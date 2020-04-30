@@ -809,7 +809,7 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         outacc += 8;
 
         const __m128 vmultiplier =
-            _mm_loadu_ps(quantization_params->sse2.requantization_scale);
+            _mm_set1_ps(quantization_params->sse2.requantization_scales[0]);
 
         vacc_lo = _mm_cvtps_epi32(
                       _mm_mul_ps(
@@ -928,7 +928,7 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         outacc += 8;
 
         const __m128 vmultiplier =
-            _mm_loadu_ps(quantization_params->sse2.requantization_scale);
+            _mm_set1_ps(quantization_params->sse2.requantization_scales[0]);
 
         vacc_lo = _mm_cvtps_epi32(
                       _mm_mul_ps(

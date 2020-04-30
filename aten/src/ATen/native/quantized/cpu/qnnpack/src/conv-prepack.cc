@@ -162,6 +162,7 @@ PrePackConvWeights::PrePackConvWeights(
                     group * conv_p.group_output_channels *
                         conv_p.group_input_channels,
                 bias + group * conv_p.group_output_channels,
+                conv_p.kernel_zero_points + group * conv_p.group_output_channels,
                 (void*)((uintptr_t)packed_weights_ + group * packed_group_weights_size));
           }
           break;
@@ -177,6 +178,7 @@ PrePackConvWeights::PrePackConvWeights(
                     group * conv_p.group_output_channels * kernel_size *
                         conv_p.group_input_channels,
                 bias + group * conv_p.group_output_channels,
+                conv_p.kernel_zero_points + group * conv_p.group_output_channels,
                 (void*)((uintptr_t)packed_weights_ + group * packed_group_weights_size));
           }
           break;

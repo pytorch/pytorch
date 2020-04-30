@@ -29,7 +29,7 @@ struct pytorch_qnnp_fp32_clamping_params {
 
 union pytorch_qnnp_fp32_requantization_params {
   struct {
-    float scale;
+    float* scales;
     uint8_t output_zero_point;
     uint8_t output_max;
     uint8_t output_min;
@@ -39,26 +39,26 @@ union pytorch_qnnp_fp32_requantization_params {
     int32_t magic_less_zero_point;
   } scalar;
   struct {
-    float scale;
+    float* scales;
     float max;
     float min;
     float magic;
     int32_t magic_less_zero_point;
   } neon;
   struct {
-    float scale;
+    float* scales;
     int16_t zero_point;
     uint8_t max;
     uint8_t min;
   } neonv8;
   struct {
-    PYTORCH_QNNP_ALIGN(16) float scale[4];
+    PYTORCH_QNNP_ALIGN(16) float* scales;
     PYTORCH_QNNP_ALIGN(16) int16_t zero_point[8];
     PYTORCH_QNNP_ALIGN(16) uint8_t max[16];
     PYTORCH_QNNP_ALIGN(16) uint8_t min[16];
   } sse2;
   struct {
-    PYTORCH_QNNP_ALIGN(16) float scale[4];
+    PYTORCH_QNNP_ALIGN(16) float* scales;
     PYTORCH_QNNP_ALIGN(16) float min_less_zero_point[4];
     PYTORCH_QNNP_ALIGN(16) float max_less_zero_point[4];
     PYTORCH_QNNP_ALIGN(16) float magic[4];
@@ -130,7 +130,7 @@ union pytorch_qnnp_conv_quantization_params {
   struct {
     const uint8_t* kernel_zero_points;
     int32_t input_zero_point;
-    float requantization_scale;
+    const float* requantization_scales;
     int32_t output_min_less_zero_point;
     int32_t output_max_less_zero_point;
     int32_t output_zero_point;
@@ -139,7 +139,7 @@ union pytorch_qnnp_conv_quantization_params {
   struct {
     const uint8_t* kernel_zero_points;
     int16_t input_zero_point;
-    float requantization_scale;
+    const float* requantization_scales;
     int16_t output_zero_point;
     uint8_t output_max;
     uint8_t output_min;
@@ -156,7 +156,7 @@ union pytorch_qnnp_conv_quantization_params {
   struct {
     PYTORCH_QNNP_ALIGN(16) const uint8_t* kernel_zero_points;
     PYTORCH_QNNP_ALIGN(16) int16_t input_zero_point[8];
-    PYTORCH_QNNP_ALIGN(16) float requantization_scale[4];
+    const PYTORCH_QNNP_ALIGN(16) float* requantization_scales;
     PYTORCH_QNNP_ALIGN(16) int16_t output_zero_point[8];
     PYTORCH_QNNP_ALIGN(16) uint8_t output_max[16];
     PYTORCH_QNNP_ALIGN(16) uint8_t output_min[16];

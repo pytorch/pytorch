@@ -98,6 +98,8 @@ struct pytorch_qnnp_operator {
   };
   enum pytorch_qnnp_ukernel_type ukernel_type;
   enum pytorch_qnnp_format format;
+
+  bool per_channel;
 };
 
 static inline uint32_t pytorch_qnnp_operator_get_log2_output_element_size(

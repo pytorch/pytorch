@@ -875,41 +875,47 @@ void pytorch_q8conv_ukernel_8x8__neon(
     }
   } while (--ks != 0);
 
-  const float32x4_t requantization_scale_v =
-      vdupq_n_f32(quantization_params->neon.requantization_scale);
+  const float32x4_t requantization_scale_c0123 =
+      vld1q_f32(
+          &quantization_params->neon.requantization_scales[output_channel_index]
+          );
+  const float32x4_t requantization_scale_c4567 =
+      vld1q_f32(
+          &quantization_params->neon.requantization_scales[
+              output_channel_index + 4]);
 
   const float32x4_t vacc0x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc0x0123), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc0x0123), requantization_scale_c0123);
   const float32x4_t vacc1x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc1x0123), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc1x0123), requantization_scale_c0123);
   const float32x4_t vacc2x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc2x0123), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc2x0123), requantization_scale_c0123);
   const float32x4_t vacc3x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc3x0123), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc3x0123), requantization_scale_c0123);
   const float32x4_t vacc0x4567_f =
-    vmulq_f32(vcvtq_f32_s32(vacc0x4567), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc0x4567), requantization_scale_c4567);
   const float32x4_t vacc1x4567_f =
-    vmulq_f32(vcvtq_f32_s32(vacc1x4567), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc1x4567), requantization_scale_c4567);
   const float32x4_t vacc2x4567_f =
-    vmulq_f32(vcvtq_f32_s32(vacc2x4567), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc2x4567), requantization_scale_c4567);
   const float32x4_t vacc3x4567_f =
-    vmulq_f32(vcvtq_f32_s32(vacc3x4567), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc3x4567), requantization_scale_c4567);
   const float32x4_t vacc4x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc4x0123), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc4x0123), requantization_scale_c0123);
   const float32x4_t vacc5x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc5x0123), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc5x0123), requantization_scale_c0123);
   const float32x4_t vacc6x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc6x0123), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc6x0123), requantization_scale_c0123);
   const float32x4_t vacc7x0123_f =
-    vmulq_f32(vcvtq_f32_s32(vacc7x0123), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc7x0123), requantization_scale_c0123);
   const float32x4_t vacc4x4567_f =
-    vmulq_f32(vcvtq_f32_s32(vacc4x4567), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc4x4567), requantization_scale_c4567);
   const float32x4_t vacc5x4567_f =
-    vmulq_f32(vcvtq_f32_s32(vacc5x4567), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc5x4567), requantization_scale_c4567);
   const float32x4_t vacc6x4567_f =
-    vmulq_f32(vcvtq_f32_s32(vacc6x4567), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc6x4567), requantization_scale_c4567);
   const float32x4_t vacc7x4567_f =
-    vmulq_f32(vcvtq_f32_s32(vacc7x4567), requantization_scale_v);
+    vmulq_f32(vcvtq_f32_s32(vacc7x4567), requantization_scale_c4567);
 
 #ifdef __aarch64__
   const int16x8_t voutput_zero_point =

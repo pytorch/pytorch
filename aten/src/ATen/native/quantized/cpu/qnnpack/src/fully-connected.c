@@ -96,6 +96,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_nc_q8(
 #endif
       kernel,
       bias,
+      kernel_zero_points,
       fully_connected->packed_weights);
 
   fully_connected->groups = 1;

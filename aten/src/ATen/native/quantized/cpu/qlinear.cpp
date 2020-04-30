@@ -271,8 +271,8 @@ class QLinearInt8 final {
       pack_ptr.w = std::make_unique<qnnpack::PackBMatrix>(
           cols_w /* input_channels */,
           rows_w /* output_channels */,
-          weight_zp_data[0],
-          pack_ptr.requantization_scale.data()[0],
+          weight_zp_data,
+          pack_ptr.requantization_scale.data(),
           (uint8_t*)qnnp_w_data,
           (int32_t*)bias.data_ptr<c10::qint32>());
       packB = pack_ptr.w.get();

@@ -26,6 +26,7 @@ struct conv_param_t {
   enum pytorch_qnnp_ukernel_type ukernel_type; // kernel type based on input params
   size_t group_input_channels;
   size_t group_output_channels;
+  bool per_channel;
 
   /**
    * @brief Constructor for initializing the convolution parameters.
@@ -41,7 +42,8 @@ struct conv_param_t {
       const uint8_t* kernel_zp,
       const float* scale,
       const uint8_t out_min,
-      const uint8_t out_max)
+      const uint8_t out_max,
+      const bool is_per_channel=false)
       : kernel_dims(kernel),
         subsampling_dims(subsampling),
         dilation(dil),
@@ -52,7 +54,8 @@ struct conv_param_t {
         kernel_zero_points(kernel_zp),
         requantization_scales(scale),
         output_min(out_min),
-        output_max(out_max) {
+        output_max(out_max),
+        per_channel(is_per_channel) {
     const uint32_t kernel_width = kernel_dims[0];
     const uint32_t kernel_height = kernel_dims[1];
 

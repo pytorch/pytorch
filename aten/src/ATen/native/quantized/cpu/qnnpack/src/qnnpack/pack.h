@@ -59,6 +59,10 @@ static inline void pytorch_pack_q8gemm_wdq(
   }
 }
 
+// NB: We use the same packing function for both dynamic quantization
+// and runtime quantization for linear.
+// This means that dynamic mode will suffer some perf because of the branching
+// introduced due to `if(kzp!=0)` however, that should not be too significant.
 static inline void pytorch_pack_q8gemm_wrq(
     const size_t nc,
     const size_t kc,
@@ -67,6 +71,7 @@ static inline void pytorch_pack_q8gemm_wrq(
     const uint32_t kr,
     const uint8_t* const k,
     const int32_t* const b,
+    const uint8_t* const kzp,
     void* const packed_w) {
   union {
     void* const as_void_ptr;
@@ -92,9 +97,39 @@ static inline void pytorch_pack_q8gemm_wrq(
                 (kr_block_start + kr_block_offset)];
           *(packed.as_uint8_ptr++) = kv;
         }
-        packed.as_uint8_ptr += (kr - kr_block_size);
+        // Weights need to be prepacked with the zero points, in their tail space
+        // where packed blocks are not multiple of input sizes
+        // e.g for ukernels with kr=2 and k is 3 then the second block must be
+        // padded with zero point. This is because when subtracting with zero point
+        // we just get zero for the padded value, which is what we want.
+        if (kzp != 0) {
+          for (size_t kr_block_offset = 0; kr_block_offset < (kr - kr_block_size);
+               kr_block_offset++) {
+            const uint8_t kv =
+                kzp[(nr_block_start + nr_block_offset)];
+            *(packed.as_uint8_ptr++) = kv;
+          }
+        } else {
+          packed.as_uint8_ptr += (kr - kr_block_size);
+        }
       }
-      packed.as_uint8_ptr += ((nr - nr_block_size) & (np - 1)) * kr;
+      if (kzp != 0) {
+        // This part fills the packed wights with zero points for output channels
+        // when they are not divisble by nr blocking parameter.
+        // In that case
+        size_t remaining_nr_blocks = ((nr - nr_block_size) & (np - 1));
+        for (size_t nr_block_offset = 0; nr_block_offset < remaining_nr_blocks;
+             nr_block_offset++) {
+          for (size_t kr_block_offset = 0; kr_block_offset < kr;
+               kr_block_offset++) {
+            const uint8_t kv =
+                kzp[(nr_block_start + nr_block_size + nr_block_offset)];
+            *(packed.as_uint8_ptr++) = kv;
+          }
+        }
+      } else {
+        packed.as_uint8_ptr += ((nr - nr_block_size) & (np - 1)) * kr;
+      }
     }
   }
 }
@@ -156,6 +191,7 @@ static inline void pytorch_pack_q8conv_wrq(
     const uint32_t kr,
     const uint8_t* const k,
     const int32_t* const b,
+    const uint8_t* const kzp,
     void* const packed_w) {
   union {
     void* const as_void_ptr;
@@ -183,9 +219,38 @@ static inline void pytorch_pack_q8conv_wrq(
                   (kr_block_start + kr_block_offset)];
             *(packed.as_uint8_ptr++) = kv;
           }
-          packed.as_uint8_ptr += (kr - kr_block_size);
+          // Weights need to be prepacked with the zero points, in their tail space
+          // where packed blocks are not multiple of input sizes
+          // e.g for ukernels with kr=2 and k is 3 then the second block must be
+          // padded with zero point. This is because when subtracting with zero point
+          // we just get zero for the padded value, which is what we want.
+          if (kzp != 0) {
+            for (size_t kr_block_offset = 0; kr_block_offset < (kr - kr_block_size);
+                 kr_block_offset++) {
+              const uint8_t kv =
+                  kzp[(nr_block_start + nr_block_offset)];
+              *(packed.as_uint8_ptr++) = kv;
+            }
+          } else {
+            packed.as_uint8_ptr += (kr - kr_block_size);
+          }
         }
-        packed.as_uint8_ptr += (nr - nr_block_size) * kr;
+        if (kzp != 0) {
+          // This part fills the packed wights with zero points for output channels
+          // when they are not divisble by nr blocking parameter.
+          // In that case
+          for (size_t nr_block_offset = 0; nr_block_offset < (nr - nr_block_size);
+               nr_block_offset++) {
+            for (size_t kr_block_offset = 0; kr_block_offset < kr;
+                 kr_block_offset++) {
+              const uint8_t kv =
+                  kzp[(nr_block_start + nr_block_size + nr_block_offset)];
+              *(packed.as_uint8_ptr++) = kv;
+            }
+          }
+        } else {
+          packed.as_uint8_ptr += (nr - nr_block_size) * kr;
+        }
       }
     }
   }
@@ -248,6 +313,7 @@ static inline void pytorch_pack_q8deconv_wrq(
     const uint32_t kr,
     const uint8_t* const k,
     const int32_t* const b,
+    const uint8_t* const kzp,
     void* const packed_w) {
   union {
     void* const as_void_ptr;
@@ -275,9 +341,38 @@ static inline void pytorch_pack_q8deconv_wrq(
                   (nr_block_start + nr_block_offset)];
             *(packed.as_uint8_ptr++) = kv;
           }
-          packed.as_uint8_ptr += (kr - kr_block_size);
+          // Weights need to be prepacked with the zero points, in their tail space
+          // where packed blocks are not multiple of input sizes
+          // e.g for ukernels with kr=2 and k is 3 then the second block must be
+          // padded with zero point. This is because when subtracting with zero point
+          // we just get zero for the padded value, which is what we want.
+          if (kzp != 0) {
+            for (size_t kr_block_offset = 0; kr_block_offset < (kr - kr_block_size);
+                 kr_block_offset++) {
+              const uint8_t kv =
+                  kzp[(nr_block_start + nr_block_offset)];
+              *(packed.as_uint8_ptr++) = kv;
+            }
+          } else {
+            packed.as_uint8_ptr += (kr - kr_block_size);
+          }
         }
-        packed.as_uint8_ptr += (nr - nr_block_size) * kr;
+        if (kzp != 0) {
+          // This part fills the packed wights with zero points for output channels
+          // when they are not divisble by nr blocking parameter.
+          // In that case
+          for (size_t nr_block_offset = 0; nr_block_offset < (nr - nr_block_size);
+               nr_block_offset++) {
+            for (size_t kr_block_offset = 0; kr_block_offset < kr;
+                 kr_block_offset++) {
+              const uint8_t kv =
+                  kzp[(nr_block_start + nr_block_size + nr_block_offset)];
+              *(packed.as_uint8_ptr++) = kv;
+            }
+          }
+        } else {
+          packed.as_uint8_ptr += (nr - nr_block_size) * kr;
+        }
       }
     }
   }

@@ -121,6 +121,8 @@ class FullyConnectedOperatorTester {
     auto s32rng =
         std::bind(std::uniform_int_distribution<int32_t>(-10000, 10000), rng);
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);
+    auto f32rng =
+        std::bind(std::uniform_real_distribution<float>(1, 5), rng);
 
     std::vector<uint8_t> input(
         (batchSize() - 1) * inputStride() + inputChannels() + 8);
@@ -135,13 +137,14 @@ class FullyConnectedOperatorTester {
     const uint8_t inputZeroPoint = 127;
     // Make number of output channels multiple of 8.
     // This is the least common denominator for SSE/ARM kernels we have.
-    size_t num_zero_points_padded = ((outputChannels() + 7) / 8) * 8;
+    size_t num_zero_points_padded = outputChannels() + 8;
     std::vector<uint8_t> kernelZeroPoints(num_zero_points_padded, 127);
 
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
       std::generate(kernel.begin(), kernel.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
+      std::generate(kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
       std::fill(output.begin(), output.end(), 0xA5);
       std::fill(output_dynamic.begin(), output_dynamic.end(), 0.0f);
       std::fill(accumulators.begin(), accumulators.end(), 0);
@@ -154,11 +157,19 @@ class FullyConnectedOperatorTester {
       for (size_t i = 0; i < batchSize(); i++) {
         for (size_t oc = 0; oc < outputChannels(); oc++) {
           for (size_t ic = 0; ic < inputChannels(); ic++) {
-            accumulators[i * outputChannels() + oc] +=
-                (int32_t(inputPtr[i * inputStride() + ic]) -
-                 int32_t(inputZeroPoint)) *
-                (int32_t(kernel[oc * inputChannels() + ic]) -
-                 int32_t(kernelZeroPoints[oc]));
+            if (mode == Mode::Dynamic) {
+              accumulators[i * outputChannels() + oc] +=
+                  (int32_t(inputPtr[i * inputStride() + ic]) -
+                   int32_t(inputZeroPoint)) *
+                  (int32_t(kernel[oc * inputChannels() + ic]) -
+                   int32_t(kernelZeroPoints[0]));
+            } else {
+              accumulators[i * outputChannels() + oc] +=
+                  (int32_t(inputPtr[i * inputStride() + ic]) -
+                   int32_t(inputZeroPoint)) *
+                  (int32_t(kernel[oc * inputChannels() + ic]) -
+                   int32_t(kernelZeroPoints[oc]));
+            }
           }
         }
       }
@@ -186,7 +197,12 @@ class FullyConnectedOperatorTester {
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
       // 1 bcz input_scale and kernel_scale are both 1.
-      std::vector<float> requantization_scale(num_zero_points_padded, 1 / outputScale);
+      std::vector<float> requantization_scales(num_zero_points_padded);
+      auto scale_generator = [&]() -> float {return (f32rng()/outputScale);};
+      std::generate(
+          requantization_scales.begin(),
+          requantization_scales.end(),
+          std::ref(scale_generator));
 
       switch(mode) {
         case Mode::Static:
@@ -206,7 +222,7 @@ class FullyConnectedOperatorTester {
                   qmin(),
                   qmax(),
                   0,
-                  requantization_scale.data(),
+                  requantization_scales.data(),
                   &convolution));
 
           ASSERT_EQ(
@@ -272,19 +288,18 @@ class FullyConnectedOperatorTester {
               new qnnpack::PackBMatrix(
                   inputChannels(),
                   outputChannels(),
-                  kernelZeroPoints[0],
-                  1.0f,
+                  kernelZeroPoints.data(),
+                  requantization_scales.data(),
                   kernel.data(),
                   bias.data()));
 
-          std::vector<float> requantization_scale(num_zero_points_padded, 1 / outputScale);
           const pytorch_qnnp_status runStatus = qnnpack::qnnpackLinear(
               batchSize() /* batch_size */,
               inputChannels() /* input_channels */,
               outputChannels() /* output_channels */,
               inputZeroPoint,
               kernelZeroPoints.data(),
-              requantization_scale.data(),
+              requantization_scales.data(),
               outputZeroPoint,
               qmin(),
               qmax(),
@@ -311,7 +326,7 @@ class FullyConnectedOperatorTester {
             for (size_t c = 0; c < outputChannels(); c++) {
               const double scaledAccumulator =
                   accumulators[i * outputChannels() + c] *
-                  requantization_scale[c];
+                  requantization_scales[c];
               const double clampedAccumulator = std::max(
                   std::min(
                       scaledAccumulator, double(qmax()) - double(outputZeroPoint)),

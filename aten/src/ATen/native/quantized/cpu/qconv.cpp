@@ -590,6 +590,9 @@ class QConvInt8 final {
           weight_scales_data[0] * input_scale,
           0, kQInt32);
 
+      const bool is_per_channel =
+        weight_contig.qscheme() == at::kPerTensorAffine;
+
       qnnpack::conv_param_t conv_p(
           {kernel_w, kernel_h},
           {stride_w, stride_h},
@@ -601,7 +604,8 @@ class QConvInt8 final {
           weight_zp_data,
           pack_data.requantization_scale.data(),
           output_min,
-          output_max);
+          output_max,
+          is_per_channel);
 
       // Update the input scale to not pack again.
       pack_data.input_scale = input_scale;
