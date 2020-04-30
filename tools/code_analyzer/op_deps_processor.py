@@ -15,9 +15,6 @@ import yaml
 from ..autograd.utils import CodeTemplate
 
 BAZEL_OUTPUT = CodeTemplate("""\
-# Generated for selective build without using static dispatch.
-# Manually run the script to update:
-# ANALYZE_TORCH=1 DEPLOY=1 tools/code_analyzer/build.sh
 TORCH_DEPS = {
 ${ops}
 }

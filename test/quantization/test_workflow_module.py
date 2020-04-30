@@ -35,6 +35,11 @@ from torch.testing._internal.common_quantization import (
     test_only_eval_fn,
 )
 
+from torch.testing._internal.common_quantized import (
+    override_quantized_engine,
+    supported_qengines,
+)
+
 # Reference method for fake quantize
 def _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max):
     res = (torch.clamp(torch.round(X * (1.0 / scale) + zero_point), quant_min, quant_max) - zero_point) * scale
@@ -321,25 +326,26 @@ class TestObserver(QuantizationTestCase):
                          "QConfig is expected to NOT propagate")
 
 
-@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                     " with instruction set support avx2 or newer.")
 class TestRecordHistogramObserver(QuantizationTestCase):
     # TODO: move this to quantize.py
     def test_record_observer(self):
-        model = AnnotatedSingleLayerLinearModel()
-        model.qconfig = default_debug_qconfig
-        model = prepare(model)
-        # run the evaluation and dump all tensors
-        test_only_eval_fn(model, self.calib_data)
-        test_only_eval_fn(model, self.calib_data)
-        observer_dict = {}
-        get_observer_dict(model, observer_dict)
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                model = AnnotatedSingleLayerLinearModel()
+                model.qconfig = default_debug_qconfig
+                model = prepare(model)
+                # run the evaluation and dump all tensors
+                test_only_eval_fn(model, self.calib_data)
+                test_only_eval_fn(model, self.calib_data)
+                observer_dict = {}
+                get_observer_dict(model, observer_dict)
 
-        self.assertTrue('fc1.module.activation_post_process' in observer_dict.keys(),
-                        'observer is not recorded in the dict')
-        self.assertEqual(len(observer_dict['fc1.module.activation_post_process'].get_tensor_value()), 2 * len(self.calib_data))
-        self.assertEqual(observer_dict['fc1.module.activation_post_process'].get_tensor_value()[0], model(self.calib_data[0][0]))
+                self.assertTrue('fc1.module.activation_post_process' in observer_dict.keys(),
+                                'observer is not recorded in the dict')
+                self.assertEqual(len(observer_dict['fc1.module.activation_post_process'].get_tensor_value()),
+                                 2 * len(self.calib_data))
+                self.assertEqual(observer_dict['fc1.module.activation_post_process'].get_tensor_value()[0],
+                                 model(self.calib_data[0][0]))
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
