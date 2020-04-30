@@ -42,7 +42,21 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
 
     # https://developer.arm.com/docs/ihi0055/d/procedure-call-standard-for-the-arm-64-bit-architecture
     # Callee need to save 8-15 vector registers and only the lower 64 bits of each.
+
+    # Load params
+    LDR x8, [sp, 8]
+
+    # a1
+    CMP x0, 2
+    ADD x9, x3, x4
+    # Load output channel index
+    LDR x16, [sp]
+
     STP d15, d14, [sp, -16]
+
+    # Load pointer to per channel zero points array
+    LDR x17, [x8]
+
     STP d13, d12, [sp, -32]
     STP d11, d10, [sp, -48]
     STP d9, d8, [sp, -64]
@@ -50,13 +64,6 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     # Load bias0123, bias4567
     LD1 {v8.4s, v9.4s}, [x5], 32
 
-    # Load params
-    LDR x8, [sp, 8]
-
-    # Load output channel index
-    LDR x16, [sp]
-    # Load pointer to per channel zero points array
-    LDR x17, [x8]
     # Add offset to the base pointer
     ADD x17, x17, x16
     # Mul by 4 to get byte offset for requant scale.
@@ -69,8 +76,8 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     # Load a_zero_point
     LD1R {v24.8b}, [x8]
     # Load pointer to per channel requant scale
-    LDR x17, [x8, 8]!
-    ADD x8, x8, 8
+    LDR x17, [x8, 8]
+    ADD x8, x8, 16
 
     # v10 := vacc1x0123
     MOV v10.16b, v8.16b
@@ -114,9 +121,6 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     // - v27 = requantization_scale channels 4-7
     LD1 {v26.4s}, [x17], 16
 
-    # a1
-    CMP x0, 2
-    ADD x9, x3, x4
     CSEL x9, x3, x9, LO
 
     # a2
