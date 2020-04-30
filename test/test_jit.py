@@ -4688,7 +4688,7 @@ def foo(x):
         mod = TorchBindOptionalExplicitAttr()
         scripted = torch.jit.script(mod)
 
-    def _testlower_graph_impl(self, model, data):
+    def _test_lower_graph_impl(self, model, data):
         model.qconfig = torch.quantization.default_qconfig
         model = torch.quantization.prepare(model)
         model = torch.quantization.convert(model)
