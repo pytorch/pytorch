@@ -112,7 +112,8 @@ TORCH_API void ReplicateDeQuant(std::shared_ptr<Graph>& graph);
  *  for ops that manipulates values of Tensor, e.g. average pool, quantization
  *  is done by inserting quant/dequant ops after the op
  */
-TORCH_API void QuantizeGeneralOps(std::shared_ptr<Graph>& graph);
+
+TORCH_API void PropagateQuantizationOps(std::shared_ptr<Graph>& graph);
 
 /** \brief Backend specific pass to fuse dequantize - op - quantize calls
  * as quantized_op calls.
