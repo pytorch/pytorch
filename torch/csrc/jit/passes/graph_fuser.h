@@ -30,5 +30,7 @@ TORCH_API void CustomFuseGraph(
     Symbol kind,
     size_t arg_limit = std::numeric_limits<size_t>::max());
 
+TORCH_API bool IsFusibleOperation(Node* n);
+
 } // namespace jit
 } // namespace torch
