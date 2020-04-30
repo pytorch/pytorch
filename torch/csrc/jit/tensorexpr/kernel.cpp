@@ -1281,11 +1281,11 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
           {0});
       std::vector<DimArg> inputTensorDims;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
-        auto const& size = *tt->sizes()[i];
+        auto const size = *tt->sizes()[i];
         inputTensorDims.emplace_back(
             DimArg(IntImm::make(size), "i" + c10::to_string(i)));
       }
-      auto const& strides = tt->strides();
+      auto const strides = tt->strides();
       tensors_.emplace(
           input->unique(),
           Compute(
