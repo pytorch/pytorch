@@ -335,7 +335,14 @@ struct CAFFE2_API IValue final {
   // Bool
   IValue(bool b)
   : tag(Tag::Bool), is_intrusive_ptr(false) {
+#if defined(__clang__) && defined(__x86_64__)
+    // Initializing entire payload stops valgrind's from reporting
+    // "jump or move depends on uninitialised value" in IValue copy constructor
+    // See https://github.com/pytorch/pytorch/issues/37117
+    payload.as_int = b;
+#else
     payload.as_bool = b;
+#endif
   }
    bool isBool() const { return Tag::Bool == tag; }
    bool toBool() const {
@@ -622,6 +629,7 @@ struct CAFFE2_API IValue final {
   };
 
   using HashAliasedIValues = std::unordered_set<IValue, HashAliasedIValue, CompAliasedIValues>;
+  using HashAliasedIValueMap = std::unordered_map<IValue, IValue, HashAliasedIValue, CompAliasedIValues>;
 
   // Chechs if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.
@@ -629,6 +637,10 @@ struct CAFFE2_API IValue final {
 
   // Inserts all subvalues of this in subValues.
   void getSubValues(HashAliasedIValues& subValues) const;
+
+  IValue deepcopy() const;
+  IValue deepcopy(
+      HashAliasedIValueMap& memo) const;
 
  private:
   static bool ptrEqual(const IValue& lhs, const IValue& rhs);
