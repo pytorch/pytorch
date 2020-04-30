@@ -316,6 +316,19 @@ def add_use_future_set_result(to, x, y, z):
     fut.add_done_callback(lambda fut : out.set_result(fut.wait() + z))
     return out.wait()
 
+
+def add_use_future_nested_cb(to, x, y, z):
+    out = rpc.Future()
+
+    def callback(fut1):
+        fut2 = rpc.rpc_async(to, torch.add, args=(fut1.wait(), z))
+        fut2.add_done_callback(lambda fut2 : out.set_result(fut2.wait()))
+
+    fut1 = rpc.rpc_async(to, torch.add, args=(x, y))
+    fut1.add_done_callback(callback)
+    return out.wait()
+
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -2444,17 +2457,26 @@ class RpcTest(RpcAgentTestFixture):
         f.set_result(torch.ones(2, 2))
         self.assertEqual(f.wait(), torch.ones(2, 2))
 
-    @dist_init
-    def test_future_in_rpc(self):
+
+    def _test_future_cb(self, func):
         dst1 = worker_name((self.rank + 1) % self.world_size)
         dst2 = worker_name((self.rank + 2) % self.world_size)
 
         ret = rpc.rpc_sync(
             dst1,
-            add_use_future_set_result,
+            func,
             args=(dst2, torch.ones(2, 2), 1, 2)
         )
         self.assertEqual(ret, torch.ones(2, 2) + 1 + 2)
+
+    @dist_init
+    def test_future_in_rpc(self):
+        self._test_future_cb(add_use_future_set_result)
+
+    @dist_init
+    def test_future_nested_callback(self):
+        self._test_future_cb(add_use_future_set_result)
+
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
 
