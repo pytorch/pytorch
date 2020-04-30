@@ -11,6 +11,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
+#include <c10/util/complex_type.h>
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
@@ -382,6 +383,9 @@ struct is_complex_t : public std::false_type {};
 template <typename T>
 struct is_complex_t<std::complex<T>> : public std::true_type {};
 
+template <typename T>
+struct is_complex_t<c10::complex<T>> : public std::true_type {};
+
 template <>
 struct is_complex_t<ComplexHalf> : public std::true_type {};
 
@@ -393,6 +397,10 @@ struct scalar_value_type {
 };
 template <typename T>
 struct scalar_value_type<std::complex<T>> {
+  using type = T;
+};
+template <typename T>
+struct scalar_value_type<c10::complex<T>> {
   using type = T;
 };
 template <>
