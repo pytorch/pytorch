@@ -291,6 +291,10 @@ add_custom_command(
 )
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+if(HAVE_SOVERSION)
+  set_target_properties(torch_python PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 add_dependencies(torch_python torch_python_stubs)
 
 # Required workaround for generated sources
