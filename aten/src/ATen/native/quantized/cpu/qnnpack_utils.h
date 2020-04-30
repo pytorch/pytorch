@@ -110,15 +110,16 @@ std::pair<at::Tensor, at::Tensor> make_zero_points_and_scales_tensor(
   auto num_output_channels = weight_contig.size(0);
   const auto qtype = weight_contig.qscheme();
   at::Tensor weight_zp =
-    at::native::empty_cpu({1}, at::device(at::kCPU).dtype(at::kQUInt8));
+    at::native::empty_cpu(
+        {num_output_channels},
+        at::device(at::kCPU).dtype(at::kQUInt8));
   // Adjust weight zero point, similar to weight data.
-  uint8_t* weight_zp_data;
+  uint8_t* weight_zp_data = (uint8_t*)weight_zp.data_ptr<c10::quint8>();
   if (qtype == at::kPerTensorAffine) {
-    weight_zp_data = (uint8_t*)weight_zp.data_ptr<c10::quint8>();
-    weight_zp_data[0] = (uint8_t)(weight_contig.q_zero_point() + 128);
+    for (int i = 0; i < num_output_channels; ++i) {
+      weight_zp_data[i] = (uint8_t)(weight_contig.q_zero_point() + 128);
+    }
   } else if (qtype == at::kPerChannelAffine) {
-    weight_zp.resize_({num_output_channels});
-    weight_zp_data = (uint8_t*)weight_zp.data_ptr<c10::quint8>();
     for (int i = 0; i < num_output_channels; ++i) {
       weight_zp_data[i] =
           (uint8_t)(
@@ -127,14 +128,15 @@ std::pair<at::Tensor, at::Tensor> make_zero_points_and_scales_tensor(
     }
   }
   at:: Tensor weight_scales =
-    at::native::empty_cpu({1}, at::device(at::kCPU).dtype(at::kFloat));
-  float* weight_scales_data;
+    at::native::empty_cpu(
+        {num_output_channels},
+        at::device(at::kCPU).dtype(at::kFloat));
+  float* weight_scales_data = weight_scales.data_ptr<float>();
   if (qtype == at::kPerTensorAffine) {
-    weight_scales_data = weight_scales.data_ptr<float>();
-    weight_scales_data[0] = weight_contig.q_scale();
+    for (int i = 0; i < num_output_channels; ++i) {
+      weight_scales_data[i] = weight_contig.q_scale();
+    }
   } else if (qtype == at::kPerChannelAffine) {
-    weight_scales.resize_({num_output_channels});
-    weight_scales_data = weight_scales.data_ptr<float>();
     for (int i = 0; i < num_output_channels; ++i) {
       weight_scales_data[i] =
         weight_contig.q_per_channel_scales()[i].item<float>();

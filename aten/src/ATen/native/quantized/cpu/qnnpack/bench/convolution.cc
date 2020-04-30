@@ -72,6 +72,11 @@ static void convolution_q8(benchmark::State& state, const char* net) {
   }
 
   pytorch_qnnp_operator_t convolutionObject = nullptr;
+  size_t num_zero_points_padded =
+    ((groups * groupOutputChannels + 7) / 8) * 8;
+  std::vector<uint8_t> kernel_zero_points(num_zero_points_padded, 127);
+  std::vector<float> requantization_scale(
+      num_zero_points_padded, 0.5 * 0.5 / 0.5);
   status = pytorch_qnnp_create_convolution2d_nhwc_q8(
       paddingTop,
       paddingRight,
@@ -87,16 +92,14 @@ static void convolution_q8(benchmark::State& state, const char* net) {
       groupInputChannels,
       groupOutputChannels,
       127,
-      0.5f,
-      127,
-      0.5f,
+      kernel_zero_points.data(),
       kernel.data(),
       bias.data(),
       127,
-      0.5f,
       0,
       255,
       0 /* flags */,
+      requantization_scale.data(),
       &convolutionObject);
   if (status != pytorch_qnnp_status_success) {
     state.SkipWithError("failed to create Convolution operator");
