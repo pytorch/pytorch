@@ -21,6 +21,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
+#include "deeplearning/fbgemm/include/fbgemm/FbgemmConvert.h"
 
 namespace caffe2 {
 
@@ -82,6 +83,37 @@ class FbGemmPackOp final : public Operator<Context> {
   size_t axis_{1};
   // Do not pack the layout, for testing only
   bool no_packing_;
+};
+
+template <
+    class Context,
+    class Engine = DefaultEngine,
+    bool TransposeWeight = true,
+    typename TPacked = fbgemm::float16>
+class FbGemmUnpackOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  FbGemmUnpackOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+  ~FbGemmUnpackOp() {}
+
+  bool RunOnDevice() override {
+    const auto& X =
+        this->template Input<unique_ptr<fbgemm::PackedGemmMatrixFP16>>(0);
+    int32_t N = X->matSize();
+
+    vector<fbgemm::float16> src_mat(N);
+    fbgemm::float16* pmat = X->pmat();
+    memcpy(src_mat.data(), pmat, N * sizeof(fbgemm::float16));
+    X->unpackFromSrc(
+        TransposeWeight ? fbgemm::matrix_op_t::Transpose
+                        : fbgemm::matrix_op_t::NoTranspose,
+        src_mat.data());
+    auto* Y = Output(0);
+    fbgemm::Float16ToFloat_simd(
+        X->pmat(), Y->template mutable_data<float>(), N);
+    return true;
+  }
 };
 
 } // namespace caffe2

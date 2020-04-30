@@ -33,6 +33,10 @@ REGISTER_CPU_OPERATOR(
     FbGemmPackTranspose,
     FbGemmPackOp<CPUContext, DefaultEngine, false, fbgemm::float16>);
 
+REGISTER_CPU_OPERATOR(
+    FbGemmUnpack,
+    FbGemmUnpackOp<CPUContext, DefaultEngine, true, fbgemm::float16>);
+
 using namespace std::placeholders;
 OPERATOR_SCHEMA(FbGemmPack)
     .NumInputs(1)
@@ -68,5 +72,13 @@ OPERATOR_SCHEMA(FbGemmPackTranspose)
     .SetDoc(R"DOC(Prepack weight for fbgemm)DOC")
     .Input(0, "X", "col major format weight matrix")
     .Output(0, "Y", "Block col major packed format weight matrix");
+
+OPERATOR_SCHEMA(FbGemmUnpack)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .SetDoc(R"DOC(Unpack weight for fbgemm)DOC")
+    .Input(0, "X", "Block row major packed format weight matrix")
+    .Output(0, "X", "Row major format weight matrix");
 
 } // namespace caffe2
