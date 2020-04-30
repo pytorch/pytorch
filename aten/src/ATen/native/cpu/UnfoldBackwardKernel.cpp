@@ -3,6 +3,12 @@
 #include <ATen/native/UnfoldBackward.h>
 #include <ATen/native/cpu/Loops.h>
 
+#if (defined(_WIN32) || defined(_WIN64))
+#define RESTRICT __restrict
+#else
+#define RESTRICT __restrict__
+#endif
+
 namespace at {
 namespace native {
 
@@ -24,16 +30,16 @@ void _unfold_backward_internal_kernel(
   }
 
   auto loop = [&](char** data, const int64_t* strides, int64_t nelems) {
-    auto* __restrict__ grad_out_ptr = data[0];
-    auto* __restrict__ grad_in_ptr = data[1];
-    auto* __restrict__ idx_dim_ptr = data[2];
+    auto* RESTRICT grad_out_ptr = data[0];
+    auto* RESTRICT grad_in_ptr = data[1];
+    auto* RESTRICT idx_dim_ptr = data[2];
 
     if (is_step_ge_size) {
-      auto* __restrict__ idx_last_dim_ptr = data[3];
+      auto* RESTRICT idx_last_dim_ptr = data[3];
 
       for (int64_t elem = 0; elem < nelems; ++elem) {
-        auto* __restrict__ grad_out_data = reinterpret_cast<scalar_t*>(grad_out_ptr);
-        auto* __restrict__ grad_in_data = reinterpret_cast<scalar_t*>(grad_in_ptr);
+        auto* RESTRICT grad_out_data = reinterpret_cast<scalar_t*>(grad_out_ptr);
+        auto* RESTRICT grad_in_data = reinterpret_cast<scalar_t*>(grad_in_ptr);
 
         auto idx_dim = *reinterpret_cast<int64_t*>(idx_dim_ptr);
         auto idx_last_dim = *reinterpret_cast<int64_t*>(idx_last_dim_ptr);
@@ -49,8 +55,8 @@ void _unfold_backward_internal_kernel(
     }
     else {
       for (int64_t elem = 0; elem < nelems; ++elem) {
-        auto* __restrict__ grad_out_data = reinterpret_cast<scalar_t*>(grad_out_ptr);
-        auto* __restrict__ grad_in_data = reinterpret_cast<scalar_t*>(grad_in_ptr);
+        auto* RESTRICT grad_out_data = reinterpret_cast<scalar_t*>(grad_out_ptr);
+        auto* RESTRICT grad_in_data = reinterpret_cast<scalar_t*>(grad_in_ptr);
 
         auto idx_dim = *reinterpret_cast<int64_t*>(idx_dim_ptr);
 
