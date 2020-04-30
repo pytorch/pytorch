@@ -242,7 +242,6 @@ class QLinearInt8 final {
         pack_ptr.input_scale.value() != input_scale) {
       // Get the original weight and adjust it to uint8 from int8
       auto weight_contig = pack_ptr.orig_weight;
-
       auto bias_fp32 = pack_ptr.bias;
       int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
       Tensor qnnp_weight = at::_empty_affine_quantized(
@@ -270,10 +269,9 @@ class QLinearInt8 final {
           (int32_t*)bias.data_ptr<c10::qint32>());
       packB = pack_ptr.w.get();
 #ifdef C10_MOBILE
-      std::cout << "Packing original tensor bytes" << weight_contig.nbytes() << std::endl;
-      pack_ptr.orig_weight = pack_ptr.orig_weight.detach();
-      pack_ptr.orig_weight.resize_(0);
-      std::cout << "After Packing tensor bytes" << pack_ptr.orig_weight.nbytes() << std::endl;
+      // On mobile, we release the original weight by freeing the underlying storage.
+      // After this calling unpack will throw an assertion.
+      pack_ptr.orig_weight.unsafeGetTensorImpl()->release_resources();
 #endif
     }
 

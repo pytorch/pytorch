@@ -61,8 +61,7 @@ class QLinearUnpackWeightInt8 final {
 #ifdef C10_MOBILE
      TORCH_CHECK(
         false,
-        "quantized::linear_unpack is currently "
-        "not supported on Mobile");
+        "quantized::linear_unpack is currently not supported on Mobile");
 #endif
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
