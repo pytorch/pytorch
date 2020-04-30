@@ -15856,13 +15856,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                             lambda: t.random_(from_, to_)
                         )
                     else:
-                        if dtype.is_floating_point and (not (-fp_limit <= from_ <= fp_limit) or not (-fp_limit <= (to_ - 1) <= fp_limit)):
+                        if dtype.is_floating_point and (
+                                not (-fp_limit <= from_ <= fp_limit) or not (-fp_limit <= (to_ - 1) <= fp_limit)):
                             if not (-fp_limit <= from_ <= fp_limit):
                                 self.assertWarnsRegex(UserWarning, "from is out of bounds",
-                                    lambda: t.random_(from_, to_))
+                                                      lambda: t.random_(from_, to_))
                             if not (-fp_limit <= (to_ - 1) <= fp_limit):
                                 self.assertWarnsRegex(UserWarning, "to - 1 is out of bounds",
-                                    lambda: t.random_(from_, to_))
+                                                      lambda: t.random_(from_, to_))
                         else:
                             t.random_(from_, to_)
                             range_ = to_ - from_
