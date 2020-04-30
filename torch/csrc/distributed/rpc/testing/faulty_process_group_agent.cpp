@@ -4,6 +4,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace {
+constexpr auto kSecToMsConversion = 1000;
+}
+
 std::string fromVec(const std::vector<char>& vec) {
   return std::string(vec.begin(), vec.end());
 }
@@ -14,7 +18,7 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
     int numSendRecvThreads,
     std::chrono::milliseconds rpcTimeout,
     const std::vector<std::string>& messagesToFail,
-    std::unordered_map<std::string, float> messagesToDelay,
+    const std::unordered_map<std::string, float>& messageTypesToDelay,
     int failNumSends)
     : ProcessGroupAgent(
           std::move(workerName),
@@ -23,7 +27,7 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
           rpcTimeout),
       failNumSends_(failNumSends),
       messageTypesToFail_(parseMessagesToFailInput(messagesToFail)),
-      messagesToDelay_(parseMessagesToDelay(messagesToDelay)) {}
+      messageTypesToDelay_(parseMessagesToDelay(messageTypesToDelay)) {}
 
 std::vector<MessageType> FaultyProcessGroupAgent::parseMessagesToFailInput(
     const std::vector<std::string>& messagesToFail) const {
@@ -31,21 +35,23 @@ std::vector<MessageType> FaultyProcessGroupAgent::parseMessagesToFailInput(
   // python tests, we must parse the list of strings and resolve the actual
   // types. We will then check this list of types in the send function to
   // determine whether we should fail or not.
-  std::vector<MessageType> messageTypesToFail;
+  std::vector<MessageType> messageTypesToFail(messagesToFail.size());
   for (const auto& msgString : messagesToFail) {
-    messageTypesToFail.emplace_back(
-        messageStringToType().find(msgString)->second);
+    messageTypesToFail.push_back(messageStringToType(msgString));
   }
   return messageTypesToFail;
 }
 
 std::unordered_map<MessageType, float, std::hash<int>> FaultyProcessGroupAgent::
-    parseMessagesToDelay(
-        const std::unordered_map<std::string, float>& messagesToDelay) const {
+    parseMessagesToDelay(const std::unordered_map<std::string, float>&
+                             messageTypesToDelay) const {
   std::unordered_map<MessageType, float, std::hash<int>> delayMessages;
-  for (const auto& messagePair : messagesToDelay) {
-    delayMessages.insert({messageStringToType().find(messagePair.first)->second,
-                          messagePair.second});
+  for (const auto& messagePair : messageTypesToDelay) {
+    float delay = messagePair.second;
+    TORCH_CHECK(
+        delay >= 0,
+        "Delays passed to FaultyProcessGroupAgent must be non-negative.")
+    delayMessages.insert({messageStringToType(messagePair.first), delay});
   }
   return delayMessages;
 }
@@ -85,8 +91,8 @@ void FaultyProcessGroupAgent::enqueueSend(SendWork work) {
   float msgDelay = getDelayForMessage(work.message_.type());
   if (msgDelay != 0) {
     // Sleep for the specified delay for the message.
-    std::this_thread::sleep_for(
-        std::chrono::milliseconds(static_cast<int>(msgDelay * 1000)));
+    std::this_thread::sleep_for(std::chrono::milliseconds(
+        static_cast<int>(msgDelay * kSecToMsConversion)));
   }
   ProcessGroupAgent::enqueueSend(std::move(work));
 }
@@ -99,14 +105,13 @@ bool FaultyProcessGroupAgent::shouldFailMessage(MessageType type) const {
 }
 
 float FaultyProcessGroupAgent::getDelayForMessage(MessageType type) const {
-  return messagesToDelay_.find(type) == messagesToDelay_.end()
-      ? 0
-      : messagesToDelay_.find(type)->second;
+  const auto& it = messageTypesToDelay_.find(type);
+  return it == messageTypesToDelay_.end() ? 0 : it->second;
 }
 
-// Lazily constructed map that returns string to message type mapping
-const std::unordered_map<std::string, MessageType> FaultyProcessGroupAgent::
-    messageStringToType() const {
+const MessageType FaultyProcessGroupAgent::messageStringToType(
+    const std::string& messageString) const {
+  // Lazily constructed map that returns string to message type mapping
   static std::unordered_map<std::string, MessageType> msgMap = {
       {"RREF_FORK_REQUEST", MessageType::RREF_FORK_REQUEST},
       {"RREF_CHILD_ACCEPT", MessageType::RREF_CHILD_ACCEPT},
@@ -117,7 +122,7 @@ const std::unordered_map<std::string, MessageType> FaultyProcessGroupAgent::
       {"PYTHON_CALL", MessageType::PYTHON_CALL},
       {"SCRIPT_CALL", MessageType::SCRIPT_CALL},
   };
-  return msgMap;
+  return msgMap.find(messageString)->second;
 }
 
 } // namespace rpc

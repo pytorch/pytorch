@@ -39,7 +39,7 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
       int numSendRecvThreads,
       std::chrono::milliseconds rpcTimeout,
       const std::vector<std::string>& messagesToFail,
-      std::unordered_map<std::string, float> messagesToDelay,
+      const std::unordered_map<std::string, float>& messageTypesToDelay,
       int failNumSends = 0);
 
   // Faulty send function for this class.
@@ -69,7 +69,7 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
 
   // Parse message types that we should inject arbitrary delays for.
   std::unordered_map<MessageType, float, std::hash<int>> parseMessagesToDelay(
-      const std::unordered_map<std::string, float>& messagesToDelay) const;
+      const std::unordered_map<std::string, float>& messageTypesToDelay) const;
 
   // Number of sends to intentionally fail before allowing one to succeed.
   const int failNumSends_;
@@ -80,7 +80,7 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
 
   // Mapping of message types to amount we should delay send for in the ::send()
   // function.
-  std::unordered_map<MessageType, float, std::hash<int>> messagesToDelay_;
+  std::unordered_map<MessageType, float, std::hash<int>> messageTypesToDelay_;
 
   // Map to track the number of sends we've failed for each RPC.
   std::unordered_map<std::string, int> failMessageCountMap_;
@@ -88,9 +88,7 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
   // Mutex to guard failMessageCountMap_
   std::mutex failMapMutex_;
 
-  // Lazily constructed map that returns string to message type mapping
-  const std::unordered_map<std::string, MessageType> messageStringToType()
-      const;
+  const MessageType messageStringToType(const std::string& messageString) const;
 };
 } // namespace rpc
 } // namespace distributed
