@@ -395,10 +395,13 @@ If the future completes with an error, an exception is thrown.
                   ``Future`` object as the only argument.
 
               Example::
+                  >>> from torch.distributed import rpc
+                  >>> import torch
+                  >>>
                   >>> def callback(fut):
                   >>>     print(f"RPC return value is {fut.wait()}.")
                   >>>
-                  >>> fut = dist.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
+                  >>> fut = rpc.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
                   >>> # The inserted callback will print the return value when
                   >>> # receiving the response from "worker1"
                   >>> fut.add_done_callback(callback)
