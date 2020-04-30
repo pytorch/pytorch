@@ -147,16 +147,13 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
 // Theses are prim::CallFunctions for ops that doesn't require observation and
 // have a single input Tensor
 // Also these ops do computation on the value of Tensor
-std::vector<std::string> _single_input_general_value_call_funcs = {
-};
+std::vector<std::string> _single_input_general_value_call_funcs = {};
 
 // Theses are aten functions for ops that doesn't require observation and
 // have a single input Tensor
 // Also these ops do computation on the value of Tensor
 // e.g. `aten::maxpool(%input_tensor, ...)`
-std::vector<std::string> _single_input_general_value_aten_funcs = {
-};
-
+std::vector<std::string> _single_input_general_value_aten_funcs = {};
 
 struct FuncArg {
   std::string func_name;
@@ -253,12 +250,14 @@ bool hasScalarInput(Node* n) {
 
 bool isSingleInputGeneralCallFunction(Node* n) {
   static std::vector<std::string> _single_input_general_call_funcs;
-  std::copy(_single_input_general_shape_call_funcs.begin(),
-            _single_input_general_shape_call_funcs.end(),
-            std::back_inserter(_single_input_general_call_funcs));
-  std::copy(_single_input_general_value_call_funcs.begin(),
-            _single_input_general_value_call_funcs.end(),
-            std::back_inserter(_single_input_general_call_funcs));
+  std::copy(
+      _single_input_general_shape_call_funcs.begin(),
+      _single_input_general_shape_call_funcs.end(),
+      std::back_inserter(_single_input_general_call_funcs));
+  std::copy(
+      _single_input_general_value_call_funcs.begin(),
+      _single_input_general_value_call_funcs.end(),
+      std::back_inserter(_single_input_general_call_funcs));
   return isFunctionNode(
       n,
       /* call_funcs = */ _single_input_general_shape_call_funcs,
@@ -267,12 +266,14 @@ bool isSingleInputGeneralCallFunction(Node* n) {
 
 bool isSingleInputGeneralAtenFunction(Node* n) {
   static std::vector<std::string> _single_input_general_aten_funcs;
-  std::copy(_single_input_general_shape_aten_funcs.begin(),
-            _single_input_general_shape_aten_funcs.end(),
-            std::back_inserter(_single_input_general_aten_funcs));
-  std::copy(_single_input_general_value_aten_funcs.begin(),
-            _single_input_general_value_aten_funcs.end(),
-            std::back_inserter(_single_input_general_aten_funcs));
+  std::copy(
+      _single_input_general_shape_aten_funcs.begin(),
+      _single_input_general_shape_aten_funcs.end(),
+      std::back_inserter(_single_input_general_aten_funcs));
+  std::copy(
+      _single_input_general_value_aten_funcs.begin(),
+      _single_input_general_value_aten_funcs.end(),
+      std::back_inserter(_single_input_general_aten_funcs));
   return isFunctionNode(
       n,
       /* call_funcs = */ {},
@@ -286,7 +287,7 @@ bool isSingleInputGeneralAtenFunction(Node* n) {
 std::vector<Value*> getPassThroughInputs(Value* v) {
   Node* n = v->node();
   if (isSingleInputGeneralCallFunction(n)) {
-      return {n->input(1)};
+    return {n->input(1)};
   } else if (
       isSingleInputGeneralAtenFunction(n) ||
       (n->kind() == Symbol::aten("sort") && v->offset() == 0)) {
