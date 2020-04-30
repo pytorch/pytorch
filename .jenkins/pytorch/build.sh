@@ -178,8 +178,6 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   git clone --recursive https://github.com/pytorch/xla.git
   ./xla/scripts/apply_patches.sh
-  # PyTorch doesn't build with clang9 yet. So we use system default gcc for it
-  unset CC CXX
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
