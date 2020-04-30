@@ -775,8 +775,8 @@ class TestFuser(JitTestCase):
             forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
         FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
             .check_next("return").check("FusionGroup").run(str(forward_graph))
-        hy, cy = module(*inputs)
-        warmup_backward((hy + cy).sum())
+        # hy, cy = module(*inputs)
+        # warmup_backward((hy + cy).sum())
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "borked on the legacy executor")

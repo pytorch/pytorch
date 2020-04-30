@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <ostream>
+#include <torch/csrc/jit/passes/graph_fuser.h>
 
 namespace torch {
 namespace jit {
@@ -145,16 +146,27 @@ void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
   n->replaceInputWith(i, pn->output());
 }
 
+bool isProfilable(Node* n) {
+
+  if (IsFusibleOperation(n)) {
+    return true;
+  }
+
+  switch (n->kind()) {
+    case prim::Return:
+      return true;
+    default:
+    return false;
+  }
+}
+
 void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
     for (auto i : n->inputs()) {
-      if (!i->type()->isSubtypeOf(TensorType::get()) ||
-          i->node()->kind() == prim::profile) {
-        continue;
+      if (i->type()->isSubtypeOf(TensorType::get()) && isProfilable(n)) {
+        insertShapeProfile(n, i);
       }
-
-      insertShapeProfile(n, i);
     }
 
     for (auto b : n->blocks()) {
