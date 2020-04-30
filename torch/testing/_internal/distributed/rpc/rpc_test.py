@@ -2421,6 +2421,14 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         with self.assertRaisesRegex(RuntimeError, expected_error):
             fut.wait()
 
+        # Ensure that the currently set default timeout is large enough such
+        # that RPCs with delays still complete.
+        self.assertEqual(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC, rpc.get_rpc_timeout())
+        fut = rpc.rpc_async(
+            dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
+        )
+        fut.wait()
+
         # Ensure timeout if we set a new default and don't override
         rpc._set_rpc_timeout(0.001)
         fut = rpc.rpc_async(
@@ -2448,6 +2456,14 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         fut = rpc.rpc_async(dst_worker, my_script_func, args=(torch.tensor(1),), timeout=1)
         with self.assertRaisesRegex(RuntimeError, expected_error):
             fut.wait()
+
+        # Ensure that the currently set default timeout is large enough such
+        # that RPCs with delays still complete.
+        self.assertEqual(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC, rpc.get_rpc_timeout())
+        fut = rpc.rpc_async(
+            dst_worker, my_script_func, args=(torch.tensor(1),)
+        )
+        fut.wait()
 
         # Ensure timeout if we set a new default and don't override
         rpc._set_rpc_timeout(0.001)

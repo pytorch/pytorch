@@ -35,7 +35,8 @@ std::vector<MessageType> FaultyProcessGroupAgent::parseMessagesToFailInput(
   // python tests, we must parse the list of strings and resolve the actual
   // types. We will then check this list of types in the send function to
   // determine whether we should fail or not.
-  std::vector<MessageType> messageTypesToFail(messagesToFail.size());
+  std::vector<MessageType> messageTypesToFail;
+  messageTypesToFail.reserve(messagesToFail.size());
   for (const auto& msgString : messagesToFail) {
     messageTypesToFail.push_back(messageStringToType(msgString));
   }
@@ -122,7 +123,12 @@ MessageType FaultyProcessGroupAgent::messageStringToType(
       {"PYTHON_CALL", MessageType::PYTHON_CALL},
       {"SCRIPT_CALL", MessageType::SCRIPT_CALL},
   };
-  return msgMap.find(messageString)->second;
+  const auto& it = msgMap.find(messageString);
+  TORCH_CHECK(
+      it != msgMap.end(),
+      "No mapping to rpc::MessageType exists for ",
+      messageString);
+  return it->second;
 }
 
 } // namespace rpc
