@@ -18,30 +18,9 @@ namespace vulkan {
 namespace details {
 namespace vulkan {
 
-void initVulkanContextOnce();
-
-class VImage {
- public:
-  VImage(int64_t W, int64_t H, int64_t C);
-  ~VImage();
-
-  VkImageViewCreateInfo imageViewCreateInfo();
-  VkSamplerCreateInfo samplerCreateInfo();
-
-  VkImage image_;
-  VkImageViewType viewType_;
-  VkFormat format_;
-  VkDeviceMemory imageMemory_;
-  VkImageLayout initialLayout_;
-  VkImageLayout imageLayout_ = VK_IMAGE_LAYOUT_GENERAL;
-  VkFilter filter_;
-  VkSamplerAddressMode samplerAddressMode_;
-
-  VkImageView imageView_;
-  VkSampler sampler_;
-};
-
 class VulkanTensor : public c10::intrusive_ptr_target {
+  class Impl;
+
  public:
   VulkanTensor(std::vector<int64_t> sizes);
   ~VulkanTensor() = default;
@@ -49,25 +28,29 @@ class VulkanTensor : public c10::intrusive_ptr_target {
   VulkanTensor(VulkanTensor&&) = default;
   VulkanTensor& operator=(VulkanTensor&&) = default;
 
-  VulkanTensor(const VulkanTensor&) = delete;
-  VulkanTensor& operator=(const VulkanTensor&) = delete;
+  VulkanTensor(const VulkanTensor&) = default;
+  VulkanTensor& operator=(const VulkanTensor&) = default;
 
-  std::vector<int64_t> sizes() const {
-    return sizes_;
-  }
-
+  std::vector<int64_t> sizes();
   void setDataFromHost(const float* data);
   void copyDataToHost(float* data);
-
-  bool hasStorage() {
-    return static_cast<bool>(tensorImage_);
-  }
+  bool hasStorage();
   void allocateStorage();
 
- private:
-  std::vector<int64_t> sizes_;
-  std::unique_ptr<VImage> tensorImage_;
+  std::shared_ptr<Impl> pImpl;
 };
+
+void upsample_nearest2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    int64_t IH,
+    int64_t IW,
+    int64_t OH,
+    int64_t OW,
+    int64_t N,
+    int64_t C,
+    float scaleH,
+    float scaleW);
 
 } // namespace vulkan
 } // namespace details

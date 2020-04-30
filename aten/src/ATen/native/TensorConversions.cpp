@@ -29,7 +29,8 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
     return self;
   }
 
-  if (options.device().type() == at::kVulkan) {
+  if (options.device().type() == DeviceType::Vulkan
+      || self.device().type() == DeviceType::Vulkan) {
     auto r = at::empty(self.sizes(), options, c10::nullopt);
     r.copy_(self, non_blocking);
     return r;
@@ -67,6 +68,13 @@ Tensor to(
   TORCH_CHECK(options.requires_grad_opt() == c10::nullopt,
            "to(options) expects unset requires_grad flag, but got "
            "options.requires_grad set as ", options.requires_grad());
+
+  if (options.device().type() == DeviceType::Vulkan
+      || self.device().type() == DeviceType::Vulkan) {
+    auto r = at::empty(self.sizes(), options, c10::nullopt);
+    r.copy_(self, non_blocking);
+    return r;
+  }
 
   TORCH_CHECK(!options.has_layout() || self.layout() == options.layout(),
            "to(options) doesn't support converting to a different layout, "

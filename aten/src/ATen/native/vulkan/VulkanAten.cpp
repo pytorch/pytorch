@@ -29,6 +29,7 @@ using VTensor = at::native::vulkan::details::gl::GLTensor;
 
 #endif
 
+
 using VTensorPtr = c10::intrusive_ptr<VTensor>;
 using VulkanTensorImpl = OpaqueTensorImpl<VTensorPtr>;
 
@@ -146,8 +147,8 @@ at::Tensor upsample_nearest2d_vulkan(
   at::native::vulkan::details::gl::upsample_nearest2d(
       y, x, ih, iw, oh, ow, in, ic, height_scale, width_scale);
 #else
-  // XXX Not implemented
-  AT_ERROR("upsample_nearest2d_vulkan: Not implemented yet for Vulkan");
+  at::native::vulkan::details::vulkan::upsample_nearest2d(
+      y, x, ih, iw, oh, ow, in, ic, height_scale, width_scale);
 #endif
   return output;
 }

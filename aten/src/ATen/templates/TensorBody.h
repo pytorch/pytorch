@@ -428,6 +428,7 @@ class CAFFE2_API Tensor {
   Tensor cpu() const;
   Tensor cuda() const;
   Tensor hip() const;
+  Tensor vulkan() const;
 
   // ~~~~~ Autograd API ~~~~~
 

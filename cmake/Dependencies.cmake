@@ -479,7 +479,7 @@ if(USE_VULKAN)
     list(APPEND Caffe2_DEPENDENCY_LIBS VulkanWrapper)
 
     # Shaderc
-    if(USE_VULKAN_SHADERC_RUNTIME)
+    if(USE_VULKAN_GLES_SHADERC_RUNTIME)
       # Shaderc from ANDROID_NDK
       set(Shaderc_ANDROID_NDK_INCLUDE_DIR "${ANDROID_NDK}/sources/third_party/shaderc/include")
       message(STATUS "Shaderc_ANDROID_NDK_INCLUDE_DIR:${Shaderc_ANDROID_NDK_INCLUDE_DIR}")
@@ -532,7 +532,7 @@ if(USE_VULKAN)
 
       include_directories(SYSTEM ${GOOGLE_SHADERC_INCLUDE_DIRS})
       list(APPEND Caffe2_DEPENDENCY_LIBS ${GOOGLE_SHADERC_LIBRARIES})
-    endif(USE_VULKAN_SHADERC_RUNTIME)
+    endif(USE_VULKAN_GLES_SHADERC_RUNTIME)
   else()
     # USE_VULKAN AND NOT ANDROID
     if(NOT DEFINED ENV{VULKAN_SDK})
@@ -579,17 +579,17 @@ if(USE_VULKAN)
       list(APPEND Caffe2_DEPENDENCY_LIBS ${VULKAN_LIBRARY})
     endif(USE_VULKAN_WRAPPER)
 
-    if(USE_VULKAN_SHADERC_RUNTIME)
+    if(USE_VULKAN_GLES_SHADERC_RUNTIME)
       # shaderc from VULKAN_SDK
       find_path(
           GOOGLE_SHADERC_INCLUDE_DIRS
-          NAMES shaderc/shaderc.h
-          PATHS $ENV{VULKAN_SDK}/include)
+          NAMES shaderc/shaderc.hpp
+          PATHS $ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/include)
 
       find_library(
           GOOGLE_SHADERC_LIBRARIES
           NAMES shaderc_combined
-          PATHS $ENV{VULKAN_SDK}/lib)
+          PATHS $ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/lib)
 
       find_package_handle_standard_args(
           Shaderc
@@ -604,7 +604,7 @@ if(USE_VULKAN)
       endif()
       include_directories(SYSTEM ${GOOGLE_SHADERC_INCLUDE_DIRS})
       list(APPEND Caffe2_DEPENDENCY_LIBS ${GOOGLE_SHADERC_LIBRARIES})
-    endif(USE_VULKAN_SHADERC_RUNTIME)
+    endif(USE_VULKAN_GLES_SHADERC_RUNTIME)
   endif()
 else()
   if(USE_GLES)

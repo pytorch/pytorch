@@ -16,16 +16,12 @@
 #include <ATen/native/vulkan/Vulkan.h>
 
 #ifdef USE_VULKAN_GLES_SHADERC_RUNTIME
-
 #include <ATen/native/vulkan/glsl.h>
 #include "shaderc/shaderc.hpp"
 #define GLSL_SPV(name) name##_glsl
-
 #else
-
 #include <ATen/native/vulkan/spv.h>
 #define GLSL_SPV(name) name##_spv, name##_spv_len
-
 #endif
 
 #define UP_DIV(x, y) (((x) + (y) - (1)) / (y))
@@ -44,27 +40,10 @@ namespace vulkan {
 namespace details {
 namespace vulkan {
 
-static const bool enableValidationLayers = true;
-
-class VContext;
-static std::unique_ptr<VContext> vkContext;
-
-void initVulkanContextOnce() {
-  static const int once = []() {
-#ifdef USE_VULKAN_WRAPPER
-    bool res = InitVulkan();
-    TORCH_CHECK(res, "Vulkan Wrapperer Failed to InitVulkan");
-#endif
-    vkContext = std::make_unique<VContext>();
-    TORCH_CHECK(vkContext, "Vulkan Failed to create Vulkan Context");
-    return 0;
-  }();
-  ((void)once);
-}
-
 class VContext {
  public:
-  VContext() {
+  VContext(bool enableValidationLayers)
+      : enableValidationLayers_(enableValidationLayers) {
     createInstance();
     findPhysicalDevice();
     createDevice();
@@ -82,17 +61,17 @@ class VContext {
   uint32_t queueFamilyIndex_;
   uint64_t uboAlign_;
   uint64_t sboAlign_;
+  bool enableValidationLayers_;
 
  private:
   void createInstance() {
     std::vector<const char*> enabledExtensions;
-    if (enableValidationLayers) {
-      uint32_t layer_present_count;
-      vkEnumerateInstanceLayerProperties(&layer_present_count, nullptr);
-      std::vector<VkLayerProperties> layer_props(layer_present_count);
-      vkEnumerateInstanceLayerProperties(
-          &layer_present_count, layer_props.data());
-      const char* instance_layers[] = {
+    if (enableValidationLayers_) {
+      uint32_t layerPresentCount;
+      vkEnumerateInstanceLayerProperties(&layerPresentCount, nullptr);
+      std::vector<VkLayerProperties> layerProps(layerPresentCount);
+      vkEnumerateInstanceLayerProperties(&layerPresentCount, layerProps.data());
+      const char* instanceLayers[] = {
           "VK_LAYER_GOOGLE_unique_objects",
           "VK_LAYER_GOOGLE_threading",
           "VK_LAYER_LUNARG_object_tracker",
@@ -101,45 +80,42 @@ class VContext {
           "VK_LAYER_KHRONOS_validation",
       };
 
-      uint32_t instance_layer_request_count =
-          sizeof(instance_layers) / sizeof(instance_layers[0]);
-      for (uint32_t i = 0; i < instance_layer_request_count; i++) {
+      uint32_t instanceLayersRequestCount =
+          sizeof(instanceLayers) / sizeof(instanceLayers[0]);
+      for (uint32_t i = 0; i < instanceLayersRequestCount; i++) {
         bool found = false;
-        for (uint32_t j = 0; j < layer_present_count; j++) {
-          if (strcmp(instance_layers[i], layer_props[j].layerName) == 0) {
+        for (uint32_t j = 0; j < layerPresentCount; j++) {
+          if (strcmp(instanceLayers[i], layerProps[j].layerName) == 0) {
             found = true;
           }
         }
         if (found) {
-          enabledValidationLayers_.push_back(instance_layers[i]);
+          enabledValidationLayers_.push_back(instanceLayers[i]);
         }
       }
 
-      uint32_t extension_count;
+      uint32_t extCount;
+      vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr);
+      std::vector<VkExtensionProperties> extProps(extCount);
       vkEnumerateInstanceExtensionProperties(
-          nullptr, &extension_count, nullptr);
-      std::vector<VkExtensionProperties> extension_props(extension_count);
-      vkEnumerateInstanceExtensionProperties(
-          nullptr, &extension_count, extension_props.data());
-      bool foundExtension = false;
-      for (VkExtensionProperties prop : extension_props) {
-        if (strcmp(VK_EXT_DEBUG_REPORT_EXTENSION_NAME, prop.extensionName) ==
-            0) {
-          foundExtension = true;
+          nullptr, &extCount, extProps.data());
+      bool foundExt = false;
+      for (VkExtensionProperties p : extProps) {
+        if (strcmp(VK_EXT_DEBUG_REPORT_EXTENSION_NAME, p.extensionName) == 0) {
+          foundExt = true;
           break;
         }
       }
-
-      if (foundExtension) {
+      if (foundExt) {
         enabledExtensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
       }
     }
 
     VkApplicationInfo applicationInfo = {};
     applicationInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    applicationInfo.pApplicationName = "vkphappname";
+    applicationInfo.pApplicationName = "pytorch";
     applicationInfo.applicationVersion = 0;
-    applicationInfo.pEngineName = "Compute";
+    applicationInfo.pEngineName = "compute";
     applicationInfo.engineVersion = 0;
     applicationInfo.apiVersion = VK_API_VERSION_1_0;
 
@@ -154,7 +130,7 @@ class VContext {
 
     vkCreateInstance(&createInfo, nullptr, &instance_);
 
-    if (enableValidationLayers) {
+    if (enableValidationLayers_) {
       VkDebugReportCallbackCreateInfoEXT debugReportCallbackCreateInfo = {};
       debugReportCallbackCreateInfo.sType =
           VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
@@ -197,7 +173,7 @@ class VContext {
       s << "INFO:";
     }
     s << pLayerPrefix << " " << msgCode << " " << pMsg << std::endl;
-    auto log = s.str();
+    std::cout << s.str();
     // TODO Where to log if VLOG,LOG disabled?
     return VK_FALSE;
   }
@@ -279,7 +255,7 @@ class VContext {
   }
 
   void cleanup() {
-    if (enableValidationLayers) {
+    if (enableValidationLayers_) {
       auto func = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
           instance_, "vkDestroyDebugReportCallbackEXT");
       TORCH_CHECK(func, "Could not load vkDestroyDebugReportCallbackEXT");
@@ -289,7 +265,58 @@ class VContext {
     vkDestroyDevice(device_, nullptr);
     vkDestroyInstance(instance_, nullptr);
   }
+}; // class VContext
+static std::unique_ptr<VContext> vkContext;
+static constexpr bool kEnableValidationLayers = true;
+
+void initVulkanContextOnce() {
+  static const int once = []() {
+#ifdef USE_VULKAN_WRAPPER
+    bool res = InitVulkan();
+    TORCH_CHECK(res, "Vulkan Wrapper Failed to InitVulkan");
+#endif
+    vkContext = std::make_unique<VContext>(kEnableValidationLayers);
+    TORCH_CHECK(vkContext, "Vulkan Failed to create Vulkan Context");
+    return 0;
+  }();
+  ((void)once);
+}
+
+class VBuffer;
+class VulkanTensor::Impl {
+ public:
+  Impl(std::vector<int64_t> sizes) : sizes_(std::move(sizes)) {
+    int64_t numel = 1;
+    for (const auto& d : sizes_) {
+      numel *= d;
+    }
+    numel_ = numel;
+  }
+
+  std::vector<int64_t> sizes_;
+  int64_t numel_;
+  std::unique_ptr<VBuffer> vbuffer_;
 };
+
+VulkanTensor::VulkanTensor(std::vector<int64_t> sizes)
+    : pImpl(std::make_shared<Impl>(std::move(sizes))) {
+  initVulkanContextOnce();
+}
+
+std::vector<int64_t> VulkanTensor::sizes() {
+  return pImpl->sizes_;
+}
+
+bool VulkanTensor::hasStorage() {
+  return static_cast<bool>(pImpl->vbuffer_);
+}
+
+void VulkanTensor::allocateStorage() {
+  const auto bufferSize = sizeof(float) * pImpl->numel_;
+  const auto bufferSizeAligned = ROUND_UP(bufferSize, vkContext->sboAlign_);
+  pImpl->vbuffer_ = std::make_unique<VBuffer>(
+      bufferSizeAligned, vkContext->physicalDevice_, vkContext->device_);
+}
 
 uint32_t findMemoryType(
     VkPhysicalDevice& physicalDevice,
@@ -312,8 +339,9 @@ class VBuffer {
       uint32_t bufferSize,
       VkPhysicalDevice physicalDevice,
       VkDevice device,
-      bool isUniform)
+      bool isUniform = false)
       : bufferSize_(bufferSize),
+        isUniform_(isUniform),
         physicalDevice_(physicalDevice),
         device_(device) {
     VkBufferCreateInfo bufferCreateInfo = {};
@@ -340,18 +368,52 @@ class VBuffer {
     VK_CHECK_RESULT(vkBindBufferMemory(device_, buffer_, bufferMemory_, 0));
   }
 
-  void toHost(void* outputData, int64_t size) {
+  void copyFromDeviceToHost(void* outputData, int64_t size) {
     void* mappedMemory = nullptr;
     vkMapMemory(device_, bufferMemory_, 0, size, 0, &mappedMemory);
     ::memcpy(outputData, mappedMemory, size);
     vkUnmapMemory(device_, bufferMemory_);
   }
 
-  void toDevice(void* data, int64_t size) {
+  void copyFromHostToDevice(void* data, int64_t size) {
     void* mappedMemory = nullptr;
     vkMapMemory(device_, bufferMemory_, 0, size, 0, &mappedMemory);
     ::memcpy(mappedMemory, data, size);
     vkUnmapMemory(device_, bufferMemory_);
+  }
+
+  VkDescriptorBufferInfo makeDescriptorBufferInfo() {
+    VkDescriptorBufferInfo info = {};
+    info.buffer = buffer_;
+    info.offset = 0;
+    info.range = bufferSize_;
+    return info;
+  }
+
+  VkWriteDescriptorSet makeWriteDescriptorSet(
+      VkDescriptorSet descriptorSet,
+      uint32_t binding,
+      const VkDescriptorBufferInfo* bufferInfo) {
+    VkWriteDescriptorSet writeSet{};
+    writeSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeSet.pNext = nullptr;
+    writeSet.dstSet = descriptorSet;
+    writeSet.dstBinding = binding;
+    writeSet.dstArrayElement = 0;
+    writeSet.descriptorCount = 1;
+    writeSet.descriptorType = isUniform_ ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+                                         : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writeSet.pImageInfo = nullptr;
+    writeSet.pBufferInfo = bufferInfo;
+    writeSet.pTexelBufferView = nullptr;
+    return writeSet;
+  }
+
+  void bind(VkDescriptorSet descriptorSet, uint32_t binding) {
+    auto descrBufferInfo = makeDescriptorBufferInfo();
+    auto writeDescrSet =
+        makeWriteDescriptorSet(descriptorSet, binding, &descrBufferInfo);
+    vkUpdateDescriptorSets(device_, 1, &writeDescrSet, 0, nullptr);
   }
 
   ~VBuffer() {
@@ -360,104 +422,12 @@ class VBuffer {
   }
 
   uint32_t bufferSize_;
+  bool isUniform_;
   VkBuffer buffer_;
   VkDeviceMemory bufferMemory_;
   VkPhysicalDevice physicalDevice_;
   VkDevice device_;
-};
-
-VImage::VImage(int64_t W, int64_t H, int64_t C) {
-  auto& device = vkContext->device_;
-  auto& physicalDevice = vkContext->physicalDevice_;
-  int32_t C_4 = UP_DIV(C, 4);
-
-  initialLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
-  filter_ = VK_FILTER_NEAREST;
-  samplerAddressMode_ = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-  format_ = VK_FORMAT_R16G16B16A16_SFLOAT;
-
-  VkImageCreateInfo imageInfo = {};
-  imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-  imageInfo.imageType = VK_IMAGE_TYPE_3D;
-  imageInfo.extent.width = static_cast<uint32_t>(W);
-  imageInfo.extent.height = static_cast<uint32_t>(H);
-  imageInfo.extent.depth = static_cast<uint32_t>(C_4);
-
-  imageInfo.mipLevels = 1;
-  imageInfo.arrayLayers = 1;
-  imageInfo.format = format_;
-  imageInfo.tiling = VK_IMAGE_TILING_LINEAR;
-  imageInfo.initialLayout = initialLayout_;
-  imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-      VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-  imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-  imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-  imageInfo.pNext = nullptr;
-  imageInfo.flags = 0;
-
-  VK_CHECK_RESULT(vkCreateImage(device, &imageInfo, nullptr, &image_));
-
-  VkMemoryRequirements memReqs = {};
-  vkGetImageMemoryRequirements(device, image_, &memReqs);
-  VkMemoryAllocateInfo allocInfo = {};
-  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocInfo.allocationSize = memReqs.size;
-  allocInfo.memoryTypeIndex = findMemoryType(
-      physicalDevice,
-      memReqs.memoryTypeBits,
-      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-  VK_CHECK_RESULT(vkAllocateMemory(device, &allocInfo, nullptr, &imageMemory_));
-  VK_CHECK_RESULT(vkBindImageMemory(device, image_, imageMemory_, 0));
-
-  VkImageViewCreateInfo _imageViewCreateInfo = imageViewCreateInfo();
-  VK_CHECK_RESULT(
-      vkCreateImageView(device, &_imageViewCreateInfo, nullptr, &imageView_));
-
-  VkSamplerCreateInfo _samplerCreateInfo = samplerCreateInfo();
-  VK_CHECK_RESULT(
-      vkCreateSampler(device, &_samplerCreateInfo, nullptr, &sampler_));
-}
-
-VImage::~VImage() {
-  vkDestroySampler(vkContext->device_, sampler_, nullptr);
-  vkDestroyImageView(vkContext->device_, imageView_, nullptr);
-  vkFreeMemory(vkContext->device_, imageMemory_, nullptr);
-  vkDestroyImage(vkContext->device_, image_, nullptr);
-}
-
-VkImageViewCreateInfo VImage::imageViewCreateInfo() {
-  VkImageViewCreateInfo info = {};
-  info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-  info.image = image_;
-  info.viewType = viewType_;
-  info.format = format_;
-  info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  info.subresourceRange.baseMipLevel = 0;
-  info.subresourceRange.levelCount = 1;
-  info.subresourceRange.baseArrayLayer = 0;
-  info.subresourceRange.layerCount = 1;
-  return info;
-}
-
-VkSamplerCreateInfo VImage::samplerCreateInfo() {
-  VkSamplerCreateInfo info = {};
-  info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-  info.magFilter = filter_;
-  info.minFilter = filter_;
-  info.addressModeU = samplerAddressMode_;
-  info.addressModeV = samplerAddressMode_;
-  info.addressModeW = samplerAddressMode_;
-  info.anisotropyEnable = VK_FALSE;
-  info.maxAnisotropy = 1.0f;
-  info.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
-  info.compareEnable = VK_FALSE;
-  info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-  info.mipLodBias = 0.0f;
-  info.minLod = 0.0f;
-  info.maxLod = 0.0f;
-  return info;
-}
+}; // class VBuffer
 
 class ComputeUnit {
  public:
@@ -474,7 +444,7 @@ class ComputeUnit {
       const uint32_t* code,
       const uint32_t codeSize,
       const VkDescriptorSetLayout& descrSetLayout) {
-    auto& device = vkContext->device_;
+    auto device = vkContext->device_;
     VkShaderModuleCreateInfo createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.pCode = code;
@@ -527,7 +497,7 @@ class ComputeUnit {
         options);
     auto compilationStatus = compilationResult.GetCompilationStatus();
     TORCH_INTERNAL_ASSERT(
-        compStat == shaderc_compilation_status_success,
+        compilationStatus == shaderc_compilation_status_success,
         "Shader compilation error: status:",
         compilationStatus,
         compilationResult.GetErrorMessage());
@@ -543,7 +513,7 @@ class ComputeUnit {
       uint32_t groupCountX,
       uint32_t groupCountY,
       uint32_t groupCountZ) {
-    auto& device = vkContext->device_;
+    auto device = vkContext->device_;
     VkCommandPoolCreateInfo commandPoolCreateInfo = {};
     commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     commandPoolCreateInfo.flags = 0;
@@ -579,6 +549,7 @@ class ComputeUnit {
     vkCmdDispatch(commandBuffer_, groupCountX, groupCountY, groupCountZ);
     VK_CHECK_RESULT(vkEndCommandBuffer(commandBuffer_));
   }
+
   void runCommandBuffer() {
     VkSubmitInfo submitInfo = {};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -599,21 +570,12 @@ class ComputeUnit {
   }
 
  private:
-  VkCommandPool commandPool_; // own
-  VkCommandBuffer commandBuffer_; // own
+  VkCommandPool commandPool_;
+  VkCommandBuffer commandBuffer_;
   VkPipeline pipeline_;
-  VkPipelineLayout pipelineLayout_; // own
-  VkShaderModule computeShaderModule_; // own
+  VkPipelineLayout pipelineLayout_;
+  VkShaderModule computeShaderModule_;
 };
-
-VulkanTensor::VulkanTensor(std::vector<int64_t> sizes) : sizes_(sizes) {
-  AT_ASSERTM(
-      sizes_.size() == 4,
-      "VulkanTensor is implemented only for tensors dim == 4");
-  initVulkanContextOnce();
-}
-
-void VulkanTensor::allocateStorage() {}
 
 #ifdef USE_VULKAN_GLES_SHADERC_RUNTIME
 auto makeComputeUnit(
@@ -637,324 +599,130 @@ auto makeComputeUnit(
 }
 #endif
 
-struct uniforms {
-  int32_t w;
-  int32_t h;
-};
-
 void VulkanTensor::setDataFromHost(const float* inputData) {
   initVulkanContextOnce();
 
-  auto& device = vkContext->device_;
-  auto& physicalDevice = vkContext->physicalDevice_;
-
-  int64_t numel = 1;
-  for (const auto& d : sizes_) {
-    numel *= d;
+  const auto inputDataSize = sizeof(float) * pImpl->numel_;
+  if (!hasStorage()) {
+    allocateStorage();
   }
-
-  int32_t N = sizes_[0];
-  int32_t C = sizes_[1];
-  int32_t H = sizes_[2];
-  int32_t W = sizes_[3];
-  int32_t C_4 = UP_DIV(C, 4);
-
-  tensorImage_ = std::make_unique<VImage>(W, H, C);
-
-  int64_t inputDataSize = sizeof(float) * numel;
-  int64_t bufferDataSizeAligned = ROUND_UP(inputDataSize, vkContext->sboAlign_);
-  VBuffer bufferData{bufferDataSizeAligned, physicalDevice, device, false};
-  bufferData.toDevice((void*)inputData, inputDataSize);
-
-  uniforms wh{W, H};
-  int64_t bufferConstSize = sizeof(wh);
-  int64_t bufferConstSizeAligned =
-      ROUND_UP(bufferConstSize, vkContext->uboAlign_);
-  VBuffer bufferConst{bufferConstSizeAligned, physicalDevice, device, true};
-  bufferConst.toDevice((void*)&wh, bufferConstSize);
-
-  VkDescriptorSet descriptorSet = {};
-  VkDescriptorSetLayout descrSetLayout = {};
-  VkDescriptorPool descrPool = {};
-
-  VkDescriptorSetLayoutBinding descrSetLayoutBinding[] = {
-      {
-          0, // binding
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          1, // descriptorCount
-          VK_SHADER_STAGE_COMPUTE_BIT, // stageFlags
-          nullptr // pImmutableSamplers
-      },
-      {
-          1, // binding
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // descriptorType
-          1, // descriptorCount
-          VK_SHADER_STAGE_COMPUTE_BIT, // stageFlags
-          nullptr // pImmutableSamplers
-      },
-      {
-          2, // binding
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // descriptorType
-          1, // descriptorCount
-          VK_SHADER_STAGE_COMPUTE_BIT, // stageFlags
-          nullptr // pImmutableSamplers
-      }};
-
-  VkDescriptorSetLayoutCreateInfo descrSetLayoutCreateInfo{
-      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, // sType
-      nullptr, // pNext
-      0, // flags
-      3, // bindingCount
-      descrSetLayoutBinding // pBindings
-  };
-
-  VK_CHECK_RESULT(vkCreateDescriptorSetLayout(
-      device, &descrSetLayoutCreateInfo, nullptr, &descrSetLayout));
-
-  VkDescriptorPoolSize descrPoolSize[] = {
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
-      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
-      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
-
-  VkDescriptorPoolCreateInfo descrPoolCreateInfo{
-      VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, // sType
-      nullptr, // pNext
-      0, // flags
-      1, // maxSets
-      3, // poolSizeCount
-      descrPoolSize // pPoolSizes
-  };
-
-  VK_CHECK_RESULT(vkCreateDescriptorPool(
-      device, &descrPoolCreateInfo, nullptr, &descrPool));
-
-  VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{
-      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, // sType
-      nullptr, // pNext
-      descrPool, // descrPool
-      1, // descriptorSetCount
-      &descrSetLayout // pSetLayouts
-  };
-  VK_CHECK_RESULT(vkAllocateDescriptorSets(
-      device, &descriptorSetAllocateInfo, &descriptorSet));
-
-  VkDescriptorBufferInfo descrBufferData = {};
-  descrBufferData.buffer = bufferData.buffer_;
-  descrBufferData.offset = 0;
-  descrBufferData.range = bufferData.bufferSize_;
-  VkWriteDescriptorSet writeDescrBufferData = {
-      VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // sType
-      nullptr, // pNext
-      descriptorSet, // dstSet
-      1, // dstBinding
-      0, // dstArrayElement
-      1, // descriptorCount
-      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-      nullptr, // pImageInfo
-      &descrBufferData, // pBufferInfo
-      nullptr, // pTexelBufferView
-  };
-  vkUpdateDescriptorSets(device, 1, &writeDescrBufferData, 0, nullptr);
-
-  VkDescriptorBufferInfo descrBufferConst = {};
-  descrBufferConst.buffer = bufferConst.buffer_;
-  descrBufferConst.offset = 0;
-  descrBufferConst.range = bufferConst.bufferSize_;
-  VkWriteDescriptorSet writeDescrBufferConst = {
-      VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // sType
-      nullptr, // pNext
-      descriptorSet, // dstSet
-      2, // dstBinding
-      0, // dstArrayElement
-      1, // descriptorCount
-      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      nullptr, // pImageInfo
-      &descrBufferConst, // pBufferInfo
-      nullptr, // pTexelBufferView
-  };
-  vkUpdateDescriptorSets(device, 1, &writeDescrBufferConst, 0, nullptr);
-
-  VkDescriptorImageInfo descrImage = {};
-  descrImage.sampler = tensorImage_->sampler_;
-  descrImage.imageLayout = tensorImage_->imageLayout_;
-  descrImage.imageView = tensorImage_->imageView_;
-  VkWriteDescriptorSet writeDescrImage = {
-      VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // sType
-      nullptr, // pNext
-      descriptorSet, // dstSet
-      0, // dstBinding
-      0, // dstArrayElement
-      1, // descriptorCount
-      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-      &descrImage, // pImageInfo
-      nullptr, // pBufferInfo
-      nullptr, // pTexelBufferView
-  };
-  vkUpdateDescriptorSets(device, 1, &writeDescrImage, 0, nullptr);
-  auto computeUnit = makeComputeUnit(
-      at::native::vulkan::GLSL_SPV(vulkan_nchw_buf_to_tex), descrSetLayout);
-  computeUnit->createCommandBuffer(
-      descriptorSet, UP_DIV(W, 8), UP_DIV(H, 8), C_4);
-  computeUnit->runCommandBuffer();
-  vkDestroyDescriptorPool(device, descrPool, nullptr);
-  vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
+  pImpl->vbuffer_->copyFromHostToDevice((void*)inputData, inputDataSize);
 }
 
 void VulkanTensor::copyDataToHost(float* output) {
   initVulkanContextOnce();
+  auto bufferDataSize = sizeof(float) * pImpl->numel_;
+  pImpl->vbuffer_->copyFromDeviceToHost(output, bufferDataSize);
+}
 
-  auto& device = vkContext->device_;
-  auto& physicalDevice = vkContext->physicalDevice_;
+VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(
+    uint32_t binding,
+    VkDescriptorType descriptorType) {
+  return {binding, descriptorType, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
+}
 
-  int64_t numel = 1;
-  for (const auto& d : sizes_) {
-    numel *= d;
-  }
+void createDescriptorSetLayout(
+    VkDevice device,
+    const VkDescriptorSetLayoutBinding* bindings,
+    uint32_t bindingCount,
+    VkDescriptorSetLayout* setLayout) {
+  VkDescriptorSetLayoutCreateInfo createInfo{};
+  createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  createInfo.pNext = nullptr;
+  createInfo.flags = 0;
+  createInfo.bindingCount = bindingCount;
+  createInfo.pBindings = bindings;
+  VK_CHECK_RESULT(
+      vkCreateDescriptorSetLayout(device, &createInfo, nullptr, setLayout));
+}
 
-  int N = sizes_[0];
-  int C = sizes_[1];
-  int H = sizes_[2];
-  int W = sizes_[3];
-  int C_4 = UP_DIV(C, 4);
+void createDescriptorPool(
+    VkDevice device,
+    const VkDescriptorPoolSize* poolSizes,
+    uint32_t poolSizeCount,
+    uint32_t maxSets,
+    VkDescriptorPool* descriptorPool) {
+  VkDescriptorPoolCreateInfo createInfo = {};
+  createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  createInfo.pNext = nullptr;
+  createInfo.flags = 0;
+  createInfo.maxSets = maxSets;
+  createInfo.poolSizeCount = poolSizeCount;
+  createInfo.pPoolSizes = poolSizes;
+  VK_CHECK_RESULT(
+      vkCreateDescriptorPool(device, &createInfo, nullptr, descriptorPool));
+}
 
-  int64_t bufferDataSize = sizeof(float) * numel;
-  int64_t bufferDataSizeAligned =
-      ROUND_UP(bufferDataSize, vkContext->sboAlign_);
-  VBuffer bufferData{bufferDataSizeAligned, physicalDevice, device, false};
+void allocateDescriptorSet(
+    VkDevice device,
+    VkDescriptorPool descriptorPool,
+    const VkDescriptorSetLayout* descriptorSetLayout,
+    VkDescriptorSet* descriptorSet) {
+  VkDescriptorSetAllocateInfo allocateInfo = {};
+  allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  allocateInfo.pNext = nullptr;
+  allocateInfo.descriptorPool = descriptorPool;
+  allocateInfo.descriptorSetCount = 1;
+  allocateInfo.pSetLayouts = descriptorSetLayout;
+  VK_CHECK_RESULT(
+      vkAllocateDescriptorSets(device, &allocateInfo, descriptorSet));
+}
 
-  uniforms wh{W, H};
-  int64_t bufferConstSize = sizeof(wh);
+void upsample_nearest2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    int64_t IH,
+    int64_t IW,
+    int64_t OH,
+    int64_t OW,
+    int64_t _N,
+    int64_t _C,
+    float scaleH,
+    float scaleW) {
+  auto device = vkContext->device_;
+  auto physicalDevice = vkContext->physicalDevice_;
+  int64_t C = _N * _C;
+  struct ConstBlock {
+    int32_t IW;
+    int32_t IH;
+    int32_t OW;
+    int32_t OH;
+    float scaleX;
+    float scaleY;
+  };
+  ConstBlock u{IW, IH, OW, OH, scaleW, scaleH};
+  int64_t bufferConstSize = sizeof(u);
   int64_t bufferConstSizeAligned =
       ROUND_UP(bufferConstSize, vkContext->uboAlign_);
   VBuffer bufferConst{bufferConstSizeAligned, physicalDevice, device, true};
-  bufferConst.toDevice((void*)&wh, bufferConstSize);
+  bufferConst.copyFromHostToDevice((void*)&u, bufferConstSize);
 
-  VkDescriptorSet descriptorSet = {};
   VkDescriptorSetLayout descrSetLayout = {};
+  VkDescriptorSetLayoutBinding bindings[] = {
+      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+      descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+      descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
+  createDescriptorSetLayout(
+      device, bindings, 3 /* bindingsCount */, &descrSetLayout);
+
   VkDescriptorPool descrPool = {};
+  VkDescriptorPoolSize poolSizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
+                                      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
+                                      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
+  createDescriptorPool(
+      device, poolSizes, 3 /* poolSizeCount */, 1 /* maxSets */, &descrPool);
 
-  VkDescriptorSetLayoutBinding descrSetLayoutBinding[] = {
-      {
-          0, // binding
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          1, // descriptorCount
-          VK_SHADER_STAGE_COMPUTE_BIT, // stageFlags
-          nullptr // pImmutableSamplers
-      },
-      {
-          1, // binding
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // descriptorType
-          1, // descriptorCount
-          VK_SHADER_STAGE_COMPUTE_BIT, // stageFlags
-          nullptr // pImmutableSamplers
-      },
-      {
-          2, // binding
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // descriptorType
-          1, // descriptorCount
-          VK_SHADER_STAGE_COMPUTE_BIT, // stageFlags
-          nullptr // pImmutableSamplers
-      }};
+  VkDescriptorSet descrSet = {};
+  allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
 
-  VkDescriptorSetLayoutCreateInfo descrSetLayoutCreateInfo{
-      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, // sType
-      nullptr, // pNext
-      0, // flags
-      3, // bindingCount
-      descrSetLayoutBinding // pBindings
-  };
+  output.pImpl->vbuffer_->bind(descrSet, 0);
+  input.pImpl->vbuffer_->bind(descrSet, 1);
+  bufferConst.bind(descrSet, 2);
 
-  VK_CHECK_RESULT(vkCreateDescriptorSetLayout(
-      device, &descrSetLayoutCreateInfo, nullptr, &descrSetLayout));
-
-  VkDescriptorPoolSize descrPoolSize[] = {
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
-      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
-      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
-
-  VkDescriptorPoolCreateInfo descrPoolCreateInfo{
-      VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, // sType
-      nullptr, // pNext
-      0, // flags
-      1, // maxSets
-      3, // poolSizeCount
-      descrPoolSize // pPoolSizes
-  };
-
-  VK_CHECK_RESULT(vkCreateDescriptorPool(
-      device, &descrPoolCreateInfo, nullptr, &descrPool));
-
-  VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{
-      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, // sType
-      nullptr, // pNext
-      descrPool, // descrPool
-      1, // descriptorSetCount
-      &descrSetLayout // pSetLayouts
-  };
-  VK_CHECK_RESULT(vkAllocateDescriptorSets(
-      device, &descriptorSetAllocateInfo, &descriptorSet));
-
-  VkDescriptorBufferInfo descrBufferData = {};
-  descrBufferData.buffer = bufferData.buffer_;
-  descrBufferData.offset = 0;
-  descrBufferData.range = bufferData.bufferSize_;
-  VkWriteDescriptorSet writeDescrBufferData = {
-      VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // sType
-      nullptr, // pNext
-      descriptorSet, // dstSet
-      1, // dstBinding
-      0, // dstArrayElement
-      1, // descriptorCount
-      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-      nullptr, // pImageInfo
-      &descrBufferData, // pBufferInfo
-      nullptr, // pTexelBufferView
-  };
-  vkUpdateDescriptorSets(device, 1, &writeDescrBufferData, 0, nullptr);
-
-  VkDescriptorBufferInfo descrBufferConst = {};
-  descrBufferConst.buffer = bufferConst.buffer_;
-  descrBufferConst.offset = 0;
-  descrBufferConst.range = bufferConst.bufferSize_;
-  VkWriteDescriptorSet writeDescrBufferConst = {
-      VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // sType
-      nullptr, // pNext
-      descriptorSet, // dstSet
-      2, // dstBinding
-      0, // dstArrayElement
-      1, // descriptorCount
-      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      nullptr, // pImageInfo
-      &descrBufferConst, // pBufferInfo
-      nullptr, // pTexelBufferView
-  };
-  vkUpdateDescriptorSets(device, 1, &writeDescrBufferConst, 0, nullptr);
-
-  VkDescriptorImageInfo descrImage = {};
-  descrImage.sampler = tensorImage_->sampler_;
-  descrImage.imageView = tensorImage_->imageView_;
-  descrImage.imageLayout = tensorImage_->imageLayout_;
-  VkWriteDescriptorSet writeDescrImage = {
-      VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // sType
-      nullptr, // pNext
-      descriptorSet, // dstSet
-      0, // dstBinding
-      0, // dstArrayElement
-      1, // descriptorCount
-      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-      &descrImage, // pImageInfo
-      nullptr, // pBufferInfo
-      nullptr, // pTexelBufferView
-  };
-  vkUpdateDescriptorSets(device, 1, &writeDescrImage, 0, nullptr);
-  auto computeUnit =
-      makeComputeUnit(GLSL_SPV(vulkan_tex_to_nchw_buf), descrSetLayout);
-  computeUnit->createCommandBuffer(
-      descriptorSet, UP_DIV(W, 8), UP_DIV(H, 8), C_4);
+  auto computeUnit = makeComputeUnit(
+      at::native::vulkan::GLSL_SPV(vulkan_upsampleNearest2d), descrSetLayout);
+  computeUnit->createCommandBuffer(descrSet, UP_DIV(OW, 8), UP_DIV(OH, 8), C);
   computeUnit->runCommandBuffer();
-
-  bufferData.toHost(output, bufferDataSize);
-
   vkDestroyDescriptorPool(device, descrPool, nullptr);
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
 }
