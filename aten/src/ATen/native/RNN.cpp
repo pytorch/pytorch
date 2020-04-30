@@ -2334,6 +2334,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
     double dropout_p,
     bool train,
     bool bidirectional,
+    bool type_2,
     bool batch_first,
     c10::optional<ScalarType> dtype,
     bool use_dynamic) {
@@ -2361,6 +2362,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
       dropout_p,
       train,
       bidirectional,
+      type_2,
       batch_first,
       std::move(dtype),
       use_dynamic);
@@ -2422,6 +2424,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
     double dropout_p,
     bool train,
     bool bidirectional,
+    bool type_2,
     c10::optional<ScalarType> dtype,
     bool use_dynamic) {
   TORCH_WARN_ONCE(
@@ -2449,6 +2452,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
       dropout_p,
       train,
       bidirectional,
+      type_2,
       std::move(dtype),
       use_dynamic);
 }
