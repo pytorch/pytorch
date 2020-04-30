@@ -189,8 +189,6 @@ def run(declarations):
 
         common_with_cwrap.sort_by_number_of_args(declaration)
 
-        discover_zero_dim_tensor_operations(declaration)
-
         for option in declaration['options']:
             set_mode(option)
             if option['mode'] != 'native':
