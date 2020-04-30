@@ -1714,6 +1714,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # N + 1 quantize_per_tensor between these ops
         m1 = convert_script(m, debug=True)
         conv_op_quant = 4
+        # NB: This Needs to be updated when we add more ops to test
         general_value_op_quant = 2
         FileCheck().check_count("aten::quantize_per_tensor", conv_op_quant + general_value_op_quant + 1, exactly=True) \
                    .run(m1.graph)
@@ -1724,7 +1725,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # patterns
         # one quantize_per_tensor for input
         m2 = convert_script(m, debug=False)
-        print(m2.graph)
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
                    .check_count("quantized::conv2d", 2, exactly=True) \
                    .check("aten::dequantize") \
@@ -1816,23 +1816,19 @@ class TestQuantizeDynamicScript(JitTestCase):
         m(data)
         quant_func = "aten::quantize_per_tensor"
 
+        print(m.graph)
         # quantizing activations
         FileCheck().check("aten::_choose_qparams_per_tensor") \
-                   .check(quant_func) \
-                   .check("prim::CallMethod[name=\"forward\"]") \
+                   .check_next(quant_func) \
+                   .check_next("aten::dequantize") \
                    .check("aten::_choose_qparams_per_tensor") \
+                   .check_next(quant_func) \
+                   .check_next("aten::dequantize") \
                    .check(quant_func) \
-                   .check("prim::CallMethod[name=\"forward\"]") \
+                   .check_next("aten::dequantize") \
                    .check_not(quant_func) \
                    .check("return") \
-                   .run(str(get_forward_graph(m._c)))
-        # quantizing weight in forward function of fc module, no choose_qparams
-        FileCheck().check_not("aten::_choose_qparams_per_tensor") \
-                   .check(quant_func) \
-                   .check("prim::CallFunction") \
-                   .check_not(quant_func) \
-                   .check("return") \
-                   .run(str(get_forward_graph(m.fc1._c)))
+                   .run(m.graph)
 
     def test_finalize_for_linear_dynamic(self):
         class M(torch.nn.Module):
