@@ -1604,6 +1604,7 @@ bool _use_cudnn_rnn_flatten_weight() {
             dropout_p,                                                      \
             train,                                                          \
             bidirectional,                                                  \
+            type_2,                                                         \
             batch_first);                                                   \
         return std::make_tuple(std::move(output), std::move(hy));           \
       }                                                                     \
@@ -1635,6 +1636,7 @@ bool _use_cudnn_rnn_flatten_weight() {
             dropout_p,                                                      \
             train,                                                          \
             bidirectional,                                                  \
+            type_2,                                                         \
             batch_first);                                                   \
         return std::make_tuple(std::move(output), std::move(hy));           \
       }                                                                     \
@@ -1696,7 +1698,8 @@ bool _use_cudnn_rnn_flatten_weight() {
             num_layers,                                                     \
             dropout_p,                                                      \
             train,                                                          \
-            bidirectional);                                                 \
+            bidirectional,                                                  \
+            type_2);                                                        \
         return std::make_tuple(std::move(output), std::move(hy));           \
       }                                                                     \
     }                                                                       \
@@ -1727,7 +1730,8 @@ bool _use_cudnn_rnn_flatten_weight() {
             num_layers,                                                     \
             dropout_p,                                                      \
             train,                                                          \
-            bidirectional);                                                 \
+            bidirectional,                                                  \
+            type_2);                                                        \
         return std::make_tuple(std::move(output), std::move(hy));           \
       }                                                                     \
     }                                                                       \
