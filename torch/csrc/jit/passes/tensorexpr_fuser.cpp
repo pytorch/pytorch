@@ -13,7 +13,7 @@
 namespace torch {
 namespace jit {
 
-static bool texpr_fuser_enabled_ = false;
+static bool texpr_fuser_enabled_ = true;
 void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
 }
@@ -290,9 +290,9 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   return {++(++iter), false};
 }
 
-void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
+void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
   if (!tensorExprFuserEnabled()) {
-    return;
+   return;
   }
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
