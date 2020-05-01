@@ -69,9 +69,11 @@ at::Tensor& random_impl(at::Tensor& self, c10::optional<Generator> generator) {
 #define CHECK_OUT_OF_BOUNDS(var, name, min, max, dtype) \
   TORCH_CHECK(var >= min && var <= max, name , " is out of bounds for ", dtype); \
 
-#define CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(var, name, min, max, dtype_min, dtype_max) \
-  if (var < min || var > max) { \
-    TORCH_WARN(name , " is out of bounds [", dtype_min, ", ", dtype_max, "]. This warning will become an error in version 1.7 release, please fix the code in advance"); \
+#define WARN_OUT_OF_BOUNDS(var, name, digits, dtype) \
+  if (var < -(1LL << digits) || var > 1LL << digits) { \
+    TORCH_WARN(name , " is out of bounds [-(2^", digits, "), 2^", digits, "]. ", \
+      "Due to precision limitations ", dtype, " can support discrete uniform distribution only within this range. ", \
+      "This warning will become an error in version 1.7 release, please fix the code in advance"); \
   }
 
 static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMeta dtype) {
@@ -84,14 +86,8 @@ static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
       CHECK_OUT_OF_BOUNDS(to_inc, "to - 1", min, max, dtype);
 
       constexpr auto digits = std::numeric_limits<scalar_t>::digits;
-      const auto two_pow_digits = 1LL << digits;
-      const auto minus_two_pow_digits = -two_pow_digits;
-      const auto two_pow_digits_name = "2^" + std::to_string(digits);
-      const auto minus_two_pow_digits_name = "-(2^" + std::to_string(digits) + ")";
-      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(from, "from", minus_two_pow_digits,
-        two_pow_digits, minus_two_pow_digits_name, two_pow_digits_name);
-      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(to_inc, "to - 1", minus_two_pow_digits,
-        two_pow_digits, minus_two_pow_digits_name, two_pow_digits_name);
+      WARN_OUT_OF_BOUNDS(from, "from", digits, dtype);
+      WARN_OUT_OF_BOUNDS(to_inc, "to - 1", digits, dtype);
     });
   } else if (isIntegralType(scalar_type, /*includeBool=*/true)) {
     AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, scalar_type, "check_random_integral_bounds", [&]() {
@@ -331,7 +327,16 @@ Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> 
   return self;
 }
 
+// ==================================================== Cauchy ========================================================
+
+template<template<typename> class cauchy_kernel, typename RNG>
+Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Generator> gen) {
+  auto iter = TensorIterator::nullary_op(self);
+  cauchy_kernel<RNG>()(iter, median, sigma, gen);
+  return self;
+}
+
 #undef CHECK_OUT_OF_BOUNDS
-#undef CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING
+#undef WARN_OUT_OF_BOUNDS
 
 }}}
