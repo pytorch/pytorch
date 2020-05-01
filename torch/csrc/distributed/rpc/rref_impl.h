@@ -366,16 +366,17 @@ class TORCH_API OwnerRRef final : public RRef {
   // Has a value or error been set?
   bool hasValue() const;
   // Gets a future that is satisfied when the value or error is set.
-  std::shared_ptr<FutureMessage> getFuture();
+  std::shared_ptr<FutureIValue> getFuture();
 
  private:
   friend class RRefContext;
 
+  // See #32608 for dicussion on whether value_ should be merged into future_
   c10::optional<IValue> value_;
   c10::optional<std::string> error_;
   mutable std::mutex mutex_;
   mutable std::condition_variable valueCV_;
-  std::shared_ptr<FutureMessage> future_;
+  std::shared_ptr<FutureIValue> future_;
 };
 
 } // namespace rpc

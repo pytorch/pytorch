@@ -296,7 +296,10 @@ namespace jit {
   _(LLVMEmptyStmt)                         \
   _(LLVMEliminatedStmt)                    \
   _(LLVMIfThenElseTest)                    \
-  _(LLVMVectorizerLoadStoreTest)
+  _(LLVMVectorizerLoadStoreTest)           \
+  _(LLVMSimpleReduction)                   \
+  _(LLVMRFactorReduction)                  \
+  _(LLVMRFactorVectorizedReduction)
 
 #define TH_FORALL_TENSOREXPR_TESTS_CUDA(_) \
   _(CudaTestVectorAdd01)                   \
