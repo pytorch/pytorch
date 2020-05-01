@@ -1,15 +1,16 @@
 #pragma once
 
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <torch/custom_class.h>
+
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmFP16.h>
 #include <fbgemm/QuantUtils.h>
 
 #include <ATen/Tensor.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <c10/core/QScheme.h>
-#include <torch/custom_class.h>
 
 
 // The struct for the packed weight matrix (PackBMatrix) and the corresponding
