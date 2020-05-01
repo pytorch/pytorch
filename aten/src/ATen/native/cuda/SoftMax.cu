@@ -723,7 +723,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
           dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax>(
               output.data_ptr<accscalar_t>(), input.data_ptr<scalar_t>(), dim_size, dim_size, outer_size);
         } else {
-          constexpr int ILP = sizeof(float4) / std::max(sizeof(scalar_t), sizeof(accscalar_t));
+          constexpr int ILP = sizeof(float4) / sizeof(accscalar_t);
           dim3 block = SoftMax_getBlockSize(ILP, dim_size);
           cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
             <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
@@ -813,7 +813,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
         dispatch_softmax_backward<accscalar_t, scalar_t, accscalar_t, is_log_softmax>(
             gI.data_ptr<scalar_t>(), grad.data_ptr<accscalar_t>(), output.data_ptr<accscalar_t>(), dim_size, dim_size, outer_size);
       } else {
-        constexpr int ILP = sizeof(float4) / std::max(sizeof(scalar_t), sizeof(accscalar_t));
+        constexpr int ILP = sizeof(float4) / sizeof(accscalar_t);
         dim3 block = SoftMax_getBlockSize(ILP, dim_size);
         cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
