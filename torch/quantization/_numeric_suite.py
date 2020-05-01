@@ -264,7 +264,7 @@ def compare_model_stub(
 
     Example usage:
         module_swap_list = [torchvision.models.quantization.resnet.QuantizableBasicBlock]
-        ob_dict = compare_model_stub(float_model,qmodel,module_swap_list, x)
+        ob_dict = compare_model_stub(float_model,qmodel,module_swap_list, data)
         for key in ob_dict:
             print(key, compute_error(ob_dict[key]['float'], ob_dict[key]['quantized'].dequantize()))
 
@@ -348,7 +348,7 @@ def compare_model_outputs(
     compute the propagation quantization error.
 
     Example usage:
-        act_compare_dict = compare_model_outputs(float_model, qmodel, x)
+        act_compare_dict = compare_model_outputs(float_model, qmodel, data)
         for key in act_compare_dict:
             print(key, compute_error(act_compare_dict[key]['float'], act_compare_dict[key]['quantized'].dequantize()))
 
