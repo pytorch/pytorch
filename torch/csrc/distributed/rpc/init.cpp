@@ -26,7 +26,7 @@ namespace {
 
 // Wrap Python function to guard deref
 struct PythonFunction {
-  PythonFunction(py::function func) : func_(std::move(func)) {}
+  explicit PythonFunction(py::function func) : func_(std::move(func)) {}
 
   ~PythonFunction() {
     pybind11::gil_scoped_acquire ag;
