@@ -47,7 +47,8 @@
           docker commit "$id" ${DEBUG_COMMIT_DOCKER_IMAGE}
           time docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
     - store_artifacts: 
-        path: ~/workspace/build_artifacts
+        path: ~/workspace/build_artifacts/master
+        destination: docs
 
   pytorch_cpp_doc_push:
     environment:
