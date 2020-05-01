@@ -417,17 +417,12 @@ Tensor* TensorExprKernel::computeFourOperand(
 Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   switch (v->node()->kind()) {
     case aten::add: {
-      if (v->node()->inputs().size () > 2){
-      return computeTwoOperandWithAlpha(
-          "aten_add", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+      auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return lhs + rhs;
-          });
-      }else{
-      return computeTwoOperand(
-          "aten_add", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs + rhs;
-          });
-      }
+      };
+      TORCH_INTERNAL_ASSERT(v->node()->inputs().size () == 2 || v->node()->inputs().size () == 3);
+      return (v->node()->inputs().size () > 2) ? 
+        computeTwoOperandWithAlpha("aten_add", v, add_lambda) : computeTwoOperand("aten_add", v, add_lambda);
     } break;
 
     case aten::_cast_Float: {
