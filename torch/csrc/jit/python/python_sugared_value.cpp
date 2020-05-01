@@ -50,6 +50,7 @@ FunctionSchema PythonValue::getSchema(
       throw ErrorReport(loc)
           << "Non-static method does not have a self argument";
     }
+
     // If there is a `self` parameter on the callable, skip it on the names list
     args.emplace_back(Argument(*names_it, moduleSelf_->type(), {}, {}, false));
     ++names_it;
@@ -427,20 +428,12 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       field.c_str(),
       pybind11::cast<pybind11::none>(Py_None));
 
-
   if (py::isinstance<py::function>(unboundMethod)) {
-
-    // from inspect import getattr_static
-// >>> isinstance(getattr_static(A, 'g'), staticmethod)
-
-    // auto getAttrStatic = py::module::import("inspect").attr("getattr_static");
-    // if (py::isinstance<)
-
     bool isStaticFn =
         py::cast<bool>(py::module::import("torch._jit_internal")
                            .attr("is_static_fn")(concreteType_->getPyClass(), field.c_str()));
     if (isStaticFn) {
-
+      // Functions within the module annotated with @staticmethod do not need binding.
       py::object staticFn = py::module::import("torch._jit_internal")
                            .attr("get_static_fn")(concreteType_->getPyClass(), field.c_str());
       return toSugaredValue(staticFn, m, loc);
