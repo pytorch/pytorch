@@ -314,22 +314,6 @@ Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   return clamp_out(self, self, min, max);
 }
 
-Tensor polygamma(int64_t n, const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  at::polygamma_out(result, n, self);
-  return result;
-}
-Tensor& polygamma_(Tensor& self, int64_t n) {
-  return at::polygamma_out(self, n, self);
-}
-Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
-  TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_mem_overlap=*/true);
-  polygamma_stub(iter.device_type(), iter, n);
-  return result;
-}
-
 Tensor& _clamp_out_cpu(
     Tensor& result,
     const Tensor& self,
@@ -445,6 +429,22 @@ Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
   auto iter = TensorIterator::unary_op(result, self,
       /*check_mem_overlap=*/true);
   clamp_min_stub(iter.device_type(), iter, min);
+  return result;
+}
+
+Tensor polygamma(int64_t n, const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  at::polygamma_out(result, n, self);
+  return result;
+}
+Tensor& polygamma_(Tensor& self, int64_t n) {
+  return at::polygamma_out(self, n, self);
+}
+Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
+  TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_mem_overlap=*/true);
+  polygamma_stub(iter.device_type(), iter, n);
   return result;
 }
 
