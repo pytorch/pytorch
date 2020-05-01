@@ -5950,11 +5950,6 @@
 
 - func: hardswish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: hardswish_out
-    CUDA: hardswish_out
-    QuantizedCPU: quantized_hardswish_out
-
 
 - func: hardswish(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -6432,6 +6427,7 @@
   dispatch:
     CPU: reflection_pad1d_cpu
     CUDA: reflection_pad1d_cuda
+    QuantizedCPU: reflection_pad1d_cpu
 
 - func: reflection_pad1d_backward.grad_input(Tensor grad_output, Tensor self, int[2] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn

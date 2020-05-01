@@ -622,9 +622,16 @@ RegisterOperators reg(
              }
 
              // Check that type of the Tensor matches that of the annotation.
-             TORCH_CHECK(
-                 tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
-                 "Output annotation element type and runtime tensor element type must match for tolist()")
+             // Make an exception for the case in which the annotated type is
+             // float and the Tensor data type is also float; the elements will
+             // be casted to double later.
+             auto scalarTypeForJitType = tryScalarTypeFromJitType(out_ty);
+             if (scalarTypeForJitType != at::ScalarType::Double ||
+                 t.scalar_type() != at::ScalarType::Float) {
+               TORCH_CHECK(
+                   tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
+                   "Output annotation element type and runtime tensor element type must match for tolist()")
+             }
 
              // Check that the dimension of the Tensor matches that of the
              // annotation.
@@ -641,9 +648,16 @@ RegisterOperators reg(
              auto sizes = t.sizes();
              auto strides = t.strides();
              size_t element_size = t.element_size();
-             char* data = (char*)t.data_ptr();
+             char* data = static_cast<char*>(t.data_ptr());
              auto result = tensorToListRecursive(
-                 data, 0, dim, out_ty, sizes, strides, element_size);
+                 data,
+                 0,
+                 dim,
+                 out_ty,
+                 t.scalar_type(),
+                 sizes,
+                 strides,
+                 element_size);
              push(stack, std::move(result));
              return 0;
            };
