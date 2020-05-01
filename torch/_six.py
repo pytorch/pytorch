@@ -170,11 +170,3 @@ def bind_method(fn, obj, obj_type):
         return types.MethodType(fn, obj, obj_type)
     else:
         return types.MethodType(fn, obj)
-
-def bind_method(fn, obj, obj_type):
-    if PY2:
-        if inspect.ismethod(fn):
-            fn = fn.__func__
-        return types.MethodType(fn, obj, obj_type)
-    else:
-        return types.FunctionType(fn)

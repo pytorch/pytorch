@@ -559,9 +559,6 @@ class Module(object):
         if torch._C._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
         else:
-            print("Forwarding!")
-            print(input)
-            print(self.forward)
             result = self.forward(*input, **kwargs)
         for hook in self._forward_hooks.values():
             hook_result = hook(self, input, result)

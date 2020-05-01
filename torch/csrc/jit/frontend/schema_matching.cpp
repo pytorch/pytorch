@@ -380,14 +380,9 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     if (failure_messages) {
       err() << "Expected at most " << used_args << " arguments "
             << "but found " << args.size() << " positional arguments.\n";
-      // err() << "self: " << self << "\n";
-      for (auto x : args) {
-        // err() << "arg: " << x << "\n";
-      }
     }
     return c10::nullopt;
   }
-
   // check for unused kwargs
   for (size_t i = 0; i < kwargs.size(); ++i) {
     const auto& nv = kwargs[i];

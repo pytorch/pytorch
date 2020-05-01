@@ -50,8 +50,6 @@ FunctionSchema PythonValue::getSchema(
       throw ErrorReport(loc)
           << "Non-static method does not have a self argument";
     }
-    std::cout << "Has moduleSelf_" << std::endl;
-    std::cout << moduleSelf_->type() << std::endl;
     // If there is a `self` parameter on the callable, skip it on the names list
     args.emplace_back(Argument(*names_it, moduleSelf_->type(), {}, {}, false));
     ++names_it;
@@ -369,7 +367,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
-  std::cout << "desugar" << std::endl;
   // 1. Look inside Module object for the field.
   const auto& selfType_ = concreteType_->getJitType();
   if (selfType_->cast<InterfaceType>()) {
@@ -417,7 +414,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // 4. Check if it's a function attribute.
   if (const auto fnAttr = concreteType_->findFunctionAttribute(field)) {
-    std::cout << "is func" << std::endl;
     return std::make_shared<FunctionValue>(*fnAttr);
   } else if (const auto builtin = concreteType_->findBuiltinFunction(field)) {
     return std::make_shared<BuiltinFunction>(*builtin, /*self=*/c10::nullopt);
@@ -447,46 +443,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
       py::object staticFn = py::module::import("torch._jit_internal")
                            .attr("get_static_fn")(concreteType_->getPyClass(), field.c_str());
-
-
-
-      //// WORKS SORTA
-      // auto boundMethod = py::module::import("torch.jit._recursive")
-      //                        .attr("lazy_bind")(concreteType_, unboundMethod);
-      // auto rcb =
-      //     py::module::import("torch._jit_internal")
-      //         .attr("createResolutionCallbackFromClosure")(unboundMethod);
-      // return std::make_shared<PythonValue>(boundMethod, rcb, self_);
-      /////
-      std::cout << "static fn sugaring" << std::endl;
       return toSugaredValue(staticFn, m, loc);
-
-
-
-      // auto py_attr = py::getattr(staticFn, field.c_str(), py::none());
-      // if (!py_attr.is_none()) {
-        // return toSugaredValue(staticFn, m, loc, true);
-      // })
-
-      // auto boundMethod = py::module::import("torch.jit._recursive")
-                            //  .attr("lazy_bind_static")(concreteType_, unboundMethod);
-      // TORCH_CHECK(py::isinstance<py::function>(boundMethod));
-      // auto rcb =
-          // py::module::import("torch._jit_internal")
-              // .attr("createResolutionCallbackFromClosure")(unboundMethod);
-      // if (auto fn = as_function(unboundMethod)) {
-        // auto fn = py::cast<StrongFunctionPtr>(boundMethod);
-        // std::cout << "as func passed" << std::endl;
-        // return std::make_shared<FunctionValue>(fn);
-        // return toSugaredValue(fn, m, loc);
-      // }
-
-      // return std::make_shared<FunctionValue>(staticFn);
-      // return std::make_shared<PythonValue>(boundMethod, rcb, self_);
-      // return toSugaredValue(boundMethod, m, loc);
     }
-    std::cout << std::string("isStaticFn? ") + std::string((isStaticFn? "yes" : "no")) << std::endl;
-    std::cout << "is unbound method" << std::endl;
     // For Python methods that we're trying to call directly, we need to bind
     // the method to a self. (see the documentation for lazy_bind in Python for
     // more info).
@@ -494,7 +452,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         py::cast<bool>(py::module::import("torch._jit_internal")
                            .attr("is_ignored_fn")(unboundMethod));
     if (isIgnoredFn) {
-      std::cout << "is ignored fn" << std::endl;
       // Create a generated ScriptModule type with module_ set as cpp_module
       auto boundMethod = py::module::import("torch.jit._recursive")
                              .attr("lazy_bind")(concreteType_, unboundMethod);
@@ -508,8 +465,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     // If we reach here, it's because this is a "normal" method that just hasn't
     // been compiled yet (directly exported methods would have been returned by
     // step 1). Just compile it.
-    std::cout << "unbound to be bound" << std::endl;
-    std::cout << unboundMethod << std::endl;
     auto stub =
         py::module::import("torch.jit._recursive")
             .attr("compile_unbound_method")(concreteType_, unboundMethod);
@@ -721,17 +676,13 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   if (auto callee = as_function(obj)) {
-    std::cout << "as function" << std::endl;
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
-    std::cout << "as module" << std::endl;
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
-    std::cout << "as primfork" << std::endl;
     return SpecialFormValue::create(prim::fork);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
-        std::cout << "as annotate" << std::endl;
     return SpecialFormValue::create(prim::annotate);
 #ifdef USE_DISTRIBUTED
   } else if (
@@ -740,7 +691,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       !py::module::import("torch._six").attr("PY2").cast<bool>() &&
       obj.ptr() ==
           py::module::import("torch.distributed.rpc").attr("rpc_async").ptr()) {
-            std::cout << "as rpc" << std::endl;
     return SpecialFormValue::create(prim::rpc_async);
 #endif
   } else if (auto callee = as_module(obj)) {
@@ -751,15 +701,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   py::object builtin_name =
       py::module::import("torch.jit").attr("_find_builtin")(obj);
   if (!builtin_name.is_none()) {
-          std::cout << "as named" << std::endl;
-
     return std::make_shared<BuiltinFunction>(
         Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
   }
 
   if (py::isinstance<py::function>(obj)) {
-          std::cout << "as builtin" << std::endl;
-
     if (typeString(obj) == "builtin_function_or_method") {
       throw ErrorReport(loc) << "Python builtin " << py::str(obj)
                              << " is currently not supported in Torchscript";
@@ -769,22 +715,17 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   py::object dispatched_fn =
       py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
   if (!dispatched_fn.is_none()) {
-          std::cout << "as dispatched" << std::endl;
-
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
 
   if (py::isinstance<ScriptClass>(obj)) {
     auto script_class = py::cast<ScriptClass>(obj);
-          std::cout << "as script" << std::endl;
 
     return std::make_shared<PythonClassValue>(
         script_class.class_type_.type_->expect<ClassType>(), obj);
   }
 
   if (isNamedTupleClass(obj)) {
-              std::cout << "as named tuple" << std::endl;
-
     auto tuple_type = registerNamedTuple(obj, loc)->expect<TupleType>();
     return std::make_shared<NamedTupleConstructor>(tuple_type);
   }
@@ -831,10 +772,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  std::cout << "is func inspecting?" << std::endl;
   py::bool_ isFunction = py::module::import("torch._jit_internal").attr("is_fn_helper")(obj);
   if (py::cast<bool>(isFunction)) {
-    std::cout << "IS FUNC" << std::endl;
     auto overloads =
         py::module::import("torch.jit").attr("_get_overloads")(obj);
     if (!overloads.is_none()) {
@@ -845,7 +784,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto compiled_fn = py::module::import("torch.jit._recursive")
                            .attr("try_compile_fn")(obj, loc);
     if (auto callee = as_function(compiled_fn)) {
-      std::cout << "AS FUNC" << std::endl;
       return std::make_shared<FunctionValue>(*callee);
     }
   }
