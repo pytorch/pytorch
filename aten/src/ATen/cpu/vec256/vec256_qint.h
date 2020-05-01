@@ -2,11 +2,10 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
-#include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/affine_quantizer.h>
+#include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
-#include <c10/util/qint32.h>
-
 
 #include <array>
 
@@ -212,7 +211,7 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
     dst[i] = nearbyint(clipped);
   }
 #else
-  at::quantize_vec<T>(
+  at::native::quantize_vec<T>(
       1.0f / inverse_scale, zero_point, src, reinterpret_cast<T*>(dst), len);
 #endif
 }
@@ -278,7 +277,7 @@ struct Vec256<c10::qint32> : public Vec256qi {
         float inverse_scale) {
       Vec256<c10::qint32> retval;
       auto rhs_data = (__m256)rhs[0];
-      at::quantize_vec<c10::qint32, /*precision=*/32>(
+      at::native::quantize_vec<c10::qint32, /*precision=*/32>(
           scale, zero_point, (float*)&rhs_data, (c10::qint32*)&retval.vals, 8);
       return retval;
     }
@@ -1093,8 +1092,8 @@ struct Vec256QuantizedConverter {
     float_vec_return_type rv;
     for (int i = 0; i < float_num_vecs(); ++i) {
       for (int j = 0; j < 8; ++j) {
-        rv[i][j] =
-            at::dequantize_val<T>(scale[j], zero_point[j], T(vals[8 * i + j]));
+        rv[i][j] = at::native::dequantize_val<T>(
+            scale[j], zero_point[j], T(vals[8 * i + j]));
       }
     }
     return rv;
@@ -1152,7 +1151,7 @@ struct Vec256<c10::qint32> : public Vec256QuantizedConverter<
       rhs[i].store(&float_vals[i * 8], 8);
     }
 
-    at::quantize_vec<c10::qint32, /*precision=*/32>(
+    at::native::quantize_vec<c10::qint32, /*precision=*/32>(
         scale,
         zero_point,
         float_vals.data(),
@@ -1284,7 +1283,7 @@ struct Vec256<c10::qint8> : public Vec256QuantizedConverter<
       rhs[i].store(&float_vals[i * 8], 8);
     }
 
-    at::quantize_vec<c10::qint8>(
+    at::native::quantize_vec<c10::qint8>(
         scale,
         zero_point,
         float_vals.data(),
@@ -1404,7 +1403,7 @@ struct Vec256<c10::quint8> : public Vec256QuantizedConverter<
       rhs[i].store(&float_vals[i * 8], 8);
     }
 
-    at::quantize_vec<c10::quint8>(
+    at::native::quantize_vec<c10::quint8>(
         scale,
         zero_point,
         float_vals.data(),

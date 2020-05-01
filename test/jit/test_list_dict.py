@@ -1,6 +1,5 @@
 import os
 import sys
-import unittest
 import inspect
 from typing import List, Dict
 from textwrap import dedent
@@ -648,7 +647,6 @@ class TestList(JitTestCase):
 
         self.checkScript(test_pop_slice, ())
 
-    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
     def test_mutable_list_clear_empty(self):
         def test_clear_empty():
             a = torch.jit.annotate(List[int], [])
@@ -657,7 +655,6 @@ class TestList(JitTestCase):
             return len(a) == 0
         self.checkScript(test_clear_empty, ())
 
-    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
     def test_mutable_list_clear(self):
         def test_clear():
             a = [1, 2, 3, 4]

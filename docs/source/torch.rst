@@ -305,6 +305,7 @@ Spectral Ops
 .. autofunction:: rfft
 .. autofunction:: irfft
 .. autofunction:: stft
+.. autofunction:: istft
 .. autofunction:: bartlett_window
 .. autofunction:: blackman_window
 .. autofunction:: hamming_window

@@ -17,7 +17,6 @@ TH_API void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTe
 
 TH_API ptrdiff_t THTensor_(numel)(THTensor *t);
 
-TH_API void THTensor_(addmv)(THTensor *r_, THTensor *t, THTensor *mat,  THTensor *vec, scalar_t beta, scalar_t alpha);
 TH_API void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *mat1, THTensor *mat2, scalar_t beta, scalar_t alpha);
 TH_API void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, scalar_t beta, scalar_t alpha);
 

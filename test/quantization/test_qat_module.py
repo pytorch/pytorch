@@ -8,7 +8,7 @@ from torch.nn import Conv2d, BatchNorm2d, ReLU
 from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.quantization.qconfig import default_qat_qconfig
 import torch.backends.mkldnn
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase
 from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
@@ -16,7 +16,7 @@ hu.assert_deadline_disabled()
 from functools import reduce
 
 
-class IntrinsicQATModuleTest(TestCase):
+class TestQATModule(TestCase):
 
     @given(batch_size=st.integers(2, 4),
            input_channels_per_group=st.sampled_from([2, 3, 4]),
@@ -163,7 +163,3 @@ class IntrinsicQATModuleTest(TestCase):
                 self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual, atol=precision)
                 self.assertEqual(running_mean_ref, running_mean_actual, atol=precision)
                 self.assertEqual(running_var_ref, running_var_actual, atol=precision)
-
-
-if __name__ == '__main__':
-    run_tests()

@@ -41,6 +41,7 @@ ContextConv2D create(
     const float output_max);
 
 Tensor run(const ContextConv2D& context, const Tensor& input);
+
 } // namespace convolution2d
 } // namespace internal
 } // namespace xnnpack

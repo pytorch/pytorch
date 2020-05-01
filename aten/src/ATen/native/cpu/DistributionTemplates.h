@@ -23,20 +23,10 @@ template<typename RNG>
 void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG generator) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_from_to_kernel_cpu", [&] {
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    if ((
-      std::is_same<scalar_t, int64_t>::value ||
-      std::is_same<scalar_t, double>::value ||
-      std::is_same<scalar_t, float>::value ||
-      std::is_same<scalar_t, at::BFloat16>::value) && range >= 1ULL << 32)
-    {
-      cpu_serial_kernel(iter, [range, base, generator]() -> scalar_t {
-        return static_cast<scalar_t>(static_cast<int64_t>((generator->random64() % range) + base));
-      });
-    } else {
-      cpu_serial_kernel(iter, [range, base, generator]() -> scalar_t {
-        return static_cast<scalar_t>(static_cast<int64_t>((generator->random() % range) + base));
-      });
-    }
+    cpu_serial_kernel(iter, [range, base, generator]() -> scalar_t {
+      uniform_int_from_to_distribution<scalar_t> random(range, base);
+      return random(generator);
+    });
   });
 }
 
@@ -52,7 +42,8 @@ void random_full_64_bits_range_kernel(TensorIterator& iter, RNG generator) {
         std::is_same<scalar_t, float>::value ||
         std::is_same<scalar_t, at::BFloat16>::value) {
       cpu_serial_kernel(iter, [generator]() -> scalar_t {
-        return static_cast<scalar_t>(static_cast<int64_t>(generator->random64()));
+        uniform_int_full_range_distribution<scalar_t> random;
+        return random(generator);
       });
     } else {
       TORCH_CHECK(false, "random_full_64_bits_range_kernel_cpu handles only int64, double, float and bfloat16");
@@ -73,37 +64,12 @@ struct RandomFromToKernel {
 template<typename RNG>
 void random_kernel(TensorIterator& iter, RNG generator) {
   std::lock_guard<std::mutex> lock(generator->mutex_);
-  if (isFloatingType(iter.dtype())) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_kernel_fp_cpu", [&] {
-      if (std::is_same<scalar_t, double>::value) {
-        cpu_serial_kernel(iter, [generator]() -> scalar_t {
-          return static_cast<scalar_t>(generator->random64() % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1));
-        });
-      } else {
-        cpu_serial_kernel(iter, [generator]() -> scalar_t {
-          return static_cast<scalar_t>(generator->random() % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1));
-        });
-      }
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, iter.dtype(), "random_kernel_cpu", [&] {
+    cpu_serial_kernel(iter, [generator]() -> scalar_t {
+      uniform_int_distribution<scalar_t> random;
+      return random(generator);
     });
-  } else if (isIntegralType(iter.dtype(), /*includeBool=*/true)) {
-    AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random_kernel_int_cpu", [&] {
-      if (std::is_same<scalar_t, int64_t>::value) {
-        cpu_serial_kernel(iter, [generator]() -> scalar_t {
-          return static_cast<scalar_t>(generator->random64() % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1));
-        });
-      } else if (std::is_same<scalar_t, bool>::value) {
-        cpu_serial_kernel(iter, [generator]() -> scalar_t {
-          return static_cast<scalar_t>(generator->random() & 1);
-        });
-      } else {
-        cpu_serial_kernel(iter, [generator]() -> scalar_t {
-          return static_cast<scalar_t>(generator->random() % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1));
-        });
-      }
-    });
-  } else {
-    TORCH_CHECK(false, "random_kernel_cpu handles only integral, floating-point and boolean types");
-  }
+  });
 }
 
 template<typename RNG>

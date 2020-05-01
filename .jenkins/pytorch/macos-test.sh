@@ -60,6 +60,9 @@ test_python_all() {
     file_diff_from_base "$DETERMINE_FROM"
   fi
 
+  # Increase default limit on open file handles from 256 to 1024
+  ulimit -n 1024
+
   python test/run_test.py --verbose --determine-from="$DETERMINE_FROM"
 
   assert_git_not_dirty
