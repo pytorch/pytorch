@@ -953,6 +953,7 @@ def __lshift_(g, self, other):
 
 
 def where(g, condition, self, other):
+    condition = g.op("Cast", condition, to_i=sym_help.cast_pytorch_to_onnx['Bool'])
     return g.op("Where", condition, self, other)
 
 
