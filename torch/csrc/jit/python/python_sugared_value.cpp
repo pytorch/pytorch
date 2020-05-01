@@ -772,7 +772,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  py::bool_ isFunction = py::module::import("torch._jit_internal").attr("is_fn_helper")(obj);
+  py::bool_ isFunction = py::module::import("inspect").attr("isroutine")(obj);
   if (py::cast<bool>(isFunction)) {
     auto overloads =
         py::module::import("torch.jit").attr("_get_overloads")(obj);

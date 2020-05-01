@@ -458,20 +458,7 @@ from inspect import getattr_static
 def is_static_fn(cls, fn):
     return isinstance(getattr_static(cls, fn), staticmethod)
 
-def is_fn_helper(fn):
-    print(fn)
-    # print(fn.__func__)
-    try:
-        return inspect.isroutine(fn)
-    except:
-        print("NOT FN weird sutff")
-        print(fn)
-        return False
-
 def get_static_fn(cls, fn):
-    print("GET ATTR STATIc")
-    print(cls.__dict__[fn])
-    print(getattr_static(cls, fn))
     return getattr_static(cls, fn).__func__
 
 
