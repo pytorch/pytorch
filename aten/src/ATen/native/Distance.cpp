@@ -25,7 +25,7 @@ Tensor pdist(const Tensor& self, const double p) {
   return at::_pdist_forward(self.contiguous(), p);
 }
 
-Tensor _euclidean_dist_squared(const Tensor& x1, const Tensor& x2) {
+Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
   /** This function does the fist part of the euclidean distance calculation
    * We divide it in two steps to simplify dealing with subgradients in the 
    * backward step */
@@ -36,15 +36,8 @@ Tensor _euclidean_dist_squared(const Tensor& x1, const Tensor& x2) {
   Tensor x1_ = at::cat({x1.mul(-2), x1_norm, x1_pad}, -1);
   Tensor x2_ = at::cat({x2, x2_pad, x2_norm}, -1);
   Tensor result = x1_.matmul(x2_.transpose(-2, -1));
-  result.clamp_min_(0);
+  result.clamp_min_(0).sqrt_();
   return result;
-}
-
-Tensor _sqrt_euclidean_dist(const Tensor& dist) {
-  // We will define a custom backward for this part since
-  // the gradient for sqrt is not defined for x=0
-  dist.sqrt_();
-  return dist;
 }
 
 static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
@@ -97,12 +90,8 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   } else if (c1 == 0) {
     result = at::zeros(output_shape, x1.options());
   } else if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
-    Tensor dist;
-    if (expand_batch_product == 1) {
-        dist = at::_sqrt_euclidean_dist(_euclidean_dist_squared(x1, x2));
-    } else {
-        dist = at::_sqrt_euclidean_dist(_euclidean_dist_squared(tensor1_expanded, tensor2_expanded));
-    }
+    Tensor dist = (expand_batch_product == 1) ? at::_euclidean_dist(x1, x2) :
+                  at::_euclidean_dist(tensor1_expanded, tensor2_expanded);
     result = dist.view(output_shape);
   } else {
     result = at::empty(output_shape, x1.options());

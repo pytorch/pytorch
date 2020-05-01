@@ -5317,7 +5317,7 @@ class TestAutogradDeviceType(TestCase):
             d.backward(dist_grad)
             # Check that the backward passs does not contain invalid 
             # values such as nan or inf
-            assert not torch.isnan(x.grad).any() and not torch.isinf(x.grad).any()
+            assert torch.isfinite(x.grad).all()
 
     def test_parameter_resize(self, device):
         asd = torch.nn.Parameter(torch.ones(16, device=device))

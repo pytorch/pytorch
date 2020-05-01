@@ -90,11 +90,15 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   return size;
 }
 
-Tensor sqrt_euclidean_dist_backward(const Tensor & grad, const Tensor & self) {
+Tensor _euclidean_dist_backward(const Tensor & grad, const Tensor & x1, const Tensor & x2, int input, const Tensor & res) {
   // handle case at 0 where we return a subgradient containing 0
-  Tensor result = grad / (2 * self);
-  result.masked_fill_(self == 0, 0);
-  return result;
+  Tensor ratio = grad / res;
+  ratio.masked_fill_(res == 0, 0);
+  if (input == 0) {
+    return (x1 * ratio.sum(-1, true) - ratio.matmul(x2));
+  } else {
+    return (x2 * ratio.sum(-2, false).unsqueeze(-1) - ratio.transpose(-2, -1).matmul(x1));
+  }
 }
 
 Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Scalar> & p_, const Tensor & norm) {
