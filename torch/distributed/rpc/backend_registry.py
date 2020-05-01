@@ -30,7 +30,8 @@ def backend_registered(backend_name):
     Arguments:
         backend_name (str): string to identify the RPC backend.
     Returns:
-        True if the backend has been registered with `register_backend`, else False.
+        True if the backend has been registered with ``register_backend``, else
+        False.
     """
     return backend_name in BackendType.__members__.keys()
 
