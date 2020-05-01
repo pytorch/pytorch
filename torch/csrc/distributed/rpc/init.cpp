@@ -411,8 +411,7 @@ If the future completes with an error, an exception is thrown.
           "set_result",
           [&](FutureIValue& fut, py::object result) {
             fut.markCompleted(torch::jit::toIValue(
-                std::move(result),
-                PyObjectType::get()));
+                std::move(result), PyObjectType::get()));
           },
           py::call_guard<py::gil_scoped_release>(),
           R"(
@@ -445,14 +444,14 @@ If the future completes with an error, an exception is thrown.
           )")
       .def(
           "__getstate__",
-          [](FutureIValue& /* unused */) {
+          [](const FutureIValue& /* unused */) {
             TORCH_CHECK(
                 false, "Can not pickle rpc.Future or send it over RPC.");
           },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "__setstate__",
-          [](FutureIValue& /* unused */, py::tuple /* unused */) {
+          [](const FutureIValue& /* unused */, const py::tuple& /* unused */) {
             TORCH_CHECK(
                 false, "Can not unpickle rpc.Future or send it over RPC.");
           },
