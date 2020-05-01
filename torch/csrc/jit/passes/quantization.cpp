@@ -33,7 +33,7 @@ using graph_rewrite_helper::getFuncName;
 using graph_rewrite_helper::getIValue;
 using graph_rewrite_helper::getValue;
 using graph_rewrite_helper::PatternInfo;
-using graph_rewrite_helper::replaceConvolutionWithConv2d;
+using graph_rewrite_helper::replaceConvolutionWithAtenConv;
 
 // Map of quantization parameter name and value
 // for example _scale, _zero_point,
@@ -1093,7 +1093,7 @@ void InsertObserversHelper::preprocess(
   ConstantPooling(graph);
   ConstantPropagation(graph);
   // must do constant propagation first before replacement
-  replaceConvolutionWithConv2d(graph);
+  replaceConvolutionWithAtenConv(graph);
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
 
