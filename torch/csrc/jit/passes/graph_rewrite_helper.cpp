@@ -34,7 +34,7 @@ c10::optional<IValue> getIValue(
   return toIValue(getValue(name, match_vmap, vmap));
 }
 
-void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
+void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
   ConstantPropagation(graph);
   std::string convolution = R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
