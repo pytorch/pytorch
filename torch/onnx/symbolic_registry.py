@@ -77,6 +77,8 @@ def register_op(opname, op, domain, version):
     global _registry
     if not is_registered_version(domain, version):
         _registry[(domain, version)] = {}
+    if opname in _registry[(domain, version)]:
+        warnings.warn('Overwriting already registered operator: {}-{} ({})'.format(opname, version, domain or 'onnx'))
     _registry[(domain, version)][opname] = op
 
 
