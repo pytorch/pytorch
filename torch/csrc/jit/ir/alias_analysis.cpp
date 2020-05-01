@@ -324,7 +324,7 @@ MemoryLocations AliasDb::getReads(Node* n) const {
 }
 
 std::string AliasDb::getElementName(const Element* e) const {
-  if (e->value == nullptr) {
+  if (e->values.empty()) {
     // not the most efficient way, but given the fact there are
     // not too many types and even fewer of them will end up in
     // wildcardIndex_, we should be fine with a linear search
@@ -336,7 +336,17 @@ std::string AliasDb::getElementName(const Element* e) const {
     }
     return "WILDCARD";
   } else {
-    return e->value->debugName();
+    std::ostringstream ss;
+    if (e->values.size() == 1) {
+      ss << "%" << (*e->values.begin())->debugName();
+      return ss.str();
+    }
+    ss << "(";
+    for (const Value* v : e->values) {
+      ss << "%" << v->debugName() << ", ";
+    }
+    ss << ")";
+    return ss.str();
   }
 }
 
@@ -1036,10 +1046,8 @@ void AliasDb::mapAliases(at::ArrayRef<Value*> from, at::ArrayRef<Value*> to) {
 // The asserts are to guard against unintentional use.
 // FIXME refactor aliasdb construction to be more robust to mutation so this
 // hack isn't necessary.
-void AliasDb::unsafeGiveFreshAlias(const Value* value) {
+void AliasDb::createValue(const Value* value) {
   TORCH_INTERNAL_ASSERT(isMutableTypeInternal(value->type()));
-  TORCH_INTERNAL_ASSERT(value->type()->containedTypes().size() == 0);
-  TORCH_INTERNAL_ASSERT(!elementMap_.count(value));
   auto new_elem = memoryDAG_->unsafeMakeFreshValue(value);
   elementMap_[value] = new_elem;
 }
@@ -1068,14 +1076,39 @@ Element* AliasDb::getOrCreateElement(const Value* value) {
   return elementMap_.at(value);
 }
 
-void AliasDb::replaceMemoryLocation(Value* existing, Value* new_value) {
+void AliasDb::replaceWithNewValue(Value* existing, Value* new_value) {
+  TORCH_INTERNAL_ASSERT(
+      *unshapedType(existing->type()) == *unshapedType(new_value->type()),
+      "Types must be strictly equal if you are replacing aliasing information. ",
+      "Got existing: '",
+      existing->type()->python_str(),
+      "', new_value: '",
+      new_value->type()->python_str(),
+      "'");
   if (!isMutableTypeInternal(existing)) {
     return;
   }
   auto existing_elem = elementMap_.at(existing);
   elementMap_[new_value] = existing_elem;
   elementMap_.erase(existing);
-  existing_elem->value = new_value;
+  existing_elem->values = {new_value};
+}
+
+void AliasDb::copyValue(Value* from, Value* to) {
+  TORCH_INTERNAL_ASSERT(
+      *unshapedType(from->type()) == *unshapedType(to->type()),
+      "Types must be strictly equal if you are copying aliasing information. ",
+      "Got from: '",
+      from->type()->python_str(),
+      "', to: '",
+      to->type()->python_str(),
+      "'");
+  if (!isMutableTypeInternal(to)) {
+    return;
+  }
+  auto origElem = elementMap_.at(from);
+  elementMap_[to] = origElem;
+  origElem->values.insert(to);
 }
 
 bool AliasDb::moveAfterTopologicallyValid(Node* n, Node* movePoint) {
@@ -1490,6 +1523,31 @@ MemoryLocations AliasDb::buildWrittenToLocationsIndex() const {
     ret |= writtenLocs;
   }
   return ret;
+}
+
+void Lint(const AliasDb* db) {
+  bool failed = false;
+
+  std::stringstream ss;
+  // Every mutable value in the system has a corresponding element.
+  for (const auto& v : db->graph_->all_values) {
+    if (!db->isMutableTypeInternal(v)) {
+      continue;
+    }
+    auto it = db->elementMap_.find(v);
+    if (it == db->elementMap_.end()) {
+      failed = true;
+      ss << "Value %" << v->debugName() << " of type "
+         << v->type()->python_str() << " wasn't found in the element map.\n"
+         << "It was defined in " << *v->node();
+    }
+  }
+  TORCH_INTERNAL_ASSERT(!failed, ss.str());
+
+  // Two checks that we want to add but can't until the mutation API is more
+  // fully developed.
+  // - Every mutable value in the aliasdb belongs to the graph
+  // - All container values have contained elements
 }
 
 } // namespace jit
