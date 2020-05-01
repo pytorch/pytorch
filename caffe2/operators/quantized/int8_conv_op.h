@@ -61,8 +61,8 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
     runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
       initQNNPACK();
 
-      c2_pthreadpool_t threadpool =
-          reinterpret_cast<c2_pthreadpool_t>(ws_->GetThreadPool());
+      pthreadpool_t threadpool =
+          reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
 
       if (this->qnnpackObject_ == nullptr) {
         CAFFE_ENFORCE(

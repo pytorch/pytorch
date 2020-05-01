@@ -274,35 +274,55 @@ if(INTERN_BUILD_MOBILE AND INTERN_USE_EIGEN_BLAS)
 endif()
 
 # ---[ pthreadpool
-# Use internal custom implementation of pthreadpool for Caffe2 in order to
-# leave that code path intact.
-if(BUILD_CAFFE2_OPS)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_THREADPOOL_IMPL")
-# But try using open source pthreadpool if, and only if:
-elseif(
-  # System threadpool is not explicitly requested, and
-  (NOT USE_SYSTEM_PTHREADPOOL) AND
-  (
-    # Either we are on a mobile build of PyTorch (for at::parallel_for)
-    # regardless of whether NNPACK and family are requested, or
+# pthreadpool is a C library with no concept of namespaces, which means two
+# copies of the library cannot exist in the same binary or symbol collision
+# will occur violating ODR.  The conundrum is that Caffe 2 provides its own
+# custom implementation of pthreadpool under the exact same interface the open
+# source version operates under; an implementation that is only used in Caffe2
+# operators and Caffe2's usage of NNPACK and QNNPACK. On the other hand, we
+# are interested in using the open source implementation on PyTorch which seems
+# to have been updated to exhibit superior performance.  Here we try to solve
+# this conundrum by prefering to pick the internal C2 implementation if
+# BUILD_CAFFE2_OPS is on.  This will force both PyTorch and Caffe2 to use the
+# C2 pthreadpool version (remember we cannot have two copies in one binary) and
+# in doing so we achieve our goal of keeping Caffe2's behavior intact. Otherwise
+# we take the liberty of picking the open source version for PyTorch.  All of
+# admittedly error prone logic logic can be removed and simplified if and when
+# we decide to migrate Caffe2 to open source pthreadpool as well.
+
+if(NOT USE_SYSTEM_PTHREADPOOL)
+  # Opt for custom C2 implementation whenever BUILD_CAFFE2_OPS is enabled
+  if(BUILD_CAFFE2_OPS)
+    set(USE_INTERNAL_PTHREADPOOL_IMPL ON)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
+
+    # XNNPACK cannot link against a custom implementation of pthreadpool
+    set(USE_XNNPACK OFF)
+
+  # But try using the open source implementation if, and only if:
+  elseif(
+    # We are on a mobile build of PyTorch (for at::parallel_for) regardless
+    # of whether NNPACK and family are requested, or
     (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE) OR
-    # We are on a non-mobile build of PyTorch where (non system) NNPACK or
-    # family are requested.
+    # We are on a mobile or non-mobile build of PyTorch where (non system)
+    # NNPACK or family are requested.
     (USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR (USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK))
   )
-)
-  if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
-    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-    set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
-  endif()
+    set(USE_INTERNAL_PTHREADPOOL_IMPL OFF)
 
-  if(NOT TARGET pthreadpool)
-    set(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
-    set(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    add_subdirectory(
-      "${PTHREADPOOL_SOURCE_DIR}"
-      "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool")
-    set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+    if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+      set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+      set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+    endif()
+
+    if(NOT TARGET pthreadpool)
+      set(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
+      set(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
+      add_subdirectory(
+        "${PTHREADPOOL_SOURCE_DIR}"
+        "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool")
+      set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+    endif()
   endif()
 endif()
 
@@ -353,6 +373,10 @@ if(USE_QNNPACK)
   endif()
 
   if(NOT TARGET qnnpack)
+    if(NOT USE_SYSTEM_PTHREADPOOL AND USE_INTERNAL_PTHREADPOOL_IMPL)
+      set(QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
+    endif()
+
     set(QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
     set(QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
@@ -382,6 +406,10 @@ if(USE_PYTORCH_QNNPACK)
     endif()
 
     if(NOT TARGET pytorch_qnnpack)
+      if(NOT USE_SYSTEM_PTHREADPOOL AND USE_INTERNAL_PTHREADPOOL_IMPL)
+        set(PYTORCH_QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
+      endif()
+
       set(PYTORCH_QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
       set(PYTORCH_QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
       set(PYTORCH_QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")

@@ -31,24 +31,24 @@ static inline size_t min(size_t a, size_t b) {
   return a < b ? a : b;
 }
 
-struct c2_compute_1d_tiled_context {
-  c2_pthreadpool_function_1d_tiled_t function;
+struct compute_1d_tiled_context {
+  pthreadpool_function_1d_tiled_t function;
   void* argument;
   size_t range;
   size_t tile;
 };
 
 static void compute_1d_tiled(void* context_, size_t linear_index) {
-  const struct c2_compute_1d_tiled_context* context = (c2_compute_1d_tiled_context*) context_;
+  const struct compute_1d_tiled_context* context = (compute_1d_tiled_context*) context_;
   const size_t tile_index = linear_index;
   const size_t index = tile_index * context->tile;
   const size_t tile = min(context->tile, context->range - index);
   context->function(context->argument, index, tile);
 }
 
-void c2_pthreadpool_compute_1d_tiled(
-  c2_pthreadpool_t threadpool,
-  c2_pthreadpool_function_1d_tiled_t function,
+void pthreadpool_compute_1d_tiled(
+  pthreadpool_t threadpool,
+  pthreadpool_function_1d_tiled_t function,
   void* argument,
   size_t range,
   size_t tile)
@@ -61,16 +61,16 @@ void c2_pthreadpool_compute_1d_tiled(
   } else {
     /* Execute in parallel on the thread pool using linearized index */
     const size_t tile_range = divide_round_up(range, tile);
-    struct c2_compute_1d_tiled_context context = {/*.function = */ function,
+    struct compute_1d_tiled_context context = {/*.function = */ function,
                                                /*.argument = */ argument,
                                                /*.range = */ range,
                                                /*.tile = */ tile};
-    c2_pthreadpool_compute_1d(threadpool, (c2_pthreadpool_function_1d_t) compute_1d_tiled, &context, tile_range);
+    pthreadpool_compute_1d(threadpool, (pthreadpool_function_1d_t) compute_1d_tiled, &context, tile_range);
   }
 }
 
-struct c2_compute_2d_context {
-  c2_pthreadpool_function_2d_t function;
+struct compute_2d_context {
+  pthreadpool_function_2d_t function;
   void* argument;
   caffe2::FixedDivisor<int32_t> range_j;
 };
@@ -78,16 +78,16 @@ struct c2_compute_2d_context {
 static void compute_2d(void* context_, size_t linear_index) {
   DCHECK_LE(linear_index, std::numeric_limits<int32_t>::max());
 
-  const struct c2_compute_2d_context* context = static_cast<c2_compute_2d_context*>(context_);
+  const struct compute_2d_context* context = static_cast<compute_2d_context*>(context_);
   int32_t q;
   int32_t r;
   context->range_j.DivMod(static_cast<int32_t>(linear_index), &q, &r);
   context->function(context->argument, q, r);
 }
 
-void c2_pthreadpool_compute_2d(
-  c2_pthreadpool_t threadpool,
-  c2_pthreadpool_function_2d_t function,
+void pthreadpool_compute_2d(
+  pthreadpool_t threadpool,
+  pthreadpool_function_2d_t function,
   void* argument,
   size_t range_i,
   size_t range_j)
@@ -102,16 +102,16 @@ void c2_pthreadpool_compute_2d(
   } else {
     DCHECK_LE(range_i * range_j, (size_t)std::numeric_limits<int32_t>::max());
     /* Execute in parallel on the thread pool using linearized index */
-    struct c2_compute_2d_context context = {
+    struct compute_2d_context context = {
         /*.function = */ function,
         /*.argument = */ argument,
         /*.range_j = */ caffe2::FixedDivisor<int32_t>(range_j)};
-    c2_pthreadpool_compute_1d(threadpool, (c2_pthreadpool_function_1d_t) compute_2d, &context, range_i * range_j);
+    pthreadpool_compute_1d(threadpool, (pthreadpool_function_1d_t) compute_2d, &context, range_i * range_j);
   }
 }
 
-struct c2_compute_2d_tiled_context {
-  c2_pthreadpool_function_2d_tiled_t function;
+struct compute_2d_tiled_context {
+  pthreadpool_function_2d_tiled_t function;
   void* argument;
   caffe2::FixedDivisor<int32_t> tile_range_j;
   size_t range_i;
@@ -124,7 +124,7 @@ static void compute_2d_tiled(void* context_, size_t linear_index) {
   int32_t q;
   int32_t r;
 
-  const struct c2_compute_2d_tiled_context* context = static_cast<c2_compute_2d_tiled_context*>(context_);
+  const struct compute_2d_tiled_context* context = static_cast<compute_2d_tiled_context*>(context_);
   context->tile_range_j.DivMod(linear_index, &q, &r);
   const size_t max_tile_i = context->tile_i;
   const size_t max_tile_j = context->tile_j;
@@ -135,9 +135,9 @@ static void compute_2d_tiled(void* context_, size_t linear_index) {
   context->function(context->argument, index_i, index_j, tile_i, tile_j);
 }
 
-void c2_pthreadpool_compute_2d_tiled(
-  c2_pthreadpool_t threadpool,
-  c2_pthreadpool_function_2d_tiled_t function,
+void pthreadpool_compute_2d_tiled(
+  pthreadpool_t threadpool,
+  pthreadpool_function_2d_tiled_t function,
   void* argument,
   size_t range_i,
   size_t range_j,
@@ -158,7 +158,7 @@ void c2_pthreadpool_compute_2d_tiled(
     DCHECK_LE(
         tile_range_i * tile_range_j,
         (size_t)std::numeric_limits<int32_t>::max());
-    struct c2_compute_2d_tiled_context context = {
+    struct compute_2d_tiled_context context = {
         /*.function = */ function,
         /*.argument = */ argument,
         /*.tile_range_j = */ caffe2::FixedDivisor<int32_t>(tile_range_j),
@@ -166,12 +166,12 @@ void c2_pthreadpool_compute_2d_tiled(
         /*.range_j = */ range_j,
         /*.tile_i = */ tile_i,
         /*.tile_j = */ tile_j};
-    c2_pthreadpool_compute_1d(threadpool, (c2_pthreadpool_function_1d_t) compute_2d_tiled, &context, tile_range_i * tile_range_j);
+    pthreadpool_compute_1d(threadpool, (pthreadpool_function_1d_t) compute_2d_tiled, &context, tile_range_i * tile_range_j);
   }
 }
 
-struct c2_compute_3d_tiled_context {
-  c2_pthreadpool_function_3d_tiled_t function;
+struct compute_3d_tiled_context {
+  pthreadpool_function_3d_tiled_t function;
   void* argument;
   caffe2::FixedDivisor<int32_t> tile_range_j;
   caffe2::FixedDivisor<int32_t> tile_range_k;
@@ -187,7 +187,7 @@ static void compute_3d_tiled(
     void* context_,
     size_t linear_index) {
   int32_t tile_index_ij, tile_index_k;
-  const struct c2_compute_3d_tiled_context* context = static_cast<c2_compute_3d_tiled_context*>(context_);
+  const struct compute_3d_tiled_context* context = static_cast<compute_3d_tiled_context*>(context_);
   context->tile_range_k.DivMod(
       static_cast<int32_t>(linear_index), &tile_index_ij, &tile_index_k);
   int32_t tile_index_i, tile_index_j;
@@ -205,9 +205,9 @@ static void compute_3d_tiled(
       context->argument, index_i, index_j, index_k, tile_i, tile_j, tile_k);
 }
 
-void c2_pthreadpool_compute_3d_tiled(
-    c2_pthreadpool_t threadpool,
-    c2_pthreadpool_function_3d_tiled_t function,
+void pthreadpool_compute_3d_tiled(
+    pthreadpool_t threadpool,
+    pthreadpool_function_3d_tiled_t function,
     void* argument,
     size_t range_i,
     size_t range_j,
@@ -240,7 +240,7 @@ void c2_pthreadpool_compute_3d_tiled(
     DCHECK_LE(
         tile_range_i * tile_range_j * tile_range_k,
         (size_t)std::numeric_limits<int>::max());
-    struct c2_compute_3d_tiled_context context = {
+    struct compute_3d_tiled_context context = {
         /*.function = */ function,
         /*.argument = */ argument,
         /*.tile_range_j = */ caffe2::FixedDivisor<int>(tile_range_j),
@@ -251,16 +251,16 @@ void c2_pthreadpool_compute_3d_tiled(
         /*.tile_i = */ tile_i,
         /*.tile_j = */ tile_j,
         /*.tile_k = */ tile_k};
-    c2_pthreadpool_compute_1d(
+    pthreadpool_compute_1d(
         threadpool,
-        (c2_pthreadpool_function_1d_t)compute_3d_tiled,
+        (pthreadpool_function_1d_t)compute_3d_tiled,
         &context,
         tile_range_i * tile_range_j * tile_range_k);
   }
 }
 
-struct c2_compute_4d_tiled_context {
-  c2_pthreadpool_function_4d_tiled_t function;
+struct compute_4d_tiled_context {
+  pthreadpool_function_4d_tiled_t function;
   void* argument;
   caffe2::FixedDivisor<int32_t> tile_range_kl;
   caffe2::FixedDivisor<int32_t> tile_range_j;
@@ -279,7 +279,7 @@ static void compute_4d_tiled(
     void* context_,
     size_t linear_index) {
   int32_t tile_index_ij, tile_index_kl;
-  const struct c2_compute_4d_tiled_context* context = static_cast<c2_compute_4d_tiled_context*>(context_);
+  const struct compute_4d_tiled_context* context = static_cast<compute_4d_tiled_context*>(context_);
   context->tile_range_kl.DivMod(
       static_cast<int32_t>(linear_index), &tile_index_ij, &tile_index_kl);
   int32_t tile_index_i, tile_index_j;
@@ -310,9 +310,9 @@ static void compute_4d_tiled(
       tile_l);
 }
 
-void c2_pthreadpool_compute_4d_tiled(
-    c2_pthreadpool_t threadpool,
-    c2_pthreadpool_function_4d_tiled_t function,
+void pthreadpool_compute_4d_tiled(
+    pthreadpool_t threadpool,
+    pthreadpool_function_4d_tiled_t function,
     void* argument,
     size_t range_i,
     size_t range_j,
@@ -352,7 +352,7 @@ void c2_pthreadpool_compute_4d_tiled(
     DCHECK_LE(
         tile_range_i * tile_range_j * tile_range_k * tile_range_l,
         (size_t)std::numeric_limits<int>::max());
-    struct c2_compute_4d_tiled_context context = {
+    struct compute_4d_tiled_context context = {
         /*.function = */ function,
         /*.argument = */ argument,
         /*.tile_range_kl = */
@@ -367,9 +367,9 @@ void c2_pthreadpool_compute_4d_tiled(
         /*.tile_j = */ tile_j,
         /*.tile_k = */ tile_k,
         /*.tile_l = */ tile_l};
-    c2_pthreadpool_compute_1d(
+    pthreadpool_compute_1d(
         threadpool,
-        (c2_pthreadpool_function_1d_t)compute_4d_tiled,
+        (pthreadpool_function_1d_t)compute_4d_tiled,
         &context,
         tile_range_i * tile_range_j * tile_range_k * tile_range_l);
   }

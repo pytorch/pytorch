@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef USE_INTERNAL_THREADPOOL_IMPL
+#ifdef USE_INTERNAL_PTHREADPOOL_IMPL
 #include <caffe2/utils/threadpool/c2_pthreadpool.h>
 #else
 #include <pthreadpool.h>

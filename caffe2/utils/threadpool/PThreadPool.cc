@@ -47,7 +47,7 @@ void PThreadPool::run(
           void* const as_void_ptr;
           const Context* const as_context_ptr;
         } argument{
-            context,
+          context,
         };
 
         argument.as_context_ptr->fn(item);

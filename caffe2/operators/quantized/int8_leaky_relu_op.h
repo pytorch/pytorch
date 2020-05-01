@@ -85,8 +85,8 @@ class Int8LeakyReluOp final : public Operator<CPUContext> {
     const qnnp_status runStatus =
         qnnp_run_operator(this->qnnpackOperator_, nullptr /* thread pool */);
 #else
-    c2_pthreadpool_t threadpool =
-        reinterpret_cast<c2_pthreadpool_t>(ws_->GetThreadPool());
+    pthreadpool_t threadpool =
+        reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
     const qnnp_status runStatus =
         qnnp_run_operator(this->qnnpackOperator_, threadpool);
 #endif

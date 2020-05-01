@@ -57,8 +57,8 @@ class Int8AddOp final : public Operator<CPUContext> {
 
     initQNNPACK();
 
-    c2_pthreadpool_t threadpool =
-        reinterpret_cast<c2_pthreadpool_t>(ws_->GetThreadPool());
+    pthreadpool_t threadpool =
+        reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
 
     if (this->qnnpackOperator_ == nullptr) {
       const qnnp_status createStatus = qnnp_create_add_nc_q8(
