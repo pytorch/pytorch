@@ -26,7 +26,7 @@ namespace {
 
 // Wrap Python function to guard deref
 struct PythonFunction {
-  PythonFunction(py::function func) : func_(std::move(func)) {}
+  explicit PythonFunction(py::function func) : func_(std::move(func)) {}
 
   ~PythonFunction() {
     pybind11::gil_scoped_acquire ag;
@@ -410,8 +410,8 @@ If the future completes with an error, an exception is thrown.
       .def(
           "set_result",
           [&](FutureIValue& fut, py::object result) {
-            fut.markCompleted(torch::jit::toIValue(
-                std::move(result), PyObjectType::get()));
+            fut.markCompleted(
+                torch::jit::toIValue(std::move(result), PyObjectType::get()));
           },
           py::call_guard<py::gil_scoped_release>(),
           R"(
