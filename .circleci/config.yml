@@ -6842,6 +6842,13 @@ workflows:
               only: postnightly
 
   docker_build:
+    triggers:
+      - schedule:
+          cron: "0 15 * * 0"
+          filters:
+            branches:
+              only:
+                - master
     jobs:
       - docker_for_ecr_gc_build_job
       - docker_build_job:
@@ -6893,6 +6900,13 @@ workflows:
           name: "pytorch-linux-xenial-pynightly"
           image_name: "pytorch-linux-xenial-pynightly"
   ecr_gc:
+    triggers:
+      - schedule:
+          cron: "45 * * * *"
+          filters:
+            branches:
+              only:
+                - master
     jobs:
       - ecr_gc_job:
             name: ecr_gc_job_for_pytorch
