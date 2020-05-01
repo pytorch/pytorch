@@ -13,6 +13,20 @@ inline std::vector<int64_t> computeStrideForComplex(IntArrayRef oldstride) {
   return res;
 }
 
+inline Tensor from_empty(
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    const TensorOptions& options = {}) {
+  AutoNonVariableTypeMode guard;
+  auto storage = Storage(
+      options.dtype(),
+      detail::computeStorageSize(sizes, strides),
+      DataPtr(nullptr, options.device()),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
+  return at::empty({0}, options).set_(storage, 0, sizes, strides);
+}
+
 // expects as input a complex tensor and returns back a float tensor
 // containing the complex values in the last two dimensions
 inline Tensor view_complex_as_float(const Tensor& self) {
@@ -20,21 +34,18 @@ inline Tensor view_complex_as_float(const Tensor& self) {
   auto new_sizes = self.sizes().vec();
   // last dimension will always have two elements containing the real and imag vals
   new_sizes.emplace_back(2);
+  auto new_strides = computeStrideForComplex(self.strides());
   if (self.numel() == 0) {
-    if(self.scalar_type() == at::kComplexFloat) {
-      return at::empty(new_sizes, self.options().dtype(at::kFloat));
-    } else {
-      return at::empty(new_sizes, self.options().dtype(at::kDouble));
-    }
+    return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "view_complex_as_float_empty", [&] {
+      auto value_dtype = c10::toValueType(self.scalar_type());
+      return from_empty(new_sizes, new_strides, self.options().dtype(value_dtype));
+    });
   } else {
-    auto new_strides = computeStrideForComplex(self.strides());
-    if(self.scalar_type() == at::kComplexFloat) {
-      float* data = reinterpret_cast<float*>(self.data_ptr<std::complex<float>>());
-      return at::from_blob(data, new_sizes, new_strides, self.options().dtype(at::kFloat));
-    } else {
-      double* data = reinterpret_cast<double*>(self.data_ptr<std::complex<double>>());
-      return at::from_blob(data, new_sizes, new_strides, self.options().dtype(at::kDouble));
-    }
+    return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "view_complex_as_float", [&] {
+      auto value_dtype = c10::toValueType(self.scalar_type());
+      auto data = self.data_ptr<scalar_t>();
+      return at::from_blob(data, new_sizes, new_strides, self.options().dtype(value_dtype));
+    });
   }
 }
 
