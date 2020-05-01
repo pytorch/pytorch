@@ -232,7 +232,10 @@ Examples::
     set_grad_enabled
 
 Math operations
-----------------------------------
+---------------
+
+Pointwise Ops
+~~~~~~~~~~~~~~~~~~~~~~
 
 .. autosummary::
     :toctree: generated
