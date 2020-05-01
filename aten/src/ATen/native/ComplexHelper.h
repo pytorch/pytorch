@@ -13,6 +13,9 @@ inline std::vector<int64_t> computeStrideForComplex(IntArrayRef oldstride) {
   return res;
 }
 
+template<typename unused>
+inline void handle_unused() {}
+
 inline Tensor from_empty(
     IntArrayRef sizes,
     IntArrayRef strides,
@@ -38,6 +41,7 @@ inline Tensor view_complex_as_float(const Tensor& self) {
   if (self.numel() == 0) {
     return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "view_complex_as_float_empty", [&] {
       auto value_dtype = c10::toValueType(self.scalar_type());
+      handle_unused<scalar_t>();
       return from_empty(new_sizes, new_strides, self.options().dtype(value_dtype));
     });
   } else {

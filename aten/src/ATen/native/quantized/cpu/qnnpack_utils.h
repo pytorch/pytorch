@@ -83,4 +83,19 @@ inline std::pair<uint8_t, uint8_t> activationLimits(
 #endif
   }
 }
+
+namespace at {
+namespace native {
+namespace qnnp_avgpool_helper {
+Tensor qnnpack_avg_pool2d(
+    Tensor input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    bool ceil_mode,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override);
+} // qnnp_avgpool_helper
+} // namespace native
+} // namespace at
 #endif
