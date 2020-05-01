@@ -130,10 +130,10 @@ GRAPH_EXECUTOR = ProfilingMode.SIMPLE if IS_SANDCASTLE else ProfilingMode.PROFIL
 args, remaining = parser.parse_known_args()
 if args.ge_config == 'legacy':
     GRAPH_EXECUTOR = ProfilingMode.LEGACY
-elif args.ge_config == 'profiling':
-    GRAPH_EXECUTOR = ProfilingMode.PROFILING
-else:
+elif args.ge_config == 'simple':
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
+else:
+    GRAPH_EXECUTOR = ProfilingMode.PROFILING
 
 LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
