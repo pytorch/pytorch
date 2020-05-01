@@ -16,6 +16,12 @@ void makePointerToImpl(Element* from, Element* to) {
 Element* makeFreshValueImpl(
     const Value* v,
     std::vector<std::unique_ptr<Element>>& indexToElementMap_) {
+  if (v == nullptr) {
+    // Create a wildcard element, with no corresponding value
+    indexToElementMap_.emplace_back(
+        std::make_unique<Element>(indexToElementMap_.size()));
+    return indexToElementMap_.back().get();
+  }
   indexToElementMap_.emplace_back(
       std::make_unique<Element>(v, indexToElementMap_.size()));
   return indexToElementMap_.back().get();
@@ -23,7 +29,8 @@ Element* makeFreshValueImpl(
 } // namespace
 
 Element::Element(const Value* value_, unsigned index_)
-    : index(index_), value(value_) {}
+    : index(index_), values({value_}) {}
+Element::Element(unsigned index_) : index(index_), values({}) {}
 
 const Element* MemoryDAG::fromIndex(unsigned x) const {
   TORCH_INTERNAL_ASSERT(x < indexToElementMap_.size());
@@ -180,13 +187,13 @@ void MemoryDAG::setWildcards(
   // For every element, if the cache contains `MemoryLocationFoo`, then we must
   // add `WildcardBar` to it.
   for (const std::unique_ptr<Element>& e : this->indexToElementMap_) {
-    if (!e->value) {
+    if (e->values.empty()) {
       // This element is a wildcard element, we can skip it.
       TORCH_INTERNAL_ASSERT(e->pointsTo.empty());
       continue;
     }
 
-    auto wildcardElement = getWildcardElement(e->value);
+    auto wildcardElement = getWildcardElement(*(e->values.begin()));
     if (!wildcardElement) {
       // This value is not a wildcard.
       continue;

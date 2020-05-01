@@ -62,6 +62,12 @@ struct THCNumerics<uint8_t> {
   static inline __host__ __device__  bool isinf(uint8_t a) { return false; }
 };
 
+#ifdef _MSC_VER
+// Suppress warning C4804: '/': unsafe use of type 'bool' in operation
+#pragma warning( push )
+#pragma warning( disable : 4804 )
+#endif
+
 template <>
 struct THCNumerics<bool> {
   static inline __host__ __device__ bool min() { return at::numeric_limits<bool>::lowest(); }
@@ -82,6 +88,10 @@ struct THCNumerics<bool> {
   static inline __host__ __device__ bool isnan(bool a) { return false; }
   static inline __host__ __device__ bool isinf(bool a) { return false; }
 };
+
+#ifdef _MSC_VER
+#pragma warning( pop )
+#endif
 
 template <>
 struct THCNumerics<int8_t> {

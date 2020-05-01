@@ -13,7 +13,7 @@ from torch.quantization import (
     quantize,
 )
 from torch.quantization._numeric_suite import (
-    RecordingLogger,
+    ShadowLogger,
     Shadow,
     compare_model_outputs,
     compare_model_stub,
@@ -116,7 +116,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
 
         def compare_and_validate_results(float_model, q_model, module_swap_list, data):
             ob_dict = compare_model_stub(
-                float_model, q_model, module_swap_list, data, RecordingLogger
+                float_model, q_model, module_swap_list, data, ShadowLogger
             )
             self.assertEqual(len(ob_dict), 1)
             for k, v in ob_dict.items():
@@ -142,7 +142,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                 q_model = quantize(model, default_eval_fn, self.img_data)
                 module_swap_list = [SubModule]
                 ob_dict = compare_model_stub(
-                    model, q_model, module_swap_list, data, RecordingLogger
+                    model, q_model, module_swap_list, data, ShadowLogger
                 )
                 self.assertTrue(isinstance(q_model.mod1, Shadow))
                 self.assertFalse(isinstance(q_model.conv, Shadow))
@@ -159,7 +159,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                 q_model = convert(q_model)
                 module_swap_list = [nnq.FloatFunctional]
                 ob_dict = compare_model_stub(
-                    model, q_model, module_swap_list, data, RecordingLogger
+                    model, q_model, module_swap_list, data, ShadowLogger
                 )
                 self.assertEqual(len(ob_dict), 6)
                 self.assertTrue(isinstance(q_model.mycat, Shadow))
