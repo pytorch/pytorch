@@ -1867,6 +1867,9 @@ class _DistTestBase(object):
         self.assertEqual(len(param_gpu), len(param_DDP))
         for p_gpu, p_DDP in zip(param_gpu, param_DDP):
             self.assertEqual(p_gpu, p_DDP, allow_inf=False)
+            self.assertTrue(p_gpu.grad is not None)
+            self.assertTrue(p_DDP.grad is not None)
+            self.assertEqual(p_gpu.grad, p_DDP.grad, allow_inf=False)
 
     def _test_DDP_5iter(
         self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save, offset=None, world_size=0
@@ -1888,11 +1891,11 @@ class _DistTestBase(object):
             )
 
             # Update weights and run a second iteration to shake out errors
-            self._model_step(model_base)
-            self._model_step(model_DDP)
             self._assert_equal_param(
                 list(model_base.parameters()), list(model_DDP.module.parameters())
             )
+            self._model_step(model_base)
+            self._model_step(model_DDP)
 
             # Shuffle the input so that DDP input is different
             input = input[torch.randperm(batch_size)]
