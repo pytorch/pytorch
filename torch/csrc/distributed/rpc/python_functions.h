@@ -21,20 +21,20 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
     const std::shared_ptr<FutureMessage>& futureResponseMessage,
     bool hasValue = true);
 
-std::shared_ptr<jit::PythonFutureWrapper> pyRpcBuiltin(
+c10::intrusive_ptr<JitFuture> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
     const float rpcTimeoutSeconds,
     const py::args& args,
     const py::kwargs& kwargs);
 
-std::shared_ptr<jit::PythonFutureWrapper> pyRpcPythonUdf(
+c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
     const float rpcTimeoutSeconds);
 
-std::shared_ptr<jit::PythonFutureWrapper> pyRpcTorchscript(
+c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
     const py::tuple& argsTuple,

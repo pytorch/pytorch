@@ -7,6 +7,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/types.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_compat.h>
@@ -315,7 +316,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_get_future",
-              &PyRRef::getFuture,
+              [](const PyRRef& self) {
+                return std::make_shared<jit::PythonFutureWrapper>(
+                    self.getFuture());
+              },
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Returns the future that corresponds to the creation of this RRef
@@ -473,12 +477,38 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def(
       "_invoke_rpc_builtin",
-      &pyRpcBuiltin,
+      [](const WorkerInfo& dst,
+         const std::string& opName,
+         const float rpcTimeoutSeconds,
+         const py::args& args,
+         const py::kwargs& kwargs) {
+        return std::make_shared<torch::jit::PythonFutureWrapper>(
+            pyRpcBuiltin(dst, opName, rpcTimeoutSeconds, args, kwargs));
+      },
       py::call_guard<py::gil_scoped_acquire>());
 
   module.def(
       "_invoke_rpc_python_udf",
-      &pyRpcPythonUdf,
+      [](const WorkerInfo& dst,
+         std::string& pickledPythonUDF,
+         std::vector<torch::Tensor>& tensors,
+         const float rpcTimeoutSeconds) {
+        return std::make_shared<torch::jit::PythonFutureWrapper>(
+            pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rpcTimeoutSeconds),
+            [](const py::object& value) {
+              py::gil_scoped_release release;
+              auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+              // This will unwrap RemoteException and raise the contained
+              // server-side Python exception on client side. A caveat here is
+              // that the exception must be raise in the client thread calling
+              // the pybind "wait" API, so that it can be correctly shown to
+              // user. A wrong way is to raise it in RPC server thread, where
+              // the exception would be swallowed in the ThreadPool task, and
+              // also no pybind handling code can help shown the Python
+              // exception.
+              pythonRpcHandler.handleException(value);
+            });
+      },
       py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
@@ -487,7 +517,18 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def(
       "_invoke_rpc_torchscript",
-      &pyRpcTorchscript,
+      [](const std::string& dstWorkerName,
+         const std::string& qualifiedNameStr,
+         const py::tuple& argsTuple,
+         const py::dict& kwargsDict,
+         const float rpcTimeoutSeconds) {
+        return std::make_shared<jit::PythonFutureWrapper>(pyRpcTorchscript(
+            dstWorkerName,
+            qualifiedNameStr,
+            argsTuple,
+            kwargsDict,
+            rpcTimeoutSeconds));
+      },
       py::call_guard<py::gil_scoped_release>());
 
   module.def(

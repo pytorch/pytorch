@@ -15,7 +15,6 @@
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/python_compat.h>
 
 namespace torch {
@@ -166,7 +165,7 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
   }
 }
 
-std::shared_ptr<jit::PythonFutureWrapper> pyRpcBuiltin(
+c10::intrusive_ptr<JitFuture> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
     const float rpcTimeoutSeconds,
@@ -179,16 +178,15 @@ std::shared_ptr<jit::PythonFutureWrapper> pyRpcBuiltin(
   py::gil_scoped_release release;
   auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
   auto agent = RpcAgent::getCurrentRpcAgent();
-  return std::make_shared<torch::jit::PythonFutureWrapper>(
-      wrapFutureMessageInJitFuture(sendMessageWithAutograd(
-          *agent,
-          dst,
-          std::move(*scriptCall).toMessage(),
-          false,
-          rpcTimeoutSeconds)));
+  return wrapFutureMessageInJitFuture(sendMessageWithAutograd(
+      *agent,
+      dst,
+      std::move(*scriptCall).toMessage(),
+      false,
+      rpcTimeoutSeconds));
 }
 
-std::shared_ptr<jit::PythonFutureWrapper> pyRpcPythonUdf(
+c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
@@ -199,29 +197,15 @@ std::shared_ptr<jit::PythonFutureWrapper> pyRpcPythonUdf(
   auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
 
   auto agent = RpcAgent::getCurrentRpcAgent();
-  return std::make_shared<torch::jit::PythonFutureWrapper>(
-      wrapFutureMessageInJitFuture(sendMessageWithAutograd(
-          *agent,
-          dst,
-          std::move(*pythonCall).toMessage(),
-          true /*forceGradRecording*/,
-          rpcTimeoutSeconds)),
-      [](const py::object& value) {
-        py::gil_scoped_release release;
-        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-        // This will unwrap RemoteException and raise the contained
-        // server-side Python exception on client side. A caveat here is
-        // that the exception must be raise in the client thread calling
-        // the pybind "wait" API, so that it can be correctly shown to
-        // user. A wrong way is to raise it in RPC server thread, where
-        // the exception would be swallowed in the ThreadPool task, and
-        // also no pybind handling code can help shown the Python
-        // exception.
-        pythonRpcHandler.handleException(value);
-      });
+  return wrapFutureMessageInJitFuture(sendMessageWithAutograd(
+      *agent,
+      dst,
+      std::move(*pythonCall).toMessage(),
+      true /*forceGradRecording*/,
+      rpcTimeoutSeconds));
 }
 
-std::shared_ptr<jit::PythonFutureWrapper> pyRpcTorchscript(
+c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
     const py::tuple& argsTuple,
@@ -250,7 +234,7 @@ std::shared_ptr<jit::PythonFutureWrapper> pyRpcTorchscript(
   DCHECK(!PyGILState_Check());
   c10::intrusive_ptr<c10::ivalue::Future> fut = rpcTorchscript(
       dstWorkerName, qualifiedName, functionSchema, stack, rpcTimeoutSeconds);
-  return std::make_shared<jit::PythonFutureWrapper>(fut);
+  return fut;
 }
 
 PyRRef pyRemoteBuiltin(

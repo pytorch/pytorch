@@ -114,13 +114,12 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         return rref;
       }()) {}
 
-std::shared_ptr<jit::PythonFutureWrapper> PyRRef::getFuture() const {
+c10::intrusive_ptr<JitFuture> PyRRef::getFuture() const {
   // Marking hasValue to false, as this Future is only used for signaling
   // profiler to update profiling result and the profiler does not retrieve
   // any value from it.
-  return std::make_shared<jit::PythonFutureWrapper>(
-      wrapFutureMessageInJitFuture(
-          rref_->getOwnerCreationFuture(), false /* hasValue */));
+  return wrapFutureMessageInJitFuture(
+      rref_->getOwnerCreationFuture(), false /* hasValue */);
 }
 
 bool PyRRef::isOwner() const {

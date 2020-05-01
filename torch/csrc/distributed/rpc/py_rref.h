@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/distributed/rpc/rref_impl.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -35,7 +34,7 @@ class PyRRef {
   // Future that is associated with the creation of this RRef on the remote end.
   // This is only used to get the future corresponding to the rref for profiling
   // use cases.
-  std::shared_ptr<jit::PythonFutureWrapper> getFuture() const;
+  c10::intrusive_ptr<JitFuture> getFuture() const;
 
   // create a proxy on this RRef, which can be used to launch RPC on the owner
   // of this RRef to run functions on the object referenced by this RRef.
