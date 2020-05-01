@@ -4569,8 +4569,7 @@ class TestNN(NNTestCase):
             m = nn.LSTM(3, 4, bidirectional=True, num_layers=2).to('cuda')
             a = torch.rand(5, 3, device='cuda')
             b = torch.tensor([1, 1, 1, 1, 1], device='cuda')
-            input = nn.utils.rnn.PackedSequence(a, b)
-
+ 
     def test_transformer_cell(self):
         # this is just a smoke test; these modules are implemented through
         # autograd so no Jacobian test is needed
@@ -4604,6 +4603,53 @@ class TestNN(NNTestCase):
                              tgt_key_padding_mask=tgt_key_padding_mask,
                              memory_key_padding_mask=memory_key_padding_mask)
         output.sum().backward()
+
+           input = nn.utils.rnn.PackedSequence(a, b)
+
+    def test_transformer_batch_first(self):
+        d_model = 512
+        nhead = 16
+        num_encoder_layers = 4
+        num_decoder_layers = 3
+        dim_feedforward = 256
+        dropout = 0.3
+        bsz = 8
+        seq_length = 35
+        tgt_length = 15
+
+        # find the output of a transformer module without batch_first
+        transformer = nn.Transformer(d_model, nhead, num_encoder_layers, num_decoder_layers,
+                                     dim_feedforward, batch_first=False, dropout=dropout)
+        src = torch.randn(seq_length, bsz, d_model)
+        src_mask = transformer.generate_square_subsequent_mask(seq_length).double()
+        tgt = torch.randn(tgt_length, bsz, d_model)
+        tgt_mask = transformer.generate_square_subsequent_mask(tgt_length).double()
+        memory_mask = torch.randn(tgt_length, seq_length).double()
+        src_key_padding_mask = torch.rand(bsz, seq_length) >= 0.5
+        tgt_key_padding_mask = torch.rand(bsz, tgt_length) >= 0.5
+        memory_key_padding_mask = torch.rand(bsz, seq_length) >= 0.5
+        output = transformer(src, tgt,
+                             src_mask=src_mask,
+                             tgt_mask=tgt_mask,
+                             memory_mask=memory_mask,
+                             src_key_padding_mask=src_key_padding_mask,
+                             tgt_key_padding_mask=tgt_key_padding_mask,
+                             memory_key_padding_mask=memory_key_padding_mask)
+
+        # compare the output to a transformer module with batch_first
+        transformer_batch_first = nn.Transformer(d_model, nhead, num_encoder_layers, num_decoder_layers,
+                                                 dim_feedforward, batch_first=True, dropout=dropout)
+        src_batch_first = src.permute(1, 0, 2)
+        tgt_batch_first = tgt.permute(1, 0, 2)
+        output_batch_first = transformer_batch_first(src, tgt,
+                                                     src_mask=src_mask,
+                                                     tgt_mask=tgt_mask,
+                                                     memory_mask=memory_mask,
+                                                     src_key_padding_mask=src_key_padding_mask,
+                                                     tgt_key_padding_mask=tgt_key_padding_mask,
+                                                     memory_key_padding_mask=memory_key_padding_mask)
+        output_ref = output_batch_first.permute(1, 0, 2)
+        np.testing.assert_allclose(output, output_ref, atol=1e-5)
 
     def test_transformerencoderlayer(self):
         # this is a deterministic test for TransformerEncoderLayer
