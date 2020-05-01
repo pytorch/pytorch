@@ -66,6 +66,10 @@ void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
     auto output_padding_value =
         getIValue("output_padding", match_vmap, vmap).value().toIntList();
 
+    // For conv1d output_padding size is always 1, so return false here.
+    if (output_padding_value.size() < 2) {
+      return false;
+    }
     if (!transposed_value && !benchmark_value && !deterministic_value &&
         cudnn_enabled_value && (output_padding_value[0] == 0) &&
         (output_padding_value[1] == 0)) {
