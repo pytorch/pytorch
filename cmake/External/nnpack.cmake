@@ -14,7 +14,7 @@ endif()
 ##############################################################################
 
 ##############################################################################
-# (1) MSVC - unsupported 
+# (1) MSVC - unsupported
 ##############################################################################
 
 if(MSVC)
@@ -59,9 +59,12 @@ if(ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAM
   set(GOOGLETEST_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/googletest" CACHE STRING "Google Test source directory")
 
   if(NOT TARGET nnpack)
+    if(NOT USE_SYSTEM_PTHREADPOOL AND USE_INTERNAL_PTHREADPOOL_IMPL)
+      set(NNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
+    endif()
+
     set(NNPACK_BUILD_TESTS OFF CACHE BOOL "")
     set(NNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    set(NNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
     set(NNPACK_LIBRARY_TYPE "static" CACHE STRING "")
     set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
     set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")

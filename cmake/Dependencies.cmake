@@ -276,22 +276,22 @@ endif()
 # ---[ pthreadpool
 # pthreadpool is a C library with no concept of namespaces, which means two
 # copies of the library cannot exist in the same binary or symbol collision
-# will occur violating ODR.  The conundrum is that Caffe 2 provides its own
+# will occur violating ODR.  The conundrum is that Caffe2 provides its own
 # custom implementation of pthreadpool under the exact same interface the open
 # source version operates under; an implementation that is only used in Caffe2
 # operators and Caffe2's usage of NNPACK and QNNPACK. On the other hand, we
 # are interested in using the open source implementation on PyTorch which seems
 # to have been updated to exhibit superior performance.  Here we try to solve
-# this conundrum by prefering to pick the internal C2 implementation if
+# this conundrum by prefering to pick the internal Caffe2 implementation if
 # BUILD_CAFFE2_OPS is on.  This will force both PyTorch and Caffe2 to use the
-# C2 pthreadpool version (remember we cannot have two copies in one binary) and
-# in doing so we achieve our goal of keeping Caffe2's behavior intact. Otherwise
-# we take the liberty of picking the open source version for PyTorch.  All of
-# admittedly error prone logic logic can be removed and simplified if and when
-# we decide to migrate Caffe2 to open source pthreadpool as well.
+# Caffe2 pthreadpool version (remember we cannot have two copies in one binary)
+# and in doing so we achieve our goal of keeping Caffe2's behavior intact.
+# Otherwise we take the liberty of picking the open source version for PyTorch.
+# All of admittedly error prone logic logic can be removed and simplified if and
+# when we decide to migrate Caffe2 to open source pthreadpool as well.
 
 if(NOT USE_SYSTEM_PTHREADPOOL)
-  # Opt for custom C2 implementation whenever BUILD_CAFFE2_OPS is enabled
+  # Opt for custom Caffe2 implementation whenever BUILD_CAFFE2_OPS is enabled
   if(BUILD_CAFFE2_OPS)
     set(USE_INTERNAL_PTHREADPOOL_IMPL ON)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
