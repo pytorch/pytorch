@@ -1344,6 +1344,7 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def(
           "_create_methods",
+          // first arg here comes from def create_methods_from_stubs
           [](std::shared_ptr<ConcreteModuleType> concreteType,
              const std::vector<Def>& defs,
              const std::vector<ResolutionCallback>& rcbs,

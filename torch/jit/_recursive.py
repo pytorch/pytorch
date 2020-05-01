@@ -273,6 +273,8 @@ class ConcreteTypeStore(object):
 concrete_type_store = ConcreteTypeStore()
 
 def create_methods_from_stubs(concrete_type, stubs):
+    print("==== create_methods_from_stubs ====")
+    print(concrete_type)
     defs = [m.def_ for m in stubs]
     rcbs = [m.resolution_callback for m in stubs]
     defaults = [get_default_args(m.original_method) for m in stubs]
@@ -494,6 +496,9 @@ def infer_methods_to_compile(nn_module):
 
     methods = methods + exported
 
+    print("==== Methods ====")
+    print(methods)
+
     overload_name_mappings = dict(getattr(nn_module, "__overloads__", {}))
     overload_info = get_overload_annotations(nn_module)
     overload_name_mappings.update(get_overload_name_mapping(overload_info))
@@ -518,8 +523,13 @@ def infer_methods_to_compile(nn_module):
         uniquer.add(name)
 
     stubs = []
+    print(uniqued_methods)
+    print("============")
     for method in uniqued_methods:
         stubs.append(make_stub_from_method(nn_module, method))
+
+    print(overload_stubs)
+    print(stubs)
     return overload_stubs + stubs
 
 def interface_script(mod_interface, nn_module):
@@ -580,6 +590,9 @@ def wrap_cpp_module(cpp_module):
     return torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
 
 def compile_unbound_method(concrete_type, fn):
+    print("==== compile_unbound_method ====")
+    print(str(concrete_type))
+    print(str(fn))
     if _jit_internal.is_ignored_fn(fn):
         return None
     stub = make_stub(fn)
@@ -620,4 +633,45 @@ def lazy_bind(concrete_type, unbound_method):
     lazy_binding_method.__name__ = unbound_method.__name__
     torch._jit_internal.copy_torchscript_modifier(unbound_method, lazy_binding_method)
 
+    return lazy_binding_method
+
+def lazy_bind_static(concrete_type, unbound_method):
+    """
+    Returns a function that lazily binds `unbound_method` to a provided
+    Module IValue, then invokes the method. We do this so that any Python
+    shenanigans that will poison type sharing are impossible at compile
+    time.
+    """
+    def lazy_binding_method(cpp_module, *args):
+        def init_fn(script_module):
+            orig_class = concrete_type.py_class
+
+            # Copy @ignored/@unused methods from the original module to the new one.
+            # This ensures they are available during execution.
+            for name in dir(orig_class):
+                item = getattr(orig_class, name, None)
+                if _jit_internal.is_ignored_fn(item):
+                    setattr(script_module, name, item)
+
+            # Copy constants over so they are available during execution.
+            for name, value in concrete_type.get_constants().items():
+                setattr(script_module, name, value)
+
+        script_module = torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
+        method = bind_method(unbound_method, script_module, torch.jit.RecursiveScriptModule)
+        return method(*args)
+
+    # make the lazy binding method "look like" the original method
+
+    print("UNBOUND")
+    print(unbound_method)
+    print(inspect.getfullargspec(unbound_method))
+
+    lazy_binding_method.original_fn = unbound_method
+    lazy_binding_method.__name__ = unbound_method.__name__
+    torch._jit_internal.copy_torchscript_modifier(unbound_method, lazy_binding_method)
+
+    print("Lazy")
+    print(unbound_method)
+    print(inspect.getfullargspec(lazy_binding_method))
     return lazy_binding_method
