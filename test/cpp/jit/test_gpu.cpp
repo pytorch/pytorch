@@ -1158,10 +1158,7 @@ void testGPU_FusionLoopUnroll() {
 
 Val* gen_jit_operand(std::pair<ValType,DataType> desc) {
   if(desc.first == ValType::TensorView) {
-    std::vector<IterDomain*> dom;
-    for (int i = 0; i < 2; i++)
-      dom.push_back(new IterDomain(new Int(0), new Int()));
-  	return new TensorView(new TensorDomain(dom), desc.second);
+    return makeDummyTensor(2, desc.second);
   } else if(desc.first == ValType::Scalar) {
     if(desc.second == DataType::Float)
       return new Float();
