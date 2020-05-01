@@ -2506,33 +2506,22 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_pickle_future(self):
         fut = rpc.Future()
+        errMsg = "Can not pickle rpc.Future or send it over RPC"
         with TemporaryFileName() as fname:
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Can not pickle rpc.Future or send it over RPC"
-            ):
+            with self.assertRaisesRegex(RuntimeError, errMsg):
                 torch.save(fut, fname)
 
         dst = worker_name((self.rank + 1) % self.world_size)
         with TemporaryFileName() as fname:
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Can not pickle rpc.Future or send it over RPC"
-            ):
+            with self.assertRaisesRegex(RuntimeError, errMsg):
                 rpc.rpc_sync(dst, fail_on_fut, args=(fut,))
 
         with TemporaryFileName() as fname:
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Can not pickle rpc.Future or send it over RPC"
-            ):
+            with self.assertRaisesRegex(RuntimeError, errMsg):
                 rpc.rpc_async(dst, fail_on_fut, args=(fut,))
 
         with TemporaryFileName() as fname:
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Can not pickle rpc.Future or send it over RPC"
-            ):
+            with self.assertRaisesRegex(RuntimeError, errMsg):
                 rpc.remote(dst, fail_on_fut, args=(fut,))
 
 
