@@ -317,6 +317,12 @@ class TestOperators(TestCase):
         x = torch.randn(20, 16, 50, 32)
         self.assertONNX(nn.AvgPool2d(3, stride=2), x)
 
+    def test_avg_pool2d_pad_11(self):
+        x = torch.randn(20, 16, 50, 32)
+        self.assertONNX(nn.AvgPool2d(3, stride=2), x, opset_version=11)
+        self.assertONNX(nn.AvgPool2d(3, stride=2), x, opset_version=11,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+
     def test_maxpool_indices(self):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2, return_indices=True), x)
