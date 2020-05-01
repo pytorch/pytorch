@@ -985,9 +985,10 @@ class TestCase(expecttest.TestCase):
             count_non_identical = torch.sum(identity_mask, dtype=torch.long)
             diff = torch.abs(a_flat - b_flat)
             greatest_diff_index = torch.argmax(diff)
-            debug_msg = ("Found {0} different element(s), with the greatest "
-                         "difference of {1} ({2} vs. {3}) occuring at index "
-                         "{4}.".format(count_non_identical.item(),
+            debug_msg = ("Found {0} different element(s) (out of {1}), with the greatest "
+                         "difference of {2} ({3} vs. {4}) occuring at index "
+                         "{5}.".format(count_non_identical.item(),
+                                       a.numel(),
                                        diff[greatest_diff_index],
                                        a_flat[greatest_diff_index],
                                        b_flat[greatest_diff_index],
@@ -1033,10 +1034,11 @@ class TestCase(expecttest.TestCase):
         outside_range = diff > (atol + rtol * torch.abs(b_flat))
         count_outside_range = torch.sum(outside_range, dtype=torch.long)
         greatest_diff_index = torch.argmax(diff)
-        debug_msg = ("With rtol={0} and atol={1}, found {2} element(s) whose "
+        debug_msg = ("With rtol={0} and atol={1}, found {2} element(s) (out of {3}) whose "
                      "difference(s) exceeded the margin of error. "
-                     "The greatest difference was {3} ({4} vs. {5}), which "
-                     "occurred at index {6}.".format(rtol, atol, count_outside_range,
+                     "The greatest difference was {4} ({5} vs. {6}), which "
+                     "occurred at index {7}.".format(rtol, atol, count_outside_range,
+                                                     a.numel(),
                                                      diff[greatest_diff_index],
                                                      a_flat[greatest_diff_index],
                                                      b_flat[greatest_diff_index],
@@ -1122,7 +1124,6 @@ class TestCase(expecttest.TestCase):
                 # defaults to True.
                 self.assertTrue(x.dtype is y.dtype, msg=message)
 
-                # TODO: use compareTensors
                 result, debug_msg = self.compareTensors(x.int_repr().to(torch.int32),
                                                         y.int_repr().to(torch.int32),
                                                         atol=atol, rtol=rtol,

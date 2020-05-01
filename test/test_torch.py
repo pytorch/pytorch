@@ -5345,55 +5345,58 @@ class TestTorchDeviceType(TestCase):
 
     # Checks that compareTensors provides the correct debug info
     def test_comparetensors_debug(self, device):
+        # Acquires atol that will be used
+        atol = max(1e-05, self.precision)
+
         # Checks float tensor comparisons (2D tensor)
         a = torch.tensor(((0, 6), (7, 9)), device=device, dtype=torch.float32)
         b = torch.tensor(((0, 7), (7, 22)), device=device, dtype=torch.float32)
         result, debug_msg = self.compareTensors(a, b)
-        expected_msg = ("With rtol=1.3e-06 and atol=1e-05, found 2 element(s) "
+        expected_msg = ("With rtol=1.3e-06 and atol={0}, found 2 element(s) (out of 4) "
                         "whose difference(s) exceeded the margin of error. "
                         "The greatest difference was 13.0 (9.0 vs. 22.0), "
-                        "which occurred at index (1, 1).")
-        self.assertTrue(debug_msg == expected_msg)
+                        "which occurred at index (1, 1).").format(atol)
+        self.assertEqual(debug_msg, expected_msg)
 
         # Checks int tensor comparisons (1D tensor)
         a = torch.tensor((1, 2, 3, 4), device=device)
         b = torch.tensor((2, 5, 3, 4), device=device)
         result, debug_msg = self.compareTensors(a, b)
-        expected_msg = ("Found 2 different element(s), "
+        expected_msg = ("Found 2 different element(s) (out of 4), "
                         "with the greatest difference of 3 (2 vs. 5) "
                         "occuring at index 1.")
-        self.assertTrue(debug_msg == expected_msg)
+        self.assertEqual(debug_msg, expected_msg)
 
         # Checks bool tensor comparisons (0D tensor)
         a = torch.tensor((True), device=device)
         b = torch.tensor((False), device=device)
         result, debug_msg = self.compareTensors(a, b)
-        expected_msg = ("Found 1 different element(s), "
+        expected_msg = ("Found 1 different element(s) (out of 1), "
                         "with the greatest difference of 1 (1 vs. 0) "
                         "occuring at index 0.")
-        self.assertTrue(debug_msg == expected_msg)
+        self.assertEqual(debug_msg, expected_msg)
 
         # Checks complex tensor comparisons (real part)
         a = torch.tensor((1 - 1j, 4 + 3j), device=device)
         b = torch.tensor((1 - 1j, 1 + 3j), device=device)
         result, debug_msg = self.compareTensors(a, b)
         expected_msg = ("Real parts failed to compare as equal! "
-                        "With rtol=1.3e-06 and atol=1e-05, "
-                        "found 1 element(s) whose difference(s) exceeded the "
+                        "With rtol=1.3e-06 and atol={0}, "
+                        "found 1 element(s) (out of 2) whose difference(s) exceeded the "
                         "margin of error. The greatest difference was "
-                        "3.0 (4.0 vs. 1.0), which occurred at index 1.")
-        self.assertTrue(debug_msg == expected_msg)
+                        "3.0 (4.0 vs. 1.0), which occurred at index 1.").format(atol)
+        self.assertEqual(debug_msg, expected_msg)
 
         # Checks complex tensor comparisons (imaginary part)
         a = torch.tensor((1 - 1j, 4 + 3j), device=device)
         b = torch.tensor((1 - 1j, 4 - 21j), device=device)
         result, debug_msg = self.compareTensors(a, b)
         expected_msg = ("Imaginary parts failed to compare as equal! "
-                        "With rtol=1.3e-06 and atol=1e-05, "
-                        "found 1 element(s) whose difference(s) exceeded the "
+                        "With rtol=1.3e-06 and atol={0}, "
+                        "found 1 element(s) (out of 2) whose difference(s) exceeded the "
                         "margin of error. The greatest difference was "
-                        "24.0 (3.0 vs. -21.0), which occurred at index 1.")
-        self.assertTrue(debug_msg == expected_msg)
+                        "24.0 (3.0 vs. -21.0), which occurred at index 1.").format(atol)
+        self.assertEqual(debug_msg, expected_msg)
 
         # Checks size mismatch
         a = torch.tensor((1, 2), device=device)
@@ -5401,7 +5404,7 @@ class TestTorchDeviceType(TestCase):
         result, debug_msg = self.compareTensors(a, b)
         expected_msg = ("Attempted to compare equality of tensors "
                         "with different sizes. Got sizes torch.Size([2]) and torch.Size([]).")
-        self.assertTrue(debug_msg == expected_msg)
+        self.assertEqual(debug_msg, expected_msg)
 
         # Checks dtype mismatch
         a = torch.tensor((1, 2), device=device, dtype=torch.long)
@@ -5409,7 +5412,7 @@ class TestTorchDeviceType(TestCase):
         result, debug_msg = self.compareTensors(a, b, exact_dtype=True)
         expected_msg = ("Attempted to compare equality of tensors "
                         "with different dtypes. Got dtypes torch.int64 and torch.float32.")
-        self.assertTrue(debug_msg == expected_msg)
+        self.assertEqual(debug_msg, expected_msg)
 
         # Checks device mismatch
         if self.device_type == 'cuda':
@@ -5418,7 +5421,7 @@ class TestTorchDeviceType(TestCase):
             result, debug_msg = self.compareTensors(a, b, exact_device=True)
             expected_msg = ("Attempted to compare equality of tensors "
                             "on different devices! Got devices cpu and cuda:0.")
-            self.assertTrue(debug_msg == expected_msg)
+            self.assertEqual(debug_msg, expected_msg)
 
     def _comparetensors_helper(self, tests, device, dtype, equal_nan, exact_dtype=True, atol=1e-08, rtol=1e-05):
         for test in tests:
@@ -5427,7 +5430,7 @@ class TestTorchDeviceType(TestCase):
             compare_result, debug_msg = self.compareTensors(a, b, rtol=rtol, atol=atol,
                                                             equal_nan=equal_nan,
                                                             exact_dtype=exact_dtype)
-            self.assertTrue(compare_result == test[2])
+            self.assertEqual(compare_result, test[2])
 
     def _isclose_helper(self, tests, device, dtype, equal_nan, atol=1e-08, rtol=1e-05):
         for test in tests:
@@ -5488,6 +5491,7 @@ class TestTorchDeviceType(TestCase):
         self._isclose_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
         self._comparetensors_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
 
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float16, torch.float32, torch.float64)
     def test_isclose_comparetensors_float(self, device, dtype):
         tests = (
@@ -6038,7 +6042,6 @@ class TestTorchDeviceType(TestCase):
 
     # Uses mismatched arange out size to trigger a warning
     def test_cpp_warnings_have_python_context(self, device):
-        import inspect
         # Creates long string in advance to avoid a too-long Python line
         s = ".+Triggered internally at.+RangeFactories.+"
 
