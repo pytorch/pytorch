@@ -3,6 +3,7 @@ import sys
 
 import torch
 from torch.nn import functional as F
+import torch.nn as nn
 from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
@@ -126,6 +127,59 @@ class TestFunctionalBlocks(JitTestCase):
         # its intermediary use (so long as aliasing is safe)
         FileCheck().check_count("aten::add_", 1).run(graph)
         self.assertEqual(test_intermediary_use(), fn())
+
+    def test_remove_mutation_if_output(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.mod = nn.Sequential(nn.Linear(20, 20), nn.ReLU(inplace=True))
+
+            def forward(self, x):
+                return self.mod(x)
+
+        with freeze_rng_state():
+            input_eager = torch.randn(20, 20)
+            out_eager = Mod().forward(input_eager)
+
+        with freeze_rng_state():
+            input = torch.randn(20, 20)
+            mod = torch.jit.script(Mod())
+            self.run_pass('inline', mod.forward.graph)
+            FileCheck().check("aten::add_").check("aten::relu_").run(mod.forward.graph)
+            self.run_pass('remove_mutation', mod.forward.graph)
+            FileCheck().check_not("aten::add_").check_not("aten::relu_").run(mod.forward.graph)
+
+        self.assertEqual(out_eager, mod(input))
+        self.assertEqual(input_eager, input)
+
+    def test_remove_mutation_if_output_fail(self):
+        @torch.jit.script
+        def foo(cond: bool):
+            li = []
+            if cond:
+                x = torch.tensor(1)
+                li.append(x)
+            else:
+                x = torch.tensor(2)
+            y = x.add_(2)
+            return y, li
+
+        self.run_pass('inline', foo.graph)
+        self.run_pass('remove_mutation', foo.graph)
+        FileCheck().check("aten::add_").run(foo.graph)
+
+        @torch.jit.script
+        def foo(cond: bool, y):
+            if cond:
+                x = y
+            else:
+                x = torch.tensor(2)
+            z = x.add_(2)
+            return z
+
+        self.run_pass('inline', foo.graph)
+        self.run_pass('remove_mutation', foo.graph)
+        FileCheck().check("aten::add_").run(foo.graph)
 
     def test_remove_mutation_lists_append(self):
         def successful_remove():
