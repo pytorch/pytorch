@@ -195,7 +195,7 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src);
 } // namespace at
 
 template <int kSpatialDim = 2>
-torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
+CAFFE2_API torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
   using SerializationType = std::tuple<
       at::Tensor,
       c10::optional<at::Tensor>,
@@ -309,5 +309,11 @@ torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
     .def("groups", &ConvPackedParamsBase<kSpatialDim>::groups);
   return register_conv_params;
 }
+
+template <>
+CAFFE2_API torch::jit::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
+
+template <>
+CAFFE2_API torch::jit::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
 
 #endif // USE_FBGEMM
