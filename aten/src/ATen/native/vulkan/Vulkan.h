@@ -18,6 +18,8 @@ namespace vulkan {
 namespace details {
 namespace vulkan {
 
+bool is_available();
+
 class VulkanTensor : public c10::intrusive_ptr_target {
   class Impl;
 

@@ -1,4 +1,5 @@
 #if defined(USE_VULKAN) || defined(USE_GLES)
+#include <ATen/native/vulkan/VulkanAten.h>
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
@@ -8,16 +9,22 @@
 
 #ifdef USE_VULKAN
 #include <ATen/native/vulkan/Vulkan.h>
+#define VULKAN_GL vulkan
 #else
 
 #ifdef USE_GLES
 #include <ATen/native/vulkan/GLES.h>
+#define VULKAN_GL gl
 #endif
 
 #endif
 
 namespace at {
 namespace native {
+
+bool _vulkan_available() {
+  return at::native::vulkan::details::VULKAN_GL::is_available();
+}
 
 #ifdef USE_VULKAN
 using VTensor = at::native::vulkan::details::vulkan::VulkanTensor;
@@ -28,7 +35,6 @@ using VTensor = at::native::vulkan::details::gl::GLTensor;
 #endif
 
 #endif
-
 
 using VTensorPtr = c10::intrusive_ptr<VTensor>;
 using VulkanTensorImpl = OpaqueTensorImpl<VTensorPtr>;
@@ -142,14 +148,8 @@ at::Tensor upsample_nearest2d_vulkan(
   Tensor output = empty_vulkan({in, ic, oh, ow}, input.options(), {});
   VTensor& y = vtensor_from_vulkan(output);
   y.allocateStorage();
-
-#ifdef USE_GLES
-  at::native::vulkan::details::gl::upsample_nearest2d(
+  at::native::vulkan::details::VULKAN_GL::upsample_nearest2d(
       y, x, ih, iw, oh, ow, in, ic, height_scale, width_scale);
-#else
-  at::native::vulkan::details::vulkan::upsample_nearest2d(
-      y, x, ih, iw, oh, ow, in, ic, height_scale, width_scale);
-#endif
   return output;
 }
 

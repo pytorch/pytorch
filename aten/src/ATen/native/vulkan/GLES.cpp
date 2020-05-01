@@ -464,15 +464,15 @@ double compute(
 
 static std::unique_ptr<GLContext> glContext;
 
-void initGLContextOnce() {
+bool initGLContextOnce() {
   static const int once = []() {
     glContext = std::make_unique<GLContext>();
-    TORCH_CHECK(
-        glContext && !glContext->isCreateError(),
-        "ERROR Failed to create GLContext");
+    TORCH_WARN(
+        glContext && !glContext->isCreateError(), "Failed to create GLContext");
     return 0;
   }();
   ((void)once);
+  return static_cast<bool>(glContext);
 }
 
 std::unique_ptr<GLShader> createShader(
@@ -495,7 +495,6 @@ std::shared_ptr<GLShader> getShader(
     const std::string& key,
     const char* content,
     const std::vector<std::string>& prefix = {}) {
-  initGLContextOnce();
   std::shared_ptr<GLShader> shader{createShader(content, prefix)};
   return shader;
 }
@@ -604,13 +603,11 @@ double deviceTex2hostCHW(
 }
 
 GLTensor::GLTensor(std::vector<int64_t> sizes) : sizes_(sizes) {
+  TORCH_CHECK(initGLContextOnce(), "Failed to create GLContext");
   assert(sizes_.size() == 4);
-  initGLContextOnce();
 }
 
 void GLTensor::setDataFromHost(const float* data) {
-  initGLContextOnce();
-
   int N = sizes_[0];
   int C = sizes_[1];
   int H = sizes_[2];
@@ -624,8 +621,6 @@ void GLTensor::setDataFromHost(const float* data) {
 }
 
 void GLTensor::copyDataToHost(float* output) {
-  initGLContextOnce();
-
   int N = sizes_[0];
   int C = sizes_[1];
   int H = sizes_[2];
@@ -636,7 +631,6 @@ void GLTensor::copyDataToHost(float* output) {
 }
 
 void GLTensor::allocateStorage() {
-  at::native::vulkan::details::gl::initGLContextOnce();
   int N = sizes_[0];
   int C = sizes_[1];
   int H = sizes_[2];
@@ -898,6 +892,10 @@ void conv2d(
       compGroupSize[1],
       compGroupSize[2]);
   GL_CHECK_ERROR;
+}
+
+bool is_available() {
+  return initGLContextOnce();
 }
 
 } // namespace gl

@@ -15,9 +15,10 @@
 namespace at {
 namespace native {
 namespace vulkan {
-
 namespace details {
 namespace gl {
+
+bool is_available();
 
 class GLTexture {
  public:

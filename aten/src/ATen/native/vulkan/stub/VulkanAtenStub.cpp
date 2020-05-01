@@ -4,6 +4,10 @@
 namespace at {
 namespace native {
 
+bool _vulkan_available() {
+  return false;
+}
+
 at::Tensor& vulkan_copy_(at::Tensor& self, const at::Tensor& src) {
   AT_ERROR("vulkan_copy_: ATen not compiled with Vulkan or GLES support");
 }

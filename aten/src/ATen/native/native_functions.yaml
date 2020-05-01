@@ -2170,6 +2170,9 @@
     CPU: batch_norm_update_stats_cpu
     CUDA: batch_norm_update_stats_cuda
 
+- func: _vulkan_available() -> bool
+  use_c10_dispatcher: full
+
 - func: _nnpack_available() -> bool
   use_c10_dispatcher: full
 

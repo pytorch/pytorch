@@ -269,17 +269,23 @@ class VContext {
 static std::unique_ptr<VContext> vkContext;
 static constexpr bool kEnableValidationLayers = true;
 
-void initVulkanContextOnce() {
+bool initVulkanContextOnce() {
   static const int once = []() {
 #ifdef USE_VULKAN_WRAPPER
-    bool res = InitVulkan();
-    TORCH_CHECK(res, "Vulkan Wrapper Failed to InitVulkan");
+    if (!InitVulkan()) {
+      TORCH_WARN("Vulkan Wrapper Failed to InitVulkan");
+      return 1;
+    }
 #endif
     vkContext = std::make_unique<VContext>(kEnableValidationLayers);
-    TORCH_CHECK(vkContext, "Vulkan Failed to create Vulkan Context");
+    if (!vkContext) {
+      TORCH_WARN("Vulkan Failed to create Vulkan Context");
+      return 2;
+    }
     return 0;
   }();
   ((void)once);
+  return static_cast<bool>(vkContext);
 }
 
 class VBuffer;
@@ -300,7 +306,8 @@ class VulkanTensor::Impl {
 
 VulkanTensor::VulkanTensor(std::vector<int64_t> sizes)
     : pImpl(std::make_shared<Impl>(std::move(sizes))) {
-  initVulkanContextOnce();
+  TORCH_CHECK(
+      initVulkanContextOnce(), "Vulkan Failed to create Vulkan Context");
 }
 
 std::vector<int64_t> VulkanTensor::sizes() {
@@ -600,8 +607,6 @@ auto makeComputeUnit(
 #endif
 
 void VulkanTensor::setDataFromHost(const float* inputData) {
-  initVulkanContextOnce();
-
   const auto inputDataSize = sizeof(float) * pImpl->numel_;
   if (!hasStorage()) {
     allocateStorage();
@@ -610,7 +615,6 @@ void VulkanTensor::setDataFromHost(const float* inputData) {
 }
 
 void VulkanTensor::copyDataToHost(float* output) {
-  initVulkanContextOnce();
   auto bufferDataSize = sizeof(float) * pImpl->numel_;
   pImpl->vbuffer_->copyFromDeviceToHost(output, bufferDataSize);
 }
@@ -725,6 +729,10 @@ void upsample_nearest2d(
   computeUnit->runCommandBuffer();
   vkDestroyDescriptorPool(device, descrPool, nullptr);
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
+}
+
+bool is_available() {
+  return initVulkanContextOnce();
 }
 
 } // namespace vulkan
