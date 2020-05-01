@@ -35,7 +35,7 @@ c10::optional<UnaryOpType> cast_type(const DataType& t1, const DataType& t2) {
   if ((DataType::Null == t1) || (DataType::Null == t2))
     return c10::nullopt;
   if ((DataType::Half == t1) && (DataType::Float == t2))
-	return UnaryOpType::HalfToFloat;;
+	return UnaryOpType::HalfToFloat;
   if ((DataType::Float == t1) && (DataType::Half == t2))
 	return UnaryOpType::FloatToHalf;
   // In theory there could be stronger real check here in the future
