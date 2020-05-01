@@ -86,10 +86,6 @@ static bool init_nnpack() {
 }
 
 static pthreadpool_t nnpack_threadpool() {
-  // Try initializing a threadpool for NNPACK's use.  If we fail to
-  // successfully initialize an implementation, return nullptr which will
-  // instruct NNPACK to run single threaded.
-
   return caffe2::pthreadpool_();
 }
 
