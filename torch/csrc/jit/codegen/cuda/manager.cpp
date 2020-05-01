@@ -174,9 +174,7 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
       // even though it is compatible with profiling graph.
       // TODO: we could relax on a bunch of checks here, like strides & gradient
       if (!static_input->type()->cast<TensorType>()->sizes().isComplete() ||
-          !static_input->type()
-               ->cast<TensorType>()
-               ->isCompatibleWithInCurrentExecutionContext(inp_tensor)) {
+          !TensorType::create(inp_tensor)->isSubtypeOf(static_input->type())) {
         matched_static_inputs = false;
         break;
       }
