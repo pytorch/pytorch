@@ -23,11 +23,11 @@ def einsum(g, equation, tensor_list):
 @parse_args('v', 'f', 'i')
 def dropout(g, input, p, train):
     sym_help.assert_training_mode(train, "dropout")
-    p = g.op("Constant", value_t=torch.tensor(p))
     # in eval mode, dropout is non-op - if the node's train param is set to False, dropout is non-op
     if not sym_help._training_mode:
         return input
 
+    p = g.op("Constant", value_t=torch.tensor(p))
     t = g.op("Constant", value_t=torch.tensor(True))
     r, _ = g.op("Dropout", input, p, t, outputs=2)
     return r
