@@ -153,7 +153,7 @@ OPS_ALREADY_MOVED_TO_C10_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/ATenOpLi
 BACKEND_SELECT_REGISTER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/BackendSelectRegister.cpp")
 SCHEMA_REGISTER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SchemaRegister.cpp")
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
-TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
+TENSOR_METHODS_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.cpp")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
 
@@ -395,7 +395,7 @@ def gen_per_op_registration_filename(opname):
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['TensorBody.h', 'TensorMethods.h', 'ATenOpList.cpp']
+    core_files = ['TensorBody.h', 'TensorMethods.cpp', 'ATenOpList.cpp']
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
@@ -506,7 +506,7 @@ def generate_outputs():
 
     core_files = {
         'TensorBody.h': TENSOR_H,
-        'TensorMethods.h': TENSOR_METHODS_H,
+        'TensorMethods.cpp': TENSOR_METHODS_CPP,
         'ATenOpList.cpp': OPS_ALREADY_MOVED_TO_C10_CPP,
     }
 

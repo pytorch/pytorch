@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/FunctionSequenceNumber.h>
+#include <ATen/core/boxing/impl/boxing.h>
 #include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <ATen/record_function.h>
@@ -8,8 +9,6 @@
 #include <c10/util/LeftRight.h>
 #include <mutex>
 #include <list>
-
-#include <ATen/core/boxing/impl/boxing.h>
 
 namespace c10 {
 
@@ -287,24 +286,6 @@ namespace detail {
 template<class... Args> inline void unused_arg_(const Args&...) {}
 }
 
-template <typename T>
-inline c10::IValue get_ivalue_copy(const T& v) {
-  return c10::IValue();
-}
-
-#define IVALUE_COPY_FOR_TYPE(T) \
-    template <> \
-    inline c10::IValue get_ivalue_copy<T>(const T& v) { \
-      return v; \
-    }
-
-IVALUE_COPY_FOR_TYPE(at::Tensor);
-IVALUE_COPY_FOR_TYPE(at::Scalar);
-IVALUE_COPY_FOR_TYPE(double);
-IVALUE_COPY_FOR_TYPE(int64_t);
-IVALUE_COPY_FOR_TYPE(int32_t);
-IVALUE_COPY_FOR_TYPE(bool);
-
 // currently not working with incomplete type
 template <typename T, std::enable_if_t<c10::impl::not_ok_to_box<T>::value>* = nullptr>
 inline bool push_ivalue_copy(std::vector<c10::IValue>& stack, const T& v) {
@@ -372,11 +353,15 @@ inline Return Dispatcher::callUnboxedWithDispatchKey(const OperatorHandle& op, D
   std::vector<c10::IValue> stack;
   auto v = std::vector<bool>{push_ivalue_copy_2(stack, args)...};
 
-  // check if we can box some useful types here
-  bool t1 = is_instanceable_2<at::Tensor>::value;
-  bool t2 = is_instanceable_2<at::Scalar>::value;
-  // sanity check
-  bool t3 = is_instanceable_2<double>::value;
+  // check if we need to call callbacks, then
+  // if yes,
+  //  boxed_inputs = std::vector<c10::IValue>{get_ivalue_copy(args)...};
+  //  RECORD_FUNCTION(... boxed_inputs ... )
+  //  prefers boxing?
+  //     yes: return kernel.template callBoxed<Return, Args...>(op, boxed_inputs);
+  //     no: return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
+  // else:
+  //  return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
 
   return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
 }
