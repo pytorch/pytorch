@@ -88,7 +88,7 @@ case "$image" in
     CUDA_VERSION=9.2
     CUDNN_VERSION=7
     ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=5.4
+    GCC_VERSION=5
     PROTOBUF=yes
     DB=yes
     VISION=yes
