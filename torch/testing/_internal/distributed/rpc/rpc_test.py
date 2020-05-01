@@ -329,6 +329,10 @@ def add_use_future_nested_cb(to, x, y, z):
     return out.wait()
 
 
+def fail_on_fut(fut):
+    pass
+
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -2476,6 +2480,60 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_future_nested_callback(self):
         self._test_future_cb(add_use_future_set_result)
+
+    @dist_init
+    def test_mark_future_twice(self):
+        fut = rpc.Future()
+        fut.set_result(1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Future can only be marked completed once"
+        ):
+            fut.set_result(1)
+
+        fut = rpc.rpc_async(
+            worker_name((self.rank + 1) % self.world_size),
+            torch.add,
+            args=(torch.zeros(2, 2), 1)
+        )
+        self.assertEqual(fut.wait(), torch.zeros(2, 2) + 1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Future can only be marked completed once"
+        ):
+            fut.set_result(1)
+
+    @dist_init
+    def test_pickle_future(self):
+        fut = rpc.Future()
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Can not pickle rpc.Future or send it over RPC"
+            ):
+                torch.save(fut, fname)
+
+        dst = worker_name((self.rank + 1) % self.world_size)
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Can not pickle rpc.Future or send it over RPC"
+            ):
+                rpc.rpc_sync(dst, fail_on_fut, args=(fut,))
+
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Can not pickle rpc.Future or send it over RPC"
+            ):
+                rpc.rpc_async(dst, fail_on_fut, args=(fut,))
+
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Can not pickle rpc.Future or send it over RPC"
+            ):
+                rpc.remote(dst, fail_on_fut, args=(fut,))
 
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):

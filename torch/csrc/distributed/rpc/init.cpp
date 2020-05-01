@@ -442,7 +442,23 @@ If the future completes with an error, an exception is thrown.
                   >>>     lambda rpc_fut : fut.set_result(rpc_fut.wait() + 1)
                   >>> )
                   >>> print(fut.wait())  # tensor([3., 3.])
-          )");
+          )")
+      .def(
+          "__getstate__",
+          [](FutureIValue& self) {
+            TORCH_CHECK(
+                false,
+                "Can not pickle rpc.Future or send it over RPC.");
+          },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "__setstate__",
+          [](FutureIValue& fv, py::tuple t) {
+            TORCH_CHECK(
+                false,
+                "Can not unpickle rpc.Future or send it over RPC.");
+          },
+          py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,

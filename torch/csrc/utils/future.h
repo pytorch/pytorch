@@ -61,7 +61,10 @@ class TORCH_API Future final {
 
   void markCompleted(T value) {
     std::unique_lock<std::mutex> lock(mutex_);
-    TORCH_CHECK(!completed_);
+    TORCH_CHECK(
+        !completed_,
+        "Attempting to mark a completed Future as complete again. Note that "
+        "a Future can only be marked completed once.");
     // Set value first as completed_ is accessed without lock
     value_ = std::move(value);
     completed_ = true;
