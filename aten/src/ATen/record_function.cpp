@@ -201,6 +201,8 @@ inline CallbackManager& manager() {
   return _manager;
 }
 
+thread_local bool tls_record_function_enabled_ = true;
+
 } // namespace
 
 bool hasCallbacks() {
@@ -243,11 +245,11 @@ void clearCallbacks() {
 }
 
 bool isRecordFunctionEnabled() {
-  return c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Profiler);
+  return tls_record_function_enabled_;
 }
 
 void enableRecordFunction(bool enable) {
-  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, enable);
+  tls_record_function_enabled_ = enable;
 }
 
 RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {

@@ -4,11 +4,14 @@
 #include <ATen/core/grad_mode.h>
 #endif
 
+#include <ATen/record_function.h>
+
 namespace at {
 
 ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
-      debug_info_(ThreadLocalDebugInfo::_current()) {
+      debug_info_(ThreadLocalDebugInfo::_current()),
+      observers_enabled_(at::isRecordFunctionEnabled()) {
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   keep_grad_mode_ = keep_grad_mode;
   if (keep_grad_mode_) {
@@ -25,6 +28,8 @@ void ThreadLocalState::setThreadLocalState(
     GradMode::set_enabled(state.grad_mode_enabled_);
   }
 #endif
+
+  at::enableRecordFunction(state.observers_enabled_);
 
   ThreadLocalDebugInfo::_forceCurrentDebugInfo(state.debug_info_);
 

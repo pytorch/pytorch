@@ -37,7 +37,7 @@ using supports_boxing =
 
 template<class Result, class... Args>
 Result boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args, std::enable_if_t<!supports_boxing<Result, Args...>::value, int> = 0) {
-  TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callUnboxed for a kernel that only has a boxed kernel and doesn't support calling from an unboxed API yet.");
+  TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callUnboxed() for a kernel that only has a boxed kernel and doesn't support calling from an unboxed API yet.");
 }
 
 // SFINAE version for ops with returns
@@ -64,13 +64,13 @@ boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_fu
 
   (*boxed_kernel_func)(functor, opHandle, &stack);
 
-  TORCH_INTERNAL_ASSERT(stack.size() == 0, "A boxed kernel returned a value but when we called it with KernelFunction::callUnboxed, we expected it to return void.");
+  TORCH_INTERNAL_ASSERT(stack.size() == 0, "A boxed kernel returned a value but when we called it with KernelFunction::callUnboxed(), we expected it to return void.");
 }
 
 template<class Result>
 std::enable_if_t<!supports_boxing<Result>::value, Result>
 callBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, torch::jit::Stack& stack) {
-  TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callUnboxedWithStack for a kernel that only has a boxed kernel and doesn't support calling from an unboxed API yet.");
+  TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callUnboxedWithStack() for a kernel that only has a boxed kernel and doesn't support calling from an unboxed API yet.");
 }
 
 template<class Result>
@@ -85,7 +85,7 @@ template<class Result>
 std::enable_if_t<supports_boxing<Result>::value && std::is_same<void, Result>::value, Result>
 callBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, torch::jit::Stack& stack) {
   (*boxed_kernel_func)(functor, opHandle, &stack);
-  TORCH_INTERNAL_ASSERT(stack.size() == 0, "A boxed kernel returned a value but when we called it with KernelFunction::callUnboxedWithStack, we expected it to return void.");
+  TORCH_INTERNAL_ASSERT(stack.size() == 0, "A boxed kernel returned a value but when we called it with KernelFunction::callUnboxedWithStack(), we expected it to return void.");
 }
 
 }

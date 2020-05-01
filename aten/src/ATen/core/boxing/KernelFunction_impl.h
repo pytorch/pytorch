@@ -72,7 +72,7 @@ inline Return KernelFunction::callUnboxedWithStack(const OperatorHandle& opHandl
         return callUnboxedKernelFunction<Return, Args...>(unboxed_kernel_func_, functor_.get(), std::forward<Args>(args)...);
     }
 
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::callUnboxed() on an uninitialized KernelFunction.");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::callUnboxedWithStack() on an uninitialized KernelFunction.");
     return impl::callBoxedFunc<Return>(boxed_kernel_func_, functor_.get(), opHandle, stack);
 }
 
