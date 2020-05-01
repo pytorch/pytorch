@@ -98,23 +98,14 @@ class RecordingLogger(Logger):
         self.stats["quantized"] = None
 
     def forward(self, x, y):
-        if self.stats["float"] is None:
-            if x.is_quantized:
-                self.stats["quantized"] = x.dequantize().detach()
-            else:  # Output is in float for dynamic quantization
-                self.stats["quantized"] = x.detach()
+        if self.stats["quantized"] is None:
+            self.stats["quantized"] = x.detach()
+        else:
+            self.stats["quantized"] = torch.cat((self.stats["quantized"], x.detach()))
 
+        if self.stats["float"] is None:
             self.stats["float"] = y.detach()
         else:
-            if x.is_quantized:
-                self.stats["quantized"] = torch.cat(
-                    (self.stats["quantized"], x.dequantize().detach())
-                )
-            else:
-                self.stats["quantized"] = torch.cat(
-                    (self.stats["quantized"], x.detach())
-                )
-
             self.stats["float"] = torch.cat((self.stats["float"], y.detach()))
 
 
@@ -246,11 +237,32 @@ def compare_model_stub(
     tensors of quantized and its matching float shadow module. This dict can be
     used to compare and compute the module level quantization error.
 
+    This function first call prepare_model_with_stubs() to swap the quantized
+    module that we want to compare with the Shadow module, which takes quantized
+    module, corresponding float module and logger as input, and creates a forward
+    path inside to make the float module to shadow quantized module sharing the
+    same input. The logger can be customizable, the default logger will save the
+    outputs of the quantized module and float module that can be used to compute
+    the module level quantization error.
+
+    Example usage:
+        float_model = torchvision.models.quantization.resnet18(pretrained=True, quantize=False)
+        float_model.eval()
+        float_model.fuse_model()
+        x = torch.rand(10,3,224,224)
+        qmodel = quantize(float_model, default_eval_fn, x)
+        module_swap_list = [torchvision.models.quantization.resnet.QuantizableBasicBlock]
+        ob_dict = compare_model_stub(float_model,qmodel,module_swap_list, x)
+        for key in ob_dict:
+            print(key, compute_error(ob_dict[key]['float'], ob_dict[key]['quantized'].dequantize()))
+
     Args:
         float_module: the float module used to generate the q_module
         q_module: the quantized module
         data: input data
-        module_swap_list: list of float module types to attach the shadow
+        module_swap_list: list of float module types at which shadow modules will
+        be attached. Shadow modules log the original floating point module output
+        along with the output of a quantized module for the same input.
         Logger: the class to be used in shadow module to process the outputs of
             quantized module and its float shadow module
     """
@@ -287,20 +299,6 @@ def get_matching_activations(float_module, q_module, Logger):
     return act_dict
 
 
-def remove_qconfig(module):
-    r"""Clean up the qconfig left in the module so that new qconfig can be
-    propagated.
-
-    Args:
-        module: module to be cleaned up
-    """
-    for child in module.children():
-        remove_qconfig(child)
-
-    if hasattr(module, "qconfig"):
-        del module.qconfig
-
-
 def prepare_model_outputs(
     float_module,
     q_module,
@@ -315,8 +313,6 @@ def prepare_model_outputs(
         q_module: the quantized module
         white_list: list of module types to attach tensor logger
     """
-    remove_qconfig(float_module)
-    remove_qconfig(q_module)
     qconfig_debug = torch.quantization.QConfig(activation=Logger, weight=None)
     float_module.qconfig = qconfig_debug
     prepare(float_module, inplace=True, white_list=white_list)
@@ -335,6 +331,16 @@ def compare_model_outputs(
     entry being a dictionary with two keys 'float' and 'quantized', containing
     the activations of quantized model and float model at matching locations. This
     dict can be used to compare and compute the propagation quantization error.
+
+    Example usage:
+        float_model = torchvision.models.quantization.resnet18(pretrained=True, quantize=False)
+        float_model.eval()
+        float_model.fuse_model()
+        x = torch.rand(10,3,224,224)
+        qmodel = quantize(float_model, default_eval_fn, x)
+        act_compare_dict = compare_model_outputs(float_model, qmodel, x)
+        for key in act_compare_dict:
+            print(key, compute_error(act_compare_dict[key]['float'], act_compare_dict[key]['quantized'].dequantize()))
 
     Args:
         float_model: the float module used to generate the q_model

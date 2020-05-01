@@ -9,7 +9,6 @@ from test_pytorch_common import skipIfUnsupportedOpsetVersion
 
 import onnx
 import onnxruntime  # noqa
-import numpy as np
 
 import io
 import copy
@@ -522,44 +521,6 @@ class TestUtilityFuns(TestCase):
                           opset_version=self.opset_version, training=torch.onnx.TrainingMode.EVAL)
         # verify that the model state is preserved
         assert model.training == old_state
-
-    # TODO: Enable test when BatchNorm is implemented in ORT for opset 12.
-    @skipIfUnsupportedOpsetVersion([12])
-    def test_batchnorm_training(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(3, affine=True)
-
-            def forward(self, x):
-                bn = self.bn(x)
-                return bn
-
-        model = MyModule()
-        x = torch.randn(10, 3, 128, 128)
-
-        model.train()
-        out = model(x)
-
-        # state after 1 train epoch
-        running_mean = model.bn.running_mean
-        running_var = model.bn.running_var
-        saved_mean = x.mean((0, 2, 3))
-        saved_var = x.var((0, 2, 3))
-
-        pytorch_out = [out.detach().numpy(),
-                       running_mean.cpu().numpy(), running_var.cpu().numpy(),
-                       saved_mean.cpu().numpy(), saved_var.cpu().numpy()]
-
-        model_export = MyModule()
-        f = io.BytesIO()
-        torch.onnx.export(model_export, (x,), f,
-                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
-        ort_sess = onnxruntime.InferenceSession(f.getvalue())
-
-        ort_inputs = {ort_sess.get_inputs()[0].name : x.cpu().numpy()}
-        ort_outs = ort_sess.run(None, ort_inputs)
-        [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in zip(pytorch_out, ort_outs)]
 
     # TODO: Enable test when Dropout is implemented in ORT for opset 12.
     @skipIfUnsupportedOpsetVersion([12])

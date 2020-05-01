@@ -63,12 +63,6 @@ def get_all_examples():
     """
     blacklist = {
         "_np",
-        "refine_names",
-        "rename",
-        "names",
-        "align_as",
-        "align_to",
-        "unflatten",
     }
     allexamples = ""
 

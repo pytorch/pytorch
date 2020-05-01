@@ -146,6 +146,19 @@ def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIS
     add_observer_(model)
     return model
 
+def _remove_qconfig(module):
+    r"""Clean up the qconfig left in the module so that new qconfig can be
+    propagated.
+
+    Args:
+        module: module to be cleaned up
+    """
+    for child in module.children():
+        _remove_qconfig(child)
+
+    if hasattr(module, "qconfig"):
+        del module.qconfig
+
 def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     r"""Converts a float model to quantized model.
 
@@ -173,6 +186,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     prepare(model, inplace=True)
     run_fn(model, run_args)
     convert(model, mapping, inplace=True)
+    _remove_qconfig(model)
     return model
 
 def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
@@ -236,6 +250,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
     model.eval()
     propagate_qconfig_(model, qconfig_spec)
     convert(model, mapping, inplace=True)
+    _remove_qconfig(model)
     return model
 
 def prepare_qat(model, mapping=None, inplace=False):
@@ -278,6 +293,7 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     prepare_qat(model, inplace=True)
     run_fn(model, run_args)
     convert(model, inplace=True)
+    _remove_qconfig(model)
     return model
 
 def convert(module, mapping=None, inplace=False):
