@@ -5288,12 +5288,16 @@ def add_neg_dim_tests():
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
+    # XLA tensors do not have storage
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.complex64)
     def test_storage(self, device, dtype):
         v = torch.randn(3, 5, dtype=dtype, device=device)
         self.assertEqual(v.storage()[0], v[0][0])
         self.assertEqual(v.storage()[14], v[2][4])
 
+    # XLA tensors do not have storage
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy(self, device, dtype):
         from copy import deepcopy
@@ -5317,6 +5321,8 @@ class TestTorchDeviceType(TestCase):
         for i in range(a.numel()):
             self.assertEqual(w[1][1][i], q[1][1][i] - 1)
 
+    # XLA tensors do not have storage
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy_scalar(self, device, dtype):
         from copy import deepcopy
