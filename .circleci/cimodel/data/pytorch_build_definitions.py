@@ -221,7 +221,7 @@ def instantiate_configs():
             parms_list.append(gcc_version)
 
             # TODO: This is a nasty special case
-            if compiler_name == "clang" and not is_xla:
+            if gcc_version == 'clang5' and not is_xla:
                 parms_list.append("asan")
                 python_version = fc.find_prop("pyver")
                 parms_list[0] = fc.find_prop("abbreviated_pyver")

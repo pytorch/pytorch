@@ -19,9 +19,9 @@ from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
-from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
 from jit.test_python_ir import TestPythonIr  # noqa: F401
+from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -619,6 +619,30 @@ class TestJit(JitTestCase):
             test_input(func, torch.tensor([[0.5]]), 2)
         test_dim()
 
+        def test_size_index():
+            @torch.jit.script
+            def func(x):
+                if x.size(0) == 1:
+                    return 1
+                else:
+                    return 2
+
+            test_input(func, torch.rand([1, 2]), 1)
+            test_input(func, torch.rand([1, 3]), 1)
+
+            @torch.jit.script
+            def neg_index(x):
+                if x.size(-2) == 1:
+                    return 1
+                else:
+                    return 2
+
+            test_input(neg_index, torch.rand([1, 2]), 1)
+            test_input(neg_index, torch.rand([1, 3]), 1)
+
+        if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
+            test_size_index()
+
         def test_dtype():
             @torch.jit.script
             def func(x):
@@ -630,6 +654,18 @@ class TestJit(JitTestCase):
             test_input(func, torch.tensor(0.5, dtype=torch.float32), 1)
             test_input(func, torch.tensor(0.5, dtype=torch.int64), 2)
         test_dtype()
+
+        def test_is_floating_poiint():
+            @torch.jit.script
+            def func(x):
+                if x.is_floating_point():
+                    return 1
+                else:
+                    return 2
+
+            test_input(func, torch.tensor(0.5, dtype=torch.float32), 1)
+            test_input(func, torch.tensor(0.5, dtype=torch.int64), 2)
+        test_is_floating_poiint()
 
         def test_device():
             @torch.jit.script
@@ -2011,15 +2047,6 @@ graph(%Ra, %Rb):
             else:
                 return x
 
-        def invalid_constant_baking(x):
-            a = ["hello", "world"]
-            return func4(x, a)
-
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Tracer cannot get value trace for type"):
-            self.checkTrace(invalid_constant_baking, (inp,))
-
-
     def test_einsum(self):
         def outer(x, y):
             return torch.einsum('i,j->ij', (x, y))
@@ -2594,7 +2621,8 @@ graph(%Ra, %Rb):
             self.assertEqual(imported(), f_script())
 
         constants = ["None", "-.5", "0", "1", "True", "False", "''", "'a'", "'b'", "torch.tensor(1)",
-                     "[True, False]", "[0., .5]", "[torch.tensor(4), torch.tensor(2)]", "[0, 1]", "['0', '1']"]
+                     "[True, False]", "[0., .5]", "[torch.tensor(4), torch.tensor(2)]", "[0, 1]", "['0', '1']",
+                     "[True, None]", "[.5, None, .2]"]
 
         for type in ["Tensor", "str", "int", "float", "bool"]:
             constants.append("torch.jit.annotate(List[ " + type + "], [])")
@@ -3386,6 +3414,13 @@ class TestFrontend(JitTestCase):
 
 
 class TestScript(JitTestCase):
+    def test_pretty_print_function(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.nn.functional.interpolate(x)
+
+        FileCheck().check("interpolate").run(foo.code)
+
     def test_inlined_graph(self):
         """
         Check that the `inlined_graph` property correctly returns an inlined
@@ -3419,6 +3454,53 @@ class TestScript(JitTestCase):
             .check("aten::mul") \
             .run(m.inlined_graph)
 
+    def test_code_with_constants(self):
+        """
+        Check that the `code_with_constants` property correctly returns graph CONSTANTS in the
+        CONSTANTS.cN format used in the output of the `code` property.
+        """
+        @torch.jit.script
+        def foo(x=torch.ones(1)):
+            return x
+
+        class Moddy(torch.nn.Module):
+            def __init__(self):
+                super(Moddy, self).__init__()
+
+            def forward(self, x):
+                return foo()
+
+        m = torch.jit.script(Moddy())
+        src, CONSTANTS = m.code_with_constants
+
+        self.assertEqual(CONSTANTS.c0, torch.ones(1))
+        self.assertEqual(src, m.code)
+
+    def test_code_with_constants_restore(self):
+        """
+        Check that the `code_with_constants` property correctly works on restoration after save() + load()
+        """
+        @torch.jit.script
+        def foo(x=torch.ones(1)):
+            return x
+
+        class Moddy(torch.nn.Module):
+            def __init__(self):
+                super(Moddy, self).__init__()
+
+            def forward(self, x):
+                return foo()
+
+        m = torch.jit.script(Moddy())
+        src, CONSTANTS = m.code_with_constants
+        eic = self.getExportImportCopy(m)
+
+        src_eic, CONSTANTS_eic = eic.code_with_constants
+
+        self.assertEqual(src, src_eic)
+        self.assertEqual(CONSTANTS.c0, CONSTANTS_eic.c0)
+
+
     def test_oneline_func(self):
         def fn(x): return x  # noqa: E704
 
@@ -3446,6 +3528,71 @@ class TestScript(JitTestCase):
             for i in range(0, num_bailouts):
                 eplan.code.request_bailout(i)
                 self.assertEqual(jitted(x), expected)
+
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
+    def test_dominated_bailout(self):
+        with enable_profiling_mode():
+            # functional dominated guard
+            @torch.jit.script
+            def foo(x):
+                dim = x.dim()
+                if dim == 0:
+                    y = int(x)
+                else:
+                    y = x.size()[dim - 1]
+                return y
+
+            x = torch.zeros(2)
+            self.assertEqual(foo(x), 2)
+            self.assertEqual(foo(x), 2)
+            g = torch.jit.last_executed_optimized_graph()
+            g_s = str(g)
+            g_s = g_s[0:g_s.find("return")]
+            FileCheck().check_count("prim::BailOut[", 1, exactly=True).run(g_s)
+
+            # dominated guard of non-functional value
+            @torch.jit.script
+            def foo(x):
+                dim = x.dim()
+                x.add_(3)
+                if dim == 0:
+                    return 0
+                else:
+                    return x.size()[dim - 1]
+
+            x = torch.zeros(2)
+            self.assertEqual(foo(x), 2)
+            self.assertEqual(foo(x), 2)
+            g = torch.jit.last_executed_optimized_graph()
+            FileCheck().check("prim::BailOut[").check("aten::add_").check_next("prim::BailOut[").check("return").run(g)
+
+            with torch.enable_grad():
+                @torch.jit.ignore
+                def disable_grad():
+                    torch.set_grad_enabled(False)
+
+                @torch.jit.ignore
+                def enable_grad():
+                    torch.set_grad_enabled(True)
+
+                @torch.jit.script
+                def foo(x):
+                    x = x + 1
+                    dim = x.dim()
+                    disable_grad()
+                    if dim == 0:
+                        y = int(x)
+                    else:
+                        y = x.size()[dim - 1]
+                    enable_grad()
+                    return y
+
+                x = torch.zeros(2, requires_grad=True)
+                self.assertEqual(foo(x), 2)
+                self.assertEqual(foo(x), 2)
+                g = torch.jit.last_executed_optimized_graph()
+                # there should still be a Bailout after disable_grad call
+                FileCheck().check("disable_grad").check("BailOut[").check("BailoutTemplate").run(g)
 
     def test_nested_bailouts(self):
         @torch.jit.script
@@ -4587,6 +4734,84 @@ def foo(x):
 
         mod = TorchBindOptionalExplicitAttr()
         scripted = torch.jit.script(mod)
+
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
+    def test_lower_graph(self):
+        class LinearModel(torch.nn.Module):
+            def __init__(self):
+                super(LinearModel, self).__init__()
+                self.qconfig = torch.quantization.default_qconfig
+                self.fc1 = torch.quantization.QuantWrapper(torch.nn.Linear(5, 10).to(dtype=torch.float))
+
+            def forward(self, x):
+                x = self.fc1(x)
+                return x
+
+        qconfig = torch.quantization.default_qconfig
+        model = LinearModel()
+        model.qconfig = qconfig
+        model = torch.quantization.prepare(model)
+        model = torch.quantization.convert(model)
+
+        def export_to_onnx(model, input, input_names):
+            outputs = model(input)
+
+            traced = torch.jit.trace(model, input)
+            buf = io.BytesIO()
+            torch.jit.save(traced, buf)
+            buf.seek(0)
+
+            model = torch.jit.load(buf)
+            f = io.BytesIO()
+            torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs,
+                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+
+        x_numpy = np.random.rand(1, 2, 5).astype(np.float32)
+        x = torch.from_numpy(x_numpy).to(dtype=torch.float)
+        outputs = model(x)
+        input_names = ["x"]
+        onnx_model = export_to_onnx(model, x, input_names)
+
+
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
+    def test_lower_graph_conv(self):
+        class ConvModel(torch.nn.Module):
+            def __init__(self):
+                super(ConvModel, self).__init__()
+                self.qconfig = torch.quantization.default_qconfig
+                self.conv = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True).to(dtype=torch.float))
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+        qconfig = torch.quantization.default_qconfig
+        model = ConvModel()
+        model.qconfig = qconfig
+        model = torch.quantization.prepare(model)
+        model = torch.quantization.convert(model)
+
+        x_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
+        x = torch.from_numpy(x_numpy).to(dtype=torch.float)
+        outputs = model(x)
+        input_names = ["x"]
+
+        def export_to_onnx(model, input, input_names):
+            outputs = model(input)
+
+            traced = torch.jit.trace(model, input)
+            buf = io.BytesIO()
+            torch.jit.save(traced, buf)
+            buf.seek(0)
+
+            model = torch.jit.load(buf)
+            f = io.BytesIO()
+            torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs,
+                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        onnx_model = export_to_onnx(model, x, input_names)
 
     def test_jitter_bug(self):
         @torch.jit.script
@@ -10288,17 +10513,6 @@ a")
                 hs = HaveSequential()
                 i = torch.Tensor(2)
                 hs(i)
-
-    def test_constant_insert_fail_lint(self):
-        @torch.jit.script
-        def foo(x):
-            y = x + 1
-            z = torch.tensor([[1.0, 2.5]])
-            print(x, z)
-
-        # check that it doesnt error
-        self.run_pass('constant_propagation', foo.graph)
-        self.assertTrue("aten::tensor" in str(foo.graph))  # not constant propped
 
     @_tmp_donotuse_dont_inline_everything
     def test_script_sequential_in_mod_list(self):

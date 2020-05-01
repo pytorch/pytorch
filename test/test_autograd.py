@@ -5635,6 +5635,14 @@ class TestAutogradDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
             b.backward(torch.ones(2, device=device))
 
+    @skipCUDAIfRocm
+    def test_leaky_relu_inplace_with_zero_slope(self, device):
+        a = torch.tensor([-2., 0., 2.], device=device, requires_grad=True)
+        b = torch.nn.functional.leaky_relu_(a.clone(), 0.0)
+        b.backward(torch.ones(3, device=device))
+        expected = torch.tensor([0., 0., 1.], device=device)
+        self.assertEqual(a.grad, expected)
+
     @onlyCUDA
     def test_free_unneeded_tensor(self, device):
         x = torch.randn(2, 3, 10, 10, device=device, requires_grad=True)
