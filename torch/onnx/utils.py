@@ -854,6 +854,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
     except RuntimeError:
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLTHROUGH:
             return None
+        raise
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch.
         # Otherwise, the backtrace will have the clues you need.

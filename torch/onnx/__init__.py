@@ -79,6 +79,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             OperatorExportTypes.ONNX_ATEN: all ops are exported as ATen ops.
             OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing, fall back on ATen op.
             OperatorExportTypes.RAW: export raw ir.
+            OperatorExportTypes.ONNX_ATEN_FALLTHROUGH: if symbolic is missing, pass through the op.
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
             evolve before next stable release, by default we export to one stable

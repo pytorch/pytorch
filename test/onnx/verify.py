@@ -270,7 +270,9 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
         opset_version (int, default None): the opset version of the model to
             export. If not specified, the default value in symboli_helper will
             be used in utils._export().
-        operator_export_type
+        operator_export_type (enum, default OperatorExportTypes.ONNX): the operator
+            export type to use when exporting the model. The default value converts
+            all operators to ONNX ops.
     """
     def _nested_map(condition, fn, condition_msg=None):
         def _map(obj):
