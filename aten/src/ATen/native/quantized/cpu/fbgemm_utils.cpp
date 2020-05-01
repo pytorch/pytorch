@@ -11,6 +11,9 @@
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
 
+template <int kSpatialDim>
+torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params();
+
 #ifdef USE_FBGEMM
 
 namespace at {
