@@ -272,13 +272,15 @@ class QConvPackWeightInt8 final {
         {stride_w, stride_h},
         {dilation_w, dilation_h},
         {pad_t, pad_l, pad_t, pad_l},
+        /*adjustment=*/{0, 0},
         groups,
         in_ch,
         out_ch,
         weight.q_zero_point(),
         weight.q_scale(),
         std::numeric_limits<uint8_t>::min(),
-        std::numeric_limits<uint8_t>::max());
+        std::numeric_limits<uint8_t>::max(),
+        /*transpose=*/false);
 
     auto weight_contig = weight.contiguous(MemoryFormat::ChannelsLast);
     auto weight_zp = weight.q_zero_point();
