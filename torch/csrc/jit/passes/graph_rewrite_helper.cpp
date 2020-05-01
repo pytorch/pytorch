@@ -51,9 +51,16 @@ void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
         %r = aten::conv2d(%a, %w, %b, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
+  std::string conv1d = R"(
+      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+          %deterministic:bool, %cudnn_enabled:bool):
+        %r = aten::conv1d(%a, %w, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
   // Filter the unsupported case
-  auto filter = [](const Match& match,
-                   const std::unordered_map<std::string, Value*>& vmap) {
+  auto filter_conv1d = [](const Match& match,
+                          const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
     auto transposed_value =
         getIValue("transposed", match_vmap, vmap).value().toBool();
@@ -66,21 +73,40 @@ void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
     auto output_padding_value =
         getIValue("output_padding", match_vmap, vmap).value().toIntList();
 
-    // For conv1d output_padding size is always 1, so return false here.
-    if (output_padding_value.size() < 2) {
+    if (output_padding_value.size() != 1) {
       return false;
     }
-    if (!transposed_value && !benchmark_value && !deterministic_value &&
-        cudnn_enabled_value && (output_padding_value[0] == 0) &&
-        (output_padding_value[1] == 0)) {
-      return true;
+    return !transposed_value && !benchmark_value && !deterministic_value &&
+        cudnn_enabled_value && (output_padding_value[0] == 0);
+  };
+  auto filter_conv2d = [](const Match& match,
+                          const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto transposed_value =
+        getIValue("transposed", match_vmap, vmap).value().toBool();
+    auto benchmark_value =
+        getIValue("benchmark", match_vmap, vmap).value().toBool();
+    auto deterministic_value =
+        getIValue("deterministic", match_vmap, vmap).value().toBool();
+    auto cudnn_enabled_value =
+        getIValue("cudnn_enabled", match_vmap, vmap).value().toBool();
+    auto output_padding_value =
+        getIValue("output_padding", match_vmap, vmap).value().toIntList();
+
+    if (output_padding_value.size() != 2) {
+      return false;
     }
-    return false;
+    return !transposed_value && !benchmark_value && !deterministic_value &&
+        cudnn_enabled_value && (output_padding_value[0] == 0) &&
+        (output_padding_value[1] == 0);
   };
 
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(convolution, conv2d);
-  rewriter.runOnGraph(graph, filter);
+  SubgraphRewriter rewriter_conv1d;
+  rewriter_conv1d.RegisterRewritePattern(convolution, conv1d);
+  rewriter_conv1d.runOnGraph(graph, filter_conv1d);
+  SubgraphRewriter rewriter_conv2d;
+  rewriter_conv2d.RegisterRewritePattern(convolution, conv2d);
+  rewriter_conv2d.runOnGraph(graph, filter_conv2d);
 }
 
 } // namespace graph_rewrite_helper
