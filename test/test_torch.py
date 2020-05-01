@@ -6092,12 +6092,35 @@ class TestTorchDeviceType(TestCase):
         self.assertTrue(y1.size() == expected_size)
         self.assertTrue(y2.size() == expected_size)
 
+    def _do_pow_for_exponents(self, m1, exponents, pow_fn, atol):
+        for num in exponents:
+            if isinstance(num, int) and num < 0 and not m1.is_floating_point() and not m1.is_complex():
+                with self.assertRaisesRegex(RuntimeError,
+                                            r'Integers to negative integer powers are not allowed\.'):
+                    torch.pow(m1[4], num)
+            else:
+                # base - tensor, exponent - number
+                # contiguous
+                res1 = torch.pow(m1[4], num)
+                res2 = res1.clone().zero_()
+                # `math.pow` has issues with complex exponentiation so we need to resort to normal `pow`.
+                for i in range(res2.size(0)):
+                    res2[i] = pow_fn(m1[4][i], num)
+                self.assertEqual(res1, res2, {'atol': atol})
+
+                # non-contiguous
+                res1 = torch.pow(m1[:, 4], num)
+                res2 = res1.clone().zero_()
+                for i in range(res2.size(0)):
+                    res2[i] = pow_fn(m1[i, 4], num)
+                self.assertEqual(res1, res2, {'atol': atol})
+
     def test_pow(self, device):
         # [res] torch.pow([res,] x)
 
         # pow has dedicated implementation for different exponents
-        dtypes = torch.testing.get_all_math_dtypes(device) + torch.testing.get_all_complex_dtypes()
-        for dtype in dtypes:
+        for dtype in torch.testing.get_all_math_dtypes(device):
+
             # This test won't work on torch.half because math.pow will generate a much more accurate result. We skip it
             # for now.
             if dtype == torch.half:
@@ -6115,58 +6138,33 @@ class TestTorchDeviceType(TestCase):
                 range_high = 4 if dtype in (torch.int8, torch.uint8) else 10
                 m1 = torch.randint(1, range_high, (100, 100), dtype=dtype, device=device)
 
-            # The complex64 implementation in CPU may show some precision issues
-            # when comparing the resulting float value with python double precision
-            # Also using pythons pow instead of math.pow can lead to precision issues with
-            # float32
-            tol_kwargs = {}
-            if dtype in (torch.complex64, torch.float32):
-                tol_kwargs = {'atol': 10e-4}
-
             exponents = [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3]
+            complex_exponents = [-2.5j, -1.0j, 0j, 1.0j, 2.5j, 1.0 + 1.0j, -1.0 - 1.5j, 3.3j]
             if m1.is_complex():
-                exponents += [-2.5j, -1.0j, 0j, 1.0j, 2.5j, 1.0 + 1.0j, -1.0 - 1.5j]
-
-            for num in exponents:
-                if isinstance(num, int) and num < 0 and not m1.is_floating_point() and not m1.is_complex():
-                    with self.assertRaisesRegex(RuntimeError,
-                                                r'Integers to negative integer powers are not allowed\.'):
-                        torch.pow(m1[4], num)
-                else:
-                    # base - tensor, exponent - number
-                    # contiguous
-                    res1 = torch.pow(m1[4], num)
-                    res2 = res1.clone().zero_()
-                    for i in range(res2.size(0)):
-                        res2[i] = pow(m1[4][i], num)
-                    self.assertEqual(res1, res2, **tol_kwargs)
-
-                    # non-contiguous
-                    res1 = torch.pow(m1[:, 4], num)
-                    res2 = res1.clone().zero_()
-                    for i in range(res2.size(0)):
-                        res2[i] = pow(m1[i, 4], num)
-                    self.assertEqual(res1, res2, **tol_kwargs)
+                self._do_pow_for_exponents(m1, exponents + complex_exponents, pow, 10e-4)
+            else:
+                self._do_pow_for_exponents(m1, exponents, math.pow, {})
+                self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
 
             # base - number, exponent - tensor
             # contiguous
             res1 = torch.pow(3, m1[4])
             res2 = res1.clone().zero_()
             for i in range(res2.size(0)):
-                res2[i] = pow(3, m1[4, i])
-            self.assertEqual(res1, res2, **tol_kwargs)
+                res2[i] = math.pow(3, m1[4, i])
+            self.assertEqual(res1, res2)
 
             # non-contiguous
             res1 = torch.pow(3, m1[:, 4])
             res2 = res1.clone().zero_()
             for i in range(res2.size(0)):
-                res2[i] = pow(3, m1[i][4])
-            self.assertEqual(res1, res2, **tol_kwargs)
+                res2[i] = math.pow(3, m1[i][4])
+            self.assertEqual(res1, res2)
 
             # resize behavior for exp == 1
             out = torch.zeros(1, dtype=dtype, device=device)
             torch.pow(m1, 1, out=out)
-            self.assertEqual(out, m1, **tol_kwargs)
+            self.assertEqual(out, m1)
 
     def test_neg(self, device):
         int_types = [torch.int, torch.short, torch.int8, torch.uint8]
