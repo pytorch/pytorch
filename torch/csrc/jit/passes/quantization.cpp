@@ -1539,7 +1539,7 @@ void insertDeQuantForAllUse(
     // in the same block so that quant fusion can happen
     WithInsertPoint ins(user);
     Node* dequant = insertDeQuant(graph, quantized_val, original_val, i);
-    user->replaceInputWith(original_val, dequant->output());
+    user->replaceInput(uses[i].offset, dequant->output());
   }
 }
 
