@@ -70,6 +70,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
+    ${TORCH_ROOT}/third_party/tensorpipe
     ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
