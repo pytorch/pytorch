@@ -82,7 +82,7 @@ static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl) {
   return out_impl(result, self);
 }
 
-// An alternate version of unary_op_impl that follows the same pattern 
+// An alternate version of unary_op_impl that follows the same pattern
 // for non-complex inputs, but returns a floating point tensor
 // for complex inputs by default.
 template <typename OutImpl>
@@ -380,6 +380,66 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
   TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   TORCH_CHECK(self.device().type() == DeviceType::CPU,
               "clamp_min only supports CPU device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "clamp_min only supports strided layout, got: ", self.layout());
+  auto iter = TensorIterator::unary_op(result, self,
+      /*check_mem_overlap=*/true);
+  clamp_min_stub(iter.device_type(), iter, min);
+  return result;
+}
+
+Tensor& _clamp__cuda(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return _clamp_out_cuda(self, self, min, max);
+}
+
+Tensor& _clamp_out_cuda(
+    Tensor& result,
+    const Tensor& self,
+    optional<Scalar> min,
+    optional<Scalar> max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
+  if (min && max) {
+    TORCH_CHECK(self.device().type() == DeviceType::CUDA,
+                "clamp only supports CUDA device type, got: ", self.device().type());
+    TORCH_CHECK(self.layout() == Layout::Strided,
+                "clamp only supports strided layout, got: ", self.layout());
+    auto iter = TensorIterator::unary_op(result, self,
+        /*check_mem_overlap=*/true);
+    clamp_stub(iter.device_type(), iter, *min, *max);
+  } else if (max) {
+    clamp_max_out(result, self, *max);
+  } else if (min) {
+    clamp_min_out(result, self, *min);
+  } else {
+    AT_ERROR("At least one of 'min' or 'max' must not be None");
+  }
+  return result;
+}
+
+Tensor& _clamp_max__cuda(Tensor& self, Scalar max) {
+  return _clamp_max_out_cuda(self, self, max);
+}
+
+Tensor& _clamp_max_out_cuda(Tensor& result, const Tensor& self, Scalar max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
+  TORCH_CHECK(self.device().type() == DeviceType::CUDA,
+              "clamp_max only supports CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "clamp_max only supports strided layout, got: ", self.layout());
+  auto iter = TensorIterator::unary_op(result, self,
+      /*check_mem_overlap=*/true);
+  clamp_max_stub(iter.device_type(), iter, max);
+  return result;
+}
+
+Tensor& _clamp_min__cuda(Tensor& self, Scalar min) {
+  return _clamp_min_out_cuda(self, self, min);
+}
+
+Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
+  TORCH_CHECK(self.device().type() == DeviceType::CUDA,
+              "clamp_min only supports CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_min only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self,
