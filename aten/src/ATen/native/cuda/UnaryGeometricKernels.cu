@@ -111,10 +111,24 @@ void cosh_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t tanh_wrapper(scalar_t v) {
+  return ::tanh(v);
+}
+
+void tanh_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "tanh_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return tanh_wrapper(a);
+    });
+  });
+}
+
 REGISTER_DISPATCH(acos_stub, &acos_kernel_cuda);
 REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda);
 REGISTER_DISPATCH(sin_stub, &sin_kernel_cuda);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel_cuda);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel_cuda);
+REGISTER_DISPATCH(tanh_stub, &tanh_kernel_cuda);
 
 }} // namespace at::native

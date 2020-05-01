@@ -30,7 +30,7 @@ namespace {
 
 void variable_fallback_kernel(const OperatorHandle& op, Stack* stack) {
     at::AutoNonVariableTypeMode _var_guard(true);
-    Dispatcher::singleton().callBoxed(op, stack);
+    op.callBoxed(stack);
 }
 
 TORCH_LIBRARY_IMPL(_, Autograd, m) {

@@ -18,3 +18,7 @@ TEST(ExceptionTest, TORCH_INTERNAL_ASSERT_DEBUG_ONLY) {
   ASSERT_NO_THROW(TORCH_INTERNAL_ASSERT_DEBUG_ONLY(true));
 #endif
 }
+
+TEST(WarningTest, JustPrintWarning) {
+  TORCH_WARN("I'm a warning");
+}

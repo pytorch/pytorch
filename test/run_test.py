@@ -17,8 +17,6 @@ import torch._six
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
-PY33 = sys.version_info >= (3, 3)
-PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'test_autograd',
@@ -50,16 +48,7 @@ TESTS = [
     'test_numba_integration',
     'test_optim',
     'test_mobile_optimizer',
-    'quantization/test_fake_quant',
-    'quantization/test_numerics',
-    'quantization/test_qat',
-    'quantization/test_quantization',
-    'quantization/test_numeric_suite',
-    'quantization/test_quantized',
-    'quantization/test_quantized_tensor',
-    'quantization/test_quantized_nn_mods',
-    'quantization/test_quantize_script',
-    'quantization/test_backward_compatibility.py',
+    'test_quantization',
     'test_sparse',
     'test_serialization',
     'test_show_pickle',
@@ -80,27 +69,17 @@ TESTS = [
     'test_overrides',
     'test_jit_fuser_te',
     'test_tensorexpr',
+    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
+    'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'distributed/rpc/jit/test_dist_autograd_spawn',
+    'distributed/rpc/test_dist_autograd_spawn',
+    'distributed/rpc/test_dist_optimizer_spawn',
+    'distributed/rpc/test_rpc_spawn',
+    'test_jit_py3',
+    'test_determination',
+    'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/faulty_agent/test_rpc_spawn',
 ]
-
-# skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
-if PY33:
-    TESTS.extend([
-        'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
-        'distributed/rpc/faulty_agent/test_rpc_spawn',
-        'distributed/rpc/jit/test_dist_autograd_spawn',
-        'distributed/rpc/test_dist_autograd_spawn',
-        'distributed/rpc/test_dist_optimizer_spawn',
-        'distributed/rpc/test_rpc_spawn',
-    ])
-
-# skip < 3.6 b/c fstrings added in 3.6
-if PY36:
-    TESTS.extend([
-        'test_jit_py3',
-        'test_determination',
-        'distributed/rpc/jit/test_rpc_spawn',
-        'distributed/rpc/faulty_agent/test_rpc_spawn',
-    ])
 
 WINDOWS_BLACKLIST = [
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
@@ -157,9 +136,7 @@ SLOW_TESTS = [
     'test_tensorboard',
     'distributed/test_c10d',
     'distributed/test_c10d_spawn',
-    'quantization/test_quantized',
-    'quantization/test_quantization',
-    'quantization/test_numeric_suite',
+    'test_quantization',
     'test_determination',
 ]
 _DEP_MODULES_CACHE = {}

@@ -45,6 +45,7 @@ white_list = [
     ('_quantized::conv2d', datetime.date(2020, 6, 1)),
     ('quantized::conv2d_prepack', datetime.date(2020, 6, 1)),
     ('quantized::conv3d_relu', datetime.date(2020, 6, 1)),
+    ('aten::batch_norm_gather_stats_with_counts', datetime.date(2020, 6, 30)),
     ('_aten::*', datetime.date(2020, 6, 1)),
     ('_prim::*', datetime.date(2020, 6, 1)),
 ]

@@ -10,7 +10,7 @@ import torch.quantization
 
 from torch.testing._internal.common_quantization import QuantizationTestCase, prepare_dynamic
 from torch.testing._internal.common_quantized import _calculate_dynamic_qparams, override_quantized_engine
-from torch.testing._internal.common_utils import run_tests, IS_PPC, TEST_WITH_UBSAN
+from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
@@ -81,7 +81,7 @@ def _make_conv_test_input(
     return (X, X_q, W, W_q, b if use_bias else None)
 
 
-class FunctionalAPITest(QuantizationTestCase):
+class TestFunctional(QuantizationTestCase):
     def test_relu_api(self):
         X = torch.arange(-5, 5, dtype=torch.float)
         scale = 2.0
@@ -237,7 +237,7 @@ class FunctionalAPITest(QuantizationTestCase):
                 use_channelwise)
 
 
-class DynamicModuleAPITest(QuantizationTestCase):
+class TestDynamicQuantizedModule(QuantizationTestCase):
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                          " with instruction set support avx2 or newer.")
@@ -336,7 +336,7 @@ class DynamicModuleAPITest(QuantizationTestCase):
         self.assertTrue('QuantizedLinear' in str(quantized_float_linear))
 
 
-class ModuleAPITest(QuantizationTestCase):
+class TestStaticQuantizedModule(QuantizationTestCase):
     def test_relu(self):
         relu_module = nnq.ReLU()
         relu6_module = nnq.ReLU6()
@@ -865,7 +865,7 @@ class ModuleAPITest(QuantizationTestCase):
         qX = torch.quantize_per_tensor(X, x_scale, x_zero_point, dtype=torch.quint8)
         dqX = qX.dequantize()
 
-        float_mod = torch.nn.LayerNorm(dqX.size()[1:])
+        float_mod = torch.nn.LayerNorm(dqX.size()[1:]).float()
         float_mod.weight = torch.nn.Parameter(torch.rand(*dims[1:]))
         float_mod.bias = torch.nn.Parameter(torch.rand(*dims[1:]))
 
@@ -880,6 +880,3 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
                          message="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
                          .format(qY_ref, qY))
-
-if __name__ == '__main__':
-    run_tests()

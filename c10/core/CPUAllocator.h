@@ -14,8 +14,15 @@ C10_DECLARE_bool(caffe2_cpu_allocator_do_junk_fill);
 
 namespace c10 {
 
+#ifdef C10_MOBILE
+// Use 16-byte alignment on mobile
+// - ARM NEON AArch32 and AArch64
+// - x86[-64] < AVX
+constexpr size_t gAlignment = 16;
+#else
 // Use 64-byte alignment should be enough for computation up to AVX512.
 constexpr size_t gAlignment = 64;
+#endif
 
 using MemoryDeleter = void (*)(void*);
 
@@ -38,5 +45,8 @@ C10_API void SetCPUAllocator(at::Allocator* alloc);
 
 // Get the Default CPU Allocator
 C10_API at::Allocator* GetDefaultCPUAllocator();
+
+// Get the Default Mobile CPU Allocator
+C10_API at::Allocator* GetDefaultMobileCPUAllocator();
 
 } // namespace c10

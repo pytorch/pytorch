@@ -118,6 +118,7 @@ std::vector<std::string> _single_input_general_aten_funcs = {
     "upsample_bicubic2d",
     "dropout",
     "reshape",
+    "resize_", // Non-inplace resize is deprecated
     "chunk",
     "view",
     "transpose",

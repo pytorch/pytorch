@@ -18,7 +18,6 @@ namespace {
 Operator createOperatorFromC10_withTracingHandledHere(
     const c10::OperatorHandle& op) {
   return Operator(op, [op](Stack& stack) {
-    RECORD_FUNCTION(op.schema().name(), stack);
     const auto input_size = op.schema().arguments().size();
     const auto output_size = op.schema().returns().size();
 
@@ -115,10 +114,10 @@ Operator createOperatorFromC10_withTracingHandledHere(
 #ifdef USE_STATIC_DISPATCH
     {
       at::AutoNonVariableTypeMode non_var_type_mode(true);
-      c10::Dispatcher::singleton().callBoxed(op, &stack);
+      op.callBoxed(&stack);
     }
 #else
-      c10::Dispatcher::singleton().callBoxed(op, &stack);
+    op.callBoxed(&stack);
 #endif // USE_STATIC_DISPATCH
 
     if (tracer_state) {
@@ -152,7 +151,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
 Operator createOperatorFromC10_withTracingNotHandledHere(
     const c10::OperatorHandle& op) {
   return Operator(op, [op](Stack& stack) {
-    c10::Dispatcher::singleton().callBoxed(op, &stack);
+    op.callBoxed(&stack);
     return 0;
   });
 }
