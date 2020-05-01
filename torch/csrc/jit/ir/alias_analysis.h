@@ -117,6 +117,24 @@ class AliasDb {
   static bool isMutableType(const Value* v);
   static bool isMutableType(const TypePtr& type);
 
+  /**
+   * Mutation API
+   *
+   * These methods allow you to update AliasDb in-place if you are performing
+   * graph mutation.
+   *
+   * WARNING: These methods should be considered INTERNAL. They do not perform
+   * very many correctness checks, the user is responsible for making sure they
+   * are updating AliasDb correctly. `Lint()`ing the AliasDb can help with
+   * this.
+   */
+  // Copy `existing`s aliasing info to `new_value`, and remove `existing`.
+  void replaceWithNewValue(Value* existing, Value* new_value);
+  // Copy `from`s aliasing info to `to`.
+  void copyValue(Value* from, Value* to);
+  // Create a new `value` that does not alias anything else.
+  void createValue(const Value* value);
+
   friend struct MutationRemover;
 
  private:
@@ -187,16 +205,8 @@ class AliasDb {
       const Value* element,
       const Value* container);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
-  void unsafeGiveFreshAlias(const Value* value);
   void giveFreshAlias(const Value* value);
   Element* getOrCreateElement(const Value* value);
-
-  // In the Value * -> Element * map replaces the mapping
-  // of Value * existing -> Element * existing_elem with
-  // Value * new_value -> Element * existing_elem
-  // Callers are expected to maintain graph invariants & specify
-  // own correctness conditions
-  void replaceMemoryLocation(Value* existing, Value* new_value);
 
   c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) const;
 
@@ -250,7 +260,14 @@ class AliasDb {
   std::unordered_set<const Value*> wildcards_;
 
   std::string getElementName(const Element* e) const;
+
+  friend void Lint(const AliasDb* db);
 };
+
+// Helper check that invariants over AliasDb are maintained.
+// Useful if you are using the AliasDb mutation API and want to check you did
+// the right thing.
+void Lint(const AliasDb* db);
 
 } // namespace jit
 } // namespace torch

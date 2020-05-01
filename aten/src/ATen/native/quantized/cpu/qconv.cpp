@@ -567,7 +567,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       "be greater than 0.")
 
   // Allocate output Tensor and a buffer for QNNPACK to use
-  at::Tensor output = at::_empty_affine_quantized(
+  at::Tensor output = at::native::empty_affine_quantized(
       output_shape,
       at::device(c10::kCPU)
           .dtype(c10::kQUInt8)
