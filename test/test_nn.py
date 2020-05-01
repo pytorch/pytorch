@@ -4569,7 +4569,7 @@ class TestNN(NNTestCase):
             m = nn.LSTM(3, 4, bidirectional=True, num_layers=2).to('cuda')
             a = torch.rand(5, 3, device='cuda')
             b = torch.tensor([1, 1, 1, 1, 1], device='cuda')
- 
+
     def test_transformer_cell(self):
         # this is just a smoke test; these modules are implemented through
         # autograd so no Jacobian test is needed
@@ -4603,8 +4603,6 @@ class TestNN(NNTestCase):
                              tgt_key_padding_mask=tgt_key_padding_mask,
                              memory_key_padding_mask=memory_key_padding_mask)
         output.sum().backward()
-
-           input = nn.utils.rnn.PackedSequence(a, b)
 
     def test_transformer_batch_first(self):
         d_model = 512
