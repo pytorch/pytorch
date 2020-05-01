@@ -196,7 +196,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
   deconvolution->group_input_channels = group_input_channels;
   deconvolution->group_output_channels = group_output_channels;
 
-  deconvolution->kernel_zero_point = kernel_zero_points;
+  deconvolution->kernel_zero_point = kernel_zero_points[0];
 
   // Passing address of kernel_zero_scale and convolution_scale
   // is not safe as they are stack variables. However for now just staging this change.
