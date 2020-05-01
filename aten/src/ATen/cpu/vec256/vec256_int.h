@@ -8,7 +8,7 @@ namespace at {
 namespace vec256 {
 namespace {
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
 
 struct Vec256i {
 protected:
@@ -30,9 +30,9 @@ public:
 
 struct Vec256i {};  // dummy definition to make Vec256i always defined
 
-#endif // __AVX2__
+#endif // CPU_CAPABILITY_AVX2
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
 
 template <>
 class Vec256<int64_t> : public Vec256i {

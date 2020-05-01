@@ -20,6 +20,9 @@
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
 
+#include "test_utils.h"
+using namespace qnnpack::testing;
+
 class DeconvolutionOperatorTester {
  public:
   inline DeconvolutionOperatorTester& padding(uint32_t padding) {
@@ -374,11 +377,6 @@ class DeconvolutionOperatorTester {
   inline size_t iterations() const {
     return this->iterations_;
   }
-
-  enum class Mode {
-    Static,
-    Runtime,
-  };
 
   void testQ8(const Mode mode = Mode::Static) const {
     std::random_device randomDevice;
