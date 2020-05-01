@@ -45,14 +45,39 @@ white_list = [
     ('_quantized::conv2d', datetime.date(2020, 6, 1)),
     ('quantized::conv2d_prepack', datetime.date(2020, 6, 1)),
     ('quantized::conv3d_relu', datetime.date(2020, 6, 1)),
-    ('_aten::*', datetime.date(2020, 6, 1)),
-    ('_prim::*', datetime.date(2020, 6, 1)),
+    ('aten::batch_norm_gather_stats_with_counts', datetime.date(2020, 6, 30)),
+    ('aten::quantized_lstm', datetime.date(2020, 6, 1)),
+    ('aten::quantized_gru', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params_fp16', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params_dynamic', datetime.date(2020, 6, 1)),
+    ('aten::len', datetime.date(2020, 6, 30)),
+    ('aten::keys', datetime.date(2020, 6, 30)),
+    ('aten::values', datetime.date(2020, 6, 30)),
+    ('aten::__getitem__', datetime.date(2020, 6, 30)),
+    ('aten::get', datetime.date(2020, 6, 30)),
+    ('aten::setdefault', datetime.date(2020, 6, 30)),
+    ('aten::Delete', datetime.date(2020, 6, 30)),
+    ('aten::pop', datetime.date(2020, 6, 30)),
+    ('aten::popitem', datetime.date(2020, 6, 30)),
+    ('aten::clear', datetime.date(2020, 6, 30)),
+    ('aten::update', datetime.date(2020, 6, 30)),
+    ('aten::items', datetime.date(2020, 6, 30)),
+    ('aten::copy', datetime.date(2020, 6, 30)),
+    ('aten::__contains__', datetime.date(2020, 6, 30)),
+    ('aten::_set_item', datetime.date(2020, 6, 30)),
+    ('aten::dict', datetime.date(2020, 6, 30)),
 ]
 
 
 # The nightly will fail to parse newly added syntax to schema declarations
 # Add new schemas that will fail the nightly here
 dont_parse_list = [
+    ('aten::quantized_lstm', datetime.date(2020, 6, 1)),
+    ('aten::quantized_gru', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params_fp16', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params_dynamic', datetime.date(2020, 6, 1)),
 ]
 
 

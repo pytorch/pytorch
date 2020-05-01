@@ -347,6 +347,12 @@ class Tensor(torch._C._TensorBase):
         return torch.stft(self, n_fft, hop_length, win_length, window, center,
                           pad_mode, normalized, onesided)
 
+    def istft(self, n_fft, hop_length=None, win_length=None, window=None,
+              center=True, normalized=False, onesided=True, length=None):
+        r"""See :func:`torch.istft`"""
+        return torch.istft(self, n_fft, hop_length, win_length, window, center,
+                           normalized, onesided, length)
+
     def resize(self, *sizes):
         warnings.warn("non-inplace resize is deprecated")
         from torch.autograd._functions import Resize
@@ -656,7 +662,7 @@ class Tensor(torch._C._TensorBase):
 
             >>> flat_imgs = torch.rand(32, 3 * 128 * 128, names=('N', 'features'))
             >>> imgs = flat_imgs.unflatten('features', (('C', 3), ('H', 128), ('W', 128)))
-            >>> imgs.names, images.shape
+            >>> imgs.names, imgs.shape
             (('N', 'C', 'H', 'W'), torch.Size([32, 3, 128, 128]))
 
         .. warning::

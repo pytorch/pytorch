@@ -528,12 +528,12 @@ Tensor gather_cpu(const Tensor & self, int64_t dim, const Tensor & index, bool s
   return gather_out_cpu(result, self, dim, index, sparse_grad);
 }
 
-Tensor & scatter_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
+Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
   scatter_stub(self.device().type(), self, dim, index, src);
   return self;
 }
 
-Tensor & scatter_fill_cpu_(Tensor & self, int64_t dim, const Tensor & index, Scalar src) {
+Tensor & scatter_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar src) {
   scatter_fill_stub(self.device().type(), self, dim, index, src);
   return self;
 }

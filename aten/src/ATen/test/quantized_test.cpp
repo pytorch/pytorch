@@ -8,7 +8,7 @@
 #include <sstream>
 #include <type_traits>
 // For quantize_val
-#include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/affine_quantizer.h>
 #include <c10/core/ScalarType.h>
 
 using namespace at;
@@ -36,8 +36,8 @@ TEST(TestQTensor, QuantDequantAPIs) {
   auto qr_data = qr.data_ptr<quint8>();
   for (auto i = 0; i < num_elements; ++i) {
     ASSERT_EQ(
-      quantize_val<quint8>(scale, zero_point, r_data[i]).val_,
-      qr_data[i].val_);
+        native::quantize_val<quint8>(scale, zero_point, r_data[i]).val_,
+        qr_data[i].val_);
   }
 
   // Check for correct dequantization
@@ -47,8 +47,9 @@ TEST(TestQTensor, QuantDequantAPIs) {
     ASSERT_EQ(r_data[i], rqr_data[i]);
   }
   for (auto i = 0; i < num_elements; ++i) {
-    ASSERT_EQ(r_data[i],
-              dequantize_val(qr.q_scale(), qr.q_zero_point(), qr_data[i]));
+    ASSERT_EQ(
+        r_data[i],
+        native::dequantize_val(qr.q_scale(), qr.q_zero_point(), qr_data[i]));
   }
 
   // Check for correct requantization
@@ -57,11 +58,12 @@ TEST(TestQTensor, QuantDequantAPIs) {
   Tensor reqr = at::quantize_per_tensor(r, new_scale, new_zero_point, kQInt8);
   auto reqr_data = reqr.data_ptr<qint8>();
   for (auto i = 0; i < num_elements; ++i) {
-    reqr_data[i].val_ = requantize_val<quint8, qint8>(scale, zero_point,
-                                                      new_scale, new_zero_point,
-                                                      qr_data[i]).val_;
-    const qint8 expected = quantize_val<qint8>(new_scale, new_zero_point,
-                                               rqr_data[i]);
+    reqr_data[i].val_ =
+        native::requantize_val<quint8, qint8>(
+            scale, zero_point, new_scale, new_zero_point, qr_data[i])
+            .val_;
+    const qint8 expected =
+        native::quantize_val<qint8>(new_scale, new_zero_point, rqr_data[i]);
     ASSERT_EQ(expected.val_, reqr_data[i].val_);
   }
 }

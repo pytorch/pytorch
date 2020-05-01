@@ -223,6 +223,9 @@ namespace c10 {
   _(onnx, SequenceInsert)            \
   _(onnx, ConcatFromSequence)        \
   _(onnx, Identity)                  \
+  _(onnx, SoftmaxCrossEntropyLoss)   \
+  _(onnx, NegativeLogLikelihoodLoss) \
+  _(onnx, LogSoftmax)                \
   _(onnx, ReduceL1)                  \
   _(onnx, ReduceL2)                  \
   FORALL_ATTR_BASE_SYMBOLS(_)        \

@@ -1628,7 +1628,7 @@ def bilinear(input1, input2, weight, bias=None):
     # type: (Tensor, Tensor, Tensor, Optional[Tensor]) -> Tensor
     r"""
     Applies a bilinear transformation to the incoming data:
-    :math:`y = x_1 A x_2 + b`
+    :math:`y = x_1^T A x_2 + b`
 
     Shape:
 
@@ -3679,7 +3679,7 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
     tensor.
 
     .. warning::
-        Currently, only 4-D output tensors (batched image-like tensors) are
+        Currently, only 3-D output tensors (unfolded batched image-like tensors) are
         supported.
 
     See :class:`torch.nn.Fold` for details
@@ -3913,7 +3913,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     if attn_mask is not None:
         assert attn_mask.dtype == torch.float32 or attn_mask.dtype == torch.float64 or \
-            attn_mask.dtype == torch.uint8 or attn_mask.dtype == torch.bool, \
+            attn_mask.dtype == torch.float16 or attn_mask.dtype == torch.uint8 or attn_mask.dtype == torch.bool, \
             'Only float, byte, and bool types are supported for attn_mask, not {}'.format(attn_mask.dtype)
         if attn_mask.dtype == torch.uint8:
             warnings.warn("Byte tensor for attn_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")

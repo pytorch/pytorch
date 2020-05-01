@@ -114,11 +114,6 @@ ProcessGroupAgent::ProcessGroupAgent(
   metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME] =
       std::make_unique<AverageMetricsTracker>(kGilAverageWaitTime);
   collectNames();
-  TORCH_CHECK(
-      nameMap_.size() > 1,
-      "ProcessGroupAgent requires world_size to "
-      "be at least 2, but got ",
-      nameMap_.size());
   auto workerRankIter = nameMap_.find(workerInfo_.name_);
   TORCH_CHECK(
       workerRankIter != nameMap_.end(),
@@ -437,6 +432,7 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
   std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
   const auto dst = work.to_.id_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto serializedPayloadData = const_cast<char*>(serializedPayload->data());
   auto serializedPayloadSize = serializedPayload->size();
   std::string* deleteWhenDone = serializedPayload.release();

@@ -56,6 +56,7 @@ cc_library(
         "c10/cuda/impl/*.h",
         "c10/macros/*.h",
         "c10/util/*.h",
+        "c10/util/*.hpp",
     ]) + [
         "c10/macros/cmake_macros.h",
         "c10/cuda/impl/cuda_cmake_macros.h",
@@ -516,6 +517,7 @@ template_rule(
         "@AT_MKL_ENABLED@": "0",
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
+        "@USE_BLAS@": "1",
     },
 )
 
@@ -635,6 +637,7 @@ intern_build_aten_ops(
     copts = ATEN_COPTS,
     deps = [
         ":aten_headers",
+        "@sleef",
         "@fbgemm",
     ],
 )
@@ -1736,6 +1739,7 @@ cc_library(
         "@foxi",
         "@gloo",
         "@onnx",
+        "@fmt",
     ] + if_cuda(
         [
             ":caffe2_cpp_cuda",

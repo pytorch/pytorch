@@ -114,6 +114,40 @@ commands:
       - brew_install:
           formulae: libtool
 
+  optional_merge_target_branch:
+    steps:
+      - run:
+          name: (Optional) Merge target branch
+          no_output_timeout: "10m"
+          command: |
+            if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+              PR_NUM=$(basename $CIRCLE_PULL_REQUEST)
+              CIRCLE_PR_BASE_BRANCH=$(curl -s https://api.github.com/repos/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/pulls/$PR_NUM | jq -r '.base.ref')
+              if [[ "${BUILD_ENVIRONMENT}" == *"xla"* || "${BUILD_ENVIRONMENT}" == *"gcc5"* ]] ; then
+                set -x
+                git config --global user.email "circleci.ossci@gmail.com"
+                git config --global user.name "CircleCI"
+                git config remote.origin.url https://github.com/pytorch/pytorch.git
+                git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
+                git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
+                export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/$CIRCLE_PR_BASE_BRANCH`
+                echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
+                export GIT_COMMIT=${CIRCLE_SHA1}
+                echo "GIT_COMMIT: " ${GIT_COMMIT}
+                git checkout -f ${GIT_COMMIT}
+                git reset --hard ${GIT_COMMIT}
+                git merge --allow-unrelated-histories --no-edit --no-ff ${GIT_MERGE_TARGET}
+                echo "Merged $CIRCLE_PR_BASE_BRANCH branch before building in environment $BUILD_ENVIRONMENT"
+                set +x
+              else
+                echo "No need to merge with $CIRCLE_PR_BASE_BRANCH, skipping..."
+              fi
+            else
+              echo "This is not a pull request, skipping..."
+            fi
+
+
+
 ##############################################################################
 # Binary build (nightlies nightly build) defaults
 # The binary builds use the docker executor b/c at time of writing the machine
@@ -188,7 +222,6 @@ pytorch_params: &pytorch_params
     DOCKER_IMAGE: << parameters.docker_image >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
     BUILD_ONLY: << parameters.build_only >>
-    BASE_REF: << pipeline.git.base_revision >>
   resource_class: << parameters.resource_class >>
 
 pytorch_ios_params: &pytorch_ios_params
@@ -210,10 +243,15 @@ pytorch_ios_params: &pytorch_ios_params
     IOS_ARCH: << parameters.ios_arch >>
     IOS_PLATFORM: << parameters.ios_platform >>
     SELECTED_OP_LIST: << parameters.op_list >>
-    BASE_REF: << pipeline.git.base_revision >>
 
 pytorch_windows_params: &pytorch_windows_params
   parameters:
+    executor:
+      type: string
+      default: "windows-cpu-with-nvidia-cuda"
+    build_environment:
+      type: string
+      default: ""
     test_name:
       type: string
       default: ""
@@ -236,7 +274,7 @@ pytorch_windows_params: &pytorch_windows_params
       type: string
       default: ""
   environment:
-    BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
+    BUILD_ENVIRONMENT: <<parameters.build_environment>>
     SCCACHE_BUCKET: "ossci-compiler-cache"
     CUDA_VERSION: <<parameters.cuda_version>>
     PYTHON_VERSION: <<parameters.python_version>>
@@ -246,7 +284,6 @@ pytorch_windows_params: &pytorch_windows_params
     USE_CUDA: <<parameters.use_cuda>>
     TORCH_CUDA_ARCH_LIST: "7.5"
     JOB_BASE_NAME: <<parameters.test_name>>
-    BASE_REF: << pipeline.git.base_revision >>
 caffe2_params: &caffe2_params
   parameters:
     build_environment:
@@ -273,7 +310,6 @@ caffe2_params: &caffe2_params
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
     DOCKER_IMAGE: << parameters.docker_image >>
     BUILD_ONLY: << parameters.build_only >>
-    BASE_REF: << pipeline.git.base_revision >>
   resource_class: << parameters.resource_class >>
 
 binary_linux_build_params: &binary_linux_build_params
@@ -366,6 +402,7 @@ jobs:
     - attach_scripts
     - setup_linux_system_environment
     - checkout
+    - optional_merge_target_branch
     - setup_ci_environment
     - run:
         name: Build
@@ -376,28 +413,6 @@ jobs:
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
           time docker pull ${DOCKER_IMAGE} >/dev/null
           export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
-
-          # TODO We may want to move the rebase logic to a separate step after checkout
-          # Rebase to master only if in xenial_py3_6_gcc5_4 case
-          if [[ "${CIRCLE_BRANCH}" != "master" && "${BUILD_ENVIRONMENT}" == *"gcc5"* ]]; then
-            echo "Merge master branch into $CIRCLE_BRANCH before build in environment $BUILD_ENVIRONMENT"
-            set -x
-            git config --global user.email "circleci.ossci@gmail.com"
-            git config --global user.name "CircleCI"
-            git config remote.origin.url https://github.com/pytorch/pytorch.git
-            git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
-            git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
-            export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
-            echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
-            export GIT_COMMIT=${CIRCLE_SHA1}
-            echo "GIT_COMMIT: " ${GIT_COMMIT}
-            git checkout -f ${GIT_COMMIT}
-            git reset --hard ${GIT_COMMIT}
-            git merge --allow-unrelated-histories --no-edit --no-ff ${GIT_MERGE_TARGET}
-            set +x
-          else
-            echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
-          fi
 
           git submodule sync && git submodule update -q --init --recursive
 
@@ -501,6 +516,12 @@ jobs:
   pytorch_windows_build:
     <<: *pytorch_windows_params
     parameters:
+      executor:
+        type: string
+        default: "windows-cpu-with-nvidia-cuda"
+      build_environment:
+        type: string
+        default: ""
       test_name:
         type: string
         default: ""
@@ -522,9 +543,7 @@ jobs:
       use_cuda:
         type: string
         default: ""
-    executor: windows-cpu-with-nvidia-cuda
-    environment:
-      BASE_REF: << pipeline.git.base_revision >>
+    executor: <<parameters.executor>>
     steps:
       - checkout
       - run:
@@ -537,37 +556,41 @@ jobs:
           name: Install Cuda
           no_output_timeout: 30m
           command: |
-            curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
-            7z x cuda_10.1.243_426.00_win10.exe -ocuda_10.1.243_426.00_win10
-            cd cuda_10.1.243_426.00_win10
-            mkdir cuda_install_logs
-            ./setup.exe -s nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1 -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
-            if [[ "${VC_YEAR}" == "2017" ]]; then
-              cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2017/BuildTools/Common7/IDE/VC/VCTargets/BuildCustomizations/"
-            else
-              cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Microsoft/VC/v160/BuildCustomizations/"
+            if [[ "${USE_CUDA}" == "1" ]]; then
+              curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
+              7z x cuda_10.1.243_426.00_win10.exe -ocuda_10.1.243_426.00_win10
+              cd cuda_10.1.243_426.00_win10
+              mkdir cuda_install_logs
+              ./setup.exe -s nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1 -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
+              if [[ "${VC_YEAR}" == "2017" ]]; then
+                cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2017/BuildTools/Common7/IDE/VC/VCTargets/BuildCustomizations/"
+              else
+                cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Microsoft/VC/v160/BuildCustomizations/"
+              fi
+              curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/NvToolsExt.7z
+              7z x NvToolsExt.7z -oNvToolsExt
+              mkdir -p "C:/Program Files/NVIDIA Corporation/NvToolsExt"
+              cp -r NvToolsExt/* "C:/Program Files/NVIDIA Corporation/NvToolsExt/"
+              export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
+              cat cuda_install_logs/LOG.setup.exe.log
+              if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/bin/nvcc.exe"
+              then
+                echo "CUDA installation failed"
+                exit 1
+              fi
+              cd ..
+              rm -rf ./cuda_10.1.243_426.00_win10
+              rm -f ./cuda_10.1.243_426.00_win10.exe
             fi
-            curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/NvToolsExt.7z
-            7z x NvToolsExt.7z -oNvToolsExt
-            mkdir -p "C:/Program Files/NVIDIA Corporation/NvToolsExt"
-            cp -r NvToolsExt/* "C:/Program Files/NVIDIA Corporation/NvToolsExt/"
-            export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
-            cat cuda_install_logs/LOG.setup.exe.log
-            if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/bin/nvcc.exe"
-            then
-              echo "CUDA installation failed"
-              exit 1
-            fi
-            cd ..
-            rm -rf ./cuda_10.1.243_426.00_win10
-            rm -f ./cuda_10.1.243_426.00_win10.exe
       - run:
           name: Install Cudnn
           command : |
-            cd c:/
-            curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
-            7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
-            cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
+            if [[ "${USE_CUDA}" == "1" ]]; then
+              cd c:/
+              curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
+              7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
+              cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
+            fi
       - run:
           name: Build
           no_output_timeout: "90m"
@@ -581,6 +604,12 @@ jobs:
   pytorch_windows_test:
     <<: *pytorch_windows_params
     parameters:
+      executor:
+        type: string
+        default: "windows-cpu-with-nvidia-cuda"
+      build_environment:
+        type: string
+        default: ""
       test_name:
         type: string
         default: ""
@@ -602,9 +631,7 @@ jobs:
       use_cuda:
         type: string
         default: ""
-    executor: windows-with-nvidia-gpu
-    environment:
-      BASE_REF: << pipeline.git.base_revision >>
+    executor: <<parameters.executor>>
     steps:
       - checkout
       - run:
@@ -1935,6 +1962,7 @@ workflows:
 
       - pytorch_windows_build:
           name: pytorch_windows_vs2017_14.11_py36_cuda10.1_build
+          build_environment: pytorch-win-vs2017-14-11-cuda10-cudnn7-py3
           cuda_version: "10"
           python_version: "3.6"
           vc_version: "14.11"
@@ -1951,6 +1979,8 @@ workflows:
                 - /release\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test1
+          executor: windows-with-nvidia-gpu
+          build_environment: pytorch-win-vs2017-14-11-cuda10-cudnn7-py3
           test_name: pytorch-windows-test1
           cuda_version: "10"
           python_version: "3.6"
@@ -1969,6 +1999,8 @@ workflows:
                 - /release\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test2
+          executor: windows-with-nvidia-gpu
+          build_environment: pytorch-win-vs2017-14-11-cuda10-cudnn7-py3
           test_name: pytorch-windows-test2
           cuda_version: "10"
           python_version: "3.6"
@@ -1987,6 +2019,7 @@ workflows:
                 - /release\/.*/
       - pytorch_windows_build:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_build
+          build_environment: pytorch-win-vs2017-14-16-cuda10-cudnn7-py3
           cuda_version: "10"
           python_version: "3.6"
           vc_version: "14.16"
@@ -2003,6 +2036,8 @@ workflows:
                 - /release\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test1
+          executor: windows-with-nvidia-gpu
+          build_environment: pytorch-win-vs2017-14-16-cuda10-cudnn7-py3
           test_name: pytorch-windows-test1
           cuda_version: "10"
           python_version: "3.6"
@@ -2021,6 +2056,8 @@ workflows:
                 - /release\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test2
+          executor: windows-with-nvidia-gpu
+          build_environment: pytorch-win-vs2017-14-16-cuda10-cudnn7-py3
           test_name: pytorch-windows-test2
           cuda_version: "10"
           python_version: "3.6"
@@ -2039,6 +2076,7 @@ workflows:
                 - /release\/.*/
       - pytorch_windows_build:
           name: pytorch_windows_vs2019_py36_cuda10.1_build
+          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10"
           python_version: "3.6"
           vc_version: ""
@@ -2049,6 +2087,8 @@ workflows:
             - setup
       - pytorch_windows_test:
           name: pytorch_windows_vs2019_py36_cuda10.1_test1
+          executor: windows-with-nvidia-gpu
+          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           test_name: pytorch-windows-test1
           cuda_version: "10"
           python_version: "3.6"
@@ -2061,6 +2101,8 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda10.1_build
       - pytorch_windows_test:
           name: pytorch_windows_vs2019_py36_cuda10.1_test2
+          executor: windows-with-nvidia-gpu
+          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           test_name: pytorch-windows-test2
           cuda_version: "10"
           python_version: "3.6"
@@ -2071,6 +2113,153 @@ workflows:
           requires:
             - setup
             - pytorch_windows_vs2019_py36_cuda10.1_build
+      - pytorch_windows_build:
+          name: pytorch_windows_vs2017_14.11_py36_cpu_build
+          build_environment: pytorch-win-vs2017-14-11-cpu-py3
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: "14.11"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "0"
+          requires:
+            - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2017_14.11_py36_cpu_test1
+          build_environment: pytorch-win-vs2017-14-11-cpu-py3
+          test_name: pytorch-windows-test1
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: "14.11"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "0"
+          requires:
+            - setup
+            - pytorch_windows_vs2017_14.11_py36_cpu_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2017_14.11_py36_cpu_test2
+          build_environment: pytorch-win-vs2017-14-11-cpu-py3
+          test_name: pytorch-windows-test2
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: "14.11"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "0"
+          requires:
+            - setup
+            - pytorch_windows_vs2017_14.11_py36_cpu_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_build:
+          name: pytorch_windows_vs2017_14.16_py36_cpu_build
+          build_environment: pytorch-win-vs2017-14-16-cpu-py3
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: "14.16"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "0"
+          requires:
+            - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2017_14.16_py36_cpu_test1
+          build_environment: pytorch-win-vs2017-14-16-cpu-py3
+          test_name: pytorch-windows-test1
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: "14.16"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "0"
+          requires:
+            - setup
+            - pytorch_windows_vs2017_14.16_py36_cpu_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2017_14.16_py36_cpu_test2
+          build_environment: pytorch-win-vs2017-14-16-cpu-py3
+          test_name: pytorch-windows-test2
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: "14.16"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "0"
+          requires:
+            - setup
+            - pytorch_windows_vs2017_14.16_py36_cpu_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_build:
+          name: pytorch_windows_vs2019_py36_cpu_build
+          build_environment: pytorch-win-vs2019-cpu-py3
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: ""
+          vc_year: "2019"
+          vc_product: "Community"
+          use_cuda: "0"
+          requires:
+            - setup
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2019_py36_cpu_test1
+          build_environment: pytorch-win-vs2019-cpu-py3
+          test_name: pytorch-windows-test1
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: ""
+          vc_year: "2019"
+          vc_product: "Community"
+          use_cuda: "0"
+          requires:
+            - setup
+            - pytorch_windows_vs2019_py36_cpu_build
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2019_py36_cpu_test2
+          build_environment: pytorch-win-vs2019-cpu-py3
+          test_name: pytorch-windows-test2
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: ""
+          vc_year: "2019"
+          vc_product: "Community"
+          use_cuda: "0"
+          requires:
+            - setup
+            - pytorch_windows_vs2019_py36_cpu_build
       - pytorch_linux_build:
           name: pytorch_linux_xenial_pynightly_build
           requires:
@@ -2418,6 +2607,20 @@ workflows:
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
       - pytorch_linux_build:
+          name: pytorch_linux_bionic_py3_6_clang9_build
+          requires:
+            - setup
+          build_environment: "pytorch-linux-bionic-py3.6-clang9-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9:8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
+      - pytorch_linux_test:
+          name: pytorch_linux_bionic_py3_6_clang9_test
+          requires:
+            - setup
+            - pytorch_linux_bionic_py3_6_clang9_build
+          build_environment: "pytorch-linux-bionic-py3.6-clang9-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9:8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
+          resource_class: large
+      - pytorch_linux_build:
           name: pytorch_xla_linux_bionic_py3_6_clang9_build
           requires:
             - setup
@@ -2538,11 +2741,11 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
           resource_class: large
       - pytorch_linux_test:
-          name: pytorch_linux_xenial_py3_6_gcc5_4_ge_config_simple_test
+          name: pytorch_linux_xenial_py3_6_gcc5_4_ge_config_profiling_test
           requires:
             - setup
             - pytorch_linux_xenial_py3_6_gcc5_4_build
-          build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-ge_config_simple-test"
+          build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-ge_config_profiling-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
           resource_class: large
       - pytorch_linux_test:
@@ -2573,14 +2776,14 @@ workflows:
           requires:
             - setup
           build_environment: "caffe2-onnx-main-py3.6-clang7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:373"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:376"
       - caffe2_linux_test:
           name: caffe2_onnx_main_py3_6_clang7_ubuntu16_04_test
           requires:
             - setup
             - caffe2_onnx_main_py3_6_clang7_ubuntu16_04_build
           build_environment: "caffe2-onnx-main-py3.6-clang7-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:373"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:376"
           resource_class: large
       - caffe2_linux_test:
           name: caffe2_onnx_ort1_py3_6_clang7_ubuntu16_04_test
@@ -2588,7 +2791,7 @@ workflows:
             - setup
             - caffe2_onnx_main_py3_6_clang7_ubuntu16_04_build
           build_environment: "caffe2-onnx-ort1-py3.6-clang7-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:373"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:376"
           resource_class: large
       - caffe2_linux_test:
           name: caffe2_onnx_ort2_py3_6_clang7_ubuntu16_04_test
@@ -2596,7 +2799,7 @@ workflows:
             - setup
             - caffe2_onnx_main_py3_6_clang7_ubuntu16_04_build
           build_environment: "caffe2-onnx-ort2-py3.6-clang7-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:373"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:376"
           resource_class: large
       # TODO: Refactor circleci/cimodel/data/binary_build_data.py to generate this file
       #       instead of doing one offs here
@@ -6709,7 +6912,7 @@ workflows:
       - ecr_gc_job:
             name: ecr_gc_job_for_caffe2
             project: caffe2
-            tags_to_keep: "373,369,348,345,336,325,324,315,306,301,287,283,276,273,266,253,248,238,230,213"
+            tags_to_keep: "376,373,369,348,345,336,325,324,315,306,301,287,283,276,273,266,253,248,238,230,213"
       - ecr_gc_job:
             name: ecr_gc_job_for_translate
             project: translate

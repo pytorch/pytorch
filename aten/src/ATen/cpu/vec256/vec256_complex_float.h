@@ -2,7 +2,7 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
-#if defined(__AVX__) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
@@ -11,7 +11,7 @@ namespace vec256 {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
-#if defined(__AVX__) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 
 template <> class Vec256<std::complex<float>> {
 private:
@@ -489,12 +489,6 @@ Vec256<std::complex<float>> Vec256<std::complex<float>>::ne(
     const Vec256<std::complex<float>>& other) const {
   return (*this != other) & Vec256<std::complex<float>>::ones;
 }
-
-#ifdef __AVX2__
-template <> inline Vec256<std::complex<float>> fmadd(const Vec256<std::complex<float>>& a, const Vec256<std::complex<float>>& b, const Vec256<std::complex<float>>& c) {
-  return a * b + c;
-}
-#endif
 
 #endif
 
