@@ -313,6 +313,7 @@ Tensor* TensorExprKernel::computeTwoOperandWithAlpha(
 
         promoteInputs(inputs);
         ExprHandle compute = innerExpr(inputs[0], inputs[2] * inputs[1]);
+        //ExprHandle compute = innerExpr(inputs[0], inputs[1]);
         return demoteOutput(compute, n->output());
       });
 }
@@ -416,10 +417,17 @@ Tensor* TensorExprKernel::computeFourOperand(
 Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   switch (v->node()->kind()) {
     case aten::add: {
+      if (v->node()->inputs().size () > 2){
       return computeTwoOperandWithAlpha(
           "aten_add", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return lhs + rhs;
           });
+      }else{
+      return computeTwoOperand(
+          "aten_add", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return lhs + rhs;
+          });
+      }
     } break;
 
     case aten::_cast_Float: {

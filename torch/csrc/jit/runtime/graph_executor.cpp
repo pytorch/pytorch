@@ -775,9 +775,13 @@ void runNondiffOptimization(
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
 
-  if (tensorExprFuserEnabled()) {
+  // strict_fuser_check is synomous with ProfilingExecutor on
+  // if `strict_fuser_check` is set to `true`, run TE by default
+  // otherwise fallback to the legacy executor and legacy fuser
+  if (strict_fuser_check) {
     FuseTensorExprs(graph);
-  } else {
+  }
+  else {
     FuseGraph(graph, strict_fuser_check);
   }
 
