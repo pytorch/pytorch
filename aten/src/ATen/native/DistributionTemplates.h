@@ -70,7 +70,7 @@ at::Tensor& random_impl(at::Tensor& self, c10::optional<Generator> generator) {
   TORCH_CHECK(var >= min && var <= max, name , " is out of bounds for ", dtype); \
 
 #define WARN_OUT_OF_BOUNDS(var, name, digits, dtype) \
-  if (var < -(1LL << digits) || var > 1LL << digits) { \
+  if (var < -(1LL << digits) || var > (1LL << digits)) { \
     TORCH_WARN(name , " is out of bounds [-(2^", digits, "), 2^", digits, "]. ", \
       "Due to precision limitations ", dtype, " can support discrete uniform distribution only within this range. ", \
       "This warning will become an error in version 1.7 release, please fix the code in advance"); \
