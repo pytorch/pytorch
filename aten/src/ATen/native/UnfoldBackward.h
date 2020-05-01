@@ -33,7 +33,7 @@ static TensorIterator _make_unfold_backward_iter_over_grad_out(
 
   auto grad_out_dim_size = ensure_nonempty_size(grad_out, dim);
   auto grad_in_dim_size = ensure_nonempty_size(grad_in, dim);
-  // distates the number of elements to iterate over
+  // dictates the number of elements to iterate over
   // in dimension `dim`
   auto iter_dim_size = std::min(
     grad_out_dim_size,
