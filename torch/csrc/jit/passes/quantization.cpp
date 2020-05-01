@@ -1648,6 +1648,7 @@ void insertQuantizationOps(
   }
   observer_out->replaceAllUsesWith(original_val);
   std::vector<Use> uses = original_val->uses();
+  // TODO: use replaceAllUsesAfterNodeWith?
   for (const auto& use : uses) {
     auto* user = use.user;
     if (user != quant && user != observer && user != choose_qparams) {
@@ -2772,13 +2773,7 @@ void propagateQuantizationOps(Block* block) {
           Value* quantized_output = quant->output();
           // replace uses of original output of the general op with quantized
           // output
-          std::vector<Use> original_uses = original_output->uses();
-          for (const auto& use : original_uses) {
-            auto* user = use.user;
-            if (user != quant) {
-              user->replaceInputWith(original_output, quantized_output);
-            }
-          }
+          original_output->replaceAllUsesAfterNodeWith(quant, quantized_output);
           std::vector<Use> quantized_uses = quantized_output->uses();
           GRAPH_DEBUG("quantized uses: ", quantized_uses.size());
           insertDeQuantForAllUse(

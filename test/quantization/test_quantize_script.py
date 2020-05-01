@@ -1816,7 +1816,6 @@ class TestQuantizeDynamicScript(JitTestCase):
         m(data)
         quant_func = "aten::quantize_per_tensor"
 
-        print(m.graph)
         # quantizing activations
         FileCheck().check("aten::_choose_qparams_per_tensor") \
                    .check_next(quant_func) \
