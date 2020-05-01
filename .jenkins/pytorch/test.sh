@@ -143,12 +143,12 @@ test_python_nn() {
   assert_git_not_dirty
 }
 
-test_python_ge_config_profiling() {
+test_python_profiling_jit() {
   time python test/run_test.py --include test_jit_profiling test_jit_fuser_profiling test_jit_fuser_te --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
-test_python_ge_config_legacy() {
+test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
@@ -292,10 +292,10 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   test_torchvision
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_legacy* || "${JOB_BASE_NAME}" == *ge_config_legacy* ]]; then
-  test_python_ge_config_legacy
-elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_profiling* || "${JOB_BASE_NAME}" == *ge_config_profiling* ]]; then
-  test_python_ge_config_profiling
+elif [[ "${BUILD_ENVIRONMENT}" == *legacy_jit* || "${JOB_BASE_NAME}" == *legacy_jit* ]]; then
+  test_python_legacy_jit
+elif [[ "${BUILD_ENVIRONMENT}" == *profiling_jit* || "${JOB_BASE_NAME}" == *profiling_jit* ]]; then
+  test_python_profiling_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
