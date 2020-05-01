@@ -29,7 +29,7 @@ def dropout(g, input, p, train):
         return input
 
     t = g.op("Constant", value_t=torch.tensor(True))
-    r, _ = g.op("Dropout", input, p, outputs=2)
+    r, _ = g.op("Dropout", input, p, t, outputs=2)
     return r
 
 
