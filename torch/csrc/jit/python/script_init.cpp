@@ -901,6 +901,21 @@ void initJitScriptBindings(PyObject* module) {
             pp.printNamedType(self.type());
             return pp.str();
           })
+      .def_property_readonly(
+          "code_with_constants",
+          [](Module& self) {
+            std::vector<at::Tensor> tensors;
+            std::vector<c10::NamedTypePtr> deps;
+            PythonPrint pp(tensors, deps);
+            pp.printNamedType(self.type());
+            std::map<std::string, at::Tensor> consts;
+            int i = 0;
+            for(auto const& tensor: tensors){
+              consts["c" + std::to_string(i)] = tensor;
+              i += 1;
+            }
+            return std::make_tuple(pp.str(), consts);
+          })
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
       .def("_clone_instance", &Module::clone_instance)
@@ -1047,6 +1062,19 @@ void initJitScriptBindings(PyObject* module) {
         PythonPrint pp(tensors, deps);
         pp.printMethod(self.function());
         return pp.str();
+      })
+       .def_property_readonly("code_with_constants", [](Method& self) {
+        std::vector<at::Tensor> tensors;
+        std::vector<c10::NamedTypePtr> deps;
+        PythonPrint pp(tensors, deps);
+        pp.printMethod(self.function());
+        std::map<std::string, at::Tensor> consts;
+        int i = 0;
+        for(auto const& tensor: tensors){
+          consts["c" + std::to_string(i)] = tensor;
+          i += 1;
+        }
+        return std::make_tuple(pp.str(), consts);
       });
   m.def(
       "_jit_script_compile",

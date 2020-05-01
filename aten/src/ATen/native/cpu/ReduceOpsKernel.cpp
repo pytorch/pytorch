@@ -101,8 +101,8 @@ static void cumprod_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) 
 }
 
 static void sum_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-      ScalarType::BFloat16, ScalarType::Bool, iter.dtype(), "sum_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::BFloat16, ScalarType::Half, ScalarType::Bool, iter.dtype(), "sum_cpu", [&] {
         binary_kernel_reduce_vec(
             iter, [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
             [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a + b; });
@@ -154,7 +154,7 @@ static void norm_kernel_tensor_iterator_impl(
 
 
   if (val == 0) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         NormZeroOps<scalar_t>(),
@@ -162,7 +162,7 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else if (val == 1) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         NormOneOps<scalar_t>(),
@@ -170,7 +170,7 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else if (val == 2) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         NormTwoOps<scalar_t>(),
@@ -178,7 +178,7 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else if (val == INFINITY) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         AbsMaxOps<scalar_t>(),
@@ -186,7 +186,7 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else if (val == -INFINITY) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         AbsMinOps<scalar_t>(),
@@ -194,7 +194,7 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         NormOps<scalar_t> { scalar_t(val) },
@@ -243,7 +243,7 @@ static void or_kernel_impl(TensorIterator& iter) {
 }
 
 static void min_values_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "min_values_cpu", [&iter] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kHalf, iter.dtype(), "min_values_cpu", [&iter] {
     binary_kernel_reduce_vec(
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return min_impl(a, b); },
@@ -252,7 +252,7 @@ static void min_values_kernel_impl(TensorIterator& iter) {
 }
 
 static void max_values_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "max_values_cpu", [&iter] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kHalf, iter.dtype(), "max_values_cpu", [&iter] {
     binary_kernel_reduce_vec(
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return max_impl(a, b); },
@@ -261,7 +261,7 @@ static void max_values_kernel_impl(TensorIterator& iter) {
 }
 
 static void argmax_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmax_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(1), "argmax_cpu", [&] {
     binary_kernel_reduce(
       iter,
       ArgMaxOps<scalar_t>{},
@@ -270,7 +270,7 @@ static void argmax_kernel_impl(TensorIterator &iter) {
 }
 
 static void argmin_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmin_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(1), "argmin_cpu", [&] {
     binary_kernel_reduce(
       iter,
       ArgMinOps<scalar_t>{},

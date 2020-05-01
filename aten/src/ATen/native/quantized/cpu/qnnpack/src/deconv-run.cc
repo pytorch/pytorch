@@ -46,29 +46,12 @@ enum pytorch_qnnp_status qnnpackDeConv(
     return pytorch_qnnp_status_invalid_parameter;
   }
 
-  const float kernel_scale = deconv_p.kernel_scale;
-
   if (output_scale <= 0.0f || !std::isnormal(output_scale)) {
     pytorch_qnnp_log_error(
         "failed to create deconvolution with %.7g output scale: "
         "scale must be finite and positive",
         output_scale);
     return pytorch_qnnp_status_invalid_parameter;
-  }
-
-  // Check all unsupported parameters
-  // TODO: Might need a change after #35856 is landed
-  const float deconvolution_scale = input_scale * kernel_scale / output_scale;
-  if (deconvolution_scale >= 1.0f) {
-    pytorch_qnnp_log_error(
-        "failed to create deconvolution with %.7g input scale, "
-        "%.7g kernel scale, and %.7g output scale: "
-        "deconvolution scale %.7g is greater or equal to 1.0",
-        input_scale,
-        kernel_scale,
-        output_scale,
-        deconvolution_scale);
-    return pytorch_qnnp_status_unsupported_parameter;
   }
 
   // Support vars
@@ -131,6 +114,8 @@ enum pytorch_qnnp_status qnnpackDeConv(
   deconvolution->group_output_channels = group_output_channels;
 
   deconvolution->kernel_zero_point = deconv_p.kernel_zero_point;
+  const float kernel_scale = deconv_p.kernel_scale;
+  const float deconvolution_scale = input_scale * kernel_scale / output_scale;
   deconvolution->conv_quantization_params =
       pytorch_qnnp_compute_conv_quantization_params(
           input_zero_point,
