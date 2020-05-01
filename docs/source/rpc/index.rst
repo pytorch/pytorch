@@ -1,14 +1,14 @@
 .. _rpc-index:
 
 Distributed RPC Framework
-==============================
+=========================
 
 The distributed RPC framework provides mechanisms for multi-machine model training through a set of primitives to allow for remote communication, and a higher-level API to automatically differentiate models split across several machines.
 
 -  :ref:`distributed-rpc-framework`
 
 Design Notes
------------
+------------
 The distributed autograd design note covers the design of the RPC-based distributed autograd framework that is useful for applications such as model parallel training.
 
 -  :ref:`distributed-autograd-design`
