@@ -292,7 +292,7 @@ std::pair<graph_node_list::iterator, bool> scanNode(
 
 void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
   if (!tensorExprFuserEnabled()) {
-   return;
+    return;
   }
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
