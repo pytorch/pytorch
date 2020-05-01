@@ -9,25 +9,4 @@ LegacyTypeDispatch & globalLegacyTypeDispatch() {
   return singleton;
 }
 
-void LegacyTypeDispatch::initCPU() {
-  static std::once_flag cpu_once;
-  std::call_once(cpu_once, [] {
-    getLegacyDeviceTypeInit().initCPU();
-  });
-}
-
-void LegacyTypeDispatch::initCUDA() {
-  static std::once_flag cuda_once;
-  std::call_once(cuda_once, [] {
-    getLegacyDeviceTypeInit().initCUDA();
-  });
-}
-
-void LegacyTypeDispatch::initHIP() {
-  static std::once_flag hip_once;
-  std::call_once(hip_once, [] {
-    getLegacyDeviceTypeInit().initHIP();
-  });
-}
-
 }

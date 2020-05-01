@@ -57,10 +57,10 @@ TESTS = [
     'test_type_hints',
     'test_utils',
     'test_namedtuple_return_api',
-    'test_jit_fuser',
-    'test_jit_simple',
+    'test_jit_profiling',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
+    'test_jit_fuser_profiling',
     'test_tensorboard',
     'test_namedtensor',
     'test_type_promotion',
@@ -107,6 +107,7 @@ ROCM_BLACKLIST = [
     'test_jit_legacy',
     'test_jit_fuser_legacy',
     'test_tensorexpr',
+    'test_type_hints',
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch
@@ -118,8 +119,9 @@ SLOW_TESTS = [
     'test_jit_legacy',
     'test_dataloader',
     'test_overrides',
-    'test_jit_simple',
     'test_jit',
+    'test_jit_profiling',
+    'test_jit_fuser_profiling',
     'test_torch',
     'distributed/test_distributed',
     'distributed/rpc/test_rpc_spawn',

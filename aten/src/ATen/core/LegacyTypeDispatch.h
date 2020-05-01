@@ -20,9 +20,26 @@ namespace at {
 
 class CAFFE2_API LegacyTypeDispatch {
  public:
-  void initCPU();
-  void initCUDA();
-  void initHIP();
+  void initCPU() {
+    static std::once_flag cpu_once;
+    std::call_once(cpu_once, [] {
+      getLegacyDeviceTypeInit().initCPU();
+    });
+  }
+
+  void initCUDA() {
+    static std::once_flag cuda_once;
+    std::call_once(cuda_once, [] {
+      getLegacyDeviceTypeInit().initCUDA();
+    });
+  }
+
+  void initHIP() {
+    static std::once_flag hip_once;
+    std::call_once(hip_once, [] {
+      getLegacyDeviceTypeInit().initHIP();
+    });
+  }
 };
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
