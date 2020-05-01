@@ -300,7 +300,7 @@ void convert_to_ivalue_vector(std::vector<c10::IValue>& stack, const Item& item,
   push_ivalue_copy(stack, item);
   convert_to_ivalue_vector(stack, other_items...);
 }
-void convert_to_ivalue_vector(std::vector<c10::IValue>& stack);
+void CAFFE2_API convert_to_ivalue_vector(std::vector<c10::IValue>& stack);
 }
 
 template<class Return, class... Args>
