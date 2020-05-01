@@ -2,7 +2,6 @@ from torch.onnx.symbolic_helper import parse_args
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_registry as sym_registry
 import importlib
-from inspect import getmembers, isfunction
 
 def _permute_helper(g, input, axes):
     quant_args = {
