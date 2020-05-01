@@ -191,10 +191,7 @@ py::object toPyObject(IValue ivalue) {
   }
 }
 
-IValue toIValue(
-    py::handle obj,
-    const TypePtr& type,
-    c10::optional<int32_t> N) {
+IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType: {
       auto var = py::cast<autograd::Variable>(obj);

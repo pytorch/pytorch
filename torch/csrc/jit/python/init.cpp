@@ -792,7 +792,8 @@ void initJITBindings(PyObject* module) {
   });
   m.def("_is_tracing", []() { return jit::tracer::isTracing(); });
 
-  py::class_<PythonFutureWrapper, std::shared_ptr<PythonFutureWrapper>>(m, "Future")
+  py::class_<PythonFutureWrapper, std::shared_ptr<PythonFutureWrapper>>(
+      m, "Future")
       .def(
           "wait",
           &PythonFutureWrapper::wait,
@@ -852,7 +853,9 @@ void initJITBindings(PyObject* module) {
     }
   });
 
-  m.def("wait", [](const std::shared_ptr<PythonFutureWrapper>& fut) { return fut->wait(); });
+  m.def("wait", [](const std::shared_ptr<PythonFutureWrapper>& fut) {
+    return fut->wait();
+  });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);

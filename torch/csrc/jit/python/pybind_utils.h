@@ -351,10 +351,7 @@ inline void guardAgainstNamedTensor(const T& var) {
       "workaround please drop names via `tensor = tensor.rename(None)`.");
 }
 
-IValue toIValue(
-    py::handle obj,
-    const TypePtr& type,
-    c10::optional<int32_t> N);
+IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N);
 
 // Small wrapper around getting the type name string from Python to make
 // types easier to interpret, e.g. give the structural type for a NamedTuple
