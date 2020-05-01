@@ -240,6 +240,8 @@ scalar_types = [
     ('Short', 'int16_t', 'Long', False),
     ('Half', 'Half', 'Double', True),
     ('BFloat16', 'BFloat16', 'BFloat16AccrealNotDefined', True),
+    ('ComplexFloat', 'ComplexFloat', 'ComplexDouble', False),
+    ('ComplexDouble', 'ComplexDouble', 'ComplexDouble', False),
 ]
 
 static_dispatch_backends = ['CPU', 'QuantizedCPU']

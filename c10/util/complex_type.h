@@ -232,7 +232,7 @@ struct alignas(sizeof(T) * 2) complex_common {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   template<typename U>
   C10_HOST_DEVICE explicit operator thrust::complex<U>() const {
-    return thrust::complex<U>(thrust::complex<T>(real(), imag()));
+    return static_cast<thrust::complex<U>>(thrust::complex<T>(real(), imag()));
   }
 #endif
 
@@ -290,7 +290,6 @@ constexpr complex<double> operator"" _id(unsigned long long imag) {
 
 } // namespace complex_literals
 
-} // namespace c10
 
 template<typename T>
 constexpr c10::complex<T> operator+(const c10::complex<T>& val) {
@@ -415,6 +414,8 @@ std::basic_istream<CharT, Traits>& operator>>(std::basic_istream<CharT, Traits>&
   x = tmp;
   return is;
 }
+
+} // namespace c10
 
 // std functions
 //
