@@ -53,10 +53,13 @@ DLDataType getDLDataType(const Tensor& t) {
       break;
     case ScalarType::ComplexHalf:
       throw std::logic_error("ComplexHalf is not supported by dlpack");
+      break;
     case ScalarType::ComplexFloat:
       throw std::logic_error("ComplexFloat is not supported by dlpack");
+      break;
     case ScalarType::ComplexDouble:
       throw std::logic_error("ComplexDouble is not supported by dlpack");
+      break;
     case ScalarType::Undefined:
       throw std::logic_error("Undefined is not a valid ScalarType");
     case ScalarType::NumOptions:

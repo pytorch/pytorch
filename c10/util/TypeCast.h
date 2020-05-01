@@ -66,6 +66,7 @@ template <typename dest_value_t, typename src_value_t>
     }
 };
 #endif
+
 #if defined(__CUDACC__)
 template <typename dest_value_t, typename src_value_t>
   struct static_cast_with_inter_type<thrust::complex<dest_value_t>, c10::complex<src_value_t>> {
