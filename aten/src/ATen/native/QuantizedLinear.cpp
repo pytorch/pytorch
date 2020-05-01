@@ -7,16 +7,16 @@
 #include <string>
 #include <vector>
 
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Parallel.h"
-#include "ATen/WrapDimUtilsMulti.h"
-#include "ATen/cpp_custom_type_hack.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/cpp_custom_type_hack.h>
 
 #ifdef USE_FBGEMM
-#include "fbgemm/Fbgemm.h"
-#include "fbgemm/FbgemmFP16.h"
-#include "fbgemm/QuantUtils.h"
+#include <fbgemm/Fbgemm.h>
+#include <fbgemm/FbgemmFP16.h>
+#include <fbgemm/QuantUtils.h>
 #endif // USE_FBGEMM
 
 #ifdef USE_FBGEMM

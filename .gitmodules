@@ -122,3 +122,7 @@
     ignore = dirty
     path = third_party/XNNPACK
     url = https://github.com/google/XNNPACK.git
+[submodule "third_party/fmt"]
+    ignore = dirty
+	path = third_party/fmt
+	url = https://github.com/fmtlib/fmt.git

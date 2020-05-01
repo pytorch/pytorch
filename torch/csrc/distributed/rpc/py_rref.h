@@ -1,12 +1,19 @@
 #pragma once
 
 #include <torch/csrc/distributed/rpc/rref_impl.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
+namespace jit {
+struct PythonFutureWrapper;
+}
+
 namespace distributed {
 namespace rpc {
+
+enum RRefProxyType { RPC_SYNC, RPC_ASYNC, REMOTE };
 
 // Python wrapper of an RRef shared_ptr that supports Python
 // pickle and unpickle.
@@ -25,6 +32,14 @@ class PyRRef {
   py::tuple pickle() const;
   static PyRRef unpickle(const py::tuple& t);
   c10::IValue toIValue();
+  // Future that is associated with the creation of this RRef on the remote end.
+  // This is only used to get the future corresponding to the rref for profiling
+  // use cases.
+  std::shared_ptr<jit::PythonFutureWrapper> getFuture() const;
+
+  // create a proxy on this RRef, which can be used to launch RPC on the owner
+  // of this RRef to run functions on the object referenced by this RRef.
+  py::object createRRefProxy(PyRRef& self, const RRefProxyType& mode) const;
 
  private:
   c10::intrusive_ptr<RRef> rref_;

@@ -134,7 +134,7 @@ cmake_pop_check_state()
 # ---[ Check if the compiler has AVX/AVX2 support. We only check AVX2.
 if(NOT INTERN_BUILD_MOBILE)
   cmake_push_check_state(RESET)
-  if(MSVC)
+  if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set(CMAKE_REQUIRED_FLAGS "/arch:AVX2")
   else()
     set(CMAKE_REQUIRED_FLAGS "-mavx2")
@@ -160,7 +160,7 @@ if(NOT INTERN_BUILD_MOBILE)
 endif()
 # ---[ Check if the compiler has AVX512 support.
 cmake_push_check_state(RESET)
-if(MSVC)
+if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   # We could've used MSVC's hidden option /arch:AVX512 that defines __AVX512F__,
   # __AVX512DQ__, and __AVX512VL__, and /arch:AVX512F that defines __AVX512F__.
   # But, we chose not to do that not to rely on hidden options.

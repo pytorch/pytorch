@@ -51,7 +51,7 @@ std::string TORCH_API getHeader(const Node* node);
 
 std::string TORCH_API log_function(const std::shared_ptr<Graph>& graph);
 
-TORCH_API JitLoggingLevels jit_log_level();
+TORCH_API ::torch::jit::JitLoggingLevels jit_log_level();
 
 // Prefix every line in a multiline string \p IN_STR with \p PREFIX.
 TORCH_API std::string jit_log_prefix(
@@ -59,32 +59,43 @@ TORCH_API std::string jit_log_prefix(
     const std::string& in_str);
 
 TORCH_API std::string jit_log_prefix(
-    JitLoggingLevels level,
+    ::torch::jit::JitLoggingLevels level,
     const char* fn,
     int l,
     const std::string& in_str);
 
-TORCH_API bool is_enabled(const char* cfname, JitLoggingLevels level);
+TORCH_API bool is_enabled(
+    const char* cfname,
+    ::torch::jit::JitLoggingLevels level);
 
-TORCH_API std::ostream& operator<<(std::ostream& out, JitLoggingLevels level);
+TORCH_API std::ostream& operator<<(
+    std::ostream& out,
+    ::torch::jit::JitLoggingLevels level);
 
 #define JIT_LOG(level, ...)                                  \
   if (is_enabled(__FILE__, level)) {                         \
-    std::cerr << jit_log_prefix(                             \
+    std::cerr << ::torch::jit::jit_log_prefix(               \
         level, __FILE__, __LINE__, ::c10::str(__VA_ARGS__)); \
   }
 
 // tries to reconstruct original python source
-#define SOURCE_DUMP(MSG, G) \
-  JIT_LOG(JitLoggingLevels::GRAPH_DUMP, MSG, "\n", log_function(G));
+#define SOURCE_DUMP(MSG, G)                       \
+  JIT_LOG(                                        \
+      ::torch::jit::JitLoggingLevels::GRAPH_DUMP, \
+      MSG,                                        \
+      "\n",                                       \
+      ::torch::jit::log_function(G));
 // use GRAPH_DUMP for dumping graphs after optimization passes
 #define GRAPH_DUMP(MSG, G) \
-  JIT_LOG(JitLoggingLevels::GRAPH_DUMP, MSG, "\n", (G)->toString());
+  JIT_LOG(                 \
+      ::torch::jit::JitLoggingLevels::GRAPH_DUMP, MSG, "\n", (G)->toString());
 // use GRAPH_UPDATE for reporting graph transformations (i.e. node deletion,
 // constant folding, CSE)
-#define GRAPH_UPDATE(...) JIT_LOG(JitLoggingLevels::GRAPH_UPDATE, __VA_ARGS__);
+#define GRAPH_UPDATE(...) \
+  JIT_LOG(::torch::jit::JitLoggingLevels::GRAPH_UPDATE, __VA_ARGS__);
 // use GRAPH_DEBUG to provide information useful for debugging a particular opt
 // pass
-#define GRAPH_DEBUG(...) JIT_LOG(JitLoggingLevels::GRAPH_DEBUG, __VA_ARGS__);
+#define GRAPH_DEBUG(...) \
+  JIT_LOG(::torch::jit::JitLoggingLevels::GRAPH_DEBUG, __VA_ARGS__);
 } // namespace jit
 } // namespace torch

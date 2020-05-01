@@ -117,7 +117,7 @@ Tensor MakeStridedQTensorCPU(
       /* resizable = */ true);
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage,
-      at::DispatchKeySet(at::DispatchKey::QuantizedCPUTensorId),
+      at::DispatchKeySet(at::DispatchKey::QuantizedCPU),
       quantizer);
   get_qtensorimpl(tensor)->set_sizes_and_strides(sizes, strides);
   return tensor;

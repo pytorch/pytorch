@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <c10/macros/Macros.h>
 #include <ATen/core/Array.h>
+#include <ATen/native/TensorIterator.h>
 #include <THC/THCIntegerDivider.cuh>
 
 /// OffsetCalculator calculates the offset in bytes of a linear index for NARGS
@@ -87,3 +88,13 @@ struct TrivialOffsetCalculator {
     return offsets;
   }
 };
+
+template<int N>
+static OffsetCalculator<N> make_offset_calculator(const at::TensorIterator& iter) {
+  AT_ASSERT(N <= iter.ntensors());
+  std::array<const int64_t*, N> strides;
+  for (int i = 0; i < N; i++) {
+    strides[i] = iter.strides(i).data();
+  }
+  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
+}

@@ -2,7 +2,7 @@ if(__NNPACK_INCLUDED)
   return()
 endif()
 set(__NNPACK_INCLUDED TRUE)
- 
+
 if(NOT USE_NNPACK)
   return()
 endif()

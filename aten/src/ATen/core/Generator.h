@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <memory>
 #include <mutex>
 #include <deque>
 #include <atomic>
@@ -11,6 +10,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/GeneratorImpl.h>
@@ -31,7 +31,7 @@
  *
  * By default, there is one generator per device, and a device's generator is
  * lazily created. A user can use the torch.Generator() api to create their own generator.
- * Currently torch.Generator() can only create a CPUGenerator.
+ * Currently torch.Generator() can only create a CPUGeneratorImpl.
  */
 
 /**
@@ -54,15 +54,12 @@ namespace at {
 struct CAFFE2_API Generator {
   Generator() {}
 
-  explicit Generator(std::shared_ptr<c10::GeneratorImpl> gen_impl)
+  explicit Generator(c10::intrusive_ptr<c10::GeneratorImpl> gen_impl)
    : impl_(std::move(gen_impl)) {
     if (impl_.get() == nullptr) {
       throw std::runtime_error("GeneratorImpl with nullptr is not supported");
     }
   }
-
-  // TODO(pbelevich): delete this after replace Generator generator = nullptr with c10::optional<at::Generator> = c10::nullopt
-  Generator(std::nullptr_t gen_impl) {}
 
   bool operator==(const Generator& rhs) const {
     return this->impl_ == rhs.impl_;
@@ -76,7 +73,41 @@ struct CAFFE2_API Generator {
     return static_cast<bool>(impl_);
   }
 
-  c10::GeneratorImpl* operator->() const { return impl_.get(); }
+  c10::GeneratorImpl* unsafeGetGeneratorImpl() const {
+    return impl_.get();
+  }
+
+  c10::GeneratorImpl* unsafeReleaseGeneratorImpl() {
+    return impl_.release();
+  }
+
+  const c10::intrusive_ptr<c10::GeneratorImpl>& getIntrusivePtr() const {
+    return impl_;
+  }
+
+  void set_current_seed(uint64_t seed) { impl_->set_current_seed(seed); }
+
+  uint64_t current_seed() const { return impl_->current_seed(); }
+
+  uint64_t seed() { return impl_->seed(); }
+
+  std::mutex& mutex() {
+    return impl_->mutex_;
+  }
+
+  DispatchKeySet key_set() const {
+    return impl_->key_set();
+  }
+
+  Device device() const { return impl_->device(); }
+
+  inline void set_pyobj(PyObject* pyobj) const noexcept {
+    impl_->set_pyobj(pyobj);
+  }
+
+  inline PyObject* pyobj() const noexcept {
+    return impl_->pyobj();
+  }
 
   template<typename T>
   T* get() const { return static_cast<T*>(impl_.get()); }
@@ -86,12 +117,12 @@ struct CAFFE2_API Generator {
   }
 
  private:
-  std::shared_ptr<c10::GeneratorImpl> impl_;
+  c10::intrusive_ptr<c10::GeneratorImpl> impl_;
 };
 
 template<class Impl, class... Args>
 Generator make_generator(Args&&... args) {
-  return Generator(std::make_shared<Impl>(args...));
+  return Generator(c10::make_intrusive<Impl>(std::forward<Args>(args)...));
 }
 
 } // namespace at

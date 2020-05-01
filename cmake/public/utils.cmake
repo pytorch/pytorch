@@ -1,6 +1,6 @@
 ##############################################################################
 # Macro to update cached options.
-macro (caffe2_update_option variable value)
+macro(caffe2_update_option variable value)
   if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
     set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
@@ -233,7 +233,7 @@ function(torch_compile_options libname)
       target_compile_options(${libname} PUBLIC
         ${MSVC_RUNTIME_LIBRARY_OPTION}
         ${MSVC_DEBINFO_OPTION}
-        /EHa
+        /EHsc
         /DNOMINMAX
         /wd4267
         /wd4251

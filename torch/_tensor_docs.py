@@ -9,7 +9,7 @@ def add_docstr_all(method, docstr):
     add_docstr(getattr(torch._C._TensorBase, method), docstr)
 
 common_args = parse_kwargs("""
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.preserve_format``.
 """)
 
@@ -173,6 +173,21 @@ abs_() -> Tensor
 In-place version of :meth:`~Tensor.abs`
 """)
 
+add_docstr_all('absolute',
+               r"""
+absolute() -> Tensor
+
+Alias for :func:`abs`
+""")
+
+add_docstr_all('absolute_',
+               r"""
+absolute_() -> Tensor
+
+In-place version of :meth:`~Tensor.absolute`
+Alias for :func:`abs_`
+""")
+
 add_docstr_all('acos',
                r"""
 acos() -> Tensor
@@ -320,9 +335,9 @@ Examples::
 
 
     # Example 2: Applying a per-channel-scale
-    def scale_channels(input, scale):
-        scale = scale.refine_names('C')
-        return input * scale.align_as(input)
+    >>> def scale_channels(input, scale):
+    >>>    scale = scale.refine_names('C')
+    >>>    return input * scale.align_as(input)
 
     >>> num_channels = 3
     >>> scale = torch.randn(num_channels, names=('C',))
@@ -745,7 +760,7 @@ type as :attr:`self`.
     Unlike `copy_()`, this function is recorded in the computation graph. Gradients
     propagating to the cloned tensor will propagate to the original tensor.
 
-Args: 
+Args:
     {memory_format}
 """.format(**common_args))
 
@@ -754,11 +769,11 @@ add_docstr_all('contiguous',
 contiguous(memory_format=torch.contiguous_format) -> Tensor
 
 Returns a contiguous in memory tensor containing the same data as :attr:`self` tensor. If
-:attr:`self` tensor is already in the specified memory format, this function returns the 
+:attr:`self` tensor is already in the specified memory format, this function returns the
 :attr:`self` tensor.
 
-Args: 
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+Args:
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.contiguous_format``.
 """)
 
@@ -1182,13 +1197,6 @@ flip(dims) -> Tensor
 See :func:`torch.flip`
 """)
 
-add_docstr_all('real',
-               r"""
-real() -> Tensor
-
-See :func:`torch.real`
-""")
-
 add_docstr_all('roll',
                r"""
 roll(shifts, dims) -> Tensor
@@ -1283,13 +1291,6 @@ add_docstr_all('ger',
 ger(vec2) -> Tensor
 
 See :func:`torch.ger`
-""")
-
-add_docstr_all('imag',
-               r"""
-imag() -> Tensor
-
-See :func:`torch.imag`
 """)
 
 add_docstr_all('indices',
@@ -1534,15 +1535,22 @@ inverse() -> Tensor
 See :func:`torch.inverse`
 """)
 
+add_docstr_all('isclose',
+               r"""
+isclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
+
+See :func:`torch.isclose`
+""")
+
 add_docstr_all('is_contiguous',
                r"""
 is_contiguous(memory_format=torch.contiguous_format) -> bool
 
-Returns True if :attr:`self` tensor is contiguous in memory in the order specified 
+Returns True if :attr:`self` tensor is contiguous in memory in the order specified
 by memory format.
 
-Args: 
-    memory_format (:class:`torch.memory_format`, optional): Specifies memory allocation 
+Args:
+    memory_format (:class:`torch.memory_format`, optional): Specifies memory allocation
         order. Default: ``torch.contiguous_format``.
 """)
 
@@ -2367,8 +2375,8 @@ memory is uninitialized.
 
 Args:
     sizes (torch.Size or int...): the desired size
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
-        Tensor. Default: ``torch.contiguous_format``. Note that memory format of 
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
+        Tensor. Default: ``torch.contiguous_format``. Note that memory format of
         :attr:`self` is going to be unaffected if ``self.size()`` matches ``sizes``.
 
 Example::
@@ -2387,8 +2395,8 @@ Resizes the :attr:`self` tensor to be the same size as the specified
 :attr:`tensor`. This is equivalent to ``self.resize_(tensor.size())``.
 
 Args:
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
-        Tensor. Default: ``torch.contiguous_format``. Note that memory format of 
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
+        Tensor. Default: ``torch.contiguous_format``. Note that memory format of
         :attr:`self` is going to be unaffected if ``self.size()`` matches ``tensor.size()``.
 
 """)
@@ -3447,6 +3455,14 @@ stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_en
 See :func:`torch.stft`
 """)
 
+add_docstr_all('istft',
+               r"""
+istft(n_fft, hop_length=None, win_length=None, window=None,
+ center=True, normalized=False, onesided=True, length=None) -> Tensor
+
+See :func:`torch.istft`
+""")
+
 add_docstr_all('fft',
                r"""
 fft(signal_ndim, normalized=False) -> Tensor
@@ -3669,4 +3685,13 @@ Is this Tensor with its dimensions reversed.
 
 If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
+""")
+
+add_docstr_all('as_subclass',
+               r"""
+as_subclass(cls) -> Tensor
+
+Makes a ``cls`` instance with the same data pointer as ``self``. Changes
+in the output mirror changes in ``self``, and the output stays attached
+to the autograd graph. ``cls`` must be a subclass of ``Tensor``.
 """)

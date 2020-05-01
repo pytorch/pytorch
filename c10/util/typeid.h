@@ -508,14 +508,4 @@ inline std::ostream& operator<<(
     return &singleton;                                             \
   }
 
-// A variant for not exporting the type in an anonymous namespace
-#define CAFFE_KNOWN_TYPE_NOEXPORT(T)                               \
-  template <>                                                      \
-  const detail::TypeMetaData*                                      \
-  TypeMeta::_typeMetaDataInstance<T>() noexcept {                  \
-    static C10_TYPENAME_CONSTEXPR detail::TypeMetaData singleton = \
-        detail::_makeTypeMetaDataInstance<T>();                    \
-    return &singleton;                                             \
-  }
-
 } // namespace caffe2

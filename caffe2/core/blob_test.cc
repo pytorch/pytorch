@@ -13,6 +13,7 @@
 #include "caffe2/core/qtensor.h"
 #include "caffe2/core/qtensor_serialization.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/test_utils.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
@@ -39,9 +40,9 @@ class BlobTestNonDefaultConstructible {
 };
 } // namespace
 
-CAFFE_KNOWN_TYPE_NOEXPORT(BlobTestFoo);
-CAFFE_KNOWN_TYPE_NOEXPORT(BlobTestBar);
-CAFFE_KNOWN_TYPE_NOEXPORT(BlobTestNonDefaultConstructible);
+CAFFE_KNOWN_TYPE(BlobTestFoo);
+CAFFE_KNOWN_TYPE(BlobTestBar);
+CAFFE_KNOWN_TYPE(BlobTestNonDefaultConstructible);
 
 class BlobTestFooSerializer : public BlobSerializerBase {
  public:
@@ -590,6 +591,18 @@ TEST(TensorTest, UndefinedTensor) {
   EXPECT_FALSE(x.defined());
 }
 
+TEST(TensorTest, CopyAndAssignment) {
+  Tensor x(CPU);
+  x.Resize(16, 17);
+  testing::randomFill(x.template mutable_data<float>(), 16 * 17);
+  EXPECT_TRUE(x.defined());
+
+  Tensor y(x);
+  Tensor z = x;
+  testing::assertTensorEquals(x, y);
+  testing::assertTensorEquals(x, z);
+}
+
 TEST(TensorDeathTest, CannotCastDownLargeDims) {
   int64_t large_number =
       static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
@@ -975,7 +988,7 @@ class DummyTypeDeserializer : public BlobDeserializerBase {
 };
 } // namespace
 
-CAFFE_KNOWN_TYPE_NOEXPORT(DummyType);
+CAFFE_KNOWN_TYPE(DummyType);
 
 namespace {
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DummyType>()), DummyTypeSerializer);

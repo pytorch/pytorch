@@ -2,7 +2,7 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
-#if defined(__AVX__) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
@@ -11,11 +11,12 @@ namespace vec256 {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
-#if defined(__AVX__) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 
 template <> class Vec256<double> {
 private:
   __m256d values;
+  static const Vec256<double> ones;
 public:
   using value_type = double;
   static constexpr int size() {
@@ -233,6 +234,13 @@ public:
   Vec256<double> operator>=(const Vec256<double>& other) const {
     return _mm256_cmp_pd(values, other.values, _CMP_GE_OQ);
   }
+
+  Vec256<double> eq(const Vec256<double>& other) const;
+  Vec256<double> ne(const Vec256<double>& other) const;
+  Vec256<double> lt(const Vec256<double>& other) const;
+  Vec256<double> le(const Vec256<double>& other) const;
+  Vec256<double> gt(const Vec256<double>& other) const;
+  Vec256<double> ge(const Vec256<double>& other) const;
 };
 
 template <>
@@ -310,6 +318,32 @@ Vec256<double> inline operator^(const Vec256<double>& a, const Vec256<double>& b
   return _mm256_xor_pd(a, b);
 }
 
+const Vec256<double> Vec256<double>::ones(1.0);
+
+Vec256<double> Vec256<double>::eq(const Vec256<double>& other) const {
+  return (*this == other) & Vec256<double>::ones;
+}
+
+Vec256<double> Vec256<double>::ne(const Vec256<double>& other) const {
+  return (*this != other) & Vec256<double>::ones;
+}
+
+Vec256<double> Vec256<double>::gt(const Vec256<double>& other) const {
+  return (*this > other) & Vec256<double>::ones;
+}
+
+Vec256<double> Vec256<double>::ge(const Vec256<double>& other) const {
+  return (*this >= other) & Vec256<double>::ones;
+}
+
+Vec256<double> Vec256<double>::lt(const Vec256<double>& other) const {
+  return (*this < other) & Vec256<double>::ones;
+}
+
+Vec256<double> Vec256<double>::le(const Vec256<double>& other) const {
+  return (*this <= other) & Vec256<double>::ones;
+}
+
 template <>
 inline void convert(const double* src, double* dst, int64_t n) {
   int64_t i;
@@ -323,7 +357,7 @@ inline void convert(const double* src, double* dst, int64_t n) {
   }
 }
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
 template <>
 Vec256<double> inline fmadd(const Vec256<double>& a, const Vec256<double>& b, const Vec256<double>& c) {
   return _mm256_fmadd_pd(a, b, c);

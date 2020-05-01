@@ -18,7 +18,7 @@ void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
 }
 
-static bool tensorExprFuserEnabled() {
+bool tensorExprFuserEnabled() {
   static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR");
   if (!enable_c_str) {
     return texpr_fuser_enabled_;
@@ -341,8 +341,6 @@ RegisterOperators TensorExprOps({
         createTensorExprOp,
         AliasAnalysisKind::PURE_FUNCTION),
 });
-
-static RegisterPass pass(fuseTensorExprs);
 
 } // namespace jit
 } // namespace torch

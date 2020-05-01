@@ -215,6 +215,10 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
  *  precedence.
  *
  *  'obj' is an object to check for a __torch_function__ implementation
+ * 
+ * If changing this file in a way that can affect the __torch_function__
+ * overhead, please report the benchmarks in 'benchmarks/overrides_benchmark'.
+ * See the instructions in the 'README.md' in that directory.
  *
  */
 
@@ -511,12 +515,18 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
 }
 
 std::string FunctionSignature::toString() const {
+  // TODO: consider printing more proper schema strings with defaults, optionals, etc.
   std::ostringstream ss;
+  bool keyword_already = false;
   ss << "(";
   int i = 0;
   for (auto& param : params) {
     if (i != 0) {
       ss << ", ";
+    }
+    if (param.keyword_only && !keyword_already) {
+      ss << "*, ";
+      keyword_already = true;
     }
     ss << param.type_name() << " " << param.name;
     i++;

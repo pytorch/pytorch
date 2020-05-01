@@ -40,7 +40,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   std::unique_ptr<llvm::Module> module_;
   llvm::Function* fn_;
   llvm::BasicBlock* bb_;
-  llvm::Value* value_;
+  llvm::Value* value_{nullptr};
   llvm::JITTargetAddress kernelAddress_;
 
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
@@ -185,7 +185,7 @@ static void* argToPtr(
 
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
   if (args.size() != buffer_args().size()) {
-    throw malformed_input();
+    throw malformed_input("wrong number of args in call");
   }
 
   std::vector<void*> argv;
@@ -236,7 +236,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   // Emit prototype and bind argument Vars to parameter indices.
   llvm::Type* retTy = dtypeToLLVM(dtype);
   std::vector<llvm::Type*> params;
-  for (int i = 0; i < args.size(); i++) {
+  for (size_t i = 0; i < args.size(); i++) {
     auto const& arg = args[i];
     if (arg.isVar()) {
       params.push_back(dtypeToLLVM(arg.dtype()));
@@ -248,7 +248,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   llvm::FunctionType* fntype = llvm::FunctionType::get(retTy, params, false);
   fn_ = llvm::Function::Create(
       fntype, llvm::Function::PrivateLinkage, "pytorch", module_.get());
-  for (int i = 0; i < args.size(); i++) {
+  for (size_t i = 0; i < args.size(); i++) {
     if (!args[i].isVar()) {
       fn_->addParamAttr(i, llvm::Attribute::NoAlias);
     }
@@ -324,6 +324,12 @@ void LLVMCodeGenImpl::emitKernel(
 
   // Compile the kernel.
   stmt->accept(this);
+
+  // If the kernel is empty, set a default return value.
+  if (value_ == nullptr) {
+    value_ = llvm::ConstantInt::get(IntTy_, 0);
+  }
+
   irb_.CreateRet(value_);
 
 #if DEBUG_PRINT
@@ -365,7 +371,7 @@ void LLVMCodeGenImpl::visit(const Add* v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateAdd(lhs, rhs);
   } else {
-    throw malformed_input(v);
+    throw malformed_input("llvm_codgen: bad type in Add", v);
   }
 }
 
@@ -383,7 +389,7 @@ void LLVMCodeGenImpl::visit(const Sub* v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateSub(lhs, rhs);
   } else {
-    throw malformed_input(v);
+    throw malformed_input("llvm_codgen: bad type in Sub", v);
   }
 }
 
@@ -401,7 +407,7 @@ void LLVMCodeGenImpl::visit(const Mul* v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateMul(lhs, rhs);
   } else {
-    throw malformed_input(v);
+    throw malformed_input("llvm_codgen: bad type in Mul", v);
   }
 }
 
@@ -419,7 +425,7 @@ void LLVMCodeGenImpl::visit(const Div* v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateSDiv(lhs, rhs);
   } else {
-    throw malformed_input(v);
+    throw malformed_input("llvm_codgen: bad type in Div", v);
   }
 }
 
@@ -434,7 +440,7 @@ void LLVMCodeGenImpl::visit(const And* v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateAnd(lhs, rhs);
   } else {
-    throw malformed_input(v);
+    throw malformed_input("llvm_codgen: bad type in And", v);
   }
 }
 
@@ -449,7 +455,7 @@ void LLVMCodeGenImpl::visit(const Or* v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateOr(lhs, rhs);
   } else {
-    throw malformed_input(v);
+    throw malformed_input("llvm_codgen: bad type in Or", v);
   }
 }
 
@@ -464,7 +470,7 @@ void LLVMCodeGenImpl::visit(const Xor* v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateXor(lhs, rhs);
   } else {
-    throw malformed_input(v);
+    throw malformed_input("llvm_codgen: bad type in Xor", v);
   }
 }
 
@@ -479,7 +485,7 @@ void LLVMCodeGenImpl::visit(const Lshift* v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateShl(lhs, rhs);
   } else {
-    throw malformed_input(v);
+    throw malformed_input("llvm_codgen: bad type in Lshift", v);
   }
 }
 
@@ -494,7 +500,7 @@ void LLVMCodeGenImpl::visit(const Rshift* v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateLShr(lhs, rhs);
   } else {
-    throw malformed_input(v);
+    throw malformed_input("llvm_codgen: bad type in Rshift", v);
   }
 }
 
@@ -699,7 +705,7 @@ void LLVMCodeGenImpl::visit(const Var* v) {
 void LLVMCodeGenImpl::visit(const Let* v) {
   const Var* var = dynamic_cast<const Var*>(v->var());
   if (!var) {
-    throw malformed_input(v);
+    throw malformed_input("llvm_codgen: bad Var in Let", v);
   }
 
   v->value()->accept(this);
@@ -721,7 +727,7 @@ void LLVMCodeGenImpl::visit(const Let* v) {
 void LLVMCodeGenImpl::visit(const LetStmt* v) {
   const Var* var = v->var();
   if (!var) {
-    throw malformed_input(v);
+    throw malformed_input("llvm_codgen: bad Var in LetStmt", v);
   }
 
   v->value()->accept(this);
@@ -818,7 +824,7 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   if (v->dtype().lanes() == 1) {
     v->base_handle()->accept(this);
     auto base = this->value_;
-    v->index()->accept(this);
+    v->flat_index()->accept(this);
     auto idx = this->value_;
 
     auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
@@ -856,7 +862,7 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   }
 
   // Handle the case where the load is contiguous and unmasked efficiently
-  auto* idx_ramp = dynamic_cast<const Ramp*>(v->index());
+  auto* idx_ramp = dynamic_cast<const Ramp*>(v->flat_index());
   if (unmasked_load && idx_ramp) {
     auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
@@ -876,7 +882,7 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   // Fallback to a scalar implementation
   v->base_handle()->accept(this);
   auto base = this->value_;
-  v->index()->accept(this);
+  v->flat_index()->accept(this);
   auto idx = this->value_;
   v->mask()->accept(this);
   auto mask = this->value_;
@@ -961,7 +967,6 @@ void LLVMCodeGenImpl::emitMaskedStore(
     llvm::Value* mask,
     llvm::Value* val) {
   // Create block structure for the masked store.
-  auto preheader = irb_.GetInsertBlock();
   auto condblock = llvm::BasicBlock::Create(getContext(), "cond", fn_);
   auto tailblock = llvm::BasicBlock::Create(getContext(), "tail", fn_);
 
@@ -983,7 +988,7 @@ void LLVMCodeGenImpl::visit(const Store* v) {
   if (v->value()->dtype().lanes() == 1) {
     v->base_handle()->accept(this);
     auto base = this->value_;
-    v->index()->accept(this);
+    v->flat_index()->accept(this);
     auto idx = this->value_;
     v->value()->accept(this);
     auto val = this->value_;
@@ -1018,7 +1023,7 @@ void LLVMCodeGenImpl::visit(const Store* v) {
   auto val = this->value_;
 
   // Handle the case where the store is contiguous and unmasked efficiently
-  auto* idx_ramp = dynamic_cast<const Ramp*>(v->index());
+  auto* idx_ramp = dynamic_cast<const Ramp*>(v->flat_index());
   if (unmasked_store && idx_ramp) {
     auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
@@ -1035,7 +1040,7 @@ void LLVMCodeGenImpl::visit(const Store* v) {
     }
   }
 
-  v->index()->accept(this);
+  v->flat_index()->accept(this);
   auto idx = this->value_;
   v->mask()->accept(this);
   auto mask = this->value_;

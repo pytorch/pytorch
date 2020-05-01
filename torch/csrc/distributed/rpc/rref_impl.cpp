@@ -203,25 +203,34 @@ RRefForkData UserRRef::fork() const {
 
 const IValue& OwnerRRef::getValue() const {
   std::unique_lock<std::mutex> lock(mutex_);
-  valueCV_.wait(lock, [this] { return value_.has_value(); });
+  valueCV_.wait(
+      lock, [this] { return value_.has_value() || error_.has_value(); });
+  if (error_) {
+    std::runtime_error err(*error_);
+    throw err;
+  }
   return value_.value();
 }
 
 bool OwnerRRef::hasValue() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return value_.has_value();
+  return value_.has_value() || error_.has_value();
 }
 
-std::shared_ptr<FutureMessage> OwnerRRef::getFuture() {
+std::shared_ptr<JitFuture> OwnerRRef::getFuture() {
   std::unique_lock<std::mutex> lock(mutex_);
   if (future_.get()) {
     return future_;
   }
-  future_ = std::make_shared<FutureMessage>();
-  std::shared_ptr<FutureMessage> ret = future_;
+  future_ = std::make_shared<JitFuture>(NoneType::get());
+  std::shared_ptr<JitFuture> ret = future_;
   if (value_.has_value()) {
     lock.unlock();
-    ret->markCompleted(Message());
+    ret->markCompleted(IValue());
+  } else if (error_.has_value()) {
+    auto err = *error_;
+    lock.unlock();
+    ret->setError(std::move(err));
   }
   return ret;
 }
@@ -229,12 +238,25 @@ std::shared_ptr<FutureMessage> OwnerRRef::getFuture() {
 void OwnerRRef::setValue(IValue&& value) {
   std::unique_lock<std::mutex> lock(mutex_);
   value_ = std::move(value);
-  std::shared_ptr<FutureMessage> future;
+  std::shared_ptr<JitFuture> future =
+      std::make_shared<JitFuture>(NoneType::get());
   future.swap(future_);
   lock.unlock();
   valueCV_.notify_all();
   if (future.get() && !future->completed()) {
-    future->markCompleted(Message());
+    future->markCompleted(IValue());
+  }
+}
+
+void OwnerRRef::setError(const std::string& error) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  error_ = error;
+  std::shared_ptr<JitFuture> future;
+  future.swap(future_);
+  lock.unlock();
+  valueCV_.notify_all();
+  if (future.get() && !future->completed()) {
+    future->setError(error);
   }
 }
 

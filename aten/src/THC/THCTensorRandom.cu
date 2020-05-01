@@ -17,7 +17,7 @@
 // See https://github.com/RadeonOpenCompute/hcc/issues/839
 extern "C" __host__ void THCRandom_getRNGState(at::Generator gen_, THByteTensor *rng_state)
 {
-  auto gen = at::check_generator<at::CUDAGenerator>(gen_);
+  auto gen = at::check_generator<at::CUDAGeneratorImpl>(gen_);
   std::lock_guard<std::mutex> lock(gen->mutex_);
   // The RNG state comprises the seed, and an offset used for Philox.
   // The following line is just here for BC reason. sizeof curandStateMtgp32 is 4120.
@@ -42,7 +42,7 @@ extern "C" __host__ void THCRandom_getRNGState(at::Generator gen_, THByteTensor 
 
 extern "C" __host__ void THCRandom_setRNGState(at::Generator gen_, THByteTensor *rng_state)
 {
-  auto gen = at::check_generator<at::CUDAGenerator>(gen_);
+  auto gen = at::check_generator<at::CUDAGeneratorImpl>(gen_);
   std::lock_guard<std::mutex> lock(gen->mutex_);
   static const size_t states_size = 200 * sizeof(4120); // this line is just here for BC reason
   static const size_t seed_size = sizeof(uint64_t);

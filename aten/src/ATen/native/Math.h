@@ -265,3 +265,5 @@ static inline float calc_digamma(float x) {
   }
   return result + logf(x) - (0.5f / x) - y;
 }
+
+inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }

@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/TypeDefault.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/stack.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/library.h>
 
 using Stack = std::vector<c10::IValue>;
 using at::Scalar;
@@ -100,84 +100,35 @@ void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
   pack(*stack, std::move(result_));
 }
 
-static auto registry =
-    torch::RegisterOperators()
-        .op("_aten::add.Scalar",
-            torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::VariableTensorId,
-                &torch::autograd::VariableType::add_Scalar))
-        .op("_aten::mul.Tensor(Tensor self, Tensor other) -> Tensor",
-            torch::RegisterOperators::options()
-                .kernel(
-                    c10::DispatchKey::VariableTensorId,
-                    &torch::autograd::VariableType::mul_Tensor)
-                .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-        .op(torch::RegisterOperators::options()
-                .schema(
-                    "_aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor")
-                .kernel<&conv2d_kernel>(DispatchKey::VariableTensorId)
-                .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-        .op(torch::RegisterOperators::options()
-                .schema(
-                    "_aten::dropout(Tensor input, float p, bool train) -> Tensor")
-                .kernel<Tensor(const Tensor&, double, bool)>(
-                    DispatchKey::VariableTensorId,
-                    &VariableType::dropout)
-                .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-        .op(torch::RegisterOperators::options()
-                .schema(
-                    "_aten::feature_dropout(Tensor input, float p, bool train) -> Tensor")
-                .kernel<Tensor(const Tensor&, double, bool)>(
-                    DispatchKey::VariableTensorId,
-                    &VariableType::feature_dropout)
-                .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-        .op(torch::RegisterOperators::options()
-                .schema(
-                    "_aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor")
-                .kernel<log_softmax_kernel>(DispatchKey::VariableTensorId)
-                .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-        .op("_aten::max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor",
-            torch::RegisterOperators::options().kernel(
-                DispatchKey::VariableTensorId,
-                [](const Tensor& self,
-                   c10::List<int64_t> kernel_size,
-                   c10::List<int64_t> stride,
-                   c10::List<int64_t> padding,
-                   c10::List<int64_t> dilation,
-                   bool ceil_mode = false) {
-                  return VariableType::max_pool2d(
-                      self,
-                      kernel_size.vec(),
-                      stride.vec(),
-                      padding.vec(),
-                      dilation.vec(),
-                      ceil_mode);
-                }))
-        .op(torch::RegisterOperators::options()
-                .schema("_aten::relu(Tensor self) -> Tensor")
-                .kernel<Tensor(const Tensor&)>(
-                    DispatchKey::VariableTensorId,
-                    &VariableType::relu)
-                .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-        .op(torch::RegisterOperators::options()
-                .schema("_aten::view(Tensor(a) self, int[] size) -> Tensor(a)")
-                .kernel<&view_kernel>(DispatchKey::VariableTensorId)
-                .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-        .op(torch::RegisterOperators::options()
-                .schema("_aten::t(Tensor(a) self) -> Tensor(a)")
-                .kernel<Tensor(const Tensor&), &VariableType::t>(
-                    DispatchKey::VariableTensorId)
-                .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-        .op(torch::RegisterOperators::options()
-                .schema(
-                    "_aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor")
-                .kernel<Tensor(
-                    const Tensor&,
-                    const Tensor&,
-                    const Tensor&,
-                    Scalar,
-                    Scalar)>(
-                    DispatchKey::VariableTensorId,
-                    &VariableType::addmm)
-                .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
-} // namespace
+// NB! This is _aten, not aten!!!
+TORCH_LIBRARY_IMPL(_aten, Autograd, m) {
+  m.impl("add.Scalar", torch::autograd::VariableType::add_Scalar);
+  m.impl("mul.Tensor", torch::autograd::VariableType::mul_Tensor);
+  m.impl("conv2d", torch::CppFunction::makeFromBoxedFunction<conv2d_kernel>());
+  m.impl("dropout", VariableType::dropout);
+  m.impl("feature_dropout", VariableType::feature_dropout);
+  m.impl(
+      "log_softmax.int",
+      torch::CppFunction::makeFromBoxedFunction<log_softmax_kernel>());
+  m.impl(
+      "max_pool2d",
+      [](const Tensor& self,
+         c10::List<int64_t> kernel_size,
+         c10::List<int64_t> stride,
+         c10::List<int64_t> padding,
+         c10::List<int64_t> dilation,
+         bool ceil_mode = false) {
+        return VariableType::max_pool2d(
+            self,
+            kernel_size.vec(),
+            stride.vec(),
+            padding.vec(),
+            dilation.vec(),
+            ceil_mode);
+      });
+  m.impl("relu", VariableType::relu);
+  m.impl("view", torch::CppFunction::makeFromBoxedFunction<view_kernel>());
+  m.impl("t", VariableType::t);
+  m.impl("addmm", VariableType::addmm);
+}
+} // anonymous namespace

@@ -9,23 +9,25 @@ namespace rpc {
 
 thread_local std::vector<std::shared_ptr<RRefContext::PendingUserState>>
     RRefContext::userTable_;
-thread_local bool RRefContext::recording = false;
+thread_local bool RRefContext::recording_ = false;
 
 namespace callback {
 void confirmPendingUser(
-    const rpc::Message& message,
-    const c10::optional<utils::FutureError>& futErr) {
-  RRefContext::handleException(futErr);
-  auto rr = RemoteRet::fromMessage(message);
-  auto& ctx = RRefContext::getInstance();
-  ctx.delPendingUser(rr->forkId());
+    const FutureMessage& futureMessage,
+    const ForkId& expectedForkId) {
+  if (!futureMessage.hasError()) {
+    auto rr = RemoteRet::fromMessage(futureMessage.constValue());
+    TORCH_INTERNAL_ASSERT(rr->forkId() == expectedForkId);
+  }
+  RRefContext::getInstance().delPendingUser(expectedForkId);
+  // Potentially propagate to the userRRef?
+  RRefContext::handleException(futureMessage);
 }
 
 c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
-    const Message& message,
-    const c10::optional<utils::FutureError>& futErr) {
-  RRefContext::handleException(futErr);
-  auto rr = RemoteRet::fromMessage(message);
+    const FutureMessage& futureMessage) {
+  RRefContext::handleException(futureMessage);
+  auto rr = RemoteRet::fromMessage(futureMessage.constValue());
   TORCH_INTERNAL_ASSERT(
       rr->rrefId() == rr->forkId(),
       "Expecting an OwnerRRef as RemoteRet but got a fork.");
@@ -63,15 +65,15 @@ std::vector<c10::intrusive_ptr<RRef>> RRefContext::destroyInstance(
     }
   }
   ctx.owners_.clear();
+  ctx.pendingOwners_.clear();
   return deletedRRefs;
 }
 
-void RRefContext::handleException(
-    const c10::optional<utils::FutureError>& futErr) {
-  if (futErr) {
+void RRefContext::handleException(const FutureMessage& fm) {
+  if (fm.hasError()) {
     // TODO: allow users to register an error handler and call it here.
-    VLOG(1) << "Got exception: " << (*futErr).what();
-    throw std::runtime_error((*futErr).what());
+    VLOG(1) << "Got exception: " << fm.error()->what();
+    throw std::runtime_error(fm.error()->what());
   }
 }
 
@@ -177,10 +179,7 @@ void RRefContext::delUser(
           agent_->getWorkerInfo(owner),
           RRefUserDelete(rrefId, forkId).toMessage());
 
-      fm->addCallback([](const Message& /* unused */,
-                         const c10::optional<utils::FutureError>& futErr) {
-        handleException(futErr);
-      });
+      fm->addCallback([](const FutureMessage& fm) { handleException(fm); });
     }
   }
 
@@ -237,29 +236,7 @@ c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
   auto& rrefId = rrefForkData.rrefId_;
   auto& forkId = rrefForkData.forkId_;
   if (ownerId == getWorkerId()) {
-    // We have found the rref through the rrefId
-    auto ownerRRef = getOwnerRRef(rrefId);
-    // Now double check if the two types are matched
-    //
-    // Why we are special casing the check for tensor type here?
-    // this is because tensor types might get specialized on tensors when
-    // we pass inputs to the function, i.e. TensorType can filled with
-    // specific shape info, requires_grad info, etc. so the OwerRRef we
-    // found might already have those infos, but the `type` we passed in
-    // here is a plain TensorType, they are not equal relationship:
-    // specialized TensorType <: plain TensorType
-    //
-    // In RPC we don't care the difference as we ser/de with just the
-    // plain TensorType. This is not a issue for UserRRef creation either,
-    // since Tensor can only get specialized with a previous run of local
-    // JIT function, and we shouldn't preserve the specialized SubTensorType
-    // information on other workers because it's only information only.
-    if (type == TensorType::get()) {
-      TORCH_INTERNAL_ASSERT(ownerRRef->type()->isSubtypeOf(TensorType::get()));
-    } else {
-      TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
-    }
-    return ownerRRef;
+    return getOrCreateOwnerRRef(rrefId, type);
   } else {
     return createUserRRef(ownerId, rrefId, forkId, type);
   }
@@ -277,13 +254,44 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     // private.
     auto rref = c10::make_intrusive<OwnerRRef>(getWorkerId(), rrefId, type);
     owners_[rref->rrefId()] = rref;
-    ownerCV_.notify_all();
+    const auto pendingOwnerIter = pendingOwners_.find(rrefId);
+    if (pendingOwnerIter != pendingOwners_.end()) {
+      pendingOwnerIter->second->markCompleted(rref);
+      pendingOwners_.erase(pendingOwnerIter);
+    }
     return rref;
   } else {
     // Scenario (2) retrieving an existing RRef
     auto ownerRRef =
         c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second);
-    TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
+    // Now double check if the two types match
+    //
+    // Why we are special casing the check for tensor type here?
+    // this is because tensor types might get specialized on tensors when
+    // we pass inputs to the function, i.e. TensorType can filled with
+    // specific shape info, requires_grad info, etc. so the OwerRRef we
+    // found might already have those infos, but the `type` we passed in
+    // here is a plain TensorType, they are not equal relationship:
+    // specialized TensorType <: plain TensorType
+    //
+    // In RPC we don't care the difference as we ser/de with just the
+    // plain TensorType. This is not a issue for UserRRef creation either,
+    // since Tensor can only get specialized with a previous run of local
+    // JIT function, and we shouldn't preserve the specialized SubTensorType
+    // information on other workers because it's only information only.
+    if (type == TensorType::get()) {
+      TORCH_INTERNAL_ASSERT(
+          ownerRRef->type()->isSubtypeOf(TensorType::get()),
+          "Expect OwnerRRef to be a sub-type of TensorType, but got ",
+          ownerRRef->type()->python_str());
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          ownerRRef->type() == type,
+          "OwnerRRef type is ",
+          ownerRRef->type()->python_str(),
+          ", expected type is ",
+          type);
+    }
     return ownerRRef;
   }
 }
@@ -298,16 +306,29 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::createOwnerRRef(
       getWorkerId(), genGloballyUniqueId(), type);
 }
 
-c10::intrusive_ptr<OwnerRRef> RRefContext::getOwnerRRef(const RRefId& rrefId) {
+std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>> RRefContext::
+    getOwnerRRef(const RRefId& rrefId) {
   std::unique_lock<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
     // Scenario (1) RRef is used before it is created
-    ownerCV_.wait(lock, [&] { return owners_.find(rrefId) != owners_.end(); });
-    return c10::static_intrusive_pointer_cast<OwnerRRef>(owners_[rrefId]);
+    const auto pendingOwnerIter = pendingOwners_.find(rrefId);
+    if (pendingOwnerIter == pendingOwners_.end()) {
+      auto futureOwner =
+          std::make_shared<Future<c10::intrusive_ptr<OwnerRRef>>>();
+      pendingOwners_[rrefId] = futureOwner;
+      return futureOwner;
+    } else {
+      return pendingOwnerIter->second;
+    }
   } else {
     // Scenario (2) retrieving an existing RRef
-    return c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second);
+    // NB: This assumes passing value to the Future constructor implicitly
+    // marks the Future as completed. This is true for utils::Future, but
+    // not so for ivalue::Future. Hence, when merging the two Future
+    // implementations later, we might need to modify code here as well.
+    return std::make_shared<Future<c10::intrusive_ptr<OwnerRRef>>>(
+        c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second));
   }
 }
 
@@ -389,20 +410,15 @@ void RRefContext::notifyOwnerAndParentOfFork(
     // with this fork ID.
     auto fm = agent_->sendWithRetries(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
-    fm->addCallback([](const Message& /* unused */,
-                       const c10::optional<utils::FutureError>& futErr) {
-      handleException(futErr);
-    });
+    fm->addCallback([](const FutureMessage& fm) { handleException(fm); });
   } else {
     auto fm = agent_->sendWithRetries(
         agent_->getWorkerInfo(rref->owner()),
         RRefForkRequest(rref->rrefId(), forkId).toMessage());
 
     addPendingUser(forkId, rref);
-    fm->addCallback([this, forkId, parent](
-                        const Message& /* unused */,
-                        const c10::optional<utils::FutureError>& futErr) {
-      handleException(futErr);
+    fm->addCallback([this, forkId, parent](const FutureMessage& fm) {
+      handleException(fm);
       this->finishForkRequest(forkId, parent);
     });
   }
@@ -462,7 +478,7 @@ void RRefContext::addPendingUser(
       !rref->isOwner(), "Attempt to add an OwnerRRef as a pending User.");
 
   auto state = std::make_shared<PendingUserState>(rref);
-  if (recording) {
+  if (recording_) {
     // adding and waiting for pending users are guaranteed to be called from the
     // same thread, but deleting pending users will be called from another
     // thread. As the delPendingUser will not be able to access the same
@@ -535,37 +551,34 @@ void RRefContext::recordThreadLocalPendingRRefs() {
   TORCH_INTERNAL_ASSERT(
       userTable_.empty(),
       "User RRef Table should be empty when start recording");
-  recording = true;
+  recording_ = true;
 }
 
-std::shared_ptr<torch::utils::Future<bool>> RRefContext::
-    waitForThreadLocalPendingRRefs() {
-  auto future = std::make_shared<torch::utils::Future<bool>>();
+std::shared_ptr<Future<bool>> RRefContext::waitForThreadLocalPendingRRefs() {
+  std::shared_ptr<Future<bool>> future;
   if (userTable_.empty()) {
-    future->markCompleted(true);
+    future = std::make_shared<Future<bool>>(true);
   } else {
+    future = std::make_shared<Future<bool>>();
     auto remainingRRefs =
         std::make_shared<std::atomic<uint64_t>>(userTable_.size());
     for (auto& state : userTable_) {
-      state->future_.addCallback(
-          [future, remainingRRefs](
-              const bool& /* unused */,
-              const c10::optional<utils::FutureError>& /* unused */) {
-            auto localCount = remainingRRefs->fetch_sub(1);
-            if (localCount == 1) {
-              future->markCompleted(true);
-            }
-          });
+      state->future_.addCallback([future, remainingRRefs]() {
+        auto localCount = remainingRRefs->fetch_sub(1);
+        if (localCount == 1) {
+          future->markCompleted(true);
+        }
+      });
     }
     userTable_.clear();
   }
-  recording = false;
+  recording_ = false;
   return future;
 }
 
 void RRefContext::clearRecordedPendingRRefsOnError() {
   userTable_.clear();
-  recording = false;
+  recording_ = false;
 }
 
 void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
@@ -573,10 +586,7 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   auto fm = agent_->sendWithRetries(
       agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
-  fm->addCallback([](const Message& /* unused */,
-                     const c10::optional<utils::FutureError>& futErr) {
-    handleException(futErr);
-  });
+  fm->addCallback([](const FutureMessage& fm) { handleException(fm); });
 }
 
 void RRefContext::addSelfAsFork(c10::intrusive_ptr<OwnerRRef>& rref) {

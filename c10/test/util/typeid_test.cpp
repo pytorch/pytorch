@@ -1,4 +1,4 @@
-#include "c10/util/typeid.h"
+#include <c10/util/typeid.h>
 #include <gtest/gtest.h>
 
 using std::string;
@@ -10,8 +10,8 @@ class TypeMetaTestFoo {};
 class TypeMetaTestBar {};
 }
 
-CAFFE_KNOWN_TYPE_NOEXPORT(TypeMetaTestFoo);
-CAFFE_KNOWN_TYPE_NOEXPORT(TypeMetaTestBar);
+CAFFE_KNOWN_TYPE(TypeMetaTestFoo);
+CAFFE_KNOWN_TYPE(TypeMetaTestBar);
 
 namespace {
 
@@ -88,8 +88,8 @@ class ClassNoAssignment {
 };
 }
 
-CAFFE_KNOWN_TYPE_NOEXPORT(ClassAllowAssignment);
-CAFFE_KNOWN_TYPE_NOEXPORT(ClassNoAssignment);
+CAFFE_KNOWN_TYPE(ClassAllowAssignment);
+CAFFE_KNOWN_TYPE(ClassNoAssignment);
 
 namespace {
 

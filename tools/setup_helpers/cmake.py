@@ -228,6 +228,7 @@ class CMake:
              'BUILDING_WITH_TORCH_LIBS',
              'CUDA_HOST_COMPILER',
              'CUDA_NVCC_EXECUTABLE',
+             'CUDA_SEPARABLE_COMPILATION',
              'CUDNN_LIBRARY',
              'CUDNN_INCLUDE_DIR',
              'CUDNN_ROOT',
