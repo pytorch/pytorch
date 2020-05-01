@@ -773,17 +773,23 @@ VaryingShape<Stride> TensorType::computeStrideProps(
 
   std::vector<Stride> stride_properties;
   for (size_t i = 0; i < stride_indices.size(); i++) {
-    Stride s{stride_indices[i], false, strides[stride_indices[i]]};
+    Stride s{
+        stride_indices[i], ContiguityType::UNKNOWN, strides[stride_indices[i]]};
     // innermost stride expected to be 1
     // TODO: turn contiguous_ into an enum CONTIGUOUS, NONCONTIGUOUS,
     // BROADCASTED
-    if (i == 0) {
-      s.contiguous_ = strides[stride_indices[i]] == 1;
+    if (strides[stride_indices[i]] == 0) {
+      s.contiguity_type_ = ContiguityType::BROADCASTED;
+    } else if (i == 0) {
+      s.contiguity_type_ = strides[stride_indices[i]] == 1
+          ? ContiguityType::CONTIGUOUS
+          : ContiguityType::NONCONTIGUOUS;
     } else {
-      s.contiguous_ = strides[stride_indices[i]] == 1 ||
-          (strides[stride_indices[i]] != 0 &&
-           strides[stride_indices[i]] ==
-               strides[stride_indices[i - 1]] * sizes[stride_indices[i - 1]]);
+      s.contiguity_type_ = strides[stride_indices[i]] == 1 ||
+              strides[stride_indices[i]] ==
+                  strides[stride_indices[i - 1]] * sizes[stride_indices[i - 1]]
+          ? ContiguityType::CONTIGUOUS
+          : ContiguityType::NONCONTIGUOUS;
     }
     stride_properties.push_back(s);
   }

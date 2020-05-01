@@ -315,6 +315,13 @@ struct CAFFE2_API OptionalType
 };
 
 template <typename T>
+inline T merge_primitive(const T& a, const T& b) {
+  TORCH_INTERNAL_ASSERT(
+      "Only merge_primitive specializations should be called!");
+  return c10::optional<T>{};
+}
+
+template <typename T>
 inline c10::optional<T> merge_primitive(
     const c10::optional<T>& a,
     const c10::optional<T>& b) {
@@ -323,6 +330,8 @@ inline c10::optional<T> merge_primitive(
   }
   return c10::optional<T>{};
 }
+
+enum class ContiguityType { UNKNOWN, NONCONTIGUOUS, CONTIGUOUS, BROADCASTED };
 
 // If we see `a + b + c`  and know that a, b, and c are the same size and have
 // two dimensions (WxH), then we can generate a fused kernel for them. That
@@ -343,19 +352,28 @@ struct CAFFE2_API Stride {
   Stride() {}
   Stride(
       const c10::optional<size_t>& stride_index,
-      const c10::optional<bool>& contiguous,
+      const ContiguityType& contiguity_type,
       const c10::optional<size_t>& stride)
-      : stride_index_(stride_index), contiguous_(contiguous), stride_(stride) {}
+      : stride_index_(stride_index),
+        contiguity_type_(contiguity_type),
+        stride_(stride) {}
 
   bool operator==(const Stride& b) const {
-    return stride_index_ == b.stride_index_ && contiguous_ == b.contiguous_ &&
-        stride_ == b.stride_;
+    return stride_index_ == b.stride_index_ &&
+        contiguity_type_ == b.contiguity_type_ && stride_ == b.stride_;
   }
 
   c10::optional<size_t> stride_index_;
-  c10::optional<bool> contiguous_;
+  ContiguityType contiguity_type_;
   c10::optional<size_t> stride_;
 };
+
+template <>
+inline ContiguityType merge_primitive(
+    const ContiguityType& a,
+    const ContiguityType& b) {
+  return a == b ? a : ContiguityType::UNKNOWN;
+}
 
 template <>
 inline c10::optional<Stride> merge_primitive(
@@ -372,12 +390,13 @@ inline c10::optional<Stride> merge_primitive(
 
   auto merged_index =
       merge_primitive(left->stride_index_, right->stride_index_);
-  auto merged_cont = merge_primitive(left->contiguous_, right->contiguous_);
+  auto merged_cont =
+      merge_primitive(left->contiguity_type_, right->contiguity_type_);
   auto merged_stride = merge_primitive(left->stride_, right->stride_);
   auto r = Stride(merged_index, merged_cont, merged_stride);
   // normalize
-  if (!r.stride_index_.has_value() && !r.contiguous_.has_value() &&
-      !r.stride_.has_value()) {
+  if (!r.stride_index_.has_value() &&
+      r.contiguity_type_ != ContiguityType::UNKNOWN && !r.stride_.has_value()) {
     return c10::optional<Stride>{};
   }
 
