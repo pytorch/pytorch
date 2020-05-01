@@ -9190,7 +9190,7 @@ class TestNNDeviceType(NNTestCase):
         self._test_LayerNorm_general(device)
 
         if self.device_type == 'cuda' and TEST_WITH_ROCM:
-            self._test_LayerNorm_general(device, dtype=torch.bfloat16);
+            self._test_LayerNorm_general(device, dtype=torch.bfloat16)
 
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
