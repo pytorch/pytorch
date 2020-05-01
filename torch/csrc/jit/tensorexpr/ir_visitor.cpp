@@ -127,7 +127,7 @@ void IRVisitor::visit(const AtomicAdd* v) {
 }
 
 void IRVisitor::visit(const Block* v) {
-  for (Stmt* s : v->stmts()) {
+  for (Stmt* s : *v) {
     s->accept(this);
   }
 }
