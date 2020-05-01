@@ -299,6 +299,14 @@ class VulkanTensor::Impl {
     numel_ = numel;
   }
 
+  std::vector<int64_t> sizes() {
+    return sizes_;
+  }
+
+  int64_t dim() {
+    return sizes_.size();
+  }
+
   std::vector<int64_t> sizes_;
   int64_t numel_;
   std::unique_ptr<VBuffer> vbuffer_;
@@ -726,6 +734,72 @@ void upsample_nearest2d(
   auto computeUnit = makeComputeUnit(
       at::native::vulkan::GLSL_SPV(vulkan_upsampleNearest2d), descrSetLayout);
   computeUnit->createCommandBuffer(descrSet, UP_DIV(OW, 8), UP_DIV(OH, 8), C);
+  computeUnit->runCommandBuffer();
+  vkDestroyDescriptorPool(device, descrPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
+}
+
+void add(
+    VulkanTensor& output,
+    const VulkanTensor& input0,
+    const VulkanTensor& input1,
+    float alpha) {
+  TORCH_INTERNAL_ASSERT(
+      output.pImpl->dim() == 4,
+      "Vulkan add is implemented for 4-dim tensors, output is not 4-dim");
+  TORCH_INTERNAL_ASSERT(
+      input0.pImpl->dim() == 4,
+      "Vulkan add is implemented for 4-dim tensors, input0 is not 4-dim");
+  TORCH_INTERNAL_ASSERT(
+      input1.pImpl->dim() == 4,
+      "Vulkan add is implemented for 4-dim tensors, input1 is not 4-dim");
+  auto sizes = output.pImpl->sizes();
+  auto C = sizes[0] * sizes[1];
+  auto H = sizes[2];
+  auto W = sizes[3];
+
+  auto device = vkContext->device_;
+  auto physicalDevice = vkContext->physicalDevice_;
+  struct ConstBlock {
+    int32_t W;
+    int32_t H;
+    int32_t C;
+    float alpha;
+  };
+  ConstBlock u{W, H, C, alpha};
+  int64_t bufferConstSize = sizeof(u);
+  int64_t bufferConstSizeAligned =
+      ROUND_UP(bufferConstSize, vkContext->uboAlign_);
+  VBuffer bufferConst{bufferConstSizeAligned, physicalDevice, device, true};
+  bufferConst.copyFromHostToDevice((void*)&u, bufferConstSize);
+
+  VkDescriptorSetLayout descrSetLayout = {};
+  VkDescriptorSetLayoutBinding bindings[] = {
+      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+      descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+      descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+      descriptorSetLayoutBinding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
+  createDescriptorSetLayout(
+      device, bindings, 4 /* bindingsCount */, &descrSetLayout);
+
+  VkDescriptorPool descrPool = {};
+  VkDescriptorPoolSize poolSizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
+                                      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
+                                      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
+                                      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
+  createDescriptorPool(
+      device, poolSizes, 4 /* poolSizeCount */, 1 /* maxSets */, &descrPool);
+
+  VkDescriptorSet descrSet = {};
+  allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
+
+  output.pImpl->vbuffer_->bind(descrSet, 0);
+  input0.pImpl->vbuffer_->bind(descrSet, 1);
+  input1.pImpl->vbuffer_->bind(descrSet, 2);
+  bufferConst.bind(descrSet, 3);
+  auto computeUnit =
+      makeComputeUnit(at::native::vulkan::GLSL_SPV(vulkan_add), descrSetLayout);
+  computeUnit->createCommandBuffer(descrSet, UP_DIV(W, 8), UP_DIV(H, 8), C);
   computeUnit->runCommandBuffer();
   vkDestroyDescriptorPool(device, descrPool, nullptr);
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);

@@ -2,7 +2,6 @@
 
 #include "ATen/ATen.h"
 #include "ATen/vulkan/Context.h"
-#include "vulkan_debug_utils.h"
 
 TEST(VulkanTest, ToVulkanToCpu) {
   if (!at::vulkan::is_available())
@@ -16,6 +15,15 @@ TEST(VulkanTest, ToVulkanToCpu) {
   ASSERT_TRUE(t2.equal(t));
 }
 
+TEST(VulkanTest, FailOnStrides) {
+  if (!at::vulkan::is_available())
+    return;
+  auto t = at::empty({1, 2, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto tv = t.vulkan();
+  ASSERT_ANY_THROW(tv.strides());
+  ASSERT_ANY_THROW(tv.stride(0));
+}
+
 TEST(VulkanTest, UpsampleNearest2D) {
   if (!at::vulkan::is_available())
     return;
@@ -27,17 +35,22 @@ TEST(VulkanTest, UpsampleNearest2D) {
       t_in.to(at::TensorOptions{at::Device{at::kVulkan}}.dtype(at::kFloat));
 
   auto tv_out = at::upsample_nearest2d(tv_in, {4, 6});
-  auto t_out = tv_out.to(at::TensorOptions{at::Device{at::kCPU}}
-                             .dtype(at::kFloat));
+  auto t_out =
+      tv_out.to(at::TensorOptions{at::Device{at::kCPU}}.dtype(at::kFloat));
 
   ASSERT_TRUE(t_out.equal(t_out_expected));
 }
 
-TEST(VulkanTest, FailOnStrides) {
+TEST(VulkanTest, Add) {
   if (!at::vulkan::is_available())
     return;
-  auto t = at::empty({1, 2, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  auto tv = t.vulkan();
-  ASSERT_ANY_THROW(tv.strides());
-  ASSERT_ANY_THROW(tv.stride(0));
+  auto t_in0 = at::rand({1, 2, 2, 3}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_in1 = at::rand({1, 2, 2, 3}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::add(t_in0, t_in1, 2);
+  auto tv_in0 = t_in0.vulkan();
+  auto tv_in1 = t_in1.vulkan();
+  auto tv_out = at::add(tv_in0, tv_in1, 2);
+  auto t_out = tv_out.cpu();
+
+  ASSERT_TRUE(t_out.equal(t_out_expected));
 }

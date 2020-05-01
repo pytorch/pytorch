@@ -156,14 +156,7 @@ Tensor vulkan_add(const Tensor& self, const Tensor& other, Scalar alpha) {
 
   VTensor output = VTensor{self.sizes().vec()};
   output.allocateStorage();
-
-#ifdef USE_GLES
-  at::native::vulkan::details::gl::add(output, x, y, a);
-#else
-  // XXX Not implemented
-  AT_ERROR("vulkan_add: Not implemented yet for Vulkan");
-#endif
-
+  at::native::vulkan::details::VULKAN_GL::add(output, x, y, a);
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
 

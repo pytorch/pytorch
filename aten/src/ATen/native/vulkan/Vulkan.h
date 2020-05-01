@@ -54,6 +54,12 @@ void upsample_nearest2d(
     float scaleH,
     float scaleW);
 
+void add(
+    VulkanTensor& output,
+    const VulkanTensor& input0,
+    const VulkanTensor& input1,
+    float alpha);
+
 } // namespace vulkan
 } // namespace details
 } // namespace vulkan

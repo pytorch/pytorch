@@ -30,15 +30,10 @@ if(NOT USE_VULKAN_GLES_SHADERC_RUNTIME)
     endif()
 
     set(GLSLC_PATH "${ANDROID_NDK}/shader-tools/${ANDROID_NDK_HOST_SYSTEM_NAME}/glslc")
-    message(STATUS "GLSLC_PATH:${GLSLC_PATH}")
   else()
     if(NOT DEFINED ENV{VULKAN_SDK})
       message(FATAL_ERROR "USE_VULKAN requires environment var VULKAN_SDK set")
     endif()
-
-    message(STATUS "VULKAN_SDK:$ENV{VULKAN_SDK}")
-
-    message(STATUS "CMAKE_HOST_SYSTEM_PROCESSOR:${CMAKE_HOST_SYSTEM_PROCESSOR}")
 
     find_program(
       GLSLC_PATH glslc
@@ -46,9 +41,7 @@ if(NOT USE_VULKAN_GLES_SHADERC_RUNTIME)
       ENV VULKAN_SDK
       PATHS "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/bin")
 
-    if(GLSLC_PATH)
-      message(STATUS "GLSLC_PATH:${GLSLC_PATH}")
-    else()
+    if(NOT GLSLC_PATH)
       message(FATAL_ERROR "USE_VULKAN glslc not found")
     endif(GLSLC_PATH)
   endif()
