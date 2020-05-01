@@ -138,7 +138,7 @@ genrule(
         "aten/src/ATen/TypeDefault.h",
         "aten/src/ATen/TypeDefault.cpp",
         "aten/src/ATen/core/TensorBody.h",
-        "aten/src/ATen/core/TensorMethods.h",
+        "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
     ],
     cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)` aten/src/ATen/Declarations.cwrap aten/src/THCUNN/generic/THCUNN.h aten/src/ATen/nn.yaml aten/src/ATen/native/native_functions.yaml",
@@ -558,7 +558,6 @@ cc_library(
         "torch/csrc/WindowsTorchApiMacro.h",
         "torch/csrc/jit/frontend/function_schema_parser.h",
         "aten/src/ATen/templates/TensorBody.h",
-        "aten/src/ATen/templates/TensorMethods.h",
     ] + glob([
         "aten/src/ATen/*.h",
         "aten/src/ATen/core/*.h",

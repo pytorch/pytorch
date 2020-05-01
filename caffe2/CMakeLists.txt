@@ -522,6 +522,7 @@ endif()
 
 
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
+
 if(HAVE_SOVERSION)
   set_target_properties(torch_cpu PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
