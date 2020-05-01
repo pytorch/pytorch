@@ -6,12 +6,12 @@
 class Baton {
  public:
   void post() {
-    std::unique_lock l(lock_);
+    std::unique_lock<std::mutex> l(lock_);
     done_ = true;
     cv_.notify_all();
   }
   void wait() {
-    std::unique_lock l(lock_);
+    std::unique_lock<std::mutex> l(lock_);
     while (!done_) {
       cv_.wait(l);
     }
