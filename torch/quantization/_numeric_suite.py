@@ -314,8 +314,8 @@ def get_matching_activations(float_module, q_module, Logger):
 def prepare_model_outputs(
     float_module,
     q_module,
-    white_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST,
     Logger=OutputLogger,
+    white_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST,
 ):
     r"""Prepare the model by attaching the logger to both float module
     and quantized module if they are in the white_list.
@@ -323,8 +323,8 @@ def prepare_model_outputs(
     Args:
         float_module: float module used to generate the q_module
         q_module: module quantized from float_module
-        white_list: list of module types to attach logger
         Logger: type of logger to be attached to float_module and q_module
+        white_list: list of module types to attach logger
     """
     qconfig_debug = torch.quantization.QConfig(activation=Logger, weight=None)
     float_module.qconfig = qconfig_debug
@@ -337,8 +337,8 @@ def compare_model_outputs(
     float_model,
     q_model,
     data,
-    white_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST,
     Logger=OutputLogger,
+    white_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST,
 ):
     r"""Compare output activations between float and quantized models at
     corresponding locations for the same input. Return a dict with key corresponding
@@ -356,6 +356,7 @@ def compare_model_outputs(
         float_model: float model used to generate the q_model
         q_model: model quantized from float_model
         data: input data used to run the prepared float_model and q_model
+        Logger: type of logger to be attached to float_module and q_module
         white_list: list of module types to attach logger
 
     Return:
