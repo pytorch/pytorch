@@ -54,3 +54,22 @@ TEST(VulkanTest, Add) {
 
   ASSERT_TRUE(t_out.equal(t_out_expected));
 }
+
+TEST(VulkanTest, Conv2dWeightsOnCPU) {
+  if (!at::vulkan::is_available())
+    return;
+  auto t_in = at::rand({1, 3, 3, 3}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_w = at::rand({2, 3, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_b = at::zeros({2}, at::device(at::kCPU).dtype(at::kFloat));
+  auto stride = c10::IntArrayRef{1};
+  auto padding = c10::IntArrayRef{0};
+  auto dilation = c10::IntArrayRef{1};
+  int64_t groups = 1;
+  auto t_out_expected =
+      at::conv2d(t_in, t_w, t_b, stride, padding, dilation, groups);
+  auto tv_in = t_in.vulkan();
+  auto tv_out = at::conv2d(tv_in, t_w, t_b, stride, padding, dilation, groups);
+  auto t_out = tv_out.cpu();
+
+  ASSERT_TRUE(t_out.equal(t_out_expected));
+}

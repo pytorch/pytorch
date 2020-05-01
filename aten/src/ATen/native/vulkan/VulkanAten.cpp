@@ -214,11 +214,8 @@ at::Tensor vulkan_convolution(
     biasData = (float*)std::malloc(sizeof(float) * OC);
     std::memset(biasData, 0, sizeof(float) * OC);
   }
-
   float* weightData = weight.template data_ptr<float>();
-
-#ifdef USE_GLES
-  at::native::vulkan::details::gl::conv2d(
+  at::native::vulkan::details::VULKAN_GL::conv2d(
       voutput,
       vinput,
       weightData,
@@ -232,10 +229,6 @@ at::Tensor vulkan_convolution(
       DY,
       DX,
       groups);
-#else
-  // XXX Not implemented
-  AT_ERROR("vulkan_convolution: Not implemented yet for Vulkan");
-#endif
   return new_with_vtensor_vulkan(std::move(voutput), input.options());
 }
 

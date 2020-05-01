@@ -805,6 +805,24 @@ void add(
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
 }
 
+void conv2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    const float* weight,
+    int64_t KH,
+    int64_t KW,
+    const float* bias,
+    int64_t SY,
+    int64_t SX,
+    int64_t PY,
+    int64_t PX,
+    int64_t DY,
+    int64_t DX,
+    int64_t G) {
+  // XXX Not Implemented
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet");
+}
+
 bool is_available() {
   return initVulkanContextOnce();
 }
