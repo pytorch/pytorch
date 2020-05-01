@@ -37,7 +37,9 @@ void printScalar(std::ostream& stream, const Value* const value) {
 }
 
 // Note: innermost dimension is at nDims - 1 (when nDims > 0)
-void printStrides(std::ostream& stream, const c10::VaryingStrides& strides) {
+void printStrides(
+    std::ostream& stream,
+    const c10::VaryingShape<int64_t>& strides) {
   stream << "Strides=(";
   for (size_t i = 0; i < *(strides.size()); ++i) {
     stream << *(strides[i]);
@@ -49,7 +51,7 @@ void printStrides(std::ostream& stream, const c10::VaryingStrides& strides) {
   }
 }
 
-void printSizes(std::ostream& stream, const c10::VaryingShape& sizes) {
+void printSizes(std::ostream& stream, const c10::VaryingShape<int64_t>& sizes) {
   stream << "Sizes=(";
   for (size_t i = 0; i < *(sizes.size()); ++i) {
     stream << *(sizes[i]);
@@ -105,7 +107,7 @@ c10::DeviceType getFusionDeviceType(const Node* const node) {
 
 std::vector<int64_t> extractStrides(
     const std::shared_ptr<c10::TensorType>& tensor) {
-  const c10::VaryingStrides& strides = tensor->strides();
+  const c10::VaryingShape<int64_t>& strides = tensor->strides();
   const auto size = *(strides.size());
   std::vector<int64_t> extracted_strides;
 
@@ -118,7 +120,7 @@ std::vector<int64_t> extractStrides(
 
 std::vector<int64_t> extractSizes(
     const std::shared_ptr<c10::TensorType>& tensor) {
-  const c10::VaryingStrides& sizes = tensor->sizes();
+  const c10::VaryingShape<int64_t>& sizes = tensor->sizes();
   const auto size = *(sizes.size());
   std::vector<int64_t> extracted_sizes;
 

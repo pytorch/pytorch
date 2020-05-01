@@ -8,6 +8,8 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/quantized/Quantizer.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
@@ -17,7 +19,6 @@
 
 namespace at {
 
-struct Quantizer;
 // This is temporary typedef to enable Quantizer in aten native function API
 // we'll remove them when we are actually exposing Quantizer class
 // to frontend

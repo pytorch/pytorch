@@ -17,6 +17,7 @@
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace caffe2 {
 class Tensor;
@@ -339,16 +340,16 @@ class CAFFE2_API Tensor {
   }
 
   template <typename T>
-  T * data_ptr() const;
+  TORCH_API T * data_ptr() const;
 
   template<typename T>
   C10_DEPRECATED_MESSAGE("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.")
-  T * data() const {
+  TORCH_API T * data() const {
     return data_ptr<T>();
   }
 
   template <typename T>
-  T item() const;
+  TORCH_API T item() const;
 
   // Purposely not defined here to avoid inlining
   void print() const;
@@ -661,7 +662,7 @@ protected:
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 };
 
-int64_t get_device(Tensor self);
+TORCH_API int64_t get_device(Tensor self);
 
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {

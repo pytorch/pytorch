@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/ivalue.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -76,7 +77,7 @@ TORCH_CUDA_API void compileKernel(Fusion& fusion, CudaKernel* entry);
 // wraps IO data structure for tensors on host.
 TORCH_CUDA_API void runKernel(
     CudaKernel* entry,
-    const at::ArrayRef<IValue>& inputs,
+    const at::ArrayRef<c10::IValue>& inputs,
     std::vector<at::Tensor>& outputs);
 
 // Facility API to run kernel in tests.
