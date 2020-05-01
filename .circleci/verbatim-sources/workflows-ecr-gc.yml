@@ -1,11 +1,4 @@
   ecr_gc:
-    triggers:
-      - schedule:
-          cron: "45 * * * *"
-          filters:
-            branches:
-              only:
-                - master
     jobs:
       - ecr_gc_job:
             name: ecr_gc_job_for_pytorch
