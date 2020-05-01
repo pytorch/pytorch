@@ -44,7 +44,7 @@ C10_HOST_DEVICE inline T uniform_int_full_range_transformation(V val) {
 }
 
 /**
- * A transformation function for `torch.Tensor.random_()`, when used without specifing `from` and `to`.
+ * A transformation function for `torch.Tensor.random_()`, when used without specifying `from` and `to`.
  */
 template <typename T, typename V>
 C10_HOST_DEVICE inline T uniform_int_transformation(V val) {
@@ -67,7 +67,7 @@ C10_HOST_DEVICE inline T uniform_int_transformation(V val) {
 template <typename T, typename V>
 C10_HOST_DEVICE inline dist_acctype<T> uniform_real_transformation(V val, T from, T to) {
   constexpr auto MASK = static_cast<V>((static_cast<uint64_t>(1) << std::numeric_limits<T>::digits) - 1);
-  constexpr auto DIVISOR = static_cast<T>(1) / (static_cast<uint64_t>(1) << std::numeric_limits<T>::digits);
+  constexpr auto DIVISOR = static_cast<dist_acctype<T>>(1) / (static_cast<uint64_t>(1) << std::numeric_limits<T>::digits);
   dist_acctype<T> x = (val & MASK) * DIVISOR;
   return (x * (to - from) + from);
 }
