@@ -315,7 +315,7 @@ void runKernel(
 // This function is here for testing purposes only
 void runTestKernel(
     CudaKernel* entry,
-    const std::vector<at::Tensor>& inputs,
+    const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs) {
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry->device_);
@@ -335,7 +335,11 @@ void runTestKernel(
   // allocated here from the subgraph could be, and very likely are, different
   // from I/O expected by the generated CUDA kernel.
   for (auto& input : inputs) {
-    kernel_args.push(input, outputs[0].sizes());
+    if (input.isTensor()) {
+      kernel_args.push(input.toTensor(), outputs[0].sizes());
+    } else {
+      kernel_args.push(input);
+    }
   }
 
   for (auto& output : outputs) {

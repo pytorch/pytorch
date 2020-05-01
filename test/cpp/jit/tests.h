@@ -120,10 +120,9 @@ namespace jit {
   _(GPU_FusionForLoop)           \
   _(GPU_FusionLoopUnroll)        \
   _(GPU_FusionUnaryOps)          \
-  _(GPU_FusionBinaryLogicalOps)  \
-  _(GPU_FusionBinaryMathOps)     \
-  _(GPU_FusionMultiInputOps)     \
+  _(GPU_FusionBinaryOps)         \
   _(GPU_FusionTernaryOps)        \
+  _(GPU_FusionCompoundOps)       \
   _(GPU_FusionCastOps)           \
   _(GPU_FusionRandLike)
   //_(GPU_FusionCodeGen4)
