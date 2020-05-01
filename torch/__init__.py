@@ -283,6 +283,11 @@ class BoolStorage(_C.BoolStorageBase, _StorageBase):
 class BFloat16Storage(_C.BFloat16StorageBase, _StorageBase):
     pass
 
+class ComplexDoubleStorage(_C.ComplexDoubleStorageBase, _StorageBase):
+    pass
+
+class ComplexFloatStorage(_C.ComplexFloatStorageBase, _StorageBase):
+    pass
 
 class QUInt8Storage(_C.QUInt8StorageBase, _StorageBase):
     pass
@@ -297,7 +302,7 @@ class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
     CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
-    QInt32Storage, BFloat16Storage
+    QInt32Storage, BFloat16Storage, ComplexFloatStorage, ComplexDoubleStorage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -349,6 +354,8 @@ del ByteStorageBase
 del BoolStorageBase
 del QUInt8StorageBase
 del BFloat16StorageBase
+del ComplexDoubleStorageBase
+del ComplexFloatStorageBase
 
 ################################################################################
 # Import most common subpackages
