@@ -509,13 +509,15 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       {stride_w, stride_h},
       {dilation_w, dilation_h},
       {pad_h, pad_w, pad_h, pad_w},
+      /*adjustment=*/{0, 0},
       groups_,
       C,
       M,
       kernel_zp,
       kernel_scale,
       output_min,
-      output_max);
+      output_max,
+      /*transpose=*/false);
 
   double act_input_scale = act_nhwc.q_scale();
 
