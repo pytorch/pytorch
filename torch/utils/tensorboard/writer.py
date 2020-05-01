@@ -700,7 +700,6 @@ class SummaryWriter(object):
     def add_graph(self, model, input_to_model=None, verbose=False):
         # prohibit second call?
         # no, let tensorboard handle it and show its warning message.
-        torch._C._log_api_usage_once("tensorboard.logging.add_graph")
         """Add graph data to summary.
 
         Args:
@@ -709,6 +708,7 @@ class SummaryWriter(object):
                 variables to be fed.
             verbose (bool): Whether to print graph structure in console.
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_graph")
         if hasattr(model, 'forward'):
             # A valid PyTorch model should have a 'forward' method
             self._get_file_writer().add_graph(graph(model, input_to_model, verbose))
