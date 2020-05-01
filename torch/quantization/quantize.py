@@ -293,7 +293,6 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     prepare_qat(model, inplace=True)
     run_fn(model, run_args)
     convert(model, inplace=True)
-    _remove_qconfig(model)
     return model
 
 def convert(module, mapping=None, inplace=False):
