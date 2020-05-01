@@ -5,6 +5,7 @@
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/conv_packed_params.h>
 
 #ifdef USE_FBGEMM
 template <int kSpatialDim>

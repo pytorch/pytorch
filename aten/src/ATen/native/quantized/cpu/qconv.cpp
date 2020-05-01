@@ -8,6 +8,7 @@
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
 template <int kSpatialDim = 2>
