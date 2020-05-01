@@ -807,6 +807,31 @@ class TestQuantizedOps(TestCase):
         np.testing.assert_equal(qC, qC_hat.int_repr(),
                                 "Quantized multiplication failed.")
 
+    """Tests channel shuffle operation on quantized tensors."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+                                              min_side=2, max_side=32),
+                       qparams=hu.qparams()),
+           groups=st.integers(2, 6))
+    def test_channel_shuffle(self, X, groups):
+        X, (scale, zero_point, torch_type) = X
+        channels = X.shape[-3]
+        iH, iW = X.shape[-2:]
+        assume(channels % groups == 0)
+
+        a = torch.from_numpy(X)
+        a = torch.rand(a.shape)
+        a_out = torch.nn.functional.channel_shuffle(a, groups)
+
+        a_ref = torch.quantize_per_tensor(a_out, scale=scale,
+                                          zero_point=zero_point, dtype=torch.quint8)
+        a_ref = a_ref.dequantize()
+        qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
+                                       dtype=torch.quint8)
+
+        a_hat = torch.nn.functional.channel_shuffle(qa, groups)
+        self.assertEqual(a_ref, a_hat.dequantize(),
+                         message="torch.nn.functional.channel_shuffle results are off")
+
     """Tests max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
