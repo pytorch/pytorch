@@ -2311,6 +2311,12 @@
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
   use_c10_dispatcher: full
 
+- func: channel_shuffle(Tensor self, int groups) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    CPU: channel_shuffle
+    QuantizedCPU: quantized_channel_shuffle
+
 - func: is_pinned(Tensor self) -> bool
   use_c10_dispatcher: full
   variants: method
