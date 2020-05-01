@@ -20,7 +20,7 @@ PackBMatrix::PackBMatrix(
           "failed to create fully connected operator with requant scale of "
           "%.7g for output channel %d."
           "Scale must be finite and positive",
-          requantization_scales[i], i);
+          requantization_scales[i], (int)i);
       assert("QNNPACK Runtime Error.");
     }
   }
