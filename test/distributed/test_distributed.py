@@ -1867,9 +1867,10 @@ class _DistTestBase(object):
         self.assertEqual(len(param_gpu), len(param_DDP))
         for p_gpu, p_DDP in zip(param_gpu, param_DDP):
             self.assertEqual(p_gpu, p_DDP, allow_inf=False)
-            self.assertTrue(p_gpu.grad is not None)
-            self.assertTrue(p_DDP.grad is not None)
-            self.assertEqual(p_gpu.grad, p_DDP.grad, allow_inf=False)
+            if p_gpu.requires_grad and p_DDP.requires_grad:
+                self.assertTrue(p_gpu.grad is not None)
+                self.assertTrue(p_DDP.grad is not None)
+                self.assertEqual(p_gpu.grad, p_DDP.grad, allow_inf=False)
 
     def _test_DDP_5iter(
         self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save, offset=None, world_size=0
