@@ -1,5 +1,7 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 
+#ifdef USE_FBGEMM
+
 #include <ATen/ATen.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
@@ -7,8 +9,6 @@
 
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
-
-#ifdef USE_FBGEMM
 
 namespace at {
 namespace native {
