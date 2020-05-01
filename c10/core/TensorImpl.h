@@ -475,8 +475,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return kSparse;
     } else if (is_mkldnn()) {
       return kMkldnn;
-    } else if (is_vulkan()) {
-      return kVulkanLayout;
     } else {
       return kStrided;
     }

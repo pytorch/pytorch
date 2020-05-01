@@ -40,9 +40,7 @@ inline Tensor Tensor::hip() const {
 }
 
 inline Tensor Tensor::vulkan() const {
-  return to(options()
-      .device(DeviceType::Vulkan)
-      .layout(Layout::Vulkan), /*non_blocking*/ false, /*copy*/ false);
+  return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {

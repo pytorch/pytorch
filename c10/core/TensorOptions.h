@@ -396,6 +396,8 @@ struct C10_API TensorOptions {
             return DispatchKey::MSNPUTensorId;
           case DeviceType::XLA:
             return DispatchKey::XLATensorId;
+          case DeviceType::Vulkan:
+            return DispatchKey::VulkanTensorId;
           default:
             AT_ERROR("Unsupported device type for dense layout: ", device().type());
         }
@@ -416,13 +418,6 @@ struct C10_API TensorOptions {
             return DispatchKey::MkldnnCPUTensorId;
           default:
             AT_ERROR("Unsupported device type for mkldnn layout: ", device().type());
-        }
-      case Layout::Vulkan:
-        switch (device().type()) {
-          case DeviceType::Vulkan:
-            return DispatchKey::VulkanTensorId;
-          default:
-            AT_ERROR("Unsupported device type for vulkan layout: ", device().type());
         }
       default:
         AT_ERROR("Unsupported layout: ", layout());

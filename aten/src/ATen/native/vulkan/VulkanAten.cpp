@@ -86,9 +86,6 @@ at::Tensor& copy_from_vulkan_(at::Tensor& self, const at::Tensor& src) {
   AT_ASSERTM(
       self.scalar_type() == ScalarType::Float,
       "copy_from_vulkan is implemented only for float dtype output");
-  AT_ASSERTM(
-      self.dim() == 4,
-      "copy_from_vulkan is implemented only for dim == 4 output");
 
   VTensor& vtensor = vtensor_from_vulkan(src);
   vtensor.copyDataToHost(self.template data_ptr<float>());
@@ -108,7 +105,6 @@ at::Tensor& copy_to_vulkan_(at::Tensor& self, const at::Tensor& src) {
   AT_ASSERTM(
       src.scalar_type() == ScalarType::Float,
       "copy_to_vulkan is implemented only for float dtype");
-  AT_ASSERTM(src.dim() == 4, "copy_to_vulkan is implemented only for dim == 4");
 
   auto cpu_tensor_cont = src.contiguous();
   VTensor& vtensor = vtensor_from_vulkan(self);
@@ -125,7 +121,7 @@ at::Tensor& vulkan_copy_(at::Tensor& self, const at::Tensor& src) {
   }
   AT_ASSERTM(
       src.device().type() == DeviceType::Vulkan,
-      "vulkan_copy_ is implemented only for CPU,Strided,float,dim 4->Vulkan; Vulkan->CPU,Strided,float,dim 4");
+      "vulkan_copy_ is implemented only for CPU,Strided,float->Vulkan; Vulkan->CPU,Strided,float");
   return self;
 }
 
