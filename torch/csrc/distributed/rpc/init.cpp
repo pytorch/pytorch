@@ -445,18 +445,16 @@ If the future completes with an error, an exception is thrown.
           )")
       .def(
           "__getstate__",
-          [](FutureIValue& self) {
+          [](FutureIValue& /* unused */) {
             TORCH_CHECK(
-                false,
-                "Can not pickle rpc.Future or send it over RPC.");
+                false, "Can not pickle rpc.Future or send it over RPC.");
           },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "__setstate__",
-          [](FutureIValue& fv, py::tuple t) {
+          [](FutureIValue& /* unused */, py::tuple /* unused */) {
             TORCH_CHECK(
-                false,
-                "Can not unpickle rpc.Future or send it over RPC.");
+                false, "Can not unpickle rpc.Future or send it over RPC.");
           },
           py::call_guard<py::gil_scoped_release>());
 
