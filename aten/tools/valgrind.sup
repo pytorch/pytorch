@@ -23,3 +23,12 @@
    obj:*libcuda.so*
    ...
 }
+
+{
+   ignore_libomp_setaffinity_check
+   Memcheck:Param
+   sched_setaffinity(mask)
+   fun:syscall
+   obj:*/lib*/libomp.so*
+   ...
+}

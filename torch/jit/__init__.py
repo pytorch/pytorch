@@ -310,9 +310,18 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
         for k, v in f_locals.items():
             if isinstance(v, torch.Tensor) and var is v:
                 return k if k != 'self' else ''
+        for k, v in f_globals.items():
+            if isinstance(v, torch.Tensor) and var is v:
+                return k if k != 'self' else ''
         return ''
     return _get_interpreter_name_for_var
 
+class ConstMap:
+    def __init__(self, const_mapping):
+        self.const_mapping = const_mapping
+
+    def __getattr__(self, attr):
+        return self.const_mapping[attr]
 
 class ONNXTracedModule(Module):
     def __init__(self, inner, strict=True, force_outplace=False, return_inputs=False, return_inputs_states=False):
@@ -368,8 +377,20 @@ class ONNXTracedModule(Module):
 
 
 def _clone_inputs(args):
-    memo = {}
-    return copy.deepcopy(args, memo)
+    def clone_input(a):
+        if a is None:
+            return None
+        elif isinstance(a, torch.Tensor):
+            # TODO: figure out one liner to .clone() and set requires_grad
+            v = a.detach().clone(memory_format=torch.preserve_format).requires_grad_(a.requires_grad)
+            if a.grad is not None:
+                v.grad = clone_input(v.grad)
+            return v
+        else:
+            return a.clone(memory_format=torch.preserve_format)
+    return function._nested_map(lambda x: isinstance(x, torch.Tensor),
+                                clone_input, condition_msg="tensors")(args)
+
 
 # This is purely for developer debugging.  We are not going to advertise it.
 _JIT_TIME = os.environ.get('PYTORCH_JIT_TIME', False)  # CUDA-only timing
@@ -1661,6 +1682,21 @@ if _enabled:
             for details.
             """
             return self.forward.code
+
+        @property
+        def code_with_constants(self):
+            r"""
+            Returns a tuple of:
+
+            [0] a pretty-printed representation (as valid Python syntax) of
+            the internal graph for the ``forward`` method. See `code`.
+            [1] a ConstMap following the CONSTANT.cN format of the output in [0].
+            The indices in the [0] output are keys to the underlying constant's values.
+
+            See `Inspecting Code`_ for details.
+            """
+            r = self.forward.code_with_constants
+            return (r[0], ConstMap(r[1]))
 
         def save(self, *args, **kwargs):
             r"""

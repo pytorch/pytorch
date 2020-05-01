@@ -62,6 +62,12 @@ struct THCNumerics<uint8_t> {
   static inline __host__ __device__  bool isinf(uint8_t a) { return false; }
 };
 
+#ifdef _MSC_VER
+// Suppress warning C4804: '/': unsafe use of type 'bool' in operation
+#pragma warning( push )
+#pragma warning( disable : 4804 )
+#endif
+
 template <>
 struct THCNumerics<bool> {
   static inline __host__ __device__ bool min() { return at::numeric_limits<bool>::lowest(); }
@@ -82,6 +88,10 @@ struct THCNumerics<bool> {
   static inline __host__ __device__ bool isnan(bool a) { return false; }
   static inline __host__ __device__ bool isinf(bool a) { return false; }
 };
+
+#ifdef _MSC_VER
+#pragma warning( pop )
+#endif
 
 template <>
 struct THCNumerics<int8_t> {
@@ -197,7 +207,6 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ bool ne(at::Half a, at::Half b) { return a != b; }
 
   static inline __host__ __device__ at::Half exp(at::Half a) { return std::exp(a); }
-  static inline __host__ __device__ at::Half cos(at::Half a) { return ::cos(a); }
   static inline __host__ __device__ at::Half sqrt(at::Half a) { return ::sqrt(a); }
   static inline __host__ __device__ at::Half tan(at::Half a) { return ::tan(a); }
   static inline __host__ __device__ at::Half atan(at::Half a) { return ::atan(a); }
@@ -248,7 +257,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__ bool ne(float a, float b) { return a != b; }
 
   static inline __host__ __device__  float exp  (float a) { return   expf(a); }
-  static inline __host__ __device__  float cos  (float a) { return   cosf(a); }
   static inline __host__ __device__  float sqrt (float a) { return  sqrtf(a); }
   static inline __host__ __device__  float tan  (float a) { return   tanf(a); }
   static inline __host__ __device__  float atan (float a) { return  atanf(a); }
@@ -278,7 +286,6 @@ struct THCNumerics<at::BFloat16> {
   static inline __host__ __device__ bool ne(at::BFloat16 a, at::BFloat16 b) { return a != b; }
 
   static inline __host__ __device__  at::BFloat16 exp  (at::BFloat16 a) { return   expf(a); }
-  static inline __host__ __device__  at::BFloat16 cos  (at::BFloat16 a) { return   cosf(a); }
   static inline __host__ __device__  at::BFloat16 sqrt (at::BFloat16 a) { return  sqrtf(a); }
   static inline __host__ __device__  at::BFloat16 tan  (at::BFloat16 a) { return   tanf(a); }
   static inline __host__ __device__  at::BFloat16 atan (at::BFloat16 a) { return  atanf(a); }
@@ -329,7 +336,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__ bool ne(double a, double b) { return a != b; }
 
   static inline __host__ __device__  double exp  (double a) { return   ::exp(a); }
-  static inline __host__ __device__  double cos  (double a) { return   ::cos(a); }
   static inline __host__ __device__  double sqrt (double a) { return  ::sqrt(a); }
   static inline __host__ __device__  double tan  (double a) { return   ::tan(a); }
   static inline __host__ __device__  double atan (double a) { return  ::atan(a); }
