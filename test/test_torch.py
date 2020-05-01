@@ -11377,8 +11377,21 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.tensor((), device=device, dtype=dtype)
         torch.linspace(_from, to, 137, dtype=dtype, out=res2)
         self.assertEqual(res1, res2, 0)
-        self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1, device=device))
-        self.assertEqual(torch.linspace(0, 1, 1, device=device), torch.zeros(1, device=device), 0)
+
+        # small tensor
+        self.assertEqual(torch.linspace(10, 20, 11, device=device, dtype=dtype),
+                         torch.tensor(list(range(10, 21)), device=device, dtype=dtype))
+        # large tensor
+        if dtype not in (torch.int8, torch.uint8):
+            self.assertEqual(torch.linspace(10, 2000, 1991, device=device, dtype=dtype),
+                             torch.tensor(list(range(10, 2001)), device=device, dtype=dtype))
+
+        self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1, device=device, dtype=dtype))
+        # steps = 1
+        self.assertEqual(torch.linspace(0, 1, 1, device=device, dtype=dtype),
+                         torch.zeros(1, device=device, dtype=dtype), 0)
+        # steps = 0
+        self.assertEqual(torch.linspace(0, 1, 0, device=device, dtype=dtype).numel(), 0)
 
         # Check linspace for generating the correct output for each dtype.
         expected_lin = torch.tensor([-100. + .5 * i for i in range(401)], device=device, dtype=torch.double)
@@ -11399,6 +11412,14 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.linspace(2, 0, 3, device=device, dtype=dtype),
                          torch.tensor((2, 1, 0), device=device, dtype=dtype),
                          0)
+
+        # Check for race condition (correctness when applied on a large tensor).
+        if dtype not in (torch.int8, torch.uint8, torch.int16, torch.half):
+            y = torch.linspace(0, 1000000 - 1, 1000000, device=device, dtype=dtype)
+            correct = True
+            for i in range(y.shape[0] - 1):
+                correct = correct and y[i] < y[i + 1]
+            self.assertTrue(correct)
 
         # Check linspace for non-contiguous tensors.
         x = torch.zeros(2, 3, device=device, dtype=dtype)
