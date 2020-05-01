@@ -8,6 +8,12 @@
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
 
+template <>
+CAFFE2_API torch::jit::class_<ConvPackedParamsBase<2>> register_conv_params();
+
+template <>
+CAFFE2_API torch::jit::class_<ConvPackedParamsBase<3>> register_conv_params();
+
 #ifdef USE_FBGEMM
 
 namespace at {
