@@ -81,6 +81,7 @@ popd
 popd
 git rm -rf "$install_path" || true
 mv "$pt_checkout/docs/build/html" "$install_path"
+pwd
 
 # Add the version handler by search and replace.
 # XXX: Consider moving this to the docs Makefile or site build
