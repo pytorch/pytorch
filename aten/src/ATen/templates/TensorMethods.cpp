@@ -9,6 +9,7 @@
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/quantized/Quantizer.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
