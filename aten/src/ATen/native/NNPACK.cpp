@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
-#include <caffe2/utils/threadpool/PThreadPool.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #if !AT_NNPACK_ENABLED()
 
@@ -57,7 +57,7 @@ bool _nnpack_available() {
 
 #include <nnpack.h>
 
-#include <caffe2/utils/threadpool/PThreadPool.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <ATen/native/ConvUtils.h>
 
 namespace at {

@@ -9,7 +9,6 @@
 #include "caffe2/operators/conv_op_shared.h"
 #include "caffe2/operators/conv_transpose_unpool_op_base.h"
 #include "caffe2/operators/quantized/int8_utils.h"
-#include "caffe2/utils/threadpool/c2_pthreadpool.h"
 
 namespace caffe2 {
 

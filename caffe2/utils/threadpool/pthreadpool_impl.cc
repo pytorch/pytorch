@@ -1,4 +1,4 @@
-#include "caffe2/utils/threadpool/c2_pthreadpool.h"
+#include "caffe2/utils/threadpool/pthreadpool.h"
 #include "caffe2/utils/threadpool/ThreadPool.h"
 
 

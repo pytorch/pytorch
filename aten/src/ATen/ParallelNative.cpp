@@ -5,8 +5,7 @@
 #ifndef C10_MOBILE
 #include <c10/core/thread_pool.h>
 #else
-#include <caffe2/utils/threadpool/ThreadPool.h>
-#include <caffe2/utils/threadpool/PThreadPool.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #endif // C10_MOBILE
 
 #include <atomic>

@@ -1,4 +1,4 @@
-#include <caffe2/utils/threadpool/PThreadPool.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <c10/util/Exception.h>
 
 namespace caffe2 {

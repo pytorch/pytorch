@@ -11,7 +11,6 @@
 #include "caffe2/operators/leaky_relu_op.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/utils/threadpool/c2_pthreadpool.h"
 #include "nnpack.h"
 
 C10_DEFINE_int(

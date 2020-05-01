@@ -16,7 +16,7 @@
 /* Library header */
 #include "caffe2/core/logging.h"
 #include "caffe2/utils/fixed_divisor.h"
-#include "caffe2/utils/threadpool/c2_pthreadpool.h"
+#include "caffe2/utils/threadpool/pthreadpool.h"
 
 
 static inline size_t divide_round_up(size_t dividend, size_t divisor) {

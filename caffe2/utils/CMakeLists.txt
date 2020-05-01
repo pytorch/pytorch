@@ -1,7 +1,7 @@
 if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   list(APPEND Caffe2_CPU_SRCS
     utils/string_utils.cc
-    utils/threadpool/PThreadPool.cc
+    utils/threadpool/pthreadpool-cpp.cc
     utils/threadpool/ThreadPool.cc
   )
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
@@ -21,7 +21,7 @@ list(APPEND Caffe2_CPU_SRCS
   utils/proto_convert.cc
   utils/proto_utils.cc
   utils/proto_wrap.cc
-  utils/threadpool/PThreadPool.cc
+  utils/threadpool/pthreadpool-cpp.cc
   utils/threadpool/ThreadPool.cc
   utils/signal_handler.cc
   utils/smart_tensor_printer.cc
@@ -29,8 +29,8 @@ list(APPEND Caffe2_CPU_SRCS
 
 if(USE_INTERNAL_PTHREADPOOL_IMPL)
   list(APPEND Caffe2_CPU_SRCS
-    utils/threadpool/c2_pthreadpool.cc
-    utils/threadpool/c2_pthreadpool_impl.cc)
+    utils/threadpool/pthreadpool.cc
+    utils/threadpool/pthreadpool_impl.cc)
 endif()
 
 set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS}
