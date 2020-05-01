@@ -12310,7 +12310,7 @@ class TestTorchDeviceType(TestCase):
             ("sqrt", doubles, True, True, 'cpu'),
             ("sqrt", doubles, False, True, 'cuda'),
             ("tan", doubles, True, True, 'cpu'),
-            ("tan", doubles, False, True, 'cuda'),
+            ("tan", doubles, True, True, 'cuda'),
             ("tanh", doubles, True, True, 'cpu'),
             ("tanh", doubles, True, True, 'cuda'),
             ("trunc", doubles, True, True, 'cpu'),

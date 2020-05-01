@@ -114,26 +114,26 @@ void preprocessCaffe2Ops(Block* block) {
           it->s_(Symbol::attr(arg.name()), constant_node->s(attr::value));
         } else if (type->kind() == TypeKind::ListType) {
           const auto& list_node = origin_input->node();
-          AT_ASSERT(list_node->kind() == prim::ListConstruct);
-          const auto& elem_type =
-              reinterpret_cast<ListType*>(type.get())->getElementType();
+          const auto& elem_type = type->cast<ListType>()->getElementType();
+          AT_ASSERT(
+              list_node->kind() == prim::ListConstruct ||
+              list_node->kind() == prim::Constant);
           if (elem_type->isSubtypeOf(TensorType::get())) {
+            AT_ASSERT(list_node->kind(), prim::ListConstruct);
             const auto& tensor_list = origin_input->node()->inputs();
             for (const auto& t : tensor_list) {
               it->addInput(t);
             }
-          } else if (
-              elem_type->kind() == TypeKind::IntType ||
-              elem_type->kind() == TypeKind::BoolType) {
-            // TODO support list of ints and bools, needs c10 op for testing
-            throw std::runtime_error(
-                "List[int] and List[bool] are not supported yet.");
           } else if (elem_type->kind() == TypeKind::FloatType) {
             std::vector<double> values;
-            for (const auto* elem_input : list_node->inputs()) {
-              const auto* constant_node = elem_input->node();
-              AT_ASSERT(constant_node->kind() == prim::Constant);
-              values.push_back(constant_node->f(attr::value));
+            if (list_node->kind() == prim::ListConstruct) {
+              for (const auto* elem_input : list_node->inputs()) {
+                const auto* constant_node = elem_input->node();
+                AT_ASSERT(constant_node->kind() == prim::Constant);
+                values.push_back(constant_node->f(attr::value));
+              }
+            } else { // is a constant list
+              values = list_node->fs(attr::value);
             }
             it->fs_(Symbol::attr(arg.name()), values);
           } else {

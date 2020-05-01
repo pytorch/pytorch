@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
+#include <c10/util/complex_type.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
@@ -31,7 +32,7 @@ namespace c10 {
   _(at::Half, Half) /* 5 */                              \
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
-  _(at::ComplexHalf, ComplexHalf) /* 8 */                \
+  _(c10::complex<c10::Half>, ComplexHalf) /* 8 */        \
   _(c10::complex<float>, ComplexFloat) /* 9 */           \
   _(c10::complex<double>, ComplexDouble) /* 10 */        \
   _(bool, Bool) /* 11 */                                 \
