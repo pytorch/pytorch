@@ -90,7 +90,8 @@ namespace jit {
   _(LiteInterpreterParams)             \
   _(LiteInterpreterSetState)           \
   _(TorchbindIValueAPI)                \
-  _(LiteInterpreterDict)
+  _(LiteInterpreterDict)               \
+  _(FusionAliasing)
 
 #if defined(USE_CUDA)
 #define TH_FORALL_TESTS_CUDA(_)  \
