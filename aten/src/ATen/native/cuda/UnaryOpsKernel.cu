@@ -99,8 +99,7 @@ void clamp_kernel_cuda(TensorIterator& iter, Scalar min_value, Scalar max_value)
     auto lower = min_value.to<scalar_t>();
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
-      scalar_t m = v < upper ? v : upper;
-      return m > lower ? m : lower;
+      return (v < lower) ? lower : (v > upper ? upper : v);
     });
   });
 }
@@ -109,7 +108,7 @@ void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_min_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
-      return v > lower ? v : lower;
+      return v < lower ? lower : v;
     });
   });
 }
@@ -118,7 +117,7 @@ void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_max_cuda", [&]() {
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
-      return v < upper ? v : upper;
+      return v > upper ? upper : v;
     });
   });
 }
