@@ -2896,15 +2896,9 @@
 - func: tan_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _tan__cpu
-    CUDA: _tan__cuda
 
 - func: tan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _tan_out_cpu
-    CUDA: _tan_out_cuda
 
 - func: tanh(Tensor self) -> Tensor
   use_c10_dispatcher: full
