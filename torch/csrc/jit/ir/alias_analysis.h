@@ -140,8 +140,7 @@ class AliasDb {
   MemoryLocations getWrites(Node* n) const;
   void getWritesImpl(Node* n, MemoryLocations& ret) const;
   // Register the fact that `n` writes to `v`.
-  void registerWrite(const Value* v, Node* n);
-  void registerWrite(const Element* e, Node* n);
+  void registerWrite(const Value* v, Node* n, bool writeToContained = false);
   // Get all the values that `n` reads from.
   // if `recurseBlocks` is true, gather reads on the nodes in `n`s sub-blocks
   MemoryLocations getReads(Node* n) const;
@@ -188,6 +187,7 @@ class AliasDb {
       const Value* element,
       const Value* container);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
+  void unsafeGiveFreshAlias(const Value* value);
   void giveFreshAlias(const Value* value);
   Element* getOrCreateElement(const Value* value);
 
@@ -210,7 +210,9 @@ class AliasDb {
   bool isFrozen_;
 
   // The points-to graph that stores aliasing relationships
+  std::unique_ptr<MemoryDAGBuilder> memoryDAGBuilder_;
   std::unique_ptr<MemoryDAG> memoryDAG_;
+
   // Mapping of values to MemoryDAG elements
   ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard elements (one for each unique mutable type).
@@ -232,12 +234,21 @@ class AliasDb {
   /**
    * State for tracking write info.
    */
+  // Write registry where the analysis can record the writes as it sees them.
+  // This information is later denormalized into various caches to improve query
+  // efficiency.
+  struct WriteRegistry;
+  std::unique_ptr<WriteRegistry> writeRegistry_;
+
   // Map of nodes to the memory locations that they write to
-  ska::flat_hash_map<Node*, MemoryLocations> writeIndex_;
-  // Set of all memory locations that may have been written to.
-  mutable MemoryLocations writeCache_;
-  mutable bool isWriteCacheStale_ = true;
-  void rebuildWriteCache() const;
+  using TWriteIndex = ska::flat_hash_map<Node*, MemoryLocations>;
+  c10::optional<TWriteIndex> writeIndex_;
+  // Collection of all memory locations that are written to.
+  c10::optional<MemoryLocations> writtenToLocationsIndex_;
+  MemoryLocations buildWrittenToLocationsIndex() const;
+
+  std::unordered_set<const Value*> wildcards_;
+
   std::string getElementName(const Element* e) const;
 };
 

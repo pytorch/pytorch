@@ -77,6 +77,14 @@ public:
   template<class Return, class... Args>
   Return callUnboxed(const OperatorHandle& opHandle, Args... args) const;
 
+
+  /**
+   * Like callUnboxed, but with a stack of inputs already passed
+   */
+  template<class Return, class... Args>
+  Return callUnboxedWithStack(
+      const OperatorHandle& opHandle, std::vector<c10::IValue>& stack, Args... args) const;
+
   /**
    * Create a KernelFunction from a boxed function.
    *
