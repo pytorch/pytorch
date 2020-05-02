@@ -368,10 +368,12 @@ def generate_storage_type_and_tensor(backend, density, declarations, per_op_regi
     if env['DeviceType'] == 'CPU':
         top_env['cpu_type_headers'].append(
             '#include <ATen/{}.h>'.format(env['Type']))
-    else:
+    elif env['DeviceType'] == 'CUDA':
         assert env['DeviceType'] == 'CUDA'
         top_env['cuda_type_headers'].append(
             '#include <ATen/{}.h>'.format(env['Type']))
+    else:  # Pass-through for out-of-tree devices
+        pass
 
 
 # yields (backend, density) tuples
