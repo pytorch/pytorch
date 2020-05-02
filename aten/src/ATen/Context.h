@@ -110,6 +110,8 @@ class CAFFE2_API Context {
   void setQEngine(at::QEngine e);
   const std::vector<at::QEngine>& supportedQEngines() const;
   bool isXNNPACKAvailable() const;
+  void setReleaseOriginalWeights(bool e);
+  bool releaseOriginalWeights() const;
 
  private:
   void initCUDAIfNeeded(DeviceType p) {
@@ -128,6 +130,7 @@ class CAFFE2_API Context {
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
   bool enabled_mkldnn = true;
+  bool release_original_weights = false;
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;

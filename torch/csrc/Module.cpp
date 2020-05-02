@@ -524,6 +524,20 @@ PyObject *THPModule_isEnabledXNNPACK(PyObject * /* unused */)
   else Py_RETURN_FALSE;
 }
 
+PyObject *THPModule_setReleaseOriginalWeights(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "set_release_original_weights expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setReleaseOriginalWeights(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_releaseOriginalWeights(PyObject *_unused, PyObject *noargs)
+{
+  if (at::globalContext().releaseOriginalWeights()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
 //NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       nullptr},
@@ -565,6 +579,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_qengine", (PyCFunction)THPModule_setQEngine, METH_O, nullptr},
   {"_supported_qengines", (PyCFunction)THPModule_supportedQEngines, METH_NOARGS, nullptr},
   {"_is_xnnpack_enabled", (PyCFunction)THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
+  {"_set_release_original_weights", (PyCFunction)THPModule_setReleaseOriginalWeights, METH_O,  nullptr},
+  {"_get_release_original_weights", (PyCFunction)THPModule_releaseOriginalWeights, METH_NOARGS,     nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

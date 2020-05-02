@@ -58,13 +58,12 @@ class QLinearUnpackWeightInt8 final {
 #ifdef USE_PYTORCH_QNNPACK
   static std::tuple<at::Tensor, c10::optional<Tensor>> qnnpack_linear_unpack(
       at::Tensor packed_weight) {
-#ifdef C10_MOBILE
-     TORCH_CHECK(
-        false,
-        "quantized::linear_unpack is currently not supported on Mobile");
-#endif
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
+    TORCH_CHECK(
+        pack_ptr.orig_weight.defined(),
+        "Cannot access original weight tensor. "
+        "quantized::linear_unpack is currently not supported for qnnpack.");
     return std::tuple<at::Tensor, c10::optional<Tensor>>(
         pack_ptr.orig_weight, pack_ptr.bias);
   }
