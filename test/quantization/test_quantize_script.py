@@ -1677,6 +1677,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = F.hardsigmoid(x)
                 x = self.relu(x)
                 x = F.relu(x)
+                x.relu_()
                 x = self.relu6(x)
                 x = F.relu6(x)
                 x = self.leaky_relu(x)
