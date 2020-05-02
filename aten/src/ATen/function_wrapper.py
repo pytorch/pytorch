@@ -142,7 +142,7 @@ ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
-${return_type} TORCH_API Tensor::${api_name}(${method_formals}) const {
+${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
