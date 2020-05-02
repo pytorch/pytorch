@@ -38,7 +38,8 @@ static at::ScalarType tensorType(Tensor* t) {
   return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
 }
 
-static std::vector<ExprHandle> texprSizes(const c10::VaryingShape& shape) {
+static std::vector<ExprHandle> texprSizes(
+    const c10::VaryingShape<int64_t>& shape) {
   std::vector<ExprHandle> dims;
   for (size_t i = 0; i < *shape.size(); i++) {
     dims.push_back(IntImm::make(*shape[i]));
@@ -1073,7 +1074,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
         Block* b = blocks.back();
         blocks.pop_back();
 
-        for (Stmt* s : b->stmts()) {
+        for (Stmt* s : *b) {
           if (For* f = dynamic_cast<For*>(s)) {
             worklist.push_back(f);
           } else if (Block* b2 = dynamic_cast<Block*>(s)) {
@@ -1091,7 +1092,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
       bool containsSubLoops = false;
       if (Block* body = dynamic_cast<Block*>(f->body())) {
-        for (Stmt* s2 : body->stmts()) {
+        for (Stmt* s2 : *body) {
           if (For* f2 = dynamic_cast<For*>(s2)) {
             containsSubLoops = true;
             worklist.push_back(f2);
@@ -1167,7 +1168,7 @@ static bool isValidPrimProperty(const c10::optional<T>& a, T b) {
 }
 
 static bool isValidVaryingShape(
-    const c10::VaryingShape& vs,
+    const c10::VaryingShape<int64_t>& vs,
     at::IntArrayRef sz) {
   if (!vs.size().has_value()) {
     // TODO: does it make sense to have kernels with completely unspecified
@@ -1280,11 +1281,11 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
           {0});
       std::vector<DimArg> inputTensorDims;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
-        auto const& size = *tt->sizes()[i];
+        auto const size = *tt->sizes()[i];
         inputTensorDims.emplace_back(
             DimArg(IntImm::make(size), "i" + c10::to_string(i)));
       }
-      auto const& strides = tt->strides();
+      auto const strides = tt->strides();
       tensors_.emplace(
           input->unique(),
           Compute(

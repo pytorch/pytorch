@@ -124,6 +124,12 @@ struct TORCH_API Object {
     return _ivalue()->slots().size();
   }
 
+  // Copies all the attributes of the object recursively without creating new
+  // `ClassType`, including deepcopy of Tensors
+  Object deepcopy() const;
+
+  Object deepcopy(c10::IValue::HashAliasedIValueMap& memo) const;
+
  private:
   // mutable be we lazily initialize in module_object.
   mutable ObjectPtr _ivalue_;
