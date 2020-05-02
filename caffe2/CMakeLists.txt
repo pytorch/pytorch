@@ -1091,7 +1091,7 @@ if(USE_ROCM)
 endif()
 
 # ---[ Test binaries.
-if(BUILD_TEST)
+if(BUILD_CAFFE2_TEST)
   foreach(test_src ${Caffe2_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
