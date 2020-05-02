@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import collections
-import datetime
+from datetime import timedelta
 import enum
 
 import torch.distributed as dist
@@ -23,6 +23,18 @@ def _backend_type_repr(self):
 BackendType = enum.Enum(value="BackendType", names={})
 BackendType.__repr__ = _backend_type_repr
 
+def backend_registered(backend_name):
+    """
+    Checks if backend_name is registered as an RPC backend.
+
+    Arguments:
+        backend_name (str): string to identify the RPC backend.
+    Returns:
+        True if the backend has been registered with ``register_backend``, else
+        False.
+    """
+    return backend_name in BackendType.__members__.keys()
+
 
 def register_backend(
     backend_name, construct_rpc_backend_options_handler, init_backend_handler
@@ -39,7 +51,7 @@ def register_backend(
              This returns the agent.
     """
     global BackendType
-    if backend_name in BackendType.__members__.keys():
+    if backend_registered(backend_name):
         raise RuntimeError("RPC backend {}: already registered".format(backend_name))
     # Create a new enum type, `BackendType`, with extended members.
     existing_enum_dict = {member.name: member.value for member in BackendType}
@@ -59,12 +71,10 @@ def register_backend(
 
 def construct_rpc_backend_options(
     backend,
-    rpc_timeout=rpc_constants.DEFAULT_RPC_TIMEOUT,
+    rpc_timeout=rpc_constants.DEFAULT_RPC_TIMEOUT_SEC,
     init_method=rpc_constants.DEFAULT_INIT_METHOD,
     **kwargs
 ):
-    if not isinstance(rpc_timeout, datetime.timedelta):
-        raise RuntimeError("`rpc_timeout` must be a `datetime.timedelta`.")
 
     return backend.value.construct_rpc_backend_options_handler(
         rpc_timeout, init_method, **kwargs
@@ -130,7 +140,7 @@ def _process_group_init_backend_handler(
             name,
             group,
             rpc_backend_options.num_send_recv_threads,
-            rpc_backend_options.rpc_timeout,
+            timedelta(seconds=rpc_backend_options.rpc_timeout),
         )
     except Exception as ex:
         dist.destroy_process_group()

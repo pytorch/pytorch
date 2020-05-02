@@ -4,9 +4,12 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import numpy as np
+import time
+import unittest
 
 import caffe2.python.fakelowp.init_shared_libs  # noqa
-import time
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 from caffe2.python import workspace
@@ -38,13 +41,15 @@ def reference_spatialbn_test16(X, scale, bias, mean, var, epsilon, order):
 
 
 # Test the lowered BN op
-class BatchnormTest(TestCase):
-    # TODO: replace with hypothesis
-    def test_bn(self):
-        size = 30
-        input_channels = 20
-        batch_size = 40
-        seed = int(time.time())
+class BatchnormTest(unittest.TestCase):
+    # TODO: using hypothesis seed, sweep dimensions
+    @given(seed=st.integers(0, 65535),
+           size=st.integers(2, 30),
+           input_channels=st.integers(2, 40),
+           batch_size=st.integers(2, 20))
+    @settings(max_examples=100)
+    def test_bn(self, seed, size, input_channels, batch_size):
+        workspace.ResetWorkspace()
         np.random.seed(seed)
 
         order = "NCHW"
@@ -130,13 +135,14 @@ class BatchnormTest(TestCase):
             diff = np.abs(Y_glow - Y_c2).astype(np.float16)
             print_test_debug_info(
                 "bn",
-                {"seed": seed,
-                "scale": scale,
-                "bias": bias,
-                "mean": mean,
-                "var": var,
-                "Y_np": Y_c2.shape,
-                "Y_glow": Y_glow.shape,
-                "diff": diff,
-                "rowwise_diff": np.max(np.abs(diff), -1)})
+                {
+                    "seed": seed,
+                    "scale": scale,
+                    "bias": bias,
+                    "mean": mean,
+                    "var": var,
+                    "Y_np": Y_c2,
+                    "Y_glow": Y_glow,
+                    "diff": diff,
+                    "rowwise_diff": np.max(np.abs(diff), -1)})
             assert(0)

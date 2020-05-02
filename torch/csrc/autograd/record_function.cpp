@@ -94,9 +94,10 @@ class CallbackManager {
         }
       }
     } else {
-      LOG(WARNING) << "Callbacks changed while running a record function, "
-                   << "you might be partially overlapping a record function "
-                   << "with a profiling scope";
+      C10_LOG_EVERY_MS(WARNING, 1000)
+          << "Callbacks changed while running a record function, "
+          << "you might be partially overlapping a record function "
+          << "with a profiling scope";
     }
   }
 
@@ -212,13 +213,21 @@ void popCallback() {
   manager().popCallback();
 }
 
+bool observersEnabled() {
+  return c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Profiler);
+}
+
+void enableObservers(bool enable) {
+  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, enable);
+}
+
 void _runBeforeCallbacks(RecordFunction* rf, const std::string& funcName) {
   TORCH_INTERNAL_ASSERT(rf != nullptr);
   rf->_before(funcName);
 }
 
 RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
-  if (manager().hasCallbacks()) {
+  if (manager().hasCallbacks() && observersEnabled()) {
     active_ = true;
   }
 }

@@ -11,7 +11,7 @@ from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 from torch.nn import Module
 from torch.serialization import validate_cuda_device
-from torch._six import PY2, PY37, with_metaclass, string_classes, get_function_from_type
+from torch._six import PY37, with_metaclass, string_classes, get_function_from_type
 from torch.utils import set_module
 
 import collections
@@ -316,6 +316,12 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
         return ''
     return _get_interpreter_name_for_var
 
+class ConstMap:
+    def __init__(self, const_mapping):
+        self.const_mapping = const_mapping
+
+    def __getattr__(self, attr):
+        return self.const_mapping[attr]
 
 class ONNXTracedModule(Module):
     def __init__(self, inner, strict=True, force_outplace=False, return_inputs=False, return_inputs_states=False):
@@ -1676,6 +1682,21 @@ if _enabled:
             for details.
             """
             return self.forward.code
+
+        @property
+        def code_with_constants(self):
+            r"""
+            Returns a tuple of:
+
+            [0] a pretty-printed representation (as valid Python syntax) of
+            the internal graph for the ``forward`` method. See `code`.
+            [1] a ConstMap following the CONSTANT.cN format of the output in [0].
+            The indices in the [0] output are keys to the underlying constant's values.
+
+            See `Inspecting Code`_ for details.
+            """
+            r = self.forward.code_with_constants
+            return (r[0], ConstMap(r[1]))
 
         def save(self, *args, **kwargs):
             r"""

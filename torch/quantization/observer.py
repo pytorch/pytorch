@@ -4,10 +4,10 @@ import math
 import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
+from typing import List, Tuple, Optional
 
 import torch
 import torch.nn as nn
-from torch._jit_internal import List, Optional
 
 def _with_args(cls_or_self, **kwargs):
     r"""Wrapper that allows creation of class factories.
@@ -124,31 +124,35 @@ class _ObserverBase(ObserverBase):
             torch.quint8,
         ), "Default Observer only works for qint8 and quint8 data type"
 
-    def _calculate_per_channel_qparams(self, min_vals, max_vals):
+    @torch.jit.export
+    def _calculate_qparams(self, min_val, max_val):
         # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor]
-        r"""Calculates the per channel quantization parameters, given min and max
-        value tensors.
+        r"""Calculates the quantization parameters, given min and max
+        value tensors. Works for both per tensor and per channel cases
 
         Args:
-            min_vals: Minimum values per channel
-            max_vals: Maximum values per channel
+            min_val: Minimum values per channel
+            max_val: Maximum values per channel
 
         Returns:
-            scales: Per channel scales tensor of shape (#channels,)
-            zero_points: Per channel zero points tensor of shape (#channels,)
+            scales: Scales tensor of shape (#channels,)
+            zero_points: Zero points tensor of shape (#channels,)
         """
-        if min_vals.numel() == 0 or max_vals.numel() == 0:
+        if min_val.numel() == 0 or max_val.numel() == 0:
             warnings.warn(
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
             )
             return torch.tensor([1.0]), torch.tensor([0])
 
-        diff = min_vals <= max_vals
-        assert (torch.sum(diff) == len(diff)), "min_vals should be less than max_vals for indices."
-
-        scales = torch.empty(min_vals.size(), dtype=torch.float32)
-        zero_points = torch.empty(min_vals.size(), dtype=torch.int64)
+        if min_val.dim() == 0 or max_val.dim() == 0:
+            assert min_val <= max_val, "min {} should be less than max {}".format(
+                min_val, max_val
+            )
+        else:
+            assert torch.sum(min_val <= max_val) == len(min_val), "min {} should be less than max {}".format(
+                min_val, max_val
+            )
 
         if self.dtype == torch.qint8:
             if self.reduce_range:
@@ -161,89 +165,34 @@ class _ObserverBase(ObserverBase):
             else:
                 qmin, qmax = 0, 255
 
-        max_vals, min_vals = max_vals.to(dtype=torch.float), min_vals.to(dtype=torch.float)
+        min_val = torch.min(min_val, torch.zeros_like(min_val))
+        max_val = torch.max(max_val, torch.zeros_like(max_val))
 
-        min_vals = torch.min(min_vals, torch.tensor([0.], device=min_vals.device, dtype=torch.float))
-        max_vals = torch.max(max_vals, torch.tensor([0.], device=max_vals.device, dtype=torch.float))
-        if torch.equal(max_vals, min_vals):
-            scales.fill_(1.0)
-            zero_points.fill_(0)
+        scale = torch.ones(min_val.size(), dtype=torch.float32)
+        zero_point = torch.zeros(min_val.size(), dtype=torch.int64)
+        device = 'cuda' if min_val.is_cuda else 'cpu'
+
+        if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
+            max_val = torch.max(-min_val, max_val)
+            scale = max_val / (float(qmax - qmin) / 2)
+            scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
+            if self.dtype == torch.quint8:
+                zero_point = zero_point.new_full(zero_point.size(), 128)
         else:
-            if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
-                max_vals = torch.max(-min_vals, max_vals)
-                scales = max_vals / ((qmax - qmin) / 2)
-                scales = torch.max(scales, torch.tensor([self.eps], device=scales.device, dtype=scales.dtype))
-                if self.dtype == torch.qint8:
-                    zp = 0
-                else:
-                    zp = 128
-                zero_points.fill_(zp)
-            else:
-                scales = (max_vals - min_vals) / float(qmax - qmin)
-                scales = torch.max(scales, torch.tensor([self.eps], device=scales.device))
-                zero_points = qmin - torch.round(min_vals / scales)
-                zero_points = torch.max(zero_points, torch.tensor([qmin], dtype=zero_points.dtype, device=zero_points.device))
-                zero_points = torch.min(zero_points, torch.tensor([qmax], dtype=zero_points.dtype, device=zero_points.device))
-                zero_points = zero_points.to(dtype=torch.int64)
-        scales.to(dtype=torch.float)
+            scale = (max_val - min_val) / float(qmax - qmin)
+            scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
+            zero_point = qmin - torch.round(min_val / scale)
+            zero_point = torch.max(zero_point, torch.tensor(qmin, device=device, dtype=zero_point.dtype))
+            zero_point = torch.min(zero_point, torch.tensor(qmax, device=device, dtype=zero_point.dtype))
 
-        return scales, zero_points
+        # if len(scale.shape) == 0:
+        #     scale = torch.tensor(scale)
+        #     scale = torch.tensor([scale])
+        # if len(zero_point.shape) == 0:
+        #     zero_point = torch.tensor(zero_point)
+        #     zero_point = torch.tensor([zero_point])
 
-    @torch.jit.export
-    def _calculate_qparams(self, min_val, max_val):
-        # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor]
-        r"""Calculates the per tensor quantization parameters, given the min/max.
-
-        Args:
-            min_val: Per tensor minimum value
-            max_val: Per tensor maximum value
-
-        Returns:
-            scale: Scale as a tensor of shape (1,)
-            zero_point: Zero point as a tensor of shape (1,)
-        """
-
-        if max_val.numel() == 0 or min_val.numel() == 0:
-            warnings.warn("Must run observer before calling calculate_qparams.\
-                           Returning default scale and zero point.")
-            return torch.tensor([1.0]), torch.tensor([0])
-
-        assert min_val <= max_val, "min {} should be less than max {}".format(
-            min_val, max_val
-        )
-
-        if self.dtype == torch.qint8:
-            if self.reduce_range:
-                qmin, qmax = -64, 63
-            else:
-                qmin, qmax = -128, 127
-        else:
-            if self.reduce_range:
-                qmin, qmax = 0, 127
-            else:
-                qmin, qmax = 0, 255
-
-        max_val, min_val = float(max_val), float(min_val)
-        min_val = min(0.0, min_val)
-        max_val = max(0.0, max_val)
-        if max_val == min_val:
-            scale = 1.0
-            zero_point = 0
-        else:
-            if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
-                max_val = max(-min_val, max_val)
-                scale = max_val / ((qmax - qmin) / 2)
-                scale = max(scale, self.eps)
-                zero_point = 0 if self.dtype == torch.qint8 else 128
-            else:
-                scale = (max_val - min_val) / float(qmax - qmin)
-                scale = max(scale, self.eps)
-                zero_point = qmin - round(min_val / scale)
-                zero_point = max(qmin, zero_point)
-                zero_point = min(qmax, zero_point)
-                zero_point = int(zero_point)
-
-        return torch.tensor([scale]), torch.tensor([zero_point])
+        return scale, zero_point
 
     @torch.jit.export
     def get_qparams(self):
@@ -630,7 +579,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        return self._calculate_per_channel_qparams(self.min_vals, self.max_vals)
+        return self._calculate_qparams(self.min_vals, self.max_vals)
 
     @torch.jit.export
     def get_qparams(self):
@@ -894,8 +843,9 @@ class HistogramObserver(_ObserverBase):
         hist_bin_width = (self.max_val - self.min_val) / (self.bins * upsample_rate)
         downsample_rate = torch.ceil((combined_max - combined_min) / (self.bins * hist_bin_width)).to(torch.int).item()
         e = downsample_rate * (self.bins * hist_bin_width) - (combined_max - combined_min)
-        combined_max = combined_max + e / 2
-        combined_min = combined_min - e / 2
+        # Relax only the max, not the min, so that for one sided distributions, min stays at zero
+        combined_max = combined_max + e
+        combined_min = combined_min
         start_idx = torch.round((self.min_val - combined_min) / hist_bin_width).to(torch.int).item()
         return combined_min, combined_max, downsample_rate, start_idx
 

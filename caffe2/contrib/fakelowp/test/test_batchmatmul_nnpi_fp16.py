@@ -4,13 +4,14 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import numpy as np
+import unittest
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -21,7 +22,6 @@ GLOW_MATMUL_RTOL = 1e-3
 
 
 class TestBatchMatMul(serial.SerializedTestCase):
-    # @settings(max_examples=30)
     @given(
         #C=0, #st.integers(min_value=0, max_value=3),  # number of batch dims
         M=st.integers(min_value=1, max_value=10),
@@ -116,5 +116,4 @@ class TestBatchMatMul(serial.SerializedTestCase):
 
 
 if __name__ == "__main__":
-    import unittest
     unittest.main()

@@ -3,7 +3,10 @@
 # Author: Pearu Peterson
 # Created: February 2020
 
+from typing import Dict, Tuple, Optional
+
 import torch
+from torch import Tensor
 from . import _linalg_utils as _utils
 from ._overrides import has_torch_function, handle_torch_function
 

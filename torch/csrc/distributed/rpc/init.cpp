@@ -24,6 +24,7 @@ namespace rpc {
 namespace {
 
 constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
+constexpr float kSecToMsConversion = 1000;
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
@@ -48,8 +49,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
             ``init_method`` to be used. )")
           .def_readwrite(
               "rpc_timeout",
-              &RpcBackendOptions::rpcTimeout,
-              R"(A ``datetime.timedelta`` indicating the timeout to use for all
+              &RpcBackendOptions::rpcTimeoutSeconds,
+              R"(A float indicating the timeout to use for all
                 RPCs. If an RPC does not complete in this timeframe, it will
                 complete with an exception indicating that it has timed out.)")
           .def_readwrite(
@@ -58,7 +59,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
               R"(URL specifying how to initialize the process group.
                 Default is ``env://``)");
 
-  module.attr("_DEFAULT_RPC_TIMEOUT") = py::cast(kDefaultRpcTimeout);
+  // The following C++ constants need to be cast so they can be used from
+  // python.
+  module.attr("_DEFAULT_RPC_TIMEOUT_SEC") = py::cast(kDefaultRpcTimeoutSeconds);
+  module.attr("_UNSET_RPC_TIMEOUT") = py::cast(kUnsetRpcTimeout);
   module.attr("_DEFAULT_INIT_METHOD") = py::cast(kDefaultInitMethod);
 
   auto workerInfo =
@@ -215,6 +219,78 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   local value. Otherwise, throws an exception.
               )")
           .def(
+              "rpc_sync",
+              [&](PyRRef& self) {
+                return self.createRRefProxy(self, RRefProxyType::RPC_SYNC);
+              },
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+                  Create a helper proxy to easily launch an ``rpc_sync`` using
+                  the owner of the RRef as the destination to run functions on
+                  the object referenced by this RRef. More specifically,
+                  ``rref.rpc_sync().func_name(*args, **kwargs)`` is the same as
+                  the following:
+
+                  >>> def run(rref, func_name, args, kwargs):
+                  >>>   return getattr(rref.local_value(), func_name)(*args, **kwargs)
+                  >>>
+                  >>> rpc.rpc_sync(rref.owner(), run, args=(rref, func_name, args, kwargs))
+
+                  Example::
+                      >>> from torch.distributed import rpc
+                      >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
+                      >>> rref.rpc_sync().size()  # returns torch.Size([2, 2])
+                      >>> rref.rpc_sync().view(1, 4)  # returns tensor([[1., 1., 1., 1.]])
+              )")
+          .def(
+              "rpc_async",
+              [&](PyRRef& self) {
+                return self.createRRefProxy(self, RRefProxyType::RPC_ASYNC);
+              },
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+                  Create a helper proxy to easily launch an ``rpc_async`` using
+                  the owner of the RRef as the destination to run functions on
+                  the object referenced by this RRef. More specifically,
+                  ``rref.rpc_async().func_name(*args, **kwargs)`` is the same as
+                  the following:
+
+                  >>> def run(rref, func_name, args, kwargs):
+                  >>>   return getattr(rref.local_value(), func_name)(*args, **kwargs)
+                  >>>
+                  >>> rpc.rpc_async(rref.owner(), run, args=(rref, func_name, args, kwargs))
+
+                  Example::
+                      >>> from torch.distributed import rpc
+                      >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
+                      >>> rref.rpc_async().size().wait()  # returns torch.Size([2, 2])
+                      >>> rref.rpc_async().view(1, 4).wait()  # returns tensor([[1., 1., 1., 1.]])
+              )")
+          .def(
+              "remote",
+              [&](PyRRef& self) {
+                return self.createRRefProxy(self, RRefProxyType::REMOTE);
+              },
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+                  Create a helper proxy to easily launch an ``remote`` using
+                  the owner of the RRef as the destination to run functions on
+                  the object referenced by this RRef. More specifically,
+                  ``rref.remote().func_name(*args, **kwargs)`` is the same as
+                  the following:
+
+                  >>> def run(rref, func_name, args, kwargs):
+                  >>>   return getattr(rref.local_value(), func_name)(*args, **kwargs)
+                  >>>
+                  >>> rpc.remote(rref.owner(), run, args=(rref, func_name, args, kwargs))
+
+                  Example::
+                      >>> from torch.distributed import rpc
+                      >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
+                      >>> rref.remote().size().to_here()  # returns torch.Size([2, 2])
+                      >>> rref.remote().view(1, 4).to_here()  # returns tensor([[1., 1., 1., 1.]])
+              )")
+          .def(
               py::pickle(
                   [](const PyRRef& self) {
                     TORCH_CHECK(
@@ -239,6 +315,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
               "_deserialize",
               &PyRRef::unpickle,
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_future",
+              &PyRRef::getFuture,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+                  Returns the future that corresponds to the creation of this RRef
+                  on the remote node. This is for internal use cases such as profiling
+                  only.
+              )")
           // not releasing GIL to avoid context switch
           .def("__str__", &PyRRef::str);
 
@@ -246,13 +331,18 @@ PyObject* rpc_init(PyObject* /* unused */) {
   // pythonRpcHandler is cleaned up in shutdown(), after
   // shutdown(), python objects returned from rpc python call can not be
   // resolved.
-  // TODO Once python object can be tagged as IValue and c10::ivalue::Future is
-  // implemented as generic Future<IValue>, we can consider all rpc call
-  // to return a future<IValue> later on.
-  auto future = shared_ptr_class_<FutureMessage>(module, "Future")
+  auto future = shared_ptr_class_<FutureIValue>(module, "Future")
                     .def(
                         "wait",
-                        [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
+                        [&](FutureIValue& fut) {
+                          auto& pythonRpcHandler =
+                              PythonRpcHandler::getInstance();
+                          const auto& value = fut.wait();
+                          pybind11::gil_scoped_acquire ag;
+                          auto obj = torch::jit::toPyObject(value);
+                          pythonRpcHandler.handleException(obj);
+                          return obj;
+                        },
                         py::call_guard<py::gil_scoped_release>(),
                         R"(
 Wait on future to complete and return the object it completed with.
@@ -270,8 +360,13 @@ If the future completes with an error, an exception is thrown.
           Arguments:
               num_send_recv_threads (int, optional): The number of threads in
                   the thread-pool used by ``ProcessGroupAgent`` (default: 4).
-              rpc_timeout (datetime.timedelta, optional): The timeout for RPC
-                  requests (default: ``timedelta(seconds=60)``).
+              rpc_timeout (float, optional): The default timeout, in seconds,
+                  for RPC requests (default: 60 seconds). If the
+                  RPC has not completed in this timeframe, an exception
+                  indicating so will be raised. Callers can override this
+                  timeout for individual RPCs in
+                  :meth:`~torch.distributed.rpc.rpc_sync` and
+                  :meth:`~torch.distributed.rpc.rpc_async` if necessary.
               init_method (str, optional): The URL to initialize
                   ``ProcessGroupGloo`` (default: ``env://``).
 
@@ -288,16 +383,16 @@ If the future completes with an error, an exception is thrown.
               >>>     world_size=2,
               >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
               >>>         num_send_recv_threads=16,
-              >>>         datetime.timedelta(seconds=20)
+              >>>         20 # 20 second timeout
               >>>     )
               >>> )
               >>>
               >>> # omitting init_rpc invocation on worker2
       )")
       .def(
-          py::init<int, std::chrono::milliseconds, std::string>(),
+          py::init<int, float, std::string>(),
           py::arg("num_send_recv_threads") = kDefaultNumSendRecvThreads,
-          py::arg("rpc_timeout") = kDefaultRpcTimeout,
+          py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
           py::arg("init_method") = kDefaultInitMethod)
       .def_readwrite(
           "num_send_recv_threads",
@@ -404,11 +499,11 @@ If the future completes with an error, an exception is thrown.
       "_invoke_rpc_builtin",
       [](const WorkerInfo& dst,
          const std::string& opName,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
+         const float rpcTimeoutSeconds,
          const py::args& args,
          const py::kwargs& kwargs) {
         DCHECK(PyGILState_Check());
-        return pyRpcBuiltin(dst, opName, rf, args, kwargs);
+        return pyRpcBuiltin(dst, opName, args, kwargs, rpcTimeoutSeconds);
       },
       py::call_guard<py::gil_scoped_acquire>());
 
@@ -417,23 +512,20 @@ If the future completes with an error, an exception is thrown.
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+         const float rpcTimeoutSeconds) {
         DCHECK(!PyGILState_Check());
-        return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf);
+        return pyRpcPythonUdf(
+            dst, pickledPythonUDF, tensors, rpcTimeoutSeconds);
       },
-      py::call_guard<py::gil_scoped_release>(),
-      py::arg("dst"),
-      py::arg("pickledPythonUDF"),
-      py::arg("tensors"),
-      py::arg("rf") = nullptr);
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
          const std::string& qualifiedNameStr,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::tuple& argsTuple,
-         const py::dict& kwargsDict) {
+         const py::dict& kwargsDict,
+         const float rpcTimeoutSeconds) {
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
@@ -456,7 +548,11 @@ If the future completes with an error, an exception is thrown.
         }
         DCHECK(!PyGILState_Check());
         c10::intrusive_ptr<c10::ivalue::Future> fut = rpcTorchscript(
-            dstWorkerName, qualifiedName, functionSchema, stack, rf);
+            dstWorkerName,
+            qualifiedName,
+            functionSchema,
+            stack,
+            rpcTimeoutSeconds);
         return torch::jit::PythonFutureWrapper(fut);
       },
       py::call_guard<py::gil_scoped_release>());
@@ -465,11 +561,10 @@ If the future completes with an error, an exception is thrown.
       "_invoke_remote_builtin",
       [](const WorkerInfo& dst,
          const std::string& opName,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
         DCHECK(PyGILState_Check());
-        return pyRemoteBuiltin(dst, opName, rf, args, kwargs);
+        return pyRemoteBuiltin(dst, opName, args, kwargs);
       },
       py::call_guard<py::gil_scoped_acquire>());
 
@@ -477,7 +572,6 @@ If the future completes with an error, an exception is thrown.
       "_invoke_remote_torchscript",
       [](const std::string& dstWorkerName,
          const std::string& qualifiedNameStr,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
         DCHECK(!PyGILState_Check());
@@ -495,7 +589,7 @@ If the future completes with an error, an exception is thrown.
         }
         DCHECK(!PyGILState_Check());
         auto rrefPtr = remoteTorchscript(
-            dstWorkerName, qualifiedName, functionSchema, stack, rf);
+            dstWorkerName, qualifiedName, functionSchema, stack);
         return PyRRef(rrefPtr);
       },
       py::call_guard<py::gil_scoped_release>());
@@ -504,25 +598,26 @@ If the future completes with an error, an exception is thrown.
       "_invoke_remote_python_udf",
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
-         std::vector<torch::Tensor>& tensors,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+         std::vector<torch::Tensor>& tensors) {
         DCHECK(!PyGILState_Check());
-        return pyRemotePythonUdf(dst, pickledPythonUDF, tensors, rf);
+        return pyRemotePythonUdf(dst, pickledPythonUDF, tensors);
       },
       py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
-      py::arg("tensors"),
-      py::arg("rf") = nullptr);
+      py::arg("tensors"));
 
   module.def(
       "get_rpc_timeout",
-      []() { return RpcAgent::getCurrentRpcAgent()->getRpcTimeout(); },
+      []() {
+        return RpcAgent::getCurrentRpcAgent()->getRpcTimeout().count() /
+            kSecToMsConversion;
+      },
       R"(
-          Retrieve the timeout for all RPCs that was set during RPC initialization.
-
+          Retrieve the default timeout for all RPCs that was set during RPC initialization.
+          The returned value will be in seconds.
           Returns:
-            ``datetime.timedelta`` instance indicating the RPC timeout.
+            ``float`` indicating the RPC timeout in seconds.
       )");
 
   module.def(
@@ -540,12 +635,21 @@ If the future completes with an error, an exception is thrown.
 
   module.def(
       "_set_rpc_timeout",
-      [](const std::chrono::milliseconds& rpcTimeout) {
+      [](const float rpcTimeoutSeconds) {
+        auto rpcTimeout = std::chrono::milliseconds(
+            static_cast<int>(rpcTimeoutSeconds * kSecToMsConversion));
         RpcAgent::getCurrentRpcAgent()->setRpcTimeout(rpcTimeout);
       },
       R"(
-          Set the timeout for all RPCs. If an RPC is not completed within this
-          time, an exception indicating it has timed out will be raised.
+          Set the default timeout for all RPCs. The input unit is expected to be
+          in seconds. If an RPC is not completed within this time, an exception
+          indicating it has timed out will be raised. To control timeout for
+          specific RPCs, a timeout parameter can be passed into
+          :meth:`~torch.distributed.rpc.rpc_sync` and
+          :meth:`~torch.distributed.rpc.rpc_async`.
+
+          Arguments:
+            rpcTimeoutSeconds (float): Timeout value in seconds.
       )");
 
   Py_RETURN_TRUE;

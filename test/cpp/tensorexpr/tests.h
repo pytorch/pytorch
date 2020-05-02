@@ -57,6 +57,13 @@ namespace jit {
   _(ReduceAnyAll)                           \
   _(ReduceMatmul2D)                         \
   _(ReduceRfactorLike)                      \
+  _(ReduceRfactor)                          \
+  _(Reduce3DRfactor)                        \
+  _(Reduce3DRfactor2)                       \
+  _(Reduce3DRfactor3)                       \
+  _(Reduce3DRfactorRepeated)                \
+  _(ReduceRfactorInsertionPoint)            \
+  _(Reduce3DRfactorInsertionPoint)          \
   _(SplitReduceAxis)                        \
   _(SplitNonReduceAxis)                     \
   _(TypeTest01)                             \
@@ -143,6 +150,8 @@ namespace jit {
   _(SimplifyOneLoopFor)                     \
   _(SimplifyForWontLoseLoopOptions)         \
   _(SimplifyMultilevelFor)                  \
+  _(SimplifyForCleansUp)                    \
+  _(SimplifyFlattenBlock)                   \
   _(StmtClone)                              \
   _(BoundsInference_1)                      \
   _(BoundsInference_2)                      \
@@ -163,7 +172,10 @@ namespace jit {
   _(LoopNestReorderLongStringOfPreOrphans)  \
   _(LoopNestReorderLongStringOfPostOrphans) \
   _(LoopNestReorderLongStringFull)          \
-  _(OuterLoopVectorization)
+  _(OuterLoopVectorization)                 \
+  _(Kernel_1)                               \
+  _(Kernel_2)                               \
+  _(Kernel_3)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
   _(LLVMByteImmTest)                       \
@@ -284,7 +296,10 @@ namespace jit {
   _(LLVMEmptyStmt)                         \
   _(LLVMEliminatedStmt)                    \
   _(LLVMIfThenElseTest)                    \
-  _(LLVMVectorizerLoadStoreTest)
+  _(LLVMVectorizerLoadStoreTest)           \
+  _(LLVMSimpleReduction)                   \
+  _(LLVMRFactorReduction)                  \
+  _(LLVMRFactorVectorizedReduction)
 
 #define TH_FORALL_TENSOREXPR_TESTS_CUDA(_) \
   _(CudaTestVectorAdd01)                   \
@@ -294,6 +309,8 @@ namespace jit {
   _(CudaOneBlockOneThreadGlobalReduce1)    \
   _(CudaOneBlockMultiThreadGlobalReduce1)  \
   _(CudaNoThreadIdxWrite_1)                \
+  _(CudaSharedMemReduce_1)                 \
+  _(CudaLocalMemReduce_1)                  \
   _(CudaTestRand01)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();

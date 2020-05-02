@@ -1,10 +1,12 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
+#include <c10/util/complex_type.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
 #include <c10/util/typeid.h>
+#include <c10/util/complex_type.h>
 
 #include <complex>
 #include <cstdint>
@@ -30,9 +32,9 @@ namespace c10 {
   _(at::Half, Half) /* 5 */                              \
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
-  _(at::ComplexHalf, ComplexHalf) /* 8 */                \
-  _(std::complex<float>, ComplexFloat) /* 9 */           \
-  _(std::complex<double>, ComplexDouble) /* 10 */        \
+  _(c10::complex<c10::Half>, ComplexHalf) /* 8 */        \
+  _(c10::complex<float>, ComplexFloat) /* 9 */           \
+  _(c10::complex<double>, ComplexDouble) /* 10 */        \
   _(bool, Bool) /* 11 */                                 \
   _(c10::qint8, QInt8) /* 12 */                          \
   _(c10::quint8, QUInt8) /* 13 */                        \
@@ -52,8 +54,8 @@ namespace c10 {
   _(at::Half, Half)                                                \
   _(float, Float)                                                  \
   _(double, Double)                                                \
-  _(std::complex<float>, ComplexFloat)                             \
-  _(std::complex<double>, ComplexDouble)                           \
+  _(c10::complex<float>, ComplexFloat)                             \
+  _(c10::complex<double>, ComplexDouble)                           \
   _(bool, Bool)                                                    \
   _(at::BFloat16, BFloat16)
 
@@ -197,8 +199,8 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeToScalarType)
   _(c10::qint32, QInt32)
 
 #define AT_FORALL_COMPLEX_TYPES(_)             \
-  _(std::complex<float>, ComplexFloat)         \
-  _(std::complex<double>, ComplexDouble)
+  _(c10::complex<float>, ComplexFloat)         \
+  _(c10::complex<double>, ComplexDouble)
 
 static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 #define DEFINE_CASE(ctype, name) \
@@ -226,6 +228,16 @@ static inline c10::optional<ScalarType> tryTypeMetaToScalarType(
   }
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_IF)
 #undef DEFINE_IF
+// TODO(@zasdfgbnm): Remove this!
+// This is needed only when the migration of std::complex to c10::complex
+// is not done. This should be removed once the migration is done.
+  if (dtype == caffe2::TypeMeta::Make<std::complex<float>>()) {
+    return {ScalarType::ComplexFloat};
+  }
+  if (dtype == caffe2::TypeMeta::Make<std::complex<double>>()) {
+    return {ScalarType::ComplexDouble};
+  }
+// end TODO
   if (dtype == caffe2::TypeMeta()) {
     return {ScalarType::Undefined};
   }
@@ -448,9 +460,9 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
         /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, ud, c4, c8, f4, ud, ud, ud, ud},
         /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, ud, c8, c8, f8, ud, ud, ud, ud},
         /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, c2, c4, c8, ud, ud, ud, ud, ud},
-        /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, ud, ud, ud, ud, ud},
-        /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, ud, ud, ud, ud, ud},
-        /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, b1, ud, ud, ud, ud},
+        /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, c4, ud, ud, ud, ud},
+        /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, ud, ud, ud, ud},
+        /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, ud, c4, c8, b1, ud, ud, ud, ud},
         /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
         /* q2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
         /* q3 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},

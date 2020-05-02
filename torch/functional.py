@@ -1,10 +1,11 @@
+from typing import Tuple, Optional
+
 import torch
 import torch.nn.functional as F
 from ._lowrank import svd_lowrank, pca_lowrank
 from ._overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
-from torch._six import PY2
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -17,6 +18,7 @@ __all__ = [
     'cdist',
     'chain_matmul',
     'einsum',
+    'istft',
     'lu',
     'lu_unpack',
     'norm',
@@ -237,6 +239,12 @@ Args:
            the ellipsis dimensions are at the beginning of the output.
     operands (Tensor): The operands to compute the Einstein sum of.
 
+.. note::
+
+    This function does not optimize the given expression, so a different formula for the same computation may
+    run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
+    can optimize the formula for you.
+
 Examples::
 
     >>> x = torch.randn(5)
@@ -429,6 +437,68 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
         input = input.view(input.shape[-signal_dim:])
     return _VF.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
+
+
+def istft(input, n_fft, hop_length=None, win_length=None, window=None,
+          center=True, normalized=False, onesided=True, length=None):
+    # type: (Tensor, int, Optional[int], Optional[int], Optional[Tensor], bool, bool, bool, Optional[int]) -> Tensor
+    r"""Inverse short time Fourier Transform. This is expected to be the inverse of :func:`~torch.stft`.
+    It has the same parameters (+ additional optional parameter of :attr:`length`) and it should return the
+    least squares estimation of the original signal. The algorithm will check using the NOLA condition (
+    nonzero overlap).
+
+    Important consideration in the parameters :attr:`window` and :attr:`center` so that the envelop
+    created by the summation of all the windows is never zero at certain point in time. Specifically,
+    :math:`\sum_{t=-\infty}^{\infty} w^2[n-t\times hop\_length] \cancel{=} 0`.
+
+    Since :func:`~torch.stft` discards elements at the end of the signal if they do not fit in a frame,
+    ``istft`` may return a shorter signal than the original signal (can occur if :attr:`center` is False
+    since the signal isn't padded).
+
+    If :attr:`center` is ``True``, then there will be padding e.g. ``'constant'``, ``'reflect'``, etc.
+    Left padding can be trimmed off exactly because they can be calculated but right padding cannot be
+    calculated without additional information.
+
+    Example: Suppose the last window is:
+    ``[17, 18, 0, 0, 0]`` vs ``[18, 0, 0, 0, 0]``
+
+    The :attr:`n_fft`, :attr:`hop_length`, :attr:`win_length` are all the same which prevents the calculation
+    of right padding. These additional values could be zeros or a reflection of the signal so providing
+    :attr:`length` could be useful. If :attr:`length` is ``None`` then padding will be aggressively removed
+    (some loss of signal).
+
+    [1] D. W. Griffin and J. S. Lim, "Signal estimation from modified short-time Fourier transform,"
+    IEEE Trans. ASSP, vol.32, no.2, pp.236-243, Apr. 1984.
+
+    Arguments:
+        input (Tensor): The input tensor. Expected to be output of :func:`~torch.stft`,
+            either 3D (``fft_size``, ``n_frame``, 2) or 4D (``channel``, ``fft_size``, ``n_frame``, 2).
+        n_fft (int): Size of Fourier transform
+        hop_length (Optional[int]): The distance between neighboring sliding window frames.
+            (Default: ``n_fft // 4``)
+        win_length (Optional[int]): The size of window frame and STFT filter. (Default: ``n_fft``)
+        window (Optional[torch.Tensor]): The optional window function.
+            (Default: ``torch.ones(win_length)``)
+        center (bool): Whether :attr:`input` was padded on both sides so that the :math:`t`-th frame is
+            centered at time :math:`t \times \text{hop\_length}`.
+            (Default: ``True``)
+        normalized (bool): Whether the STFT was normalized. (Default: ``False``)
+        onesided (bool): Whether the STFT is onesided. (Default: ``True``)
+        length (Optional[int]): The amount to trim the signal by (i.e. the
+            original signal length). (Default: whole signal)
+
+    Returns:
+        Tensor: Least squares estimation of the original signal of size (..., signal_length)
+    """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                istft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length,
+                window=window, center=center, normalized=normalized, onesided=onesided,
+                length=length)
+
+    return _VF.istft(
+        input, n_fft, hop_length, win_length, window, center, normalized, onesided, length)
 
 
 del torch.unique_dim
@@ -856,9 +926,6 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
                 norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
-        # py2 considers isinstance(unicodestr, str) == False
-        if PY2 and isinstance(p, unicode):
-            p = str(p)
 
     ndim = input.dim()
 
@@ -983,6 +1050,9 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         equal to 32 on a CUDA device, the LU factorization is repeated
         for singular matrices due to the bug in the MAGMA library (see
         magma issue 13).
+
+    .. note::
+       ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
 
     Arguments:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`

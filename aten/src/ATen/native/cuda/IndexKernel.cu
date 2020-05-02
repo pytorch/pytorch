@@ -97,8 +97,6 @@ static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntAr
 static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self, const Tensor & mask) {
   NoNamesGuard guard;
 
-  TORCH_CHECK(self.scalar_type() != ScalarType::BFloat16,
-              "masked_select: bfloat16 not supported for CUDA implementation");
   TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
               "masked_select: expected BoolTensor or ByteTensor for mask");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),

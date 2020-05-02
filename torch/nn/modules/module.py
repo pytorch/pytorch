@@ -1,7 +1,6 @@
 from collections import OrderedDict, namedtuple
 import functools
 import itertools
-import weakref
 import warnings
 
 import torch
@@ -453,6 +452,15 @@ class Module(object):
     def register_backward_hook(self, hook):
         r"""Registers a backward hook on the module.
 
+        .. warning ::
+
+            The current implementation will not have the presented behavior
+            for complex :class:`Module` that perform many operations.
+            In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
+            contain the gradients for a subset of the inputs and outputs.
+            For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
+            directly on a specific input or output to get the required gradients.
+
         The hook will be called every time the gradients with respect to module
         inputs are computed. The hook should have the following signature::
 
@@ -462,21 +470,13 @@ class Module(object):
         module has multiple inputs or outputs. The hook should not modify its
         arguments, but it can optionally return a new gradient with respect to
         input that will be used in place of :attr:`grad_input` in subsequent
-        computations.
+        computations. :attr:`grad_input` will only correspond to the inputs given
+        as positional arguments.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
-
-        .. warning ::
-
-            The current implementation will not have the presented behavior
-            for complex :class:`Module` that perform many operations.
-            In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
-            contain the gradients for a subset of the inputs and outputs.
-            For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
-            directly on a specific input or output to get the required gradients.
 
         """
         handle = hooks.RemovableHandle(self._backward_hooks)
@@ -491,6 +491,8 @@ class Module(object):
 
             hook(module, input) -> None or modified input
 
+        The input contains only the positional arguments given to the module.
+        Keyword arguments won't be passed to the hooks and only to the ``forward``.
         The hook can modify the input. User can either return a tuple or a
         single modified value in the hook. We will wrap the value into a tuple
         if a single value is returned(unless that value is already a tuple).
@@ -512,6 +514,8 @@ class Module(object):
 
             hook(module, input, output) -> None or modified output
 
+        The input contains only the positional arguments given to the module.
+        Keyword arguments won't be passed to the hooks and only to the ``forward``.
         The hook can modify the output. It can modify the input inplace but
         it will not have effect on forward since this is called after
         :func:`forward` is called.
@@ -1118,6 +1122,13 @@ class Module(object):
 
     def zero_grad(self):
         r"""Sets gradients of all model parameters to zero."""
+        if getattr(self, '_is_replica', False):
+            warnings.warn(
+                "Calling .zero_grad() from a module created with nn.DataParallel() has no effect. "
+                "The parameters are copied (in a differentiable manner) from the original module. "
+                "This means they are not leaf nodes in autograd and so don't accumulate gradients. "
+                "If you need gradients in your forward method, consider using autograd.grad instead.")
+
         for p in self.parameters():
             if p.grad is not None:
                 p.grad.detach_()
@@ -1185,21 +1196,6 @@ class Module(object):
         replica._parameters = OrderedDict()
         replica._buffers = replica._buffers.copy()
         replica._modules = replica._modules.copy()
-
-        # Warn users that gradients don't behave as expected on replica modules
-        old_zero_grad = replica.__class__.zero_grad
-        weak_self = weakref.ref(replica)
-
-        def zero_grad():
-            warnings.warn(
-                "Calling .zero_grad() from a module that was passed to a nn.DataParallel() has no effect. "
-                "The parameters are copied (in a differentiable manner) from the original module. "
-                "This means they are not leaf nodes in autograd and so don't accumulate gradients. "
-                "If you need gradients in your forward method, consider using autograd.grad instead.")
-            replica = weak_self()
-            if replica:
-                old_zero_grad(replica)
-
-        replica.zero_grad = zero_grad
+        replica._is_replica = True
 
         return replica

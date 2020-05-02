@@ -147,7 +147,7 @@ using fLI::FLAGS_v;
 
 C10_DEFINE_int(
     caffe2_log_level,
-    google::GLOG_ERROR,
+    google::GLOG_WARNING,
     "The minimum log level that caffe2 will output.");
 
 // Google glog's api does not have an external function that allows one to check
@@ -184,7 +184,7 @@ void UpdateLoggingLevelsFromFlags() {
   // we will transfer the caffe2_log_level setting to glog to override that.
   FLAGS_minloglevel = std::min(FLAGS_caffe2_log_level, FLAGS_minloglevel);
   // If caffe2_log_level is explicitly set, let's also turn on logtostderr.
-  if (FLAGS_caffe2_log_level < google::GLOG_ERROR) {
+  if (FLAGS_caffe2_log_level < google::GLOG_WARNING) {
     FLAGS_logtostderr = 1;
   }
   // Also, transfer the caffe2_log_level verbose setting to glog.
@@ -207,7 +207,7 @@ void ShowLogInfoToStderr() {
 
 C10_DEFINE_int(
     caffe2_log_level,
-    ERROR,
+    WARNING,
     "The minimum log level that caffe2 will output.");
 
 namespace c10 {

@@ -19,7 +19,7 @@ if sys.version_info < (3,):
 
 from ._utils import _import_dotted_name
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
-    USE_RTLD_GLOBAL_WITH_LIBTORCH
+    USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
 from .version import __version__
 from ._six import string_classes as _string_classes
 
@@ -130,8 +130,13 @@ else:
     # C++ symbols from libtorch clobbering C++ symbols from other
     # libraries, leading to mysterious segfaults.
     #
+    # If building in an environment where libtorch_global_deps isn't available
+    # like parts of fbsource, but where RTLD_GLOBAL causes segfaults, you will
+    # want USE_RTLD_GLOBAL_WITH_LIBTORCH = False and USE_GLOBAL_DEPS = False
+    #
     # See Note [Global dependencies]
-    _load_global_deps()
+    if USE_GLOBAL_DEPS:
+        _load_global_deps()
     from torch._C import *
 
 __all__ += [name for name in dir(_C)
@@ -278,6 +283,11 @@ class BoolStorage(_C.BoolStorageBase, _StorageBase):
 class BFloat16Storage(_C.BFloat16StorageBase, _StorageBase):
     pass
 
+class ComplexDoubleStorage(_C.ComplexDoubleStorageBase, _StorageBase):
+    pass
+
+class ComplexFloatStorage(_C.ComplexFloatStorageBase, _StorageBase):
+    pass
 
 class QUInt8Storage(_C.QUInt8StorageBase, _StorageBase):
     pass
@@ -292,7 +302,7 @@ class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
     CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
-    QInt32Storage, BFloat16Storage
+    QInt32Storage, BFloat16Storage, ComplexFloatStorage, ComplexDoubleStorage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -344,6 +354,8 @@ del ByteStorageBase
 del BoolStorageBase
 del QUInt8StorageBase
 del BFloat16StorageBase
+del ComplexDoubleStorageBase
+del ComplexFloatStorageBase
 
 ################################################################################
 # Import most common subpackages
@@ -407,3 +419,9 @@ del register_after_fork
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
 from ._lobpcg import lobpcg
+
+# These were previously defined in native_functions.yaml and appeared on the
+# `torch` namespace, but we moved them to c10 dispatch to facilitate custom
+# class usage. We add these lines here to preserve backward compatbility.
+quantized_lstm = torch.ops.aten.quantized_lstm
+quantized_gru = torch.ops.aten.quantized_gru

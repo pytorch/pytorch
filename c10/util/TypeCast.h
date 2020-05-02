@@ -4,6 +4,8 @@
 #include <c10/util/BFloat16.h>
 #include <c10/macros/Macros.h>
 
+#include <type_traits>
+
 
 namespace c10 {
 
@@ -29,6 +31,7 @@ struct maybe_real<true, src_t> {
 // Note: deliberately ignores undefined behavior, consistent with NumPy.
 // PyTorch's type conversions can cause a variety of undefined behavior,
 // including float to integral overflow and signed to unsigned integer overflow.
+// Some of this undefined behavior is addressed below.
 template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t apply(src_t src) {
@@ -37,11 +40,38 @@ struct static_cast_with_inter_type {
   }
 };
 
+// Partial template instantiation for casting to uint8.
+// Note: Converting from negative float values to unsigned integer types is
+// undefined behavior in C++, and current CPU and GPU compilers exhibit
+// divergent behavior. Casting from negative float values to signed
+// integer types and then to unsigned integer types is not undefiend,
+// however, so this cast improves the consistency of type conversions
+// to uint8 across compilers.
+// Further note: Type conversions across compilers still have other undefined
+// and divergent behavior.
+template <typename src_t>
+struct static_cast_with_inter_type<uint8_t, src_t> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline uint8_t apply(src_t src) {
+    constexpr bool real = needs_real<uint8_t, src_t>::value;
+    return static_cast<uint8_t>(
+      static_cast<int64_t>(maybe_real<real, src_t>::apply(src)));
+  }
+};
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template <typename dest_value_t, typename src_value_t>
   struct static_cast_with_inter_type<std::complex<dest_value_t>, std::complex<src_value_t>> {
     C10_HOST_DEVICE static inline std::complex<dest_value_t> apply(std::complex<src_value_t> src) {
       return std::complex<dest_value_t>(src.real(), src.imag());
+    }
+};
+#endif
+
+#if defined(__CUDACC__)
+template <typename dest_value_t, typename src_value_t>
+  struct static_cast_with_inter_type<thrust::complex<dest_value_t>, c10::complex<src_value_t>> {
+    C10_HOST_DEVICE static inline thrust::complex<dest_value_t> apply(c10::complex<src_value_t> src) {
+      return thrust::complex<dest_value_t>(src.real(), src.imag());
     }
 };
 #endif

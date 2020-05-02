@@ -173,7 +173,7 @@ parseWireSections(const void* data, size_t data_size) {
     }
     // Parse name
     const char* namePtr = ptr;
-    while (*ptr != ' ' && ptr != endp) {
+    while (ptr != endp && *ptr != ' ') {
       ptr++;
     }
     if (ptr == endp) {
@@ -185,7 +185,7 @@ parseWireSections(const void* data, size_t data_size) {
     }
     // Parse size
     const char* sizePtr = ptr;
-    while (*ptr != '\n' && ptr != endp) {
+    while (ptr != endp && *ptr != '\n') {
       ptr++;
     }
     if (ptr == endp) {

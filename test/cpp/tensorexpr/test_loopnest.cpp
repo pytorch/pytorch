@@ -150,7 +150,7 @@ void testExprSplitWithTailNone() {
     BufHandle f("f", {24, 5});
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(24) - 0) / 4;
-    For* stmt = For::make(
+    Stmt* stmt = new Block({For::make(
         x_outer,
         0,
         x_outer_end,
@@ -158,11 +158,10 @@ void testExprSplitWithTailNone() {
             x_inner,
             0,
             4,
-            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
+            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))))});
 
     std::ostringstream oss_ref;
     oss_ref << *stmt;
-    oss_ref << "\n"; // TODO: fix printing instead of adding \n here
     ASSERT_EQ(oss.str(), oss_ref.str());
   }
 
@@ -868,8 +867,11 @@ void testLoopNestComputeAt_1() {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (int i_b = 0; i_b < N; i_b++)
+# CHECK:   Allocate(temp, int, {1})
+# CHECK:   temp[
 # CHECK-NOT: A[
-# CHECK:  B[i_b] =)IR";
+# CHECK:   B[i_b] = temp[0]
+# CHECK:   Free(temp))IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -938,11 +940,13 @@ void testLoopNestComputeAt_2() {
     const std::string& verification_pattern =
         R"IR(
 # CHECK: for (int cy = 0; cy < H; cy++)
+# CHECK:   Allocate(temp, int, {2, W + 1})
 # CHECK:   for
 # CHECK:     for
 # CHECK:   for (int cx = 0; cx < W; cx++)
 # CHECK-NOT: prod[
-# CHECK:     cons[)IR";
+# CHECK:     cons[
+# CHECK:   Free(temp))IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     // Now check that the loop still produces the correct result.
@@ -968,10 +972,12 @@ void testLoopNestComputeAt_2() {
         R"IR(
 # CHECK: for (int cy = 0; cy < H; cy++)
 # CHECK:   for (int cx = 0; cx < W; cx++)
+# CHECK:     Allocate(temp, int, {2, 2})
 # CHECK:     for
 # CHECK:       for
 # CHECK-NOT: prod[
-# CHECK:     cons[)IR";
+# CHECK:     cons[
+# CHECK:     Free(temp))IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     // Now check that the loop still produces the correct result.
@@ -1051,6 +1057,7 @@ void testLoopNestComputeAt_3() {
 # CHECK:   for (int cx = 0; cx < W; cx++)
 # CHECK:     C[
 # CHECK: for (int dy = 0; dy < H; dy++)
+# CHECK:   Allocate(temp, int, {1, W})
 # CHECK:   for (int dx = 0; dx < W; dx++)
 # CHECK-NOT: A[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1087,6 +1094,7 @@ void testLoopNestComputeAt_3() {
 # CHECK:     C[
 # CHECK: for (int dy = 0; dy < H; dy++)
 # CHECK:   for (int dx = 0; dx < W; dx++)
+# CHECK:     Allocate(temp, int, {1, 1})
 # CHECK-NOT: A[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -1589,19 +1597,18 @@ void testOuterLoopVectorization() {
   Stmt* root_stmt = l.root_stmt();
   Block* outer_block = dynamic_cast<Block*>(root_stmt);
   ASSERT_NE(outer_block, nullptr);
-  while (Block* inner_block =
-             dynamic_cast<Block*>(*outer_block->stmts().begin())) {
+  while (Block* inner_block = dynamic_cast<Block*>(outer_block->front())) {
     outer_block = inner_block;
   }
 
   // Verify that we have only a single loop level remaining after
   // vectorization.
   ASSERT_EQ(outer_block->nstmts(), 1);
-  For* for_loop = dynamic_cast<For*>(*outer_block->stmts().begin());
+  For* for_loop = dynamic_cast<For*>(outer_block->front());
   ASSERT_NE(for_loop, nullptr);
   Block* for_body = for_loop->body();
   ASSERT_EQ(for_body->nstmts(), 1);
-  ASSERT_EQ(dynamic_cast<For*>(*for_body->stmts().begin()), nullptr);
+  ASSERT_EQ(dynamic_cast<For*>(for_body->front()), nullptr);
 }
 
 } // namespace jit
