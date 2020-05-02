@@ -7,6 +7,8 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 
+#include <thrust/tuple.h>
+
 // References:
 // https://devblogs.nvidia.com/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
 
@@ -73,31 +75,22 @@ struct unroll_load_helper {
   }
 };
 
+// check the return type is `thrust::tuple`, not `std::tuple`.
 template <typename T> struct is_tuple: std::false_type {};
 
-template <typename ...T> struct is_tuple<std::tuple<T...>>: std::true_type {};
+template <typename ...T> struct is_tuple<thrust::tuple<T...>>: std::true_type {};
 
 template <int current>
 struct multi_outputs_store_helper {
-  template<int ntensors, int num_outputs, typename out_t, typename... Args>
+  template<int ntensors, int num_outputs, typename out_t>
   C10_HOST_DEVICE static void apply(
       at::detail::Array<char*, ntensors> data,
       at::detail::Array<uint32_t, num_outputs> offsets,
       out_t ret) {
     static_assert(is_tuple<out_t>::value);
-    using T = std::tuple_element_t<current, out_t>;
-    auto ptr = reinterpret_cast<T *>(data[current]) + offsets[current];
-    std::get<current>(ret) = *ptr;
-  }
-};
-
-template <int current>
-struct tuple_result_write_helper {
-  template <typename tuple_t>
-  static __device__ inline void apply(tuple_t src, tuple_t &dst) {
-    using T = std::tuple_element_t<current, tuple_t>;
-    auto src_value = reinterpret_cast<T>(std::get<current>(src));
-    std::get<current>(dst) = src_value;
+    using T = typename thrust::tuple_element<current, out_t>::type;
+    T *to = reinterpret_cast<T *>(data[current]) + offsets[current];
+    *to = thrust::get<current>(ret);
   }
 };
 

@@ -5,6 +5,8 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 
+#include <thrust/tuple.h>
+
 namespace at { namespace native {
 
 #define NUM_THREADS (C10_WARP_SIZE * 2)

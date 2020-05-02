@@ -42,6 +42,8 @@
 #include <c10/util/TypeCast.h>
 #include <c10/util/C++17.h>
 
+#include <thrust/tuple.h>
+
 // Marks a lambda as executable on both the host and device. The __host__
 // attribute is important so that we can access static type information from
 // the host, even if the function is typically only executed on the device.
@@ -318,7 +320,7 @@ void gpu_kernel_multiple_outputs_impl(TensorIterator& iter, const func_t& f) {
   using traits = function_traits<func_t>;
   using output_t = typename traits::result_type;
   TORCH_INTERNAL_ASSERT(memory::detail::is_tuple<output_t>::value);
-  constexpr int num_outputs = std::tuple_size<output_t>::value;
+  constexpr int num_outputs = thrust::tuple_size<output_t>::value;
   TORCH_INTERNAL_ASSERT(num_outputs > 1);
   constexpr int num_inputs = traits::arity;
   constexpr int ntensors = num_outputs + num_inputs;

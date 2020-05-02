@@ -15,6 +15,8 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
 
+#include <thrust/tuple.h>
+
 
 namespace at { namespace native {
 
@@ -134,9 +136,9 @@ void prelu_cuda_backward_kernel_share_weights(
   iter.add_input(grad_out);
   iter.build();
 
-  scalar_t weight = *weight_data;
-  gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t input, scalar_t grad_out) -> std::tuple<scalar_t, scalar_t> {
-    scalar_t input_grad = input > 0 ? grad_out : weight * grad_out;
+  // N.B. `std::tuple` does not support `::operator=` on device code.
+  gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t input, scalar_t grad_out) -> thrust::tuple<scalar_t, scalar_t> {
+    scalar_t input_grad = input > 0 ? grad_out : (*weight_data) * grad_out;
     scalar_t weight_grad_collector = input > 0 ? scalar_t(0) : input * grad_out;
     return {input_grad, weight_grad_collector};
   });
