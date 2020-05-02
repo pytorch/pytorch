@@ -520,7 +520,6 @@ def infer_methods_to_compile(nn_module):
     stubs = []
     for method in uniqued_methods:
         stubs.append(make_stub_from_method(nn_module, method))
-
     return overload_stubs + stubs
 
 def interface_script(mod_interface, nn_module):

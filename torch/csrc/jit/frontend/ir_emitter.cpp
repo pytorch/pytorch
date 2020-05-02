@@ -3490,7 +3490,6 @@ std::unique_ptr<Function> CompilationUnit::define(
     bool shouldMangle) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
-
   if (!self) {
     // if self is defined, then these are methods and do not go into the
     // global namespace otherwise, they get defined together so we add them to
@@ -3520,8 +3519,6 @@ std::unique_ptr<Function> CompilationUnit::define(
       name = mangle(name);
     }
   }
-
-
   auto fn = torch::make_unique<GraphFunction>(
       std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
@@ -3537,7 +3534,6 @@ std::vector<Function*> CompilationUnit::define(
     const std::vector<ResolverPtr>& resolvers,
     const Self* self,
     bool shouldMangle) {
-
   TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
   std::vector<Function*> functions;
   std::unordered_map<std::string, Function*> function_table;
@@ -3576,7 +3572,6 @@ std::vector<Function*> CompilationUnit::define(
     const std::string& source,
     const ResolverPtr& resolver,
     const Self* self) {
-
   Parser p(std::make_shared<Source>(source, "<string>", 1));
   std::vector<Def> definitions;
   std::vector<ResolverPtr> resolvers;
