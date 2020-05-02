@@ -2381,9 +2381,9 @@ class TestQuantizedConv(unittest.TestCase):
         if qengine == 'qnnpack':
             if IS_PPC or TEST_WITH_UBSAN:
                 return
-            assume(channelwise == False)
+            assume(channelwise)
         if qengine == 'fbgemm':
-            assume(transpose == False)
+            assume(transpose)
 
         if transpose:
             qconv_prepack = torch.ops.quantized.conv_transpose2d_prepack
