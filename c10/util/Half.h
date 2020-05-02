@@ -360,17 +360,18 @@ struct alignas(2) Half {
 
 // This is just a placeholder for whatever complex representation we
 // end up deciding to use for half-precision complex numbers.
-struct alignas(4) ComplexHalf {
+template<>
+struct alignas(4) complex<Half> {
   Half real_;
   Half imag_;
-  ComplexHalf() = default;
+  complex() = default;
   Half real() const {
     return real_;
   }
   Half imag() const {
     return imag_;
   }
-  inline ComplexHalf(std::complex<float> value)
+  inline complex(std::complex<float> value)
       : real_(value.real()), imag_(value.imag()) {}
   inline operator std::complex<float>() const {
     return {real_, imag_};
@@ -386,8 +387,6 @@ struct is_complex_t<std::complex<T>> : public std::true_type {};
 template <typename T>
 struct is_complex_t<c10::complex<T>> : public std::true_type {};
 
-template <>
-struct is_complex_t<ComplexHalf> : public std::true_type {};
 
 // Extract double from std::complex<double>; is identity otherwise
 // TODO: Write in more idiomatic C++17
@@ -404,7 +403,7 @@ struct scalar_value_type<c10::complex<T>> {
   using type = T;
 };
 template <>
-struct scalar_value_type<ComplexHalf> {
+struct scalar_value_type<complex<Half>> {
   using type = Half;
 };
 
