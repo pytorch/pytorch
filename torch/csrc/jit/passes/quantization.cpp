@@ -100,6 +100,7 @@ std::vector<std::string> _single_input_general_call_funcs = {
     "upsample_bilinear",
     "upsample_nearest",
     "relu",
+    "relu_",
     "sigmoid",
     "tanh",
     "hardtanh",
@@ -144,6 +145,7 @@ std::vector<std::string> _single_input_general_aten_funcs = {
     "clamp",
     // "clamp_",  // Enable when quantized `clamp_` is ready
     "relu",
+    "relu_",
     "sigmoid",
     "tanh",
     "hardtanh",

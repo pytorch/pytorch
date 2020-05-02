@@ -69,7 +69,8 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: mask fallback types:Byte
     - THByteTensor* mask
 ]]
 [[
@@ -85,7 +86,8 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: mask fallback types:Bool
     - THBoolTensor* mask
 ]]
 [[

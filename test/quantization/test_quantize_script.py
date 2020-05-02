@@ -1597,7 +1597,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         FileCheck().check_not("aten::layer_norm") \
                    .run(m.graph)
 
-
     def test_swap_dequantize_all_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general ops without actually checking for execution of these ops
