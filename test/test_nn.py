@@ -4639,7 +4639,7 @@ class TestNN(NNTestCase):
                                                  dim_feedforward, batch_first=True, dropout=dropout)
         src_batch_first = src.permute(1, 0, 2)
         tgt_batch_first = tgt.permute(1, 0, 2)
-        output_batch_first = transformer_batch_first(src, tgt,
+        output_batch_first = transformer_batch_first(src_batch_first, tgt_batch_first,
                                                      src_mask=src_mask,
                                                      tgt_mask=tgt_mask,
                                                      memory_mask=memory_mask,
