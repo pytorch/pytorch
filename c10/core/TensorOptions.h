@@ -397,6 +397,8 @@ struct C10_API TensorOptions {
             return DispatchKey::IDEEP;
           case DeviceType::HIP:
             return DispatchKey::HIP;
+          case DeviceType::FPGA:
+            return DispatchKey::FPGA;
           case DeviceType::MSNPU:
             return DispatchKey::MSNPU;
           case DeviceType::XLA:
@@ -623,6 +625,8 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::CUDA;
   } else if (tid == DispatchKey::HIP) {
     return DeviceType::HIP;
+  } else if (tid == DispatchKey::FPGA) {
+    return DeviceType::FPGA;
   } else if (tid == DispatchKey::MKLDNN) {
     return DeviceType::MKLDNN;
   } else if (tid == DispatchKey::OpenGL) {
@@ -631,8 +635,6 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::OPENCL;
   } else if (tid == DispatchKey::IDEEP) {
     return DeviceType::IDEEP;
-  } else if (tid == DispatchKey::HIP) {
-    return DeviceType::HIP;
   } else if (tid == DispatchKey::MSNPU) {
     return DeviceType::MSNPU;
   } else if (tid == DispatchKey::XLA) {

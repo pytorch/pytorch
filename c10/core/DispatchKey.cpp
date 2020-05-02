@@ -24,6 +24,8 @@ const char* toString(DispatchKey t) {
       return "IDEEP";
     case DispatchKey::HIP:
       return "HIP";
+    case DispatchKey::FPGA:
+      return "FPGA";
     case DispatchKey::SparseHIP:
       return "SparseHIP";
     case DispatchKey::MSNPU:

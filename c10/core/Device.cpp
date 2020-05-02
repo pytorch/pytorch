@@ -13,7 +13,7 @@
 namespace c10 {
 namespace {
 DeviceType parse_type(const std::string& device_string) {
-  static const std::array<std::pair<std::string, DeviceType>, 9> types = {{
+  static const std::array<std::pair<std::string, DeviceType>, 10> types = {{
       {"cpu", DeviceType::CPU},
       {"cuda", DeviceType::CUDA},
       {"mkldnn", DeviceType::MKLDNN},
@@ -21,6 +21,7 @@ DeviceType parse_type(const std::string& device_string) {
       {"opencl", DeviceType::OPENCL},
       {"ideep", DeviceType::IDEEP},
       {"hip", DeviceType::HIP},
+      {"fpga", DeviceType::FPGA},
       {"msnpu", DeviceType::MSNPU},
       {"xla", DeviceType::XLA},
   }};

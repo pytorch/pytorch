@@ -32,6 +32,7 @@ enum class Backend {
   SparseCPU,
   SparseCUDA,
   SparseHIP,
+  FPGA,
   MSNPU,
   XLA,
   QuantizedCPU,
@@ -68,6 +69,8 @@ static inline Backend toDense(Backend b) {
       return Backend::CUDA;
     case Backend::HIP:
       return Backend::HIP;
+    case Backend::FPGA:
+      return Backend::FPGA;
     case Backend::MSNPU:
       return Backend::MSNPU;
     case Backend::XLA:
@@ -94,6 +97,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::CUDA;
   } else if (t == DispatchKey::HIP) {
     return Backend::HIP;
+  } else if (t == DispatchKey::FPGA) {
+    return Backend::FPGA;
   } else if (t == DispatchKey::MSNPU) {
     return Backend::MSNPU;
   } else if (t == DispatchKey::XLA || t == DispatchKey::XLAPreAutograd) {
@@ -125,6 +130,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::CUDA;
     case Backend::HIP:
       return DispatchKey::HIP;
+    case Backend::FPGA:
+      return DispatchKey::FPGA;
     case Backend::MSNPU:
       return DispatchKey::MSNPU;
     case Backend::XLA:
@@ -156,6 +163,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CUDA;
     case Backend::HIP:
       return DeviceType::HIP;
+    case Backend::FPGA:
+      return DeviceType::FPGA;
     case Backend::MSNPU:
       return DeviceType::MSNPU;
     case Backend::XLA:
@@ -192,6 +201,8 @@ static inline Backend backendToCPU(Backend b) {
       return Backend::SparseCPU;
     case Backend::SparseHIP:
       return Backend::SparseCPU;
+    case Backend::FPGA:
+      return Backend::FPGA;
     case Backend::MSNPU:
     case Backend::XLA:
       return Backend::CPU;
@@ -213,6 +224,7 @@ static inline Backend backendToCUDA(Backend b) {
     case Backend::CPU:
     case Backend::CUDA:
     case Backend::HIP:
+    case Backend::FPGA:
     case Backend::MSNPU:
     case Backend::XLA:
       return Backend::CUDA;
@@ -232,6 +244,7 @@ static inline Backend backendToHIP(Backend b) {
     case Backend::CPU:
     case Backend::CUDA:
     case Backend::HIP:
+    case Backend::FPGA:
     case Backend::MSNPU:
     case Backend::XLA:
       return Backend::HIP;
@@ -255,6 +268,8 @@ static inline const char* toString(Backend b) {
       return "CUDA";
     case Backend::HIP:
       return "HIP";
+    case Backend::FPGA:
+      return "FPGA";
     case Backend::MSNPU:
       return "MSNPU";
     case Backend::XLA:
