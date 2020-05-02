@@ -83,8 +83,6 @@ class Transformer(Module):
             src_key_padding_mask: the ByteTensor mask for src keys per batch (optional).
             tgt_key_padding_mask: the ByteTensor mask for tgt keys per batch (optional).
             memory_key_padding_mask: the ByteTensor mask for memory keys per batch (optional).
-            batch_first: if the src tensor is in the shape of (N, S, E) instead of (S, N, E) and the tgt tensor is
-                in the shape of (N, T, E) instead of (T, N, E) (default=False).
 
         Shape:
             - src: :math:`(S, N, E)` by default or `(N, S, E)` if batch_first is True.
@@ -119,7 +117,9 @@ class Transformer(Module):
             >>> output = transformer_model(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask)
         """
 
-        if src.size(1) != tgt.size(1):
+        if not batch_first and src.size(1) != tgt.size(1):
+            raise RuntimeError("the batch number of src and tgt must be equal")
+        elif batch_first and src.size(0) != tgt.size(0):
             raise RuntimeError("the batch number of src and tgt must be equal")
 
         if src.size(2) != self.d_model or tgt.size(2) != self.d_model:
