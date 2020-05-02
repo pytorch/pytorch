@@ -2695,6 +2695,34 @@ Args:
     input (Tensor): the PyTorch tensor to test
 """)
 
+add_docstr(torch.is_nonzero,
+           r"""
+is_nonzero(input) -> (bool)
+
+Returns True if the :attr:`input` is a scalar which is not equal to zero
+after type conversions.
+i.e. not equal to ``torch.Tensor([0.])`` or ``torch.Tensor([0])`` or
+``torch.Tensor([False])``.
+Throws a ``RuntimeError`` if ``torch.numel() != 1``.
+
+Args:
+    input (Tensor): the PyTorch tensor to test
+Example::
+
+    >>> torch.is_nonzero(torch.Tensor([0.]))
+    False
+    >>> torch.is_nonzero(torch.Tensor([1.5]))
+    True
+    >>> torch.is_nonzero(torch.Tensor([False]))
+    False
+    >>> torch.is_nonzero(torch.Tensor([True]))
+    True
+    >>> torch.is_nonzero(torch.Tensor([0]))
+    False
+    >>> torch.is_nonzero(torch.Tensor([3]))
+    True
+""")
+
 add_docstr(torch.kthvalue,
            r"""
 kthvalue(input, k, dim=None, keepdim=False, out=None) -> (Tensor, LongTensor)

@@ -8,6 +8,7 @@ Tensors
 .. autofunction:: is_storage
 .. autofunction:: is_complex
 .. autofunction:: is_floating_point
+.. autofunction:: is_nonzero
 .. autofunction:: set_default_dtype
 .. autofunction:: get_default_dtype
 .. autofunction:: set_default_tensor_type
