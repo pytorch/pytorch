@@ -2703,7 +2703,8 @@ Returns True if the :attr:`input` is a scalar which is not equal to zero
 after type conversions.
 i.e. not equal to ``torch.Tensor([0.])`` or ``torch.Tensor([0])`` or
 ``torch.Tensor([False])``.
-Throws a ``RuntimeError`` if ``torch.numel() != 1``.
+Throws a ``RuntimeError`` if ``torch.numel() != 1`` (after coalescing in case
+of sparse tensors).
 
 Args:
     input (Tensor): the PyTorch tensor to test
@@ -2721,6 +2722,14 @@ Example::
     False
     >>> torch.is_nonzero(torch.Tensor([3]))
     True
+    >>> torch.is_nonzero(torch.Tensor([]))
+    Traceback (most recent call last):
+    ...
+    RuntimeError: bool value of Tensor with no values is ambiguous
+    >>> torch.is_nonzero(torch.sparse_coo_tensor([0]))
+    Traceback (most recent call last):
+    ...
+    RuntimeError: bool value of Tensor with no values is ambiguous
 """)
 
 add_docstr(torch.kthvalue,
