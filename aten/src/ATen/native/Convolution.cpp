@@ -256,7 +256,9 @@ auto ConvParams::use_xnnpack(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias) const -> bool {
-#ifdef C10_MOBILE
+// Disable the xnnpack operators for both iOS and macOS temporarily due to the crash in pthreadpool
+// TODO:T66297472 remove `!defined(__APPLE__)` once we figure out the root cause of the crash.
+#if defined(C10_MOBILE) && !defined(__APPLE__)
   if (!transposed) {
     return (input.size(1) == groups) &&
             xnnpack::use_convolution2d(
@@ -727,7 +729,6 @@ at::Tensor _convolution(
                                       params.padding, params.stride, params.dilation, params.groups);
     }
 #endif
-#if !defined(C10_IOS)
   } else if (params.use_xnnpack(input, weight, bias)) {
     // Using prepacked conv is preferred, but XNNPACK is still the fastest
     // option for NHWC.
@@ -739,7 +740,6 @@ at::Tensor _convolution(
         params.stride,
         params.dilation,
         params.groups);
-#endif
   } else if (params.use_cpu_depthwise3x3_winograd(input, weight, bias)) {
     output = convolution_depthwise3x3_winograd_stub(
         input.device().type(),
