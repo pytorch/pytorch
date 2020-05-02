@@ -4569,6 +4569,7 @@ class TestNN(NNTestCase):
             m = nn.LSTM(3, 4, bidirectional=True, num_layers=2).to('cuda')
             a = torch.rand(5, 3, device='cuda')
             b = torch.tensor([1, 1, 1, 1, 1], device='cuda')
+            input = nn.utils.rnn.PackedSequence(a, b)
 
     def test_transformer_cell(self):
         # this is just a smoke test; these modules are implemented through
@@ -4647,7 +4648,7 @@ class TestNN(NNTestCase):
                                                      tgt_key_padding_mask=tgt_key_padding_mask,
                                                      memory_key_padding_mask=memory_key_padding_mask)
         output_ref = output_batch_first.permute(1, 0, 2)
-        np.testing.assert_allclose(output, output_ref, atol=1e-5)
+        np.testing.assert_allclose(output.detach().numpy(), output_ref.detach().numpy(), atol=1e-5)
 
     def test_transformerencoderlayer(self):
         # this is a deterministic test for TransformerEncoderLayer
