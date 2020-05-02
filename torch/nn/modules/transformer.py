@@ -117,9 +117,9 @@ class Transformer(Module):
             >>> output = transformer_model(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask)
         """
 
-        if not batch_first and src.size(1) != tgt.size(1):
+        if not self.batch_first and src.size(1) != tgt.size(1):
             raise RuntimeError("the batch number of src and tgt must be equal")
-        elif batch_first and src.size(0) != tgt.size(0):
+        elif self.batch_first and src.size(0) != tgt.size(0):
             raise RuntimeError("the batch number of src and tgt must be equal")
 
         if src.size(2) != self.d_model or tgt.size(2) != self.d_model:
