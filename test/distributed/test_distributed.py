@@ -2090,7 +2090,6 @@ class _DistTestBase(object):
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
-    @skip_if_rocm
     def test_DistributedDataParallel_SyncBatchNorm_2D_Input(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
