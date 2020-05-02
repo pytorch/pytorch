@@ -67,6 +67,7 @@ class Transformer(Module):
 
         self.d_model = d_model
         self.nhead = nhead
+        self.batch_first = batch_first
 
     def forward(self, src, tgt, src_mask=None, tgt_mask=None,
                 memory_mask=None, src_key_padding_mask=None,
