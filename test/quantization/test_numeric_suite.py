@@ -1,5 +1,3 @@
-import unittest
-
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
@@ -13,8 +11,8 @@ from torch.quantization import (
     quantize,
 )
 from torch.quantization._numeric_suite import (
-    ShadowLogger,
     Shadow,
+    ShadowLogger,
     compare_model_outputs,
     compare_model_stub,
     compare_weights,
