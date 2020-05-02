@@ -61,7 +61,8 @@ DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.GRU: nnqd.GRU,
     nn.LSTMCell: nnqd.LSTMCell,
     nn.RNNCell: nnqd.RNNCell,
-    nn.GRUCell: nnqd.GRUCell,}
+    nn.GRUCell: nnqd.GRUCell
+}
 
 # Whitelist for propagating the qconfig
 _EXCLUDE_QCONFIG_PROPAGATE_LIST = {

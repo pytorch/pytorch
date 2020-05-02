@@ -62,7 +62,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def(
       "_call_end_callbacks_on_fut",
       [](const at::Tensor& handle,
-         const std::shared_ptr<torch::distributed::rpc::FutureMessage>& fut) {
+         const std::shared_ptr<torch::distributed::rpc::FutureIValue>& fut) {
         torch::autograd::profiler::_call_end_callbacks_on_fut(handle, fut);
       });
 #endif

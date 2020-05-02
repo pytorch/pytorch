@@ -44,11 +44,11 @@ struct ArgumentInfo {
   TypePtr toType() const {
     if (!defined())
       return TensorType::get();
+
     return TensorType::create(
         type(),
         ConvertIntToCPUOrCUDA(device()),
-        c10::VaryingShape(dim()),
-        c10::VaryingShape(dim()),
+        c10::optional<size_t>(dim()),
         requires_grad());
   }
   operator TypePtr() const {
@@ -353,7 +353,11 @@ struct CompleteArgumentInfo {
     if (!defined())
       return TensorType::get();
     return TensorType::create(
-        type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());
+        type(),
+        ConvertIntToCPUOrCUDA(device()),
+        c10::VaryingShape<int64_t>{sizes()},
+        c10::VaryingShape<int64_t>{strides()},
+        requires_grad());
   }
 
  private:
@@ -440,12 +444,12 @@ inline c10::optional<int8_t> convertOptional(
 
 namespace std {
 
-template <>
-struct hash<c10::VaryingShape> {
-  size_t operator()(const c10::VaryingShape& vs) const {
+template <typename T>
+struct hash<c10::VaryingShape<T>> {
+  size_t operator()(const c10::VaryingShape<T>& vs) const {
     return torch::get_hash(
         vs.size(),
-        vs.size() ? vs.sizes().value() : std::vector<c10::optional<int64_t>>());
+        vs.size() ? vs.sizes().value() : std::vector<c10::optional<T>>());
   }
 };
 
@@ -454,8 +458,8 @@ struct hash<c10::TensorType> {
   size_t operator()(const c10::TensorType& ptt) const {
     return torch::get_hash<
         c10::optional<int8_t>,
-        c10::VaryingShape,
-        c10::VaryingShape,
+        c10::VaryingShape<int64_t>,
+        c10::VaryingShape<int64_t>,
         c10::optional<bool>>(
         torch::jit::convertOptional(ptt.scalarType()),
         ptt.sizes(),
