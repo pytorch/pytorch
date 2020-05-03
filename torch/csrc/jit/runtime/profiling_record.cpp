@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -24,33 +25,36 @@ ProfileOp* ProfilingRecord::createProfileNode(
 void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
   auto pn = createProfileNode(nullptr, {i});
   auto pno = pn->addOutput();
-  bool first = true;
   pno->setType(TensorType::get());
-  std::function<void(Stack&)> shape_profiler =
-      [this, pno, first](Stack& stack) mutable {
-        int64_t frame_id;
-        pop(stack, frame_id);
-        IValue t;
-        pop(stack, t);
-        if (t.isTensor()) {
-          if (t.toTensor().defined()) {
-            auto pttp = tensorTypeInCurrentExecutionContext(t.toTensor());
-            std::lock_guard<std::mutex> lock(this->mutex_);
-            if (auto type = pno->type()->cast<TensorType>()) {
-              if (!first) {
-                pttp = pttp->merge(type);
-              }
-              pno->setType(pttp);
-              first = false;
-            }
-          } else {
-            pno->setType(TensorType::get()->withUndefined());
+  std::function<void(Stack&)> shape_profiler = [this,
+                                                pno](Stack& stack) mutable {
+    GRAPH_DEBUG("Profiling %", pno->debugName(), " addr = ", pno);
+    int64_t frame_id;
+    pop(stack, frame_id);
+    IValue t;
+    pop(stack, t);
+    if (t.isTensor()) {
+      if (t.toTensor().defined()) {
+        auto pttp = tensorTypeInCurrentExecutionContext(t.toTensor());
+        GRAPH_DEBUG("pttp = ", *pttp);
+        std::lock_guard<std::mutex> lock(this->mutex_);
+        if (auto type = pno->type()->cast<TensorType>()) {
+          auto result = this->seen_.insert(pno);
+          if (!result.second) {
+            GRAPH_DEBUG("Merging ", *pttp, " with ", *type);
+            pttp = pttp->merge(type);
           }
+          pno->setType(pttp);
+          GRAPH_DEBUG("Setting a new type ", *pttp);
         }
+      } else {
+        pno->setType(TensorType::get()->withUndefined());
+      }
+    }
 
-        // passing t through
-        push(stack, t);
-      };
+    // passing t through
+    push(stack, t);
+  };
 
   pn->setCallback(shape_profiler);
   pn->insertBefore(n);

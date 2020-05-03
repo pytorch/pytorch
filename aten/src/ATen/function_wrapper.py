@@ -4,16 +4,7 @@
 import re
 from code_template import CodeTemplate
 
-try:
-    import typing  # noqa: F401
-except ImportError:
-    raise RuntimeError(
-        'Missing build dependency: Unable to import the `typing` module. '
-        'Please install it via `conda install typing` or `pip install typing`')
-
-# flake8 doesn't take into account usages in type annotations.
-from typing import Union, Set  # noqa: F401
-from typing import Any, Dict, List, Optional, Tuple, NamedTuple
+from typing import Any, Dict, List, Optional, Set, Tuple, NamedTuple
 
 try:
     from mypy_extensions import TypedDict
@@ -22,12 +13,6 @@ except ImportError:
     # It is required, however, for type checking.
     def TypedDict(name, attrs, total=True):  # type: ignore
         return Dict[Any, Any]
-
-import sys
-if sys.version_info[0] == 3:
-    string_type = str
-else:
-    string_type = basestring
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #
@@ -255,6 +240,8 @@ scalar_types = [
     ('Short', 'int16_t', 'Long', False),
     ('Half', 'Half', 'Double', True),
     ('BFloat16', 'BFloat16', 'BFloat16AccrealNotDefined', True),
+    ('ComplexFloat', 'ComplexFloat', 'ComplexDouble', False),
+    ('ComplexDouble', 'ComplexDouble', 'ComplexDouble', False),
 ]
 
 static_dispatch_backends = ['CPU', 'QuantizedCPU']
@@ -769,7 +756,7 @@ def gen_dispatch_key_init(var_name, formals):
         subexprs.append('c10::detail::multi_dispatch_key_set({})'.format(args))
     return [
         'DispatchKeySet _dk_set = {};'.format(' | '.join(subexprs)),
-        'DispatchKeySet _dk_mask = c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect);',
+        'DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);',
         'DispatchKey {} = c10::impl::dispatchTypeId(_dk_set, _dk_mask);'.format(var_name),
     ]
 
@@ -1050,7 +1037,7 @@ def create_generic(top_env, declarations):
         for t_raw in ret:
             # See Note [field_name versus name]
             field_name = None
-            if isinstance(t_raw, string_type):
+            if isinstance(t_raw, str):
                 t = t_raw
                 name = None
             else:

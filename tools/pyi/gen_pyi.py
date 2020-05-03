@@ -7,7 +7,11 @@ import re
 import argparse
 
 from ..autograd.utils import YamlLoader, CodeTemplate, write
-from ..autograd.gen_python_functions import get_py_torch_functions, get_py_variable_methods
+from ..autograd.gen_python_functions import (
+    get_py_torch_functions,
+    get_py_variable_methods,
+    namedtuple_fieldnames,
+)
 from ..autograd.gen_autograd import load_aten_declarations
 
 """
@@ -67,14 +71,19 @@ blacklist = [
     'triplet_margin_loss',
     # Somehow, these are defined in both _C and in functional. Ick!
     'broadcast_tensors',
-    # type hints for named tensors are broken: https://github.com/pytorch/pytorch/issues/27846
+    # Manually define named tensor type stubs in __init__.pyi.in
+    'rename',
+    'refine_names',
+    'align_to',
     'align_tensors',
+    'unflatten',
     'meshgrid',
     'cartesian_prod',
     'block_diag',
     'norm',
     'chain_matmul',
     'stft',
+    'istft',
     'tensordot',
     'norm',
     'split',
@@ -135,8 +144,8 @@ def type_to_python(typename, size=None):
         'void*': '_int',    # data_ptr
         'void': 'None',
         'std::string': 'str',
-        'Dimname': 'Union[str, None]',
-        'DimnameList': 'List[Union[str, None]]',
+        'Dimname': 'Union[str, ellipsis, None]',
+        'DimnameList': 'Sequence[Union[str, ellipsis, None]]',
         'QScheme': '_qscheme',
     }[typename]
 
@@ -224,12 +233,13 @@ def sig_for_ops(opname):
         raise Exception("unknown op", opname)
 
 
-def generate_type_hints(fname, decls, is_tensor=False):
+def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
     """generate_type_hints(fname, decls, is_tensor=False)
 
     Generates type hints for the declarations pertaining to the function
     :attr:`fname`. attr:`decls` are the declarations from the parsed
     Declarations.yaml.
+    :attr:`namedtuples` is a dictionary for accumulating NamedTuple definitions.
     The :attr:`is_tensor` flag indicates whether we are parsing
     members of the Tensor class (true) or functions in the
     `torch` namespace (default, false).
@@ -288,8 +298,18 @@ def generate_type_hints(fname, decls, is_tensor=False):
 
         python_args_s = ', '.join(python_args)
         python_returns = [type_to_python(r['dynamic_type']) for r in decl['returns']]
+        field_names = namedtuple_fieldnames(decl)
 
-        if len(python_returns) > 1:
+        if field_names:
+            namedtuple_name = '_'.join(['namedtuple'] + field_names)
+            tuple_args = ['("{}", {})'.format(name, typ) for name, typ in zip(field_names, python_returns)]
+            namedtuple_def = 'NamedTuple("{}", [{}])'.format(namedtuple_name, ', '.join(tuple_args))
+            if namedtuple_name in namedtuples:
+                assert namedtuples[namedtuple_name] == namedtuple_def
+            else:
+                namedtuples[namedtuple_name] = namedtuple_def
+            python_returns_s = namedtuple_name
+        elif len(python_returns) > 1:
             python_returns_s = 'Tuple[' + ', '.join(python_returns) + ']'
         elif len(python_returns) == 1:
             python_returns_s = python_returns[0]
@@ -362,6 +382,7 @@ def gen_nn_functional(out):
         'celu_',
         'rrelu_',
         'pixel_shuffle',
+        'channel_shuffle',
         'pdist',
         'cosine_similarity',
     ]
@@ -417,6 +438,9 @@ def gen_pyi(declarations_path, out):
 
     # Load information from YAML
     declarations = load_aten_declarations(declarations_path)
+
+    # Dictionary for NamedTuple definitions
+    namedtuples = {}
 
     # Generate type signatures for top-level functions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -476,7 +500,7 @@ def gen_pyi(declarations_path, out):
 
     function_declarations = get_py_torch_functions(declarations)
     for name in sorted(function_declarations.keys()):
-        unsorted_function_hints[name] += generate_type_hints(name, function_declarations[name])
+        unsorted_function_hints[name] += generate_type_hints(name, function_declarations[name], namedtuples)
 
     # Generate type signatures for deprecated functions
 
@@ -545,6 +569,7 @@ def gen_pyi(declarations_path, out):
                'def to(self, other: Tensor, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',
                ],
         'item': ["def item(self) -> Number: ..."],
+        'copy_': ["def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."],
     })
     for binop in ['mul', 'div', 'true_divide', 'floor_divide']:
         for inplace in [False, True]:
@@ -574,7 +599,7 @@ def gen_pyi(declarations_path, out):
     tensor_method_declarations = get_py_variable_methods(declarations)
     for name in sorted(tensor_method_declarations.keys()):
         unsorted_tensor_method_hints[name] += \
-            generate_type_hints(name, tensor_method_declarations[name], is_tensor=True)
+            generate_type_hints(name, tensor_method_declarations[name], namedtuples, is_tensor=True)
 
     for op in all_ops:
         name = '__{}__'.format(op)
@@ -587,6 +612,11 @@ def gen_pyi(declarations_path, out):
         tensor_method_hints += hints
 
     # TODO: Missing type hints for nn
+
+    # Generate namedtuple definitions
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    namedtuple_defs = ['{} = {}'.format(name, defn) for name, defn in namedtuples.items()]
 
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -616,6 +646,7 @@ def gen_pyi(declarations_path, out):
     # ~~~~~~~~~~~~~~~~~~
 
     env = {
+        'namedtuple_defs': namedtuple_defs,
         'function_hints': function_hints,
         'tensor_method_hints': tensor_method_hints,
         'legacy_class_hints': legacy_class_hints,

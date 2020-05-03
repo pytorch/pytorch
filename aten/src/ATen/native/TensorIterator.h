@@ -369,7 +369,7 @@ struct CAFFE2_API TensorIterator {
   void declare_static_shape(IntArrayRef shape, const int64_t squash_dim){
     declare_static_shape(shape);
     if (!shape_.size()) return;
-    TORCH_CHECK(squash_dim >= 0 && squash_dim < shape_.size(),
+    TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(shape_.size()),
                 "squash_dim ", squash_dim, " must be in [0, ", shape_.size(), ").");
     shape_[squash_dim] = 1;
   }

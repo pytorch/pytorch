@@ -94,8 +94,8 @@ namespace {
 
 }
 
-void warn(SourceLocation source_location, const std::string& msg) {
-  ThreadWarningHandler::get_handler()->process(source_location, msg);
+void warn(SourceLocation source_location, const std::string& msg, const bool verbatim) {
+  ThreadWarningHandler::get_handler()->process(source_location, msg, verbatim);
 }
 
 void set_warning_handler(WarningHandler* handler) noexcept(true) {
@@ -110,7 +110,8 @@ WarningHandler* get_warning_handler() noexcept(true) {
 
 void WarningHandler::process(
     const SourceLocation& source_location,
-    const std::string& msg) {
+    const std::string& msg,
+    const bool /*verbatim*/) {
   LOG_AT_FILE_LINE(WARNING, source_location.file, source_location.line)
       << "Warning: " << msg << " (function " << source_location.function << ")";
 }

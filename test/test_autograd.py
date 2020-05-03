@@ -31,7 +31,7 @@ from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_pd_matrix, random_symmetric_matrix,
-                                                  IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck)
+                                                  IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck, skipIfRocm)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
@@ -2655,6 +2655,16 @@ class TestAutograd(TestCase):
         with torch.autograd.profiler.profile() as prof:
             x.resize_([3, 2])
 
+    @skipIfRocm
+    def test_profiler_custom_op(self):
+        inst = torch.classes._TorchScriptTesting._PickleTester([3, 4])
+
+        with torch.autograd.profiler.profile() as prof:
+            torch.ops._TorchScriptTesting.take_an_instance(inst)
+
+        self.assertEqual(len(prof.function_events), 1)
+        self.assertEqual(prof.function_events[0].name, '_TorchScriptTesting::take_an_instance')
+
     def test_profiler_propagation(self):
         def foo(x):
             with record_function("in_foo") as rf:
@@ -3663,7 +3673,7 @@ for shape in [(1,), ()]:
         run_test(grad_mode=False, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
 
-    def test_autograd_simple_views_python(self):
+    def _do_test_autograd_simple_views_python(self, dtype):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
         # and not silent. The TODOs below mark the places with unexpected behavior.
@@ -3762,8 +3772,8 @@ for shape in [(1,), ()]:
 
                         return tmp.sum()
 
-                    a = torch.ones(2, requires_grad=True)
-                    b = torch.ones(2, requires_grad=True)
+                    a = torch.ones(2, dtype=dtype, requires_grad=True)
+                    b = torch.ones(2, dtype=dtype, requires_grad=True)
 
 
                     if fn_id == "two_output" and inplace and output_is_a_view:
@@ -3803,6 +3813,10 @@ for shape in [(1,), ()]:
                         self.assertTrue(bw_called[0] == expected_called)
                         self.assertTrue(ga_nz[0] == expected_ga_nz)
                         self.assertTrue((len(w) == 1) == expected_warning)
+
+    def test_autograd_simple_views_python(self):
+        self._do_test_autograd_simple_views_python(torch.double)
+        self._do_test_autograd_simple_views_python(torch.cdouble)
 
     def test_autograd_complex_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
@@ -5345,6 +5359,24 @@ class TestAutogradDeviceType(TestCase):
             m.sum().backward()
 
 
+    @deviceCountAtLeast(2)
+    def test_scalar_different_devices(self, devices):
+        a = torch.rand([], requires_grad=True, device=devices[0])
+        b = torch.rand(10, requires_grad=True, device=devices[1])
+
+        c = b * a
+        c.sum().backward()
+
+
+    @onlyCUDA
+    def test_scalar_different_device_types(self, device):
+        c = torch.tensor(3.0, device='cpu', requires_grad=True) * torch.rand(2, 2, device=device)
+        c.sum().backward()
+
+        d = torch.tensor(3.0, device=device, requires_grad=True) * torch.rand(2, 2, device='cpu')
+        d.sum().backward()
+
+
     # NOTE: flaky on ROCm CI
     @skipCUDAIfRocm
     def test_sparse_ctor_getter_backward(self, device):
@@ -5662,6 +5694,14 @@ class TestAutogradDeviceType(TestCase):
         b = torch.nn.functional.rrelu_(a.clone(), -5.0, 1.0)
         with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
             b.backward(torch.ones(2, device=device))
+
+    @skipCUDAIfRocm
+    def test_leaky_relu_inplace_with_zero_slope(self, device):
+        a = torch.tensor([-2., 0., 2.], device=device, requires_grad=True)
+        b = torch.nn.functional.leaky_relu_(a.clone(), 0.0)
+        b.backward(torch.ones(3, device=device))
+        expected = torch.tensor([0., 0., 1.], device=device)
+        self.assertEqual(a.grad, expected)
 
     @onlyCUDA
     def test_free_unneeded_tensor(self, device):

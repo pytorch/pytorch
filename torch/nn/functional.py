@@ -1628,7 +1628,7 @@ def bilinear(input1, input2, weight, bias=None):
     # type: (Tensor, Tensor, Tensor, Optional[Tensor]) -> Tensor
     r"""
     Applies a bilinear transformation to the incoming data:
-    :math:`y = x_1 A x_2 + b`
+    :math:`y = x_1^T A x_2 + b`
 
     Shape:
 
@@ -2764,6 +2764,43 @@ Examples::
     torch.Size([1, 1, 12, 12])
 """)
 
+channel_shuffle = _add_docstr(torch.channel_shuffle, r"""
+Divide the channels in a tensor of shape :math:`(*, C , H, W)`
+into g groups and rearrange them as :math:`(*, C \frac g, g, H, W)`,
+while keeping the original tensor shape.
+
+See :class:`~torch.nn.ChannelShuffle` for details.
+
+Args:
+    input (Tensor): the input tensor
+    groups (int): number of groups to divide channels in and rearrange.
+
+Examples::
+
+    >>> input = torch.randn(1, 4, 2, 2)
+    >>> print(input)
+    [[[[1, 2],
+       [3, 4]],
+      [[5, 6],
+       [7, 8]],
+      [[9, 10],
+       [11, 12]],
+      [[13, 14],
+       [15, 16]],
+     ]]
+    >>> output = torch.nn.functional.channel_shuffle(input, 2)
+    >>> print(output)
+    [[[[1, 2],
+       [3, 4]],
+      [[9, 10],
+       [11, 12]],
+      [[5, 6],
+       [7, 8]],
+      [[13, 14],
+       [15, 16]],
+     ]]
+""")
+
 @_overload  # noqa: F811
 def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=None):  # noqa: F811
     # type: (Tensor, Optional[int], Optional[float], str, Optional[bool]) -> Tensor
@@ -3679,7 +3716,7 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
     tensor.
 
     .. warning::
-        Currently, only 4-D output tensors (batched image-like tensors) are
+        Currently, only 3-D output tensors (unfolded batched image-like tensors) are
         supported.
 
     See :class:`torch.nn.Fold` for details
@@ -3913,7 +3950,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     if attn_mask is not None:
         assert attn_mask.dtype == torch.float32 or attn_mask.dtype == torch.float64 or \
-            attn_mask.dtype == torch.uint8 or attn_mask.dtype == torch.bool, \
+            attn_mask.dtype == torch.float16 or attn_mask.dtype == torch.uint8 or attn_mask.dtype == torch.bool, \
             'Only float, byte, and bool types are supported for attn_mask, not {}'.format(attn_mask.dtype)
         if attn_mask.dtype == torch.uint8:
             warnings.warn("Byte tensor for attn_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")

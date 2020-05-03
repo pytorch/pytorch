@@ -225,6 +225,10 @@ Tensor& sin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(r
 Tensor sin(const Tensor& self) { return unary_op_impl(self, at::sin_out); }
 Tensor& sin_(Tensor& self) { return unary_op_impl_(self, at::sin_out); }
 
+Tensor& cos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, cos_stub); }
+Tensor cos(const Tensor& self) { return unary_op_impl(self, at::cos_out); }
+Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
+
 Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sinh_stub); }
 Tensor sinh(const Tensor& self) { return unary_op_impl(self, at::sinh_out); }
 Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
@@ -243,6 +247,14 @@ Tensor& square_(Tensor& self) { return at::pow_out(self, self, 2); }
 Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sigmoid_stub);  }
 Tensor sigmoid(const Tensor& self) { return unary_op_impl(self, at::sigmoid_out);  }
 Tensor& sigmoid_(Tensor& self) { return unary_op_impl_(self, at::sigmoid_out);  }
+
+Tensor& tanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, tanh_stub); }
+Tensor tanh(const Tensor& self) { return unary_op_impl(self, at::tanh_out); }
+Tensor& tanh_(Tensor& self) { return unary_op_impl_(self, at::tanh_out); }
+
+Tensor& tan_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, tan_stub);  }
+Tensor tan(const Tensor& self) { return unary_op_impl(self, at::tan_out);  }
+Tensor& tan_(Tensor& self) { return unary_op_impl_(self, at::tan_out);  }
 
 Tensor& trunc_out(Tensor& result, const Tensor& self) {
   // Note: this is consistent with NumPy
@@ -435,13 +447,10 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
 IMPLEMENT_UNARY_OP_VEC(atan)
-IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
-IMPLEMENT_UNARY_OP_VEC(tan)
-IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)
 
 DEFINE_DISPATCH(abs_stub);

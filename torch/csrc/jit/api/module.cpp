@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/api/module.h>
+#include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -161,6 +161,10 @@ void Module::clone_method(const Module& orig, const std::string& name) {
     }
   }
   return clone_method(orig, orig.get_method(name).function(), type_remap);
+}
+
+Module Module::deepcopy() const {
+  return Module(_ivalue()->deepcopy());
 }
 
 Module Module::clone() const {

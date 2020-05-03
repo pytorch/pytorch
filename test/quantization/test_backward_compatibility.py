@@ -12,13 +12,10 @@ import torch.nn.intrinsic.quantized as nniq
 
 # Testing utils
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import run_tests
-
-# TODO: remove this global setting
-# JIT tests use double as the default dtype
-torch.set_default_dtype(torch.double)
 
 class TestSerialization(TestCase):
+    """ Test backward compatiblity for serialization and numerics
+    """
     # Copy and modified from TestCase.assertExpected
     def _test_op(self, qmodule, subname=None, input_size=None, input_quantized=True, generate=False, prec=None):
         r""" Test quantized modules serialized previously can be loaded
@@ -35,8 +32,6 @@ class TestSerialization(TestCase):
         module_id = self.__class__.__module__
         munged_id = remove_prefix(self.id(), module_id + ".")
         test_file = os.path.realpath(sys.modules[module_id].__file__)
-        # TODO: change to quantization/serialized after we add test_quantization.py
-        # under pytorch/test folder
         base_name = os.path.join(os.path.dirname(test_file),
                                  "serialized",
                                  munged_id)
@@ -68,9 +63,9 @@ class TestSerialization(TestCase):
         qmodule_traced = torch.jit.load(traced_module_file)
 
         expected = torch.load(expected_file)
-        self.assertEqual(qmodule(input_tensor), expected, prec=prec)
-        self.assertEqual(qmodule_scripted(input_tensor), expected, prec=prec)
-        self.assertEqual(qmodule_traced(input_tensor), expected, prec=prec)
+        self.assertEqual(qmodule(input_tensor), expected, atol=prec)
+        self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)
+        self.assertEqual(qmodule_traced(input_tensor), expected, atol=prec)
 
     # TODO: add qnnpack test(https://github.com/pytorch/pytorch/pull/36771)
     @unittest.skipUnless(
@@ -145,8 +140,3 @@ class TestSerialization(TestCase):
                                  groups=1, bias=True, padding_mode="zeros")
         self._test_op(module, input_size=[1, 3, 6, 6, 6], generate=False)
         # TODO: graph mode quantized conv3d module
-
-
-
-if __name__ == "__main__":
-    run_tests()

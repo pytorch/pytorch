@@ -98,17 +98,21 @@ parser.add_argument('--subprocess', action='store_true',
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 parser.add_argument('--ge_config', type=str)
+parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test_bailouts', action='store_true')
 
 GRAPH_EXECUTOR = ProfilingMode.SIMPLE if IS_SANDCASTLE else ProfilingMode.PROFILING
 args, remaining = parser.parse_known_args()
 if args.ge_config == 'legacy':
     GRAPH_EXECUTOR = ProfilingMode.LEGACY
-elif args.ge_config == 'simple':
+elif args.ge_config == 'profiling':
+    GRAPH_EXECUTOR = ProfilingMode.PROFILING
+else:
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 
 TEST_BAILOUTS = args.test_bailouts
 TEST_IN_SUBPROCESS = args.subprocess
+REPEAT_COUNT = args.repeat
 SEED = args.seed
 if not expecttest.ACCEPT:
     expecttest.ACCEPT = args.accept
@@ -210,6 +214,10 @@ def run_tests(argv=UNITTEST_ARGS):
             if verbose:
                 print('Test results will be stored in {}'.format(test_report_path))
             unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
+        elif REPEAT_COUNT > 1:
+            for _ in range(REPEAT_COUNT):
+                if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
+                    sys.exit(-1)
         else:
             unittest.main(argv=argv)
 
@@ -818,12 +826,7 @@ class TestCase(expecttest.TestCase):
         b_tol = self.get_default_tolerance(b)
         return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))
 
-    def assertEqual(self, x, y, message='', **kwargs):
-        self.assertIsNone(kwargs.get('prec', None), 'prec is no longer supported. Use atol or rtol.')
-        rtol = kwargs.get('rtol', None)
-        atol = kwargs.get('atol', None)
-        allow_inf = kwargs.get('allow_inf', False)
-        exact_dtype = kwargs.get('exact_dtype', None)
+    def assertEqual(self, x, y, message='', *, atol=None, rtol=None, allow_inf=False, exact_dtype=None):
         # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
         if isinstance(message, Number):
             self.assertIsNone(atol, "don't combine positional prec and atol")
@@ -965,7 +968,7 @@ class TestCase(expecttest.TestCase):
             prec = 10**(-places)
         self.assertEqual(x, y, msg, atol=prec, allow_inf=allow_inf)
 
-    def assertNotEqual(self, x, y, message='', atol=None):
+    def assertNotEqual(self, x, y, message='', *, atol=None):
         if not isinstance(message, str):
             raise Error("fix this test, message should be a string")
         if atol is None:
