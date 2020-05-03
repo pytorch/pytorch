@@ -1740,6 +1740,7 @@ cc_library(
         "@gloo",
         "@onnx",
         "@fmt",
+        "@tensorpipe",
     ] + if_cuda(
         [
             ":caffe2_cpp_cuda",
@@ -1776,6 +1777,7 @@ cu_library(
         "@cudnn",
         "@eigen",
         "@gloo",
+        "@tensorpipe",
     ],
     alwayslink = True,
 )
