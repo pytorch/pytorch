@@ -4611,7 +4611,8 @@ class TestNN(NNTestCase):
         num_encoder_layers = 4
         num_decoder_layers = 3
         dim_feedforward = 256
-        dropout = 0.3
+        # deterministic comparison, the dropout must be 0
+        dropout = 0.0
         bsz = 8
         seq_length = 35
         tgt_length = 15
@@ -4619,6 +4620,24 @@ class TestNN(NNTestCase):
         # find the output of a transformer module without batch_first
         transformer = nn.Transformer(d_model, nhead, num_encoder_layers, num_decoder_layers,
                                      dim_feedforward, batch_first=False, dropout=dropout)
+        # use deterministic weights
+        for idx, p in enumerate(transformer.parameters()):
+            x = p.data
+            sz = x.view(-1).size(0)
+            shape = x.shape
+            x = torch.cos(torch.arange(0, sz).float().view(shape))
+            p.data.copy_(x)
+        # compare the output to a transformer module with batch_first
+        transformer_batch_first = nn.Transformer(d_model, nhead, num_encoder_layers, num_decoder_layers,
+                                                 dim_feedforward, batch_first=True, dropout=dropout)
+        # also use deterministic weights
+        for idx, p in enumerate(transformer_batch_first.parameters()):
+            x = p.data
+            sz = x.view(-1).size(0)
+            shape = x.shape
+            x = torch.cos(torch.arange(0, sz).float().view(shape))
+            p.data.copy_(x)
+
         src = torch.randn(seq_length, bsz, d_model)
         src_mask = transformer.generate_square_subsequent_mask(seq_length).double()
         tgt = torch.randn(tgt_length, bsz, d_model)
@@ -4635,9 +4654,6 @@ class TestNN(NNTestCase):
                              tgt_key_padding_mask=tgt_key_padding_mask,
                              memory_key_padding_mask=memory_key_padding_mask)
 
-        # compare the output to a transformer module with batch_first
-        transformer_batch_first = nn.Transformer(d_model, nhead, num_encoder_layers, num_decoder_layers,
-                                                 dim_feedforward, batch_first=True, dropout=dropout)
         src_batch_first = src.permute(1, 0, 2)
         tgt_batch_first = tgt.permute(1, 0, 2)
         output_batch_first = transformer_batch_first(src_batch_first, tgt_batch_first,
