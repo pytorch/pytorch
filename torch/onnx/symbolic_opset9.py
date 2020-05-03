@@ -611,6 +611,9 @@ def softmax(g, input, dim, dtype=None):
             softmax = g.op("Transpose", softmax, perm_i=axes)
         return softmax
 
+    # Apply max normalization.
+    input = g.op('Sub', input, g.op('ReduceMax', input, axes_i=[dim], keepdims_i=1))
+
     exp = g.op('Exp', input)
     sum = g.op('ReduceSum', exp, axes_i=[dim])
     softmax = g.op('Div', exp, sum)
