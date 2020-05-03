@@ -2381,9 +2381,9 @@ class TestQuantizedConv(unittest.TestCase):
         if qengine == 'qnnpack':
             if IS_PPC or TEST_WITH_UBSAN:
                 return
-            assume(channelwise)
+            assume(not channelwise)
         if qengine == 'fbgemm':
-            assume(transpose)
+            assume(not transpose)
 
         if transpose:
             qconv_prepack = torch.ops.quantized.conv_transpose2d_prepack
@@ -2609,8 +2609,8 @@ class TestQuantizedConv(unittest.TestCase):
             qconv3d_unpack = torch.ops.quantized.conv3d_unpack
             self._test_qconv_unpack_impl(
                 qconv3d_prepack, qconv3d_unpack, inputs,
-                (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w),
-                channelwise)
+                (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w), None,
+                channelwise, transpose=False)
 
 
 class TestPadding(TestCase):
