@@ -1,5 +1,4 @@
 #include <ATen/record_function.h>
-
 #include <algorithm>
 #include <cstdlib>
 #include <random>
@@ -9,39 +8,40 @@ namespace at {
 namespace {
 
 // Used to generate unique callback handles
-uint64_t next_unique_callback_id() {
-  static std::mutex id_mutex;
-  static uint64_t unique_id = 0;
-  std::lock_guard<std::mutex> id_lock(id_mutex);
-  return ++unique_id;
+CallbackHandle next_unique_callback_handle() {
+  static std::atomic<uint64_t> unique_id {0};
+  return CallbackHandle(++unique_id);
 }
+
 // Thread local vector of callbacks, holds pairs (callbacks, unique_id);
-// must be sorted in increase handles order
-typedef std::vector<std::pair<RecordFunctionCallback, uint64_t>> idd_callbacks_vector;
-thread_local idd_callbacks_vector sorted_tls_callbacks_;
+// must be sorted in increasing handles order
+thread_local RecordFunctionCallbacks sorted_tls_callbacks_;
 
 class CallbackManager {
  public:
-  uint64_t addThreadLocalCallback(RecordFunctionCallback cb) {
+  CallbackHandle addThreadLocalCallback(RecordFunctionCallback cb) {
     // note: monotonically increasing callbacks_unique_id keeps
     // sorted_tls_callbacks_ sorted
-    auto handle = next_unique_callback_id();
+    auto handle = next_unique_callback_handle();
     sorted_tls_callbacks_.emplace_back(std::move(cb), handle);
     return handle;
   }
 
-  uint64_t addGlobalCallback(RecordFunctionCallback cb) {
-    auto handle = next_unique_callback_id();
+  CallbackHandle addGlobalCallback(RecordFunctionCallback cb) {
+    auto handle = next_unique_callback_handle();
     sorted_global_callbacks_.emplace_back(std::move(cb), handle);
     return handle;
   }
 
-  void removeCallback(uint64_t handle) {
+  void removeCallback(CallbackHandle handle) {
     bool found = false;
-    auto find_and_remove = [handle, &found](idd_callbacks_vector& cbs) {
+    auto find_and_remove = [handle, &found](RecordFunctionCallbacks& cbs) {
       auto it = std::find_if(
         cbs.begin(), cbs.end(),
-        [handle](const std::pair<RecordFunctionCallback, uint64_t>& el) {
+        [handle](
+            const std::pair<
+                RecordFunctionCallback,
+                CallbackHandle>& el) {
           return el.second == handle;
         });
       if (it != cbs.end()) {
@@ -83,7 +83,7 @@ class CallbackManager {
     bool found_active_cb = false;
     bool found_needs_inputs = false;
     auto init_handles = [scope, &found_active_cb, &found_needs_inputs](
-        handles_vector& handles, idd_callbacks_vector& cbs) {
+        CallbackHandles& handles, RecordFunctionCallbacks& cbs) {
       handles.clear();
       for (const auto& cb : cbs) {
         if (cb.first.shouldRun(scope)) {
@@ -145,14 +145,20 @@ class CallbackManager {
   }
 
   void mergeRunCallbacks(
-      const idd_callbacks_vector& sorted_callbacks,
-      handles_vector sorted_handles,
+      const RecordFunctionCallbacks& sorted_callbacks,
+      const CallbackHandles& sorted_handles,
       bool is_start,
       RecordFunction& rf) {
-    size_t idx_c = 0;
-    size_t idx_h = 0;
     size_t num_executed = 0;
-    while (idx_c < sorted_callbacks.size() && idx_h < sorted_handles.size()) {
+    size_t idx_c = 0;
+    for (size_t idx_h = 0; idx_h < sorted_handles.size(); ++idx_h) {
+      while (idx_c < sorted_callbacks.size() &&
+            sorted_callbacks[idx_c].second < sorted_handles[idx_h]) {
+        ++idx_c;
+      }
+      if (idx_c >= sorted_callbacks.size()) {
+        break;
+      }
       if (sorted_callbacks[idx_c].second == sorted_handles[idx_h]) {
         if (is_start) {
           tryRunCallback(sorted_callbacks[idx_c].first.start(), rf);
@@ -160,20 +166,9 @@ class CallbackManager {
           tryRunCallback(sorted_callbacks[idx_c].first.end(), rf);
         }
         ++num_executed;
-        ++idx_c;
-        ++idx_h;
-      }
-      while ((idx_c < sorted_callbacks.size()) &&
-             (idx_h < sorted_handles.size()) &&
-             (sorted_callbacks[idx_c].second < sorted_handles[idx_h])) {
-        ++idx_c;
-      }
-      while ((idx_c < sorted_callbacks.size()) &&
-             (idx_h < sorted_handles.size()) &&
-             (sorted_handles[idx_h] < sorted_callbacks[idx_c].second)) {
-        ++idx_h;
       }
     }
+
     if (num_executed != sorted_handles.size()) {
       C10_LOG_EVERY_MS(WARNING, 1000)
           << "Could not match some of the start callbacks with the corresponding end callbacks, "
@@ -183,14 +178,13 @@ class CallbackManager {
   }
 
   // Global callbacks; must be sorted in increasing handle order
-  idd_callbacks_vector sorted_global_callbacks_;
+  RecordFunctionCallbacks sorted_global_callbacks_;
 };
 
 // Enumerates thread ids logically;
 // note: std::this_thread::get_id may return potentially
 // reused thread id
-std::mutex next_thread_id_mutex_;
-uint16_t next_thread_id_ = 0;
+std::atomic<uint16_t> next_thread_id_ {0};
 thread_local uint16_t current_thread_id_ = 0;
 
 // Points to the currently active RecordFunction
@@ -218,15 +212,17 @@ bool hasThreadLocalCallbacks() {
   return manager().hasThreadLocalCallbacks();
 }
 
-uint64_t addThreadLocalCallback(RecordFunctionCallback cb) {
+CallbackHandle addThreadLocalCallback(
+    RecordFunctionCallback cb) {
   return manager().addThreadLocalCallback(std::move(cb));
 }
 
-uint64_t addGlobalCallback(RecordFunctionCallback cb) {
+CallbackHandle addGlobalCallback(
+    RecordFunctionCallback cb) {
   return manager().addGlobalCallback(std::move(cb));
 }
 
-void removeCallback(uint64_t handle) {
+void removeCallback(CallbackHandle handle) {
   manager().removeCallback(handle);
 }
 
@@ -268,7 +264,6 @@ void RecordFunction::_setCurrent() {
 uint16_t RecordFunction::currentThreadId() {
   if (!current_thread_id_) {
     // happens only once per thread
-    std::lock_guard<std::mutex> guard(next_thread_id_mutex_);
     current_thread_id_ = ++next_thread_id_;
   }
   return current_thread_id_;
