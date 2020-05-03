@@ -102,7 +102,6 @@ class CallbackManager {
     rec_fn.needs_inputs_ = found_needs_inputs;
   }
 
-
   void runStartCallbacks(RecordFunction& rf) {
     mergeRunCallbacks(
         sorted_global_callbacks_,
@@ -196,6 +195,23 @@ inline CallbackManager& manager() {
 }
 
 } // namespace
+
+RecordFunctionCallbacks _getTLSCallbacks() {
+  return sorted_tls_callbacks_;
+}
+
+void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks) {
+  clearThreadLocalCallbacks();
+  // keep the original handles
+  sorted_tls_callbacks_ = callbacks;
+  std::sort(
+      sorted_tls_callbacks_.begin(),
+      sorted_tls_callbacks_.end(),
+      [](const std::pair<RecordFunctionCallback, CallbackHandle>& l,
+          const std::pair<RecordFunctionCallback, CallbackHandle>& r) {
+        return l.second < r.second;
+  });
+}
 
 bool hasCallbacks() {
   auto& m = manager();
