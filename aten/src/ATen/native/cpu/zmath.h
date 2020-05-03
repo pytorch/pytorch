@@ -248,5 +248,10 @@ inline TYPE polar_impl (TYPE a) {
   return TYPE(std::abs(a), std::arg(a));
 }
 
+template <typename TYPE, std::enable_if_t<c10::is_complex_t<TYPE>::value, int> = 0>
+inline TYPE cart_impl (TYPE a) {
+  return std::polar(a.real(), a.imag());
+}
+
 } // end namespace
 }} //end at::native

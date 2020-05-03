@@ -324,6 +324,9 @@ public:
   Vec256<T> polar() const {
     return abs();
   }
+  Vec256<T> cart() const {
+    return abs();
+  }
   Vec256<T> log() const {
     return map(std::log);
   }

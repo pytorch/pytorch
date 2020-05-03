@@ -2644,6 +2644,18 @@
 - func: polar.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
+- func: cart(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: cart_(Tensor(a!) self) -> Tensor(a!)
+  supports_named_tensor: True
+  variants: function, method
+
+- func: cart.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
 # Returns a copy of this `Variable` that is detached from its autograd graph.
 # This method is OK to call if the `Variable` is a view.
 #

@@ -49,5 +49,21 @@ class TestComplexTensor(TestCase):
         polar_fn(torch.complex64)
         polar_fn(torch.complex128)
 
+    def test_cart(self):
+        def cart_fn(dtype):
+            torch.manual_seed(123456)
+            a = torch.rand(5, 5, dtype=dtype)
+            res1 = a.cart()
+            res2 = torch.tensor([], dtype=dtype)
+            torch.cart(a, out=res2)
+            self.assertEqual(res1, res2)
+
+            b = a.polar()
+            cart_tensor = b.cart()
+            self.assertEqual(torch.isclose(cart_tensor, a).all(), True)
+
+        cart_fn(torch.complex64)
+        cart_fn(torch.complex128)
+
 if __name__ == '__main__':
     run_tests()

@@ -1002,6 +1002,27 @@ Example::
              -0.5790,  0.1497]])
 """.format(**common_args))
 
+add_docstr(torch.cart,
+           r"""
+cart(input, out=None) -> Tensor
+
+Takes complex tensor in polar form and computes cartesian coordinates.
+
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.rand(5, dtype=torch.complex64)
+    >>> a
+    tensor([(0.5987+0.6589j), (0.3539+0.4639j), (0.5569+0.9351j), (0.4098+0.9458j),
+            (0.6055+0.1625j)], dtype=torch.complex64)
+    >>> a.cart()
+    tensor([(0.4734+0.3665j), (0.3165+0.1584j), (0.3306+0.4481j), (0.2398+0.3323j),
+            (0.5975+0.0979j)], dtype=torch.complex64)
+""".format(**common_args))
+
 add_docstr(torch.ceil,
            r"""
 ceil(input, out=None) -> Tensor

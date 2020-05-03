@@ -174,6 +174,16 @@ public:
   Vec256<std::complex<float>> polar() const {
     return polar_();
   }
+  __m256 cart_() const {
+    auto sin_cos = Sleef_sincosf8_u10(values);                        //[ sin(a), cos(a)] [sin(b), cos(b)]
+    auto cos_sin = _mm256_blend_ps(_mm256_permute_ps(sin_cos.y, 0xB1),
+                                   sin_cos.x, 0xAA);                  // cos(b)           sin(b)
+    auto rr = _mm256_permute_ps(values, 0xA0);                         // r                r
+    return _mm256_mul_ps(cos_sin, rr);
+  }
+  Vec256<std::complex<float>> cart() const {
+    return cart_();
+  }
   __m256 real_() const {
     const __m256 real_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
                                                                    0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000));

@@ -207,6 +207,7 @@ def get_testing_overrides():
         torch.bmm: lambda input, mat2, out=None: -1,
         torch.broadcast_tensors: lambda *tensors: -1,
         torch.bucketize: lambda input, boundaries, out_int32=False, right=False, out=None: -1,
+        torch.cart: lambda input: -1,
         torch.cartesian_prod: lambda *tensors: -1,
         torch.cat: lambda tensors, dim=0, out=None: -1,
         torch.cdist: lambda x1, c2, p=2, compute_mode=None: -1,

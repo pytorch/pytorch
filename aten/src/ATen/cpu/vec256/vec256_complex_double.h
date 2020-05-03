@@ -137,6 +137,16 @@ public:
   Vec256<std::complex<double>> polar() const {
     return polar_();
   }
+  __m256d cart_() const {
+    auto sin_cos = Sleef_sincosd4_u10(values);                        // [sin(a), cos(a)] [sin(b), cos(b)]
+    auto cos_sin = _mm256_blend_pd(_mm256_permute_pd(sin_cos.y, 0x05),
+                                   sin_cos.x, 0x0A);                  // cos(b)           sin(b)
+    auto rr = _mm256_permute_pd(values, 0x0);                         // r                r
+    return _mm256_mul_pd(cos_sin, rr);
+  }
+  Vec256<std::complex<double>> cart() const {
+    return cart_();
+  }
   __m256d real_() const {
     const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
                                                                      0xFFFFFFFFFFFFFFFF, 0x0000000000000000));

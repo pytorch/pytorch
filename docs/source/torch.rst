@@ -207,6 +207,7 @@ Pointwise Ops
 .. autofunction:: bitwise_and
 .. autofunction:: bitwise_or
 .. autofunction:: bitwise_xor
+.. autofunction:: cart
 .. autofunction:: ceil
 .. autofunction:: clamp
 .. autofunction:: conj

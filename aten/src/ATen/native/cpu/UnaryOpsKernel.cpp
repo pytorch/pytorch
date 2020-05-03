@@ -72,6 +72,15 @@ static void polar_kernel(TensorIterator& iter) {
   });
 }
 
+static void cart_kernel(TensorIterator& iter) {
+  AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "cart_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return cart_impl(a); },
+        [=](Vec256<scalar_t> a) { return a.cart(); });
+  });
+}
+
 static void angle_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "angle_cpu", [&]() {
     cpu_kernel_vec(
@@ -460,6 +469,7 @@ REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_ker
 REGISTER_DISPATCH(random_stub, &random_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(polar_stub, &polar_kernel);
+REGISTER_DISPATCH(cart_stub, &cart_kernel);
 REGISTER_DISPATCH(angle_stub, &angle_kernel);
 REGISTER_DISPATCH(real_stub, &real_kernel);
 REGISTER_DISPATCH(imag_stub, &imag_kernel);

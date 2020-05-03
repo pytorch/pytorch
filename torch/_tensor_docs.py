@@ -688,6 +688,20 @@ bmm(batch2) -> Tensor
 See :func:`torch.bmm`
 """)
 
+add_docstr_all('cart',
+               r"""
+cart() -> Tensor
+
+See :func:`torch.cart`
+""")
+
+add_docstr_all('cart_',
+               r"""
+cart_(n) -> Tensor
+
+In-place version of :meth:`~Tensor.cart`
+""")
+
 add_docstr_all('cauchy_',
                r"""
 cauchy_(median=0, sigma=1, *, generator=None) -> Tensor

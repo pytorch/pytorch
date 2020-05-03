@@ -236,9 +236,14 @@ Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
 Tensor& cosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, cosh_stub); }
 Tensor cosh(const Tensor& self) { return unary_op_impl(self, at::cosh_out); }
 Tensor& cosh_(Tensor& self) { return unary_op_impl_(self, at::cosh_out); }
+
 Tensor& polar_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, polar_stub); }
 Tensor polar(const Tensor& self) { return unary_op_impl(self, at::polar_out); }
 Tensor& polar_(Tensor& self) { return unary_op_impl_(self, at::polar_out); }
+
+Tensor& cart_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, cart_stub); }
+Tensor cart(const Tensor& self) { return unary_op_impl(self, at::cart_out); }
+Tensor& cart_(Tensor& self) { return unary_op_impl_(self, at::cart_out); }
 
 Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
 Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
@@ -465,6 +470,7 @@ DEFINE_DISPATCH(acos_stub);
 DEFINE_DISPATCH(asin_stub);
 DEFINE_DISPATCH(atan_stub);
 DEFINE_DISPATCH(bitwise_not_stub);
+DEFINE_DISPATCH(cart_stub);
 DEFINE_DISPATCH(ceil_stub);
 DEFINE_DISPATCH(clamp_stub);
 DEFINE_DISPATCH(clamp_max_stub);

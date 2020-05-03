@@ -208,6 +208,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bmm
    .. automethod:: bool
    .. automethod:: byte
+   .. automethod:: cart
+   .. automethod:: cart_
    .. automethod:: cauchy_
    .. automethod:: ceil
    .. automethod:: ceil_
