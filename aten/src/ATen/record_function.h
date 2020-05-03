@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <ATen/ThreadLocalState.h>
 #include <c10/util/SmallVector.h>
 #include <c10/macros/Export.h>
 #include <memory>
@@ -446,5 +445,9 @@ class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
   DisableRecordFunctionGuard() : RecordFunctionGuard(false) {}
   virtual ~DisableRecordFunctionGuard() {}
 };
+
+// Internal, used in ThreadLocalState to propagate TLS callbacks across threads
+TORCH_API RecordFunctionCallbacks _getTLSCallbacks();
+TORCH_API void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks);
 
 } // namespace at
