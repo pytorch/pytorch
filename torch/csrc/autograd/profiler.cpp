@@ -14,13 +14,15 @@
 #include <string>
 #include <vector>
 
+#include <ATen/ThreadLocalDebugInfo.h>
+
 namespace torch { namespace autograd { namespace profiler {
 
 namespace {
 
 CUDAStubs default_stubs;
 constexpr CUDAStubs* default_stubs_addr = &default_stubs;
-// constant initialization, so it is guaranteed to be initialized before
+// Constant initialization, so it is guaranteed to be initialized before
 // static initialization calls which may invoke registerCUDAMethods
 static CUDAStubs* cuda_stubs = default_stubs_addr;
 
@@ -50,102 +52,137 @@ RangeEventList& getEventList() {
     thread_id = at::RecordFunction::currentThreadId();
     all_event_lists_map.emplace(thread_id, event_list);
   }
-  return *event_list;
-}
 
-void mark(std::string name, bool include_cuda /* = true */) {
-  if (state == ProfilerState::Disabled) {
-    return;
+  thread_event_lists consolidate() {
+    std::lock_guard<std::mutex> g(mutex_);
+    thread_event_lists result;
+    for (auto it = event_lists_map_.begin(); it != event_lists_map_.end(); ++it) {
+      auto & list = it->second;
+      result.emplace_back(list->consolidate());
+    }
+    return result;
   }
-  if (state == ProfilerState::NVTX) {
-    cuda_stubs->nvtxMarkA(name.c_str());
-  } else {
-    getEventList().record(
-        EventKind::Mark,
-        at::StringView(std::move(name)),
-        thread_id,
-        include_cuda && state == ProfilerState::CUDA);
+
+  void mark(
+    std::string name,
+    bool include_cuda = true) {
+    if (config_.state == ProfilerState::Disabled) {
+      return;
+    }
+    if (config_.state == ProfilerState::NVTX) {
+      cuda_stubs->nvtxMarkA(name.c_str());
+    } else {
+      std::lock_guard<std::mutex> guard(mutex_);
+      auto& list = getEventList();
+      list.record(
+          EventKind::Mark,
+          StringView(std::move(name)),
+          RecordFunction::currentThreadId(),
+          include_cuda && config_.state == ProfilerState::CUDA);
+    }
   }
-}
 
-bool profilerEnabled() {
-  return state != ProfilerState::Disabled;
-}
-
-void pushRange(
-    const at::StringView& name,
+  void pushRange(
+    const StringView& name,
     const char* msg = "",
     int64_t sequence_nr = -1,
     std::vector<std::vector<int64_t>>&& shapes = {}) {
-  if (state == ProfilerState::Disabled) {
-    return;
-  }
-  if (state == ProfilerState::NVTX) {
-    if(sequence_nr >= 0 || shapes.size() > 0) {
-      std::stringstream s;
-      if(sequence_nr >= 0)
-        s << name.str() << msg << sequence_nr;
-      if(shapes.size() > 0) {
-        s << ", sizes = [";
-        for(int i = 0; i < shapes.size(); i++) {
-          if(shapes[i].size() > 0) {
-            s << "[";
-            for(int dim = 0; dim < shapes[i].size(); dim++) {
-              s << shapes[i][dim];
-              if(dim < shapes[i].size() - 1)
-                s << ", ";
-            }
-            s << "]";
-          }
-          else
-            s << "[]";
-          if(i < shapes.size() - 1)
-            s << ", ";
-        }
-        s << "]";
-      }
-      cuda_stubs->nvtxRangePushA(s.str().c_str());
-    } else {
-      cuda_stubs->nvtxRangePushA(name.str());
+    if (config_.state == ProfilerState::Disabled) {
+      return;
     }
-  } else {
-    getEventList().record(
-        EventKind::PushRange,
-        name,
-        thread_id,
-        state == ProfilerState::CUDA,
-        std::move(shapes));
+    if (config_.state == ProfilerState::NVTX) {
+      if (sequence_nr >= 0 || shapes.size() > 0) {
+        std::stringstream s;
+        if (sequence_nr >= 0) {
+          s << name.str() << msg << sequence_nr;
+        }
+        if (shapes.size() > 0) {
+          s << ", sizes = [";
+          for (int i = 0; i < shapes.size(); i++) {
+            if (shapes[i].size() > 0) {
+              s << "[";
+              for (int dim = 0; dim < shapes[i].size(); dim++) {
+                s << shapes[i][dim];
+                if (dim < shapes[i].size() - 1) {
+                  s << ", ";
+                }
+              }
+              s << "]";
+            } else {
+              s << "[]";
+            }
+            if (i < shapes.size() - 1) {
+              s << ", ";
+            }
+          }
+          s << "]";
+        }
+        cuda_stubs->nvtxRangePushA(s.str().c_str());
+      } else {
+        cuda_stubs->nvtxRangePushA(name.str());
+      }
+    } else {
+      std::lock_guard<std::mutex> guard(mutex_);
+      auto& list = getEventList();
+      list.record(
+          EventKind::PushRange,
+          name,
+          RecordFunction::currentThreadId(),
+          config_.state == ProfilerState::CUDA,
+          std::move(shapes));
+    }
   }
-}
 
-void popRange() {
-  if (state == ProfilerState::Disabled) {
-    return;
-  }
-  if (state == ProfilerState::NVTX) {
-    cuda_stubs->nvtxRangePop();
-  } else {
-    getEventList().record(
-        EventKind::PopRange,
-        at::StringView(""),
-        thread_id,
-        state == ProfilerState::CUDA);
-  }
-}
-
-void enableProfiler(ProfilerConfig config) {
-  ProfilerState new_state = config.state;
-  AT_ASSERT(new_state != ProfilerState::Disabled);
-  if (new_state == ProfilerState::NVTX && !cuda_stubs->enabled())
-    throw std::runtime_error("Can't use NVTX profiler - PyTorch was compiled without CUDA");
-  if (state != ProfilerState::Disabled && new_state != state) {
-    throw std::runtime_error("can't change kind of profiling (e.g. NVTX to CPU) while profiler is running");
+  void popRange(uint64_t orig_thread_id) {
+    if (config_.state == ProfilerState::Disabled) {
+      return;
+    }
+    if (config_.state == ProfilerState::NVTX) {
+      cuda_stubs->nvtxRangePop();
+    } else {
+      std::lock_guard<std::mutex> guard(mutex_);
+      auto& list = getEventList(orig_thread_id);
+      list.record(
+          EventKind::PopRange,
+          StringView(""),
+          orig_thread_id,
+          config_.state == ProfilerState::CUDA);
+    }
   }
 
-  auto handle = at::addGlobalCallback(at::RecordFunctionCallback(
-      [config](const at::RecordFunction& fn) {
+ private:
+  // not thread safe
+  RangeEventList& getEventList(int64_t thread_id = -1) {
+    if (thread_id < 0) {
+      thread_id = RecordFunction::currentThreadId();
+    }
+    auto it = event_lists_map_.find(thread_id);
+    if (it != event_lists_map_.end()) {
+      return *(it->second);
+    } else {
+      auto event_list = std::make_shared<RangeEventList>();
+      event_lists_map_[thread_id] = event_list;
+      return *(event_list.get());
+    }
+  }
+
+  std::mutex mutex_;
+  std::unordered_map<uint16_t, std::shared_ptr<RangeEventList>>
+      event_lists_map_;
+  ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false);
+};
+
+void pushProfilingCallbacks(bool needs_inputs = false) {
+  pushCallback(
+      [needs_inputs](const RecordFunction& fn) {
+        const auto& state = at::ThreadLocalDebugInfo::get(at::DebugInfoKind::PROFILER_STATE);
+        auto state_ptr = dynamic_cast<ProfilerThreadLocalState*>(state.get());
+        if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
+          return true;
+        }
+
         auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
-        if (config.report_input_shapes) {
+        if (needs_inputs) {
           std::vector<std::vector<int64_t>> inputSizes;
           inputSizes.reserve(fn.inputs().size());
           for (const c10::IValue& input : fn.inputs()) {
@@ -160,40 +197,44 @@ void enableProfiler(ProfilerConfig config) {
               inputSizes.emplace_back();
             }
           }
-          pushRange(fn.name(), msg, fn.seqNr(), std::move(inputSizes));
+          state_ptr->pushRange(fn.name(), msg, fn.seqNr(), std::move(inputSizes));
         } else {
-          pushRange(fn.name(), msg, fn.seqNr(), {});
+          state_ptr->pushRange(fn.name(), msg, fn.seqNr(), {});
         }
         return true;
       },
-      [](const at::RecordFunction& fn) {
-        if (fn.getStartCallbacksThreadId() !=
-                at::RecordFunction::currentThreadId()) {
-          // If we're not in a thread that ran start callbacks, then find
-          // the eventList that was created for the original thread_id. Then,
-          // record the end event on this list so that the block is added to
-          // the correct list, instead of to a new list. This should only run
-          // when calling RecordFunction::end() in a different thread.
-          if (state == ProfilerState::Disabled) {
-            return;
-          } else {
-            std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
-            const auto& eventListIter =
-                all_event_lists_map.find(fn.getStartCallbacksThreadId());
-            TORCH_INTERNAL_ASSERT(
-                eventListIter != all_event_lists_map.end(),
-                "Did not find thread_id matching ",
-                fn.getStartCallbacksThreadId());
+      [](const RecordFunction& fn) {
+        const auto& state = at::ThreadLocalDebugInfo::get(at::DebugInfoKind::PROFILER_STATE);
+        auto state_ptr = dynamic_cast<ProfilerThreadLocalState*>(state.get());
+        if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
+          return;
+        }
+        state_ptr->popRange(fn.getStartCallbacksThreadId());
+      },
+      needs_inputs,
+      /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE},
+      CallbackKind::PROFILER);
+}
 
-            auto& eventList = eventListIter->second;
-            eventList->record(
-                      EventKind::PopRange,
-                      at::StringView(""),
-                      fn.getStartCallbacksThreadId(),
-                      state == ProfilerState::CUDA);
-          }
-        } else {
-          popRange();
+void removeProfilingCallbacks() {
+  removeCallback(CallbackKind::PROFILER);
+}
+
+bool unused_ = []() {
+  at::ThreadLocalState::registerThreadLocalSetting(
+    at::ThreadLocalSetting::PROFILER,
+    []() {
+      auto v = at::SettingValue();
+      v.value = (int64_t)(profiler_nested_depth_ > 0);
+      return v;
+    },
+    [](at::SettingValue v) {
+      // push profiling callbacks in the child task
+      // if profiling is enabled in the parent
+      auto to_push = (bool)v.value;
+      if (to_push) {
+        if (profiler_nested_depth_ == 0) {
+          pushProfilingCallbacks();
         }
       })
       .needsInputs(config.report_input_shapes)
@@ -204,9 +245,9 @@ void enableProfiler(ProfilerConfig config) {
   if(state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
     // to generate some dummy events first before recording synchronization events
-    for(int i = 0; i < 5; i++) {
-      cuda_stubs->onEachDevice([](int d) {
-          mark("__cuda_startup");
+    for (int i = 0; i < kCUDAWarmupStart; i++) {
+      cuda_stubs->onEachDevice([state](int /* unused */) {
+          state->mark("__cuda_startup");
           cuda_stubs->synchronize();
       });
     }
@@ -214,19 +255,24 @@ void enableProfiler(ProfilerConfig config) {
     // cuda events must be on the same device, so we need a start event recorded
     // for each gpu. we then use this event to synchronize time on the GPU
     // with the CPU clock.
-    cuda_stubs->onEachDevice([](int d) {
-        mark("__cuda_start_event");
+    cuda_stubs->onEachDevice([state](int d) {
+        state->mark("__cuda_start_event");
     });
   }
-  mark("__start_profile", false);
+  state->mark("__start_profile", false);
 }
 
 thread_event_lists disableProfiler() {
-  if (state == ProfilerState::Disabled) {
-    throw std::runtime_error("can't disable profiler when it's not running");
+  auto state = at::ThreadLocalDebugInfo::pop(at::DebugInfoKind::PROFILER_STATE);
+  auto state_ptr = dynamic_cast<ProfilerThreadLocalState*>(state.get());
+  TORCH_CHECK(state_ptr && state_ptr->config().state != ProfilerState::Disabled,
+      "Can't disable profiler when it's not running");
+
+  --profiler_nested_depth_;
+  if (profiler_nested_depth_ == 0) {
+    c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, false);
+    removeProfilingCallbacks();
   }
-  ProfilerState old_state = state;
-  mark("__stop_profile");
 
   TORCH_INTERNAL_ASSERT(!callback_handles_.empty());
   at::removeCallback(callback_handles_.back());
@@ -235,23 +281,11 @@ thread_event_lists disableProfiler() {
 
   if (old_state == ProfilerState::NVTX) {
     return thread_event_lists();
-  } else {
-    thread_event_lists result;
-    std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
-    for (auto it = all_event_lists_map.begin(); it != all_event_lists_map.end();) {
-      auto & list = it->second;
-      result.emplace_back(list->consolidate());
-      // GC lists that are not held by any threads
-      if (list.use_count() == 1) {
-        auto current_it = it;
-        ++it;
-        all_event_lists_map.erase(current_it);
-      } else {
-        ++it;
-      }
-    }
-    return result;
   }
+
+  state_ptr->mark("__stop_profile");
+
+  return state_ptr->consolidate();
 }
 
 void Event::record(bool record_cuda) {
