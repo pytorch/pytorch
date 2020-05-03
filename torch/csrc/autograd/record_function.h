@@ -83,9 +83,9 @@ struct TORCH_API StringView {
 };
 
 // Soft limit on the number of callbacks to use;
-constexpr std::size_t kSoftLimitCallbacks = 32;
+constexpr std::size_t kSoftLimitCallbacks = 8;
 
-typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> handles_vector;
+typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> CallbackHandles;
 
 struct TORCH_API RecordFunction {
   // Default constructor is used with before function called afterwards:
@@ -174,8 +174,8 @@ struct TORCH_API RecordFunction {
   // Used internally to keep track of thread local and global callbacks
   // that were picked to run; must be sorted;
   // public because of anonymous "friend" class
-  handles_vector sorted_active_tls_handles_;
-  handles_vector sorted_active_global_handles_;
+  CallbackHandles sorted_active_tls_handles_;
+  CallbackHandles sorted_active_global_handles_;
   // Whether this RecordFunction runs any callbacks
   bool active_ = false;
   /// Whether any of the picked callbacks require inputs
@@ -371,11 +371,18 @@ class TORCH_API RecordFunctionCallback {
 //  - adding/removing global callbacks is not thread safe and should be done
 //    only when no other code is running, e.g. during the initialization
 
+typedef uint64_t CallbackHandle;
+
+// Holds pairs (callbacks, unique_id)
+typedef std::vector<std::pair<RecordFunctionCallback, CallbackHandle>>
+    RecordFunctionCallbacks;
+
 /**
  * addThreadLocalCallback adds a thread local callback to run with RecordFunction,
  * returns handle to use with removeThreadLocalCallback
  */
-TORCH_API uint64_t addThreadLocalCallback(RecordFunctionCallback cb);
+TORCH_API CallbackHandle addThreadLocalCallback(
+    RecordFunctionCallback cb);
 
 /**
  * hasThreadLocalCallbacks returns whether there're callbacks registered
@@ -394,7 +401,8 @@ TORCH_API void clearThreadLocalCallbacks();
  * WARNING: not thread safe, typically addGlobalCallback can be called
  * only during the program initialization
  */
-TORCH_API uint64_t addGlobalCallback(RecordFunctionCallback cb);
+TORCH_API CallbackHandle addGlobalCallback(
+    RecordFunctionCallback cb);
 
 /**
  * removeCallback removes a callback given the handle returned by
@@ -403,7 +411,7 @@ TORCH_API uint64_t addGlobalCallback(RecordFunctionCallback cb);
  * WARNING: removing a global callback is not thread safe,
  * no other code can run simultaneously
  */
-TORCH_API void removeCallback(uint64_t handle);
+TORCH_API void removeCallback(CallbackHandle handle);
 
 /**
  * hasGlobalCallbacks returns whether there're global callbacks
