@@ -335,9 +335,9 @@ Examples::
 
 
     # Example 2: Applying a per-channel-scale
-    def scale_channels(input, scale):
-        scale = scale.refine_names('C')
-        return input * scale.align_as(input)
+    >>> def scale_channels(input, scale):
+    >>>    scale = scale.refine_names('C')
+    >>>    return input * scale.align_as(input)
 
     >>> num_channels = 3
     >>> scale = torch.randn(num_channels, names=('C',))
@@ -3303,15 +3303,17 @@ of elements, but may have a different size. For a tensor to be viewed, the new
 view size must be compatible with its original size and stride, i.e., each new
 view dimension must either be a subspace of an original dimension, or only span
 across original dimensions :math:`d, d+1, \dots, d+k` that satisfy the following
-contiguity-like condition that :math:`\forall i = 0, \dots, k-1`,
+contiguity-like condition that :math:`\forall i = d, \dots, d+k-1`,
 
 .. math::
 
   \text{stride}[i] = \text{stride}[i+1] \times \text{size}[i+1]
 
-Otherwise, :meth:`contiguous` needs to be called before the tensor can be
-viewed. See also: :meth:`reshape`, which returns a view if the shapes are
-compatible, and copies (equivalent to calling :meth:`contiguous`) otherwise.
+Otherwise, it will not be possible to view :attr:`self` tensor as :attr:`shape`
+without copying it (e.g., via :meth:`contiguous`). When it is unclear whether a
+:meth:`view` can be performed, it is advisable to use :meth:`reshape`, which
+returns a view if the shapes are compatible, and copies (equivalent to calling 
+:meth:`contiguous`) otherwise.
 
 Args:
     shape (torch.Size or int...): the desired size
@@ -3453,6 +3455,14 @@ add_docstr_all('stft',
 stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
 
 See :func:`torch.stft`
+""")
+
+add_docstr_all('istft',
+               r"""
+istft(n_fft, hop_length=None, win_length=None, window=None,
+ center=True, normalized=False, onesided=True, length=None) -> Tensor
+
+See :func:`torch.istft`
 """)
 
 add_docstr_all('fft',

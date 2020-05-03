@@ -305,6 +305,7 @@ Spectral Ops
 .. autofunction:: rfft
 .. autofunction:: irfft
 .. autofunction:: stft
+.. autofunction:: istft
 .. autofunction:: bartlett_window
 .. autofunction:: blackman_window
 .. autofunction:: hamming_window
@@ -343,6 +344,7 @@ Other Operations
 .. autofunction:: tril_indices
 .. autofunction:: triu
 .. autofunction:: triu_indices
+.. autofunction:: vander
 
 
 BLAS and LAPACK Operations

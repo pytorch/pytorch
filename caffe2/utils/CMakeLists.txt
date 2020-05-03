@@ -36,7 +36,7 @@ list(APPEND Caffe2_CPU_SRCS
 # ---[ threadpool/pthreadpool* is a local modification of the NNPACK
 # pthreadpool with a very similar interface. Neither NNPACK, nor this
 # thread pool supports Windows.
-if(NOT MSVC)
+if(NOT MSVC AND USE_XNNPACK)
   add_definitions(-DUSE_INTERNAL_THREADPOOL_IMPL)
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
           utils/threadpool/pthreadpool.cc

@@ -2,11 +2,11 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/record_function.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -1246,9 +1246,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             } else {
               auto t = stack.back().toTensor();
               const TypePtr& expected = af.types[inst.X];
-              bool comp = expected->cast<TensorType>()
-                              ->isCompatibleWithInCurrentExecutionContext(t);
-              push(stack, comp);
+              auto pttp = tensorTypeInCurrentExecutionContext(t);
+              push(stack, pttp->isSubtypeOf(expected));
             }
             ++af.pc;
           } break;
@@ -1339,7 +1338,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               drop(stack, 1);
               c10::SourceLocation location{
                   "", range->filename()->c_str(), uint32_t(line)};
-              c10::Warning::warn(location, pop(stack).toStringRef());
+              // Sends the warning to the warning handler with the
+              // "verbatim" flag. This flag ensures the warning handler
+              // will print the exception as configured.
+              c10::Warning::warn(
+                  location, pop(stack).toStringRef(), /*verbatim=*/true);
             } else {
               TORCH_WARN(pop(stack).toStringRef());
             }

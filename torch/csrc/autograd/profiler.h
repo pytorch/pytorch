@@ -14,8 +14,11 @@
 #ifndef _WIN32
 #include <ctime>
 #endif
+#if defined(C10_IOS) && defined(C10_MOBILE)
+#include <sys/time.h> // for gettimeofday()
+#endif
 
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 
 typedef struct CUevent_st* CUDAEventStub;
 
@@ -65,24 +68,17 @@ constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
 
-#if (defined(__MACH__) && !defined(CLOCK_REALTIME)) || defined(C10_IOS)
-#include <sys/time.h>
-// clock_gettime is not implemented on older versions of OS X (< 10.12).
-// If implemented, CLOCK_REALTIME will have already been defined.
-
+inline int64_t getTime() {
+#if defined(C10_IOS) && defined(C10_MOBILE)
 // clock_gettime is only available on iOS 10.0 or newer. Unlike OS X, iOS can't rely on
 // CLOCK_REALTIME, as it is defined no matter if clock_gettime is implemented or not
-#endif
-
-inline int64_t getTime() {
-#ifdef _WIN32
-  using namespace std::chrono;
-  using clock = std::conditional<high_resolution_clock::is_steady, high_resolution_clock, steady_clock>::type;
-  return duration_cast<nanoseconds>(clock::now().time_since_epoch()).count();
-#elif (defined(__MACH__) && !defined(CLOCK_REALTIME)) || defined(C10_IOS)
   struct timeval now;
   gettimeofday(&now, NULL);
   return static_cast<int64_t>(now.tv_sec) * 1000000000 + static_cast<int64_t>(now.tv_usec) * 1000;
+#elif defined(_WIN32) || defined(__MACH__)
+  using namespace std::chrono;
+  using clock = std::conditional<high_resolution_clock::is_steady, high_resolution_clock, steady_clock>::type;
+  return duration_cast<nanoseconds>(clock::now().time_since_epoch()).count();
 #else
   // clock_gettime is *much* faster than std::chrono implementation on Linux
   struct timespec t{};
@@ -124,7 +120,7 @@ enum class TORCH_API EventKind : uint16_t {
 struct TORCH_API Event final {
   Event(
       EventKind kind,
-      StringView name,
+      at::StringView name,
       uint16_t thread_id,
       bool record_cuda,
       std::vector<std::vector<int64_t>>&& shapes = {})
@@ -166,7 +162,7 @@ struct TORCH_API Event final {
 private:
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
-  StringView name_;
+  at::StringView name_;
   EventKind kind_;
   uint16_t thread_id_;
   std::vector<std::vector<int64_t>> shapes_;

@@ -28,6 +28,14 @@ def _make_grads(outputs, grads):
                                    + str(grad.shape) + " and output["
                                    + str(outputs.index(out)) + "] has a shape of "
                                    + str(out.shape) + ".")
+            if (out.dtype.is_complex != grad.dtype.is_complex):
+                raise RuntimeError("For complex Tensors, both grad_output and output"
+                                   " are required to have the same dtype."
+                                   " Mismatch in dtype: grad_output["
+                                   + str(grads.index(grad)) + "] has a dtype of "
+                                   + str(grad.dtype) + " and output["
+                                   + str(outputs.index(out)) + "] has a dtype of "
+                                   + str(out.dtype) + ".")
             new_grads.append(grad)
         elif grad is None:
             if out.requires_grad:
@@ -56,6 +64,13 @@ def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, 
 
     This function accumulates gradients in the leaves - you might need to zero
     them before calling it.
+
+    .. note::
+        Using this method with ``create_graph=True`` will create a reference cycle
+        between the parameter and its gradient which can cause a memory leak.
+        We recommend using ``autograd.grad`` when creating the graph to avoid this.
+        If you have to use this function, make sure to reset the ``.grad`` fields of your
+        parameters to ``None`` after use to break the cycle and avoid the leak.
 
     Arguments:
         tensors (sequence of Tensor): Tensors of which the derivative will be

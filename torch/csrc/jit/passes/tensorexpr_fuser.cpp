@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -18,7 +18,7 @@ void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
 }
 
-static bool tensorExprFuserEnabled() {
+bool tensorExprFuserEnabled() {
   static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR");
   if (!enable_c_str) {
     return texpr_fuser_enabled_;

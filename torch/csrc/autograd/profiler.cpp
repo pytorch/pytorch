@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 #include <fstream>
 #include <list>
@@ -31,6 +32,12 @@ std::unordered_map<uint16_t, std::shared_ptr<RangeEventList>>
 thread_local std::shared_ptr<RangeEventList> event_list;
 thread_local uint16_t thread_id;
 
+// use RecordFunctionGuard to keep track of observers,
+// enable/disableProfiler are tied to the code range
+thread_local std::vector<std::shared_ptr<at::RecordFunctionGuard>> g_;
+// use thread_local vector to save profiler callback ids
+thread_local std::vector<uint64_t> callback_handles_;
+
 } // namespace
 
 void registerCUDAMethods(CUDAStubs* stubs) {
@@ -43,7 +50,7 @@ RangeEventList& getEventList() {
   if (!event_list) {
     std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
     event_list = std::make_shared<RangeEventList>();
-    thread_id = RecordFunction::currentThreadId();
+    thread_id = at::RecordFunction::currentThreadId();
     all_event_lists_map.emplace(thread_id, event_list);
   }
   return *event_list;
@@ -58,7 +65,7 @@ void mark(std::string name, bool include_cuda /* = true */) {
   } else {
     getEventList().record(
         EventKind::Mark,
-        StringView(std::move(name)),
+        at::StringView(std::move(name)),
         thread_id,
         include_cuda && state == ProfilerState::CUDA);
   }
@@ -69,7 +76,7 @@ bool profilerEnabled() {
 }
 
 void pushRange(
-    const StringView& name,
+    const at::StringView& name,
     const char* msg = "",
     int64_t sequence_nr = -1,
     std::vector<std::vector<int64_t>>&& shapes = {}) {
@@ -123,7 +130,7 @@ void popRange() {
   } else {
     getEventList().record(
         EventKind::PopRange,
-        StringView(""),
+        at::StringView(""),
         thread_id,
         state == ProfilerState::CUDA);
   }
@@ -138,8 +145,8 @@ void enableProfiler(ProfilerConfig config) {
     throw std::runtime_error("can't change kind of profiling (e.g. NVTX to CPU) while profiler is running");
   }
 
-  pushCallback(
-      [config](const RecordFunction& fn) {
+  auto handle = at::addGlobalCallback(at::RecordFunctionCallback(
+      [config](const at::RecordFunction& fn) {
         auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
         if (config.report_input_shapes) {
           std::vector<std::vector<int64_t>> inputSizes;
@@ -162,9 +169,9 @@ void enableProfiler(ProfilerConfig config) {
         }
         return true;
       },
-      [](const RecordFunction& fn) {
+      [](const at::RecordFunction& fn) {
         if (fn.getStartCallbacksThreadId() !=
-                RecordFunction::currentThreadId()) {
+                at::RecordFunction::currentThreadId()) {
           // If we're not in a thread that ran start callbacks, then find
           // the eventList that was created for the original thread_id. Then,
           // record the end event on this list so that the block is added to
@@ -184,19 +191,19 @@ void enableProfiler(ProfilerConfig config) {
             auto& eventList = eventListIter->second;
             eventList->record(
                       EventKind::PopRange,
-                      StringView(""),
+                      at::StringView(""),
                       fn.getStartCallbacksThreadId(),
                       state == ProfilerState::CUDA);
           }
         } else {
           popRange();
         }
-      },
-      /* needs_inputs */ config.report_input_shapes,
-      /* sampling_prob */ 1.0,
-      /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE});
+      })
+      .needsInputs(config.report_input_shapes)
+      .scopes({at::RecordScope::FUNCTION, at::RecordScope::USER_SCOPE}));
   state = new_state;
-  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, true);
+  callback_handles_.push_back(handle);
+  g_.emplace_back(std::make_shared<at::RecordFunctionGuard>());
 
   if(state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
@@ -225,9 +232,12 @@ thread_event_lists disableProfiler() {
   ProfilerState old_state = state;
   mark("__stop_profile");
 
-  popCallback();
+  TORCH_INTERNAL_ASSERT(!callback_handles_.empty());
+  at::removeCallback(callback_handles_.back());
+  callback_handles_.pop_back();
+  TORCH_INTERNAL_ASSERT(!g_.empty());
+  g_.pop_back();
   state = ProfilerState::Disabled;
-  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, false);
 
   if (old_state == ProfilerState::NVTX) {
     return thread_event_lists();
@@ -346,3 +356,17 @@ void RecordProfile::processEvents(const std::vector<Event*>& events) {
 }
 
 }}}
+
+void profile_wrapper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+  RECORD_FUNCTION(op.schema().name(), *stack, torch::autograd::Node::peek_at_next_sequence_nr());
+#else
+  RECORD_FUNCTION(op.schema().name(), *stack);
+#endif
+  op.callBoxed(stack);
+}
+
+TORCH_LIBRARY_IMPL(_, Profiler, m) {
+  m.fallback(torch::CppFunction::makeFromBoxedFunction<&profile_wrapper>());
+}
