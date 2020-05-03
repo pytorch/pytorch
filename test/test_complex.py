@@ -33,5 +33,21 @@ class TestComplexTensor(TestCase):
         self.assertEqual(complex_tensor.copy_real(), real)
         self.assertEqual(complex_tensor.copy_imag(), imag)
 
+    def test_polar(self):
+        def polar_fn(dtype):
+            torch.manual_seed(123456)
+            a = torch.rand(5, 5, dtype=dtype)
+            res1 = a.polar()
+            res2 = torch.tensor([], dtype=dtype)
+            torch.polar(a, out=res2)
+            self.assertEqual(res1, res2)
+
+            polar_tensor = a.polar()
+            self.assertEqual(polar_tensor.copy_real(), a.abs())
+            self.assertEqual(polar_tensor.copy_imag(), a.angle())
+
+        polar_fn(torch.complex64)
+        polar_fn(torch.complex128)
+
 if __name__ == '__main__':
     run_tests()
