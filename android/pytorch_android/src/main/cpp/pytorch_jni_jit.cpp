@@ -112,7 +112,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
 #endif
 
 #ifdef TRACE_ENABLED
-    pushGlobalCallback(
+    pushCallback(
         &onFunctionEnter,
         &onFunctionExit,
         /* need_inputs */ false,

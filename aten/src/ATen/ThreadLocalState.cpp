@@ -6,96 +6,35 @@
 
 namespace at {
 
-namespace {
-thread_local bool is_record_function_enabled_ = true;
-typedef std::array<std::function<SettingValue()>, (size_t)ThreadLocalSetting::NUM_SETTINGS> getters_arr;
-getters_arr& getters() {
-  static getters_arr getters;
-  return getters;
-}
-
-typedef std::array<std::function<void(SettingValue)>, (size_t)ThreadLocalSetting::NUM_SETTINGS> setters_arr;
-setters_arr& setters() {
-  static setters_arr setters;
-  return setters;
-}
-
-bool _unused = []() {
-  ThreadLocalState::registerThreadLocalSetting(
-    ThreadLocalSetting::GRAD_MODE,
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-    []() {
-      auto v = SettingValue();
-      v.value = GradMode::is_enabled();
-      return v;
-    },
-    [](SettingValue v) {
-      GradMode::set_enabled(v.value);
-    }
-#else
-    []() { return SettingValue{.value = false}; },
-    [](SettingValue v) {}
-#endif
-  );
-
-  ThreadLocalState::registerThreadLocalSetting(
-    ThreadLocalSetting::RECORD_FUNCTION,
-    []() {
-      auto v = SettingValue();
-      v.value = _tls_is_record_function_enabled();
-      return v;
-    },
-    [](SettingValue v) {
-      _tls_set_record_function_enabled(v.value);
-    }
-  );
-  return true;
-}();
-
-} // namespace
-
 ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
-      debug_info_(ThreadLocalDebugInfo::current()),
-      keep_grad_mode_(keep_grad_mode) {
-  for (auto st = (size_t)0; st < (size_t)ThreadLocalSetting::NUM_SETTINGS; ++st) {
-    if (!getters()[st] ||
-        (st == (size_t)ThreadLocalSetting::GRAD_MODE && !keep_grad_mode_)) {
-      continue;
-    }
-    settings_[st] = getters()[st]();
+      debug_info_(ThreadLocalDebugInfo::_current()) {
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+  keep_grad_mode_ = keep_grad_mode;
+  if (keep_grad_mode_) {
+    grad_mode_enabled_ = GradMode::is_enabled();
   }
+#endif
+  record_function_enabled_ = _tls_is_record_function_enabled();
 }
 
 /* static */
 void ThreadLocalState::setThreadLocalState(
     const ThreadLocalState& state) {
-for (auto st = (size_t)0; st < (size_t)ThreadLocalSetting::NUM_SETTINGS; ++st) {
-    if (!setters()[st] ||
-        (st == (size_t)ThreadLocalSetting::GRAD_MODE && !state.keep_grad_mode_)) {
-      continue;
-    }
-    setters()[st](state.settings_[st]);
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+  if (state.keep_grad_mode_) {
+    GradMode::set_enabled(state.grad_mode_enabled_);
   }
+#endif
 
   c10::impl::_force_tls_local_dispatch_key_set(state.dispatch_key_);
 
   ThreadLocalDebugInfo::_forceCurrentDebugInfo(state.debug_info_);
+
+  _tls_set_record_function_enabled(state.record_function_enabled_);
 }
 
-/* static */
-void ThreadLocalState::registerThreadLocalSetting(
-      ThreadLocalSetting st,
-      std::function<SettingValue(void)> getter,
-      std::function<void(SettingValue)> setter) {
-  auto st_ = (size_t)st;
-  TORCH_CHECK(!getters()[st_] && !setters()[st_],
-      "Setting with the key ", st_, " is already registered");
-  TORCH_CHECK(getter && setter, "Expected non empty getter/setter");
-  getters()[st_] = std::move(getter);
-  setters()[st_] = std::move(setter);
-}
-
+thread_local bool is_record_function_enabled_ = true;
 bool _tls_is_record_function_enabled() {
   return is_record_function_enabled_;
 }

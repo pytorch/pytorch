@@ -31,7 +31,7 @@ void setupCallbacks() {
 
   // sampled
   for (auto idx = 0; idx < kNumSampledCb; ++idx) {
-    profiler::pushGlobalCallback(
+    profiler::pushCallback(
         [](const profiler::RecordFunction& fn) {
           return true;
         },
