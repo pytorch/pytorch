@@ -25,7 +25,7 @@ TensorPipeAgent::TensorPipeAgent(
     std::shared_ptr<::c10d::Store> addressStore,
     TensorPipeRpcBackendOptions opts)
     : RpcAgent(
-          WorkerInfo(selfName, selfId),
+          WorkerInfo(std::move(selfName), selfId),
           std::make_unique<RequestCallbackImpl>(),
           std::chrono::milliseconds(
               (long)(opts.rpcTimeoutSeconds * kToMilliseconds))),
@@ -110,7 +110,7 @@ void TensorPipeAgent::onListenerAccepted(
 }
 
 void TensorPipeAgent::pipeRead(
-    std::shared_ptr<tensorpipe::Pipe> pipe,
+    const std::shared_ptr<tensorpipe::Pipe>& pipe,
     std::function<void(const tensorpipe::Error&, Message&&)> fn) {
   pipe->readDescriptor([fn{std::move(fn)}, pipe](
                            const tensorpipe::Error& error,
@@ -143,7 +143,7 @@ void TensorPipeAgent::pipeRead(
 }
 
 void TensorPipeAgent::pipeWrite(
-    std::shared_ptr<tensorpipe::Pipe> pipe,
+    const std::shared_ptr<tensorpipe::Pipe>& pipe,
     Message&& rpcMessage,
     std::function<void(const tensorpipe::Error&)> fn) {
   TensorPipeEntry tpEntry = tensorpipeSerialize(rpcMessage);

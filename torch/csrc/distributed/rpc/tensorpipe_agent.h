@@ -68,13 +68,13 @@ class TensorPipeAgent : public RpcAgent {
   // TensorPipe read function that could be used to read response messages
   // by client, and read requests request messages by server.
   void pipeRead(
-      std::shared_ptr<tensorpipe::Pipe>,
+      const std::shared_ptr<tensorpipe::Pipe>&,
       std::function<void(const tensorpipe::Error&, Message&&)>);
 
   // TensorPipe write function that could be used to write response
   // messages by server, and write request messages by client.
   void pipeWrite(
-      std::shared_ptr<tensorpipe::Pipe>,
+      const std::shared_ptr<tensorpipe::Pipe>&,
       Message&& message,
       std::function<void(const tensorpipe::Error&)>);
 

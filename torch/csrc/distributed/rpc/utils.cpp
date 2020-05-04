@@ -378,7 +378,7 @@ TensorPipeEntry tensorpipeSerialize(const Message& rpcMessage) {
 
   // Tensors
   tpMessage.tensors.reserve(tensors.size());
-  for (const at::Tensor& tensor : tensors) {
+  for (at::Tensor tensor : tensors) {
     // Keep original user tensors and cloned sparse tensors
     reservedTensors.push_back(tensor);
     tensorpipe::Message::Tensor tpTensor;
