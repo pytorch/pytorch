@@ -796,7 +796,7 @@ class THCCachingAllocator {
 
  public:
 
-  std::vector<DeviceCachingAllocator*> device_allocator;
+  std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
 
   std::mutex* getCudaFreeMutex() const {
     return &cuda_free_mutex;
@@ -820,15 +820,13 @@ class THCCachingAllocator {
     if (size < device_count) {
       device_allocator.resize(device_count);
       for (int i = size; i < device_count; i++) {
-        device_allocator[i] = new DeviceCachingAllocator();
+        device_allocator[i] = std::unique_ptr<DeviceCachingAllocator>(new DeviceCachingAllocator());
       }
     }
   }
 
   /** allocates a block which is safe to use from the provided stream */
-  void malloc(void** devPtr, size_t size, cudaStream_t stream) {
-    int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+  void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
     Block* block = device_allocator[device]->malloc(device, size, stream);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;
@@ -904,7 +902,7 @@ struct CudaCachingAllocator : public Allocator {
     C10_CUDA_CHECK(cudaGetDevice(&device));
     void* r = nullptr;
     if (size != 0) {
-      caching_allocator.malloc(&r, size, cuda::getCurrentCUDAStream(device));
+      caching_allocator.malloc(&r, device, size, cuda::getCurrentCUDAStream(device));
     }
     return {r, r, &raw_delete, Device(DeviceType::CUDA, device)};
   }
@@ -1032,7 +1030,7 @@ void* raw_alloc(size_t nbytes) {
   int device;
   C10_CUDA_CHECK(cudaGetDevice(&device));
   void* r = nullptr;
-  caching_allocator.malloc(&r, nbytes, cuda::getCurrentCUDAStream(device));
+  caching_allocator.malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
   return r;
 }
 
@@ -1040,8 +1038,10 @@ void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
   if (nbytes == 0) {
     return nullptr;
   }
+  int device;
+  C10_CUDA_CHECK(cudaGetDevice(&device));
   void* r = nullptr;
-  caching_allocator.malloc(&r, nbytes, stream);
+  caching_allocator.malloc(&r, device, nbytes, stream);
   return r;
 }
 
