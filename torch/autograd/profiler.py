@@ -29,7 +29,6 @@ class EventList(list):
         self._use_cuda = use_cuda
 
     def __str__(self):
-        self.populate_cpu_children()
         return self.table()
 
     def populate_cpu_children(self):
@@ -291,11 +290,13 @@ class profile(object):
     def __repr__(self):
         if self.function_events is None:
             return '<unfinished torch.autograd.profile>'
+        self.function_events.populate_cpu_children()
         return repr(self.function_events)
 
     def __str__(self):
         if self.function_events is None:
             return '<unfinished torch.autograd.profile>'
+        self.function_events.populate_cpu_children()
         return str(self.function_events)
 
     def _check_finish(self):
