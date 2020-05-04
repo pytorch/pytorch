@@ -1,6 +1,7 @@
+:orphan:
+
 .. contents:: :local:
     :depth: 2
-
 
 .. _distributed-rpc-framework:
 
@@ -13,7 +14,7 @@ higher-level API to automatically differentiate models split across several
 machines.
 
 .. warning ::
-     APIs in the RPC package are stable. There are multiple ongoing work items 
+     APIs in the RPC package are stable. There are multiple ongoing work items
      to improve performance and error handling, which will ship in future releases.
 
 
