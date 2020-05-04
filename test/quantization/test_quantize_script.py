@@ -1142,6 +1142,36 @@ graph(%input, %weight):
                    .check("quantized::linear") \
                    .run(model.graph)
 
+    def test_conv_trace(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1d = torch.nn.Conv1d(3, 3, 3).float()
+                self.conv2d = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv3d = torch.nn.Conv3d(3, 3, 3).float()
+
+            def forward(self, x, y, z):
+                a = self.conv1d(x)
+                b = self.conv2d(y)
+                c = self.conv3d(z)
+                return (a, b, c)
+
+        qconfig_dict = {'': default_qconfig}
+        inputs = (torch.rand((1, 3, 10), dtype=torch.float),
+                  torch.rand((1, 3, 10, 10), dtype=torch.float),
+                  torch.rand((1, 3, 10, 10, 10), dtype=torch.float))
+        model = torch.jit.trace(M(), inputs).eval()
+        m = prepare_script(model, qconfig_dict)
+        FileCheck().check('aten::conv1d') \
+                   .check_not("aten::_convolution") \
+                   .run(str(get_forward_graph(m.conv1d._c)))
+        FileCheck().check('aten::conv2d') \
+                   .check_not("aten::_convolution") \
+                   .run(str(get_forward_graph(m.conv2d._c)))
+        FileCheck().check('aten::conv3d') \
+                   .check_not("aten::_convolution") \
+                   .run(str(get_forward_graph(m.conv3d._c)))
+
 class TestQuantizeScriptPTSQOps(JitTestCase):
     """ Test graph mode post training static quantization works
     for individual ops end to end.
