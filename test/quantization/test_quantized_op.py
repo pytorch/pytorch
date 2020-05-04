@@ -463,6 +463,8 @@ class TestQuantizedOps(TestCase):
            min_val=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
            max_val=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
     def test_hardtanh(self, X, min_val, max_val):
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            return
         with override_quantized_engine('fbgemm'):
             X, (scale, zero_point, torch_type) = X
 
@@ -2839,6 +2841,8 @@ class TestQNNPackOps(TestCase):
            min_val=hu.floats(-1e6, -9.999999974752427e-07, allow_nan=False, allow_infinity=False),
            max_val=hu.floats(9.999999974752427e-07, 1e6, allow_nan=False, allow_infinity=False))
     def test_hardtanh(self, X, min_val, max_val):
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            return
         with override_quantized_engine('qnnpack'):
             X, (scale, zero_point, torch_type) = X
 
