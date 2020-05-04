@@ -32,14 +32,18 @@ class TORCH_API LLVMCodeGen : public CodeGen {
 
   template <typename T>
   T value() {
-    std::vector<void*> args;
-    return value<T>(args);
+    return value<T>(nullptr);
   }
 
   template <typename T>
   T value(std::vector<void*>& args) {
+    return value<T>(args.data());
+  }
+
+  template <typename T>
+  T value(void** args) {
     T (*fp)(void**) = (T(*)(void**))getKernelAddress(impl_.get());
-    T rv = fp(args.data());
+    T rv = fp(args);
     return rv;
   }
 
