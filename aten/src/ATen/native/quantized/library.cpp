@@ -46,7 +46,15 @@ TORCH_LIBRARY(quantized, m) {
   m.def("conv_unpack(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
   m.def("conv2d_unpack(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
   m.def("conv3d_unpack(__torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
-  m.def("hardswish(Tensor input, float output_scale, int output_zero_point) -> Tensor");
+  m.def("conv2d_stride(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> int[]");
+  m.def("conv2d_padding(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> int[]");
+  m.def("conv2d_dilation(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> int[]");
+  m.def("conv2d_groups(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> int");
+  m.def("conv3d_stride(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> int[]");
+  m.def("conv3d_padding(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> int[]");
+  m.def("conv3d_dilation(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> int[]");
+  m.def("conv3d_groups(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weights) -> int");
+m.def("hardswish(Tensor input, float output_scale, int output_zero_point) -> Tensor");
   m.def("layer_norm(Tensor input, int[] normalized_shape, Tensor weight, Tensor bias, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("linear(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
   m.def("linear_relu(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
