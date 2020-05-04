@@ -992,6 +992,13 @@ class TestList(JitTestCase):
             li = torch.jit.annotate(List[List[List[float]]], x.tolist())
             return li
 
+        # Test with torch.float dtype Tensors to check that they are converted to double automatically.
+        self.checkScript(to_list_float_0D, (torch.randn(5, dtype=torch.float)[0],))
+        self.checkScript(to_list_float_1D, (torch.randn(5, dtype=torch.float),))
+        self.checkScript(to_list_float_2D, (torch.randn(5, 6, dtype=torch.float),))
+        self.checkScript(to_list_float_3D, (torch.randn(5, 6, 7, dtype=torch.float),))
+        self.checkScript(to_list_float_3D, (torch.randn(5, 6, 7, dtype=torch.float).transpose(0, 1),))
+
         self.checkScript(to_list_float_0D, (torch.randn(5, dtype=torch.double)[0],))
         self.checkScript(to_list_float_1D, (torch.randn(5, dtype=torch.double),))
         self.checkScript(to_list_float_2D, (torch.randn(5, 6, dtype=torch.double),))
