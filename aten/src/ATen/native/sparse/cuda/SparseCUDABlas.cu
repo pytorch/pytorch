@@ -9,7 +9,7 @@
 
 #include <cusparse.h>
 
-#if !defined(MSC_VER) && defined(__CUDACC__) && CUSPARSE_VERSION >= 10301 // CUDA release >= 10.2 and not windows
+#if !defined(_MSC_VER) && defined(__CUDACC__) && CUSPARSE_VERSION >= 10301 // CUDA release >= 10.2 and not windows
 #include <library_types.h>
 #endif
 
@@ -81,7 +81,7 @@ cusparseOperation_t convertTransToCusparseOperation(char trans) {
   }
 }
 
-#if !defined(MSC_VER) && defined(__CUDACC__) && CUSPARSE_VERSION >= 10301 // CUDA release >= 10.2 and not windows
+#if !defined(_MSC_VER) && defined(__CUDACC__) && CUSPARSE_VERSION >= 10301 // CUDA release >= 10.2 and not windows
 
 template<typename T> 
 void csrmm2(

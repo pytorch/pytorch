@@ -29,7 +29,7 @@ struct ClassResolver : public Resolver {
       : source_importer_(std::move(source_importer)) {}
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
       override {
-    return source_importer_.loadNamedType(c10::QualifiedName(name));
+    return source_importer_.loadType(c10::QualifiedName(name));
   }
 
  private:
@@ -137,7 +137,7 @@ IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
       reinterpret_cast<const char*>(attributes_ptr.get()),
       attributes_size,
       [&](const c10::QualifiedName& qn) {
-        auto cls = source_importer_.loadNamedType(qn)->expect<ClassType>();
+        auto cls = source_importer_.loadType(qn)->expect<ClassType>();
         return c10::StrongTypePtr(compilation_unit_, std::move(cls));
       },
       &constants_table_);

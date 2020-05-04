@@ -155,6 +155,16 @@ def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
     ]
 
 
+# [How does MultiProcessTestCase work?]
+# Each MultiProcessTestCase instance uses 1 + `world_size()` processes, by
+# default `world_size()` returns 4. Let's take `test_rpc_spawn.py` as an
+# example which inherits from this class. Its `Setup()` methods calls into
+# `MultiProcessTestCase._spawn_processes()` which spawns `world_size()`
+# subprocesses. During the spawn, the main process passes the test name to
+# subprocesses, and the name is acquired from self.id(). The subprocesses
+# then use the provided test function name to retrieve the function attribute
+# from the test instance and run it. The main process simply waits for all
+# subprocesses to join.
 class MultiProcessTestCase(TestCase):
     MAIN_PROCESS_RANK = -1
     # This exit code is used to indicate that the test code had an error and

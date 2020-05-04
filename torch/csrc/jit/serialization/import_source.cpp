@@ -494,9 +494,9 @@ SourceImporter::SourceImporter(
           std::move(loader),
           version)) {}
 
-TypePtr SourceImporter::loadNamedType(const QualifiedName& name) const {
-  TypePtr t = pImpl->findNamedType(name);
-  TORCH_INTERNAL_ASSERT(t != nullptr);
+TypePtr SourceImporter::loadType(const QualifiedName& name) const {
+  ScriptTypeParser type_parser(pImpl);
+  TypePtr t = type_parser.parseType(name.qualifiedName());
   return t;
 }
 

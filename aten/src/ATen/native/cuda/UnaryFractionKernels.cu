@@ -57,11 +57,34 @@ void floor_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+template <typename scalar_t>
+__host__ __device__ static inline scalar_t reciprocal_wrapper(scalar_t a) {
+  return static_cast<scalar_t>(1)/a;
+}
+
+template<typename T>
+__host__ __device__ static inline thrust::complex<T> reciprocal_wrapper(thrust::complex<T> v) {
+  // Handle extreme cases for numpy compatibility
+  auto both_inf = [](T real, T imag) {
+    return (::isinf(real) && ::isinf(imag));
+  };
+
+  if (::isnan(v.real()) || ::isnan(v.imag()) || both_inf(v.real(), v.imag())) {
+    // If either is Nan or both are infinite, return {nan, nan}
+    return {std::numeric_limits<T>::quiet_NaN(), std::numeric_limits<T>::quiet_NaN()};
+  } else if (::isinf(v.real()) || ::isinf(v.imag())) {
+    // If either is Inf, return {0, 0}
+    return {0, 0};
+  }
+  const thrust::complex<T> one = thrust::complex<T>(1.0, 0);
+  return one/v;
+}
+
 void reciprocal_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "reciprocal_cuda", [&]() {
-    using acc_t = acc_type<scalar_t, /*is_cuda=*/true>;
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return static_cast<acc_t>(1) / a;
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "reciprocal_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return reciprocal_wrapper(a);
     });
   });
 }

@@ -45,8 +45,10 @@ namespace detail {
   }
 
   inline C10_HOST_DEVICE uint16_t round_to_nearest_even(float src) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(__HIP_PLATFORM_HCC__)
     if(src != src) {
+#elif defined(_MSC_VER)
+    if (isnan(src)) {
 #else
     if (std::isnan(src)) {
 #endif

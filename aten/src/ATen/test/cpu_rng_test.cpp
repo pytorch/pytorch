@@ -89,10 +89,26 @@ Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> 
 
 // ==================================================== Cauchy ========================================================
 
-Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> generator) {
-  auto iter = TensorIterator::nullary_op(self);
-  native::templates::cpu::cauchy_kernel(iter, median, sigma, check_generator<TestCPUGenerator>(generator));
-  return self;
+Tensor& cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> generator) {
+  return at::native::templates::cauchy_impl_<native::templates::cpu::CauchyKernel, TestCPUGenerator>(self, median, sigma, generator);
+}
+
+// ================================================== LogNormal =======================================================
+
+Tensor& log_normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  return at::native::templates::log_normal_impl_<native::templates::cpu::LogNormalKernel, TestCPUGenerator>(self, mean, std, gen);
+}
+
+// ================================================== Geometric =======================================================
+
+Tensor& geometric_(Tensor& self, double p, c10::optional<Generator> gen) {
+  return at::native::templates::geometric_impl_<native::templates::cpu::GeometricKernel, TestCPUGenerator>(self, p, gen);
+}
+
+// ================================================== Exponential =====================================================
+
+Tensor& exponential_(Tensor& self, double lambda, c10::optional<Generator> gen) {
+  return at::native::templates::exponential_impl_<native::templates::cpu::ExponentialKernel, TestCPUGenerator>(self, lambda, gen);
 }
 
 TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
@@ -110,7 +126,13 @@ TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   m.impl_UNBOXED("normal.Tensor_Tensor",     normal_Tensor_Tensor);
   m.impl_UNBOXED("uniform_",                 uniform_);
   // Cauchy
-  m.impl_UNBOXED("cauchy_",                  custom_rng_cauchy_);
+  m.impl_UNBOXED("cauchy_",                  cauchy_);
+  // LogNormal
+  m.impl_UNBOXED("log_normal_",              log_normal_);
+  // Geometric
+  m.impl_UNBOXED("geometric_",               geometric_);
+  // Exponential
+  m.impl_UNBOXED("exponential_",             exponential_);
 }
 
 class RNGTest : public ::testing::Test {
@@ -278,6 +300,55 @@ TEST_F(RNGTest, Cauchy) {
   auto expected = torch::empty_like(actual);
   auto iter = TensorIterator::nullary_op(expected);
   native::templates::cpu::cauchy_kernel(iter, median, sigma, check_generator<TestCPUGenerator>(gen));
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
+
+// ================================================== LogNormal =======================================================
+
+TEST_F(RNGTest, LogNormal) {
+  const auto mean = 12.345;
+  const auto std = 6.789;
+  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+
+  auto actual = torch::empty({3, 3});
+  actual.log_normal_(mean, std, gen);
+
+  auto expected = torch::empty_like(actual);
+  auto iter = TensorIterator::nullary_op(expected);
+  native::templates::cpu::log_normal_kernel(iter, mean, std, check_generator<TestCPUGenerator>(gen));
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
+
+// ================================================== Geometric =======================================================
+
+TEST_F(RNGTest, Geometric) {
+  const auto p = 0.42;
+  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+
+  auto actual = torch::empty({3, 3});
+  actual.geometric_(p, gen);
+
+  auto expected = torch::empty_like(actual);
+  auto iter = TensorIterator::nullary_op(expected);
+  native::templates::cpu::geometric_kernel(iter, p, check_generator<TestCPUGenerator>(gen));
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
+
+// ================================================== Exponential =====================================================
+
+TEST_F(RNGTest, Exponential) {
+  const auto lambda = 42;
+  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+
+  auto actual = torch::empty({3, 3});
+  actual.exponential_(lambda, gen);
+
+  auto expected = torch::empty_like(actual);
+  auto iter = TensorIterator::nullary_op(expected);
+  native::templates::cpu::exponential_kernel(iter, lambda, check_generator<TestCPUGenerator>(gen));
 
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
