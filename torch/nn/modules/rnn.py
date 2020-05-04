@@ -289,6 +289,8 @@ class RNNBase(Module):
         return replica
 
 
+# Anything other than __init__ is copied and modified from GRU for fixing #28418.
+# If GRU changed, this RNN may also need to change.
 class RNN(RNNBase):
     r"""Applies a multi-layer Elman RNN with :math:`\tanh` or :math:`\text{ReLU}` non-linearity to an
     input sequence.
@@ -395,7 +397,65 @@ class RNN(RNNBase):
         else:
             raise ValueError("Unknown nonlinearity '{}'".format(self.nonlinearity))
         super(RNN, self).__init__(mode, *args, **kwargs)
+    @overload
+    @torch._jit_internal._overload_method  # noqa: F811
+    def forward(self, input, hx=None):  # noqa: F811
+        # type: (Tensor, Optional[Tensor]) -> Tuple[Tensor, Tensor]
+        pass
 
+    @overload
+    @torch._jit_internal._overload_method  # noqa: F811
+    def forward(self, input, hx=None):  # noqa: F811
+        # type: (PackedSequence, Optional[Tensor]) -> Tuple[PackedSequence, Tensor]
+        pass
+
+    def forward(self, input, hx=None):  # noqa: F811
+        orig_input = input
+        # xxx: isinstance check needs to be in conditional for TorchScript to compile
+        if isinstance(orig_input, PackedSequence):
+            input, batch_sizes, sorted_indices, unsorted_indices = input
+            max_batch_size = batch_sizes[0]
+            max_batch_size = int(max_batch_size)
+        else:
+            batch_sizes = None
+            max_batch_size = input.size(0) if self.batch_first else input.size(1)
+            sorted_indices = None
+            unsorted_indices = None
+
+        if hx is None:
+            num_directions = 2 if self.bidirectional else 1
+            hx = torch.zeros(self.num_layers * num_directions,
+                             max_batch_size, self.hidden_size,
+                             dtype=input.dtype, device=input.device)
+        else:
+            # Each batch of the hidden state should match the input sequence that
+            # the user believes he/she is passing in.
+            hx = self.permute_hidden(hx, sorted_indices)
+
+        self.check_forward_args(input, hx, batch_sizes)
+        if self.mode == "RNN_TANH":
+            if batch_sizes is None:
+                result = _VF.rnn_tanh(input, hx, self._flat_weights, self.bias, self.num_layers,
+                                 self.dropout, self.training, self.bidirectional, self.batch_first)
+            else:
+                result = _VF.rnn_tanh(input, batch_sizes, hx, self._flat_weights, self.bias,
+                                 self.num_layers, self.dropout, self.training, self.bidirectional)
+        else:
+            if batch_sizes is None:
+                result = _VF.rnn_relu(input, hx, self._flat_weights, self.bias, self.num_layers,
+                                 self.dropout, self.training, self.bidirectional, self.batch_first)
+            else:
+                result = _VF.rnn_relu(input, batch_sizes, hx, self._flat_weights, self.bias,
+                                 self.num_layers, self.dropout, self.training, self.bidirectional)
+        output = result[0]
+        hidden = result[1]
+
+        # xxx: isinstance check needs to be in conditional for TorchScript to compile
+        if isinstance(orig_input, PackedSequence):
+            output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
+            return output_packed, self.permute_hidden(hidden, unsorted_indices)
+        else:
+            return output, self.permute_hidden(hidden, unsorted_indices)
 
 # XXX: LSTM and GRU implementation is different from RNNBase, this is because:
 # 1. we want to support nn.LSTM and nn.GRU in TorchScript and TorchScript in
