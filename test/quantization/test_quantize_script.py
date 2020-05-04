@@ -1213,7 +1213,8 @@ graph(%input, %weight):
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(Mul()).eval()
         m = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data])
-        FileCheck().check_not("aten::mul") \
+        FileCheck().check("quantized::mul") \
+                   .check_not("aten::mul") \
                    .run(m.graph)
 
 class TestQuantizeScriptPTSQOps(JitTestCase):
