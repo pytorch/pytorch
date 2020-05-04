@@ -225,6 +225,8 @@ scalar_types = [
     ('Short', 'int16_t', 'Long', False),
     ('Half', 'Half', 'Double', True),
     ('BFloat16', 'BFloat16', 'BFloat16AccrealNotDefined', True),
+    ('ComplexFloat', 'ComplexFloat', 'ComplexDouble', False),
+    ('ComplexDouble', 'ComplexDouble', 'ComplexDouble', False),
 ]
 
 static_dispatch_backends = ['CPU', 'QuantizedCPU']
@@ -518,7 +520,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'type_method_formals': List[str],
     'variants': str,
     'with_gil': bool,
-    'zero_dim_dispatch_when_scalar': str,
 })
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
@@ -1300,18 +1301,6 @@ def create_derived(backend_type_env, declarations):
         return [get_argument(env, argument, option)
                 for argument in arguments]
 
-    # TODO: Delete this per https://github.com/pytorch/pytorch/issues/33094
-    # after all TH uses are ported
-    def handle_zero_dim(env, option):
-        # type: (Environment, FunctionOption) -> List[str]
-        zero_dim_dispatch = option.get('zero_dim_dispatch_when_scalar', '')
-        if not zero_dim_dispatch:
-            return []
-        zero_dim_actuals = [arg['name']
-                            if arg['name'] != zero_dim_dispatch else "{}.item()".format(arg['name'])
-                            for arg in option['formals_list']]
-        return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
-
     def allocate_arg(arg, output_count, backend, scalar_name):
         # type: (THFormal, int, str, str) -> List[str]
         name = arg['name']
@@ -1362,7 +1351,6 @@ def create_derived(backend_type_env, declarations):
     def emit_body(env, option, scalar_type_cases):
         # type: (Environment, FunctionOption, List[str]) -> List[str]
         body = []  # type: List[str]
-        body += handle_zero_dim(env, option)
 
         switch_prologue = []  # type: List[str]
         output_count = 0
