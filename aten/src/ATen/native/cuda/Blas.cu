@@ -9,16 +9,7 @@ Tensor &addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, c
   auto vec_size = vec.size(0);
   auto vec_stride = vec.stride(0);
 
-  if (mat.scalar_type() == kHalf || mat.scalar_type() == kBFloat16) {
-    // Currently no Hgemv/SgemvEx in Cublas
-    Tensor vec_as_matrix = vec.reshape({vec_size, 1}).contiguous();
-    Tensor self_as_matrix = self.reshape({mat.size(0), 1}).contiguous();
-    at::addmm_out(result, self_as_matrix, mat, vec_as_matrix, beta_, alpha_);
-    result.resize_({result.size(0)});
-    return result;
-  }
-
-  AT_DISPATCH_FLOATING_TYPES(mat.scalar_type(), "addmv_impl_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, mat.scalar_type(), "addmv_impl_cuda", [&] {
     auto beta = beta_.to<scalar_t>();
     auto alpha = alpha_.to<scalar_t>();
     if (mat.stride(0) == 1) {
