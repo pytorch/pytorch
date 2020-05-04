@@ -389,7 +389,7 @@ class TORCH_API LoopOptions {
     return gpu_block_index_ != -1;
   }
 
-  bool gpu_block_index() const {
+  int gpu_block_index() const {
     return gpu_block_index_;
   }
 
