@@ -243,14 +243,12 @@ Args:
     qparams: Strategy for quantization parameters. for X, w, and b.
              Could be either a single strategy (used for all) or a list of
              three strategies for X, w, b.
-    transpose: Flag to specify if the tranposed convolution is to be tested.
 Generates:
     (X, W, b, g): Tensors of type `float32` of the following drawen shapes:
         X: (`batch_size, input_channels, H, W`)
         W: (`output_channels, input_channels_per_group) + kernel_shape
         b: `(output_channels,)`
         groups: Number of groups the input is divided into
-        transpose: Boolean flag that shows if transposed convolution is used.
 Note: X, W, b are tuples of (Tensor, qparams), where qparams could be either
       None or (scale, zero_point, quantized_type)
 
@@ -268,14 +266,12 @@ Example:
         qparams=qparams()
     ))
 """
-from hypothesis import note
 @st.composite
 def tensor_conv(
     draw, spatial_dim=2, batch_size_range=(1, 4),
     input_channels_per_group_range=(3, 7),
     output_channels_per_group_range=(3, 7), feature_map_range=(6, 12),
-    kernel_range=(3, 7), max_groups=1, elements=None, qparams=None,
-    transpose=None
+    kernel_range=(3, 7), max_groups=1, elements=None, qparams=None
 ):
 
     # Resolve the minibatch, in_channels, out_channels, iH/iW, iK/iW
@@ -303,26 +299,16 @@ def tensor_conv(
         else:
             qparams = [qparams] * 3
 
-    if transpose is None:
-        transpose = False
-    if type(transpose) != bool:
-        transpose = draw(st.booleans())
-    if transpose:
-        weight_shape = ((input_channels, output_channels_per_group)
-                        + tuple(kernels))
-    else:
-        weight_shape = ((output_channels, input_channels_per_group)
-                        + tuple(kernels))
-
     X = draw(tensor(shapes=(
         (batch_size, input_channels) + tuple(feature_map_shape),),
         elements=elements, qparams=qparams[0]))
-    W = draw(tensor(shapes=(weight_shape,), elements=elements,
-                    qparams=qparams[1]))
+    W = draw(tensor(shapes=(
+        (output_channels, input_channels_per_group) + tuple(kernels),),
+        elements=elements, qparams=qparams[1]))
     b = draw(tensor(shapes=(output_channels,), elements=elements,
                     qparams=qparams[2]))
-    note([transpose, W[0].shape, b[0].shape, input_channels, output_channels])
-    return X, W, b, groups, transpose
+
+    return X, W, b, groups
 
 # We set the deadline in the currently loaded profile.
 # Creating (and loading) a separate profile overrides any settings the user
