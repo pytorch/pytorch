@@ -397,6 +397,7 @@ class RNN(RNNBase):
         else:
             raise ValueError("Unknown nonlinearity '{}'".format(self.nonlinearity))
         super(RNN, self).__init__(mode, *args, **kwargs)
+
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(self, input, hx=None):  # noqa: F811
@@ -436,17 +437,17 @@ class RNN(RNNBase):
         if self.mode == "RNN_TANH":
             if batch_sizes is None:
                 result = _VF.rnn_tanh(input, hx, self._flat_weights, self.bias, self.num_layers,
-                                 self.dropout, self.training, self.bidirectional, self.batch_first)
+                                      self.dropout, self.training, self.bidirectional, self.batch_first)
             else:
                 result = _VF.rnn_tanh(input, batch_sizes, hx, self._flat_weights, self.bias,
-                                 self.num_layers, self.dropout, self.training, self.bidirectional)
+                                      self.num_layers, self.dropout, self.training, self.bidirectional)
         else:
             if batch_sizes is None:
                 result = _VF.rnn_relu(input, hx, self._flat_weights, self.bias, self.num_layers,
-                                 self.dropout, self.training, self.bidirectional, self.batch_first)
+                                      self.dropout, self.training, self.bidirectional, self.batch_first)
             else:
                 result = _VF.rnn_relu(input, batch_sizes, hx, self._flat_weights, self.bias,
-                                 self.num_layers, self.dropout, self.training, self.bidirectional)
+                                      self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1]
 
