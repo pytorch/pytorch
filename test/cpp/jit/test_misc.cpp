@@ -1162,13 +1162,6 @@ void testThreadLocalDebugInfo() {
   {
     at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO, debug_info);
     {
-      bool throws_ = false;
-      try {
-        at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO, debug_info);
-      } catch (const std::exception&) {
-        throws_ = true;
-      }
-      TORCH_CHECK(throws_);
       checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
       {
         auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
