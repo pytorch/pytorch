@@ -1238,16 +1238,15 @@ class TestTensorExprFuser(BaseTestClass):
         a = torch.ones((2))
         with self.assertRaisesRegex(RuntimeError, 'A should be 2 dimensional'):
             a.eig()
-        a = torch.ones((2,3))
+        a = torch.ones((2, 3))
         with self.assertRaisesRegex(RuntimeError, 'A should be square'):
             a.eig()
-        a = np.inf * torch.ones((2,2))
+        a = np.inf * torch.ones((2, 2))
         with self.assertRaisesRegex(RuntimeError, 'A should not contain infs or NaNs'):
             a.eig()
-        a = np.nan * torch.ones((2,2))
+        a = np.nan * torch.ones((2, 2))
         with self.assertRaisesRegex(RuntimeError, 'A should not contain infs or NaNs'):
             a.eig()
-        
 
 if __name__ == '__main__':
     unittest.main()
