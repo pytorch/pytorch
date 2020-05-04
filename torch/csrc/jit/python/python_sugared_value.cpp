@@ -44,7 +44,6 @@ FunctionSchema PythonValue::getSchema(
   auto py_param_names = annotations.attr("get_param_names")(callable, n_args);
   auto param_names = py::cast<std::vector<std::string>>(py_param_names);
   auto names_it = param_names.begin();
-
   if (moduleSelf_) {
     if (param_names.size() == 0) {
       throw ErrorReport(loc)
@@ -764,7 +763,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  py::bool_ isFunction = py::module::import("inspect").attr("isroutine")(obj);
+  py::bool_ isFunction = py::module::import("inspect").attr("isfunction")(obj);
   if (py::cast<bool>(isFunction)) {
     auto overloads =
         py::module::import("torch.jit").attr("_get_overloads")(obj);
