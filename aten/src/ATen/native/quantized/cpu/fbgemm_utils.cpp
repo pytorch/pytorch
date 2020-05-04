@@ -317,8 +317,10 @@ CAFFE2_API torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_p
   return register_conv_params;
 }
 
-template torch::jit::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
-template torch::jit::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
+template
+CAFFE2_API torch::jit::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
+template
+CAFFE2_API torch::jit::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
 
 namespace {
 
