@@ -58,11 +58,6 @@ class C10_API Error : public std::exception {
 
   void AppendMessage(const std::string& msg);
 
-  // Compute the full message from msg_ and msg_without_backtrace_
-  // TODO: Maybe this should be private
-  std::string msg() const;
-  std::string msg_without_backtrace() const;
-
   const std::vector<std::string>& msg_stack() const {
     return msg_stack_;
   }
@@ -80,6 +75,11 @@ class C10_API Error : public std::exception {
   const char* what_without_backtrace() const noexcept {
     return msg_without_backtrace_.c_str();
   }
+
+ private:
+  // Compute the full message from msg_ and msg_without_backtrace_
+  std::string msg() const;
+  std::string msg_without_backtrace() const;
 };
 
 class C10_API WarningHandler {
