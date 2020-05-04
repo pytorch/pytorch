@@ -788,8 +788,6 @@ Vec256<int32_t> Vec256<int32_t>::le(const Vec256<int32_t>& other) const {
   return (*this <= other) & Vec256<int32_t>(1);
 }
 
-const Vec256<int16_t> Vec256<int16_t>(1)(1);
-
 Vec256<int16_t> Vec256<int16_t>::eq(const Vec256<int16_t>& other) const {
   return (*this == other) & Vec256<int16_t>(1);
 }
