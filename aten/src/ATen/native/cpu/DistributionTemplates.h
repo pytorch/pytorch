@@ -236,6 +236,13 @@ void cauchy_kernel(TensorIterator& iter, double median, double sigma, RNG genera
   });
 }
 
+template<typename RNG>
+struct CauchyKernel {
+  void operator()(TensorIterator& iter, double median, double sigma, c10::optional<Generator> gen) {
+    cauchy_kernel(iter, median, sigma, check_generator<RNG>(gen));
+  }
+};
+
 // ================================================== LogNormal =======================================================
 
 template<typename RNG>
