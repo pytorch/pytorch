@@ -543,7 +543,7 @@
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
-        name: Doc Build and Push
+        name: Doc test
         no_output_timeout: "1h"
         command: |
           set -ex
