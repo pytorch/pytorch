@@ -102,7 +102,6 @@ class CallbackManager {
     rec_fn.needs_inputs_ = found_needs_inputs;
   }
 
-
   void runStartCallbacks(RecordFunction& rf) {
     mergeRunCallbacks(
         sorted_global_callbacks_,
@@ -130,16 +129,19 @@ class CallbackManager {
   }
 
  private:
-  bool tryRunCallback(const std::function<void(const RecordFunction&)>& fn, RecordFunction& rf) {
+  bool tryRunCallback(
+      const std::function<void(const RecordFunction&)>& fn,
+      RecordFunction& rf) {
     try {
       fn(rf);
       return true;
     } catch (const std::exception &e) {
       LOG(WARNING) << "Exception in RecordFunction callback: "
-                    << e.what();
+          << e.what() << " , for the range " << rf.name();
       return false;
     } catch (...) {
-      LOG(WARNING) << "Exception in RecordFunction callback: unknown";
+      LOG(WARNING) << "Exception in RecordFunction callback: unknown"
+          << " , for the range " << rf.name();
       return false;
     }
   }
@@ -184,8 +186,8 @@ class CallbackManager {
 // Enumerates thread ids logically;
 // note: std::this_thread::get_id may return potentially
 // reused thread id
-std::atomic<uint16_t> next_thread_id_ {0};
-thread_local uint16_t current_thread_id_ = 0;
+std::atomic<uint64_t> next_thread_id_ {0};
+thread_local uint64_t current_thread_id_ = 0;
 
 // Points to the currently active RecordFunction
 thread_local RecordFunction* current_record_func_ = nullptr;
@@ -259,7 +261,7 @@ void RecordFunction::_setCurrent() {
 }
 
 /* static */
-uint16_t RecordFunction::currentThreadId() {
+uint64_t RecordFunction::currentThreadId() {
   if (!current_thread_id_) {
     // happens only once per thread
     current_thread_id_ = ++next_thread_id_;
