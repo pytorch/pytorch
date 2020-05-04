@@ -286,7 +286,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
   }
 
   std::mutex state_mutex_;
-  std::unordered_map<uint16_t, std::shared_ptr<RangeEventList>>
+  std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
       event_lists_map_;
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false);
   at::CallbackHandle handle_;
