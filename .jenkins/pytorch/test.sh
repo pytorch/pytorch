@@ -294,8 +294,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_legacy* || "${JOB_BASE_NAME}" == *ge_config_legacy* ]]; then
   test_python_ge_config_legacy
-elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_profiling* || "${JOB_BASE_NAME}" == *ge_config_profiling* ]]; then
-  test_python_ge_config_profiling
+elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_simple* || "${JOB_BASE_NAME}" == *ge_config_simple* ]]; then
+  test_python_ge_config_simple
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
