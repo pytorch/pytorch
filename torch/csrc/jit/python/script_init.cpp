@@ -910,7 +910,7 @@ void initJitScriptBindings(PyObject* module) {
             pp.printNamedType(self.type());
             std::map<std::string, at::Tensor> consts;
             int i = 0;
-            for(auto const& tensor: tensors){
+            for (auto const& tensor : tensors) {
               consts["c" + std::to_string(i)] = tensor;
               i += 1;
             }
@@ -1056,21 +1056,23 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "schema", [](Method& m) { return m.function().getSchema(); })
       .def_property_readonly("name", &Method::name)
-      .def_property_readonly("code", [](Method& self) {
-        std::vector<at::Tensor> tensors;
-        std::vector<c10::NamedTypePtr> deps;
-        PythonPrint pp(tensors, deps);
-        pp.printMethod(self.function());
-        return pp.str();
-      })
-       .def_property_readonly("code_with_constants", [](Method& self) {
+      .def_property_readonly(
+          "code",
+          [](Method& self) {
+            std::vector<at::Tensor> tensors;
+            std::vector<c10::NamedTypePtr> deps;
+            PythonPrint pp(tensors, deps);
+            pp.printMethod(self.function());
+            return pp.str();
+          })
+      .def_property_readonly("code_with_constants", [](Method& self) {
         std::vector<at::Tensor> tensors;
         std::vector<c10::NamedTypePtr> deps;
         PythonPrint pp(tensors, deps);
         pp.printMethod(self.function());
         std::map<std::string, at::Tensor> consts;
         int i = 0;
-        for(auto const& tensor: tensors){
+        for (auto const& tensor : tensors) {
           consts["c" + std::to_string(i)] = tensor;
           i += 1;
         }
