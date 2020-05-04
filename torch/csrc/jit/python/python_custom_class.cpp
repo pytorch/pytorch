@@ -39,9 +39,10 @@ void initPythonCustomClassBindings(PyObject* module) {
         TORCH_CHECK(
             named_type,
             fmt::format(
-                "Tried to instantiate class '{}', but it does not exist! "
+                "Tried to instantiate class '{}.{}', but it does not exist! "
                 "Ensure that it is registered via torch::jit::class_",
-                ns + "." + qualname));
+                ns,
+                qualname));
         c10::ClassTypePtr class_type = named_type->cast<ClassType>();
         return ScriptClass(c10::StrongTypePtr(
             std::shared_ptr<CompilationUnit>(), std::move(class_type)));
