@@ -210,6 +210,7 @@ class profile(object):
     Under the hood it just records events of functions being executed in C++ and
     exposes those events to Python. You can wrap any code into it and it will
     only report runtime of PyTorch functions.
+    Note: profiler is thread local and is automatically propagated into the async tasks
 
     Arguments:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
@@ -231,8 +232,8 @@ class profile(object):
             collection.
 
     .. warning:
-        This context managers should not be called recursively, i.e. at most one
-        instance should be enabled at any given time.
+        This context managers should not be called recursively, i.e. no nested
+        instances are allowed
 
     .. warning:
         Due to some CUDA multiprocessing limitations (multiprocessing-cuda-note_),

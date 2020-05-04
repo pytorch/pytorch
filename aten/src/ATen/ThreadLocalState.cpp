@@ -10,7 +10,7 @@ namespace at {
 
 ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
-      debug_info_(ThreadLocalDebugInfo::_current()),
+      debug_info_(ThreadLocalDebugInfo::current()),
       observers_enabled_(at::isRecordFunctionEnabled()) {
   callbacks_ = _getTLSCallbacks();
 
