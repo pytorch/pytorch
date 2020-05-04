@@ -245,7 +245,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
   }
 
  private:
-  RangeEventList& getEventList(uint64_t thread_id = -1) {
+  RangeEventList& getEventList(int64_t thread_id = -1) {
     bool is_current_thread = (thread_id < 0) ||
         thread_id == at::RecordFunction::currentThreadId();
 
@@ -339,12 +339,6 @@ void pushProfilingCallbacks() {
   state_ptr->setCallbackHandle(handle);
 }
 
-void removeProfilingCallbacks() {
-  auto state_ptr = getProfilerTLSState();
-  TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
-  at::removeCallback(state_ptr->callbackHandle());
-}
-
 const int kCUDAWarmupStart = 5;
 
 // temp. workaround for dispatcher ::Profiler key
@@ -405,7 +399,7 @@ thread_event_lists disableProfiler() {
       "Can't disable profiler when it's not running");
 
   g_.pop_back();
-  removeProfilingCallbacks();
+  at::removeCallback(state_ptr->callbackHandle());
 
   if (state_ptr->config().state == ProfilerState::NVTX) {
     return thread_event_lists();
