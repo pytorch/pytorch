@@ -8734,6 +8734,12 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x[:, 1], expected, '{} with out= kwarg'.format(fn_name))
 
     @onlyCUDA
+    @largeCUDATensorTest('6GB')
+    def test_reduction_split(self, device):
+        # https://github.com/pytorch/pytorch/issues/37583
+        torch.zeros(5, 14400, 14400, device=device).sum(dim=0)
+
+    @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
     def test_reduction_vectorized_corner(self, device, dtype):
         # 1D case: sum
