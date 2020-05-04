@@ -820,7 +820,7 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
     }
   } catch (const caffe2::EnforceNotMet& e) {
     LOG(ERROR) << "Enforce not met while inferring shapes for " << op.type()
-               << ": " << e.msg() << " first output: " << op.output(0);
+               << ": " << e.what() << " first output: " << op.output(0);
   } catch (const std::exception& e) {
     LOG(WARNING) << "Caught exception while inferring shapes for " << op.type()
                  << ": " << e.what() << " first output: " << op.output(0);
