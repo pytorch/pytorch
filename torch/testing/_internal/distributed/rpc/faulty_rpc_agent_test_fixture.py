@@ -12,6 +12,13 @@ retryable_message_types = ["RREF_FORK_REQUEST",
                            "RREF_USER_DELETE",
                            "CLEANUP_AUTOGRAD_CONTEXT_REQ"]
 
+# The following messages incur the corresponding delay in seconds while being
+# processed in FaultyProcessGroupAgent's enqueueSend() function.
+default_messages_to_delay = {
+    "PYTHON_CALL": 1.5,  # Python UDF
+    "SCRIPT_CALL": 1.5,  # Script/Builtin
+}
+
 class FaultyRpcAgentTestFixture(RpcAgentTestFixture):
     @property
     def rpc_backend(self):
@@ -26,3 +33,7 @@ class FaultyRpcAgentTestFixture(RpcAgentTestFixture):
     @property
     def num_fail_sends(self):
         return 3
+
+    @property
+    def default_messages_to_delay(self):
+        return default_messages_to_delay
