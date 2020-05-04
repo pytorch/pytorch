@@ -2699,7 +2699,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class ComparisonModel(torch.nn.Module):
             def forward(self, x, y):
-                return x.ge(0.5) & y.le(2)
+                return x.lt(1.5) & y.le(2) & x.le(1)
 
         x = torch.ones(2, 3, dtype=torch.int32)
         y = torch.ones(2, 3, dtype=torch.float32)
