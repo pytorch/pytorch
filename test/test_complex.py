@@ -35,32 +35,34 @@ class TestComplexTensor(TestCase):
 
     def test_polar(self):
         def polar_fn(dtype):
-            torch.manual_seed(123456)
-            a = torch.rand(5, 5, dtype=dtype)
+            a = torch.tensor([1. + 1j, 2. + 0j, 3. + 0j,
+                              -4. + 0j, -5. + 0j], dtype=dtype)
             res1 = a.polar()
             res2 = torch.tensor([], dtype=dtype)
             torch.polar(a, out=res2)
             self.assertEqual(res1, res2)
 
             polar_tensor = a.polar()
-            self.assertEqual(polar_tensor.copy_real(), a.abs())
-            self.assertEqual(polar_tensor.copy_imag(), a.angle())
+            expected = torch.tensor([math.sqrt(2) + 0.25j * math.pi, 2. + 0j, 3. + 0j,
+                                     4. + 1j * math.pi, 5. + 1j * math.pi], dtype=dtype)
+            self.assertEqual(polar_tensor, expected)
 
         polar_fn(torch.complex64)
         polar_fn(torch.complex128)
 
     def test_cart(self):
         def cart_fn(dtype):
-            torch.manual_seed(123456)
-            a = torch.rand(5, 5, dtype=dtype)
+            a = torch.tensor([math.sqrt(2) + 0.25j * math.pi, 2. + 0j,
+                              3. + 0j, 4. + 1j * math.pi, 5. + 1j * math.pi], dtype=dtype)
             res1 = a.cart()
             res2 = torch.tensor([], dtype=dtype)
             torch.cart(a, out=res2)
             self.assertEqual(res1, res2)
 
-            b = a.polar()
-            cart_tensor = b.cart()
-            self.assertEqual(torch.isclose(cart_tensor, a).all(), True)
+            cart_tensor = a.cart()
+            expected = torch.tensor([1. + 1j, 2. + 0j, 3. + 0j,
+                                     -4. + 0j, -5. + 0j], dtype=dtype)
+            self.assertEqual(cart_tensor, expected)
 
         cart_fn(torch.complex64)
         cart_fn(torch.complex128)
