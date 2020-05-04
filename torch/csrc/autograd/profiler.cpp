@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <ATen/ThreadLocalDebugInfo.h>
+#include <ATen/record_function.h>
 
 namespace torch { namespace autograd { namespace profiler {
 
@@ -82,7 +83,7 @@ static CUDAStubs* cuda_stubs = default_stubs_addr;
 // ThreadLocalState also automatically propagates profiler callbacks.
 //
 //
-// RecordFunction and observers
+// at::RecordFunction and observers
 //
 // Profiler uses observers mechanism to add a pair of thread local callbacks
 // that are executed on a number of predetermined ranges, including:
@@ -116,6 +117,20 @@ static CUDAStubs* cuda_stubs = default_stubs_addr;
 //  - save profiling events into the profiling state
 //
 
+// Internal optimization:
+// threads use the map <ProfilerThreadLocalState ptr> -> <RangeEventList ptr>
+// as a cache to avoid taking a per state lock every time they write into the list;
+// Notes:
+//  - to avoid indefinite growth of this TLS cache, we set its max size and flush
+//    it every time it reaches the max size
+//  - RangeEventList already synchronizes reads (consolidate) and writes using
+//    an internal lock
+
+class ProfilerThreadLocalState;
+thread_local std::unordered_map<const ProfilerThreadLocalState*, RangeEventList*>
+    tls_lists_cache_;
+static constexpr size_t kMaxTLSCacheSize = 32;
+
 // Profiler state
 struct ProfilerThreadLocalState : public at::DebugInfoBase {
   explicit ProfilerThreadLocalState(
@@ -131,7 +146,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
   }
 
   thread_event_lists consolidate() {
-    std::lock_guard<std::mutex> g(mutex_);
+    std::lock_guard<std::mutex> g(state_mutex_);
     thread_event_lists result;
     for (auto it = event_lists_map_.begin(); it != event_lists_map_.end(); ++it) {
       auto & list = it->second;
@@ -149,18 +164,16 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxMarkA(name.c_str());
     } else {
-      std::lock_guard<std::mutex> guard(mutex_);
-      auto& list = getEventList();
-      list.record(
+      getEventList().record(
           EventKind::Mark,
-          StringView(std::move(name)),
-          RecordFunction::currentThreadId(),
+          at::StringView(std::move(name)),
+          at::RecordFunction::currentThreadId(),
           include_cuda && config_.state == ProfilerState::CUDA);
     }
   }
 
   void pushRange(
-    const StringView& name,
+    const at::StringView& name,
     const char* msg = "",
     int64_t sequence_nr = -1,
     std::vector<std::vector<int64_t>>&& shapes = {}) {
@@ -199,63 +212,84 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
         cuda_stubs->nvtxRangePushA(name.str());
       }
     } else {
-      std::lock_guard<std::mutex> guard(mutex_);
-      auto& list = getEventList();
-      list.record(
+      getEventList().record(
           EventKind::PushRange,
           name,
-          RecordFunction::currentThreadId(),
+          at::RecordFunction::currentThreadId(),
           config_.state == ProfilerState::CUDA,
           std::move(shapes));
     }
   }
 
-  void popRange(uint64_t orig_thread_id) {
+  void popRange(uint64_t thread_id) {
     if (config_.state == ProfilerState::Disabled) {
       return;
     }
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxRangePop();
     } else {
-      std::lock_guard<std::mutex> guard(mutex_);
-      auto& list = getEventList(orig_thread_id);
-      list.record(
+      getEventList(thread_id).record(
           EventKind::PopRange,
-          StringView(""),
-          orig_thread_id,
+          at::StringView(""),
+          thread_id,
           config_.state == ProfilerState::CUDA);
     }
   }
 
-  void setCallbackHandle(CallbackHandle handle) {
+  void setCallbackHandle(at::CallbackHandle handle) {
     handle_ = handle;
   }
 
-  CallbackHandle callbackHandle() const {
+  at::CallbackHandle callbackHandle() const {
     return handle_;
   }
 
  private:
-  // not thread safe
-  RangeEventList& getEventList(int64_t thread_id = -1) {
+  RangeEventList& getEventList(uint64_t thread_id = -1) {
+    bool is_current_thread = (thread_id < 0) ||
+        thread_id == at::RecordFunction::currentThreadId();
+
+    if (is_current_thread) {
+      // check if we can get a list without taking a state's lock
+      auto it = tls_lists_cache_.find(this);
+      if (it != tls_lists_cache_.end()) {
+        return *(it->second);
+      }
+    }
+
+    // otherwise, take state's lock and remember the pointer
+    // in the thread local cache
     if (thread_id < 0) {
-      thread_id = RecordFunction::currentThreadId();
+      thread_id = at::RecordFunction::currentThreadId();
     }
-    auto it = event_lists_map_.find(thread_id);
-    if (it != event_lists_map_.end()) {
-      return *(it->second);
-    } else {
-      auto event_list = std::make_shared<RangeEventList>();
-      event_lists_map_[thread_id] = event_list;
-      return *(event_list.get());
+    RangeEventList* list_ptr = nullptr;
+    {
+      std::lock_guard<std::mutex> guard(state_mutex_);
+      auto it = event_lists_map_.find(thread_id);
+      if (it != event_lists_map_.end()) {
+        list_ptr = it->second.get();
+      } else {
+        auto event_list = std::make_shared<RangeEventList>();
+        event_lists_map_[thread_id] = event_list;
+        list_ptr = event_list.get();
+      }
     }
+
+    if (is_current_thread) {
+      if (tls_lists_cache_.size() >= kMaxTLSCacheSize) {
+        tls_lists_cache_.clear();
+      }
+      tls_lists_cache_[this] = list_ptr;
+    }
+
+    return *list_ptr;
   }
 
-  std::mutex mutex_;
+  std::mutex state_mutex_;
   std::unordered_map<uint16_t, std::shared_ptr<RangeEventList>>
       event_lists_map_;
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false);
-  CallbackHandle handle_;
+  at::CallbackHandle handle_;
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
@@ -266,8 +300,8 @@ ProfilerThreadLocalState* getProfilerTLSState() {
 void pushProfilingCallbacks() {
   auto state_ptr = getProfilerTLSState();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
-  auto handle = addThreadLocalCallback(RecordFunctionCallback(
-      [](const RecordFunction& fn) {
+  auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
+      [](const at::RecordFunction& fn) {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
@@ -294,28 +328,27 @@ void pushProfilingCallbacks() {
           state_ptr->pushRange(fn.name(), msg, fn.seqNr(), {});
         }
       },
-      [](const RecordFunction& fn) {
+      [](const at::RecordFunction& fn) {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
         }
         state_ptr->popRange(fn.getStartCallbacksThreadId());
       })
-    .needsInputs(state_ptr->config().report_input_shapes)
-    .scopes({RecordScope::FUNCTION, RecordScope::USER_SCOPE}));
+    .needsInputs(state_ptr->config().report_input_shapes));
   state_ptr->setCallbackHandle(handle);
 }
 
 void removeProfilingCallbacks() {
   auto state_ptr = getProfilerTLSState();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
-  removeCallback(state_ptr->callbackHandle());
+  at::removeCallback(state_ptr->callbackHandle());
 }
 
 const int kCUDAWarmupStart = 5;
 
 // temp. workaround for dispatcher ::Profiler key
-thread_local std::vector<std::shared_ptr<RecordFunctionGuard>> g_;
+thread_local std::vector<std::shared_ptr<at::RecordFunctionGuard>> g_;
 
 } // namespace
 
@@ -342,7 +375,7 @@ void enableProfiler(const ProfilerConfig& new_config) {
 
 
   pushProfilingCallbacks();
-  g_.emplace_back(std::make_shared<RecordFunctionGuard>());
+  g_.emplace_back(std::make_shared<at::RecordFunctionGuard>());
 
   if (new_config.state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
@@ -367,19 +400,20 @@ void enableProfiler(const ProfilerConfig& new_config) {
 thread_event_lists disableProfiler() {
   // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
   auto state = at::ThreadLocalDebugInfo::_pop(at::DebugInfoKind::PROFILER_STATE);
-  TORCH_CHECK(state && state->config().state != ProfilerState::Disabled,
+  auto state_ptr = static_cast<ProfilerThreadLocalState*>(state.get());
+  TORCH_CHECK(state_ptr && state_ptr->config().state != ProfilerState::Disabled,
       "Can't disable profiler when it's not running");
 
   g_.pop_back();
   removeProfilingCallbacks();
 
-  if (state->config().state == ProfilerState::NVTX) {
+  if (state_ptr->config().state == ProfilerState::NVTX) {
     return thread_event_lists();
   }
 
-  state->mark("__stop_profile");
+  state_ptr->mark("__stop_profile");
 
-  return state->consolidate();
+  return state_ptr->consolidate();
 }
 
 void Event::record(bool record_cuda) {
