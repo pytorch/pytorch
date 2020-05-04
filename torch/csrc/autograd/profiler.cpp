@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <ATen/record_function.h>
+#include <c10/core/Allocator.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
 namespace torch { namespace autograd { namespace profiler {
@@ -132,14 +133,14 @@ thread_local std::unordered_map<const ProfilerThreadLocalState*, RangeEventList*
 static constexpr size_t kMaxTLSCacheSize = 32;
 
 // Profiler state
-struct ProfilerThreadLocalState : public at::DebugInfoBase {
-  explicit ProfilerThreadLocalState(
-      ProfilerState state,
-      bool report_input_shapes)
-    : config_(state, report_input_shapes) {}
+struct ProfilerThreadLocalState
+    : public at::DebugInfoBase,
+      public c10::MemoryUsageReporter {
+
   explicit ProfilerThreadLocalState(
       const ProfilerConfig& config)
     : config_(config) {}
+  ~ProfilerThreadLocalState() {}
 
   inline const ProfilerConfig& config() const {
     return config_;
@@ -228,11 +229,17 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxRangePop();
     } else {
-      getEventList(thread_id).record(
+      Event evt(
           EventKind::PopRange,
           at::StringView(""),
           thread_id,
           config_.state == ProfilerState::CUDA);
+      if (config_.profile_memory) {
+        std::lock_guard<std::mutex> guard(state_mutex_);
+        evt.updateMemoryStats(mem_usage_[thread_id]);
+        mem_usage_[thread_id].clear();
+      }
+      getEventList(thread_id).record(evt);
     }
   }
 
@@ -242,6 +249,18 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
 
   at::CallbackHandle callbackHandle() const {
     return handle_;
+  }
+
+  void reportMemoryUsage(c10::Device device, int64_t alloc_size) override {
+    if (config_.profile_memory) {
+      std::lock_guard<std::mutex> guard(state_mutex_);
+      auto thread_id = at::RecordFunction::currentThreadId();
+      mem_usage_[thread_id][device] += alloc_size;
+    }
+  }
+
+  bool memoryProfilingEnabled() const override {
+    return config_.profile_memory;
   }
 
  private:
@@ -288,8 +307,13 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
   std::mutex state_mutex_;
   std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
       event_lists_map_;
-  ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false);
+  ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false, false);
   at::CallbackHandle handle_;
+
+  // temporary memory usage per thread
+  // thread_id -> (device -> usage (bytes))
+  std::unordered_map<uint64_t,
+      std::unordered_map<c10::Device, int64_t>> mem_usage_;
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
@@ -309,21 +333,21 @@ void pushProfilingCallbacks() {
 
         auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
         if (state_ptr->config().report_input_shapes) {
-          std::vector<std::vector<int64_t>> inputSizes;
-          inputSizes.reserve(fn.inputs().size());
+          std::vector<std::vector<int64_t>> input_sizes;
+          input_sizes.reserve(fn.inputs().size());
           for (const c10::IValue& input : fn.inputs()) {
             if (!input.isTensor()) {
-              inputSizes.emplace_back();
+              input_sizes.emplace_back();
               continue;
             }
             const at::Tensor& tensor = input.toTensor();
             if (tensor.defined()) {
-              inputSizes.push_back(input.toTensor().sizes().vec());
+              input_sizes.push_back(input.toTensor().sizes().vec());
             } else {
-              inputSizes.emplace_back();
+              input_sizes.emplace_back();
             }
           }
-          state_ptr->pushRange(fn.name(), msg, fn.seqNr(), std::move(inputSizes));
+          state_ptr->pushRange(fn.name(), msg, fn.seqNr(), std::move(input_sizes));
         } else {
           state_ptr->pushRange(fn.name(), msg, fn.seqNr(), {});
         }
@@ -454,7 +478,10 @@ RecordProfile::RecordProfile(const std::string& filename)
 }
 
 void RecordProfile::init() {
-  enableProfiler(ProfilerConfig(ProfilerState::CPU, false /* report shapes */));
+  enableProfiler(ProfilerConfig(
+      ProfilerState::CPU,
+      /* report_input_shapes */ false,
+      /* profile_memory */ false));
 }
 
 RecordProfile::~RecordProfile() {

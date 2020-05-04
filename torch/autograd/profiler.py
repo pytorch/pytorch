@@ -24,9 +24,11 @@ class EventList(list):
     """A list of Events (for pretty printing)"""
     def __init__(self, *args, **kwargs):
         use_cuda = kwargs.pop('use_cuda', True)
+        profile_memory = kwargs.pop('profile_memory', False)
         super(EventList, self).__init__(*args, **kwargs)
         self._cpu_children_populated = False
         self._use_cuda = use_cuda
+        self._profile_memory = profile_memory
 
     def __str__(self):
         return self.table()
@@ -100,13 +102,18 @@ class EventList(list):
             sort_by (str, optional): Attribute used to sort entries. By default
                 they are printed in the same order as they were registered.
                 Valid keys include: ``cpu_time``, ``cuda_time``, ``cpu_time_total``,
-                ``cuda_time_total``, ``count``.
+                ``cuda_time_total``, ``cpu_memory_usage``, ``cuda_memory_usage``, ``count``.
 
         Returns:
             A string containing the table.
         """
         return build_table(
-            self, sort_by=sort_by, row_limit=row_limit, header=header, use_cuda=self._use_cuda)
+            self,
+            sort_by=sort_by,
+            row_limit=row_limit,
+            header=header,
+            use_cuda=self._use_cuda,
+            profile_memory=self._profile_memory)
 
     def export_chrome_trace(self, path):
         """Exports an EventList as a Chrome tracing tools file.
@@ -189,7 +196,7 @@ class EventList(list):
         for evt in self:
             stats[get_key(evt, group_by_input_shapes)].add(
                 evt, group_by_input_shapes)
-        return EventList(stats.values(), use_cuda=self._use_cuda)
+        return EventList(stats.values(), use_cuda=self._use_cuda, profile_memory=self._profile_memory)
 
     def total_average(self):
         """Averages all events.
@@ -231,6 +238,11 @@ class profile(object):
             self cpu time might be artificially increased because of the shape
             collection.
 
+        profile_memory (bool, optional): Whether to report memory usage, default: ``False``
+
+    .. warning:
+        Enabling memory profiling incurs additional profiler overhead
+
     .. warning:
         This context managers should not be called recursively, i.e. no nested
         instances are allowed
@@ -260,7 +272,12 @@ class profile(object):
         -----------------------------------  ---------------  ---------------  ---------------
 
     """
-    def __init__(self, enabled=True, use_cuda=False, record_shapes=False):
+    def __init__(
+            self,
+            enabled=True,
+            use_cuda=False,
+            record_shapes=False,
+            profile_memory=False):
         self.enabled = enabled
         self.use_cuda = use_cuda
         self.function_events = None
@@ -268,6 +285,7 @@ class profile(object):
             return
         self.entered = False
         self.record_shapes = record_shapes
+        self.profile_memory = profile_memory
 
     def __enter__(self):
         if not self.enabled:
@@ -278,14 +296,18 @@ class profile(object):
         profiler_kind = torch.autograd.ProfilerState.CUDA if self.use_cuda \
             else torch.autograd.ProfilerState.CPU
         torch.autograd._enable_profiler(
-            torch.autograd.ProfilerConfig(profiler_kind, self.record_shapes))
+            torch.autograd.ProfilerConfig(
+                profiler_kind, self.record_shapes, self.profile_memory))
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
         records = torch.autograd._disable_profiler()
-        self.function_events = EventList(parse_cpu_trace(records), use_cuda=self.use_cuda)
+        self.function_events = EventList(
+            parse_cpu_trace(records),
+            use_cuda=self.use_cuda,
+            profile_memory=self.profile_memory)
         return False
 
     def __repr__(self):
@@ -505,7 +527,8 @@ class emit_nvtx(object):
         torch.autograd._enable_profiler(
             torch.autograd.ProfilerConfig(
                 torch.autograd.ProfilerState.NVTX,
-                self.record_shapes
+                self.record_shapes,
+                false
             )
         )
         return self
@@ -548,6 +571,19 @@ def format_time_share(time_us, total_time_us):
         return "NaN"
     return '{:.2f}%'.format(time_us * 100.0 / total_time_us)
 
+def format_memory(nbytes):
+    """Returns a formatted memory size string"""
+    KB = 1024
+    MB = 1024 * KB
+    GB = 1024 * MB
+    if (abs(nbytes) >= GB):
+        return '{:.2f} Gb'.format(nbytes * 1.0 / GB)
+    elif (abs(nbytes) >= MB):
+        return '{:.2f} Mb'.format(nbytes * 1.0 / MB)
+    elif (abs(nbytes) >= KB):
+        return '{:.2f} Kb'.format(nbytes * 1.0 / KB)
+    else:
+        return str(nbytes) + ' b'
 
 def attr_formatter(name):
     return property(lambda self: format_time(getattr(self, name)))
@@ -588,7 +624,7 @@ Kernel = namedtuple('Kernel', ['name', 'device', 'interval'])
 # TODO: record TID too
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
-    def __init__(self, id, name, thread, cpu_start, cpu_end, input_shapes=None):
+    def __init__(self, id, name, thread, cpu_start, cpu_end, input_shapes=None, cpu_memory_usage=0, cuda_memory_usage=0):
         self.id = id
         self.name = name
         self.cpu_interval = Interval(cpu_start, cpu_end)
@@ -597,6 +633,8 @@ class FunctionEvent(FormattedTimesMixin):
         self.count = 1
         self.cpu_children = []
         self.input_shapes = input_shapes
+        self.cpu_memory_usage = cpu_memory_usage
+        self.cuda_memory_usage = cuda_memory_usage
 
     def append_kernel(self, name, device, start, end):
         self.kernels.append(Kernel(name, device, Interval(start, end)))
@@ -631,7 +669,8 @@ class FunctionEvent(FormattedTimesMixin):
     def __repr__(self):
         return (
             '<FunctionEvent id={} cpu_time={} cpu_start={} cpu_end={} '
-            'cpu_children={} cuda_time={} name={} thread={} input_shapes={}>'.format(
+            'cpu_children={} cuda_time={} name={} thread={} input_shapes={} '
+            'cpu_memory_usage={} cuda_memory_usage={}>'.format(
                 self.id,
                 self.cpu_time_str,
                 self.cpu_interval.start,
@@ -641,6 +680,8 @@ class FunctionEvent(FormattedTimesMixin):
                 self.name,
                 self.thread,
                 str(self.input_shapes),
+                self.cpu_memory_usage,
+                self.cuda_memory_usage
             )
         )
 
@@ -654,6 +695,8 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.cuda_time_total = 0
         self.self_cpu_time_total = 0
         self.input_shapes = None
+        self.cpu_memory_usage = 0
+        self.cuda_memory_usage = 0
 
     def add(self, other, group_by_input_shapes=False):
         if self.key is None:
@@ -670,6 +713,8 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.cpu_time_total += other.cpu_time_total
         self.cuda_time_total += other.cuda_time_total
         self.self_cpu_time_total += other.self_cpu_time_total
+        self.cpu_memory_usage += other.cpu_memory_usage
+        self.cuda_memory_usage += other.cuda_memory_usage
         self.count += other.count
         return self
 
@@ -679,12 +724,15 @@ class FunctionEventAvg(FormattedTimesMixin):
     def __repr__(self):
         return (
             '<FunctionEventAvg key={} self_cpu_time={} cpu_time={} '
-            'cuda_time={} input_shapes={}>'.format(
+            'cuda_time={} input_shapes={}> '
+            'cpu_memory_usage={} cuda_memory_usage={}'.format(
                 self.key,
                 self.self_cpu_time_total_str,
                 self.cpu_time_str,
                 self.cuda_time_str,
                 str(self.input_shapes),
+                self.cpu_memory_usage,
+                self.cuda_memory_usage,
             )
         )
 
@@ -742,7 +790,9 @@ def parse_cpu_trace(thread_records):
                 thread=start.thread_id(),
                 cpu_start=start_record.cpu_elapsed_us(start),
                 cpu_end=start_record.cpu_elapsed_us(record),
-                input_shapes=start.shapes())
+                input_shapes=start.shapes(),
+                cpu_memory_usage=record.cpu_memory_usage(),
+                cuda_memory_usage=record.cuda_memory_usage())
             if start.has_cuda():
                 cuda_start = adjusted_time(start)
                 cuda_end = adjusted_time(record)
@@ -843,7 +893,13 @@ def parse_nvprof_trace(path):
 # Pretty printer
 
 
-def build_table(events, sort_by=None, header=None, row_limit=100, use_cuda=True):
+def build_table(
+        events,
+        sort_by=None,
+        header=None,
+        row_limit=100,
+        use_cuda=True,
+        profile_memory=False):
     """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
     if len(events) == 0:
         return ""
@@ -851,7 +907,7 @@ def build_table(events, sort_by=None, header=None, row_limit=100, use_cuda=True)
     if sort_by is not None:
         events = EventList(sorted(
             events, key=lambda evt: getattr(evt, sort_by), reverse=True
-        ), use_cuda=use_cuda)
+        ), use_cuda=use_cuda, profile_memory=profile_memory)
 
     has_input_shapes = any(
         [event.input_shapes is not None for event in events])
@@ -873,6 +929,14 @@ def build_table(events, sort_by=None, header=None, row_limit=100, use_cuda=True)
             'CUDA total',
             'CUDA time avg',
         ])
+    if profile_memory:
+        headers.extend([
+            'CPU Mem Total',
+        ])
+        if torch.cuda.is_available():
+            headers.extend([
+                'CUDA Mem Total',
+            ])
     headers.append(
         'Number of Calls'
     )
@@ -937,6 +1001,16 @@ def build_table(events, sort_by=None, header=None, row_limit=100, use_cuda=True)
                 evt.cuda_time_total_str,
                 evt.cuda_time_str,  # Cuda time avg
             ])
+        if profile_memory:
+            row_values.extend([
+                # CPU Mem Total
+                format_memory(evt.cpu_memory_usage),
+            ])
+            if torch.cuda.is_available():
+                row_values.extend([
+                    # CUDA Mem Total
+                    format_memory(evt.cuda_memory_usage),
+                ])
         row_values.append(
             evt.count,  # Number of calls
         )

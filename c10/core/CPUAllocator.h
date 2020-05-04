@@ -37,6 +37,21 @@ C10_API void memset_junk(void* data, size_t num);
 C10_API void* alloc_cpu(size_t nbytes);
 C10_API void free_cpu(void* data);
 
+// A simple struct that is used to report C10's memory allocation and
+// deallocation status to the profiler
+class C10_API ProfiledCPUMemoryReporter {
+ public:
+  ProfiledCPUMemoryReporter() {}
+  void New(void* ptr, size_t nbytes);
+  void Delete(void* ptr);
+
+ private:
+  std::mutex mutex_;
+  std::unordered_map<void*, size_t> size_table_;
+};
+
+C10_API ProfiledCPUMemoryReporter& profiledCPUMemoryReporter();
+
 // Get the CPU Allocator.
 C10_API at::Allocator* GetCPUAllocator();
 // Sets the CPU allocator to the given allocator: the caller gives away the

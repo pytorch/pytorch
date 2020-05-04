@@ -101,11 +101,17 @@ enum class TORCH_API ProfilerState {
 };
 
 struct TORCH_API ProfilerConfig {
-  ProfilerConfig(ProfilerState state, bool report_input_shapes)
-      : state(state), report_input_shapes(report_input_shapes) {}
+  ProfilerConfig(
+      ProfilerState state,
+      bool report_input_shapes,
+      bool profile_memory)
+      : state(state),
+        report_input_shapes(report_input_shapes),
+        profile_memory(profile_memory) {}
   ~ProfilerConfig();
   ProfilerState state;
   bool report_input_shapes;
+  bool profile_memory;
 };
 
 enum class TORCH_API EventKind : uint16_t {
@@ -159,6 +165,29 @@ struct TORCH_API Event final {
   int device() const {
     return device_;
   }
+
+  void updateMemoryStats(const std::unordered_map<c10::Device, int64_t>& mem_usage) {
+    cuda_memory_usage_ = 0;
+    cpu_memory_usage_ = 0;
+    for (const auto& item : mem_usage) {
+      if (item.first.type() == c10::DeviceType::CUDA) {
+        cuda_memory_usage_ += item.second;
+      } else if (item.first.type() == c10::DeviceType::CPU ||
+          item.first.type() == c10::DeviceType::MKLDNN ||
+          item.first.type() == c10::DeviceType::IDEEP) {
+        cpu_memory_usage_ += item.second;
+      }
+    }
+  }
+
+  int64_t cpu_memory_usage() const {
+    return cpu_memory_usage_;
+  }
+
+  int64_t cuda_memory_usage() const {
+    return cuda_memory_usage_;
+  }
+
 private:
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
@@ -166,6 +195,8 @@ private:
   EventKind kind_;
   uint16_t thread_id_;
   std::vector<std::vector<int64_t>> shapes_;
+  int64_t cpu_memory_usage_ = 0;
+  int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
   struct CUevent_st* event = nullptr;
 };
@@ -232,7 +263,6 @@ using thread_event_lists = std::vector<std::vector<Event>>;
 TORCH_API void enableProfiler(const ProfilerConfig&);
 TORCH_API thread_event_lists disableProfiler();
 TORCH_API bool profilerEnabled();
-
 
 // Usage:
 //   {
