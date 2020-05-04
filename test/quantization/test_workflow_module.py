@@ -740,36 +740,39 @@ class TestDistributed(QuantizationTestCase):
         """
         Tests that doing QAT in nn.DataParallel does not crash.
         """
-        device = torch.device('cuda')
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            return
+        with override_quantized_engine('fbgemm'):
+            device = torch.device('cuda')
 
-        model = nn.Sequential(
-            torch.quantization.QuantStub(),
-            nn.Conv2d(3, 1, 1, bias=False),
-            nn.BatchNorm2d(1),
-            nn.ReLU(),
-            nn.Conv2d(1, 2, 3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(2),
-            nn.AvgPool2d(14),
-            nn.Sigmoid(),
-            torch.quantization.DeQuantStub(),
-        )
+            model = nn.Sequential(
+                torch.quantization.QuantStub(),
+                nn.Conv2d(3, 1, 1, bias=False),
+                nn.BatchNorm2d(1),
+                nn.ReLU(),
+                nn.Conv2d(1, 2, 3, stride=2, padding=1, bias=False),
+                nn.BatchNorm2d(2),
+                nn.AvgPool2d(14),
+                nn.Sigmoid(),
+                torch.quantization.DeQuantStub(),
+            )
 
-        torch.quantization.fuse_modules(model, [['1', '2', '3'], ['4', '5']], inplace=True)
+            torch.quantization.fuse_modules(model, [['1', '2', '3'], ['4', '5']], inplace=True)
 
-        model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
-        torch.quantization.prepare_qat(model, inplace=True)
-        model = nn.DataParallel(model, device_ids=[0, 1])
-        model.to(device)
-        model.train()
+            model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+            torch.quantization.prepare_qat(model, inplace=True)
+            model = nn.DataParallel(model, device_ids=[0, 1])
+            model.to(device)
+            model.train()
 
-        for epoch in range(3):
-            inputs = torch.rand(2, 3, 28, 28).to(device)
-            model(inputs)
-            if epoch >= 1:
-                model.apply(torch.quantization.disable_observer)
-            if epoch >= 2:
-                model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
-            quant_model = copy.deepcopy(model.module)
-            quant_model = torch.quantization.convert(quant_model.eval().cpu(), inplace=False)
-            with torch.no_grad():
-                out = quant_model(torch.rand(1, 3, 28, 28))
+            for epoch in range(3):
+                inputs = torch.rand(2, 3, 28, 28).to(device)
+                model(inputs)
+                if epoch >= 1:
+                    model.apply(torch.quantization.disable_observer)
+                if epoch >= 2:
+                    model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                quant_model = copy.deepcopy(model.module)
+                quant_model = torch.quantization.convert(quant_model.eval().cpu(), inplace=False)
+                with torch.no_grad():
+                    out = quant_model(torch.rand(1, 3, 28, 28))
