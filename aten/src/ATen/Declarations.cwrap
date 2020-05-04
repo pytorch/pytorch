@@ -764,7 +764,6 @@
     - arg: THTensor* result
       output: True
     - arg: THTensor* self
-      broadcast: batch1,batch2 dims:batch1.dim0,batch1.dim1,batch2.dim2
     - THTensor* batch1
     - THTensor* batch2
     - real beta
