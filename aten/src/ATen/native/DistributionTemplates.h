@@ -340,3 +340,4 @@ Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Ge
 #undef WARN_OUT_OF_BOUNDS
 
 }}}
+
