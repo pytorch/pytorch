@@ -5,15 +5,19 @@
 namespace at { namespace native {
 
 Tensor baddbmm_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  return legacy::cuda::_th_baddbmm(self, batch1, batch2, beta, alpha);
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
+  return legacy::cuda::_th_baddbmm(b_self, batch1, batch2, beta, alpha);
 }
 
 Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  return legacy::cuda::_th_baddbmm_out(result, self, batch1, batch2, beta, alpha);
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm_out");
+  return legacy::cuda::_th_baddbmm_out(result, b_self, batch1, batch2, beta, alpha);
 }
 
 Tensor& baddbmm__cuda(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  return legacy::cuda::_th_baddbmm_out(self, self, batch1, batch2, beta, alpha);
+  return baddbmm_out_cuda(self, self, batch1, batch2, beta, alpha);
 }
 
 Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {

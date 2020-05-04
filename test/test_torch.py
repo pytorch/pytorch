@@ -15867,6 +15867,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             froms = [int64_min_val, min_val - 1, min_val, -42, 0, 42, max_val, max_val + 1]
             tos = [min_val - 1, min_val, -42, 0, 42, max_val, max_val + 1, int64_max_val]
 
+        if dtype == torch.double:
+            fp_limit = 2**53
+        elif dtype == torch.float:
+            fp_limit = 2**24
+        elif dtype == torch.half:
+            fp_limit = 2**11
+        elif dtype == torch.bfloat16:
+            fp_limit = 2**8
+        else:
+            fp_limit = 0
+
         for from_ in froms:
             for to_ in tos:
                 t = torch.empty(size, dtype=dtype, device=device)
@@ -15884,17 +15895,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                             lambda: t.random_(from_, to_)
                         )
                     else:
-                        t.random_(from_, to_)
-                        range_ = to_ - from_
-                        delta = max(1, alpha * range_)
-                        if dtype == torch.bfloat16:
-                            # Less strict checks because of rounding errors
-                            # TODO investigate rounding errors
-                            self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
-                            self.assertTrue((to_ - delta) < t.to(torch.double).max() <= to_)
+                        if dtype.is_floating_point and (
+                                not (-fp_limit <= from_ <= fp_limit) or not (-fp_limit <= (to_ - 1) <= fp_limit)):
+                            if not (-fp_limit <= from_ <= fp_limit):
+                                self.assertWarnsRegex(UserWarning, "from is out of bounds",
+                                                      lambda: t.random_(from_, to_))
+                            if not (-fp_limit <= (to_ - 1) <= fp_limit):
+                                self.assertWarnsRegex(UserWarning, "to - 1 is out of bounds",
+                                                      lambda: t.random_(from_, to_))
                         else:
-                            self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
-                            self.assertTrue((to_ - delta) <= t.to(torch.double).max() < to_)
+                            t.random_(from_, to_)
+                            range_ = to_ - from_
+                            delta = max(1, alpha * range_)
+                            if dtype == torch.bfloat16:
+                                # Less strict checks because of rounding errors
+                                # TODO investigate rounding errors
+                                self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
+                                self.assertTrue((to_ - delta) < t.to(torch.double).max() <= to_)
+                            else:
+                                self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
+                                self.assertTrue((to_ - delta) <= t.to(torch.double).max() < to_)
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,
