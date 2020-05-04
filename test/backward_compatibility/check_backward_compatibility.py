@@ -67,6 +67,8 @@ white_list = [
     ('aten::__contains__', datetime.date(2020, 6, 30)),
     ('aten::_set_item', datetime.date(2020, 6, 30)),
     ('aten::dict', datetime.date(2020, 6, 30)),
+    ('aten::tensor', datetime.date(2020, 6, 30)),
+    ('aten::as_tensor', datetime.date(2020, 6, 30)),
 ]
 
 
