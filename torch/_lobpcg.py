@@ -149,18 +149,18 @@ def lobpcg(A,                   # type: Tensor
       Preconditioned Eigensolver: Locally Optimal Block Preconditioned
       Conjugate Gradient Method. SIAM J. Sci. Comput., 23(2),
       517-541. (25 pages)
-      https://epubs.siam.org/doi/abs/10.1137/S1064827500366124
+      `https://epubs.siam.org/doi/abs/10.1137/S1064827500366124`_
 
       [StathopoulosEtal2002] Andreas Stathopoulos and Kesheng
       Wu. (2002) A Block Orthogonalization Procedure with Constant
       Synchronization Requirements. SIAM J. Sci. Comput., 23(6),
       2165-2182. (18 pages)
-      https://epubs.siam.org/doi/10.1137/S1064827500370883
+      `https://epubs.siam.org/doi/10.1137/S1064827500370883`_
 
       [DuerschEtal2018] Jed A. Duersch, Meiyue Shao, Chao Yang, Ming
       Gu. (2018) A Robust and Efficient Implementation of LOBPCG.
       SIAM J. Sci. Comput., 40(5), C655-C676. (22 pages)
-      https://epubs.siam.org/doi/abs/10.1137/17M1129830
+      `https://epubs.siam.org/doi/abs/10.1137/17M1129830`_
 
     """
 

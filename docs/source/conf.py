@@ -23,7 +23,6 @@ import os
 # sys.path.insert(0, os.path.abspath('../..'))
 
 import torch
-
 try:
     import torchvision  # noqa: F401
 except ImportError:
@@ -57,10 +56,6 @@ extensions = [
     'javasphinx',
 ]
 
-# build the templated autosummary files
-autosummary_generate = True
-numpydoc_show_class_members = False
-
 # autosectionlabel throws warnings if section names are duplicated.
 # The following tells autosectionlabel to not throw a warning for
 # duplicated section names that are in different documents.
@@ -77,7 +72,7 @@ napoleon_use_ivar = True
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
 if RELEASE:
-    templates_path = ['_templates-stable'] + templates_path
+    templates_path = ['_templates-stable']
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
@@ -245,8 +240,8 @@ texinfo_documents = [
 
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {
-    'python': ('https://docs.python.org/3', None),
-    'numpy': ('https://numpy.org/doc/stable', None),
+    'python': ('https://docs.python.org/', None),
+    'numpy': ('https://docs.scipy.org/doc/numpy/', None),
 }
 
 # -- A patch that prevents Sphinx from cross-referencing ivar tags -------
