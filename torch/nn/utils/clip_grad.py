@@ -5,11 +5,10 @@ from torch._six import inf
 
 def clip_grad_and_get_total_norm_(parameters, max_norm=None, norm_type=2):
     r"""Gets the total gradient norm of an iterable of parameters.
-    If `max_norm` is provided, clips the gradient norm of the parameters.
+    If ``max_norm`` is provided, clips the gradient norm of the parameters in-place.
 
     The norm is computed over all gradients together, as if they were
     concatenated into a single vector.
-    If `max_norm` is provided, gradients are modified in-place.
 
     Arguments:
         parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
