@@ -3,7 +3,7 @@ import torch
 from torch._six import inf
 
 
-def clip_grad_and_get_total_norm(parameters, max_norm=None, norm_type=2):
+def clip_grad_and_get_total_norm_(parameters, max_norm=None, norm_type=2):
     r"""Gets the total gradient norm of an iterable of parameters.
     If `max_norm` is provided, clips the gradient norm of the parameters.
 
@@ -40,6 +40,7 @@ def clip_grad_and_get_total_norm(parameters, max_norm=None, norm_type=2):
                 p.grad.detach().mul_(clip_coef)
     return total_norm
 
+
 def clip_grad_norm_(parameters, max_norm, norm_type=2):
     r"""Clips gradient norm of an iterable of parameters.
 
@@ -56,10 +57,11 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2):
     Returns:
         Total norm of the parameters (viewed as a single vector).
     """
-    return clip_grad_and_get_total_norm(parameters, max_norm, norm_type)
+    return clip_grad_and_get_total_norm_(parameters, max_norm=max_norm, norm_type=norm_type)
 
-def get_total_grad_norm(parameters, norm_type=2):
-    r"""Get the total gradient norm of an iterable of parameters.
+
+def total_grad_norm(parameters, norm_type=2):
+    r"""Gets the total gradient norm of an iterable of parameters.
 
     The norm is computed over all gradients together, as if they were
     concatenated into a single vector.
@@ -73,7 +75,7 @@ def get_total_grad_norm(parameters, norm_type=2):
     Returns:
         Total norm of the parameters (viewed as a single vector).
     """
-    return clip_grad_and_get_total_norm(parameters, None, norm_type)
+    return clip_grad_and_get_total_norm_(parameters, norm_type=norm_type)
 
 
 def clip_grad_norm(parameters, max_norm, norm_type=2):
