@@ -207,7 +207,7 @@ void HashProvider::visit(const Store* v) {
 void HashProvider::visit(const Block* v) {
   CACHE_GUARD();
   SimplifierHashType hash;
-  for (Stmt* s : v->stmts()) {
+  for (Stmt* s : *v) {
     s->accept(this);
     hash = hash_combine(hash, hashOf(s));
   }
