@@ -7,41 +7,12 @@
 
 #include <vector>
 
-// unfold_backward, the algorithm.
+// Note on naming: it is unconventional.
+// grad_in does not mean that it is a gradient wrt to input,
+// grad_in/grad_out is just an input/output of unfold_backward kernel.
 //
-// Consider out = in.unfold(dim, size, step), then
-// out.shape[dim] == (in.shape[dim] - size) / step + 1,
-// out.shape[-1] == size.
-// out.dims() == in.dims() + 1
-//
-// unfold_backward receives grad_in and returns grad_out such that
-// grad_in.shape == out.shape,
-// grad_out.shape = in.shape.
-//
-// unfold_backward considers the following two cases:
-// case1. step >= size.
-// case2. step < size.
-//
-// case1. step >= size.
-// In this case the iteration takes over grad_in and performs the following copy:
-// grad_out[..., i_out_dim,...] = grad_in[..., i_in_dim,..., i_in_last_dim],
-// where i_out_dim = i_in_dim * step + i_in_last_dim.
-//
-// case2. step < size.
-// In this case the iteration takes over grad_out,
-// where grad_out[...,i_out_dim,...] accumulates all values
-// grad_in[...,i_in_dim,...,i_in_last_dim], where
-// i_in_dim is in [left_idx_fold, right_idx_fold],
-// i_in_last_dim = i_out_dim - i_in_dim * step,
-// left_idx_fold = (i_out_dim - size) / step 
-//  if i_out_dim in [left_idx_fold * step, left_idx_fold * step + size)
-//  else (i_out_dim - size) / step + 1,
-// right_idx_fold = i_out_dim / step.
-//
-// Simply put, given i_out_dim, we find which folds of grad_in
-// intersect with i_out_dim, these are precisely [left_idx_fold, right_idx_fold],
-// and then the corresponding value of grad_in[...,i_in_dim,...,i_in_last_dim]
-// gets added up to grad_out[...,i_out_dim,...].
+// unfold_backward, the algorithm is described in
+// /native/cpu/UnfoldBackwardKernel.cpp
 
 namespace at { namespace native {
 

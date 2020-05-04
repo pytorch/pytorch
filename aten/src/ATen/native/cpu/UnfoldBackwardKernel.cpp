@@ -9,6 +9,10 @@
 #define RESTRICT __restrict__
 #endif
 
+// Note on naming: it is unconventional.
+// grad_in does not mean that it is a gradient wrt to input,
+// grad_in/grad_out is just an input/output of unfold_backward kernel.
+//
 // unfold_backward, the algorithm.
 //
 // Consider out = in.unfold(dim, size, step), then
