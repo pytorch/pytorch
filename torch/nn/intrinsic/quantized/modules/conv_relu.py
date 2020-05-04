@@ -55,6 +55,7 @@ class ConvReLU3d(nnq.Conv3d):
 
     We adopt the same interface as :class:`torch.nn.quantized.Conv3d`.
 
+    .. note::
     Attributes: Same as torch.nn.quantized.Conv3d
 
     """

@@ -731,5 +731,5 @@ Functions
 .. autofunction:: export
 .. autofunction:: register_custom_op_symbolic
 .. autofunction:: torch.onnx.operators.shape_as_tensor
-.. autofunction:: select_model_mode_for_export
+.. autofunction:: set_training
 .. autofunction:: is_in_onnx_export

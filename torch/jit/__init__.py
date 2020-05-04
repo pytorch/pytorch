@@ -88,62 +88,58 @@ DEFAULT_EXTRA_FILES_MAP = torch._C.ExtraFilesMap()
 
 
 def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
-    r"""
-    Save an offline version of this module for use in a separate process. The
-    saved module serializes all of the methods, submodules, parameters, and
-    attributes of this module. It can be loaded into the C++ API using
-    ``torch::jit::load(filename)`` or into the Python API with
-    :func:`torch.jit.load <torch.jit.load>`.
+    """
+        Save an offline version of this module for use in a separate process. The saved
+        module serializes all of the methods, submodules, parameters, and attributes of this
+        module. It can be loaded into the C++ API using ``torch::jit::load(filename)`` or into the Python
+        API with :func:`torch.jit.load <torch.jit.load>`.
 
-    To be able to save a module, it must not make any calls to native Python
-    functions.  This means that all submodules must be subclasses of
-    :class:`ScriptModule` as well.
+        To be able to save a module, it must not make any calls to native Python functions.
+        This means that all submodules must be subclasses of :class:`ScriptModule` as well.
 
-    .. DANGER::
-        All modules, no matter their device, are always loaded onto the CPU
-        during loading.  This is different from :func:`torch.load`'s semantics
-        and may change in the future.
+        .. DANGER::
+           All modules, no matter their device, are always loaded onto the CPU during loading.
+           This is different from :func:`torch.load`'s semantics and may change in the future.
 
-    Arguments:
-        m: A :class:`ScriptModule` to save.
-        f: A file-like object (has to implement write and flush) or a string
-           containing a file name.
-        _extra_files: Map from filename to contents which will be stored as part of `f`.
+        Arguments:
+            m: A :class:`ScriptModule` to save.
+            f: A file-like object (has to implement write and flush) or a string
+               containing a file name.
+            _extra_files: Map from filename to contents which will be stored as part of 'f'.
 
-    .. warning::
-        If you are using Python 2, `save` does NOT support ``StringIO.StringIO``
-        as a valid file-like object. This is because the write method should
-        return the number of bytes written; ``StringIO.write()`` does not do
-        this.
+        .. warning::
+            If you are using Python 2, ``torch.jit.save`` does NOT support :any:`StringIO.StringIO`
+            as a valid file-like object. This is because the write method should return
+            the number of bytes written; ``StringIO.write()`` does not do this.
 
-        Please use something like ``io.BytesIO`` instead.
+            Please use something like ``io.BytesIO`` instead.
 
-    Example:
+        Example:
 
-    .. testcode::
+        .. testcode::
 
-        import torch
-        import io
+            import torch
+            import io
 
-        class MyModule(torch.nn.Module):
-            def forward(self, x):
-                return x + 10
+            class MyModule(torch.nn.Module):
+                def forward(self, x):
+                    return x + 10
 
-        m = torch.jit.script(MyModule())
+            m = torch.jit.script(MyModule())
 
-        # Save to file
-        torch.jit.save(m, 'scriptmodule.pt')
-        # This line is equivalent to the previous
-        m.save("scriptmodule.pt")
+            # Save to file
+            torch.jit.save(m, 'scriptmodule.pt')
+            # This line is equivalent to the previous
+            m.save("scriptmodule.pt")
 
-        # Save to io.BytesIO buffer
-        buffer = io.BytesIO()
-        torch.jit.save(m, buffer)
+            # Save to io.BytesIO buffer
+            buffer = io.BytesIO()
+            torch.jit.save(m, buffer)
 
-        # Save with extra files
-        extra_files = torch._C.ExtraFilesMap()
-        extra_files['foo.txt'] = 'bar'
-        torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
+            # Save with extra files
+            extra_files = torch._C.ExtraFilesMap()
+            extra_files['foo.txt'] = 'bar'
+            torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
     """
     if isinstance(f, str) or isinstance(f, pathlib.Path):
         m.save(f, _extra_files=_extra_files)
@@ -153,66 +149,64 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
 
 def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     r"""
-    Load a :class:`ScriptModule` or :class:`ScriptFunction` previously
-    saved with :func:`torch.jit.save <torch.jit.save>`
+        Load a :class:`ScriptModule` or :class:`ScriptFunction` previously
+        saved with :func:`torch.jit.save <torch.jit.save>`
 
-    All previously saved modules, no matter their device, are first loaded onto CPU,
-    and then are moved to the devices they were saved from. If this fails (e.g.
-    because the run time system doesn't have certain devices), an exception is
-    raised.
+        All previously saved modules, no matter their device, are first loaded onto CPU,
+        and then are moved to the devices they were saved from. If this fails (e.g. because
+        the run time system doesn't have certain devices), an exception is raised.
 
-    Arguments:
-        f: a file-like object (has to implement read, readline, tell, and seek),
-            or a string containing a file name
-        map_location (string or torch.device): A simplified version of
-            ``map_location`` in `torch.jit.save` used to dynamically remap
-            storages to an alternative set of devices.
-        _extra_files (dictionary of filename to content): The extra
-            filenames given in the map would be loaded and their content
-            would be stored in the provided map.
+        Arguments:
+            f: a file-like object (has to implement read, readline, tell, and seek),
+                or a string containing a file name
+            map_location (string or torch.device): A simplified version of ``map_location`` in
+                ``torch.save`` used to dynamically remap storages to an alternative set of devices.
+            _extra_files (dictionary of filename to content): The extra
+                filenames given in the map would be loaded and their content
+                would be stored in the provided map.
 
-    Returns:
-        A :class:`ScriptModule` object.
+        Returns:
+            A :class:`ScriptModule` object.
 
-    Example:
+        Example:
 
-    .. testcode::
+        .. testcode::
 
-        import torch
-        import io
+            import torch
+            import io
 
-        torch.jit.load('scriptmodule.pt')
+            torch.jit.load('scriptmodule.pt')
 
-        # Load ScriptModule from io.BytesIO object
-        with open('scriptmodule.pt', 'rb') as f:
-            buffer = io.BytesIO(f.read())
+            # Load ScriptModule from io.BytesIO object
+            with open('scriptmodule.pt', 'rb') as f:
+                buffer = io.BytesIO(f.read())
 
-        # Load all tensors to the original device
-        torch.jit.load(buffer)
+            # Load all tensors to the original device
+            torch.jit.load(buffer)
 
-        # Load all tensors onto CPU, using a device
-        buffer.seek(0)
-        torch.jit.load(buffer, map_location=torch.device('cpu'))
+            # Load all tensors onto CPU, using a device
+            buffer.seek(0)
+            torch.jit.load(buffer, map_location=torch.device('cpu'))
 
-        # Load all tensors onto CPU, using a string
-        buffer.seek(0)
-        torch.jit.load(buffer, map_location='cpu')
+            # Load all tensors onto CPU, using a string
+            buffer.seek(0)
+            torch.jit.load(buffer, map_location='cpu')
 
-        # Load with extra files.
-        extra_files = torch._C.ExtraFilesMap()
-        extra_files['foo.txt'] = 'bar'
-        torch.jit.load('scriptmodule.pt', _extra_files=extra_files)
-        print(extra_files['foo.txt'])
+            # Load with extra files.
+            extra_files = torch._C.ExtraFilesMap()
+            extra_files['foo.txt'] = 'bar'
+            torch.jit.load('scriptmodule.pt', _extra_files=extra_files)
+            print(extra_files['foo.txt'])
 
-    .. testoutput::
-        :hide:
+        .. testoutput::
+            :hide:
 
-        ...
+            ...
 
-    .. testcleanup::
+        .. testcleanup::
 
-        import os
-        os.remove("scriptmodule.pt")
+            import os
+            os.remove("scriptmodule.pt")
     """
     if isinstance(f, string_classes):
         if not os.path.exists(f):
@@ -753,95 +747,88 @@ def trace(func,
     """
     Trace a function and return an executable  or :class:`ScriptFunction`
     that will be optimized using just-in-time compilation. Tracing is ideal for
-    code that operates only on ``Tensor``\\s and lists, dictionaries, and
-    tuples of ``Tensor``\\s.
+    code that operates only on ``Tensor``\\s and lists, dictionaries, and tuples of ``Tensor``\\s.
 
-    Using `torch.jit.trace` and `torch.jit.trace_module`, you can turn an
-    existing module or Python function into a TorchScript
-    :class:`ScriptFunction` or :class:`ScriptModule`. You must provide example
-    inputs, and we run the function, recording the operations performed on all
-    the tensors.
+    Using ``torch.jit.trace`` and :func:`torch.jit.trace_module<torch.jit.trace_module>`, you can turn an existing module or Python
+    function into a TorchScript :class:`ScriptFunction` or :class:`ScriptModule`. You must provide example inputs,
+    and we run the function, recording the operations performed on all the tensors.
 
-    * The resulting recording of a standalone function produces `ScriptFunction`.
-    * The resulting recording of `nn.Module.forward` or `nn.Module` produces
-      `ScriptModule`.
+    * The resulting recording of a standalone function produces :class:`ScriptFunction`.
+    * The resulting recording of ``forward`` function of ``nn.Module`` or ``nn.Module`` produces :class:`ScriptModule`.
 
     This module also contains any parameters that the original
     module had as well.
 
-    Warning:
+    .. warning::
         Tracing only correctly records functions and modules which are not data
         dependent (e.g., do not have conditionals on data in tensors) and do not have
         any untracked external dependencies (e.g., perform input/output or
         access global variables). Tracing only records operations done when the given
-        function is run on the given tensors. Therefore, the returned
-        `ScriptModule` will always run the same traced graph on any input. This
-        has some important implications when your module is expected to run
-        different sets of operations, depending on the input and/or the module
-        state. For example,
+        function is run on the given
+        tensors. Therefore, the returned :class:`ScriptModule` will always run the same traced
+        graph on any input. This has some important implications when your module is
+        expected to run different sets of operations, depending on the input and/or the
+        module state. For example,
 
         * Tracing will not record any control-flow like if-statements or loops.
-          When this control-flow is constant across your module, this is fine
-          and it often inlines the control-flow decisions. But sometimes the
-          control-flow is actually part of the model itself. For instance, a
-          recurrent network is a loop over the (possibly dynamic) length of an
-          input sequence.
+          When this control-flow is constant across your module, this is fine and it often
+          inlines the control-flow decisions. But sometimes the control-flow is actually part
+          of the model itself. For instance, a recurrent network is a loop over
+          the (possibly dynamic) length of an input sequence.
         * In the returned :class:`ScriptModule`, operations that have different
-          behaviors in ``training`` and ``eval`` modes will always behave as if
-          it is in the mode it was in during tracing, no matter which mode the
-          `ScriptModule` is in.
+          behaviors in ``training`` and ``eval`` modes will always behave as if it
+          is in the mode it was in during tracing, no matter which mode the
+          :class:`ScriptModule` is in.
 
-        In cases like these, tracing would not be appropriate and
-        :func:`scripting <torch.jit.script>` is a better choice. If you trace
-        such models, you may silently get incorrect results on subsequent
-        invocations of the model. The tracer will try to emit warnings when
-        doing something that may cause an incorrect trace to be produced.
+        In cases like these, tracing would not be appropriate and :func:`scripting <torch.jit.script>` is a better
+        choice. If you trace such models, you may silently get
+        incorrect results on subsequent invocations of the model. The tracer
+        will try to emit warnings when doing something that may cause an
+        incorrect trace to be produced.
 
     Arguments:
-        func (callable or torch.nn.Module):  A Python function or `torch.nn.Module`
-            that will be run with `example_inputs`. `func` arguments and return
-            values  must be tensors or (possibly nested) tuples that contain
-            tensors. When a module is passed `torch.jit.trace`, only the
-            ``forward`` method is run and traced (see :func:`torch.jit.trace
-            <torch.jit.trace_module>` for details).
-        example_inputs (tuple):  A tuple of example inputs that will be passed
-            to the function while tracing. The resulting trace can be run with
-            inputs of different types and shapes assuming the traced operations
-            support those types and shapes. `example_inputs` may also be a
-            single Tensor in which case it is automatically wrapped in a tuple.
+        func (callable or torch.nn.Module):  A Python function or ``torch.nn.Module``
+                                             that will be run with ``example_inputs``.
+                                             arguments and returns to ``func`` must be tensors
+                                             or (possibly nested) tuples that
+                                             contain tensors. When a module is passed to
+                                             :func:`torch.jit.trace <torch.jit.trace>`, only the
+                                             ``forward`` method is run and traced
+                                             (see :func:`torch.jit.trace <torch.jit.trace_module>` for details).
+        example_inputs (tuple):  A tuple of example inputs that will be passed to the function
+                                 while tracing. The resulting trace can be run with
+                                 inputs of different types and shapes assuming the traced operations
+                                 support those types and shapes. ``example_inputs`` may also be a single
+                                 Tensor in which case it is automatically wrapped in a tuple.
 
     Keyword arguments:
         check_trace (bool, optional): Check if the same inputs run through
-            traced code produce the same outputs. Default: ``True``. You might want
-            to disable this if, for example, your network contains non-
-            deterministic ops or if you are sure that the network is correct despite
-            a checker failure.
+                                      traced code produce the same outputs. Default: ``True``. You might want
+                                      to disable this if, for example, your network contains non-
+                                      deterministic ops or if you are sure that the network is correct despite
+                                      a checker failure.
 
-        check_inputs (list of tuples, optional): A list of tuples of input
-            arguments that should be used to check the trace against what is
-            expected. Each tuple is equivalent to a set of input arguments that
-            would be specified in ``example_inputs``. For best results, pass in
-            a set of checking inputs representative of the space of shapes and
-            types of inputs you expect the network to see.  If not specified,
-            the original ``example_inputs`` are used for checking
-        check_tolerance (float, optional): Floating-point comparison tolerance
-            to use in the checker procedure.  This can be used to relax the
-            checker strictness in the event that results diverge numerically
-            for a known reason, such as operator fusion.
-        strict (bool, optional): run the tracer in a strict mode or not
-            (default: ``True``). Only turn this off when you want the tracer to
-            record your mutable container types (currently ``list``/``dict``)
-            and you are sure that the containuer you are using in your
-            problem is a ``constant`` structure and does not get used as
-            control flow (if, for) conditions.
+        check_inputs (list of tuples, optional): A list of tuples of input arguments that should be used
+                                                 to check the trace against what is expected. Each tuple
+                                                 is equivalent to a set of input arguments that would
+                                                 be specified in ``example_inputs``. For best results, pass in a
+                                                 set of checking inputs representative of the space of
+                                                 shapes and types of inputs you expect the network to see.
+                                                 If not specified, the original ``example_inputs`` are used for checking
+        check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
+                                           This can be used to relax the checker strictness in the event that
+                                           results diverge numerically for a known reason, such as operator fusion.
+        strict (bool, optional): run the tracer in a strict mode or not (default: True). Only turn this off when you
+                                 want the tracer to record your mutable container types (currently list/dict) and you
+                                 are sure that the list/dict that you are using in your problem is a `constant` structure
+                                 and does not get used as control flow (if, for) conditions.
 
     Returns:
-        If `func` is `nn.Module` or ``forward`` of `nn.Module`, `trace` returns
-        a :class:`ScriptModule` object with a single ``forward`` method
-        containing the traced code.  The returned `ScriptModule` will
-        have the same set of sub-modules and parameters as the original
-        ``nn.Module``.  If ``func`` is a standalone function, ``trace``
-        returns `ScriptFunction`.
+        If ``callable`` is ``nn.Module`` or ``forward`` of ``nn.Module``, ``trace`` returns
+        a :class:`ScriptModule` object with a single ``forward`` method containing the traced code.
+        The returned :class:`ScriptModule` will have the same set of sub-modules and parameters as the
+        original ``nn.Module``.
+        If ``callable`` is a standalone function, ``trace`` returns :class:`ScriptFunction`
 
     Example (tracing a function):
 

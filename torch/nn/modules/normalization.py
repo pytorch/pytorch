@@ -71,7 +71,7 @@ class CrossMapLRN2d(Module):
 
 class LayerNorm(Module):
     r"""Applies Layer Normalization over a mini-batch of inputs as described in
-    the paper `Layer Normalization <https://arxiv.org/abs/1607.06450>`__
+    the paper `Layer Normalization`_ .
 
     .. math::
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
@@ -123,6 +123,8 @@ class LayerNorm(Module):
         >>> m = nn.LayerNorm(10)
         >>> # Activating the module
         >>> output = m(input)
+
+    .. _`Layer Normalization`: https://arxiv.org/abs/1607.06450
     """
     __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
 
@@ -157,7 +159,7 @@ class LayerNorm(Module):
 
 class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs as described in
-    the paper `Group Normalization <https://arxiv.org/abs/1803.08494>`__
+    the paper `Group Normalization`_ .
 
     .. math::
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
@@ -194,6 +196,8 @@ class GroupNorm(Module):
         >>> m = nn.GroupNorm(1, 6)
         >>> # Activating the module
         >>> output = m(input)
+
+    .. _`Group Normalization`: https://arxiv.org/abs/1803.08494
     """
     __constants__ = ['num_groups', 'num_channels', 'eps', 'affine']
 

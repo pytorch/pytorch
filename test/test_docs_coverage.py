@@ -31,11 +31,7 @@ class TestDocCoverage(unittest.TestCase):
                     ret.add(name[0])
         return ret
 
-    def _test_torch(self):
-        # TODO: this test was disabled as part of PR gh-37419, since the
-        # simplistic test no longer works. It should be replaced, perhaps
-        # with a test based on sphinx.ext.coverage
-
+    def test_torch(self):
         # TODO: The algorithm here is kind of unsound; we don't assume
         # every identifier in torch.rst lives in torch by virtue of
         # where it lives; instead, it lives in torch because at the
@@ -90,11 +86,7 @@ class TestDocCoverage(unittest.TestCase):
             don't want to document?''')
         )
 
-    def _test_tensor(self):
-        # TODO: this test was disabled as part of PR gh-37419, since the
-        # simplistic test no longer works. It should be replaced, perhaps
-        # with a test based on sphinx.ext.coverage
-
+    def test_tensor(self):
         in_rst = self.parse_rst('tensors.rst', r2)
         whitelist = {
             'names', 'unflatten', 'align_as', 'rename_', 'refine_names', 'align_to',

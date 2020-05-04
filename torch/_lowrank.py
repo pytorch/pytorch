@@ -84,7 +84,7 @@ def get_approximate_basis(A,        # type: Tensor
 
 def svd_lowrank(A, q=6, niter=2, M=None):
     # type: (Tensor, Optional[int], Optional[int], Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]
-    r"""Return the singular value decomposition ``(U, S, V)`` of a matrix,
+    """Return the singular value decomposition ``(U, S, V)`` of a matrix,
     batches of matrices, or a sparse matrix :math:`A` such that
     :math:`A \approx U diag(S) V^T`. In case :math:`M` is given, then
     SVD is computed for the matrix :math:`A - M`.
