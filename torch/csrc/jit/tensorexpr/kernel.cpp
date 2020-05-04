@@ -1074,7 +1074,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
         Block* b = blocks.back();
         blocks.pop_back();
 
-        for (Stmt* s : b->stmts()) {
+        for (Stmt* s : *b) {
           if (For* f = dynamic_cast<For*>(s)) {
             worklist.push_back(f);
           } else if (Block* b2 = dynamic_cast<Block*>(s)) {
@@ -1092,7 +1092,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
       bool containsSubLoops = false;
       if (Block* body = dynamic_cast<Block*>(f->body())) {
-        for (Stmt* s2 : body->stmts()) {
+        for (Stmt* s2 : *body) {
           if (For* f2 = dynamic_cast<For*>(s2)) {
             containsSubLoops = true;
             worklist.push_back(f2);
