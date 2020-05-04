@@ -1172,6 +1172,24 @@ graph(%input, %weight):
                    .check_not("aten::_convolution") \
                    .run(str(get_forward_graph(m.conv3d._c)))
 
+    def test_replicate_dequant_same_value(self):
+        class Mul(torch.nn.Module):
+            def __init__(self):
+                super(Mul, self).__init__()
+
+            def forward(self, x):
+                return x * x
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+
+        qconfig_dict = {'': default_qconfig}
+        model = torch.jit.script(Mul()).eval()
+        m = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data])
+        FileCheck().check("quantized::mul") \
+                   .check_not("aten::mul") \
+                   .run(m.graph)
+
 class TestQuantizeScriptPTSQOps(JitTestCase):
     """ Test graph mode post training static quantization works
     for individual ops end to end.
