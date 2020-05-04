@@ -2137,9 +2137,10 @@ class TestQuantizedConv(TestCase):
                 W_q.q_zero_point(), W_unpacked.q_zero_point())
 
     def _make_qconv_tensors(self, batch_size, input_channels_per_group,
-        input_feature_map_shape, output_channels_per_group, groups, kernels,
-        strides, pads, dilations, X_scale, X_zero_point, W_scale, W_zero_point,
-        use_bias, use_channelwise, transpose):
+                            input_feature_map_shape, output_channels_per_group,
+                            groups, kernels, strides, pads, dilations,
+                            X_scale, X_zero_point, W_scale, W_zero_point,
+                            use_bias, use_channelwise, transpose):
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         # Padded input size should be at least as big as dilated kernel
