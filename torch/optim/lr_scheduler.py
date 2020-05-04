@@ -152,6 +152,14 @@ class _LRScheduler(object):
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 
+    @property
+    def steps_on_batch(self):
+        raise NotImplementedError
+
+    @property
+    def steps_on_epoch(self):
+        raise NotImplementedError
+
 
 class LambdaLR(_LRScheduler):
     """Sets the learning rate of each parameter group to the initial lr
@@ -234,6 +242,14 @@ class LambdaLR(_LRScheduler):
         return [base_lr * lmbda(self.last_epoch)
                 for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs)]
 
+    @property
+    def steps_on_batch(self):
+        return False
+
+    @property
+    def steps_on_epoch(self):
+        return True
+
 
 class MultiplicativeLR(_LRScheduler):
     """Multiply the learning rate of each parameter group by the factor given
@@ -313,6 +329,14 @@ class MultiplicativeLR(_LRScheduler):
         else:
             return list(self.base_lrs)
 
+    @property
+    def steps_on_batch(self):
+        return False
+
+    @property
+    def steps_on_epoch(self):
+        return True
+
 
 class StepLR(_LRScheduler):
     """Decays the learning rate of each parameter group by gamma every
@@ -358,6 +382,14 @@ class StepLR(_LRScheduler):
     def _get_closed_form_lr(self):
         return [base_lr * self.gamma ** (self.last_epoch // self.step_size)
                 for base_lr in self.base_lrs]
+
+    @property
+    def steps_on_batch(self):
+        return False
+
+    @property
+    def steps_on_epoch(self):
+        return True
 
 
 class MultiStepLR(_LRScheduler):
@@ -405,6 +437,14 @@ class MultiStepLR(_LRScheduler):
         return [base_lr * self.gamma ** bisect_right(milestones, self.last_epoch)
                 for base_lr in self.base_lrs]
 
+    @property
+    def steps_on_batch(self):
+        return False
+
+    @property
+    def steps_on_epoch(self):
+        return True
+
 
 class ExponentialLR(_LRScheduler):
     """Decays the learning rate of each parameter group by gamma every epoch.
@@ -433,6 +473,14 @@ class ExponentialLR(_LRScheduler):
     def _get_closed_form_lr(self):
         return [base_lr * self.gamma ** self.last_epoch
                 for base_lr in self.base_lrs]
+
+    @property
+    def steps_on_batch(self):
+        return False
+
+    @property
+    def steps_on_epoch(self):
+        return True
 
 
 class CosineAnnealingLR(_LRScheduler):
@@ -499,6 +547,14 @@ class CosineAnnealingLR(_LRScheduler):
         return [self.eta_min + (base_lr - self.eta_min) *
                 (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
                 for base_lr in self.base_lrs]
+
+    @property
+    def steps_on_batch(self):
+        return False
+
+    @property
+    def steps_on_epoch(self):
+        return True
 
 
 class ReduceLROnPlateau(object):
@@ -670,6 +726,14 @@ class ReduceLROnPlateau(object):
     def load_state_dict(self, state_dict):
         self.__dict__.update(state_dict)
         self._init_is_better(mode=self.mode, threshold=self.threshold, threshold_mode=self.threshold_mode)
+
+    @property
+    def steps_on_batch(self):
+        return False
+
+    @property
+    def steps_on_epoch(self):
+        return True
 
 
 class CyclicLR(_LRScheduler):
@@ -894,6 +958,14 @@ class CyclicLR(_LRScheduler):
 
         return lrs
 
+    @property
+    def steps_on_batch(self):
+        return True
+
+    @property
+    def steps_on_epoch(self):
+        return False
+
 
 class CosineAnnealingWarmRestarts(_LRScheduler):
     r"""Set the learning rate of each parameter group using a cosine annealing
@@ -1012,6 +1084,14 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
                 param_group['lr'] = lr
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+
+    @property
+    def steps_on_batch(self):
+        return True
+
+    @property
+    def steps_on_epoch(self):
+        return False
 
 
 class OneCycleLR(_LRScheduler):
@@ -1234,3 +1314,11 @@ class OneCycleLR(_LRScheduler):
                     group['momentum'] = computed_momentum
 
         return lrs
+
+    @property
+    def steps_on_batch(self):
+        return True
+
+    @property
+    def steps_on_epoch(self):
+        return False
