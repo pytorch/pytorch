@@ -9,6 +9,8 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/quantized/Quantizer.h>
 
+#include "_common_utils.h"
+
 namespace caffe2 {
 
 #ifdef USE_FBGEMM
@@ -87,9 +89,18 @@ class QConvPackWeightInt8 final {
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
       TORCH_CHECK(
-          kSpatialDim == 2,
-          "quantized::conv2d_prepack (qnnpack): QNNPACK only supports Conv2d "
-          "now.");
+          kSpatialDim == 1 || kSpatialDim == 2,
+          "quantized::conv_prepack (qnnpack): QNNPACK only supports Conv1d "
+          "and Conv2d now.");
+      if (kSpatialDim == 1) {
+        if (weight.dim() == 3) {
+          weight = weight.unsqueeze(_internal::kConv1dSqueezeDim + 1);
+        }
+        stride = _internal::MakeArgForConv1d(stride, 1);
+        input_padding = _internal::MakeArgForConv1d(input_padding, 0);
+        output_padding = _internal::MakeArgForConv1d(output_padding, 0);
+        dilation = _internal::MakeArgForConv1d(dilation, 1);
+      }
       return qnnpack_conv_prepack(weight, bias, stride, input_padding,
                                   output_padding, dilation, groups, transpose);
     }

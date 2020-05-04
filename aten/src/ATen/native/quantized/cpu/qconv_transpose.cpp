@@ -5,6 +5,8 @@
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 #include <torch/library.h>
 
+#include "_common_utils.h"
+
 #include <vector>
 
 namespace at {
@@ -273,11 +275,36 @@ class QDeConv2dInt8 final {
 #endif // USE_PYTORCH_QNNPACK
 };
 
+
+class QDeConv1dInt8 final {
+ public:
+  static Tensor run(Tensor act,
+                    Tensor packed_weight,
+                    torch::List<int64_t> stride,
+                    torch::List<int64_t> input_padding,
+                    torch::List<int64_t> output_padding,
+                    torch::List<int64_t> dilation,
+                    int64_t groups,
+                    double output_scale,
+                    int64_t output_zero_point) {
+    stride = _internal::MakeArgForConv1d(stride, 1);
+    input_padding = _internal::MakeArgForConv1d(input_padding, 0);
+    output_padding = _internal::MakeArgForConv1d(output_padding, 0);
+    dilation = _internal::MakeArgForConv1d(dilation, 1);
+    return QDeConv2dInt8::run(act, packed_weight, stride,
+                              input_padding, output_padding,
+                              dilation, groups,
+                              output_scale, output_zero_point);
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("conv_transpose1d", QDeConv1dInt8::run);
   m.impl("conv_transpose2d", QDeConv2dInt8::run);
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
+  m.impl("conv_transpose1d", QDeConv1dInt8::run);
   m.impl("conv_transpose2d", QDeConv2dInt8::run);
 }
 
