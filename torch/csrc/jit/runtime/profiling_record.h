@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <list>
+#include <unordered_set>
 #include <vector>
 
 namespace torch {
@@ -27,6 +28,7 @@ struct ProfilingRecord {
   std::shared_ptr<Graph> profiled_graph_;
   std::mutex mutex_;
   size_t profiling_count_;
+  std::unordered_set<Value*> seen_;
   bool ready() const {
     return profiling_count_ == 0;
   }
