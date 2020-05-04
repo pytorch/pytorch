@@ -34,10 +34,10 @@ c10::optional<IValue> getIValue(
   return toIValue(getValue(name, match_vmap, vmap));
 }
 
-void get_conv_params(
+std::unordered_map<std::string, c10::IValue> getConvParams(
     const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap,
-    std::unordered_map<std::string, c10::IValue>& calc_values) {
+    const std::unordered_map<std::string, Value*>& vmap) {
+  std::unordered_map<std::string, c10::IValue> calc_values;
   const auto& match_vmap = match.values_map;
   auto transposed_value = getIValue("transposed", match_vmap, vmap).value();
   calc_values["transposed"] = transposed_value;
@@ -54,8 +54,11 @@ void get_conv_params(
   calc_values["output_padding"] = output_padding_value;
   auto stride_value = getIValue("stride", match_vmap, vmap).value();
   calc_values["stride"] = stride_value;
+  auto padding_value = getIValue("padding", match_vmap, vmap).value();
+  calc_values["padding"] = padding_value;
   auto dilation_value = getIValue("dilation", match_vmap, vmap).value();
   calc_values["dilation"] = dilation_value;
+  return calc_values;
 }
 
 void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
@@ -92,10 +95,10 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
   // Filter the unsupported case
   auto filter_conv1d = [](const Match& match,
                           const std::unordered_map<std::string, Value*>& vmap) {
-    std::unordered_map<std::string, c10::IValue> calc_value_map;
-    get_conv_params(match, vmap, calc_value_map);
+    auto calc_value_map = getConvParams(match, vmap);
     if (calc_value_map["output_padding"].toIntList().size() != 1 ||
         calc_value_map["stride"].toIntList().size() != 1 ||
+        calc_value_map["padding"].toIntList().size() != 1 ||
         calc_value_map["dilation"].toIntList().size() != 1) {
       return false;
     }
@@ -107,10 +110,10 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
   };
   auto filter_conv2d = [](const Match& match,
                           const std::unordered_map<std::string, Value*>& vmap) {
-    std::unordered_map<std::string, c10::IValue> calc_value_map;
-    get_conv_params(match, vmap, calc_value_map);
+    auto calc_value_map = getConvParams(match, vmap);
     if (calc_value_map["output_padding"].toIntList().size() != 2 ||
         calc_value_map["stride"].toIntList().size() != 2 ||
+        calc_value_map["padding"].toIntList().size() != 2 ||
         calc_value_map["dilation"].toIntList().size() != 2) {
       return false;
     }
@@ -123,10 +126,10 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
   };
   auto filter_conv3d = [](const Match& match,
                           const std::unordered_map<std::string, Value*>& vmap) {
-    std::unordered_map<std::string, c10::IValue> calc_value_map;
-    get_conv_params(match, vmap, calc_value_map);
+    auto calc_value_map = getConvParams(match, vmap);
     if (calc_value_map["output_padding"].toIntList().size() != 3 ||
         calc_value_map["stride"].toIntList().size() != 3 ||
+        calc_value_map["padding"].toIntList().size() != 3 ||
         calc_value_map["dilation"].toIntList().size() != 3) {
       return false;
     }
