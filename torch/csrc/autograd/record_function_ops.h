@@ -26,7 +26,7 @@ void _call_end_callbacks_on_fut(
   fut->addCallback(
       // Copy handle and tls_state by value to persist after the python
       // context manager is exited.
-      [handle, tls_state]() {
+      [handle, tls_state = std::move(tls_state)]() {
         TORCH_INTERNAL_ASSERT(
             handle.defined(),
             "Undefined RecordFunction handle. This can happen if the handle is "
