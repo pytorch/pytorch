@@ -118,7 +118,7 @@ struct TORCH_API RecordFunction {
   // Retrieves the thread_id that this RecordFunction ran start callbacks with.
   // Useful for writing thread safe end callbacks that may be potentially
   // executed in a different thread (async ops)
-  inline uint16_t getStartCallbacksThreadId() const {
+  inline uint64_t getStartCallbacksThreadId() const {
     return thread_id_;
   }
 
@@ -130,7 +130,7 @@ struct TORCH_API RecordFunction {
   static RecordFunction* current();
 
   // Returns logical thread_id for the current thread
-  static uint16_t currentThreadId();
+  static uint64_t currentThreadId();
 
   // Internal functions, do not use directly;
   // used in python's context manager
@@ -202,7 +202,7 @@ struct TORCH_API RecordFunction {
   const RecordScope scope_;
 
   // The logical thread_id that this RecordFunction was created with
-  uint16_t thread_id_ = 0;
+  uint64_t thread_id_ = 0;
 };
 
 //
