@@ -69,8 +69,7 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - arg: THTensor* self
-      broadcast: mask fallback types:Byte
+    - THTensor* self
     - THByteTensor* mask
 ]]
 [[
@@ -86,8 +85,7 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - arg: THTensor* self
-      broadcast: mask fallback types:Bool
+    - THTensor* self
     - THBoolTensor* mask
 ]]
 [[
@@ -339,34 +337,6 @@
 [[
   name: _th_exp
   cname: exp
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_cos
-  cname: cos
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_tan
-  cname: tan
   types:
     - floating_point
   backends:

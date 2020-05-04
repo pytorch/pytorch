@@ -64,7 +64,6 @@ namespace jit {
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
-  _(ProfiledTensorTypeHashing)         \
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
   _(TypeTags)                          \
@@ -90,7 +89,8 @@ namespace jit {
   _(LiteInterpreterParams)             \
   _(LiteInterpreterSetState)           \
   _(TorchbindIValueAPI)                \
-  _(LiteInterpreterDict)
+  _(LiteInterpreterDict)               \
+  _(FusionAliasing)
 
 #if defined(USE_CUDA)
 #define TH_FORALL_TESTS_CUDA(_)  \
@@ -114,7 +114,6 @@ namespace jit {
   _(GPU_FusionTVReorder)         \
   _(GPU_FusionEquality)          \
   _(GPU_FusionReplaceAll)        \
-  _(GPU_FusionParser)            \
   _(GPU_FusionDependency)        \
   _(GPU_FusionCodeGen)           \
   _(GPU_FusionCodeGen2)          \

@@ -177,10 +177,6 @@ test_aten() {
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libmkldnn* build/bin
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
 
-    if [[ "$BUILD_ENVIRONMENT" == *clang* ]]; then
-      echo "Disable valgrind testing due to https://github.com/pytorch/pytorch/issues/37117"
-      VALGRIND=OFF
-    fi
     ls build/bin
     aten/tools/run_tests.sh build/bin
     assert_git_not_dirty

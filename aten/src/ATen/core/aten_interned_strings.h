@@ -715,6 +715,7 @@ _(aten, upsample_trilinear3d) \
 _(aten, upsample_trilinear3d_backward) \
 _(aten, upsample_trilinear3d_forward) \
 _(aten, values) \
+_(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \

@@ -7,6 +7,9 @@
 #include <TH/THGenerateAllTypes.h>
 
 #include <TH/generic/THStorage.cpp>
+#include <TH/THGenerateComplexTypes.h>
+
+#include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateHalfType.h>
 
 #include <TH/generic/THStorage.cpp>
@@ -20,6 +23,9 @@
 
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateAllTypes.h>
+
+#include <TH/generic/THStorageCopy.cpp>
+#include <TH/THGenerateComplexTypes.h>
 
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateHalfType.h>

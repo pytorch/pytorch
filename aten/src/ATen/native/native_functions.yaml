@@ -882,15 +882,9 @@
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _cos__cpu
-    CUDA: _cos__cuda
 
 - func: cos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _cos_out_cpu
-    CUDA: _cos_out_cuda
 
 - func: cosh(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2317,6 +2311,12 @@
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
   use_c10_dispatcher: full
 
+- func: channel_shuffle(Tensor self, int groups) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    CPU: channel_shuffle
+    QuantizedCPU: quantized_channel_shuffle
+
 - func: is_pinned(Tensor self) -> bool
   use_c10_dispatcher: full
   variants: method
@@ -2896,15 +2896,9 @@
 - func: tan_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _tan__cpu
-    CUDA: _tan__cuda
 
 - func: tan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _tan_out_cpu
-    CUDA: _tan_out_cuda
 
 - func: tanh(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3129,6 +3123,10 @@
 - func: unsqueeze_(Tensor(a!) self, int dim) -> Tensor(a!)
   variants: method
   device_guard: False
+
+- func: vander(Tensor x, int? N=None, bool increasing=False) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
 
 - func: var(Tensor self, bool unbiased=True) -> Tensor
   use_c10_dispatcher: full
@@ -5952,11 +5950,6 @@
 
 - func: hardswish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: hardswish_out
-    CUDA: hardswish_out
-    QuantizedCPU: quantized_hardswish_out
-
 
 - func: hardswish(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -6434,6 +6427,7 @@
   dispatch:
     CPU: reflection_pad1d_cpu
     CUDA: reflection_pad1d_cuda
+    QuantizedCPU: reflection_pad1d_cpu
 
 - func: reflection_pad1d_backward.grad_input(Tensor grad_output, Tensor self, int[2] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
