@@ -2090,11 +2090,9 @@ class TestQuantizedLinear(unittest.TestCase):
                     W_q.q_zero_point(), W_q_origin.q_zero_point())
 
 class TestQuantizedConv(unittest.TestCase):
-    def _test_qconv_unpack_impl(
-        self, qconv_prepack_fn, qconv_unpack_fn, inputs, strides, pads,
-        channelwise
-    ):
-        (X_data, W_data, bias_data, groups) = inputs
+    def _test_qconv_unpack_impl(self, qconv_prepack_fn, qconv_unpack_fn, inputs,
+                                strides, i_pads, o_pads, channelwise):
+        (X_data, W_data, bias_data, groups, transpose) = inputs
         (X, (X_scale, X_zero_point, X_qtype)) = X_data
         (W, (W_scale, W_zero_point, W_qtype)) = W_data
         (bias, (bias_scale, bias_zero_point, bias_qtype)) = bias_data
@@ -2114,7 +2112,12 @@ class TestQuantizedConv(unittest.TestCase):
                 W, scale=W_scale, zero_point=W_zero_point, dtype=W_qtype)
 
         dilations = (1,) * len(strides)
-        W_packed = qconv_prepack_fn(W_q, bias, strides, pads, dilations, groups)
+        if transpose:
+            W_packed = qconv_prepack_fn(W_q, bias, strides, i_pads, o_pads,
+                                        dilations, groups)
+        else:
+            W_packed = qconv_prepack_fn(W_q, bias, strides, i_pads, dilations,
+                                        groups)
         (W_unpacked, bias) = qconv_unpack_fn(W_packed)
 
         # Assert equal
@@ -2365,24 +2368,30 @@ class TestQuantizedConv(unittest.TestCase):
                                 zero_point_max=0)]),
         stride_h=st.integers(1, 3), stride_w=st.integers(1, 3),
         pad_h=st.integers(1, 2), pad_w=st.integers(1, 2),
+        out_pad_h=st.integers(1, 2), out_pad_w=st.integers(1, 2),
         channelwise=st.booleans(),
         qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_qconv_unpack(
-        self, inputs, stride_h, stride_w, pad_h, pad_w, channelwise, qengine
-    ):
+    def test_qconv_unpack(self, inputs, stride_h, stride_w, pad_h, pad_w,
+                          out_pad_h, out_pad_w, channelwise, qengine):
         if qengine not in torch.backends.quantized.supported_engines:
             return
         if qengine == 'qnnpack':
             if IS_PPC or TEST_WITH_UBSAN:
                 return
-            channelwise = False
+            assume(not channelwise)
+        transpose = inputs[-1]
+        if qengine == 'fbgemm':
+            assume(not transpose)
 
-        with override_quantized_engine(qengine):
+        if transpose:
+            qconv_prepack = torch.ops.quantized.conv_transpose2d_prepack
+        else:
             qconv_prepack = torch.ops.quantized.conv2d_prepack
-            qconv_unpack = torch.ops.quantized.conv2d_unpack
+        qconv_unpack = torch.ops.quantized.conv2d_unpack
+        with override_quantized_engine(qengine):
             self._test_qconv_unpack_impl(
                 qconv_prepack, qconv_unpack, inputs, (stride_h, stride_w),
-                (pad_h, pad_w), channelwise)
+                (pad_h, pad_w), (out_pad_h, out_pad_w), channelwise)
 
     """Tests the correctness of quantized 1D convolution op."""
     @given(batch_size=st.integers(1, 6),
@@ -2598,7 +2607,7 @@ class TestQuantizedConv(unittest.TestCase):
             qconv3d_unpack = torch.ops.quantized.conv3d_unpack
             self._test_qconv_unpack_impl(
                 qconv3d_prepack, qconv3d_unpack, inputs,
-                (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w),
+                (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w), None,
                 channelwise)
 
 
