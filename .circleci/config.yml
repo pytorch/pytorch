@@ -2337,6 +2337,9 @@ workflows:
       - pytorch_cpp_doc_push:
           requires:
             - pytorch_linux_xenial_py3_6_gcc5_4_build
+      - pytorch_doc_test:
+          requires:
+            - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_linux_test:
           name: pytorch_linux_backward_compatibility_check_test
           requires:
