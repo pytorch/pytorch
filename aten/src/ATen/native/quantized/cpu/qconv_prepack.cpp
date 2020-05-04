@@ -15,6 +15,7 @@ namespace caffe2 {
 
 #ifdef USE_FBGEMM
 // Required for cpp_custom_type_hack to work
+CAFFE_KNOWN_TYPE(PackedConvWeight<1>);
 CAFFE_KNOWN_TYPE(PackedConvWeight<2>);
 CAFFE_KNOWN_TYPE(PackedConvWeight<3>);
 #endif
@@ -79,6 +80,7 @@ class QConvPackWeightInt8 final {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
+      TORCH_CHECK(kSpatialDim != 1, "FPGEMM Doesn't support 1D conv prepack yet.");
       TORCH_CHECK(!transpose, "FBGEMM prepacking for conv_transpose is not"
                   "implemented yet")
       return fbgemm_conv_prepack(

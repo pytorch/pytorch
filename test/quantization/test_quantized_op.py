@@ -2429,6 +2429,7 @@ class TestQuantizedConv(TestCase):
         else:
             qconv_prepack = torch.ops.quantized.conv2d_prepack
         qconv_unpack = torch.ops.quantized.conv2d_unpack
+
         with override_quantized_engine(qengine):
             self._test_qconv_unpack_impl(
                 qconv_prepack, qconv_unpack, inputs, (stride_h, stride_w),
