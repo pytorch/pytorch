@@ -1,13 +1,11 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from collections import OrderedDict
 import numbers
 import warnings
 
 import torch
 import torch.nn as nn
 from torch import Tensor  # noqa: F401
-from torch import _VF
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
 
@@ -20,50 +18,6 @@ class PackedParameter(torch.nn.Module):
     def __init__(self, param):
         super(PackedParameter, self).__init__()
         self.param = param
-
-    @torch.jit.export
-    def __getstate__(self):
-        return (torch.ops.quantized.linear_unpack(self.param), self.training)
-
-    @torch.jit.export
-    def __setstate__(self, state):
-        self.param = torch.ops.quantized.linear_prepack(*state[0])
-        self.training = state[1]
-
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(PackedParameter, self)._save_to_state_dict(destination, prefix,
-                                                         keep_vars)
-        (w, b) = self.unpack()
-
-        destination[prefix + 'weight'] = w
-        destination[prefix + 'bias'] = b
-
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-        weight = state_dict[prefix + 'weight']
-        bias = state_dict[prefix + 'bias']
-        self.param = torch.ops.quantized.linear_prepack(weight, bias)
-        state_dict.pop(prefix + 'weight')
-        state_dict.pop(prefix + 'bias')
-
-        super(PackedParameter, self)._load_from_state_dict(state_dict, prefix,
-                                                           local_metadata,
-                                                           False, missing_keys,
-                                                           unexpected_keys,
-                                                           error_msgs)
-
-    def __repr__(self):
-        return repr(self.unpack())
-
-    def unpack(self):
-        return torch.ops.quantized.linear_unpack(self.param)
-
-    # This only exists because there's a bug in recursive scripting
-    # that arises only in Python 2 where a recursively scripted
-    # module does not have a forward(). We can delete this once we
-    # drop python 2 support
-    def forward(self):
-        raise RuntimeError('PackedParameter cannot be called')
 
 class RNNBase(torch.nn.Module):
 
@@ -101,38 +55,10 @@ class RNNBase(torch.nn.Module):
         else:
             raise ValueError("Unrecognized RNN mode: " + mode)
 
-        self._all_weight_names = []
         _all_weight_values = []
         for layer in range(num_layers):
             for direction in range(num_directions):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
-
-                def process_weights(ihhh, layer, suffix, qweight, bias, dtype):
-                    if dtype == torch.qint8:
-                        # for each layer, for each direction we need to quantize and pack
-                        # weights and pack parameters in this order:
-                        #
-                        #   w_ih, w_hh
-                        packed_weight = \
-                            torch.ops.quantized.linear_prepack(qweight, bias)
-
-                        params = [packed_weight]
-                        pos_names = ['w']
-                        ret_name = ['{}_{}_l{}{}'.format(
-                            name, ihhh, layer, suffix) for name in pos_names]
-                        return params, ret_name
-                    else:
-                        # for each layer, for each direction we need to quantize and pack
-                        # weights and pack parameters in this order:
-                        #
-                        #   packed_ih, packed_hh, b_ih, b_hh
-                        packed_weight = torch.ops.quantized.linear_prepack_fp16(
-                            qweight)
-
-                        params = [packed_weight, bias]
-                        pos_names = ['packed', 'b']
-                        ret_name = ['{}_{}_l{}{}'.format(name, ihhh, layer, suffix) for name in pos_names]
-                        return params, ret_name
 
                 if dtype == torch.qint8:
                     w_ih = torch._empty_affine_quantized(
@@ -144,6 +70,12 @@ class RNNBase(torch.nn.Module):
                     # bias vector is needed in standard definition.
                     b_hh = torch.empty([gate_size], dtype=torch.float)
 
+                    packed_ih = \
+                        torch.ops.quantized.linear_prepack(w_ih, b_ih)
+                    packed_hh = \
+                        torch.ops.quantized.linear_prepack(w_hh, b_hh)
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                        packed_ih, packed_hh, b_ih, b_hh)
                 else:
                     w_ih = torch.Tensor(gate_size, layer_input_size).float()
                     w_hh = torch.Tensor(gate_size, hidden_size).float()
@@ -152,17 +84,14 @@ class RNNBase(torch.nn.Module):
                     # bias vector is needed in standard definition.
                     b_hh = torch.Tensor(gate_size).float()
 
-                suffix = '_reverse' if direction == 1 else ''
-                ih_params, ih_param_names = process_weights(
-                    'ih', layer, suffix, w_ih, b_ih, dtype)
-                hh_params, hh_param_names = process_weights(
-                    'hh', layer, suffix, w_hh, b_hh, dtype)
+                    packed_ih = torch.ops.quantized.linear_prepack_fp16(w_ih)
+                    packed_hh = torch.ops.quantized.linear_prepack_fp16(w_hh)
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
+                        packed_ih, packed_hh, b_ih, b_hh)
 
-                for (ih, ih_name), (hh, hh_name) in zip(zip(ih_params, ih_param_names), zip(hh_params, hh_param_names)):
-                    self._all_weight_names.extend([ih_name, hh_name])
-                    _all_weight_values.extend([PackedParameter(p) for p in [ih, hh]])
-
-            self._all_weight_values = torch.nn.ModuleList(_all_weight_values)
+                _all_weight_values.append(PackedParameter(cell_params))
+        self._all_weight_values = torch.nn.ModuleList(_all_weight_values)
+        self._all_params = ([m.param for m in self._all_weight_values])
 
     def _get_name(self):
         return 'DynamicQuantizedRNN'
@@ -254,13 +183,6 @@ class RNNBase(torch.nn.Module):
             return hx
         return apply_permutation(hx, permutation)
 
-    @property
-    def all_weights(self):
-        result = OrderedDict()
-        for idx, name in enumerate(self._all_weight_names):
-            result[name] = self._all_weight_values[idx].unpack()
-        return result
-
     @classmethod
     def from_float(cls, mod):
         assert type(mod) == torch.nn.LSTM, 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM'
@@ -291,57 +213,49 @@ class RNNBase(torch.nn.Module):
 
         assert mod.bias
 
-        qRNNBase._all_weight_names = []
         _all_weight_values = []
         for layer in range(qRNNBase.num_layers):
             for direction in range(num_directions):
                 layer_input_size = qRNNBase.input_size if layer == 0 else qRNNBase.hidden_size * num_directions
 
-                def process_weights(ihhh, layer, suffix, dtype):
+                suffix = '_reverse' if direction == 1 else ''
+
+                def retrieve_weight_bias(ihhh):
                     weight_name = 'weight_{}_l{}{}'.format(ihhh, layer, suffix)
                     bias_name = 'bias_{}_l{}{}'.format(ihhh, layer, suffix)
-
                     weight = getattr(mod, weight_name)
                     bias = getattr(mod, bias_name)
+                    return weight, bias
 
-                    if dtype == torch.qint8:
-                        # for each layer, for each direction we need to quantize and pack
-                        # weights and pack parameters in this order:
-                        #
-                        #   w_ih, w_hh
-                        weight_observer(weight)
+                weight_ih, bias_ih = retrieve_weight_bias('ih')
+                weight_hh, bias_hh = retrieve_weight_bias('hh')
+
+                if dtype == torch.qint8:
+                    def quantize_and_pack(w, b):
+                        weight_observer(w)
                         wt_scale, wt_zp = weight_observer.calculate_qparams()
                         qweight = torch.quantize_per_tensor(
-                            weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
+                            w.float(), float(wt_scale), int(wt_zp), torch.qint8)
                         packed_weight = \
-                            torch.ops.quantized.linear_prepack(qweight, bias)
+                            torch.ops.quantized.linear_prepack(qweight, b)
+                        return packed_weight
+                    packed_ih = quantize_and_pack(weight_ih, bias_ih)
+                    packed_hh = quantize_and_pack(weight_hh, bias_hh)
 
-                        params = [packed_weight]
-                        pos_names = ['w']
-                        ret_name = ['{}_{}_l{}{}'.format(
-                            name, ihhh, layer, suffix) for name in pos_names]
-                        return params, ret_name
-                    else:
-                        # for each layer, for each direction we need to quantize and pack
-                        # weights and pack parameters in this order:
-                        #
-                        #   packed_ih, packed_hh, b_ih, b_hh
-                        packed_weight = torch.fbgemm_pack_gemm_matrix_fp16(
-                            weight.float())
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                        packed_ih, packed_hh, bias_ih, bias_hh)
+                else:
+                    packed_ih = torch.ops.quantized.linear_prepack_fp16(
+                        weight_ih.float())
+                    packed_hh = torch.ops.quantized.linear_prepack_fp16(
+                        weight_hh.float())
 
-                        params = [packed_weight, bias]
-                        pos_names = ['packed', 'b']
-                        ret_name = ['{}_{}_l{}{}'.format(name, ihhh, layer, suffix) for name in pos_names]
-                        return params, ret_name
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
+                        packed_ih, packed_hh, bias_ih, bias_hh)
 
-                suffix = '_reverse' if direction == 1 else ''
-                ih_params, ih_param_names = process_weights('ih', layer, suffix, dtype)
-                hh_params, hh_param_names = process_weights('hh', layer, suffix, dtype)
-
-                for (ih, ih_name), (hh, hh_name) in zip(zip(ih_params, ih_param_names), zip(hh_params, hh_param_names)):
-                    qRNNBase._all_weight_names.extend([ih_name, hh_name])
-                    _all_weight_values.extend([PackedParameter(p) for p in [ih, hh]])
+                _all_weight_values.append(PackedParameter(cell_params))
         qRNNBase._all_weight_values = torch.nn.ModuleList(_all_weight_values)
+        qRNNBase._all_params = ([m.param for m in qRNNBase._all_weight_values])
 
         return qRNNBase
 
@@ -373,18 +287,14 @@ class LSTM(RNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
 
-        weight_values = []
-        for mod in self._all_weight_values:
-            weight_values.append(mod.param)
-
         if batch_sizes is None:
-            result = _VF.quantized_lstm(input, hx, weight_values, self.bias, self.num_layers,
-                                        float(self.dropout), self.training, self.bidirectional,
-                                        self.batch_first, dtype=self.dtype, use_dynamic=True)
+            result = torch.quantized_lstm(input, hx, self._all_params, self.bias, self.num_layers,
+                                          float(self.dropout), self.training, self.bidirectional,
+                                          self.batch_first, dtype=self.dtype, use_dynamic=True)
         else:
-            result = _VF.quantized_lstm(input, batch_sizes, hx, weight_values, self.bias,
-                                        self.num_layers, float(self.dropout), self.training,
-                                        self.bidirectional, dtype=self.dtype, use_dynamic=True)
+            result = torch.quantized_lstm(input, batch_sizes, hx, self._all_params, self.bias,
+                                          self.num_layers, float(self.dropout), self.training,
+                                          self.bidirectional, dtype=self.dtype, use_dynamic=True)
         output = result[0]
         hidden = result[1:]
 

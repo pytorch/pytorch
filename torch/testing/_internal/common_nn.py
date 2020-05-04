@@ -226,6 +226,14 @@ module_tests = [
         desc='with_negval'
     ),
     dict(
+        module_name='LeakyReLU',
+        constructor_args=(0.0,),
+        cpp_constructor_args='torch::nn::LeakyReLUOptions().negative_slope(0.0)',
+        input_fn=lambda: torch.randn(10, 10),
+        check_inplace=True,
+        desc='with_zero_negval'
+    ),
+    dict(
         module_name='LogSigmoid',
         input_size=(2, 3, 4),
         reference_fn=lambda i, *_: i.sigmoid().log(),
