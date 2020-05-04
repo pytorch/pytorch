@@ -118,7 +118,7 @@ using qtopk_fn = void(*)(Tensor&, Tensor&, const Tensor&, int64_t, int64_t, bool
 
 using qbatch_norm_fn = void(*)(int64_t, int64_t, int64_t, int64_t, int64_t, const Tensor&, const Tensor&, const Tensor&, Tensor&);
 
-using forward_quantized_fn = void (*)(
+using qnormalize_fn = void (*)(
     const Tensor& /* X */,
     const Tensor& /* gamma */,
     const Tensor& /* beta */,
@@ -156,7 +156,7 @@ DECLARE_DISPATCH(qcat_nhwc_fn, qcat_relu_nhwc_stub);
 DECLARE_DISPATCH(qtopk_fn, qtopk_stub);
 DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_stub);
 DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_relu_stub);
-DECLARE_DISPATCH(forward_quantized_fn, quantized_normalize_stub);
+DECLARE_DISPATCH(qnormalize_fn, quantized_normalize_stub);
 
 } // namespace native
 } // namespace at
