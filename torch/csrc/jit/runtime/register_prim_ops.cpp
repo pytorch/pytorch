@@ -26,6 +26,22 @@ namespace {
 
 RegisterOperators reg(
     {Operator(
+         // note the compiler knows to type TupleIndex more accurately than it
+         // is listed here.
+         "prim::TupleIndex(Any tup, int i) -> Any",
+         [](Stack& stack) {
+           int64_t index = pop(stack).toInt();
+           auto tuple = pop(stack).toTuple();
+           auto norm_index = normalizeIndex(index, tuple->elements().size());
+           if (norm_index < 0 ||
+               norm_index > static_cast<int64_t>(tuple->elements().size())) {
+             throw std::out_of_range("Tuple list index out of range");
+           }
+           stack.emplace_back(tuple->elements()[norm_index]);
+           return 0;
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
          "prim::TupleUnpack(Any tup) -> ...",
          [](Stack& stack) {
            tupleUnpack(stack);
@@ -384,10 +400,6 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator("aten::len.t(t[] a) -> int", listLen, aliasAnalysisFromSchema()),
      Operator(
-         "aten::eq.int_list(int[] a, int[] b) -> bool",
-         listEq<int64_t>,
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::Uninitialized() -> Any",
          [](Stack& stack) {
            push(stack, IValue::uninitialized());
@@ -423,90 +435,7 @@ RegisterOperators reg(
      DEFINE_BINARY_OP(aten::add, a + b),
      DEFINE_BINARY_OP(aten::sub, a - b),
      DEFINE_BINARY_OP(aten::mul, a* b),
-     DEFINE_BOOL_OP(aten::__and__, a&& b),
-     DEFINE_BOOL_OP(aten::__or__, a || b),
-     DEFINE_BOOL_OP(aten::__xor__, a != b),
-     DEFINE_INT_FLOAT_OP(aten::pow, pow(a, b), float),
-     DEFINE_BINARY_OP(aten::pow, pow(a, b)),
-     // min and max are in prim:: because there is a difference between
-     // the python builtin 'min' and 'torch.min'
-     DEFINE_BINARY_OP(prim::min, a < b ? a : b),
-     DEFINE_BINARY_OP(prim::max, a > b ? a : b),
-     // Pass in two ops for handling int and float separately as % in C++ only
-     // works for int The modulus calculation is different between C++ and
-     // Python (on negative), we preserve the python behavior as it's more
-     // common and match python syntax, hence the conversion.
-     DEFINE_GENERIC_OP(
-         aten::remainder,
-         (b + (a % b)) % b,
-         fmod((b + fmod(a, b)), b),
-         int,
-         float),
-     DEFINE_INT_FLOAT_OP(aten::remainder, fmod((b + fmod(a, b)), b), float),
-     DEFINE_SCALAR_BINARY_OP(
-         aten::remainder,
-         (b + (a % b)) % b,
-         fmod((b + fmod(a, b)), b),
-         Scalar),
-     // NB: This is the python truediv operation
-     DEFINE_GENERIC_OP(
-         aten::div,
-         static_cast<double>(a) / static_cast<double>(b),
-         a / b,
-         float,
-         float),
-     DEFINE_SCALAR_BINARY_OP(
-         aten::div,
-         static_cast<double>(a) / static_cast<double>(b),
-         a / b,
-         float),
-     DEFINE_GENERIC_OP(
-         aten::floordiv,
-         floordiv(a, b),
-         std::floor(a / b),
-         int,
-         float),
-     DEFINE_INT_FLOAT_OP(aten::floordiv, std::floor(a / b), float),
-     DEFINE_SCALAR_BINARY_OP(
-         aten::floordiv,
-         floordiv(a, b),
-         std::floor(a / b),
-         Scalar),
-     // int ** int produces a float, because negative exponents produce float
-     // results
-     DEFINE_GENERIC_OP(
-         aten::pow,
-         static_cast<double>(pow(a, b)),
-         static_cast<double>(pow(a, b)),
-         float,
-         float),
-     DEFINE_SCALAR_BINARY_OP(
-         aten::pow,
-         static_cast<double>(pow(a, b)),
-         static_cast<double>(pow(a, b)),
-         float),
-     Operator(
-         "prim::type(Device self) -> str",
-         [](Stack& stack) {
-           auto d = pop(stack);
-           push(
-               stack,
-               DeviceTypeName(d.toDevice().type(), /* lower_case=*/true));
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     // tensor length op (size of 1st dimension)
-     Operator(
-         "aten::len.Tensor(Tensor t) -> int",
-         [](Stack& stack) {
-           at::Tensor t = pop(stack).toTensor();
-           if (t.dim() == 0) {
-             AT_ERROR("len() of a 0-d tensor");
-           }
-           push(stack, t.sizes()[0]);
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
+
      //
      // create a clone of these declarations with a _hacked_twin overload name
      // and nullability scrubbed from TensorList arg types
@@ -559,59 +488,7 @@ RegisterOperators reg(
            push(stack, std::move(result));
            return 0;
          },
-         aliasAnalysisFromSchema()),
-     // reference function parse_to_conversion in python_arg_parsing.h
-     Operator(
-         "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
-         [](Stack& stack) {
-           bool non_blocking;
-           bool copy;
-           pop(stack, non_blocking, copy);
-           c10::optional<at::ScalarType> scalarType =
-               pop(stack).toOptional<at::ScalarType>();
-           c10::optional<c10::Device> device =
-               pop(stack).toOptional<c10::Device>();
-           at::Tensor self = pop(stack).toTensor();
-           push(
-               stack,
-               to_dispatch(self, device, scalarType, non_blocking, copy));
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "prim::is_cuda(Tensor a) -> bool",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.is_cuda());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-// these ops are not defined for Tensor
-#define CREATE_COMPARATOR_LIST_OPS_SPECIALIZED(decl_type, value_type)         \
-  Operator(                                                                   \
-      "prim::min." decl_type "(" decl_type "[] l, " decl_type                 \
-      "[] r) -> " decl_type "[]",                                             \
-      minList<value_type>,                                                    \
-      aliasAnalysisFromSchema()),                                             \
-      Operator(                                                               \
-          "prim::max." decl_type "(" decl_type "[] l, " decl_type             \
-          "[] r) -> " decl_type "[]",                                         \
-          maxList<value_type>,                                                \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "prim::min.self_" decl_type "(" decl_type "[] self) -> " decl_type, \
-          listMin<value_type>,                                                \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "prim::max.self_" decl_type "(" decl_type "[] self) -> " decl_type, \
-          listMax<value_type>,                                                \
-          aliasAnalysisFromSchema()),
-     CREATE_COMPARATOR_LIST_OPS_SPECIALIZED("int", int64_t)
-         CREATE_COMPARATOR_LIST_OPS_SPECIALIZED("float", double)
-             CREATE_COMPARATOR_LIST_OPS_SPECIALIZED("bool", bool)
-#undef CREATE_COMPARATOR_LIST_OPS_SPECIALIZED
-    });
+         aliasAnalysisFromSchema())});
 
 int dictSetItem(Stack& stack) {
   auto value = pop(stack);
