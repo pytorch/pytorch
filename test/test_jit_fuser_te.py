@@ -21,6 +21,9 @@ from test_jit import JitTestCase, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
 
 from te_utils import CudaCodeGenExecuted
 
+torch._C._jit_set_profiling_executor(True)
+torch._C._jit_set_profiling_mode(True)
+
 FUSION_GROUP = 'tensorexpr::Group'
 
 def strip_profiling_nodes(nodes):

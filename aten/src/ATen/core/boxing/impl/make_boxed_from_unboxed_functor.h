@@ -34,21 +34,24 @@ namespace impl {
   // supported_primitive_arg_types defines which primitive types we allow in
   // kernel functions as arguments or returns.
   // Additionally, we support lists, dicts and optionals containing these types.
-  using supported_primitive_arg_types = guts::typelist::typelist<
+using supported_primitive_arg_types = guts::typelist::typelist<
     int64_t,
     double,
     bool,
     std::string,
     at::Tensor,
     at::Scalar,
-    c10::QScheme
-  >;
+    c10::QScheme,
+    c10::ScalarType>;
 
-  template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
-    assert_is_valid_input_type() {
-      auto tmap = c10::getCustomClassTypeMap();
-      TORCH_CHECK(c10::isCustomClassRegistered<T>(), "Tried to use undefined class as input argument");
-    }
+template <class T, bool AllowDeprecatedTypes, class Enable = void>
+struct assert_is_valid_input_type {
+  assert_is_valid_input_type() {
+    auto tmap = c10::getCustomClassTypeMap();
+    TORCH_CHECK(
+        c10::isCustomClassRegistered<T>(),
+        "Tried to use undefined class as input argument");
+  }
   };
 
   template<class T, bool AllowDeprecatedTypes>

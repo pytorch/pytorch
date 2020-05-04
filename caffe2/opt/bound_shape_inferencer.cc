@@ -157,6 +157,8 @@ void BoundShapeInferencer::InferOps(
       op.type() == "HalfToFused4BitRowwiseQuantized" ||
       op.type() == "FloatToHalf" || op.type() == "FbGemmPack") {
     InferQuantizationTransformation(op);
+  } else if (op.type() == "UnPackRecords") {
+    InferUnPackRecords(op);
   } else {
     InferCommonOp(op);
   }
@@ -707,6 +709,54 @@ void BoundShapeInferencer::InferQuantizationTransformation(
   current_dim_type_ = previous_dim_type;
 }
 
+void BoundShapeInferencer::InferUnPackRecords(const OperatorDef& op) {
+  std::vector<TensorShape> input_shapes;
+  for (const auto& input : op.input()) {
+    const auto it = shape_info_.find(input);
+    if (it == shape_info_.end()) {
+      LOG(WARNING) << "Cannot find shape info for " << input << ". Skipping "
+                   << op.type();
+      return;
+    }
+    input_shapes.emplace_back(it->second.shape);
+  }
+
+  std::vector<TensorShape> output_shapes;
+
+  ArgumentHelper helper(op);
+  std::vector<std::string> fields =
+      helper.GetRepeatedArgument<std::string>("fields");
+
+  const int num_tensors = fields.size();
+  if (spec_.max_batch_size == 1 && num_tensors == 1 &&
+      input_shapes[0].dims_size() != 1) {
+    // Special case of single tensor input
+    output_shapes.push_back(input_shapes[0]);
+  } else {
+    // Input is packed
+    TensorShape oshape;
+    oshape.add_dims(spec_.max_batch_size);
+    oshape.add_dims(spec_.num_embeddings);
+    oshape.add_dims(spec_.embedding_length);
+    // TODO: how to do this more intelligently
+    oshape.set_data_type(TensorProto::FLOAT);
+    for (int i = 0; i < num_tensors; i++) {
+      output_shapes.push_back(oshape);
+    }
+  }
+
+  for (int i = 0; i < output_shapes.size(); i++) {
+    const auto& shape = output_shapes[i];
+
+    CheckAndSetTensorBoundShape(
+        op.output(i),
+        setDimTypeWithFirst(current_dim_type_, shape.dims().size()),
+        ConvertToVec(shape.dims()),
+        output_shapes[i].data_type(),
+        false);
+  }
+}
+
 void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   // First, we need to check that all the input shape/types are already
   // presented
@@ -726,7 +776,6 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
     CAFFE_ENFORCE(schema);
     std::vector<TensorShape> output_shapes;
     output_shapes = schema->InferTensor(op, input_shapes);
-    int i = 0;
     bool is_quantized =
         !(op.type().compare(0, 4, "Int8")) && (op.type() != "Int8Dequantize");
     TensorProto::DataType infered_data_type = TensorProto::UNDEFINED;
@@ -754,16 +803,16 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
       infered_data_type = TensorProto::FLOAT;
     }
 
-    for (const auto& shape : output_shapes) {
+    for (int i = 0; i < output_shapes.size(); i++) {
+      const auto& shape = output_shapes[i];
       if (infered_data_type == TensorProto::UNDEFINED) {
         infered_data_type = shape.data_type();
       }
       if (shape.unknown_shape()) {
-        ++i;
         continue;
       }
       CheckAndSetTensorBoundShape(
-          op.output(i++),
+          op.output(i),
           setDimTypeWithFirst(current_dim_type_, shape.dims().size()),
           ConvertToVec(shape.dims()),
           infered_data_type,

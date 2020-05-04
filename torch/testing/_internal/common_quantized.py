@@ -5,6 +5,16 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import numpy as np
 import torch
 from contextlib import contextmanager
+from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_UBSAN, IS_PPC, IS_MACOS, IS_WINDOWS
+
+supported_qengines = torch.backends.quantized.supported_engines
+supported_qengines.remove('none')
+# Note: We currently do not run QNNPACK tests on WINDOWS and MACOS as it is flaky. Issue #29326
+# QNNPACK is not supported on PPC
+# QNNPACK throws ASAN heap-buffer-overflow error.
+if 'qnnpack' in supported_qengines:
+    if IS_PPC or TEST_WITH_ASAN or TEST_WITH_UBSAN or IS_MACOS or IS_WINDOWS:
+        supported_qengines.remove('qnnpack')
 
 """Computes the output shape given convolution parameters."""
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
@@ -43,18 +53,20 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     according to the min and max element of the tensor"""
     if isinstance(X, torch.Tensor):
         X = X.numpy()
-    if X.size == 0:
-        return float(1.0), int(0)
-    qinfo = torch.iinfo(dtype)
-    qmin = qinfo.min
-    qmax = qinfo.max
-    n_levels = float(qmax - qmin)
-    if reduce_range:
-        qmin = qmin // 2
-        qmax = qmax // 2
+    if dtype == torch.qint8:
+        if reduce_range:
+            qmin, qmax = -64, 63
+        else:
+            qmin, qmax = -128, 127
+    else:  # dtype == torch.quint8
+        if reduce_range:
+            qmin, qmax = 0, 127
+        else:
+            qmin, qmax = 0, 255
+    n_levels = 255.0
     min_val = X.min()
     max_val = X.max()
-    if min_val == max_val == 0:
+    if min_val == max_val:
         scale = 1.0
         zero_point = 0
     else:

@@ -2607,6 +2607,20 @@ workflows:
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
       - pytorch_linux_build:
+          name: pytorch_linux_bionic_py3_6_clang9_build
+          requires:
+            - setup
+          build_environment: "pytorch-linux-bionic-py3.6-clang9-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9:8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
+      - pytorch_linux_test:
+          name: pytorch_linux_bionic_py3_6_clang9_test
+          requires:
+            - setup
+            - pytorch_linux_bionic_py3_6_clang9_build
+          build_environment: "pytorch-linux-bionic-py3.6-clang9-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9:8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
+          resource_class: large
+      - pytorch_linux_build:
           name: pytorch_xla_linux_bionic_py3_6_clang9_build
           requires:
             - setup
@@ -2727,11 +2741,11 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
           resource_class: large
       - pytorch_linux_test:
-          name: pytorch_linux_xenial_py3_6_gcc5_4_ge_config_simple_test
+          name: pytorch_linux_xenial_py3_6_gcc5_4_ge_config_profiling_test
           requires:
             - setup
             - pytorch_linux_xenial_py3_6_gcc5_4_build
-          build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-ge_config_simple-test"
+          build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-ge_config_profiling-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
           resource_class: large
       - pytorch_linux_test:
@@ -2762,14 +2776,14 @@ workflows:
           requires:
             - setup
           build_environment: "caffe2-onnx-main-py3.6-clang7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:373"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:376"
       - caffe2_linux_test:
           name: caffe2_onnx_main_py3_6_clang7_ubuntu16_04_test
           requires:
             - setup
             - caffe2_onnx_main_py3_6_clang7_ubuntu16_04_build
           build_environment: "caffe2-onnx-main-py3.6-clang7-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:373"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:376"
           resource_class: large
       - caffe2_linux_test:
           name: caffe2_onnx_ort1_py3_6_clang7_ubuntu16_04_test
@@ -2777,7 +2791,7 @@ workflows:
             - setup
             - caffe2_onnx_main_py3_6_clang7_ubuntu16_04_build
           build_environment: "caffe2-onnx-ort1-py3.6-clang7-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:373"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:376"
           resource_class: large
       - caffe2_linux_test:
           name: caffe2_onnx_ort2_py3_6_clang7_ubuntu16_04_test
@@ -2785,7 +2799,7 @@ workflows:
             - setup
             - caffe2_onnx_main_py3_6_clang7_ubuntu16_04_build
           build_environment: "caffe2-onnx-ort2-py3.6-clang7-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:373"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:376"
           resource_class: large
       # TODO: Refactor circleci/cimodel/data/binary_build_data.py to generate this file
       #       instead of doing one offs here
@@ -6898,7 +6912,7 @@ workflows:
       - ecr_gc_job:
             name: ecr_gc_job_for_caffe2
             project: caffe2
-            tags_to_keep: "373,369,348,345,336,325,324,315,306,301,287,283,276,273,266,253,248,238,230,213"
+            tags_to_keep: "376,373,369,348,345,336,325,324,315,306,301,287,283,276,273,266,253,248,238,230,213"
       - ecr_gc_job:
             name: ecr_gc_job_for_translate
             project: translate
