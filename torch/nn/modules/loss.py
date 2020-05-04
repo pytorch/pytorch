@@ -1291,7 +1291,7 @@ class CTCLoss(_Loss):
         Labelling Unsegmented Sequence Data with Recurrent Neural Networks:
         https://www.cs.toronto.edu/~graves/icml_2006.pdf
 
-    Note:
+    .. Note::
         In order to use CuDNN, the following must be satisfied: :attr:`targets` must be
         in concatenated format, all :attr:`input_lengths` must be `T`.  :math:`blank=0`,
         :attr:`target_lengths` :math:`\leq 256`, the integer arguments must be of
@@ -1300,13 +1300,8 @@ class CTCLoss(_Loss):
         The regular implementation uses the (more common in PyTorch) `torch.long` dtype.
 
 
-    Note:
-        In some circumstances when using the CUDA backend with CuDNN, this operator
-        may select a nondeterministic algorithm to increase performance. If this is
-        undesirable, you can try to make the operation deterministic (potentially at
-        a performance cost) by setting ``torch.backends.cudnn.deterministic =
-        True``.
-        Please see the notes on :doc:`/notes/randomness` for background.
+    .. include:: cudnn_deterministic.rst
+
     """
     __constants__ = ['blank', 'reduction']
 

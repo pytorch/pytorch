@@ -125,14 +125,14 @@ class Conv1d(_ConvNd):
           of size
           :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`.
 
-    Note:
+    .. note::
 
         Depending of the size of your kernel, several (of the last)
         columns of the input might be lost, because it is a valid
         `cross-correlation`_, and not a full `cross-correlation`_.
         It is up to the user to add proper padding.
 
-    Note:
+    .. note::
 
         When `groups == in_channels` and `out_channels == K * in_channels`,
         where `K` is a positive integer, this operation is also termed in
@@ -142,14 +142,7 @@ class Conv1d(_ConvNd):
         a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
         :math:`(C_\text{in}=C_{in}, C_\text{out}=C_{in} \times K, ..., \text{groups}=C_{in})`.
 
-    Note:
-        In some circumstances when using the CUDA backend with CuDNN, this operator
-        may select a nondeterministic algorithm to increase performance. If this is
-        undesirable, you can try to make the operation deterministic (potentially at
-        a performance cost) by setting ``torch.backends.cudnn.deterministic =
-        True``.
-        Please see the notes on :doc:`/notes/randomness` for background.
-
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -158,14 +151,12 @@ class Conv1d(_ConvNd):
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
-            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
+        padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1
         groups (int, optional): Number of blocked connections from input
             channels to output channels. Default: 1
-        bias (bool, optional): If ``True``, adds a learnable bias to the
-            output. Default: ``True``
+        bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C_{in}, L_{in})`
@@ -177,8 +168,7 @@ class Conv1d(_ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-            :math:`(\text{out\_channels},
-            \frac{\text{in\_channels}}{\text{groups}}, \text{kernel\_size})`.
+            :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}}, \text{kernel\_size})`.
             The values of these weights are sampled from
             :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
             :math:`k = \frac{groups}{C_\text{in} * \text{kernel\_size}}`
@@ -267,14 +257,14 @@ class Conv2d(_ConvNd):
         - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension,
           and the second `int` for the width dimension
 
-    Note:
+    .. note::
 
          Depending of the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
-    Note:
+    .. note::
 
         When `groups == in_channels` and `out_channels == K * in_channels`,
         where `K` is a positive integer, this operation is also termed in
@@ -284,29 +274,18 @@ class Conv2d(_ConvNd):
         a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
         :math:`(in\_channels=C_{in}, out\_channels=C_{in} \times K, ..., groups=C_{in})`.
 
-    Note:
-        In some circumstances when using the CUDA backend with CuDNN, this operator
-        may select a nondeterministic algorithm to increase performance. If this is
-        undesirable, you can try to make the operation deterministic (potentially at
-        a performance cost) by setting ``torch.backends.cudnn.deterministic =
-        True``.
-        Please see the notes on :doc:`/notes/randomness` for background.
-
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): Zero-padding added to both sides of
-            the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
-            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
+        padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
+        padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
-        groups (int, optional): Number of blocked connections from input
-            channels to output channels. Default: 1
-        bias (bool, optional): If ``True``, adds a learnable bias to the
-            output. Default: ``True``
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+        bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
@@ -322,18 +301,17 @@ class Conv2d(_ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-            :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},`
-            :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]})`.
-            The values of these weights are sampled from
-            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
-        bias (Tensor):   the learnable bias of the module of shape
-            (out_channels). If :attr:`bias` is ``True``,
-            then the values of these weights are
-            sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+                         :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},`
+                         :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]})`.
+                         The values of these weights are sampled from
+                         :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+        bias (Tensor):   the learnable bias of the module of shape (out_channels). If :attr:`bias` is ``True``,
+                         then the values of these weights are
+                         sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
 
-    Examples:
+    Examples::
 
         >>> # With square kernels and equal stride
         >>> m = nn.Conv2d(16, 33, 3, stride=2)
@@ -412,14 +390,14 @@ class Conv3d(_ConvNd):
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
           the second `int` for the height dimension and the third `int` for the width dimension
 
-    Note:
+    .. note::
 
          Depending of the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
-    Note:
+    .. note::
 
         When `groups == in_channels` and `out_channels == K * in_channels`,
         where `K` is a positive integer, this operation is also termed in
@@ -429,14 +407,7 @@ class Conv3d(_ConvNd):
         a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
         :math:`(in\_channels=C_{in}, out\_channels=C_{in} \times K, ..., groups=C_{in})`.
 
-    Note:
-        In some circumstances when using the CUDA backend with CuDNN, this operator
-        may select a nondeterministic algorithm to increase performance. If this is
-        undesirable, you can try to make the operation deterministic (potentially at
-        a performance cost) by setting ``torch.backends.cudnn.deterministic =
-        True``.
-        Please see the notes on :doc:`/notes/randomness` for background.
-
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -596,14 +567,14 @@ class ConvTranspose1d(_ConvTransposeNd):
           its own set of filters (of size
           :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`).
 
-    Note:
+    .. note::
 
          Depending of the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
-    Note:
+    .. note::
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
         amount of zero padding to both sizes of the input. This is set so that
         when a :class:`~torch.nn.Conv1d` and a :class:`~torch.nn.ConvTranspose1d`
@@ -615,13 +586,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
 
-    Note:
-        In some circumstances when using the CUDA backend with CuDNN, this operator
-        may select a nondeterministic algorithm to increase performance. If this is
-        undesirable, you can try to make the operation deterministic (potentially at
-        a performance cost) by setting ``torch.backends.cudnn.deterministic =
-        True``.
-        Please see the notes on :doc:`/notes/randomness` for background.
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -727,7 +692,7 @@ class ConvTranspose2d(_ConvTransposeNd):
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
-    Note:
+    .. note::
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
         amount of zero padding to both sizes of the input. This is set so that
         when a :class:`~torch.nn.Conv2d` and a :class:`~torch.nn.ConvTranspose2d`
@@ -739,14 +704,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
 
-    Note:
-        In some circumstances when using the CUDA backend with CuDNN, this operator
-        may select a nondeterministic algorithm to increase performance. If this is
-        undesirable, you can try to make the operation deterministic (potentially at
-        a performance cost) by setting ``torch.backends.cudnn.deterministic =
-        True``.
-        Please see the notes on :doc:`/notes/randomness` for background.
-
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -876,14 +834,14 @@ class ConvTranspose3d(_ConvTransposeNd):
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
           the second `int` for the height dimension and the third `int` for the width dimension
 
-    Note:
+    .. note::
 
          Depending of the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
-    Note:
+    .. note::
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
         amount of zero padding to both sizes of the input. This is set so that
         when a :class:`~torch.nn.Conv3d` and a :class:`~torch.nn.ConvTranspose3d`
@@ -895,14 +853,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
 
-    Note:
-        In some circumstances when using the CUDA backend with CuDNN, this operator
-        may select a nondeterministic algorithm to increase performance. If this is
-        undesirable, you can try to make the operation deterministic (potentially at
-        a performance cost) by setting ``torch.backends.cudnn.deterministic =
-        True``.
-        Please see the notes on :doc:`/notes/randomness` for background.
-
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image

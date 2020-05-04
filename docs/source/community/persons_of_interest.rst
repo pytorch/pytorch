@@ -145,7 +145,7 @@ PowerPC
 -  Alfredo Mendoza (`avmgithub <https://github.com/avmgithub>`__)
 
 Library-level maintainers
--------------------------
+------------------------
 
 XLA
 ~~~
