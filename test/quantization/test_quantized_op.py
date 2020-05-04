@@ -2265,7 +2265,6 @@ class TestQuantizedConv(unittest.TestCase):
             result_ref_q.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=0)
 
     """Tests the correctness of quantized convolution op."""
-    from hypothesis import example
     @given(batch_size=st.integers(1, 3),
            input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            height=st.integers(10, 16),
