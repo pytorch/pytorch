@@ -4528,13 +4528,13 @@
   variants: method
   dispatch:
     CPU: fmod_
-    CUDA: legacy::cuda::_th_fmod_
+    CUDA: fmod_cuda_
 
 - func: fmod_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: fmod_
-    CUDA: legacy::cuda::_th_fmod_
+    CUDA: fmod_cuda_
 
 - func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
@@ -5283,26 +5283,26 @@
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: fmod_out
-    CUDA: legacy::cuda::_th_fmod_out
+    CUDA: fmod_cuda_out
 
 - func: fmod.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: fmod
-    CUDA: legacy::cuda::_th_fmod
+    CUDA: fmod_cuda
 
 - func: fmod.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: fmod_out
-    CUDA: legacy::cuda::_th_fmod_out
+    CUDA: fmod_cuda_out
 
 - func: fmod.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: fmod
-    CUDA: legacy::cuda::_th_fmod
+    CUDA: fmod_cuda
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
