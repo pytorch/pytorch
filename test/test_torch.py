@@ -15768,13 +15768,18 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for to_ in tos:
                 t = torch.empty(size, dtype=torch.bool, device=device)
                 if to_ > from_:
-                    if not (min_val <= from_ <= max_val) or not (min_val <= (to_ - 1) <= max_val):
-                        if not (min_val <= from_ <= max_val):
-                            self.assertWarnsRegex(UserWarning, "from is out of bounds",
-                                                  lambda: t.random_(from_, to_))
-                        if not (min_val <= (to_ - 1) <= max_val):
-                            self.assertWarnsRegex(UserWarning, "to - 1 is out of bounds",
-                                                  lambda: t.random_(from_, to_))
+                    if not (min_val <= from_ <= max_val):
+                        self.assertRaisesRegex(
+                            RuntimeError,
+                            "from is out of bounds",
+                            lambda: t.random_(from_, to_)
+                        )
+                    elif not (min_val <= (to_ - 1) <= max_val):
+                        self.assertRaisesRegex(
+                            RuntimeError,
+                            "to - 1 is out of bounds",
+                            lambda: t.random_(from_, to_)
+                        )
                     else:
                         t.random_(from_, to_)
                         range_ = to_ - from_
@@ -15866,13 +15871,18 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for to_ in tos:
                 t = torch.empty(size, dtype=dtype, device=device)
                 if to_ > from_:
-                    if not (min_val <= from_ <= max_val) or not (min_val <= (to_ - 1) <= max_val):
-                        if not (min_val <= from_ <= max_val):
-                            self.assertWarnsRegex(UserWarning, "from is out of bounds",
-                                                  lambda: t.random_(from_, to_))
-                        if not (min_val <= (to_ - 1) <= max_val):
-                            self.assertWarnsRegex(UserWarning, "to - 1 is out of bounds",
-                                                  lambda: t.random_(from_, to_))
+                    if not (min_val <= from_ <= max_val):
+                        self.assertRaisesRegex(
+                            RuntimeError,
+                            "from is out of bounds",
+                            lambda: t.random_(from_, to_)
+                        )
+                    elif not (min_val <= (to_ - 1) <= max_val):
+                        self.assertRaisesRegex(
+                            RuntimeError,
+                            "to - 1 is out of bounds",
+                            lambda: t.random_(from_, to_)
+                        )
                     else:
                         t.random_(from_, to_)
                         range_ = to_ - from_
@@ -15933,8 +15943,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             t = torch.empty(size, dtype=dtype, device=device)
             if to_ > from_:
                 if not (min_val <= (to_ - 1) <= max_val):
-                    self.assertWarnsRegex(UserWarning, "to - 1 is out of bounds",
-                                          lambda: t.random_(to_))
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        "to - 1 is out of bounds",
+                        lambda: t.random_(from_, to_)
+                    )
                 else:
                     t.random_(to_)
                     range_ = to_ - from_

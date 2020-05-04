@@ -389,10 +389,9 @@ void testLLVMVectorizerLoadStoreTest() {
   Buffer c_buf(BufHandle(c->func_var()), kInt);
   LoopNest l({c});
   Stmt* s = l.root_stmt();
-  l.vectorize(*dynamic_cast<Block*>(s)->stmts().begin());
+  l.vectorize(dynamic_cast<Block*>(s)->front());
 
-  ASSERT_TRUE(
-      dynamic_cast<For*>(*dynamic_cast<Block*>(s)->stmts().begin()) == nullptr);
+  ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
 
   LLVMCodeGen cg(s, {a, c_buf});
 
@@ -1319,8 +1318,7 @@ void testLLVMRFactorVectorizedReduction() {
   s = IRSimplifier::simplify(s);
 
   Block* root_block = dynamic_cast<Block*>(s);
-  auto stmt_list = root_block->stmts();
-  auto I = stmt_list.begin();
+  auto I = root_block->begin();
   ++I;
 
   For* outer_loop = dynamic_cast<For*>(*I);
