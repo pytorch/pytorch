@@ -669,7 +669,7 @@ class QConvInt8 final {
 };
 
 // kernel for maintaining backward compatibility
-template <int kSpatialDim>
+template <int kSpatialDim, bool kReluFused>
 class QConvInt8ForBC final {
  public:
   static Tensor run(
@@ -681,10 +681,19 @@ class QConvInt8ForBC final {
       int64_t groups,
       double output_scale,
       int64_t output_zero_point) {
-    TORCH_CHECK(false, "Arguments [stride, padding, dilation, groups] in \
-     ops.quantized.conv" + c10::to_string(kSpatialDim) + "d, " +
-     "ops.quantized.conv" + c10::to_string(kSpatialDim) + "d_relu, \
-     have been removed, please update your model to remove these arguments.");
+    if (kReluFused) {
+      TORCH_WARN_ONCE(
+          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv"
+          + c10::to_string(kSpatialDim) + "d_relu, " +
+          "have been removed, please update your model to remove these arguments.");
+      return packed_weight->apply_relu(act, output_scale, output_zero_point);
+    } else {
+      TORCH_WARN_ONCE(
+          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv"
+          + c10::to_string(kSpatialDim) + "d, " +
+          "have been removed, please update your model to remove these arguments.");
+      return packed_weight->apply(act, output_scale, output_zero_point);
+    }
   }
 };
 
@@ -694,10 +703,10 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl("conv3d",      QConvInt8<3, false>::run);
   m.impl("conv3d_relu", QConvInt8<3, true>::run);
   // for backward compatibility
-  m.impl("conv2d.deprecated", QConvInt8ForBC<2>::run);
-  m.impl("conv2d_relu.deprecated", QConvInt8ForBC<2>::run);
-  m.impl("conv3d.deprecated", QConvInt8ForBC<3>::run);
-  m.impl("conv3d_relu.deprecated", QConvInt8ForBC<3>::run);
+  m.impl("conv2d.deprecated", QConvInt8ForBC<2, false>::run);
+  m.impl("conv2d_relu.deprecated", QConvInt8ForBC<2, true>::run);
+  m.impl("conv3d.deprecated", QConvInt8ForBC<3, false>::run);
+  m.impl("conv3d_relu.deprecated", QConvInt8ForBC<3, true>::run);
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {

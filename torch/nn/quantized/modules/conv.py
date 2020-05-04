@@ -88,7 +88,6 @@ class _ConvNd(nn.Module):
         destination[prefix + 'weight'] = w
         destination[prefix + 'bias'] = b
         destination[prefix + 'scale'] = torch.tensor(self.scale)
-        destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
 
     @torch.jit.export
