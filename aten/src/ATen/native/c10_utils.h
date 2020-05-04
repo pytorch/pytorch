@@ -7,8 +7,11 @@ inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
   return {std::forward<Inputs>(inputs)...};
 }
 
+// Note: this is slow because it boxes every argument
+// and likely has to re-unbox them when calling the kernel.
+// Prefer calling c10::OperatorHandle::callUnboxed<Args...>(args...).
 template <class... Args>
-inline std::vector<c10::IValue> callOp(
+inline std::vector<c10::IValue> callOp_slow(
     const c10::OperatorHandle& op,
     Args... args) {
   auto stack = makeStack(std::forward<Args>(args)...);
@@ -16,8 +19,11 @@ inline std::vector<c10::IValue> callOp(
   return stack;
 }
 
+// Note: this is slow because it boxes every argument
+// and likely has to re-unbox them when calling the kernel.
+// Prefer calling c10::OperatorHandle::callUnboxed<Args...>(args...).
 template <class... Args>
-inline std::vector<c10::IValue> callOp(
+inline std::vector<c10::IValue> callOp_slow(
     const char* func_name,
     const char* overload_name,
     Args... args) {

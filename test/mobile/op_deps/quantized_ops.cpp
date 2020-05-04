@@ -18,14 +18,14 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other);
 template <>
 Tensor _add_out<false>(Tensor& out, const Tensor& self, const Tensor& other) {
   const auto kName = "quantized::t_helper1";
-  callOp(kName, "", self);
+  callOp_slow(kName, "", self);
   return out;
 }
 
 template <>
 Tensor _add_out<true>(Tensor& out, const Tensor& self, const Tensor& other) {
   const auto kName = "quantized::t_helper2";
-  callOp(kName, "", self);
+  callOp_slow(kName, "", self);
   return out;
 }
 
@@ -43,7 +43,7 @@ Tensor QHelper(Tensor qa) {
   std::cout << "Op: " << opName << std::endl;
   if (callOpName != nullptr) {
     std::cout << "Call op: " << callOpName << std::endl;
-    callOp(callOpName, "", qa);
+    callOp_slow(callOpName, "", qa);
   }
   return qa;
 }
