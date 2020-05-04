@@ -150,6 +150,14 @@ RangeEventList& getEventList() {
     }
   }
 
+  void setCallbackHandle(CallbackHandle handle) {
+    handle_ = handle;
+  }
+
+  CallbackHandle callbackHandle() const {
+    return handle_;
+  }
+
  private:
   // not thread safe
   RangeEventList& getEventList(int64_t thread_id = -1) {
@@ -170,19 +178,26 @@ RangeEventList& getEventList() {
   std::unordered_map<uint16_t, std::shared_ptr<RangeEventList>>
       event_lists_map_;
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false);
+  CallbackHandle handle_;
 };
 
-void pushProfilingCallbacks(bool needs_inputs = false) {
-  pushCallback(
-      [needs_inputs](const RecordFunction& fn) {
-        const auto& state = at::ThreadLocalDebugInfo::get(at::DebugInfoKind::PROFILER_STATE);
-        auto state_ptr = dynamic_cast<ProfilerThreadLocalState*>(state.get());
+ProfilerThreadLocalState* getProfilerTLSState() {
+  const auto& state = at::ThreadLocalDebugInfo::get(at::DebugInfoKind::PROFILER_STATE);
+  return static_cast<ProfilerThreadLocalState*>(state.get());
+}
+
+void pushProfilingCallbacks() {
+  auto state_ptr = getProfilerTLSState();
+  TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
+  auto handle = addThreadLocalCallback(RecordFunctionCallback(
+      [](const RecordFunction& fn) {
+        auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
-          return true;
+          return;
         }
 
         auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
-        if (needs_inputs) {
+        if (state_ptr->config().report_input_shapes) {
           std::vector<std::vector<int64_t>> inputSizes;
           inputSizes.reserve(fn.inputs().size());
           for (const c10::IValue& input : fn.inputs()) {
@@ -201,23 +216,23 @@ void pushProfilingCallbacks(bool needs_inputs = false) {
         } else {
           state_ptr->pushRange(fn.name(), msg, fn.seqNr(), {});
         }
-        return true;
       },
       [](const RecordFunction& fn) {
-        const auto& state = at::ThreadLocalDebugInfo::get(at::DebugInfoKind::PROFILER_STATE);
-        auto state_ptr = dynamic_cast<ProfilerThreadLocalState*>(state.get());
+        auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
         }
         state_ptr->popRange(fn.getStartCallbacksThreadId());
-      },
-      needs_inputs,
-      /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE},
-      CallbackKind::PROFILER);
+      })
+    .needsInputs(state_ptr->config().report_input_shapes)
+    .scopes({RecordScope::FUNCTION, RecordScope::USER_SCOPE}));
+  state_ptr->setCallbackHandle(handle);
 }
 
 void removeProfilingCallbacks() {
-  removeCallback(CallbackKind::PROFILER);
+  auto state_ptr = getProfilerTLSState();
+  TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
+  removeCallback(state_ptr->callbackHandle());
 }
 
 bool unused_ = []() {
@@ -245,7 +260,7 @@ bool unused_ = []() {
   if(state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
     // to generate some dummy events first before recording synchronization events
-    for (int i = 0; i < kCUDAWarmupStart; i++) {
+    for (int idx = 0; idx < kCUDAWarmupStart; ++idx) {
       cuda_stubs->onEachDevice([state](int /* unused */) {
           state->mark("__cuda_startup");
           cuda_stubs->synchronize();
@@ -263,16 +278,13 @@ bool unused_ = []() {
 }
 
 thread_event_lists disableProfiler() {
-  auto state = at::ThreadLocalDebugInfo::pop(at::DebugInfoKind::PROFILER_STATE);
-  auto state_ptr = dynamic_cast<ProfilerThreadLocalState*>(state.get());
-  TORCH_CHECK(state_ptr && state_ptr->config().state != ProfilerState::Disabled,
+  // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
+  auto state = at::ThreadLocalDebugInfo::_pop(at::DebugInfoKind::PROFILER_STATE);
+  TORCH_CHECK(state && state->config().state != ProfilerState::Disabled,
       "Can't disable profiler when it's not running");
 
-  --profiler_nested_depth_;
-  if (profiler_nested_depth_ == 0) {
-    c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, false);
-    removeProfilingCallbacks();
-  }
+  g_.pop_back();
+  removeProfilingCallbacks();
 
   TORCH_INTERNAL_ASSERT(!callback_handles_.empty());
   at::removeCallback(callback_handles_.back());
@@ -283,9 +295,9 @@ thread_event_lists disableProfiler() {
     return thread_event_lists();
   }
 
-  state_ptr->mark("__stop_profile");
+  state->mark("__stop_profile");
 
-  return state_ptr->consolidate();
+  return state->consolidate();
 }
 
 void Event::record(bool record_cuda) {
