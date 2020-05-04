@@ -331,6 +331,9 @@ class THCCachingAllocator {
 
     *devPtr = block->ptr;
 
+    c10::reportMemoryUsageToProfiler(
+        c10::Device(c10::DeviceType::CUDA, device), block->size);
+
     update_stat_array(stats.allocation, 1, stat_types);
     update_stat_array(stats.allocated_bytes, block->size, stat_types);
     update_stat_array(stats.active, 1, stat_types);
@@ -352,6 +355,9 @@ class THCCachingAllocator {
     Block* block = it->second;
     allocated_blocks.erase(it);
     block->allocated = false;
+
+    c10::reportMemoryUsageToProfiler(
+        c10::Device(c10::DeviceType::CUDA, block->device), -block->size);
 
     DeviceStats& stats = get_stats_for_device(block->device);
     StatTypes stat_types;

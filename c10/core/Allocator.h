@@ -214,4 +214,19 @@ struct AllocatorRegisterer {
   static AllocatorRegisterer<t> g_allocator_d(f); \
   }
 
+// An interface for reporting thread local memory usage
+// per device
+struct MemoryUsageReporter {
+  MemoryUsageReporter() {}
+  virtual ~MemoryUsageReporter() {}
+
+  // Negative alloc_size corresponds to freeing of the memory
+  virtual void reportMemoryUsage(Device device, int64_t alloc_size) = 0;
+
+  virtual bool memoryProfilingEnabled() const = 0;
+};
+
+C10_API bool memoryProfilingEnabled();
+C10_API void reportMemoryUsageToProfiler(Device device, int64_t alloc_size);
+
 } // namespace c10

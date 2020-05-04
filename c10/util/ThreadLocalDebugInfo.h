@@ -6,11 +6,10 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include <ATen/core/ivalue.h>
 
-namespace at {
+namespace c10 {
 
-enum class DebugInfoKind : uint8_t {
+enum class C10_API DebugInfoKind : uint8_t {
   PRODUCER_INFO = 0,
   MOBILE_RUNTIME_INFO,
   PROFILER_STATE,
@@ -19,7 +18,7 @@ enum class DebugInfoKind : uint8_t {
   TEST_INFO_2, // used only in tests
 };
 
-class CAFFE2_API DebugInfoBase {
+class C10_API DebugInfoBase {
  public:
   DebugInfoBase() {}
   virtual ~DebugInfoBase() {}
@@ -31,22 +30,22 @@ class CAFFE2_API DebugInfoBase {
 // the higher layers (e.g. model id) down to the lower levels
 // (e.g. to the operator observers used for debugging, logging,
 // profiling, etc)
-class CAFFE2_API ThreadLocalDebugInfo {
+class C10_API ThreadLocalDebugInfo {
  public:
-  static std::shared_ptr<DebugInfoBase> get(DebugInfoKind kind);
+  static C10_API std::shared_ptr<DebugInfoBase> get(DebugInfoKind kind);
 
   // Get current ThreadLocalDebugInfo
-  static std::shared_ptr<ThreadLocalDebugInfo> current();
+  static C10_API std::shared_ptr<ThreadLocalDebugInfo> current();
 
   // Internal, use DebugInfoGuard/ThreadLocalStateGuard
-  static void _forceCurrentDebugInfo(
+  static C10_API void _forceCurrentDebugInfo(
       const std::shared_ptr<ThreadLocalDebugInfo>& info);
 
   // Push debug info struct of a given kind
-  static void _push(DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
+  static C10_API void _push(DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
   // Pop debug info, throws in case the last pushed
   // debug info is not of a given kind
-  static std::shared_ptr<DebugInfoBase> _pop(DebugInfoKind kind);
+  static C10_API std::shared_ptr<DebugInfoBase> _pop(DebugInfoKind kind);
 
  private:
   std::shared_ptr<DebugInfoBase> debug_info_;
@@ -62,7 +61,7 @@ class CAFFE2_API ThreadLocalDebugInfo {
 // Nested DebugInfoGuard adds/overrides existing values in the scope,
 // restoring the original values after exiting the scope.
 // Users can access the values through the ThreadLocalDebugInfo::get() call;
-class CAFFE2_API DebugInfoGuard {
+class C10_API DebugInfoGuard {
  public:
   DebugInfoGuard(
       DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
@@ -80,4 +79,4 @@ class CAFFE2_API DebugInfoGuard {
   std::shared_ptr<ThreadLocalDebugInfo> prev_info_ = nullptr;
 };
 
-} // namespace at
+} // namespace c10

@@ -41,7 +41,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("NVTX", ProfilerState::NVTX);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
-      .def(py::init<ProfilerState, bool>());
+      .def(py::init<ProfilerState, bool, bool>());
 
   py::class_<Event>(m, "ProfilerEvent")
       .def("kind", &Event::kind)
@@ -51,7 +51,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("cpu_elapsed_us", &Event::cpu_elapsed_us)
       .def("cuda_elapsed_us", &Event::cuda_elapsed_us)
       .def("has_cuda", &Event::has_cuda)
-      .def("shapes", &Event::shapes);
+      .def("shapes", &Event::shapes)
+      .def("cpu_memory_usage", &Event::cpu_memory_usage)
+      .def("cuda_memory_usage", &Event::cuda_memory_usage);
 
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
