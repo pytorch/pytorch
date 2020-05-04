@@ -22,6 +22,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def("conv2d_relu(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor");
   m.def("conv3d(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor");
   m.def("conv3d_relu(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor");
+  m.def("conv_transpose2d(Tensor qx, Tensor weight, int[] stride, int[] input_padding, int[] output_padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor");
   // conv_prepack is deprecated, please use conv2d_prepack for 2D conv.
   m.def("conv_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor");
   m.def("conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor");
@@ -31,6 +32,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def("conv_unpack(Tensor packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
   m.def("conv2d_unpack(Tensor packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
   m.def("conv3d_unpack(Tensor packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
+  m.def("conv_transpose2d_unpack(Tensor packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
   m.def("hardswish(Tensor input, float output_scale, int output_zero_point) -> Tensor");
   m.def("layer_norm(Tensor input, int[] normalized_shape, Tensor weight, Tensor bias, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("linear(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
@@ -62,6 +64,7 @@ TORCH_LIBRARY(_quantized, m) {
   m.def("add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
   m.def("conv2d(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor");
   m.def("conv2d_relu(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor");
+  m.def("conv_transpose2d(Tensor qx, Tensor weight, int[] stride, int[] input_padding, int[] output_padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor");
   m.def("conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor");
   m.def("conv_transpose2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] input_padding, int[] output_padding, int[] dilation, int groups) -> Tensor");
   m.def("linear(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");

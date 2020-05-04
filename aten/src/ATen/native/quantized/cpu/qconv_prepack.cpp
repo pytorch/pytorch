@@ -281,8 +281,8 @@ class QConvPackWeightInt8 final {
 
     // QNNPACK expects weights to be of the format {out_c, kH, kW, in_c/groups},
     // but PyTorch lays them out as {out_c, in_c/groups, kH, kW}
-    const size_t out_ch = weight.size(0);
-    const size_t in_ch = weight.size(1) * groups;
+    const size_t out_ch = transpose ? weight.size(1) * groups : weight.size(0);
+    const size_t in_ch = transpose ? weight.size(0) : weight.size(1) * groups;
     const uint32_t kernel_h = weight.size(2);
     const uint32_t kernel_w = weight.size(3);
 
@@ -307,8 +307,8 @@ class QConvPackWeightInt8 final {
     uint32_t stride_w = stride[1];
     uint32_t input_pad_t = input_padding[0];
     uint32_t input_pad_l = input_padding[1];
-    uint32_t output_height_adjustment = output_padding[0] * 2;
-    uint32_t output_width_adjustment = output_padding[1] * 2;
+    uint32_t output_height_adjustment = output_padding[0];
+    uint32_t output_width_adjustment = output_padding[1];
     uint32_t dilation_h = dilation[0];
     uint32_t dilation_w = dilation[1];
 
