@@ -136,7 +136,9 @@ static void check_1d(const Tensor& t, const char* arg, const char* fn) {
 Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::_addr(self, vec1, vec2, beta, alpha);
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr");
+  return at::_addr(b_self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
@@ -148,7 +150,9 @@ Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta,
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::_addr_out(result, self, vec1, vec2, beta, alpha);
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr_out");
+  return at::_addr_out(result, b_self, vec1, vec2, beta, alpha);
 }
 
 Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
@@ -157,6 +161,7 @@ Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
   if (result.dim() != 2 || result.size(0) != self.size(0) || result.size(1) != vec2.size(0)) {
     result.resize_({ self.size(0), vec2.size(0) });
   }
+  // resize_ does the "broadcasting", don't need to broadcast again.
   return at::_addr_out(result, result, self, vec2, Scalar(0), Scalar(1));
 }
 
