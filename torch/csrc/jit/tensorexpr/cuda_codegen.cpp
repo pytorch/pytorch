@@ -635,7 +635,7 @@ class NoThreadIdxRewriter : public IRMutator {
   }
 
   Stmt* mutate(const Block* v) override {
-    std::list<Stmt*> old_stmts = v->stmts();
+    std::list<Stmt*> old_stmts(v->begin(), v->end());
     std::vector<bool> need_rewrites(old_stmts.size());
     std::vector<Stmt*> new_stmts(old_stmts.size());
     int index = 0;
