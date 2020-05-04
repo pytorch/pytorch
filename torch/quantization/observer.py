@@ -898,9 +898,7 @@ class HistogramObserver(_ObserverBase):
             self.min_val.copy_(min_val)
             self.max_val.resize_(max_val.shape)
             self.max_val.copy_(max_val)
-            new_histogram = torch.histc(x, self.bins, min=min_val, max=max_val)
-            self.histogram.resize_(new_histogram.shape)
-            self.histogram.copy_(new_histogram)
+            torch.histc(x, self.bins, min=min_val, max=max_val, out=self.histogram)
         else:
             new_min = torch.min(x)
             new_max = torch.max(x)
