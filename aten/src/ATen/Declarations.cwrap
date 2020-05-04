@@ -676,8 +676,7 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - arg: THTensor* self
-      broadcast: vec1,vec2 dims:vec1.dim0,vec2.dim0
+    - THTensor* self
     - THTensor* vec1
     - THTensor* vec2
     - real beta
