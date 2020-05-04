@@ -287,14 +287,18 @@ class QDeConv1dInt8 final {
                     int64_t groups,
                     double output_scale,
                     int64_t output_zero_point) {
+    // N, C, L -> N, C, 1, L
+    act = act.unsqueeze(_internal::kConv1dSqueezeDim + 2);
     stride = _internal::MakeArgForConv1d(stride, 1);
     input_padding = _internal::MakeArgForConv1d(input_padding, 0);
     output_padding = _internal::MakeArgForConv1d(output_padding, 0);
     dilation = _internal::MakeArgForConv1d(dilation, 1);
-    return QDeConv2dInt8::run(act, packed_weight, stride,
-                              input_padding, output_padding,
-                              dilation, groups,
-                              output_scale, output_zero_point);
+    Tensor result2d = QDeConv2dInt8::run(act, packed_weight, stride,
+                                         input_padding, output_padding,
+                                         dilation, groups,
+                                         output_scale, output_zero_point);
+    // N, C, 1, L -> N, C, L
+    return result2d.squeeze_(_internal::kConv1dSqueezeDim + 2);
   }
 };
 
