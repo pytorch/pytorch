@@ -69,6 +69,13 @@ at::Tensor& random_impl(at::Tensor& self, c10::optional<Generator> generator) {
 #define CHECK_OUT_OF_BOUNDS(var, name, min, max, dtype) \
   TORCH_CHECK(var >= min && var <= max, name , " is out of bounds for ", dtype); \
 
+#define WARN_OUT_OF_BOUNDS(var, name, digits, dtype) \
+  if (var < -(1LL << digits) || var > (1LL << digits)) { \
+    TORCH_WARN(name , " is out of bounds [-(2^", digits, "), 2^", digits, "]. ", \
+      "Due to precision limitations ", dtype, " can support discrete uniform distribution only within this range. ", \
+      "This warning will become an error in version 1.7 release, please fix the code in advance"); \
+  }
+
 static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMeta dtype) {
   const auto scalar_type = typeMetaToScalarType(dtype);
   if (isFloatingType(scalar_type)) {
@@ -77,6 +84,10 @@ static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
       const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
       CHECK_OUT_OF_BOUNDS(from, "from", min, max, dtype);
       CHECK_OUT_OF_BOUNDS(to_inc, "to - 1", min, max, dtype);
+
+      constexpr auto digits = std::numeric_limits<scalar_t>::digits;
+      WARN_OUT_OF_BOUNDS(from, "from", digits, dtype);
+      WARN_OUT_OF_BOUNDS(to_inc, "to - 1", digits, dtype);
     });
   } else if (isIntegralType(scalar_type, /*includeBool=*/true)) {
     AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, scalar_type, "check_random_integral_bounds", [&]() {
@@ -326,5 +337,7 @@ Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Ge
 }
 
 #undef CHECK_OUT_OF_BOUNDS
+#undef WARN_OUT_OF_BOUNDS
 
 }}}
+
