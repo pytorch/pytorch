@@ -738,82 +738,80 @@ inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
   return _mm256_xor_si256(a, b);
 }
 
-const Vec256<int64_t> Vec256<int64_t>::ones(1);
-
 Vec256<int64_t> Vec256<int64_t>::eq(const Vec256<int64_t>& other) const {
-  return (*this == other) & Vec256<int64_t>::ones;
+  return (*this == other) & Vec256<int64_t>(1);
 }
 
 Vec256<int64_t> Vec256<int64_t>::ne(const Vec256<int64_t>& other) const {
-  return (*this != other) & Vec256<int64_t>::ones;
+  return (*this != other) & Vec256<int64_t>(1);
 }
 
 Vec256<int64_t> Vec256<int64_t>::gt(const Vec256<int64_t>& other) const {
-  return (*this > other) & Vec256<int64_t>::ones;
+  return (*this > other) & Vec256<int64_t>(1);
 }
 
 Vec256<int64_t> Vec256<int64_t>::ge(const Vec256<int64_t>& other) const {
-  return (*this >= other) & Vec256<int64_t>::ones;
+  return (*this >= other) & Vec256<int64_t>(1);
 }
 
 Vec256<int64_t> Vec256<int64_t>::lt(const Vec256<int64_t>& other) const {
-  return (*this < other) & Vec256<int64_t>::ones;
+  return (*this < other) & Vec256<int64_t>(1);
 }
 
 Vec256<int64_t> Vec256<int64_t>::le(const Vec256<int64_t>& other) const {
-  return (*this <= other) & Vec256<int64_t>::ones;
+  return (*this <= other) & Vec256<int64_t>(1);
 }
 
-const Vec256<int32_t> Vec256<int32_t>::ones(1);
+const Vec256<int32_t> Vec256<int32_t>(1)(1);
 
 Vec256<int32_t> Vec256<int32_t>::eq(const Vec256<int32_t>& other) const {
-  return (*this == other) & Vec256<int32_t>::ones;
+  return (*this == other) & Vec256<int32_t>(1);
 }
 
 Vec256<int32_t> Vec256<int32_t>::ne(const Vec256<int32_t>& other) const {
-  return (*this != other) & Vec256<int32_t>::ones;
+  return (*this != other) & Vec256<int32_t>(1);
 }
 
 Vec256<int32_t> Vec256<int32_t>::gt(const Vec256<int32_t>& other) const {
-  return (*this > other) & Vec256<int32_t>::ones;
+  return (*this > other) & Vec256<int32_t>(1);
 }
 
 Vec256<int32_t> Vec256<int32_t>::ge(const Vec256<int32_t>& other) const {
-  return (*this >= other) & Vec256<int32_t>::ones;
+  return (*this >= other) & Vec256<int32_t>(1);
 }
 
 Vec256<int32_t> Vec256<int32_t>::lt(const Vec256<int32_t>& other) const {
-  return (*this < other) & Vec256<int32_t>::ones;
+  return (*this < other) & Vec256<int32_t>(1);
 }
 
 Vec256<int32_t> Vec256<int32_t>::le(const Vec256<int32_t>& other) const {
-  return (*this <= other) & Vec256<int32_t>::ones;
+  return (*this <= other) & Vec256<int32_t>(1);
 }
 
-const Vec256<int16_t> Vec256<int16_t>::ones(1);
+const Vec256<int16_t> Vec256<int16_t>(1)(1);
 
 Vec256<int16_t> Vec256<int16_t>::eq(const Vec256<int16_t>& other) const {
-  return (*this == other) & Vec256<int16_t>::ones;
+  return (*this == other) & Vec256<int16_t>(1);
 }
 
 Vec256<int16_t> Vec256<int16_t>::ne(const Vec256<int16_t>& other) const {
-  return (*this != other) & Vec256<int16_t>::ones;
+  return (*this != other) & Vec256<int16_t>(1);
 }
 
 Vec256<int16_t> Vec256<int16_t>::gt(const Vec256<int16_t>& other) const {
-  return (*this > other) & Vec256<int16_t>::ones;
+  return (*this > other) & Vec256<int16_t>(1);
 }
 
 Vec256<int16_t> Vec256<int16_t>::ge(const Vec256<int16_t>& other) const {
-  return (*this >= other) & Vec256<int16_t>::ones;
+  return (*this >= other) & Vec256<int16_t>(1);
 }
 
 Vec256<int16_t> Vec256<int16_t>::lt(const Vec256<int16_t>& other) const {
-  return (*this < other) & Vec256<int16_t>::ones;
+  return (*this < other) & Vec256<int16_t>(1);
 }
 
 Vec256<int16_t> Vec256<int16_t>::le(const Vec256<int16_t>& other) const {
-  return (*this <= other) & Vec256<int16_t>::ones;
+  return (*this <= other) & Vec256<int16_t>(1);
 }
 
 #endif
