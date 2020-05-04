@@ -105,7 +105,7 @@ struct TORCH_API RecordFunction {
   // Retrieves the thread_id that this RecordFunction ran start callbacks with.
   // Useful for writing thread safe end callbacks that may be potentially
   // executed in a different thread (async ops)
-  inline uint16_t getStartCallbacksThreadId() const {
+  inline uint64_t getStartCallbacksThreadId() const {
     return thread_id_;
   }
 
@@ -117,7 +117,7 @@ struct TORCH_API RecordFunction {
   static RecordFunction* current();
 
   // Returns logical thread_id for the current thread
-  static uint16_t currentThreadId();
+  static uint64_t currentThreadId();
 
   // Internal functions, do not use directly;
   // used in python's context manager
@@ -187,7 +187,7 @@ struct TORCH_API RecordFunction {
   const RecordScope scope_;
 
   // The logical thread_id that this RecordFunction was created with
-  uint16_t thread_id_ = 0;
+  uint64_t thread_id_ = 0;
 };
 
 //
@@ -350,9 +350,8 @@ class TORCH_API RecordFunctionCallback {
 //    for the specific piece of code (range) and are not sampled
 //  - a typical use case for thread local callbacks is profiler and code
 //    execution tracer
-//     - note, some functionality (e.g. profiler) can automatically
-//       propagate its calbacks across thread by using ThreadLocalState
-//       mechanism, but in general callbacks are not propagated
+//  - note, thread local callbacks are automatically propagated with
+//    ThreadLocalState across JIT continuations and async tasks (at::launch)
 //  - adding/removing global callbacks is not thread safe and should be done
 //    only when no other code is running, e.g. during the initialization
 
