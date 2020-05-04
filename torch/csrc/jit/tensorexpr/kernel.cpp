@@ -1391,34 +1391,11 @@ void TensorExprKernel::compile() {
 
 TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
     : graph_(subgraph), code_(subgraph, "") {
-  if (!fallbackAllowed()) {
-    compile();
-    return;
-  }
-
-  try {
-    compile();
-  } catch (...) {
-    fallback_ = true;
-  }
+  compile();
 }
 
 void TensorExprKernel::run(Stack& stack) {
-  if (!fallbackAllowed()) {
-    runKernel(stack);
-    return;
-  }
-
-  if (fallback_) {
-    fallback(stack);
-    return;
-  }
-  try {
-    runKernel(stack);
-  } catch (...) {
-    fallback_ = true;
-    fallback(stack);
-  }
+  runKernel(stack);
 }
 
 std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
