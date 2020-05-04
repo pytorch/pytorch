@@ -566,7 +566,9 @@ Q: How do I store attributes on a :class:`ScriptModule`?
 
     .. testcode::
 
-        class Model(nn.Module):
+        import torch
+
+        class Model(torch.nn.Module):
             def __init__(self):
                 super(Model, self).__init__()
                 self.x = 2
