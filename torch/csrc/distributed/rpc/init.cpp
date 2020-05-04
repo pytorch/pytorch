@@ -15,7 +15,6 @@
 #include <torch/types.h>
 
 #include <pybind11/chrono.h>
-#include <pybind11/functional.h>
 #include <pybind11/operators.h>
 
 namespace torch {
@@ -23,18 +22,6 @@ namespace distributed {
 namespace rpc {
 
 namespace {
-
-// Wrap Python function to guard deref
-struct PythonFunction {
-  explicit PythonFunction(py::function func) : func_(std::move(func)) {}
-
-  ~PythonFunction() {
-    pybind11::gil_scoped_acquire ag;
-    func_ = py::none();
-  }
-
-  py::function func_;
-};
 
 constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
 constexpr float kSecToMsConversion = 1000;
@@ -345,118 +332,23 @@ PyObject* rpc_init(PyObject* /* unused */) {
   // pythonRpcHandler is cleaned up in shutdown(), after
   // shutdown(), python objects returned from rpc python call can not be
   // resolved.
-  shared_ptr_class_<FutureIValue>(module, "Future")
-      .def(py::init())
-      .def(
-          "wait",
-          [&](FutureIValue& fut) {
-            auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-            const auto& value = fut.wait();
-            pybind11::gil_scoped_acquire ag;
-            auto obj = torch::jit::toPyObject(value);
-            pythonRpcHandler.handleException(obj);
-            return obj;
-          },
-          py::call_guard<py::gil_scoped_release>(),
-          R"(
+  auto future = shared_ptr_class_<FutureIValue>(module, "Future")
+                    .def(
+                        "wait",
+                        [&](FutureIValue& fut) {
+                          auto& pythonRpcHandler =
+                              PythonRpcHandler::getInstance();
+                          const auto& value = fut.wait();
+                          pybind11::gil_scoped_acquire ag;
+                          auto obj = torch::jit::toPyObject(value);
+                          pythonRpcHandler.handleException(obj);
+                          return obj;
+                        },
+                        py::call_guard<py::gil_scoped_release>(),
+                        R"(
 Wait on future to complete and return the object it completed with.
 If the future completes with an error, an exception is thrown.
-          )")
-      .def(
-          "add_done_callback",
-          [&](FutureIValue& fut, py::function cb) {
-            // We need this an additional layer of wrapper here to guard the
-            // destruction of the py::function object. Because, the
-            // FutureIValue owns a reference to the py::function in its
-            // callback vector, but FutureIValue does not acquire GIL on
-            // destruction and it does not need to do so either. FutureIValue
-            // only acquires GIL if the IValue holds a py::object. However,
-            // nothing prevents applications to insert py::function as callbacks
-            // non-py::object FutureIValue. For example, the application can
-            // call a TorchScript function using rpc_async, and then append
-            // py::function as a callback. Hence, we use PythonFunction wrapper
-            // here to explicitly acquire GIL and decouple value destruction and
-            // callback destruction.
-            PythonFunction pf(std::move(cb));
-            fut.addCallback([pf](const FutureIValue& fut) {
-              pybind11::gil_scoped_acquire ag;
-              pf.func_(fut);
-            });
-          },
-          py::call_guard<py::gil_scoped_release>(),
-          R"(
-              Registers a callback to the ``Future``, which will be fired
-              when the value in ``Future`` is ready. Multiple callbacks can
-              be added to the same ``Future``, and will be invoked in the
-              same order as they were added. The callback takes one argument,
-              which is the reference to this ``Future``. The callback function
-              can use the ``Future.wait()`` API to get the value.
-
-              Arguments:
-                  callback (callable): a Python callable, which takes this
-                  ``Future`` object as the only argument.
-
-              Example::
-                  >>> from torch.distributed import rpc
-                  >>> import torch
-                  >>>
-                  >>> def callback(fut):
-                  >>>     print(f"RPC return value is {fut.wait()}.")
-                  >>>
-                  >>> fut = rpc.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
-                  >>> # The inserted callback will print the return value when
-                  >>> # receiving the response from "worker1"
-                  >>> fut.add_done_callback(callback)
-          )")
-      .def(
-          "set_result",
-          [&](FutureIValue& fut, py::object result) {
-            fut.markCompleted(
-                torch::jit::toIValue(std::move(result), PyObjectType::get()));
-          },
-          py::call_guard<py::gil_scoped_release>(),
-          R"(
-              Set the result for this ``Future``, which will mark this
-              ``Future`` as completed and trigger all attached callbacks. Note
-              that as a ``Future`` cannot be marked completed twice,
-              applications should never call this method on a ``Future``
-              returned by :meth:`~torch.distributed.rpc.rpc_async`, because the
-              RPC system will also set result for that ``Future`` when the
-              response is received. This method should only be called on
-              ``Future`` objects created using the ``rpc.Future()`` constructor.
-
-              Arguments:
-                  result (object): the result object of this ``Future``.
-
-              Example::
-                  >>> from torch.distributed import rpc
-                  >>> import torch
-                  >>>
-                  >>> fut = rpc.Future()
-                  >>> rpc_fut = rpc.async(
-                  >>>     "worker1",
-                  >>>     torch.add,
-                  >>>     args=(torch.ones(2), 1)
-                  >>> )
-                  >>> rpc_fut.add_done_callback(
-                  >>>     lambda rpc_fut : fut.set_result(rpc_fut.wait() + 1)
-                  >>> )
-                  >>> print(fut.wait())  # tensor([3., 3.])
-          )")
-      .def(
-          "__getstate__",
-          [](const FutureIValue& /* unused */) {
-            TORCH_CHECK(
-                false, "Can not pickle rpc.Future or send it over RPC.");
-          },
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "__setstate__",
-          [](const FutureIValue& /* unused */, const py::tuple& /* unused */) {
-            TORCH_CHECK(
-                false, "Can not unpickle rpc.Future or send it over RPC.");
-          },
-          py::call_guard<py::gil_scoped_release>());
+              )");
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,
