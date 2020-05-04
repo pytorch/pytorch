@@ -11225,7 +11225,7 @@ class TestNNDeviceType(NNTestCase):
     def test_maxpool3d_non_square_backward(self, device):
         # previous CUDA routine of this backward calculates kernel launch grid size
         # with last two dimensions interchanged, so the tailing along the longer dim
-        # get ignored. Here we test whether every potision gets gradient.
+        # get ignored. Here we test whether every position gets gradient.
         for dim in (2, 3, 4):
             shape = tuple(32 if i != dim else 256 for i in range(4))
             x = torch.randn(shape, device=device, requires_grad=True)
