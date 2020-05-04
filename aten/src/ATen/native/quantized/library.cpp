@@ -35,6 +35,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def("conv_unpack(Tensor packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
   m.def("conv2d_unpack(Tensor packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
   m.def("conv3d_unpack(Tensor packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
+  m.def("conv_transpose1d_unpack(Tensor packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
   m.def("conv_transpose2d_unpack(Tensor packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
   m.def("hardswish(Tensor input, float output_scale, int output_zero_point) -> Tensor");
   m.def("layer_norm(Tensor input, int[] normalized_shape, Tensor weight, Tensor bias, float eps, float output_scale, int output_zero_point) -> Tensor");

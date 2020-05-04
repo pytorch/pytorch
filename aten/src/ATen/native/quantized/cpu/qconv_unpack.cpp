@@ -147,6 +147,7 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   m.impl("conv2d_unpack", QConvUnpackWeightsInt8<2>::run);
   m.impl("conv3d_unpack", QConvUnpackWeightsInt8<3>::run);
   // conv_transpose unpacking is the same as the conv
+  m.impl("conv_transpose1d_unpack", QConvUnpackWeightsInt8<2>::run);
   m.impl("conv_transpose2d_unpack", QConvUnpackWeightsInt8<2>::run);
 }
 
