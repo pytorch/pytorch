@@ -124,7 +124,10 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
   if (IsComparisonOp(n->kind())) {
     // For comparison ops, always promote scalar type to highest among inputs,
     // regardless if that input is a tensor or scalar.
-    typesFromScalars.insert(typesFromScalars.end(), typesFromTensors.begin(), typesFromTensors.end());
+    typesFromScalars.insert(
+        typesFromScalars.end(),
+        typesFromTensors.begin(),
+        typesFromTensors.end());
     st = PromoteScalarTypes(typesFromScalars);
   } else {
     if (typesFromScalars.size() == n->inputs().size()) {
@@ -144,7 +147,8 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
               [&st](const c10::ScalarType& type) { return type != st; })) {
         std::cerr
             << "Warning: ONNX Scalar Type Analysis - Scalar types mismatch for tensor inputs of operator "
-            << n->kind().toDisplayString() << ". Please report a bug to PyTorch. "
+            << n->kind().toDisplayString()
+            << ". Please report a bug to PyTorch. "
             << "The scalar type " << c10::toString(*st)
             << " of the first tensor is chosen." << std::endl;
       }
