@@ -31,7 +31,7 @@ void ThreadLocalDebugInfo::_forceCurrentDebugInfo(
 }
 
 /* static */
-void ThreadLocalDebugInfo::push(
+void ThreadLocalDebugInfo::_push(
     DebugInfoKind kind,
     std::shared_ptr<DebugInfoBase> info) {
   auto prev_info = debug_info;
@@ -42,7 +42,7 @@ void ThreadLocalDebugInfo::push(
 }
 
 /* static */
-std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::pop(DebugInfoKind kind) {
+std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_pop(DebugInfoKind kind) {
   TORCH_CHECK(
       debug_info && debug_info->kind_ == kind,
       "Expected debug info of type ", (size_t)kind);
@@ -58,7 +58,7 @@ DebugInfoGuard::DebugInfoGuard(
     return;
   }
   prev_info_ = debug_info;
-  ThreadLocalDebugInfo::push(kind, info);
+  ThreadLocalDebugInfo::_push(kind, info);
   active_ = true;
 }
 
