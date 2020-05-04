@@ -29,6 +29,7 @@ class EventList(list):
         self._use_cuda = use_cuda
 
     def __str__(self):
+        self.populate_cpu_children()
         return self.table()
 
     def populate_cpu_children(self):
