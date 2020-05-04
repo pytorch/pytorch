@@ -36,10 +36,10 @@ inline Tensor from_blob(
         " does not match device of data ", device);
   }
   auto storage = Storage(
+      Storage::use_byte_size_t(),
       options.dtype(),
-      detail::computeStorageSize(sizes, strides),
-      InefficientStdFunctionContext::makeDataPtr(
-          data, deleter, device),
+      detail::computeStorageNbytes(sizes, strides, options.dtype().itemsize()),
+      InefficientStdFunctionContext::makeDataPtr(data, deleter, device),
       /*allocator=*/nullptr,
       /*resizable=*/false);
   return empty({0}, options).set_(storage, 0, sizes, strides);
@@ -67,8 +67,9 @@ inline Tensor from_blob(
         " does not match device of data ", device);
   }
   auto storage = Storage(
+      Storage::use_byte_size_t(),
       options.dtype(),
-      detail::computeStorageSize(sizes, strides),
+      detail::computeStorageNbytes(sizes, strides, options.dtype().itemsize()),
       DataPtr(data, nullptr, [](void*) {}, device),
       /*allocator=*/nullptr,
       /*resizable=*/false);
