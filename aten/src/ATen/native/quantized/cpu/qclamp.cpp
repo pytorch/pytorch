@@ -31,9 +31,9 @@ Tensor qnnpack_clamp(Tensor input, Scalar min, Scalar max) {
   auto min_f = min.to<float>();
   auto max_f = max.to<float>();
   uint8_t min_q =
-      at::quantize_val<quint8>(input.q_scale(), input.q_zero_point(), min_f).val_;
+      at::native::quantize_val<quint8>(input.q_scale(), input.q_zero_point(), min_f).val_;
   uint8_t max_q =
-      at::quantize_val<quint8>(input.q_scale(), input.q_zero_point(), max_f).val_;
+      at::native::quantize_val<quint8>(input.q_scale(), input.q_zero_point(), max_f).val_;
 
   pytorch_qnnp_operator_t clamp_op{nullptr};
   const pytorch_qnnp_status createStatus = pytorch_qnnp_create_clamp_nc_u8(
