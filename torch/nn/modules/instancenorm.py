@@ -52,8 +52,7 @@ class _InstanceNorm(_NormBase):
 class InstanceNorm1d(_InstanceNorm):
     r"""Applies Instance Normalization over a 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
-    `Instance Normalization: The Missing Ingredient for Fast Stylization
-    <https://arxiv.org/abs/1607.08022>`__.
+    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
     .. math::
 
@@ -113,6 +112,9 @@ class InstanceNorm1d(_InstanceNorm):
         >>> m = nn.InstanceNorm1d(100, affine=True)
         >>> input = torch.randn(20, 100, 40)
         >>> output = m(input)
+
+    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
+        https://arxiv.org/abs/1607.08022
     """
 
     def _check_input_dim(self, input):
@@ -131,8 +133,7 @@ class InstanceNorm1d(_InstanceNorm):
 class InstanceNorm2d(_InstanceNorm):
     r"""Applies Instance Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
-    `Instance Normalization: The Missing Ingredient for Fast Stylization
-    <https://arxiv.org/abs/1607.08022>`__.
+    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
     .. math::
 
@@ -192,6 +193,9 @@ class InstanceNorm2d(_InstanceNorm):
         >>> m = nn.InstanceNorm2d(100, affine=True)
         >>> input = torch.randn(20, 100, 35, 45)
         >>> output = m(input)
+
+    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
+        https://arxiv.org/abs/1607.08022
     """
 
     def _check_input_dim(self, input):
@@ -203,8 +207,7 @@ class InstanceNorm2d(_InstanceNorm):
 class InstanceNorm3d(_InstanceNorm):
     r"""Applies Instance Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
-    `Instance Normalization: The Missing Ingredient for Fast Stylization
-    <https://arxiv.org/abs/1607.08022>`__.
+    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
     .. math::
 
@@ -264,6 +267,9 @@ class InstanceNorm3d(_InstanceNorm):
         >>> m = nn.InstanceNorm3d(100, affine=True)
         >>> input = torch.randn(20, 100, 35, 45, 10)
         >>> output = m(input)
+
+    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
+        https://arxiv.org/abs/1607.08022
     """
 
     def _check_input_dim(self, input):

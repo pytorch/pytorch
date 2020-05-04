@@ -15,7 +15,7 @@ def _with_args(cls_or_self, **kwargs):
     This can be useful when there is a need to create classes with the same
     constructor arguments, but different instances.
 
-    Example::
+    .. Example::
 
         >>> Foo.with_args = classmethod(_with_args)
         >>> foo_builder = Foo.with_args(a=3, b=4).with_args(answer=42)

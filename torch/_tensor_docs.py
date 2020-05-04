@@ -1384,13 +1384,7 @@ The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
 
-Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
+.. include:: cuda_deterministic.rst
 
 Args:
     dim (int): dimension along which to index
@@ -2517,13 +2511,7 @@ dimensions. It is also required that ``index.size(d) <= src.size(d)`` for all
 dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``.
 
-Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
+.. include:: cuda_deterministic.rst
 
 Args:
     dim (int): the axis along which to index

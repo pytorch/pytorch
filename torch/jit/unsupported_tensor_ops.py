@@ -45,7 +45,6 @@ Unsupported Tensor Methods
     """
     methods, properties = _gen_unsupported_methods_properties()
     return header + "\n" + methods + """
-
 Unsupported Tensor Properties
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """ + "\n" + properties
