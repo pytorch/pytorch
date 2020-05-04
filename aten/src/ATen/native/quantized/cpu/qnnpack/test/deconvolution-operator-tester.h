@@ -18,6 +18,10 @@
 #include <vector>
 
 #include <pytorch_qnnpack.h>
+#include <qnnpack_func.h>
+
+#include "test_utils.h"
+using namespace qnnpack::testing;
 
 class DeconvolutionOperatorTester {
  public:
@@ -374,7 +378,7 @@ class DeconvolutionOperatorTester {
     return this->iterations_;
   }
 
-  void testQ8() const {
+  void testQ8(const Mode mode = Mode::Static) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -494,60 +498,108 @@ class DeconvolutionOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
-      pytorch_qnnp_operator_t deconvolution = nullptr;
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_create_deconvolution2d_nhwc_q8(
-              paddingTop(),
-              paddingRight(),
-              paddingBottom(),
-              paddingLeft(),
-              adjustmentHeight(),
-              adjustmentWidth(),
-              kernelHeight(),
-              kernelWidth(),
-              strideHeight(),
-              strideWidth(),
-              dilationHeight(),
-              dilationWidth(),
-              groups(),
-              groupInputChannels(),
-              groupOutputChannels(),
-              inputZeroPoint,
-              1.0f /* input scale */,
-              kernelZeroPoint,
-              1.0f /* kernel scale */,
-              kernel.data(),
-              bias.data(),
-              outputZeroPoint,
-              outputScale,
-              qmin(),
-              qmax(),
-              0,
-              &deconvolution));
+      switch(mode) {
+        case Mode::Static:
+        {
+          pytorch_qnnp_operator_t deconvolution = nullptr;
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
-              deconvolution,
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_create_deconvolution2d_nhwc_q8(
+                  paddingTop(),
+                  paddingRight(),
+                  paddingBottom(),
+                  paddingLeft(),
+                  adjustmentHeight(),
+                  adjustmentWidth(),
+                  kernelHeight(),
+                  kernelWidth(),
+                  strideHeight(),
+                  strideWidth(),
+                  dilationHeight(),
+                  dilationWidth(),
+                  groups(),
+                  groupInputChannels(),
+                  groupOutputChannels(),
+                  inputZeroPoint,
+                  1.0f /* input scale */,
+                  kernelZeroPoint,
+                  1.0f /* kernel scale */,
+                  kernel.data(),
+                  bias.data(),
+                  outputZeroPoint,
+                  outputScale,
+                  qmin(),
+                  qmax(),
+                  0,
+                  &deconvolution));
+
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
+                  deconvolution,
+                  batchSize(),
+                  inputHeight(),
+                  inputWidth(),
+                  inputPtr,
+                  inputPixelStride(),
+                  output.data(),
+                  outputPixelStride(),
+                  nullptr /* thread pool */));
+
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_run_operator(deconvolution, nullptr /* thread pool */));
+
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_delete_operator(deconvolution));
+          deconvolution = nullptr;
+        }
+        break;
+
+        case Mode::Runtime:
+        {
+          qnnpack::conv_param_t deconv_p(
+            {kernelWidth(), kernelHeight()},
+            {strideWidth(), strideHeight()},
+            {dilationWidth(), dilationHeight()},
+            {paddingTop(), paddingLeft(), paddingBottom(), paddingRight()},
+            {adjustmentWidth(), adjustmentHeight()},
+            groups(),
+            groupInputChannels() * groups(),
+            groupOutputChannels() * groups(),
+            kernelZeroPoint,
+            /*kernel_scale=*/1.0,
+            qmin(),
+            qmax(),
+            /*transpose=*/true);
+          auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
+              new qnnpack::PrePackConvWeights(
+                  deconv_p,
+                  kernel.data(),
+                  bias.data()));
+          const pytorch_qnnp_status runStatus = qnnpack::qnnpackDeConv(
+              deconv_p,
+              packW->getPackedWeights(),
               batchSize(),
               inputHeight(),
               inputWidth(),
+              /*input_scale=*/1.0,
+              inputZeroPoint,
               inputPtr,
-              inputPixelStride(),
+              outputScale,
+              outputZeroPoint,
               output.data(),
-              outputPixelStride(),
-              nullptr /* thread pool */));
+              nullptr);
+          ASSERT_EQ(pytorch_qnnp_status_success, runStatus);
+        }
+        break;
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_run_operator(deconvolution, nullptr /* thread pool */));
-
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_delete_operator(deconvolution));
-      deconvolution = nullptr;
+        default:
+          ASSERT_TRUE(false);
+      }
 
       for (size_t i = 0; i < batchSize(); i++) {
         for (size_t y = 0; y < outputHeight(); y++) {

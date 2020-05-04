@@ -11,17 +11,27 @@
 #include <pytorch_qnnpack.h>
 #include <qnnpack/operator.h>
 
+#ifndef SAFE_FREE
+#define SAFE_FREE(ptr)  \
+if (ptr != NULL) {      \
+  free((ptr));          \
+  (ptr) = NULL;         \
+}
+#endif
+
 enum pytorch_qnnp_status pytorch_qnnp_delete_operator(
     pytorch_qnnp_operator_t op) {
   if (op == NULL) {
     return pytorch_qnnp_status_invalid_parameter;
   }
 
-  free(op->indirection_buffer);
-  free(op->packed_weights);
-  free(op->a_sum);
-  free(op->zero_buffer);
-  free(op->lookup_table);
-  free(op);
+  SAFE_FREE(op->indirection_buffer);
+  SAFE_FREE(op->packed_weights);
+  SAFE_FREE(op->a_sum);
+  SAFE_FREE(op->zero_buffer);
+  SAFE_FREE(op->lookup_table);
+  SAFE_FREE(op);
   return pytorch_qnnp_status_success;
 }
+
+#undef SAFE_FREE
