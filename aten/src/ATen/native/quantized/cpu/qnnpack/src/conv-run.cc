@@ -293,6 +293,11 @@ enum pytorch_qnnp_status qnnpackConv(
   const size_t dilation_height = conv_p.dilation[1];
   const size_t groups = conv_p.groups;
 
+  if (batch_size == 0) {
+    // If no batches, return
+    return pytorch_qnnp_status_success;
+  }
+
   const float convolution_scale =
       input_scale * conv_p.kernel_scale / output_scale;
   if (convolution_scale >= 1.0f) {
