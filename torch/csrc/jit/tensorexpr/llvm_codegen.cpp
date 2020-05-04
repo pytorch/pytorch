@@ -962,7 +962,7 @@ void LLVMCodeGenImpl::visit(const For* v) {
 }
 
 void LLVMCodeGenImpl::visit(const Block* v) {
-  for (Stmt* s : v->stmts()) {
+  for (Stmt* s : *v) {
     s->accept(this);
   }
 }
