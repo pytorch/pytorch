@@ -24,9 +24,8 @@ namespace {
 typedef Val* CgValue;
 typedef Expr* CgOp;
 
-typedef void (*ParseFuncPtr)(
-    const Node* const,
-    std::unordered_map<size_t, CgValue>&);
+typedef void (
+    *ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue>&);
 
 // TODO: add a mutex to make it thread safe.
 class IrParser {
@@ -167,10 +166,13 @@ class IrParser {
           ptr_op,
           [](const Node* const node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
-            static std::unordered_map<Symbol, std::pair<BinaryOpType,decltype(&add_alpha)>> op_mapping({
-                {aten::add, std::make_pair(BinaryOpType::Add, &add_alpha)},
-                {aten::sub, std::make_pair(BinaryOpType::Sub, &sub_alpha)},
-            });
+            static std::unordered_map<
+                Symbol,
+                std::pair<BinaryOpType, decltype(&add_alpha)>>
+                op_mapping({
+                    {aten::add, std::make_pair(BinaryOpType::Add, &add_alpha)},
+                    {aten::sub, std::make_pair(BinaryOpType::Sub, &sub_alpha)},
+                });
             // TODO: handle scaling factor when it's not constant 1;
             auto lhs = value_map[node->inputs()[0]->unique()];
             auto rhs = value_map[node->inputs()[1]->unique()];
