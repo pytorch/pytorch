@@ -207,8 +207,8 @@ ExprHandle Buf::make(
     const std::string& name_hint,
     const std::vector<ExprHandle>& dims,
     Dtype dtype) {
-  return ExprHandle(new Buf(
-      new Var(name_hint, kHandle), ExprHandleVectorToExprVector(dims), dtype));
+  return ExprHandle(
+      new Buf(name_hint, ExprHandleVectorToExprVector(dims), dtype));
 }
 
 ExprHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
