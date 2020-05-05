@@ -155,6 +155,11 @@ struct ProfilerThreadLocalState
       auto & list = it->second;
       result.emplace_back(list->consolidate());
     }
+    size_t total_elem_num = 0;
+    for (const auto& list : result) {
+      total_elem_num += list.size();
+    }
+    std::cerr << "in state consolidate, event_lists_map_.size(): " << event_lists_map_.size() << ", total_elem_num = " << total_elem_num << std::endl;
     return result;
   }
 
