@@ -35,13 +35,13 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <c10/util/Metaprogramming.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
 #include <c10/util/C++17.h>
+#include <c10/util/Metaprogramming.h>
 
 // Marks a lambda as executable on both the host and device. The __host__
 // attribute is important so that we can access static type information from
