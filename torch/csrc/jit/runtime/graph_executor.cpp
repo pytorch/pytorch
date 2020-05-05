@@ -781,7 +781,7 @@ void runNondiffOptimization(
 
   FuseGraph(graph, strict_fuser_check);
 
-  fuseTensorExprs(graph);
+  FuseTensorExprs(graph);
 
   // Run custom post-fusion passes
   for (const auto& passPair : getCustomPostPasses()) {

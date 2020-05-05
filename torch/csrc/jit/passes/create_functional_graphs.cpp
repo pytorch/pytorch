@@ -322,11 +322,12 @@ struct MutationRemover {
       Node* list_construct = mutated_value->node();
       list_construct->addInput(node->inputs().at(1));
       node->output()->replaceAllUsesWith(mutated_value);
-      aliasDb_->writeIndex_.erase(node);
+      aliasDb_->writeIndex_->erase(node);
       node->destroy();
 
       // TODO: don't strictly need to reset write cache, evaluate on models
-      aliasDb_->isWriteCacheStale_ = true;
+      aliasDb_->writtenToLocationsIndex_ =
+          aliasDb_->buildWrittenToLocationsIndex();
     }
   }
 
@@ -377,20 +378,21 @@ struct MutationRemover {
       // same aliasing relationships as the original x.
       // To avoid rebuilding the entire alias db, we can replace
       // the memory dag element of x with x0.
-      aliasDb_->replaceMemoryLocation(mutated_value, new_node->output());
+      aliasDb_->replaceWithNewValue(mutated_value, new_node->output());
 
       // it is an invariant that all mutable types have an element in the memory
       // dag so we must regive x an alias db element. We have already verified
       // that the mutated value is a fresh alias with a single use.
-      aliasDb_->giveFreshAlias(mutated_value);
+      aliasDb_->createValue(mutated_value);
 
       // We must erase the destroyed node from the AliasDb lists of writes
-      aliasDb_->writeIndex_.erase(node);
+      aliasDb_->writeIndex_->erase(node);
       node->destroy();
 
       // now that we have removed a mutating op, the write cache is stale
       // TODO: don't strictly need to reset write cache, evaluate on models
-      aliasDb_->isWriteCacheStale_ = true;
+      aliasDb_->writtenToLocationsIndex_ =
+          aliasDb_->buildWrittenToLocationsIndex();
     }
   }
 
