@@ -2249,6 +2249,9 @@
   use_c10_dispatcher: full
   supports_named_tensor: True
 
+- func: _euclidean_dist(Tensor x1, Tensor x2) -> Tensor
+  use_c10_dispatcher: full
+
 - func: _cdist_forward(Tensor x1, Tensor x2, float p, int? compute_mode) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
