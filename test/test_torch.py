@@ -14988,7 +14988,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # tests (o, s)*(s).  o is output size, s is summed size.
         o = 5
         s = 3
-        a_data = torch.arange(1, o * s, o * s - 1, device=device, dtype=dtype).view(o, s)
+        a_data = torch.arange(1, o * s + 1, device=device, dtype=dtype).view(o, s)
         x_data = torch.arange(1, s + 1, 1, device=device, dtype=dtype)
         y_data = torch.ones(o, device=device, dtype=dtype)
         control = torch.tensor([15., 33., 51., 69., 87.], device=device, dtype=dtype)
