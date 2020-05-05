@@ -606,4 +606,43 @@ struct ExponentialKernel {
   }
 };
 
+// ==================================================== Cauchy ========================================================
+
+template<typename RNG>
+void cauchy_kernel(TensorIterator& iter, double median_, double sigma_, RNG gen) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "cauchy_cuda", [&] {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto median = static_cast<accscalar_t>(median_);
+    auto sigma = static_cast<accscalar_t>(sigma_);
+    if (std::is_same<scalar_t, double>::value) {
+      // define lambda for cauchy transformation
+      auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
+        return static_cast<scalar_t>(median + sigma *
+                ::tan(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
+      };
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
+        cauchy_func);
+    } else {
+      // use __tanf fast approximation for peak bandwidth
+      auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
+        return static_cast<scalar_t>(median + sigma *
+                __tanf(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
+      };
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
+        cauchy_func);
+    }
+   });
+}
+
+template<typename RNG>
+struct CauchyKernel {
+  void operator()(TensorIterator& iter, double median, double sigma, c10::optional<Generator> gen) {
+    cauchy_kernel(iter, median, sigma, check_generator<RNG>(gen));
+  }
+};
+
 }}}}

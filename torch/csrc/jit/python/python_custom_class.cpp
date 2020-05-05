@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/python/python_custom_class.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 
+#include <fmt/format.h>
+
 namespace torch {
 namespace jit {
 
@@ -13,10 +15,10 @@ py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
   Function* init_fn = instance.type()->findMethod("__init__");
   TORCH_CHECK(
       init_fn,
-      "Custom C++ class: '",
-      instance.type()->python_str(),
-      "' does not have an '__init__' method bound. "
-      "Did you forget to add '.def(torch::init<...>)' to its registration?")
+      fmt::format(
+          "Custom C++ class: '{}' does not have an '__init__' method bound. "
+          "Did you forget to add '.def(torch::init<...>)' to its registration?",
+          instance.type()->python_str()));
   Method init_method(instance._ivalue(), init_fn);
   invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
   return py::cast(instance);
@@ -44,11 +46,11 @@ void initPythonCustomClassBindings(PyObject* module) {
         auto named_type = getCustomClass(full_qualname);
         TORCH_CHECK(
             named_type,
-            "Tried to instantiate class ",
-            ns + "." + qualname,
-            " but it"
-            " does not exist! Ensure that it is registered via torch::jit"
-            "::class_");
+            fmt::format(
+                "Tried to instantiate class '{}.{}', but it does not exist! "
+                "Ensure that it is registered via torch::jit::class_",
+                ns,
+                qualname));
         c10::ClassTypePtr class_type = named_type->cast<ClassType>();
         return ScriptClass(c10::StrongTypePtr(
             std::shared_ptr<CompilationUnit>(), std::move(class_type)));

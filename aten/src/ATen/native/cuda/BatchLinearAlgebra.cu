@@ -986,39 +986,7 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cuda(const Tensor& self, bool p
     self_working_copy = cloneBatchedColumnMajor(self);
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_cuda", [&]{
         apply_lu<scalar_t>(self_working_copy, pivots_tensor, infos_tensor, pivot);
-        if (self.dim() > 2 && pivot && m == n && m <= 32) {
-          /*
-            The magma implementation of small singular square batch
-            matrices has a bug that results nan values in the LU
-            factorization results, see
-            https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
-
-            TODO: disable this block for magma versions that implement a bug fix
-          */
-          auto batch_size = infos_tensor.numel();
-          auto infos_array = infos_tensor.view({batch_size});
-          auto infos_cpu = infos_array.to(at::kCPU);
-          auto infos_data = infos_cpu.data_ptr<int>();
-          auto input_array = self.view({batch_size, m, n});
-          auto working_array = self_working_copy.view({batch_size, m, n});
-          auto pivots_array = pivots_tensor.view({batch_size, k});
-          for (int64_t i = 0; i < batch_size; i++) {
-            auto info = infos_data[i];
-            if (info > 0) {
-              /*
-                We'll recompute LU factorization of singular matrices
-                using the non-batch implementation to workaround the
-                magma bug (magma issue 13).
-              */
-              working_array[i].copy_(input_array[i]);
-              auto matrix = working_array[i];
-              auto pivots = pivots_array[i];
-              auto infos = infos_array[i];
-              apply_lu<scalar_t>(matrix, pivots, infos, pivot);
-            }
-          }
-        }
-      });
+    });
   }
   if (check_errors) {
     if (self.dim() == 2) {
