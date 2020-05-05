@@ -152,3 +152,49 @@ register_backend(
     _process_group_construct_rpc_backend_options_handler,
     _process_group_init_backend_handler,
 )
+
+def _tensorpipe_construct_rpc_backend_options_handler(
+    rpc_timeout,
+    init_method,
+    worker_name_to_id=None,
+    **kwargs
+):
+    from . import TensorPipeRpcBackendOptions
+
+    assert (
+        worker_name_to_id is not None
+    ), "worker_name_to_id must be provided as a kwargs."
+    rpc_backend_options = TensorPipeRpcBackendOptions()
+    rpc_backend_options.rpc_timeout = rpc_timeout
+    rpc_backend_options.init_method = init_method
+    rpc_backend_options.worker_name_to_id = worker_name_to_id
+    return rpc_backend_options
+
+
+def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
+    from . import TensorPipeRpcBackendOptions
+    from . import TensorPipeAgent
+
+    if not isinstance(store, dist.Store):
+        raise RuntimeError("`store` must be a c10d::Store. {}".format(store))
+
+    if not isinstance(
+        rpc_backend_options, TensorPipeRpcBackendOptions
+    ):
+        raise RuntimeError(
+            "`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`. {}".format(
+                rpc_backend_options
+            )
+        )
+
+    agent = TensorPipeAgent(
+        rank, name, store, rpc_backend_options
+    )
+    return agent
+
+
+register_backend(
+    "TENSORPIPE",
+    _tensorpipe_construct_rpc_backend_options_handler,
+    _tensorpipe_init_backend_handler,
+)

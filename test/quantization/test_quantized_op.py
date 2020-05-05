@@ -490,36 +490,39 @@ class TestQuantizedOps(TestCase):
            min_val=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
            max_val=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
     def test_hardtanh(self, X, min_val, max_val):
-        X, (scale, zero_point, torch_type) = X
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            return
+        with override_quantized_engine('fbgemm'):
+            X, (scale, zero_point, torch_type) = X
 
-        assume(min_val <= max_val)
-        Y = X.copy()
-        Y[Y < min_val] = min_val
-        Y[Y > max_val] = max_val
-        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
-                                       zero_point=zero_point, dtype=torch_type)
-        X = torch.from_numpy(X)
-        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
+            assume(min_val <= max_val)
+            Y = X.copy()
+            Y[Y < min_val] = min_val
+            Y[Y > max_val] = max_val
+            qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
+                                           zero_point=zero_point, dtype=torch_type)
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
 
-        ops_under_test = {
-            'nn.quantized.functional.hardtanh':
-                torch.nn.quantized.functional.hardtanh,
-        }
+            ops_under_test = {
+                'nn.quantized.functional.hardtanh':
+                    torch.nn.quantized.functional.hardtanh,
+            }
 
-        for name, op in ops_under_test.items():
-            qY_hat = op(qX, min_val, max_val)
-            self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
+            for name, op in ops_under_test.items():
+                qY_hat = op(qX, min_val, max_val)
+                self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
 
-        ops_under_test_inplace = {
-            'inplace nn.quantized.functional.hardtanh':
-                torch.nn.quantized.functional.hardtanh,
-        }
+            ops_under_test_inplace = {
+                'inplace nn.quantized.functional.hardtanh':
+                    torch.nn.quantized.functional.hardtanh,
+            }
 
-        for name, op_ in ops_under_test_inplace.items():
-            qY_hat = qX.clone()
-            op_(qY_hat, min_val, max_val, inplace=True)
-            self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
+            for name, op_ in ops_under_test_inplace.items():
+                qY_hat = qX.clone()
+                op_(qY_hat, min_val, max_val, inplace=True)
+                self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
 
     """Tests the correctness of the quantized::hardswish op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
@@ -2979,6 +2982,34 @@ class TestQNNPackOps(TestCase):
                        qparams=hu.qparams(dtypes=(torch.quint8))))
     def test_qhardsigmoid(self, X):
         _test_hardsigmoid(self, X, 'qnnpack')
+
+    """Tests the correctness of the quantized::hardtanh op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
+           min_val=hu.floats(-1e6, -9.999999974752427e-07, allow_nan=False, allow_infinity=False),
+           max_val=hu.floats(9.999999974752427e-07, 1e6, allow_nan=False, allow_infinity=False))
+    def test_hardtanh(self, X, min_val, max_val):
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            return
+        with override_quantized_engine('qnnpack'):
+            X, (scale, zero_point, torch_type) = X
+
+            assume(min_val <= max_val)
+            Y = X.copy()
+            Y[Y < min_val] = min_val
+            Y[Y > max_val] = max_val
+            qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
+                                           zero_point=zero_point, dtype=torch_type)
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+
+            qY_hat = torch.nn.quantized.functional.hardtanh(qX, min_val, max_val)
+            self.assertEqual(
+                qY, qY_hat,
+                message="hardtanh failed:\nactual {}\nexpected {}".format(qY_hat, qY))
+
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
