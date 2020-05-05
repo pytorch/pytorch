@@ -495,6 +495,17 @@ void GraphTask::exec_post_processing() {
   // added in between callback calls, so iterators may become invalidated.
   // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < final_callbacks_.size(); ++i) {
+    // for (const auto& leaf_stream : leaf_streams) {
+    //   const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+    //   const auto default_stream = guard.getDefaultStream(leaf_stream.device());
+    //   const auto currentStream = guard.getStream(leaf_stream.device());
+    //   if (default_stream != currentStream) {
+    //     LOG(INFO) << "[engine]: diff streams (current stream != default stream)";
+    //   } else {
+    //     LOG(INFO) << "[engine]: same streams (current stream == default stream)";
+    //   }
+    //   break;
+    // }
     cb_lock.unlock();
     final_callbacks_[i]();
     cb_lock.lock();
@@ -1013,7 +1024,7 @@ auto Engine::ready_queue(std::shared_ptr<ReadyQueue> cpu_ready_queue, at::Device
 
 auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, int device_index) -> std::shared_ptr<ReadyQueue> {
   if (device_index == CPU_DEVICE) {
-    // return the cpu ready queue passed in 
+    // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {

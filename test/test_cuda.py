@@ -17,7 +17,7 @@ from torch import multiprocessing as mp
 from torch._six import inf, nan, container_abcs
 
 from test_torch import _TestTorchMixin
-
+from torch.autograd import Variable
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
@@ -1906,6 +1906,12 @@ class TestCuda(TestCase):
         default_stream = torch.cuda.current_stream()
         stream = torch.cuda.Stream()
 
+        def validate_callback_stream():
+            if torch.cuda.current_stream() == default_stream:
+                print("current_stream is default stream")
+            # Same assert as in the backward func below
+            self.assertEqual(torch.cuda.current_stream(), stream)
+
         class MultiplyInStream(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
@@ -1913,6 +1919,7 @@ class TestCuda(TestCase):
 
             @staticmethod
             def backward(ctx, grad):
+                Variable._execution_engine.queue_callback(validate_callback_stream)
                 self.assertEqual(torch.cuda.current_stream(), stream)
                 # delays the operation in the the background stream
                 torch.cuda._sleep(1000 * 1000)
