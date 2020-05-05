@@ -63,6 +63,20 @@ struct EnumClassHash {
   }
 };
 
+bool SimpleValue::hasAttr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  auto class_type = value_->type()->cast<ClassType>();
+  if (!class_type) {
+    throw ErrorReport(loc) << "hasattr's first argument must be an object, got "
+                           << value_->type()->python_str() << " instead";
+  }
+
+  return class_type->getMethod(field) || class_type->hasAttribute(field) ||
+      class_type->hasConstant(field);
+}
+
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(
