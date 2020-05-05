@@ -587,43 +587,47 @@ void validate_outputs(
     if (!edge.is_valid()) continue;
 
     const auto& metadata = edge.function->input_metadata(edge.input_nr);
-    const auto& output = grads[i];
-    if (!output.defined()) {
+    auto& grad = grads[i];
+    if (!grad.defined()) {
       // FIXME: TestJit.test_ge_optimized fails this assertion.
       // std::stringstream ss;
       // ss << "undefined gradient at index " << i;
       // AT_ERROR(format_error(ss.str()));
       continue;
     }
-    if (!grads[i].sizes().equals(metadata.shape())) {
-      if (!at::is_expandable_to(metadata.shape(), grads[i].sizes())) {
+    if (!grad.sizes().equals(metadata.shape())) {
+      if (!at::is_expandable_to(metadata.shape(), grad.sizes())) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - got ";
-        ss << grads[i].sizes() << " but expected shape compatible with ";
+        ss << grad.sizes() << " but expected shape compatible with ";
         ss << metadata.shape();
         AT_ERROR(format_error(ss.str()));
       }
-      grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
+      grad = at::sum_to(std::move(grad), metadata.shape());
     }
 
     bool input_is_complex = isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));
-    bool grad_is_complex = isComplexType(grads[i].scalar_type());
+    bool grad_is_complex = isComplexType(grad.scalar_type());
 
-    TORCH_CHECK(isFloatingType(grads[i].scalar_type()) || (input_is_complex == grad_is_complex));
-    if (c10::typeMetaToScalarType(metadata.options().dtype()) != grads[i].scalar_type()) {
-      grads[i] = grads[i].to(c10::typeMetaToScalarType(metadata.options().dtype()));
+    TORCH_CHECK(isFloatingType(grad.scalar_type()) || (input_is_complex == grad_is_complex));
+    if (c10::typeMetaToScalarType(metadata.options().dtype()) != grad.scalar_type()) {
+      grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
-    if (!is_compatible_type(metadata.options(), grads[i].options())) {
+    if (grad.device() != metadata.device() &&
+        grad.dim() == 0) {
+      grad = grad.to(metadata.device());
+    }
+    if (!is_compatible_type(metadata.options(), grad.options())) {
        std::stringstream ss;
        ss << "invalid gradient at index " << i << " - expected type ";
-       ss << metadata.options() << " but got " << grads[i].options();
+       ss << metadata.options() << " but got " << grad.options();
        AT_ERROR(format_error(ss.str()));
     }
-    auto output_device = output.device();
-    if (output_device != metadata.device()) {
+    auto grad_device = grad.device();
+    if (grad_device != metadata.device()) {
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected device ";
-      ss << metadata.device() << " but got " << output_device;
+      ss << metadata.device() << " but got " << grad_device;
       AT_ERROR(format_error(ss.str()));
     }
   }
