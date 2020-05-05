@@ -16,7 +16,7 @@ c10::optional<IValue> getIValue(
     const std::string& name,
     const std::unordered_map<const Value*, Value*>& match_vmap,
     const std::unordered_map<std::string, Value*>& vmap);
-void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph);
+void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph);
 
 // This struct contains a compiled IR patterns slated for use in the
 // findPatternMatches function. The struct encapsulates the common

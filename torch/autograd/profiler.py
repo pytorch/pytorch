@@ -277,8 +277,8 @@ class profile(object):
         self.entered = True
         profiler_kind = torch.autograd.ProfilerState.CUDA if self.use_cuda \
             else torch.autograd.ProfilerState.CPU
-        torch.autograd._enable_profiler(
-            torch.autograd.ProfilerConfig(profiler_kind, self.record_shapes))
+        config = torch.autograd.ProfilerConfig(profiler_kind, self.record_shapes)
+        torch.autograd._enable_profiler(config)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
