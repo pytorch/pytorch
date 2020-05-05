@@ -133,7 +133,8 @@ RegisterOperators reg_rpc_ops(
             // IValue corresponding to placeholder for RPC timeout. Used if no
              // rpc timeout is specified by user.
              IValue noTimeout(torch::distributed::rpc::kUnsetRpcTimeout);
-             auto& timeoutIValue = num_inputs >= 5 ? *stackIter++ : noTimeout;
+             const auto rpcMaxInputs = 5;
+             auto& timeoutIValue = num_inputs >= rpcMaxInputs ? *stackIter++ : noTimeout;
              TORCH_INTERNAL_ASSERT(
                  dstWorkerIValue.isString() ||
                  c10::getCustomClassType<
@@ -214,7 +215,7 @@ RegisterOperators reg_rpc_ops(
                    dstWorkerIValue.toCustomClass<dist_rpc::WorkerInfo>()->name_;
              }
              // Get RPC timeout, if specified by user.
-             const float rpcTimeout = timeoutIValue.toDouble();
+             const auto rpcTimeout = timeoutIValue.toDouble();
              // Send RPC request.
              auto futureIValuePtr = dist_rpc::rpcTorchscript(
                  dstWorkerNameStr,

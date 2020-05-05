@@ -2751,7 +2751,10 @@ struct to_ir {
     // through RPC in TorchScript,
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
-    if (apply.inputs().size() < 2 || apply.inputs().size() > 5) {
+    auto rpcMinInputs = 2;
+    auto rpcMaxInputs = 5;
+    if (apply.inputs().size() < rpcMinInputs ||
+        apply.inputs().size() > rpcMaxInputs) {
       throw ErrorReport(apply)
           << "Possible forms of call to rpc_async(..) are\n"
           << "rpc_async(dst_worker_name, user_callable, args, kwargs, timeout)\n"
@@ -2789,10 +2792,10 @@ struct to_ir {
 
     TreeList args_kwargs_trees(
         input_trees.begin() + 2,
-        apply.inputs().size() == 5 ? input_trees.end() - 1 : input_trees.end());
+        apply.inputs().size() == rpcMaxInputs ? input_trees.end() - 1 : input_trees.end());
 
     // Parse timeout, if applicable
-    Value* timeout = apply.inputs().size() == 5 ? emitExpr(Expr(input_trees[4])) : nullptr;
+    Value* timeout = apply.inputs().size() == rpcMaxInputs ? emitExpr(Expr(input_trees[4])) : nullptr;
 
     // Get user callable.
     const auto& callablePtrs = user_callable_function_value->callees();
