@@ -102,11 +102,17 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "upsample_bilinear",
     "upsample_nearest",
     "relu",
+    "relu_",
     "sigmoid",
     "tanh",
     "hardtanh",
+    "hardtanh_",
     "elu",
+    "elu_",
     "hardsigmoid",
+    "hardsigmoid_",
+    "leaky_relu",
+    "leaky_relu_",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
@@ -147,11 +153,17 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "clamp",
     // "clamp_",  // Enable when quantized `clamp_` is ready
     "relu",
+    "relu_",
     "sigmoid",
     "tanh",
     "hardtanh",
+    "hardtanh_",
     "elu",
+    "elu_",
     "hardsigmoid",
+    "hardsigmoid_",
+    "leaky_relu",
+    "leaky_relu_",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
