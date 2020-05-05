@@ -1074,62 +1074,61 @@ endif()
 # ---[ HIP
 if(USE_ROCM)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
-  if(PYTORCH_FOUND_HIP)
-    message(INFO "Compiling with HIP for AMD.")
-    caffe2_update_option(USE_ROCM ON)
-
-    if(USE_NCCL AND NOT USE_SYSTEM_NCCL)
-      message(INFO "Forcing USE_SYSTEM_NCCL to ON since it's required by using RCCL")
-      caffe2_update_option(USE_SYSTEM_NCCL ON)
-    endif()
-
-    list(APPEND HIP_CXX_FLAGS -fPIC)
-    list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_HCC__=1)
-    list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
-    list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
-    list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
-    list(APPEND HIP_CXX_FLAGS -Wno-macro-redefined)
-    list(APPEND HIP_CXX_FLAGS -Wno-inconsistent-missing-override)
-    list(APPEND HIP_CXX_FLAGS -Wno-exceptions)
-    list(APPEND HIP_CXX_FLAGS -Wno-shift-count-negative)
-    list(APPEND HIP_CXX_FLAGS -Wno-shift-count-overflow)
-    list(APPEND HIP_CXX_FLAGS -Wno-unused-command-line-argument)
-    list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
-    list(APPEND HIP_CXX_FLAGS -Wno-implicit-int-float-conversion)
-    list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
-    list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
-    list(APPEND HIP_CXX_FLAGS -std=c++14)
-
-    if(CMAKE_BUILD_TYPE MATCHES Debug)
-       list(APPEND HIP_CXX_FLAGS -g)
-       list(APPEND HIP_CXX_FLAGS -O0)
-    endif(CMAKE_BUILD_TYPE MATCHES Debug)
-
-    set(HIP_HCC_FLAGS ${HIP_CXX_FLAGS})
-    # Ask hcc to generate device code during compilation so we can use
-    # host linker to link.
-    list(APPEND HIP_HCC_FLAGS -fno-gpu-rdc)
-    foreach(pytorch_rocm_arch ${PYTORCH_ROCM_ARCH})
-      list(APPEND HIP_HCC_FLAGS --amdgpu-target=${pytorch_rocm_arch})
-    endforeach()
-
-    set(Caffe2_HIP_INCLUDE
-       ${thrust_INCLUDE_DIRS} ${hipcub_INCLUDE_DIRS} ${rocprim_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${roctracer_INCLUDE_DIRS} ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
-    # This is needed for library added by hip_add_library (same for hip_add_executable)
-    hip_include_directories(${Caffe2_HIP_INCLUDE})
-
-    set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${PYTORCH_RCCL_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
-
-    # Note [rocblas & rocfft cmake bug]
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # TODO: There is a bug in rocblas's & rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
-    # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
-    list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
-      roc::rocblas roc::rocfft hip::hiprand roc::hipsparse)
-  else()
-    caffe2_update_option(USE_ROCM OFF)
+  if(NOT PYTORCH_FOUND_HIP)
+    message(FATAL_ERROR "Cannot find HIP, perhaps you should set USE_ROCM to OFF")
   endif()
+  message(INFO "Compiling with HIP for AMD.")
+  caffe2_update_option(USE_ROCM ON)
+
+  if(USE_NCCL AND NOT USE_SYSTEM_NCCL)
+    message(INFO "Forcing USE_SYSTEM_NCCL to ON since it's required by using RCCL")
+    caffe2_update_option(USE_SYSTEM_NCCL ON)
+  endif()
+
+  list(APPEND HIP_CXX_FLAGS -fPIC)
+  list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_HCC__=1)
+  list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
+  list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
+  list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
+  list(APPEND HIP_CXX_FLAGS -Wno-macro-redefined)
+  list(APPEND HIP_CXX_FLAGS -Wno-inconsistent-missing-override)
+  list(APPEND HIP_CXX_FLAGS -Wno-exceptions)
+  list(APPEND HIP_CXX_FLAGS -Wno-shift-count-negative)
+  list(APPEND HIP_CXX_FLAGS -Wno-shift-count-overflow)
+  list(APPEND HIP_CXX_FLAGS -Wno-unused-command-line-argument)
+  list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
+  list(APPEND HIP_CXX_FLAGS -Wno-implicit-int-float-conversion)
+  list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
+  list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
+  list(APPEND HIP_CXX_FLAGS -std=c++14)
+
+  if(CMAKE_BUILD_TYPE MATCHES Debug)
+     list(APPEND HIP_CXX_FLAGS -g)
+     list(APPEND HIP_CXX_FLAGS -O0)
+  endif(CMAKE_BUILD_TYPE MATCHES Debug)
+
+  set(HIP_HCC_FLAGS ${HIP_CXX_FLAGS})
+  # Ask hcc to generate device code during compilation so we can use
+  # host linker to link.
+  list(APPEND HIP_HCC_FLAGS -fno-gpu-rdc)
+  foreach(pytorch_rocm_arch ${PYTORCH_ROCM_ARCH})
+    list(APPEND HIP_HCC_FLAGS --amdgpu-target=${pytorch_rocm_arch})
+  endforeach()
+
+  set(Caffe2_HIP_INCLUDE
+     ${thrust_INCLUDE_DIRS} ${hipcub_INCLUDE_DIRS} ${rocprim_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${roctracer_INCLUDE_DIRS} ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
+  # This is needed for library added by hip_add_library (same for hip_add_executable)
+  hip_include_directories(${Caffe2_HIP_INCLUDE})
+
+  set(Caffe2_HIP_DEPENDENCY_LIBS
+    ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${PYTORCH_RCCL_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
+
+  # Note [rocblas & rocfft cmake bug]
+  # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  # TODO: There is a bug in rocblas's & rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
+  # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
+  list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
+    roc::rocblas roc::rocfft hip::hiprand roc::hipsparse)
 
   include_directories(SYSTEM ${HIP_PATH}/include)
   include_directories(SYSTEM ${ROCBLAS_PATH}/include)
