@@ -294,7 +294,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
 
 ProfilerThreadLocalState* getProfilerTLSState() {
   const auto& state = at::ThreadLocalDebugInfo::get(at::DebugInfoKind::PROFILER_STATE);
-  return static_cast<ProfilerThreadLocalState*>(state.get());
+  return dynamic_cast<ProfilerThreadLocalState*>(state.get());
 }
 
 void pushProfilingCallbacks() {

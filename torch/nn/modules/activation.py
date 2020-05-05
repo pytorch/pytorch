@@ -72,7 +72,7 @@ class ReLU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/ReLU.png
+    .. image:: ../scripts/activation_images/ReLU.png
 
     Examples::
 
@@ -184,7 +184,7 @@ class Hardtanh(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Hardtanh.png
+    .. image:: ../scripts/activation_images/Hardtanh.png
 
     Examples::
 
@@ -232,7 +232,7 @@ class ReLU6(Hardtanh):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/ReLU6.png
+    .. image:: ../scripts/activation_images/ReLU6.png
 
     Examples::
 
@@ -261,7 +261,7 @@ class Sigmoid(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Sigmoid.png
+    .. image:: ../scripts/activation_images/Sigmoid.png
 
     Examples::
 
@@ -312,7 +312,7 @@ class Tanh(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Tanh.png
+    .. image:: ../scripts/activation_images/Tanh.png
 
     Examples::
 
@@ -371,7 +371,7 @@ class ELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/ELU.png
+    .. image:: ../scripts/activation_images/ELU.png
 
     Examples::
 
@@ -411,7 +411,7 @@ class CELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/CELU.png
+    .. image:: ../scripts/activation_images/CELU.png
 
     Examples::
 
@@ -456,7 +456,7 @@ class SELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/SELU.png
+    .. image:: ../scripts/activation_images/SELU.png
 
     Examples::
 
@@ -515,8 +515,8 @@ class GLU(Module):
 class GELU(Module):
     r"""Applies the Gaussian Error Linear Units function:
 
-    .. math::
-        \text{GELU}(x) = x * \Phi(x)
+    .. math:: \text{GELU}(x) = x * \Phi(x)
+
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
     Shape:
@@ -524,7 +524,7 @@ class GELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/GELU.png
+    .. image:: ../scripts/activation_images/GELU.png
 
     Examples::
 
@@ -555,7 +555,7 @@ class Hardshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Hardshrink.png
+    .. image:: ../scripts/activation_images/Hardshrink.png
 
     Examples::
 
@@ -601,7 +601,7 @@ class LeakyReLU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/LeakyReLU.png
+    .. image:: ../scripts/activation_images/LeakyReLU.png
 
     Examples::
 
@@ -635,7 +635,7 @@ class LogSigmoid(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/LogSigmoid.png
+    .. image:: ../scripts/activation_images/LogSigmoid.png
 
     Examples::
 
@@ -669,7 +669,7 @@ class Softplus(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Softplus.png
+    .. image:: ../scripts/activation_images/Softplus.png
 
     Examples::
 
@@ -710,7 +710,7 @@ class Softshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Softshrink.png
+    .. image:: ../scripts/activation_images/Softshrink.png
 
     Examples::
 
@@ -930,7 +930,7 @@ class PReLU(Module):
     Attributes:
         weight (Tensor): the learnable weights of shape (:attr:`num_parameters`).
 
-    .. image:: scripts/activation_images/PReLU.png
+    .. image:: ../scripts/activation_images/PReLU.png
 
     Examples::
 
@@ -963,7 +963,7 @@ class Softsign(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Softsign.png
+    .. image:: ../scripts/activation_images/Softsign.png
 
     Examples::
 
@@ -987,7 +987,7 @@ class Tanhshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Tanhshrink.png
+    .. image:: ../scripts/activation_images/Tanhshrink.png
 
     Examples::
 

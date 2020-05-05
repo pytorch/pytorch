@@ -265,7 +265,7 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   return {++(++iter), false};
 }
 
-void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
+void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
   if (!tensorExprFuserEnabled()) {
     return;
   }
