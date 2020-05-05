@@ -9,6 +9,7 @@
 
 #ifdef USE_VULKAN
 #include <ATen/native/vulkan/Vulkan.h>
+#include <ATen/native/vulkan/VulkanOps.h>
 #define VULKAN_GL vulkan
 #else
 
