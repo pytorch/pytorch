@@ -11,6 +11,7 @@
 #include <vector>
 #include <regex>
 
+// Test below is from https://stackoverflow.com/a/41186162
 #if __cplusplus >= 201103L &&                             \
     (!defined(__GLIBCXX__) || (__cplusplus >= 201402L) || \
         (defined(_GLIBCXX_REGEX_DFS_QUANTIFIERS_LIMIT) || \
@@ -19,7 +20,7 @@
              _GLIBCXX_RELEASE > 4)))
   // Have working regex
 #else
-  static_assert(false, "Compiler does not have proper regex support.")
+  static_assert(false, "Compiler does not have proper regex support.");
 #endif
 
 namespace c10 {
