@@ -893,6 +893,9 @@ if(pybind11_FOUND)
 else()
     message(STATUS "Using third_party/pybind11.")
     set(pybind11_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
+    install(DIRECTORY ${pybind11_INCLUDE_DIRS}
+            DESTINATION ${CMAKE_INSTALL_PREFIX}
+            FILES_MATCHING PATTERN "*.h")
     set(pybind11_PREFER_third_party ON CACHE BOOL
         "Use the third_party/pybind11 submodule, instead of looking for system
         installation of pybind11")
