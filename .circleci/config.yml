@@ -1251,7 +1251,7 @@ jobs:
           export DEBUG_COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}-debug
           docker commit "$id" ${DEBUG_COMMIT_DOCKER_IMAGE}
           time docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
-    - store_artifacts: 
+    - store_artifacts:
         path: ~/workspace/build_artifacts/master
         destination: docs
 
@@ -1733,6 +1733,31 @@ jobs:
           docker stats --all --no-stream
     - store_test_results:
         path: bazel-testlogs
+
+  pytorch_doc_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-doc-test
+      # TODO: stop hardcoding this
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
+    resource_class: medium
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - attach_scripts
+    - setup_linux_system_environment
+    - setup_ci_environment
+    - run:
+        name: Doc test
+        no_output_timeout: "30m"
+        command: |
+          set -ex
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export GITHUB_PYTORCHBOT_TOKEN=${GITHUB_PYTORCHBOT_TOKEN}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && . ./.jenkins/pytorch/docs-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
   promote_s3:
     <<: *promote_common
@@ -2310,6 +2335,9 @@ workflows:
           requires:
             - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_cpp_doc_push:
+          requires:
+            - pytorch_linux_xenial_py3_6_gcc5_4_build
+      - pytorch_doc_test:
           requires:
             - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_linux_test:
