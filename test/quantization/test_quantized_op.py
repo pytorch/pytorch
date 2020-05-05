@@ -17,6 +17,7 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_UBSAN, TestCase, IS_PPC, IS_MACOS
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine
 
@@ -319,6 +320,7 @@ class TestQuantizedOps(TestCase):
                          message="Sigmoid failed: {} vs. {}".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qhardsigmoid op."""
+    @skipIfNoFBGEMM
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams()))
@@ -327,15 +329,13 @@ class TestQuantizedOps(TestCase):
 
 
     """Tests the correctness of the quantized::qlayer_norm op."""
+    @skipIfNoFBGEMM
     @given(shapes=hu.array_shapes(3, 5, 1, 32),
            torch_type=st.sampled_from((torch.qint8, torch.quint8, torch.qint32)),
            X_rand_scale=st.floats(0.01, 1e3),
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
     def test_qlayer_norm(self, shapes, torch_type, X_rand_scale, Y_scale, Y_zero_point):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
-            return
-
         with override_quantized_engine("fbgemm"):
 
             # In the FP kernel, mean and variance are calculated in floating point.
@@ -490,38 +490,42 @@ class TestQuantizedOps(TestCase):
            min_val=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
            max_val=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
     def test_hardtanh(self, X, min_val, max_val):
-        X, (scale, zero_point, torch_type) = X
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            return
+        with override_quantized_engine('fbgemm'):
+            X, (scale, zero_point, torch_type) = X
 
-        assume(min_val <= max_val)
-        Y = X.copy()
-        Y[Y < min_val] = min_val
-        Y[Y > max_val] = max_val
-        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
-                                       zero_point=zero_point, dtype=torch_type)
-        X = torch.from_numpy(X)
-        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
+            assume(min_val <= max_val)
+            Y = X.copy()
+            Y[Y < min_val] = min_val
+            Y[Y > max_val] = max_val
+            qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
+                                           zero_point=zero_point, dtype=torch_type)
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
 
-        ops_under_test = {
-            'nn.quantized.functional.hardtanh':
-                torch.nn.quantized.functional.hardtanh,
-        }
+            ops_under_test = {
+                'nn.quantized.functional.hardtanh':
+                    torch.nn.quantized.functional.hardtanh,
+            }
 
-        for name, op in ops_under_test.items():
-            qY_hat = op(qX, min_val, max_val)
-            self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
+            for name, op in ops_under_test.items():
+                qY_hat = op(qX, min_val, max_val)
+                self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
 
-        ops_under_test_inplace = {
-            'inplace nn.quantized.functional.hardtanh':
-                torch.nn.quantized.functional.hardtanh,
-        }
+            ops_under_test_inplace = {
+                'inplace nn.quantized.functional.hardtanh':
+                    torch.nn.quantized.functional.hardtanh,
+            }
 
-        for name, op_ in ops_under_test_inplace.items():
-            qY_hat = qX.clone()
-            op_(qY_hat, min_val, max_val, inplace=True)
-            self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
+            for name, op_ in ops_under_test_inplace.items():
+                qY_hat = qX.clone()
+                op_(qY_hat, min_val, max_val, inplace=True)
+                self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
 
     """Tests the correctness of the quantized::hardswish op."""
+    @skipIfNoFBGEMM
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams()),
@@ -531,7 +535,6 @@ class TestQuantizedOps(TestCase):
         _test_hardswish(self, X, Y_scale, Y_zero_point, 'fbgemm')
 
     """Tests the correctness of the scalar addition."""
-    @unittest.skip("Failing on MacOS")
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
@@ -1589,15 +1592,13 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qX.equal(qX2), equal_ref(qX, qX2))
 
 
+    @skipIfNoFBGEMM
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=32),
-                       qparams=hu.qparams()),
+                       qparams=hu.qparams(dtypes=(torch.quint8, torch.qint8))),
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
     def test_batch_norm2d(self, X, Y_scale, Y_zero_point):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
-            return
-
         with override_quantized_engine("fbgemm"):
             X, (scale_x, zero_point_x, dtype_x) = X
 
@@ -1617,14 +1618,13 @@ class TestQuantizedOps(TestCase):
             quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, dtype_x)
             self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
 
-    def test_batch_norm2d_relu(self):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
-            return
 
+    @skipIfNoFBGEMM
+    def test_batch_norm2d_relu(self):
         # hypothesis too slow for this test, create test cases manually
         max_sides = (4, 5)
         side_lens = (1, 8, 11)
-        torch_types = (torch.qint8, torch.quint8, torch.qint32)
+        torch_types = (torch.qint8, torch.quint8)
         combined = [max_sides, side_lens, torch_types]
         test_cases = itertools.product(*combined)
 
@@ -1667,13 +1667,11 @@ class TestQuantizedOps(TestCase):
                     quantize_ref.int_repr().numpy(),
                     message="{} vs {}".format(qy, quantize_ref))
 
+    @skipIfNoFBGEMM
     def test_batch_norm3d(self):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
-            return
-
         # hypothesis too slow for this test, create test cases manually
         side_lens = (1, 8, 11)
-        torch_types = (torch.qint8, torch.quint8, torch.qint32)
+        torch_types = (torch.qint8, torch.quint8)
         combined = [side_lens, torch_types]
         test_cases = itertools.product(*combined)
 
@@ -1707,9 +1705,7 @@ class TestQuantizedOps(TestCase):
                     qy.int_repr().numpy(), quantize_ref.int_repr().numpy(),
                     message="{} vs {}".format(qy, quantize_ref))
 
-@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                     " with instruction set support avx2 or newer.")
+@skipIfNoFBGEMM
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
     @given(
@@ -2653,6 +2649,7 @@ class TestQNNPackOps(TestCase):
             self.assertEqual(qY, qY_hat)
 
     """Tests the correctness of the quantized::qnnpack_tanh op."""
+    @skipIfNoFBGEMM
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams(dtypes=torch.quint8)))
     def test_qnnpack_tanh(self, X):
@@ -2678,6 +2675,7 @@ class TestQNNPackOps(TestCase):
                              message="QNNPACK TanH failed (FBGEMM ref)!")
 
     """Tests the correctness of the quantized::qnnpack_sigmoid op."""
+    @skipIfNoFBGEMM
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams(dtypes=torch.quint8)))
     def test_qnnpack_sigmoid(self, X):
@@ -2702,6 +2700,7 @@ class TestQNNPackOps(TestCase):
             self.assertEqual(qYserver, qY_hat,
                              message="QNNPACK Sigmoid failed (FBGEMM ref)!")
 
+    @skipIfNoFBGEMM
     def test_qnnpack_sigmoid_sweep(self):
         # Input parameters
         f_min = -4.0
@@ -2980,6 +2979,34 @@ class TestQNNPackOps(TestCase):
     def test_qhardsigmoid(self, X):
         _test_hardsigmoid(self, X, 'qnnpack')
 
+    """Tests the correctness of the quantized::hardtanh op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
+           min_val=hu.floats(-1e6, -9.999999974752427e-07, allow_nan=False, allow_infinity=False),
+           max_val=hu.floats(9.999999974752427e-07, 1e6, allow_nan=False, allow_infinity=False))
+    def test_hardtanh(self, X, min_val, max_val):
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            return
+        with override_quantized_engine('qnnpack'):
+            X, (scale, zero_point, torch_type) = X
+
+            assume(min_val <= max_val)
+            Y = X.copy()
+            Y[Y < min_val] = min_val
+            Y[Y > max_val] = max_val
+            qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
+                                           zero_point=zero_point, dtype=torch_type)
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+
+            qY_hat = torch.nn.quantized.functional.hardtanh(qX, min_val, max_val)
+            self.assertEqual(
+                qY, qY_hat,
+                message="hardtanh failed:\nactual {}\nexpected {}".format(qY_hat, qY))
+
+
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
     """Tests the element-wise equality ops."""
@@ -3014,7 +3041,6 @@ class TestComparatorOps(TestCase):
             self.assertEqual(result_ref, result,
                              "'tensor.{}(tensor)'' failed".format(op))
 
-    @unittest.skip("FIXME: Failing due to overflow error without width option")
     @given(A=hu.tensor(shapes=((3, 4, 5),),
                        qparams=hu.qparams()),
            b=hu.floats(allow_infinity=False, allow_nan=False))
@@ -3033,16 +3059,22 @@ class TestComparatorOps(TestCase):
         for op in ops_under_test_reversible:
             result_ref = getattr(dqA, op)(b)
             result = getattr(qA, op)(b)
+            note("result_ref 1: {}".format(result_ref))
+            note("result 1: {}".format(result))
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
             # Reversed broadcasting.
             result_ref = getattr(b, op)(dqA)
             result = getattr(b, op)(qA)
+            note("result_ref 2: {}".format(result_ref))
+            note("result 2: {}".format(result))
             self.assertEqual(result_ref, result,
                              "'scalar.{}(tensor)'' failed".format(op))
 
         for op in ops_under_test_nonreversible:
             result_ref = getattr(dqA, op)(b)
             result = getattr(qA, op)(b)
+            note("result_ref 3: {}".format(result_ref))
+            note("result 3: {}".format(result))
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))

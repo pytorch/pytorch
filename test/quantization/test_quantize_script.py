@@ -1628,7 +1628,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         FileCheck().check_not("aten::layer_norm") \
                    .run(m.graph)
 
-
     def test_quantize_general_shape_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general shape ops like aten::flatten
@@ -1653,6 +1652,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.hardtanh = torch.nn.Hardtanh()
                 self.elu = torch.nn.ELU()
                 self.hardsigmoid = torch.nn.Hardsigmoid()
+                self.relu = torch.nn.ReLU()
+                self.relu6 = torch.nn.ReLU6()
+                self.leaky_relu = torch.nn.LeakyReLU()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1701,10 +1703,21 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = torch.tanh(x)
                 x = self.hardtanh(x)
                 x = F.hardtanh(x)
+                x.hardtanh_()
                 x = self.elu(x)
                 x = F.elu(x)
+                x.elu_()
                 x = self.hardsigmoid(x)
                 x = F.hardsigmoid(x)
+                x.hardsigmoid_()
+                x = self.relu(x)
+                x = F.relu(x)
+                x.relu_()
+                x = self.relu6(x)
+                x = F.relu6(x)
+                x = self.leaky_relu(x)
+                x = F.leaky_relu(x)
+                x.leaky_relu_()
                 x = self.conv(x)
                 return x
 
@@ -1773,6 +1786,8 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
+            torch.jit.script(M())._c, 'forward', {'': qconfig}, inplace=False))
         m2 = convert_script(m, debug=False)
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
                    .check_count("quantized::conv2d", 2, exactly=True) \
