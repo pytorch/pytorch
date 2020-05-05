@@ -19,21 +19,21 @@ namespace rpc {
 
 constexpr long kToMilliseconds = 1000;
 
-//////////////////////////  MetricsTracker  /////////////////////////////////
-
 const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
 
-TimeSeriesMetricsTracker::TimeSeriesMetricsTracker(
+//////////////////////////  MetricsTracker  /////////////////////////////////
+
+TensorPipeAgent::TimeSeriesMetricsTracker::TimeSeriesMetricsTracker(
     uint64_t currentSum,
     uint64_t currentCount)
     : currentSum_(currentSum), currentCount_(currentCount) {}
 
-void TimeSeriesMetricsTracker::addData(uint64_t dataPoint) {
+void TensorPipeAgent::TimeSeriesMetricsTracker::addData(uint64_t dataPoint) {
   currentSum_ += dataPoint;
   ++currentCount_;
 }
 
-float TimeSeriesMetricsTracker::computeAverage() {
+float TensorPipeAgent::TimeSeriesMetricsTracker::computeAverage() {
   return currentCount_ == 0 ? 0 : currentSum_ / (float)currentCount_;
 }
 
@@ -430,18 +430,18 @@ std::string TensorPipeAgent::createUniqueShmAddr() {
 }
 #endif
 
-void TensorpipeAgent::addGilWaitTime(
+void TensorPipeAgent::addGilWaitTime(
     const std::chrono::microseconds gilWaitTime) {
   std::lock_guard<std::mutex> lock(metricsMutex_);
   timeSeriesMetrics_[kGilAverageWaitTime]->addData(gilWaitTime.count());
 }
 
-NetworkDataDict TensorpipeAgent::getNetworkData() {
+TensorPipeAgent::NetworkDataDict TensorPipeAgent::getNetworkData() {
   std::lock_guard<std::mutex> lock(networkDataMutex_);
   return networkData_;
 }
 
-NetworkSourceInfo TensorpipeAgent::getNetworkSourceInfo() {
+NetworkSourceInfo TensorPipeAgent::getNetworkSourceInfo() {
   NetworkSourceInfo info = {
       RpcAgent::getWorkerInfo().id_,
       addressStore_->get(RpcAgent::getWorkerInfo().name_)};
@@ -449,7 +449,7 @@ NetworkSourceInfo TensorpipeAgent::getNetworkSourceInfo() {
   return info;
 }
 
-void TensorpipeAgent::trackNetworkData(
+void TensorPipeAgent::trackNetworkData(
     uint64_t requestSize,
     uint64_t responseSize,
     worker_id_t destRank) {
@@ -459,7 +459,7 @@ void TensorpipeAgent::trackNetworkData(
   networkData_[destRank].totalRecvBytes += responseSize;
 }
 
-void TensorpipeAgent::trackNetworkError(
+void TensorPipeAgent::trackNetworkError(
     uint64_t requestSize,
     worker_id_t destRank) {
   std::lock_guard<std::mutex> lock(networkDataMutex_);

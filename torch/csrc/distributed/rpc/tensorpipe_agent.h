@@ -27,10 +27,10 @@ struct NetworkSourceInfo {
 // Struct to track aggregated network metrics
 struct AggregatedNetworkData {
   uint64_t numCalls{0};
-  uint64_t totalBytesSent{0};
+  uint64_t totalSentBytes{0};
   uint64_t totalRecvBytes{0};
-  uint64_t totalBytes{0};
-}
+  uint64_t totalErrors{0};
+};
 
 // TensorPipeAgent leverages tensorpipe (https://github.com/pytorch/tensorpipe)
 // to move tensors and payload through fatested transport and channel
