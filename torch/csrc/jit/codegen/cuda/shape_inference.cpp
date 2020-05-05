@@ -24,7 +24,8 @@ namespace {
  */
 class NaiveShapeTypePropagator {
  public:
-  NaiveShapeTypePropagator(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {}
+  NaiveShapeTypePropagator(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)) {}
 
   void PropagateOnBlock(Block* block) {
     for (Node* node : block->nodes()) {
