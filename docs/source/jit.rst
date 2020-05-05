@@ -215,6 +215,8 @@ Disable JIT for Debugging
 
     Given an example 
 
+    .. code-block:: python
+
         @torch.jit.script
         def scripted_fn(x : torch.Tensor):
             for i in range(12):
