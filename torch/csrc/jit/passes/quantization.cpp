@@ -104,8 +104,11 @@ std::vector<std::string> _single_input_general_call_funcs = {
     "sigmoid",
     "tanh",
     "hardtanh",
+    "hardtanh_",
     "elu",
+    "elu_",
     "hardsigmoid",
+    "hardsigmoid_",
     "leaky_relu",
     "leaky_relu_",
 };
@@ -150,8 +153,11 @@ std::vector<std::string> _single_input_general_aten_funcs = {
     "sigmoid",
     "tanh",
     "hardtanh",
+    "hardtanh_",
     "elu",
+    "elu_",
     "hardsigmoid",
+    "hardsigmoid_",
     "leaky_relu",
     "leaky_relu_",
 };
