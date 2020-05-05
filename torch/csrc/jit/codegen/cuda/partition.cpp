@@ -47,7 +47,6 @@ static bool isFusableDevice(const Node* node, const c10::Device device) {
 static bool isFusableDevice(const Node* node) {
   auto device = getDevice(node);
   if (!device.has_value()) {
-    //return false;
     return true;
   }
   return device->is_cuda();

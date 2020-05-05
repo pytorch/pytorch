@@ -256,8 +256,7 @@ void runKernel(
   size_t numel = outputs[0].numel();
 
   // TODO: we can't randomly clap down this until we got striding.
-  // const auto nBlocks = std::min(entry->max_blocks_, ceilDiv(numel, 128));
-  const auto nBlocks = ceilDiv(numel, 128);
+  const auto nBlocks = ceilDiv(numel, 128 * entry->unroll_factor_);
 
   KernelArgumentHolder kernel_args;
 
@@ -266,6 +265,9 @@ void runKernel(
   // from I/O expected by the generated CUDA kernel.
   for (auto& input : inputs) {
     if (input.isTensor()) {
+      TORCH_INTERNAL_ASSERT(
+          input.toTensor().device().index() == entry->device_,
+          "input to kernel on device that is not compiled for");
       kernel_args.push(input.toTensor(), outputs[0].sizes());
     } else {
       kernel_args.push(input);
@@ -326,8 +328,7 @@ void runTestKernel(
   size_t numel = outputs[0].numel();
 
   // TODO: we can't randomly clap down this until we got striding.
-  // const auto nBlocks = std::min(entry->max_blocks_, ceilDiv(numel, 128));
-  const auto nBlocks = ceilDiv(numel, 128);
+  const auto nBlocks = ceilDiv(numel, 128 * entry->unroll_factor_);
 
   KernelArgumentHolder kernel_args;
 
@@ -336,6 +337,9 @@ void runTestKernel(
   // from I/O expected by the generated CUDA kernel.
   for (auto& input : inputs) {
     if (input.isTensor()) {
+      TORCH_INTERNAL_ASSERT(
+          input.toTensor().device().index() == entry->device_,
+          "input to kernel on device that is not compiled for");
       kernel_args.push(input.toTensor(), outputs[0].sizes());
     } else {
       kernel_args.push(input);

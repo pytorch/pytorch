@@ -103,8 +103,19 @@ class CudaFusionManager {
       // we should propagate more information back:
       //   1. device;
       //   2. launch config;
-      parseJitIR(graph, fusion);
-      cuda_kernel.value()->device_ = 0;
+      parseJitIR(graph, fusion, cuda_kernel.value());
+
+      // find device in inputs.
+      for (const auto& input : inputs) {
+        if (input.isTensor()) {
+          const auto& device = input.toTensor().device();
+          TORCH_INTERNAL_ASSERT(
+              device.is_cuda(),
+              "Could only fuser operations on cuda device");
+          cuda_kernel.value()->device_ = device.index();
+          break;
+        }
+      }
 
       // NVRTC compile kernel
       compileKernel(fusion, cuda_kernel.value());

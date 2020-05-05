@@ -50,6 +50,7 @@ class CudaKernel {
   CUmodule module_;
   CUfunction function_;
   int max_blocks_;
+  int unroll_factor_;
 
   // WARNING:
   // Block and Grid dimension setting is here for testing purposes only

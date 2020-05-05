@@ -35,8 +35,11 @@ class IrParser {
   static const int unroll_factor = 4;
 
  public:
-  IrParser(std::shared_ptr<Graph> graph, Fusion& fusion)
-      : graph_(std::move(graph)), fusion_(&fusion) {
+  IrParser(
+      std::shared_ptr<Graph> graph,
+      Fusion& fusion,
+      CudaKernel* cuda_kernel)
+      : graph_(std::move(graph)), fusion_(&fusion), cuda_kernel_(cuda_kernel){
     if (init_registry_) {
       registerJitOperator();
       init_registry_ = false;
@@ -63,9 +66,15 @@ class IrParser {
       fusion_->addInput(value_map_[val->unique()]);
     }
 
+    // TODO: disable unroll to ensure rand_like generates identical output as
+    // with eager mode
+    bool disable_unroll = false;
     // compose nodes in topo order;
     for (const JitOp* node : block->nodes()) {
       processJitNode(node);
+      if (node->kind() == aten::rand_like) {
+        disable_unroll = true;
+      }
     }
 
     // mark output;
@@ -80,7 +89,9 @@ class IrParser {
       // Split into 128 which will be bockDim.x
       out->split(0, nthreads);
       // Split by another 4 which will be our unroll factor
-      out->split(0, unroll_factor);
+      auto ur_factor = disable_unroll ? 1 : unroll_factor;
+      out->split(0, ur_factor);
+      cuda_kernel_->unroll_factor_ = ur_factor;
 
       // Map blocks/threads
       out->axis(0)->parallelize(ParallelType::BIDx);
@@ -472,6 +483,7 @@ class IrParser {
 
   std::shared_ptr<Graph> graph_;
   Fusion* fusion_;
+  CudaKernel* cuda_kernel_;
 
   // maps from JitValue::unique() to fusion Val;
   std::unordered_map<size_t, CgValue> value_map_;
@@ -496,8 +508,11 @@ bool isNodeParsible(const Node* const node) {
   return IrParser::canParseNode(node);
 }
 
-void parseJitIR(std::shared_ptr<Graph>& graph, Fusion& fusion) {
-  IrParser parser(graph, fusion);
+void parseJitIR(
+    std::shared_ptr<Graph>& graph,
+    Fusion& fusion,
+    CudaKernel* cuda_kernel) {
+  IrParser parser(graph, fusion, cuda_kernel);
   parser.parse();
 }
 

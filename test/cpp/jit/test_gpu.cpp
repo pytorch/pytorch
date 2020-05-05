@@ -536,7 +536,13 @@ void testGPU_FusionParser() {
 
   Fusion fusion;
   FusionGuard fg(&fusion);
-  fuser::cuda::parseJitIR(g, fusion);
+  torch::jit::fuser::cuda::CudaKernel prog;
+  // These can be set to anything as there are no bindings!
+  // All CTAS and threads execute the same thing.
+  prog.grid(4);
+  prog.block(32);
+  prog.device_ = 0;
+  fuser::cuda::parseJitIR(g, fusion, &prog);
 
   std::stringstream ref;
   ref << "__global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3){\n"
