@@ -13,7 +13,7 @@
 static PyObject * THPStorage_(size)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromLong(self->cdata->nbytes() / sizeof(scalar_t));
+  return PyLong_FromLong(THWStorage_(size)(LIBRARY_STATE self->cdata));
   END_HANDLE_TH_ERRORS
 }
 
@@ -65,8 +65,7 @@ static PyObject * THPStorage_(resize_)(THPStorage *self, PyObject *number_arg)
   THPUtils_assert(THPUtils_checkLong(number_arg), "resize_ expects an int, "
       "but got %s", THPUtils_typename(number_arg));
   int64_t newsize = THPUtils_unpackLong(number_arg);
-  THWStorage_(resizeBytes)(
-      LIBRARY_STATE self->cdata, newsize * sizeof(scalar_t));
+  THWStorage_(resize)(LIBRARY_STATE self->cdata, newsize);
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
