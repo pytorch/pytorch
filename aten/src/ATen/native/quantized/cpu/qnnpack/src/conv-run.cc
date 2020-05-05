@@ -291,6 +291,11 @@ enum pytorch_qnnp_status qnnpackConv(
   const size_t dilation_height = conv_p.dilation[1];
   const size_t groups = conv_p.groups;
 
+  if (batch_size == 0) {
+    // If no batches, return
+    return pytorch_qnnp_status_success;
+  }
+
   // TODO Kimish: The scale check has moved elsewhere, but given that we are
   // removing this constraint, this should just disappear.
   /*
