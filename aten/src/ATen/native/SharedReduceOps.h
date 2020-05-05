@@ -321,14 +321,14 @@ template <typename T1, typename T2> using pair = std::pair<T1, T2>;
 template <typename scalar_t>
 struct LessOrNan {
   C10_DEVICE bool operator () (scalar_t a, scalar_t b) const {
-    return at::_isnan(a) || a < b;
+    return at::_isnan(a) || a <= b;
   }
 };
 
 template <typename scalar_t>
 struct GreaterOrNan {
   C10_DEVICE bool operator () (scalar_t a, scalar_t b) const {
-    return at::_isnan(a) || a > b;
+    return at::_isnan(a) || a >= b;
   }
 };
 
