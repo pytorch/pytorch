@@ -551,6 +551,9 @@ class QConvInt8 final {
 
     auto input_scale = act_nhwc.q_scale();
 
+    const bool is_per_channel =
+      pack_data.orig_weight.qscheme() == at::kPerTensorAffine;
+
     // Re-quantizing the bias based on input scale and weight scale.
     if (!pack_data.input_scale.has_value() ||
         pack_data.input_scale.value() != input_scale) {
@@ -590,14 +593,12 @@ class QConvInt8 final {
           weight_scales_data[0] * input_scale,
           0, kQInt32);
 
-      const bool is_per_channel =
-        weight_contig.qscheme() == at::kPerTensorAffine;
-
       qnnpack::conv_param_t conv_p(
           {kernel_w, kernel_h},
           {stride_w, stride_h},
           {dilation_w, dilation_h},
           {pad_h, pad_w, pad_h, pad_w},
+          /*adjustment=*/{0, 0},
           groups,
           C,
           M,
@@ -605,6 +606,7 @@ class QConvInt8 final {
           pack_data.requantization_scale.data(),
           output_min,
           output_max,
+          /*transpose=*/false,
           is_per_channel);
 
       // Update the input scale to not pack again.
@@ -628,7 +630,7 @@ class QConvInt8 final {
         "be greater than 0.")
 
     // Allocate output Tensor and a buffer for QNNPACK to use
-    Tensor output = at::_empty_affine_quantized(
+    Tensor output = at::native::empty_affine_quantized(
         output_shape,
         at::device(kCPU)
            .dtype(kQUInt8)
@@ -642,13 +644,16 @@ class QConvInt8 final {
         {stride_w, stride_h},
         {dilation_w, dilation_h},
         {pad_h, pad_w, pad_h, pad_w},
+        /*adjustment=*/{0, 0},
         groups,
         C,
         M,
         (uint8_t*)pack_data.w_zero_points.data_ptr<c10::quint8>(),
         pack_data.requantization_scale.data(),
         output_min,
-        output_max);
+        output_max,
+        /*transpose=*/false,
+        is_per_channel);
 
     const pytorch_qnnp_status run_status = qnnpack::qnnpackConv(
         conv_p,

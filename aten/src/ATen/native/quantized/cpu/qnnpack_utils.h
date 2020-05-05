@@ -88,6 +88,21 @@ inline std::pair<uint8_t, uint8_t> activationLimits(
 #endif
   }
 }
+
+namespace at {
+namespace native {
+namespace qnnp_avgpool_helper {
+Tensor qnnpack_avg_pool2d(
+    Tensor input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    bool ceil_mode,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override);
+} // qnnp_avgpool_helper
+} // namespace native
+} // namespace at
 #endif
 
 namespace {
@@ -95,10 +110,12 @@ std::vector<float> generate_requantization_scales(
     const at::Tensor& weight_scales,
     const float input_scale,
     const float output_scale) {
-  auto num_output_channels = weight_scales.numel();
+  // Since weight scale is allocated with padding
+  // weight_scales.numel() gives us padded num elements.
+  auto num_output_channels_padded = weight_scales.numel();
   float* weight_scales_data = weight_scales.data_ptr<float>();
-  std::vector<float> requant_scales(num_output_channels, 1.f);
-  for (int i = 0; i < num_output_channels; ++i) {
+  std::vector<float> requant_scales(num_output_channels_padded, 1.f);
+  for (int i = 0; i < num_output_channels_padded; ++i) {
     requant_scales[i] = weight_scales_data[i] * input_scale / output_scale;
   }
   return requant_scales;
@@ -108,11 +125,14 @@ std::pair<at::Tensor, at::Tensor> make_zero_points_and_scales_tensor(
     const at::Tensor& weight_contig
     ) {
   auto num_output_channels = weight_contig.size(0);
+  // Add 8 to account for bufferring needed by QNNPACK.
+  auto num_output_channels_padded = weight_contig.size(0) + 8;
   const auto qtype = weight_contig.qscheme();
   at::Tensor weight_zp =
-    at::native::empty_cpu(
-        {num_output_channels},
-        at::device(at::kCPU).dtype(at::kQUInt8));
+    at::_empty_affine_quantized(
+        {num_output_channels_padded},
+        at::device(at::kCPU).dtype(at::kQUInt8),
+        1.f, 0);
   // Adjust weight zero point, similar to weight data.
   uint8_t* weight_zp_data = (uint8_t*)weight_zp.data_ptr<c10::quint8>();
   if (qtype == at::kPerTensorAffine) {
@@ -128,8 +148,8 @@ std::pair<at::Tensor, at::Tensor> make_zero_points_and_scales_tensor(
     }
   }
   at:: Tensor weight_scales =
-    at::native::empty_cpu(
-        {num_output_channels},
+    at::empty(
+        {num_output_channels_padded},
         at::device(at::kCPU).dtype(at::kFloat));
   float* weight_scales_data = weight_scales.data_ptr<float>();
   if (qtype == at::kPerTensorAffine) {
