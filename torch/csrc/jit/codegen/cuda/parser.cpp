@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 
 #include <unordered_map>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -25,8 +26,7 @@ typedef Expr* CgOp;
 
 typedef void (*ParseFuncPtr)(
     const Node* const,
-    std::unordered_map<size_t, CgValue>&,
-    std::unordered_set<CgValue>&);
+    std::unordered_map<size_t, CgValue>&);
 
 // TODO: add a mutex to make it thread safe.
 class IrParser {
@@ -112,18 +112,7 @@ class IrParser {
     }
 
     // Run through intermediates, unroll, and bind their axes
-    for (auto entry : value_map_) {
-      CgValue val = entry.second;
-      if (fusion_->hasInput(val) || fusion_->hasOutput(val))
-        continue;
-      if (val->getValType().value() != ValType::TensorView)
-        continue;
-      TensorView* tv = static_cast<TensorView*>(val);
-      tv->axis(-2)->parallelize(ParallelType::Unroll);
-      tv->axis(-1)->parallelize(ParallelType::TIDx);
-    }
-
-    for (auto val : value_set_) {
+    for (auto val : fusion_->vals()) {
       if (fusion_->hasInput(val) || fusion_->hasOutput(val))
         continue;
       if (val->getValType().value() != ValType::TensorView)
@@ -177,11 +166,10 @@ class IrParser {
       registerParseRule(
           ptr_op,
           [](const Node* const node,
-             std::unordered_map<size_t, CgValue>& value_map,
-             std::unordered_set<CgValue>& value_set) -> void {
-            static std::unordered_map<Symbol, BinaryOpType> op_mapping({
-                {aten::add, BinaryOpType::Add},
-                {aten::sub, BinaryOpType::Sub},
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
+            static std::unordered_map<Symbol, std::pair<BinaryOpType,decltype(&add_alpha)>> op_mapping({
+                {aten::add, std::make_pair(BinaryOpType::Add, &add_alpha)},
+                {aten::sub, std::make_pair(BinaryOpType::Sub, &sub_alpha)},
             });
             // TODO: handle scaling factor when it's not constant 1;
             auto lhs = value_map[node->inputs()[0]->unique()];
@@ -189,12 +177,10 @@ class IrParser {
             auto alpha = value_map[node->inputs()[2]->unique()];
 
             if (alpha->isOneInt()) {
-              auto out = binaryOp(op_mapping[node->kind()], lhs, rhs);
+              auto out = binaryOp(op_mapping[node->kind()].first, lhs, rhs);
               value_map.emplace(node->output()->unique(), out);
             } else {
-              auto weight_other = binaryOp(BinaryOpType::Mul, rhs, alpha);
-              value_set.emplace(weight_other);
-              auto out = binaryOp(op_mapping[node->kind()], lhs, weight_other);
+              auto out = op_mapping[node->kind()].second(lhs, rhs, alpha);
               value_map.emplace(node->output()->unique(), out);
             }
           });
@@ -230,8 +216,7 @@ class IrParser {
       registerParseRule(
           ptr_op,
           [](const Node* const node,
-             std::unordered_map<size_t, CgValue>& value_map,
-             std::unordered_set<CgValue>& value_set) -> void {
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
             static std::unordered_map<Symbol, BinaryOpType> op_mapping(
                 {{aten::div, BinaryOpType::Div},
                  {aten::mul, BinaryOpType::Mul},
@@ -296,8 +281,7 @@ class IrParser {
       registerParseRule(
           ptr_op,
           [](const Node* const node,
-             std::unordered_map<size_t, CgValue>& value_map,
-             std::unordered_set<CgValue>& value_set) -> void {
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
             static std::unordered_map<Symbol, UnaryOpType> op_mapping({
                 {aten::neg, UnaryOpType::Neg},
                 {aten::abs, UnaryOpType::Abs},
@@ -344,8 +328,7 @@ class IrParser {
       registerParseRule(
           ptr_op,
           [](const Node* const node,
-             std::unordered_map<size_t, CgValue>& value_map,
-             std::unordered_set<CgValue>& value_set) -> void {
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto operand = value_map[node->inputs()[0]->unique()];
 
             auto out = unaryOp(UnaryOpType::RandLike, operand);
@@ -359,8 +342,7 @@ class IrParser {
       registerParseRule(
           ptr_op,
           [](const Node* const node,
-             std::unordered_map<size_t, CgValue>& value_map,
-             std::unordered_set<CgValue>& value_set) -> void {
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto operand = value_map[node->inputs()[0]->unique()];
             auto th = value_map[node->inputs()[1]->unique()];
             auto value = value_map[node->inputs()[2]->unique()];
@@ -376,8 +358,7 @@ class IrParser {
       registerParseRule(
           ptr_op,
           [](const Node* const node,
-             std::unordered_map<size_t, CgValue>& value_map,
-             std::unordered_set<CgValue>& value_set) -> void {
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto operand = value_map[node->inputs()[0]->unique()];
             // TODO: we need to get a proper lower bound per dtype in operand.
             auto low = value_map.count(node->inputs()[1]->unique()) != 0
@@ -398,8 +379,7 @@ class IrParser {
       registerParseRule(
           ptr_op,
           [](const Node* const node,
-             std::unordered_map<size_t, CgValue>& value_map,
-             std::unordered_set<CgValue>& value_set) -> void {
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto condition = value_map[node->inputs()[0]->unique()];
             auto x = value_map[node->inputs()[1]->unique()];
             auto y = value_map[node->inputs()[2]->unique()];
@@ -426,7 +406,7 @@ class IrParser {
           node->kind().toDisplayString());
       for (auto& pair_op_func : iter->second) {
         if (node->matches(pair_op_func.first->schema())) {
-          pair_op_func.second(node, value_map_, value_set_);
+          pair_op_func.second(node, value_map_);
           return;
         }
       }
@@ -492,7 +472,6 @@ class IrParser {
 
   // maps from JitValue::unique() to fusion Val;
   std::unordered_map<size_t, CgValue> value_map_;
-  std::unordered_set<CgValue> value_set_;
   // parsing rule registry.
   static std::unordered_map<
       Symbol,

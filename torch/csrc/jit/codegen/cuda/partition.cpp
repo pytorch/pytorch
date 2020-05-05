@@ -35,7 +35,6 @@ static c10::optional<c10::Device> getDevice(const Node* const node) {
 static bool isFusableDevice(const Node* node, const c10::Device device) {
   for (auto value : node->outputs()) {
     auto output_device = getDevice(value);
-    // if (!output_device.has_value() || output_device.value() != device) {
     if (output_device.has_value() && output_device.value() != device) {
       return false;
     }
