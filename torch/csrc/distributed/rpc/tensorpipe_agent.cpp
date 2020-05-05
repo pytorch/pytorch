@@ -42,7 +42,7 @@ TensorPipeAgent::TensorPipeAgent(
 }
 
 TensorPipeAgent::~TensorPipeAgent() {
-  shutdownImpl();
+  shutdown();
 }
 
 void TensorPipeAgent::startImpl() {
@@ -351,7 +351,7 @@ void TensorPipeAgent::sync() {}
 
 // TODO: Remove join()
 void TensorPipeAgent::join() {
-  shutdownImpl();
+  shutdown();
 }
 
 void TensorPipeAgent::shutdownImpl() {
