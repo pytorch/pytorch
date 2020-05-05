@@ -1,5 +1,5 @@
-#include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/codegen/cuda/shape_inference.h>
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <ATen/ExpandUtils.h>
@@ -35,13 +35,12 @@ class NaiveShapeTypePropagator {
   void PropagateOnNode(Node* node) {
     switch (node->kind()) {
       // Constant:
-      case prim::Constant:
-        {
-					if (node->output()->type()->isSubtypeOf(TensorType::get())) {
-            node->output()->inferTypeFrom(node->t(attr::value));
-     			}
-          break;
+      case prim::Constant: {
+        if (node->output()->type()->isSubtypeOf(TensorType::get())) {
+          node->output()->inferTypeFrom(node->t(attr::value));
         }
+        break;
+      }
       // unary operations that forward meta info and shape:
       case aten::neg:
       case aten::abs:
@@ -75,23 +74,21 @@ class NaiveShapeTypePropagator {
       case aten::threshold:
       case aten::clamp:
       case aten::gelu:
-      case aten::tanh:
-        {
-          TORCH_CHECK(
-               node->input(0)->type()->cast<TensorType>()->isComplete(),
-              "shape propagation failed");
-          node->output()->setType(node->input(0)->type()->cast<TensorType>());
-          break;
-        }
+      case aten::tanh: {
+        TORCH_CHECK(
+            node->input(0)->type()->cast<TensorType>()->isComplete(),
+            "shape propagation failed");
+        node->output()->setType(node->input(0)->type()->cast<TensorType>());
+        break;
+      }
       // TODO: rand_like should support cast.
-      case aten::rand_like:
-        {
-          TORCH_CHECK(
-               node->input(0)->type()->cast<TensorType>()->isComplete(),
-              "shape propagation failed");
-          node->output()->setType(node->input(0)->type()->cast<TensorType>());
-          break;
-        }
+      case aten::rand_like: {
+        TORCH_CHECK(
+            node->input(0)->type()->cast<TensorType>()->isComplete(),
+            "shape propagation failed");
+        node->output()->setType(node->input(0)->type()->cast<TensorType>());
+        break;
+      }
       // binary operations that forward meta info and broadcast shape:
       case aten::mul:
       case aten::div:
@@ -105,37 +102,34 @@ class NaiveShapeTypePropagator {
       // add/sub could be ternary op and the third argument does not contribute
       // to neither type promoteion nor shape.
       case aten::add:
-      case aten::sub:
-        {
-          auto promoted_type = binary_broadcast_type(
-              node->input(0)->type()->cast<TensorType>(),
-              node->input(1)->type()->cast<TensorType>());
-          node->output()->setType(promoted_type);
-          break;
-        }
+      case aten::sub: {
+        auto promoted_type = binary_broadcast_type(
+            node->input(0)->type()->cast<TensorType>(),
+            node->input(1)->type()->cast<TensorType>());
+        node->output()->setType(promoted_type);
+        break;
+      }
       // TODO: double check type casting logic for operations commented out.
       case aten::lt:
       case aten::le:
       case aten::gt:
       case aten::ge:
       case aten::ne:
-      case aten::eq:
-        {
-          auto promoted_type = binary_broadcast_type(
-              node->input(0)->type()->cast<TensorType>(),
-              node->input(1)->type()->cast<TensorType>(),
-              at::ScalarType::Bool);
-          node->output()->setType(promoted_type);
-          break;
-        }
-      case aten::where:
-        {
-          auto promoted_type = binary_broadcast_type(
-              node->input(1)->type()->cast<TensorType>(),
-              node->input(2)->type()->cast<TensorType>());
-          node->output()->setType(promoted_type);
-          break;
-        }
+      case aten::eq: {
+        auto promoted_type = binary_broadcast_type(
+            node->input(0)->type()->cast<TensorType>(),
+            node->input(1)->type()->cast<TensorType>(),
+            at::ScalarType::Bool);
+        node->output()->setType(promoted_type);
+        break;
+      }
+      case aten::where: {
+        auto promoted_type = binary_broadcast_type(
+            node->input(1)->type()->cast<TensorType>(),
+            node->input(2)->type()->cast<TensorType>());
+        node->output()->setType(promoted_type);
+        break;
+      }
       default:
         TORCH_CHECK(false, "shape/type inference failed.");
         // TODO: generate a proper error log, as this probably means something
@@ -150,33 +144,30 @@ class NaiveShapeTypePropagator {
 
  protected:
   // TODO: we should comply to codegen type promotion.
-  TensorTypePtr binary_broadcast_type(TensorTypePtr op0, TensorTypePtr op1,
+  TensorTypePtr binary_broadcast_type(
+      TensorTypePtr op0,
+      TensorTypePtr op1,
       c10::optional<at::ScalarType> scalar_type = c10::nullopt) {
-      
     TORCH_CHECK(
-        op0 != nullptr || op1 != nullptr,
-		  	"no scalar operation supported yet.");
+        op0 != nullptr || op1 != nullptr, "no scalar operation supported yet.");
 
     if (op0 != nullptr && op1 != nullptr) {
-      auto expanded_size = at::infer_size(*op0->sizes().concrete_sizes(),
-          *op1->sizes().concrete_sizes());
-      auto promoted_scalar_type =
-          scalar_type.has_value() ?
-          scalar_type.value() :
-          c10::promoteTypes(*op0->scalarType(), *op1->scalarType());
+      auto expanded_size = at::infer_size(
+          *op0->sizes().concrete_sizes(), *op1->sizes().concrete_sizes());
+      auto promoted_scalar_type = scalar_type.has_value()
+          ? scalar_type.value()
+          : c10::promoteTypes(*op0->scalarType(), *op1->scalarType());
       // TODO: maybe contiguous is not what we want in case when layout
       //       propagation could be beneficial.
       return TensorType::createContiguous(
-          promoted_scalar_type,
-          *op0->device(),
-          expanded_size);
+          promoted_scalar_type, *op0->device(), expanded_size);
     } else {
       auto ptr = (op0 != nullptr) ? op0 : op1;
       TORCH_CHECK(ptr->isComplete(), "shape propagation failed");
       return TensorType::createContiguous(
           scalar_type.has_value() ? scalar_type.value() : *ptr->scalarType(),
-					*ptr->device(),
-					*ptr->sizes().concrete_sizes());
+          *ptr->device(),
+          *ptr->sizes().concrete_sizes());
     }
   }
 
@@ -184,7 +175,7 @@ class NaiveShapeTypePropagator {
   std::shared_ptr<Graph> graph_;
 };
 
-} // 
+} // namespace
 
 TORCH_CUDA_API void ShapeTypePropagate(std::shared_ptr<Graph>& graph) {
   NaiveShapeTypePropagator(graph).run();

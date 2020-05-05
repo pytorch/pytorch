@@ -110,8 +110,7 @@ class CudaFusionManager {
         if (input.isTensor()) {
           const auto& device = input.toTensor().device();
           TORCH_INTERNAL_ASSERT(
-              device.is_cuda(),
-              "Could only fuser operations on cuda device");
+              device.is_cuda(), "Could only fuser operations on cuda device");
           cuda_kernel.value()->device_ = device.index();
           break;
         }
@@ -219,9 +218,8 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
   } catch (...) {
     TORCH_CHECK(!DISABLED_FALLBACK, "codegen errored out.");
     EraseShapeInformation(graph);
-    InterpreterState{Code(graph,"fallback_cuda_fuser")}.run(stack);
+    InterpreterState{Code(graph, "fallback_cuda_fuser")}.run(stack);
   }
-
 }
 
 } // namespace cuda

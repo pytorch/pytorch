@@ -1,6 +1,6 @@
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <ATen/CUDAGeneratorImpl.h>
 #include <c10/core/ScalarType.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/ArrayRef.h>
@@ -281,8 +281,7 @@ void runKernel(
   // TODO: this probably won't work for us.
   if (entry->has_random_) {
     std::pair<uint64_t, uint64_t> philox_engine_inputs;
-    const auto rand_offset =
-        4 * (std::ceil(numel / (4.0 * 128 * nBlocks)) + 1);
+    const auto rand_offset = 4 * (std::ceil(numel / (4.0 * 128 * nBlocks)) + 1);
     auto gen = at::cuda::detail::getDefaultCUDAGenerator();
     {
       // See Note [Acquire lock when using random generators]
@@ -353,8 +352,7 @@ void runTestKernel(
   // TODO: this probably won't work for us.
   if (entry->has_random_) {
     std::pair<uint64_t, uint64_t> philox_engine_inputs;
-    const auto rand_offset =
-        4 * (std::ceil(numel / (4.0 * 128 * nBlocks)) + 1);
+    const auto rand_offset = 4 * (std::ceil(numel / (4.0 * 128 * nBlocks)) + 1);
     auto gen = at::cuda::detail::getDefaultCUDAGenerator();
     {
       // See Note [Acquire lock when using random generators]

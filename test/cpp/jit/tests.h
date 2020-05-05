@@ -126,7 +126,7 @@ namespace jit {
   _(GPU_FusionTernaryOps)        \
   _(GPU_FusionCompoundOps)       \
   _(GPU_FusionCastOps)
-  //_(GPU_FusionCodeGen4)
+//_(GPU_FusionCodeGen4)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

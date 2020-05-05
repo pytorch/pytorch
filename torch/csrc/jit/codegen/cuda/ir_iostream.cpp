@@ -58,8 +58,10 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
   os << "){\n";
   indent_size++;
   if (fusion->random()) {
-    indent(); os << "int idx = blockIdx.x*blockDim.x + threadIdx.x;\n";
-    indent(); os << "Philox rnd(seed, idx, offset);\n";
+    indent();
+    os << "int idx = blockIdx.x*blockDim.x + threadIdx.x;\n";
+    indent();
+    os << "Philox rnd(seed, idx, offset);\n";
   }
 }
 
@@ -236,7 +238,7 @@ void IRPrinter::handle(const UnaryOp* const uop) {
     handle(uop->in());
   } else {
     os << uop->getUnaryOpType() << "(";
-    if(uop->getUnaryOpType() == UnaryOpType::RandLike)
+    if (uop->getUnaryOpType() == UnaryOpType::RandLike)
       os << "rnd";
     else
       handle(uop->in());

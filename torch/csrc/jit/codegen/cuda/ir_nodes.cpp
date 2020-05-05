@@ -119,7 +119,12 @@ bool BinaryOp::sameAs(const BinaryOp* other) const {
   return true;
 }
 
-TernaryOp::TernaryOp(TernaryOpType _type, Val* _out, Val* _in1, Val* _in2, Val* _in3)
+TernaryOp::TernaryOp(
+    TernaryOpType _type,
+    Val* _out,
+    Val* _in1,
+    Val* _in2,
+    Val* _in3)
     : Expr(ExprType::TernaryOp),
       ternary_op_type_{_type},
       out_{_out},
@@ -136,9 +141,8 @@ TernaryOp::TernaryOp(TernaryOpType _type, Val* _out, Val* _in1, Val* _in2, Val* 
 bool TernaryOp::sameAs(const TernaryOp* other) const {
   if (getTernaryOpType() != other->getTernaryOpType())
     return false;
-  if ( ! (    in1()->sameAs(other->in1())
-           && in2()->sameAs(other->in2())
-           && in3()->sameAs(other->in3())))
+  if (!(in1()->sameAs(other->in1()) && in2()->sameAs(other->in2()) &&
+        in3()->sameAs(other->in3())))
     return false;
   return true;
 }

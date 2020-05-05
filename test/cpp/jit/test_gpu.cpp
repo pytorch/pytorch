@@ -23,7 +23,7 @@ namespace jit {
 
 using namespace torch::jit::fuser;
 
-TensorView* makeDummyTensor(int nDims, DataType dtype=DataType::Float) {
+TensorView* makeDummyTensor(int nDims, DataType dtype = DataType::Float) {
   std::vector<IterDomain*> dom;
   for (int i = 0; i < nDims; i++)
     dom.push_back(new IterDomain(new Int(0), new Int()));
@@ -823,7 +823,7 @@ void testGPU_FusionCodeGen2() {
   at::Tensor input2 = at::randn_like(input1);
 
   at::Tensor output = at::empty_like(input1);
-  std::array<IValue,2> inputs = {input1, input2};
+  std::array<IValue, 2> inputs = {input1, input2};
   const at::ArrayRef<IValue> input_ivalues(inputs);
   std::vector<at::Tensor> outputs{{output}};
 
@@ -869,7 +869,7 @@ void testGPU_FusionCodeGen3() {
 
   tv3->computeAt(tv4, 1);
   tv3->computeAt(tv5, 1);
-  
+
   tv4->axis(0)->parallelize(ParallelType::BIDx);
   tv4->axis(1)->parallelize(ParallelType::Unroll);
   tv4->axis(-1)->parallelize(ParallelType::TIDx);
@@ -880,7 +880,7 @@ void testGPU_FusionCodeGen3() {
 
   tv3->axis(-2)->parallelize(ParallelType::Unroll);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
-  
+
   GPULower gpulw(&fusion);
   std::stringstream cdg;
   gpulw.printKernel(cdg);
@@ -920,7 +920,7 @@ void testGPU_FusionCodeGen4() {
 
   tv3->computeAt(tv4, 1);
   tv3->computeAt(tv5, 1);
-  
+
   tv4->axis(0)->parallelize(ParallelType::BIDx);
   tv4->axis(1)->parallelize(ParallelType::Unroll);
   tv4->axis(-1)->parallelize(ParallelType::TIDx);
@@ -931,7 +931,7 @@ void testGPU_FusionCodeGen4() {
 
   tv3->axis(-2)->parallelize(ParallelType::Unroll);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
-  
+
   std::cout << "start code gen" << std::endl;
 
   GPULower gpulw(&fusion);
@@ -992,7 +992,7 @@ void testGPU_FusionSimplePWise() {
   at::Tensor input2 = at::randn_like(input1);
 
   at::Tensor output = at::empty_like(input1);
-  std::array<IValue,2> inputs = {input1, input2};
+  std::array<IValue, 2> inputs = {input1, input2};
   const at::ArrayRef<IValue> input_ivalues(inputs);
   std::vector<at::Tensor> outputs{{output}};
 
@@ -1050,7 +1050,7 @@ void testGPU_FusionExecKernel() {
   at::Tensor input2 = at::ones_like(input1);
 
   at::Tensor output = at::empty_like(input1);
-  std::array<IValue,2> inputs = {input1, input2};
+  std::array<IValue, 2> inputs = {input1, input2};
   const at::ArrayRef<IValue> input_ivalues(inputs);
   std::vector<at::Tensor> outputs{{output}};
 
@@ -1150,7 +1150,7 @@ void testGPU_FusionLoopUnroll() {
   at::Tensor input2 = at::ones_like(input1);
 
   at::Tensor output = at::empty_like(input1);
-  std::array<IValue,2> inputs = {input1, input2};
+  std::array<IValue, 2> inputs = {input1, input2};
   const at::ArrayRef<IValue> input_ivalues(inputs);
   std::vector<at::Tensor> outputs{{output}};
 
@@ -1166,13 +1166,13 @@ void testGPU_FusionLoopUnroll() {
  * Helper function for single op testing that generates a codegen operand
  */
 
-Val* gen_jit_operand(std::pair<ValType,DataType> desc) {
-  if(desc.first == ValType::TensorView) {
-  	return makeDummyTensor(2, desc.second);
-  } else if(desc.first == ValType::Scalar) {
-    if(desc.second == DataType::Float)
+Val* gen_jit_operand(std::pair<ValType, DataType> desc) {
+  if (desc.first == ValType::TensorView) {
+    return makeDummyTensor(2, desc.second);
+  } else if (desc.first == ValType::Scalar) {
+    if (desc.second == DataType::Float)
       return new Float();
-    else if(desc.second == DataType::Int)
+    else if (desc.second == DataType::Int)
       return new Int();
     else
       TORCH_CHECK("Not currently supported type", desc.first);
@@ -1186,42 +1186,46 @@ Val* gen_jit_operand(std::pair<ValType,DataType> desc) {
  * Helper function for single op testing that generates an ATen operand
  */
 
-IValue gen_aten_operand(std::pair<ValType,DataType> desc, int blocks, int threads, bool rand) {
-  if(desc.first == ValType::TensorView) {
-    if(desc.second == DataType::Float) {
+IValue gen_aten_operand(
+    std::pair<ValType, DataType> desc,
+    int blocks,
+    int threads,
+    bool rand) {
+  if (desc.first == ValType::TensorView) {
+    if (desc.second == DataType::Float) {
       auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-      if(rand)
-   	    return IValue(at::rand({blocks, threads}, options));
+      if (rand)
+        return IValue(at::rand({blocks, threads}, options));
       else
-   	    return IValue(at::empty({blocks, threads}, options));
-    } else if(desc.second == DataType::Half) {
+        return IValue(at::empty({blocks, threads}, options));
+    } else if (desc.second == DataType::Half) {
       auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-      if(rand)
-   	    return IValue(at::rand({blocks, threads}, options));
+      if (rand)
+        return IValue(at::rand({blocks, threads}, options));
       else
-   	    return IValue(at::empty({blocks, threads}, options));
-    } else if(desc.second == DataType::Bool) {
-      if(rand) {
-        auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-   	    return IValue(at::rand({blocks, threads}, options).to(at::kBool));
-      }
-      else {
-        auto options = at::TensorOptions().dtype(at::kBool).device(at::kCUDA, 0);
-   	    return IValue(at::empty({blocks, threads}, options));
+        return IValue(at::empty({blocks, threads}, options));
+    } else if (desc.second == DataType::Bool) {
+      if (rand) {
+        auto options =
+            at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+        return IValue(at::rand({blocks, threads}, options).to(at::kBool));
+      } else {
+        auto options =
+            at::TensorOptions().dtype(at::kBool).device(at::kCUDA, 0);
+        return IValue(at::empty({blocks, threads}, options));
       }
     } else {
-      TORCH_CHECK("Not currently supported type",  desc.second)
+      TORCH_CHECK("Not currently supported type", desc.second)
     }
-  } else if(desc.first == ValType::Scalar) {
-    if(desc.second == DataType::Float)
+  } else if (desc.first == ValType::Scalar) {
+    if (desc.second == DataType::Float)
       return IValue(at::Scalar(1.f));
     else if (desc.second == DataType::Int)
       return IValue(at::Scalar(1));
     else
       TORCH_CHECK("Not currently supported type", desc.first);
   } else {
-    TORCH_CHECK("Not currently supported type",
-				desc.first);
+    TORCH_CHECK("Not currently supported type", desc.first);
   }
   return nullptr;
 }
@@ -1232,20 +1236,37 @@ IValue gen_aten_operand(std::pair<ValType,DataType> desc, int blocks, int thread
  */
 
 using OutputPair = std::pair<ValType, DataType>;
-template<typename AtenFunc, typename JitFunc, typename InputTuple, size_t ... NumInputs>
-void test_op(int blocks, int threads, std::string op_str, AtenFunc af, JitFunc jf, OutputPair op, InputTuple it, std::index_sequence<NumInputs ...>) {
+template <
+    typename AtenFunc,
+    typename JitFunc,
+    typename InputTuple,
+    size_t... NumInputs>
+void test_op(
+    int blocks,
+    int threads,
+    std::string op_str,
+    AtenFunc af,
+    JitFunc jf,
+    OutputPair op,
+    InputTuple it,
+    std::index_sequence<NumInputs...>) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  // Generate Input JIT function Inputs and add them as Inputs to the Fusion Graph
-  std::array<Val*,sizeof...(NumInputs)> jit_inputs = {gen_jit_operand(std::get<NumInputs>(it)) ...};
-  std::for_each(jit_inputs.begin(), jit_inputs.end(), [&fusion](Val* v){ fusion.addInput(v); });
-  TensorView* out = static_cast<TensorView*>( jf(std::get<NumInputs>(jit_inputs) ...) );
+  // Generate Input JIT function Inputs and add them as Inputs to the Fusion
+  // Graph
+  std::array<Val*, sizeof...(NumInputs)> jit_inputs = {
+      gen_jit_operand(std::get<NumInputs>(it))...};
+  std::for_each(jit_inputs.begin(), jit_inputs.end(), [&fusion](Val* v) {
+    fusion.addInput(v);
+  });
+  TensorView* out =
+      static_cast<TensorView*>(jf(std::get<NumInputs>(jit_inputs)...));
   fusion.addOutput(out);
 
   std::for_each(jit_inputs.begin(), jit_inputs.end(), [out](Val* v) {
-	if (v->getValType() == ValType::TensorView)
-	  static_cast<TensorView*>(v)->computeAt(out, -1);
+    if (v->getValType() == ValType::TensorView)
+      static_cast<TensorView*>(v)->computeAt(out, -1);
   });
   out->axis(0)->parallelize(ParallelType::BIDx);
   out->axis(-1)->parallelize(ParallelType::TIDx);
@@ -1256,200 +1277,330 @@ void test_op(int blocks, int threads, std::string op_str, AtenFunc af, JitFunc j
   prog.block(threads);
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
 
-  std::array<IValue,sizeof...(NumInputs)> aten_inputs = {gen_aten_operand(std::get<NumInputs>(it), blocks, threads, /*rand*/true) ...};
+  std::array<IValue, sizeof...(NumInputs)> aten_inputs = {gen_aten_operand(
+      std::get<NumInputs>(it), blocks, threads, /*rand*/ true)...};
   const at::ArrayRef<IValue> aten_inputs_ivalues(aten_inputs);
 
-  at::Tensor output = gen_aten_operand(op, blocks, threads, /*rand*/false).toTensor();
+  at::Tensor output =
+      gen_aten_operand(op, blocks, threads, /*rand*/ false).toTensor();
   std::vector<at::Tensor> output_vect = {output};
-  if(fusion.random())
+  if (fusion.random())
     at::manual_seed(0);
-  torch::jit::fuser::cuda::runTestKernel(&prog, aten_inputs_ivalues, output_vect);
+  torch::jit::fuser::cuda::runTestKernel(
+      &prog, aten_inputs_ivalues, output_vect);
 
-  at::Tensor ref_output = gen_aten_operand(op, blocks, threads, /*rand*/false).toTensor();
-  if(fusion.random())
+  at::Tensor ref_output =
+      gen_aten_operand(op, blocks, threads, /*rand*/ false).toTensor();
+  if (fusion.random())
     at::manual_seed(0);
-  ref_output = af( aten_inputs );
+  ref_output = af(aten_inputs);
 
   std::function<std::string()> aten_inputs_to_str =
-              [&aten_inputs]()->std::string {
-                int input_cnt = 1;
-			    std::stringstream ss;
-			    std::for_each(aten_inputs.begin(), aten_inputs.end(),
-                [&input_cnt, &ss] (IValue &iv) {
-			      ss << "\nINPUT" << input_cnt++ << ": " << iv.toTensor(); });
-                return ss.str(); };
+      [&aten_inputs]() -> std::string {
+    int input_cnt = 1;
+    std::stringstream ss;
+    std::for_each(
+        aten_inputs.begin(), aten_inputs.end(), [&input_cnt, &ss](IValue& iv) {
+          ss << "\nINPUT" << input_cnt++ << ": " << iv.toTensor();
+        });
+    return ss.str();
+  };
 
-  TORCH_CHECK( (output.scalar_type() == at::kBool ?
-                 output.equal(ref_output) :
-                 // The absolute Tolerance was raised to 1e-07 from 1e-08 to allow
-                 // allow for the remainder function to pass. 
-                 output.allclose(ref_output, /*rtol*/ 1e-05, /*atol*/ 1e-07) ),
-              "\nOp Type: -- ", op_str,
-              " -- had a mismatch.",
-              aten_inputs_to_str(),
-              "\nJIT: ", output,
-              "\nREF: ", ref_output, "\n");
+  TORCH_CHECK(
+      (output.scalar_type() == at::kBool
+           ? output.equal(ref_output)
+           :
+           // The absolute Tolerance was raised to 1e-07 from 1e-08 to allow
+           // allow for the remainder function to pass.
+           output.allclose(ref_output, /*rtol*/ 1e-05, /*atol*/ 1e-07)),
+      "\nOp Type: -- ",
+      op_str,
+      " -- had a mismatch.",
+      aten_inputs_to_str(),
+      "\nJIT: ",
+      output,
+      "\nREF: ",
+      ref_output,
+      "\n");
 }
 
 /*
  *  Templatized Helper Function that uses variadic templates to
  *  process a variable length Input Tuple of different Operand Type.
  */
-template<typename AtenFunc, typename JitFunc, typename InputTuple>
-void test_op(int blocks, int threads, std::string op_str, AtenFunc af, JitFunc jf, OutputPair op,InputTuple it) {
+template <typename AtenFunc, typename JitFunc, typename InputTuple>
+void test_op(
+    int blocks,
+    int threads,
+    std::string op_str,
+    AtenFunc af,
+    JitFunc jf,
+    OutputPair op,
+    InputTuple it) {
   static constexpr auto size = std::tuple_size<InputTuple>::value;
-  test_op(blocks, threads, op_str, af, jf, op, it, std::make_index_sequence<size>{});
+  test_op(
+      blocks,
+      threads,
+      op_str,
+      af,
+      jf,
+      op,
+      it,
+      std::make_index_sequence<size>{});
 }
 
 void testGPU_FusionUnaryOps() {
-  using OpTuple = std::tuple<at::Tensor(*)(const at::Tensor&), UnaryOpType, std::string>;
-  std::vector<OpTuple> ops {
-    {at::abs,        UnaryOpType::Abs,        "abs"        },
-    {at::acos,       UnaryOpType::Acos,       "acos"       },
-    {at::asin,       UnaryOpType::Asin,       "asin"       },
-    {at::atan,       UnaryOpType::Atan,       "atan"       },
-    // There does not appear to be an appropriate ATen function for atanh
-    //{at::atanh,      UnaryOpType::Atanh,      "atanh"      },
-    {at::ceil,       UnaryOpType::Ceil,       "ceil"       },
-    {at::cos,        UnaryOpType::Cos,        "cos"        },
-    {at::cosh,       UnaryOpType::Cosh,       "cosh"       },
-    {at::erf,        UnaryOpType::Erf,        "erf"        },
-    {at::erfc,       UnaryOpType::Erfc,       "erfc"       },
-    {at::exp,        UnaryOpType::Exp,        "exp"        },
-    {at::expm1,      UnaryOpType::Expm1,      "expm1"      },
-    {at::floor,      UnaryOpType::Floor,      "floor"      },
-    {at::frac,       UnaryOpType::Frac,       "frac"       },
-    {at::gelu,       UnaryOpType::Gelu,       "gelu"       },
-    {at::lgamma,     UnaryOpType::Lgamma,     "lgamma"     },
-    {at::log,        UnaryOpType::Log,        "log"        },
-    {at::log10,      UnaryOpType::Log10,      "log10"      },
-    {at::log1p,      UnaryOpType::Log1p,      "log1p"      },
-    {at::log2,       UnaryOpType::Log2,       "log2"       },
-    {at::neg,        UnaryOpType::Neg,        "neg"        },
-    {at::reciprocal, UnaryOpType::Reciprocal, "reciprocal" },
-    {at::relu,       UnaryOpType::Relu,       "relu"       },
-    {at::round,      UnaryOpType::Round,      "round"      },
-    {at::rsqrt,      UnaryOpType::Rsqrt,      "rsqrt"      },
-    {at::sigmoid,    UnaryOpType::Sigmoid,    "sigmoid"    },
-    {at::sin,        UnaryOpType::Sin,        "sin"        },
-    {at::sinh,       UnaryOpType::Sinh,       "sinh"       },
-    {at::sqrt,       UnaryOpType::Sqrt,       "sqrt"       },
-    {at::tan,        UnaryOpType::Tan,        "tan"        },
-    {at::tanh,       UnaryOpType::Tanh,       "tanh"       },
-    {at::trunc,      UnaryOpType::Trunc,      "trunc"      }
-  };
+  using OpTuple =
+      std::tuple<at::Tensor (*)(const at::Tensor&), UnaryOpType, std::string>;
+  std::vector<OpTuple> ops{
+      {at::abs, UnaryOpType::Abs, "abs"},
+      {at::acos, UnaryOpType::Acos, "acos"},
+      {at::asin, UnaryOpType::Asin, "asin"},
+      {at::atan, UnaryOpType::Atan, "atan"},
+      // There does not appear to be an appropriate ATen function for atanh
+      //{at::atanh,      UnaryOpType::Atanh,      "atanh"      },
+      {at::ceil, UnaryOpType::Ceil, "ceil"},
+      {at::cos, UnaryOpType::Cos, "cos"},
+      {at::cosh, UnaryOpType::Cosh, "cosh"},
+      {at::erf, UnaryOpType::Erf, "erf"},
+      {at::erfc, UnaryOpType::Erfc, "erfc"},
+      {at::exp, UnaryOpType::Exp, "exp"},
+      {at::expm1, UnaryOpType::Expm1, "expm1"},
+      {at::floor, UnaryOpType::Floor, "floor"},
+      {at::frac, UnaryOpType::Frac, "frac"},
+      {at::gelu, UnaryOpType::Gelu, "gelu"},
+      {at::lgamma, UnaryOpType::Lgamma, "lgamma"},
+      {at::log, UnaryOpType::Log, "log"},
+      {at::log10, UnaryOpType::Log10, "log10"},
+      {at::log1p, UnaryOpType::Log1p, "log1p"},
+      {at::log2, UnaryOpType::Log2, "log2"},
+      {at::neg, UnaryOpType::Neg, "neg"},
+      {at::reciprocal, UnaryOpType::Reciprocal, "reciprocal"},
+      {at::relu, UnaryOpType::Relu, "relu"},
+      {at::round, UnaryOpType::Round, "round"},
+      {at::rsqrt, UnaryOpType::Rsqrt, "rsqrt"},
+      {at::sigmoid, UnaryOpType::Sigmoid, "sigmoid"},
+      {at::sin, UnaryOpType::Sin, "sin"},
+      {at::sinh, UnaryOpType::Sinh, "sinh"},
+      {at::sqrt, UnaryOpType::Sqrt, "sqrt"},
+      {at::tan, UnaryOpType::Tan, "tan"},
+      {at::tanh, UnaryOpType::Tanh, "tanh"},
+      {at::trunc, UnaryOpType::Trunc, "trunc"}};
 
-  std::for_each(ops.begin(), ops.end(), [](OpTuple &op) {
-    test_op(/*blocks*/ 640, /*threads*/ 64, /*name*/std::get<2>(op),
-      	    /*Aten Func   */ [&op](std::array<IValue,1> &vals) { return std::get<0>(op)(vals[0].toTensor()); },
-            /*JIT  Func   */ [&op](Val* in1)->Val* { return unaryOp(std::get<1>(op), in1); },
-            /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-            /*Inputs Tuple*/ std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
+  std::for_each(ops.begin(), ops.end(), [](OpTuple& op) {
+    test_op(
+        /*blocks*/ 640,
+        /*threads*/ 64,
+        /*name*/ std::get<2>(op),
+        /*Aten Func   */
+        [&op](std::array<IValue, 1>& vals) {
+          return std::get<0>(op)(vals[0].toTensor());
+        },
+        /*JIT  Func   */
+        [&op](Val* in1) -> Val* { return unaryOp(std::get<1>(op), in1); },
+        /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
+        /*Inputs Tuple*/
+        std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
   });
 
-  test_op(/*blocks*/640, /*threads*/64, /*name*/"rand_like",
-      	  /*Aten Func   */ [](std::array<IValue,1> &vals) { return at::rand_like(vals[0].toTensor()); },
-          /*JIT  Func   */ [](Val* in1)->Val* { return unaryOp(UnaryOpType::RandLike, in1); },
-          /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-          /*Inputs Tuple*/ std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
+  test_op(
+      /*blocks*/ 640,
+      /*threads*/ 64,
+      /*name*/ "rand_like",
+      /*Aten Func   */
+      [](std::array<IValue, 1>& vals) {
+        return at::rand_like(vals[0].toTensor());
+      },
+      /*JIT  Func   */
+      [](Val* in1) -> Val* { return unaryOp(UnaryOpType::RandLike, in1); },
+      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
+      /*Inputs Tuple*/
+      std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
 }
 
 void testGPU_FusionBinaryOps() {
-  using AtenFuncSig = at::Tensor(*)(const at::Tensor&, const at::Tensor&);
-  using OpTuple     = std::tuple<AtenFuncSig, BinaryOpType, std::string>;
-  std::vector<OpTuple> logic_ops {
-    {at::eq, BinaryOpType::Eq, "eq"},
-    {at::ge, BinaryOpType::GE, "ge"},
-    {at::gt, BinaryOpType::GT, "gt"},
-    {at::le, BinaryOpType::LE, "le"},
-    {at::lt, BinaryOpType::LT, "lt"},
-    {at::ne, BinaryOpType::NE, "ne"}
-  };
+  using AtenFuncSig = at::Tensor (*)(const at::Tensor&, const at::Tensor&);
+  using OpTuple = std::tuple<AtenFuncSig, BinaryOpType, std::string>;
+  std::vector<OpTuple> logic_ops{{at::eq, BinaryOpType::Eq, "eq"},
+                                 {at::ge, BinaryOpType::GE, "ge"},
+                                 {at::gt, BinaryOpType::GT, "gt"},
+                                 {at::le, BinaryOpType::LE, "le"},
+                                 {at::lt, BinaryOpType::LT, "lt"},
+                                 {at::ne, BinaryOpType::NE, "ne"}};
 
-  std::for_each(logic_ops.begin(), logic_ops.end(), [](OpTuple &op) {
-    test_op(/*blocks*/ 640, /*threads*/ 64, /*name*/std::get<2>(op),
-      	    /*Aten Func   */ [&op](std::array<IValue,2> &vals) { return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor()); },
-            /*JIT  Func   */ [&op](Val* in1, Val* in2)->Val* { return binaryOp(std::get<1>(op), in1, in2); },
-            /*Output      */ std::make_pair(ValType::TensorView, DataType::Bool),
-            /*Inputs Tuple*/ std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float),
-                                             std::make_pair(ValType::TensorView, DataType::Float)));
+  std::for_each(logic_ops.begin(), logic_ops.end(), [](OpTuple& op) {
+    test_op(
+        /*blocks*/ 640,
+        /*threads*/ 64,
+        /*name*/ std::get<2>(op),
+        /*Aten Func   */
+        [&op](std::array<IValue, 2>& vals) {
+          return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor());
+        },
+        /*JIT  Func   */
+        [&op](Val* in1, Val* in2) -> Val* {
+          return binaryOp(std::get<1>(op), in1, in2);
+        },
+        /*Output      */ std::make_pair(ValType::TensorView, DataType::Bool),
+        /*Inputs Tuple*/
+        std::make_tuple(
+            std::make_pair(ValType::TensorView, DataType::Float),
+            std::make_pair(ValType::TensorView, DataType::Float)));
   });
 
-  std::vector<OpTuple> math_ops {
-    {at::atan2,     BinaryOpType::Atan2,     "atan2"    },
-    {at::div,       BinaryOpType::Div,       "div"      },
-    {at::fmod,      BinaryOpType::Fmod,      "fmod"     },
-    {at::max,       BinaryOpType::Max,       "max"      },
-    {at::min,       BinaryOpType::Min,       "min"      },
-    {at::mul,       BinaryOpType::Mul,       "mul"      },
-    {at::pow,       BinaryOpType::Pow,       "pow"      },
-    // NOTE: Remainder does not match the Aten impl exactly
-    // despite using an identical function.
-    {at::remainder, BinaryOpType::Remainder, "remainder"},
+  std::vector<OpTuple> math_ops{
+      {at::atan2, BinaryOpType::Atan2, "atan2"},
+      {at::div, BinaryOpType::Div, "div"},
+      {at::fmod, BinaryOpType::Fmod, "fmod"},
+      {at::max, BinaryOpType::Max, "max"},
+      {at::min, BinaryOpType::Min, "min"},
+      {at::mul, BinaryOpType::Mul, "mul"},
+      {at::pow, BinaryOpType::Pow, "pow"},
+      // NOTE: Remainder does not match the Aten impl exactly
+      // despite using an identical function.
+      {at::remainder, BinaryOpType::Remainder, "remainder"},
   };
 
-  std::for_each(math_ops.begin(), math_ops.end(), [](OpTuple &op) {
-    test_op(/*blocks*/ 640, /*threads*/ 64, /*name*/std::get<2>(op),
-      	    /*Aten Func   */ [&op](std::array<IValue,2> &vals) { return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor()); },
-            /*JIT  Func   */ [&op](Val* in1, Val* in2)->Val* { return binaryOp(std::get<1>(op), in1, in2); },
-            /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-            /*Inputs Tuple*/ std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float),
-                                             std::make_pair(ValType::TensorView, DataType::Float)));
+  std::for_each(math_ops.begin(), math_ops.end(), [](OpTuple& op) {
+    test_op(
+        /*blocks*/ 640,
+        /*threads*/ 64,
+        /*name*/ std::get<2>(op),
+        /*Aten Func   */
+        [&op](std::array<IValue, 2>& vals) {
+          return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor());
+        },
+        /*JIT  Func   */
+        [&op](Val* in1, Val* in2) -> Val* {
+          return binaryOp(std::get<1>(op), in1, in2);
+        },
+        /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
+        /*Inputs Tuple*/
+        std::make_tuple(
+            std::make_pair(ValType::TensorView, DataType::Float),
+            std::make_pair(ValType::TensorView, DataType::Float)));
   });
 
-  test_op(/*blocks*/640, /*threads*/64, /*name*/"add_alpha",
-      	  /*Aten Func   */ [](std::array<IValue,3> &vals) { return at::add(vals[0].toTensor(), vals[1].toTensor(), vals[2].toScalar()); },
-          /*JIT  Func   */ add_alpha,
-          /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-          /*Inputs Tuple*/ std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float),
-                                           std::make_pair(ValType::TensorView, DataType::Float),
-                                           std::make_pair(ValType::Scalar,     DataType::Float)));
-  test_op(/*blocks*/640, /*threads*/64, /*name*/"sub_alpha",
-      	  /*Aten Func   */ [](std::array<IValue,3> &vals) { return at::sub(vals[0].toTensor(), vals[1].toTensor(), vals[2].toScalar()); },
-          /*JIT  Func   */ sub_alpha,
-          /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-          /*Inputs Tuple*/ std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float),
-                                           std::make_pair(ValType::TensorView, DataType::Float),
-                                           std::make_pair(ValType::Scalar,     DataType::Float)));
-
+  test_op(
+      /*blocks*/ 640,
+      /*threads*/ 64,
+      /*name*/ "add_alpha",
+      /*Aten Func   */
+      [](std::array<IValue, 3>& vals) {
+        return at::add(
+            vals[0].toTensor(), vals[1].toTensor(), vals[2].toScalar());
+      },
+      /*JIT  Func   */ add_alpha,
+      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
+      /*Inputs Tuple*/
+      std::make_tuple(
+          std::make_pair(ValType::TensorView, DataType::Float),
+          std::make_pair(ValType::TensorView, DataType::Float),
+          std::make_pair(ValType::Scalar, DataType::Float)));
+  test_op(
+      /*blocks*/ 640,
+      /*threads*/ 64,
+      /*name*/ "sub_alpha",
+      /*Aten Func   */
+      [](std::array<IValue, 3>& vals) {
+        return at::sub(
+            vals[0].toTensor(), vals[1].toTensor(), vals[2].toScalar());
+      },
+      /*JIT  Func   */ sub_alpha,
+      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
+      /*Inputs Tuple*/
+      std::make_tuple(
+          std::make_pair(ValType::TensorView, DataType::Float),
+          std::make_pair(ValType::TensorView, DataType::Float),
+          std::make_pair(ValType::Scalar, DataType::Float)));
 }
 
 void testGPU_FusionTernaryOps() {
-  test_op(/*blocks*/640, /*threads*/64, /*name*/"clamp",
-      	  /*Aten Func   */ [](std::array<IValue,1> &vals) { return at::clamp(vals[0].toTensor(), 0.f, 1.f); },
-          /*JIT  Func   */ [](Val* in1)->Val* { return clamp(in1, new Float(0.f), new Float(1.f)); },
-          /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-          /*Inputs Tuple*/ std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
-  test_op(/*blocks*/640, /*threads*/64, /*name*/"threshold",
-      	  /*Aten Func   */ [](std::array<IValue,1> &vals) { return at::threshold(vals[0].toTensor(), 0.f, 1.f); },
-          /*JIT  Func   */ [](Val* in1)->Val* { return threshold(in1, new Float(0.f), new Float(1.f)); },
-          /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-          /*Inputs Tuple*/ std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
-  test_op(/*blocks*/640, /*threads*/64, /*name*/"where",
-      	  /*Aten Func   */ [](std::array<IValue,3> &vals) { return at::where(vals[0].toTensor(), vals[1].toTensor(), vals[2].toTensor()); },
-          /*JIT  Func   */ where,
-          /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-          /*Inputs Tuple*/ std::make_tuple(std::make_pair(ValType::TensorView, DataType::Bool),
-                                           std::make_pair(ValType::TensorView, DataType::Float),
-                                           std::make_pair(ValType::TensorView, DataType::Float)));
+  test_op(
+      /*blocks*/ 640,
+      /*threads*/ 64,
+      /*name*/ "clamp",
+      /*Aten Func   */
+      [](std::array<IValue, 1>& vals) {
+        return at::clamp(vals[0].toTensor(), 0.f, 1.f);
+      },
+      /*JIT  Func   */
+      [](Val* in1) -> Val* {
+        return clamp(in1, new Float(0.f), new Float(1.f));
+      },
+      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
+      /*Inputs Tuple*/
+      std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
+  test_op(
+      /*blocks*/ 640,
+      /*threads*/ 64,
+      /*name*/ "threshold",
+      /*Aten Func   */
+      [](std::array<IValue, 1>& vals) {
+        return at::threshold(vals[0].toTensor(), 0.f, 1.f);
+      },
+      /*JIT  Func   */
+      [](Val* in1) -> Val* {
+        return threshold(in1, new Float(0.f), new Float(1.f));
+      },
+      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
+      /*Inputs Tuple*/
+      std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
+  test_op(
+      /*blocks*/ 640,
+      /*threads*/ 64,
+      /*name*/ "where",
+      /*Aten Func   */
+      [](std::array<IValue, 3>& vals) {
+        return at::where(
+            vals[0].toTensor(), vals[1].toTensor(), vals[2].toTensor());
+      },
+      /*JIT  Func   */ where,
+      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
+      /*Inputs Tuple*/
+      std::make_tuple(
+          std::make_pair(ValType::TensorView, DataType::Bool),
+          std::make_pair(ValType::TensorView, DataType::Float),
+          std::make_pair(ValType::TensorView, DataType::Float)));
 }
 
 void testGPU_FusionCompoundOps() {
-  test_op(/*blocks*/640, /*threads*/64, /*name*/"lerp",
-      	  /*Aten Func   */ [](std::array<IValue,3> &vals) { return at::lerp(vals[0].toTensor(), vals[1].toTensor(), vals[2].toTensor()); },
-          /*JIT  Func   */ lerp,
-          /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-          /*Inputs Tuple*/ std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float),
-                                           std::make_pair(ValType::TensorView, DataType::Float),
-                                           std::make_pair(ValType::TensorView, DataType::Float)));
-  test_op(/*blocks*/640, /*threads*/64, /*name*/"addcmul",
-      	  /*Aten Func   */ [](std::array<IValue,4> &vals) { return at::addcmul(vals[0].toTensor(), vals[1].toTensor(), vals[2].toTensor(), vals[3].toScalar()); },
-          /*JIT  Func   */ addcmul,
-          /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-          /*Inputs Tuple*/ std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float),
-                                           std::make_pair(ValType::TensorView, DataType::Float),
-                                           std::make_pair(ValType::TensorView, DataType::Float),
-                                           std::make_pair(ValType::Scalar,     DataType::Float)));
+  test_op(
+      /*blocks*/ 640,
+      /*threads*/ 64,
+      /*name*/ "lerp",
+      /*Aten Func   */
+      [](std::array<IValue, 3>& vals) {
+        return at::lerp(
+            vals[0].toTensor(), vals[1].toTensor(), vals[2].toTensor());
+      },
+      /*JIT  Func   */ lerp,
+      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
+      /*Inputs Tuple*/
+      std::make_tuple(
+          std::make_pair(ValType::TensorView, DataType::Float),
+          std::make_pair(ValType::TensorView, DataType::Float),
+          std::make_pair(ValType::TensorView, DataType::Float)));
+  test_op(
+      /*blocks*/ 640,
+      /*threads*/ 64,
+      /*name*/ "addcmul",
+      /*Aten Func   */
+      [](std::array<IValue, 4>& vals) {
+        return at::addcmul(
+            vals[0].toTensor(),
+            vals[1].toTensor(),
+            vals[2].toTensor(),
+            vals[3].toScalar());
+      },
+      /*JIT  Func   */ addcmul,
+      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
+      /*Inputs Tuple*/
+      std::make_tuple(
+          std::make_pair(ValType::TensorView, DataType::Float),
+          std::make_pair(ValType::TensorView, DataType::Float),
+          std::make_pair(ValType::TensorView, DataType::Float),
+          std::make_pair(ValType::Scalar, DataType::Float)));
 }
 
 void testGPU_FusionCastOps() {
@@ -1458,7 +1609,7 @@ void testGPU_FusionCastOps() {
 
   TensorView* tv0 = makeDummyTensor(2, DataType::Half);
 
-  Val*     intrm1 = castOp(DataType::Float, tv0);
+  Val* intrm1 = castOp(DataType::Float, tv0);
   TensorView* out = static_cast<TensorView*>(castOp(DataType::Half, intrm1));
 
   fusion.addInput(tv0);
@@ -1475,11 +1626,11 @@ void testGPU_FusionCastOps() {
 
   auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
 
-  at::Tensor input1     = at::rand({1,4}, options);
-  at::Tensor output     = at::empty_like(input1);
+  at::Tensor input1 = at::rand({1, 4}, options);
+  at::Tensor output = at::empty_like(input1);
   at::Tensor ref_output = at::empty_like(input1);
 
-  std::array<IValue,1> inputs = {input1};
+  std::array<IValue, 1> inputs = {input1};
   const at::ArrayRef<IValue> input_ivalues(inputs);
   std::vector<at::Tensor> outputs{{output}};
 
@@ -1488,12 +1639,20 @@ void testGPU_FusionCastOps() {
 
   ref_output = at::_cast_Half(at::_cast_Float(input1));
 
-  TORCH_CHECK(output.equal(ref_output),
-              "\nOp Type: -- ", "cast FP16->FP32->FP16",
-              " -- had a mismatch.\n",
-              "IN1 : ", input1, "\n",
-              "JIT: ", output, "\n",
-              "REF: ", ref_output, "\n");
+  TORCH_CHECK(
+      output.equal(ref_output),
+      "\nOp Type: -- ",
+      "cast FP16->FP32->FP16",
+      " -- had a mismatch.\n",
+      "IN1 : ",
+      input1,
+      "\n",
+      "JIT: ",
+      output,
+      "\n",
+      "REF: ",
+      ref_output,
+      "\n");
 }
 
 void testGPU_Fusion() {}

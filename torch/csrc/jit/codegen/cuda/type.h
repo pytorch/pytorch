@@ -23,13 +23,7 @@ enum class ValType {
   NamedScalar
 };
 
-enum class DataType {
-  Bool,
-  Float,
-  Half,
-  Int,
-  Null
-};
+enum class DataType { Bool, Float, Half, Int, Null };
 
 enum class ExprType {
   UnaryOp,
@@ -49,7 +43,7 @@ enum class UnaryOpType {
   Asin,
   Atan,
   Atanh,
-  //Cast,
+  // Cast,
   Ceil,
   Cos,
   Cosh,
@@ -96,7 +90,7 @@ enum class BinaryOpType {
   Pow,
   Remainder,
   Sub,
-  //TypeAs,
+  // TypeAs,
 
   // Logical Ops
   // Int operations, leave position oif Mod we depend on its location of first
@@ -111,11 +105,7 @@ enum class BinaryOpType {
   NE
 };
 
-enum class TernaryOpType {
-  Clamp,
-  Threshold,
-  Where
-};
+enum class TernaryOpType { Clamp, Threshold, Where };
 
 enum class ParallelType {
   BIDz,
