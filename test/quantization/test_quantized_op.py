@@ -1594,7 +1594,7 @@ class TestQuantizedOps(TestCase):
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=32),
-                       qparams=hu.qparams()),
+                       qparams=hu.qparams(dtypes=(torch.quint8, torch.qint8))),
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
     def test_batch_norm2d(self, X, Y_scale, Y_zero_point):
@@ -1627,7 +1627,7 @@ class TestQuantizedOps(TestCase):
         # hypothesis too slow for this test, create test cases manually
         max_sides = (4, 5)
         side_lens = (1, 8, 11)
-        torch_types = (torch.qint8, torch.quint8, torch.qint32)
+        torch_types = (torch.qint8, torch.quint8)
         combined = [max_sides, side_lens, torch_types]
         test_cases = itertools.product(*combined)
 
@@ -1676,7 +1676,7 @@ class TestQuantizedOps(TestCase):
 
         # hypothesis too slow for this test, create test cases manually
         side_lens = (1, 8, 11)
-        torch_types = (torch.qint8, torch.quint8, torch.qint32)
+        torch_types = (torch.qint8, torch.quint8)
         combined = [side_lens, torch_types]
         test_cases = itertools.product(*combined)
 
