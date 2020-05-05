@@ -41,7 +41,7 @@ namespace vulkan {
 namespace details {
 namespace vulkan {
 
-class VContext {
+class VContext final {
  public:
   VContext(bool enableValidationLayers)
       : enableValidationLayers_(enableValidationLayers) {
@@ -330,9 +330,9 @@ uint32_t findMemoryType(
   return -1;
 }
 
-class VBuffer {
+class VBuffer final {
  public:
-  class MapMemory {
+  class MapMemory final {
    public:
     MapMemory(
         VkDevice device,
@@ -506,7 +506,7 @@ class VBuffer {
   VkDeviceMemory bufferMemory_;
 }; // class VBuffer
 
-class VImage {
+class VImage final {
  public:
   explicit VImage(uint32_t W, uint32_t H, uint32_t C)
       : W_(W), H_(H), C_(C), D_(UP_DIV(C, 4)) {
@@ -785,15 +785,40 @@ struct WorkGroupSize {
   uint32_t z;
 };
 
-class ComputeUnit {
+class ComputeUnit final {
  public:
-  ComputeUnit() {}
+#ifdef USE_VULKAN_GLES_SHADERC_RUNTIME
+  ComputeUnit(
+      const char* glslSrc,
+      const VkDescriptorSetLayout& descrSetLayout,
+      WorkGroupSize& workGroupSize) {
+    createComputePipelineCompile(
+        std::string{glslSrc, std::strlen(glslSrc)},
+        descrSetLayout,
+        workGroupSize);
+  }
+#else
+  ComputeUnit(
+      const unsigned char* spvCode,
+      const unsigned int spvCodeSize,
+      const VkDescriptorSetLayout& descrSetLayout,
+      WorkGroupSize& workGroupSize) {
+    const uint32_t* code = reinterpret_cast<const uint32_t*>(spvCode);
+    const auto codeSize = spvCodeSize;
+    createComputePipeline(code, codeSize, descrSetLayout, workGroupSize);
+  }
+#endif
 
   ~ComputeUnit() {
     vkDestroyShaderModule(vkContext->device(), computeShaderModule_, nullptr);
     vkDestroyPipelineLayout(vkContext->device(), pipelineLayout_, nullptr);
     vkDestroyPipeline(vkContext->device(), pipeline_, nullptr);
   }
+
+  ComputeUnit(const ComputeUnit&) = delete;
+  ComputeUnit& operator=(const ComputeUnit&) = delete;
+  ComputeUnit(ComputeUnit&&) = default;
+  ComputeUnit& operator=(ComputeUnit&&) = default;
 
   void createComputePipeline(
       const uint32_t* code,
@@ -951,33 +976,6 @@ class ComputeUnit {
   VkShaderModule computeShaderModule_;
 }; // class ComputeUnit
 
-#ifdef USE_VULKAN_GLES_SHADERC_RUNTIME
-auto makeComputeUnit(
-    const char* glslSrc,
-    const VkDescriptorSetLayout& descrSetLayout,
-    WorkGroupSize& workGroupSize) {
-  auto computeUnit = std::make_unique<ComputeUnit>();
-  computeUnit->createComputePipelineCompile(
-      std::string{glslSrc, std::strlen(glslSrc)},
-      descrSetLayout,
-      workGroupSize);
-  return computeUnit;
-}
-#else
-auto makeComputeUnit(
-    const unsigned char* spvCode,
-    const unsigned int spvCodeSize,
-    const VkDescriptorSetLayout& descrSetLayout,
-    WorkGroupSize& workGroupSize) {
-  auto computeUnit = std::make_unique<ComputeUnit>();
-  const uint32_t* code = reinterpret_cast<const uint32_t*>(spvCode);
-  const auto codeSize = spvCodeSize;
-  computeUnit->createComputePipeline(
-      code, codeSize, descrSetLayout, workGroupSize);
-  return computeUnit;
-}
-#endif
-
 VBuffer makeUniformConstBuffer(void* ptr, VkDeviceSize size) {
   auto sizeAligned =
       ROUND_UP(size, vkContext->limits().minUniformBufferOffsetAlignment);
@@ -1021,24 +1019,23 @@ void copyFromBufferToImage(VBuffer& buffer, VImage& image) {
   buffer.bind(descrSet, 1);
   constBuffer.bind(descrSet, 2);
   WorkGroupSize workGroupSize{8, 8, 1};
-  auto computeUnit = makeComputeUnit(
-      at::native::vulkan::GLSL_SPV(vulkan_nchw_to_image),
-      descrSetLayout,
-      workGroupSize);
-  computeUnit->createCommandBuffer(descrSet);
+  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(vulkan_nchw_to_image),
+                          descrSetLayout,
+                          workGroupSize};
+  computeUnit.createCommandBuffer(descrSet);
 
   image.addImageMemoryBarrier(
-      computeUnit->commandBuffer(),
+      computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_UNDEFINED,
       VK_IMAGE_LAYOUT_GENERAL);
 
   buffer.addBufferMemoryBarrier(
-      computeUnit->commandBuffer(), 0, buffer.sizeBytes());
-  computeUnit->dispatchCommandBuffer(
+      computeUnit.commandBuffer(), 0, buffer.sizeBytes());
+  computeUnit.dispatchCommandBuffer(
       UP_DIV(image.W(), workGroupSize.x),
       UP_DIV(image.H(), workGroupSize.y),
       UP_DIV(image.D(), workGroupSize.z));
-  computeUnit->runCommandBuffer();
+  computeUnit.runCommandBuffer();
 
   vkDestroyDescriptorPool(device, descrPool, nullptr);
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
@@ -1086,21 +1083,20 @@ void copyFromImageToBuffer(VImage& image, VBuffer& buffer) {
   constBuffer.bind(descrSet, 2);
 
   WorkGroupSize workGroupSize{8, 8, 1};
-  auto computeUnit = makeComputeUnit(
-      at::native::vulkan::GLSL_SPV(vulkan_image_to_nchw),
-      descrSetLayout,
-      workGroupSize);
+  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(vulkan_image_to_nchw),
+                          descrSetLayout,
+                          workGroupSize};
 
-  computeUnit->createCommandBuffer(descrSet);
+  computeUnit.createCommandBuffer(descrSet);
   image.addImageMemoryBarrier(
-      computeUnit->commandBuffer(),
+      computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_GENERAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-  computeUnit->dispatchCommandBuffer(
+  computeUnit.dispatchCommandBuffer(
       UP_DIV(image.W(), workGroupSize.x),
       UP_DIV(image.H(), workGroupSize.y),
       UP_DIV(image.D(), workGroupSize.z));
-  computeUnit->runCommandBuffer();
+  computeUnit.runCommandBuffer();
 
   vkDestroyDescriptorPool(device, descrPool, nullptr);
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
@@ -1212,7 +1208,6 @@ void VulkanTensor::setDataFromHost(const float* inputData) {
 void VulkanTensor::copyDataToHost(float* outputData) {
   impl()->copyDataToHost(outputData);
 }
-// ---VulkanTensor
 
 // Ops
 void upsample_nearest2d(
@@ -1269,20 +1264,20 @@ void upsample_nearest2d(
   constBuffer.bind(descrSet, 2);
 
   WorkGroupSize workGroupSize{8, 8, 1};
-  auto computeUnit = makeComputeUnit(
+  ComputeUnit computeUnit{
       at::native::vulkan::GLSL_SPV(vulkan_upsampleNearest2d),
       descrSetLayout,
-      workGroupSize);
-  computeUnit->createCommandBuffer(descrSet);
+      workGroupSize};
+  computeUnit.createCommandBuffer(descrSet);
   input.impl()->image().addImageMemoryBarrier(
-      computeUnit->commandBuffer(),
+      computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_GENERAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-  computeUnit->dispatchCommandBuffer(
+  computeUnit.dispatchCommandBuffer(
       UP_DIV(OW, workGroupSize.x),
       UP_DIV(OH, workGroupSize.y),
       UP_DIV(C, workGroupSize.z));
-  computeUnit->runCommandBuffer();
+  computeUnit.runCommandBuffer();
   vkDestroyDescriptorPool(device, descrPool, nullptr);
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
 }
@@ -1353,14 +1348,26 @@ void add(
   constBuffer.bind(descrSet, 3);
 
   WorkGroupSize workGroupSize{8, 8, 1};
-  auto computeUnit = makeComputeUnit(
-      at::native::vulkan::GLSL_SPV(vulkan_add), descrSetLayout, workGroupSize);
-  computeUnit->createCommandBuffer(descrSet);
-  computeUnit->dispatchCommandBuffer(
+  ComputeUnit computeUnit{
+      at::native::vulkan::GLSL_SPV(vulkan_add), descrSetLayout, workGroupSize};
+  computeUnit.createCommandBuffer(descrSet);
+  output.impl()->image().addImageMemoryBarrier(
+      computeUnit.commandBuffer(),
+      VK_IMAGE_LAYOUT_UNDEFINED,
+      VK_IMAGE_LAYOUT_GENERAL);
+  input0.impl()->image().addImageMemoryBarrier(
+      computeUnit.commandBuffer(),
+      VK_IMAGE_LAYOUT_GENERAL,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  input1.impl()->image().addImageMemoryBarrier(
+      computeUnit.commandBuffer(),
+      VK_IMAGE_LAYOUT_GENERAL,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  computeUnit.dispatchCommandBuffer(
       UP_DIV(W, workGroupSize.x),
       UP_DIV(H, workGroupSize.y),
       UP_DIV(C, workGroupSize.z));
-  computeUnit->runCommandBuffer();
+  computeUnit.runCommandBuffer();
   vkDestroyDescriptorPool(device, descrPool, nullptr);
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
 }
@@ -1406,8 +1413,7 @@ VBuffer kernelNCHW_OCHW_repack_O4C4HWi4o4(
   return kernelBuffer;
 }
 
-// std::unique_ptr<VImage> conv2d_kernel_tex_from_hostCHW(
-VImage conv2d_kernel_tex_from_hostCHW(
+VImage conv2d_kernelImage_from_hostCHW(
     const float* data,
     int64_t OC,
     int64_t C,
@@ -1418,7 +1424,6 @@ VImage conv2d_kernel_tex_from_hostCHW(
   auto OC_4 = UP_DIV(OC, 4);
   auto C_4 = UP_DIV(C, 4);
 
-  // auto kernelImage = std::make_unique<VImage>(C_4 * 4, OC_4, 4 * KH * KW);
   VImage kernelImage{C_4 * 4, OC_4, 4 * KH * KW};
   struct ConstBlock {
     int32_t KWxKH;
@@ -1452,22 +1457,21 @@ VImage conv2d_kernel_tex_from_hostCHW(
   constBuffer.bind(descrSet, 2);
 
   WorkGroupSize workGroupSize{1, 1, 1};
-  auto computeUnit = makeComputeUnit(
-      at::native::vulkan::GLSL_SPV(vulkan_KO4C4HW_to_image),
-      descrSetLayout,
-      workGroupSize);
-  computeUnit->createCommandBuffer(descrSet);
+  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(vulkan_KO4C4HW_to_image),
+                          descrSetLayout,
+                          workGroupSize};
+  computeUnit.createCommandBuffer(descrSet);
   kernelImage.addImageMemoryBarrier(
-      computeUnit->commandBuffer(),
+      computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_UNDEFINED,
       VK_IMAGE_LAYOUT_GENERAL);
   kernelBuffer.addBufferMemoryBarrier(
-      computeUnit->commandBuffer(), 0, kernelBuffer.sizeBytes());
-  computeUnit->dispatchCommandBuffer(
+      computeUnit.commandBuffer(), 0, kernelBuffer.sizeBytes());
+  computeUnit.dispatchCommandBuffer(
       UP_DIV(C_4, workGroupSize.x),
       UP_DIV(OC_4, workGroupSize.y),
       UP_DIV(KH * KW, workGroupSize.z));
-  computeUnit->runCommandBuffer();
+  computeUnit.runCommandBuffer();
   vkDestroyDescriptorPool(device, descrPool, nullptr);
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
   return kernelImage;
@@ -1512,7 +1516,7 @@ void conv2d(
   auto biasBufferSize = sizeof(float) * ALIGN_UP4(OC);
   auto biasBufferSizeAligned = ROUND_UP(
       biasBufferSize, vkContext->limits().minStorageBufferOffsetAlignment);
-  VBuffer biasBuffer{biasBufferSizeAligned, false};
+  VBuffer biasBuffer{biasBufferSizeAligned};
   biasBuffer.copyFromHostToDevice((void*)bias, biasBufferSize);
 
   struct ConstBlock {
@@ -1531,7 +1535,7 @@ void conv2d(
                         {W, H, C_4, 0}};
   VBuffer constBuffer =
       makeUniformConstBuffer((void*)&constBlock, sizeof(constBlock));
-  VImage kernelImage = conv2d_kernel_tex_from_hostCHW(weight, OC, C, KH, KW);
+  VImage kernelImage = conv2d_kernelImage_from_hostCHW(weight, OC, C, KH, KW);
 
   VkDescriptorSetLayout descrSetLayout = {};
   VkDescriptorSetLayoutBinding bindings[] = {
@@ -1570,29 +1574,28 @@ void conv2d(
   biasBuffer.bind(descrSet, 3);
   constBuffer.bind(descrSet, 4);
   WorkGroupSize workGroupSize{1, 1, OC_4};
-  auto computeUnit = makeComputeUnit(
-      at::native::vulkan::GLSL_SPV(vulkan_conv_tex_IKnc4hw),
-      descrSetLayout,
-      workGroupSize);
-  computeUnit->createCommandBuffer(descrSet);
+  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(vulkan_conv_tex_IKnc4hw),
+                          descrSetLayout,
+                          workGroupSize};
+  computeUnit.createCommandBuffer(descrSet);
 
   outputImage.addImageMemoryBarrier(
-      computeUnit->commandBuffer(),
+      computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_UNDEFINED,
       VK_IMAGE_LAYOUT_GENERAL);
   inputImage.addImageMemoryBarrier(
-      computeUnit->commandBuffer(),
+      computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_GENERAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
   kernelImage.addImageMemoryBarrier(
-      computeUnit->commandBuffer(),
+      computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_GENERAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-  computeUnit->dispatchCommandBuffer(
+  computeUnit.dispatchCommandBuffer(
       UP_DIV(OW, 4 * workGroupSize.x),
       UP_DIV(OH, workGroupSize.y),
       UP_DIV(OC_4, workGroupSize.z));
-  computeUnit->runCommandBuffer();
+  computeUnit.runCommandBuffer();
 
   vkDestroyDescriptorPool(device, descrPool, nullptr);
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
