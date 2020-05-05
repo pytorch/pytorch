@@ -51,8 +51,8 @@ endif()
 # {Q/X,etc} NPACK support is enabled by default, if none of these options
 # are selected, turn this flag ON to incidate the support is disabled
 set(NNPACK_AND_FAMILY_DISABLED OFF)
-if( NOT (USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK))
-   	(NNPACK_AND_FAMILY_DISABLED ON)
+if(NOT (USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK))
+  set(NNPACK_AND_FAMILY_DISABLED ON)
 endif()
 
 # ---[ Caffe2 build
