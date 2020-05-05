@@ -25,7 +25,13 @@ planes.
 
 See :class:`~torch.nn.Conv1d` for details and output shape.
 
-.. include:: cudnn_deterministic.rst
+Note:
+    In some circumstances when using the CUDA backend with CuDNN, this operator
+    may select a nondeterministic algorithm to increase performance. If this is
+    undesirable, you can try to make the operation deterministic (potentially at
+    a performance cost) by setting ``torch.backends.cudnn.deterministic =
+    True``.
+    Please see the notes on :doc:`/notes/randomness` for background.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
@@ -55,7 +61,14 @@ planes.
 
 See :class:`~torch.nn.Conv2d` for details and output shape.
 
-.. include:: cudnn_deterministic.rst
+Note:
+    In some circumstances when using the CUDA backend with CuDNN, this operator
+    may select a nondeterministic algorithm to increase performance. If this is
+    undesirable, you can try to make the operation deterministic (potentially at
+    a performance cost) by setting ``torch.backends.cudnn.deterministic =
+    True``.
+    Please see the notes on :doc:`/notes/randomness` for background.
+
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
@@ -86,7 +99,13 @@ planes.
 
 See :class:`~torch.nn.Conv3d` for details and output shape.
 
-.. include:: cudnn_deterministic.rst
+Note:
+    In some circumstances when using the CUDA backend with CuDNN, this operator
+    may select a nondeterministic algorithm to increase performance. If this is
+    undesirable, you can try to make the operation deterministic (potentially at
+    a performance cost) by setting ``torch.backends.cudnn.deterministic =
+    True``.
+    Please see the notes on :doc:`/notes/randomness` for background.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
@@ -116,7 +135,13 @@ composed of several input planes, sometimes also called "deconvolution".
 
 See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
 
-.. include:: cudnn_deterministic.rst
+Note:
+    In some circumstances when using the CUDA backend with CuDNN, this operator
+    may select a nondeterministic algorithm to increase performance. If this is
+    undesirable, you can try to make the operation deterministic (potentially at
+    a performance cost) by setting ``torch.backends.cudnn.deterministic =
+    True``.
+    Please see the notes on :doc:`/notes/randomness` for background.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
@@ -149,7 +174,13 @@ composed of several input planes, sometimes also called "deconvolution".
 
 See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
 
-.. include:: cudnn_deterministic.rst
+Note:
+    In some circumstances when using the CUDA backend with CuDNN, this operator
+    may select a nondeterministic algorithm to increase performance. If this is
+    undesirable, you can try to make the operation deterministic (potentially at
+    a performance cost) by setting ``torch.backends.cudnn.deterministic =
+    True``.
+    Please see the notes on :doc:`/notes/randomness` for background.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
@@ -184,7 +215,13 @@ composed of several input planes, sometimes also called "deconvolution"
 
 See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
 
-.. include:: cudnn_deterministic.rst
+Note:
+    In some circumstances when using the CUDA backend with CuDNN, this operator
+    may select a nondeterministic algorithm to increase performance. If this is
+    undesirable, you can try to make the operation deterministic (potentially at
+    a performance cost) by setting ``torch.backends.cudnn.deterministic =
+    True``.
+    Please see the notes on :doc:`/notes/randomness` for background.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
@@ -1767,7 +1804,10 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
 
     See :class:`torch.nn.EmbeddingBag` for more details.
 
-    .. include:: cuda_deterministic_backward.rst
+    Note:
+        When using the CUDA backend, this operation may induce nondeterministic
+        behaviour in its backward pass that is not easily switched off.
+        Please see the notes on :doc:`/notes/randomness` for background.
 
     Args:
         input (LongTensor): Tensor containing bags of indices into the embedding matrix
@@ -2046,8 +2086,18 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
 
     See :class:`~torch.nn.CTCLoss` for details.
 
-    .. include:: cudnn_deterministic.rst
-    .. include:: cuda_deterministic_backward.rst
+    Note:
+        In some circumstances when using the CUDA backend with CuDNN, this operator
+        may select a nondeterministic algorithm to increase performance. If this is
+        undesirable, you can try to make the operation deterministic (potentially at
+        a performance cost) by setting ``torch.backends.cudnn.deterministic =
+        True``.
+        Please see the notes on :doc:`/notes/randomness` for background.
+
+    Note:
+        When using the CUDA backend, this operation may induce nondeterministic
+        behaviour in its backward pass that is not easily switched off.
+        Please see the notes on :doc:`/notes/randomness` for background.
 
     Args:
         log_probs: :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
@@ -2232,7 +2282,8 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
 
 def kl_div(input, target, size_average=None, reduce=None, reduction='mean', log_target=False):
     # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, bool) -> Tensor
-    r"""The `Kullback-Leibler divergence`_ Loss.
+    r"""The `Kullback-Leibler divergence Loss
+    <https://en.wikipedia.org/wiki/Kullback-Leibler_divergence>`__
 
     See :class:`~torch.nn.KLDivLoss` for details.
 
@@ -2268,9 +2319,6 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean', log_
         :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
         :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
         In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
-
-    .. _Kullback-Leibler divergence:
-        https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
     """
     if not torch.jit.is_scripting():
         tens_ops = (input, target)
@@ -2820,7 +2868,10 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         This function is deprecated in favor of :func:`torch.nn.functional.interpolate`.
         This is equivalent with ``nn.functional.interpolate(...)``.
 
-    .. include:: cuda_deterministic_backward.rst
+    Note:
+        When using the CUDA backend, this operation may induce nondeterministic
+        behaviour in its backward pass that is not easily switched off.
+        Please see the notes on :doc:`/notes/randomness` for background.
 
     The algorithm used for upsampling is determined by :attr:`mode`.
 
@@ -3027,7 +3078,10 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         in 1.6.0, and scale_factor will be used in the interpolation
         calculation.
 
-    .. include:: cuda_deterministic_backward.rst
+    Note:
+        When using the CUDA backend, this operation may induce nondeterministic
+        behaviour in its backward pass that is not easily switched off.
+        Please see the notes on :doc:`/notes/randomness` for background.
     """
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
@@ -3131,7 +3185,10 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
             size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
 
-    .. include:: cuda_deterministic_backward.rst
+    Note:
+        When using the CUDA backend, this operation may induce nondeterministic
+        behaviour in its backward pass that is not easily switched off.
+        Please see the notes on :doc:`/notes/randomness` for background.
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
@@ -3173,7 +3230,10 @@ def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
         size (int or Tuple[int, int]): output spatial size.
         scale_factor (int or Tuple[int, int]): multiplier for spatial size
 
-    .. include:: cuda_deterministic_backward.rst
+    Note:
+        When using the CUDA backend, this operation may induce nondeterministic
+        behaviour in its backward pass that is not easily switched off.
+        Please see the notes on :doc:`/notes/randomness` for background.
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.interpolate instead.")
@@ -3231,10 +3291,14 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
           and becomes ``x' = 1.5``, then reflects by border ``1`` and becomes
           ``x'' = -0.5``.
 
-    .. note::
+    Note:
         This function is often used in conjunction with :func:`affine_grid`
         to build `Spatial Transformer Networks`_ .
-    .. include:: cuda_deterministic_backward.rst
+
+    Note:
+        When using the CUDA backend, this operation may induce nondeterministic
+        behaviour in its backward pass that is not easily switched off.
+        Please see the notes on :doc:`/notes/randomness` for background.
 
     Args:
         input (Tensor): input of shape :math:`(N, C, H_\text{in}, W_\text{in})` (4-D case)
@@ -3428,7 +3492,10 @@ def _pad(input, pad, mode='constant', value=0):
         3D input tensor. Reflect padding is only implemented for padding the last 2
         dimensions of 4D input tensor, or the last dimension of 3D input tensor.
 
-    .. include:: cuda_deterministic_backward.rst
+    Note:
+        When using the CUDA backend, this operation may induce nondeterministic
+        behaviour in its backward pass that is not easily switched off.
+        Please see the notes on :doc:`/notes/randomness` for background.
 
     Args:
         input (Tensor): N-dimensional tensor

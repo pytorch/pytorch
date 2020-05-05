@@ -228,16 +228,6 @@ static inline c10::optional<ScalarType> tryTypeMetaToScalarType(
   }
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_IF)
 #undef DEFINE_IF
-// TODO(@zasdfgbnm): Remove this!
-// This is needed only when the migration of std::complex to c10::complex
-// is not done. This should be removed once the migration is done.
-  if (dtype == caffe2::TypeMeta::Make<std::complex<float>>()) {
-    return {ScalarType::ComplexFloat};
-  }
-  if (dtype == caffe2::TypeMeta::Make<std::complex<double>>()) {
-    return {ScalarType::ComplexDouble};
-  }
-// end TODO
   if (dtype == caffe2::TypeMeta()) {
     return {ScalarType::Undefined};
   }
