@@ -1707,9 +1707,6 @@ class TestQuantizedOps(TestCase):
                     qy.int_repr().numpy(), quantize_ref.int_repr().numpy(),
                     message="{} vs {}".format(qy, quantize_ref))
 
-@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                     " with instruction set support avx2 or newer.")
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
     @given(
@@ -1833,7 +1830,9 @@ class TestDynamicQuantizedLinear(TestCase):
             self.assertEqual(Y_fp32, Y_fp32_ref,
                              message="torch.ops.quantized.linear_dynamic (fbgemm) results are off")
 
-    """Tests the correctness of the legacy dynamic quantized linear op."""
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         batch_size=st.integers(1, 4),
         input_channels=st.integers(16, 32),
