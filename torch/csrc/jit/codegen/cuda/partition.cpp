@@ -24,7 +24,7 @@ static c10::optional<c10::Device> getDevice(const Value* const value) {
 static c10::optional<c10::Device> getDevice(const Node* const node) {
   auto outputs = node->outputs();
   for (auto output : outputs) {
-    auto device = getDevice(outputs[0]);
+    auto device = getDevice(output);
     if (device.has_value()) {
       return device;
     }
