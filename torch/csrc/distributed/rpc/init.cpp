@@ -291,21 +291,22 @@ PyObject* rpc_init(PyObject* /* unused */) {
                       >>> rref.remote().view(1, 4).to_here()  # returns tensor([[1., 1., 1., 1.]])
               )")
           .def(
-              py::pickle(
-                  [](const PyRRef& self) {
-                    TORCH_CHECK(
-                        false,
-                        "Can not pickle rref in python pickler, rref can only be pickled when using RPC");
-                    // __getstate__
-                    return self.pickle();
-                  },
-                  [](py::tuple t) { // NOLINT
-                    TORCH_CHECK(
-                        false,
-                        "Can not unpickle rref in python pickler, rref can only be unpickled when using RPC");
-                    // __setstate__
-                    return PyRRef::unpickle(t);
-                  }),
+              "__getstate__",
+              [](const PyRRef& /* unused */) {
+                TORCH_CHECK(
+                    false,
+                    "Can not pickle rref in python pickler, rref can only be "
+                    "pickled when using RPC");
+              },
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "__setstate__",
+              [](const PyRRef& /* unused */, const py::tuple& /* unused */) {
+                TORCH_CHECK(
+                    false,
+                    "Can not unpickle rref in python pickler, rref can only be "
+                    "unpickled when using RPC");
+              },
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_serialize",
@@ -331,13 +332,18 @@ PyObject* rpc_init(PyObject* /* unused */) {
   // pythonRpcHandler is cleaned up in shutdown(), after
   // shutdown(), python objects returned from rpc python call can not be
   // resolved.
-  // TODO Once python object can be tagged as IValue and c10::ivalue::Future is
-  // implemented as generic Future<IValue>, we can consider all rpc call
-  // to return a future<IValue> later on.
-  auto future = shared_ptr_class_<FutureMessage>(module, "Future")
+  auto future = shared_ptr_class_<FutureIValue>(module, "Future")
                     .def(
                         "wait",
-                        [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
+                        [&](FutureIValue& fut) {
+                          auto& pythonRpcHandler =
+                              PythonRpcHandler::getInstance();
+                          const auto& value = fut.wait();
+                          pybind11::gil_scoped_acquire ag;
+                          auto obj = torch::jit::toPyObject(value);
+                          pythonRpcHandler.handleException(obj);
+                          return obj;
+                        },
                         py::call_guard<py::gil_scoped_release>(),
                         R"(
 Wait on future to complete and return the object it completed with.

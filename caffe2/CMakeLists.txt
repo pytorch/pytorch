@@ -522,6 +522,10 @@ endif()
 
 
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
+if(HAVE_SOVERSION)
+  set_target_properties(torch_cpu PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
 if(USE_LLVM AND LLVM_FOUND)
@@ -546,6 +550,10 @@ file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
 # Wrapper library for people who link against torch and expect both CPU and CUDA support
 # Contains "torch_cpu" and "torch_cuda"
 add_library(torch ${DUMMY_EMPTY_FILE})
+if(HAVE_SOVERSION)
+  set_target_properties(torch PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 
 if(USE_ROCM)
   filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cu|hip)$")
@@ -1028,6 +1036,10 @@ endif()
 # this we have to preload those libs in a global namespace.
 if(BUILD_SHARED_LIBS)
   add_library(torch_global_deps SHARED ${TORCH_SRC_DIR}/csrc/empty.c)
+  if(HAVE_SOVERSION)
+    set_target_properties(torch_global_deps PROPERTIES
+        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+  endif()
   set_target_properties(torch_global_deps PROPERTIES LINKER_LANGUAGE C)
   if(USE_MPI)
       target_link_libraries(torch_global_deps ${MPI_CXX_LIBRARIES})
@@ -1080,7 +1092,19 @@ endif()
 
 # ---[ Test binaries.
 if(BUILD_TEST)
-  foreach(test_src ${Caffe2_CPU_TEST_SRCS})
+  if(BUILD_CAFFE2_TEST)
+    # If this is set, build all test srcs (caffe2 + aten)
+    set(CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS})
+    set(GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS})
+    set(HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS})
+  else()
+    # Otherwise build only the aten-related ones
+    set(CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
+    list(APPEND CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
+    set(GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
+    set(HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS})
+  endif()
+  foreach(test_src ${CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
     target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)
@@ -1097,7 +1121,7 @@ if(BUILD_TEST)
   endforeach()
 
   if(USE_CUDA)
-    foreach(test_src ${Caffe2_GPU_TEST_SRCS})
+    foreach(test_src ${GPU_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
       cuda_add_executable(${test_name} "${test_src}")
       target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)
@@ -1115,7 +1139,7 @@ if(BUILD_TEST)
   endif()
 
   if(USE_ROCM)
-    foreach(test_src ${Caffe2_HIP_TEST_SRCS})
+    foreach(test_src ${HIP_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
       add_executable(${test_name} "${test_src}")
       target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)

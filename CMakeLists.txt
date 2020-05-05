@@ -130,6 +130,7 @@ cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
+option(BUILD_CAFFE2_TEST "Build caffe2 tests" OFF)
 option(BUILD_JNI "Build JNI bindings" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
@@ -204,8 +205,12 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
+    "USE_DISTRIBUTED" OFF)
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
+option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 
 # Linux distributions do not want too many embedded sources, in that sense we
 # need to be able to build pytorch with an (almost) empty third_party
@@ -415,6 +420,7 @@ if(NOT TORCH_BUILD_VERSION)
 endif()
 caffe2_parse_version_str(TORCH ${TORCH_BUILD_VERSION})
 caffe2_parse_version_str(CAFFE2 ${TORCH_BUILD_VERSION})
+set(TORCH_SOVERSION "${TORCH_VERSION_MAJOR}.${TORCH_VERSION_MINOR}")
 
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)

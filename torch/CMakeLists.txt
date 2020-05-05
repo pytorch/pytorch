@@ -82,7 +82,8 @@ list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
     torch_library
-    shm)
+    shm
+    fmt::fmt-header-only)
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
@@ -291,6 +292,10 @@ add_custom_command(
 )
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+if(HAVE_SOVERSION)
+  set_target_properties(torch_python PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 add_dependencies(torch_python torch_python_stubs)
 
 # Required workaround for generated sources
