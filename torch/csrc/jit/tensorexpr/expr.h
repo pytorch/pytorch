@@ -166,8 +166,9 @@ class TORCH_API Buf : public ExprNode<Buf> {
  public:
   static ExprHandle make(
       const std::string& name_hint,
-      const std::vector<ExprHandle>& dims);
-  static ExprHandle make(const std::vector<ExprHandle>& dims);
+      const std::vector<ExprHandle>& dims,
+      Dtype dtype);
+  static ExprHandle make(const std::vector<ExprHandle>& dims, Dtype dtype);
 
   // TODO: unique_name
   const Var* base_handle() const {
@@ -177,8 +178,8 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return base_handle_->name_hint();
   }
 
-  Buf(const Var* var, const std::vector<const Expr*>& dims)
-      : ExprNodeBase(kHandle, kPrimitive), base_handle_(var), dims_(dims) {
+  Buf(const Var* var, const std::vector<const Expr*>& dims, Dtype dtype)
+      : ExprNodeBase(dtype, kPrimitive), base_handle_(var), dims_(dims) {
     TORCH_CHECK(var);
   }
 
@@ -200,12 +201,14 @@ class TORCH_API Buf : public ExprNode<Buf> {
   std::vector<const Expr*> dims_;
 };
 
+// TODO: Merge this class with 'Buffer'
 class TORCH_API BufHandle : public ExprHandle {
  public:
-  BufHandle() : ExprHandle(nullptr) {}
-  //   explicit BufHandle(Dtype dtype) : ExprHandle(Buf::make(dtype)) {}
-  BufHandle(const std::string& name_hint, const std::vector<ExprHandle>& dims)
-      : ExprHandle(Buf::make(name_hint, dims)) {}
+  BufHandle(
+      const std::string& name_hint,
+      const std::vector<ExprHandle>& dims,
+      Dtype dtype)
+      : ExprHandle(Buf::make(name_hint, dims, dtype)) {}
   explicit BufHandle(const Buf* node) : ExprHandle(node) {}
   const Buf* node() const {
     return static_cast<const Buf*>(ExprHandle::node());
