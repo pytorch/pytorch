@@ -2,7 +2,7 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
@@ -29,9 +29,9 @@ namespace native {
 namespace {
 
 template <int kSpatialDim = 2>
-class QConvPackWeightInt8 final : public c10::OperatorKernel {
+class QConvPackWeightInt8 final {
  public:
-  Tensor operator()(
+  static Tensor run(
       Tensor weight,
       c10::optional<Tensor> bias,
       torch::List<int64_t> stride,
@@ -65,7 +65,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 
  private:
 #ifdef USE_FBGEMM
-  Tensor fbgemm_conv_prepack(
+  static Tensor fbgemm_conv_prepack(
       Tensor weight,
       c10::optional<Tensor> bias,
       torch::List<int64_t> stride,
@@ -207,7 +207,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
-  at::Tensor qnnpack_conv_prepack(
+  static at::Tensor qnnpack_conv_prepack(
       Tensor weight,
       c10::optional<Tensor> bias_in,
       torch::List<int64_t> stride,
@@ -272,13 +272,15 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         {stride_w, stride_h},
         {dilation_w, dilation_h},
         {pad_t, pad_l, pad_t, pad_l},
+        /*adjustment=*/{0, 0},
         groups,
         in_ch,
         out_ch,
         weight.q_zero_point(),
         weight.q_scale(),
         std::numeric_limits<uint8_t>::min(),
-        std::numeric_limits<uint8_t>::max());
+        std::numeric_limits<uint8_t>::max(),
+        /*transpose=*/false);
 
     auto weight_contig = weight.contiguous(MemoryFormat::ChannelsLast);
     auto weight_zp = weight.q_zero_point();
@@ -301,25 +303,16 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 #endif // USE_PYTORCH_QNNPACK
 };
 
-static auto registry =
-    c10::RegisterOperators()
-        // conv_prepack is deprecated, please use conv2d_prepack for 2D conv.
-        .op("quantized::conv_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
-            c10::RegisterOperators::options()
-            .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
-            .kernel<QConvPackWeightInt8<2>>(DispatchKey::QuantizedCPU))
-        .op("quantized::conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
-            c10::RegisterOperators::options()
-            .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
-            .kernel<QConvPackWeightInt8<2>>(DispatchKey::QuantizedCPU))
-        .op("_quantized::conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
-            c10::RegisterOperators::options()
-            .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
-            .kernel<QConvPackWeightInt8<2>>(DispatchKey::QuantizedCPU))
-        .op("quantized::conv3d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
-            c10::RegisterOperators::options()
-            .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
-            .kernel<QConvPackWeightInt8<3>>(DispatchKey::QuantizedCPU));
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  // conv_prepack is deprecated, please use conv2d_prepack for 2D conv.
+  m.impl("conv_prepack", QConvPackWeightInt8<2>::run);
+  m.impl("conv2d_prepack", QConvPackWeightInt8<2>::run);
+  m.impl("conv3d_prepack", QConvPackWeightInt8<3>::run);
+}
+
+TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
+  m.impl("conv2d_prepack", QConvPackWeightInt8<2>::run);
+}
 
 } // namespace
 } // namespace native

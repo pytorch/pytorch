@@ -250,20 +250,6 @@ RegisterOperators reg({
           return 0;
         },
         aliasAnalysisFromSchema()),
-    Operator(
-        "aten::Size(int[] sizes) -> int[]",
-        [](Stack& stack) { return 0; },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::size(Tensor self) -> int[]",
-        [](Stack& stack) {
-          RECORD_FUNCTION("size", last(stack, 1));
-
-          auto t = std::move(pop(stack)).toTensor();
-          pack(stack, t.sizes().vec());
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
     // not currently being generated, here for BC
     Operator(
         "aten::list_with_default(int[] list, int[] defaults) -> int[]",
@@ -314,7 +300,7 @@ RegisterOperators reg({
 
 #define DEFINE_TORCH_TENSOR_OP(operator_type, c_type, tensor_creation_op)  \
   Operator(                                                                \
-      "aten::tensor(" #operator_type                                       \
+      "aten::tensor." #operator_type "(" #operator_type                    \
       " t, *, ScalarType? dtype=None, Device? device=None"                 \
       ", bool requires_grad=False) -> Tensor",                             \
       [](Stack& stack) {                                                   \
@@ -331,7 +317,7 @@ RegisterOperators reg({
       },                                                                   \
       aliasAnalysisFromSchema()),                                          \
       Operator(                                                            \
-          "aten::as_tensor(" #operator_type                                \
+          "aten::as_tensor." #operator_type "(" #operator_type             \
           " t, *, ScalarType? dtype=None, Device? device=None) -> Tensor", \
           [](Stack& stack) {                                               \
             c_type scalar_val;                                             \

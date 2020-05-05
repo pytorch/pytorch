@@ -768,6 +768,8 @@ void TensorIterator::check_mem_overlaps() {
 }
 
 void TensorIterator::compute_shape() {
+  if (static_shape_) return;
+
   all_ops_same_shape_ = true;
   bool has_scalars = false;
   bool has_tensors = false;
@@ -824,7 +826,7 @@ void TensorIterator::compute_shape() {
 void TensorIterator::compute_strides() {
   for (auto& op : operands_) {
     if (op.tensor.defined()) {
-      auto original_shape = op.tensor.sizes();
+      IntArrayRef original_shape = static_shape_ ? shape_ : op.tensor.sizes();
       auto original_stride = op.tensor.strides();
       auto element_size_in_bytes = op.tensor.element_size();
       auto offset = ndim() - original_shape.size();
@@ -1074,7 +1076,11 @@ void TensorIterator::build() {
   }
 
   // zero out offsets
-  view_offsets_ = DimVector(ndim(), 0);
+  // If the tensor is a scalar, we leave room for it
+  // So index translations in reduction can access
+  // a valid value for the offset
+  int64_t ndim_offsets = (ndim() ? ndim() : 1);
+  view_offsets_ = DimVector(ndim_offsets, 0);
 }
 
 SplitUntil32Bit TensorIterator::with_32bit_indexing() const {

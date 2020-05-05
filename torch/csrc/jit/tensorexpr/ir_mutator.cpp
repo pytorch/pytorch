@@ -338,7 +338,7 @@ Stmt* IRMutator::mutate(const For* v) {
 Stmt* IRMutator::mutate(const Block* v) {
   bool any_change = false;
   std::vector<Stmt*> stmts;
-  for (Stmt* stmt : v->stmts()) {
+  for (Stmt* stmt : *v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
     if (stmt != stmt_new) {
       any_change = true;
@@ -469,6 +469,7 @@ class StmtClone : public IRMutator {
   Stmt* mutate(const Allocate* v) override;
   Stmt* mutate(const Free* v) override;
   Stmt* mutate(const Cond* v) override;
+  Stmt* mutate(const AtomicAdd* v) override;
 };
 
 Stmt* StmtClone::mutate(const LetStmt* v) {
@@ -492,7 +493,7 @@ Stmt* StmtClone::mutate(const For* v) {
 
 Stmt* StmtClone::mutate(const Block* v) {
   std::vector<Stmt*> stmts;
-  for (Stmt* stmt : v->stmts()) {
+  for (Stmt* stmt : *v) {
     stmts.push_back(stmt->accept_mutator(this));
   }
   return new Block(stmts);
@@ -500,6 +501,10 @@ Stmt* StmtClone::mutate(const Block* v) {
 
 Stmt* StmtClone::mutate(const Store* v) {
   return new Store(v->buf(), v->indices(), v->value(), v->mask());
+}
+
+Stmt* StmtClone::mutate(const AtomicAdd* v) {
+  return new AtomicAdd(v->buf(), v->indices(), v->value());
 }
 
 Stmt* StmtClone::mutate(const Allocate* v) {

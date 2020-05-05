@@ -1,4 +1,4 @@
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 TORCH_LIBRARY(quantized, m) {
   m.def("add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
@@ -9,7 +9,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def("add_scalar_relu(Tensor qa, Scalar b) -> Tensor qc");
   m.def("add_scalar_out(Tensor qa, Scalar b, Tensor(a!) out) -> Tensor(a!) out");
   m.def("add_scalar_relu_out(Tensor qa, Scalar b, Tensor(a!) out) -> Tensor(a!) out");
-  m.def("batch_norm(Tensor qx, Tensor weight, Tensor bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
+  m.def("batch_norm2d(Tensor qx, Tensor weight, Tensor bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm2d_relu(Tensor qx, Tensor weight, Tensor bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm3d(Tensor qx, Tensor weight, Tensor bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm3d_relu(Tensor qx, Tensor weight, Tensor bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
@@ -26,6 +26,12 @@ TORCH_LIBRARY(quantized, m) {
   m.def("conv_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor");
   m.def("conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor");
   m.def("conv3d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor");
+  // conv_unpack is deprecated, please use conv2d_unpack for 2D conv.
+  m.def("conv_unpack(Tensor packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
+  m.def("conv2d_unpack(Tensor packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
+  m.def("conv3d_unpack(Tensor packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
+  m.def("hardswish(Tensor input, float output_scale, int output_zero_point) -> Tensor");
+  m.def("layer_norm(Tensor input, int[] normalized_shape, Tensor weight, Tensor bias, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("linear(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
   m.def("linear_relu(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
   m.def("linear_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y");

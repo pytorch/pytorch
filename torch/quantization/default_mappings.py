@@ -21,6 +21,7 @@ DEFAULT_MODULE_MAPPING = {
     nn.Conv3d: nnq.Conv3d,
     nn.BatchNorm2d: nnq.BatchNorm2d,
     nn.BatchNorm3d: nnq.BatchNorm3d,
+    nn.LayerNorm: nnq.LayerNorm,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # Wrapper Modules:
@@ -74,3 +75,13 @@ DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST = (
      _INCLUDE_QCONFIG_PROPAGATE_LIST) -
     _EXCLUDE_QCONFIG_PROPAGATE_LIST
 )
+
+DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST = (
+    set(DEFAULT_MODULE_MAPPING.values())
+    | set(DEFAULT_QAT_MODULE_MAPPING.values())
+    | set(DEFAULT_DYNAMIC_MODULE_MAPPING.values())
+    | set(DEFAULT_MODULE_MAPPING.keys())
+    | set(DEFAULT_QAT_MODULE_MAPPING.keys())
+    | set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys())
+    | _INCLUDE_QCONFIG_PROPAGATE_LIST
+) - _EXCLUDE_QCONFIG_PROPAGATE_LIST

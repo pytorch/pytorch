@@ -84,3 +84,37 @@ commands:
       - brew_update
       - brew_install:
           formulae: libtool
+
+  optional_merge_target_branch:
+    steps:
+      - run:
+          name: (Optional) Merge target branch
+          no_output_timeout: "10m"
+          command: |
+            if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+              PR_NUM=$(basename $CIRCLE_PULL_REQUEST)
+              CIRCLE_PR_BASE_BRANCH=$(curl -s https://api.github.com/repos/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/pulls/$PR_NUM | jq -r '.base.ref')
+              if [[ "${BUILD_ENVIRONMENT}" == *"xla"* || "${BUILD_ENVIRONMENT}" == *"gcc5"* ]] ; then
+                set -x
+                git config --global user.email "circleci.ossci@gmail.com"
+                git config --global user.name "CircleCI"
+                git config remote.origin.url https://github.com/pytorch/pytorch.git
+                git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
+                git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
+                export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/$CIRCLE_PR_BASE_BRANCH`
+                echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
+                export GIT_COMMIT=${CIRCLE_SHA1}
+                echo "GIT_COMMIT: " ${GIT_COMMIT}
+                git checkout -f ${GIT_COMMIT}
+                git reset --hard ${GIT_COMMIT}
+                git merge --allow-unrelated-histories --no-edit --no-ff ${GIT_MERGE_TARGET}
+                echo "Merged $CIRCLE_PR_BASE_BRANCH branch before building in environment $BUILD_ENVIRONMENT"
+                set +x
+              else
+                echo "No need to merge with $CIRCLE_PR_BASE_BRANCH, skipping..."
+              fi
+            else
+              echo "This is not a pull request, skipping..."
+            fi
+
+

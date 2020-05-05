@@ -5,12 +5,12 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/op_registration/infer_schema.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/stack.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
+#include <torch/library.h>
 #include <torch/custom_class_detail.h>
 #include <iostream>
 #include <sstream>
@@ -270,4 +270,14 @@ using ::torch::class_;
 
 } // namespace jit
 
-} // namespace torch
+template <class CurClass>
+inline class_<CurClass> Library::class_(const std::string& className) {
+  TORCH_CHECK(kind_ == DEF || kind_ == FRAGMENT,
+    "class_(\"", className, "\"): Cannot define a class inside of a TORCH_LIBRARY_IMPL block.  "
+    "All class_()s should be placed in the (unique) TORCH_LIBRARY block for their namespace.  "
+    "(Error occurred at ", file_, ":", line_, ")");
+  TORCH_INTERNAL_ASSERT(ns_.has_value(), file_, ":", line_);
+  return torch::class_<CurClass>(*ns_, className);
+}
+
+}

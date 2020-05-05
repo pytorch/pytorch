@@ -62,7 +62,7 @@ struct function_traits<ReturnType(Args...)> {
   using parameter_types = typelist::typelist<Args...>;
 
   // arity is the number of arguments.
-  constexpr static int arity = sizeof...(Args);
+  constexpr static int arity() { return sizeof...(Args); }
 
   typedef std::tuple<Args...> ArgsTuple;
 

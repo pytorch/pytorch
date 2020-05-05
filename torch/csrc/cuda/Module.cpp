@@ -35,7 +35,7 @@ static bool in_bad_fork = false;  // True for children forked after cuda init
 // Called in the forked child if cuda has already been initialized
 static void forked_child() {
   in_bad_fork = true;
-  utils::set_run_yet_variable_to_false();
+  torch::utils::set_run_yet_variable_to_false();
   state = nullptr;
 }
 #endif
@@ -441,6 +441,8 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   THCPByteStorage_postInit(m);
   THCPBoolStorage_postInit(m);
   THCPBFloat16Storage_postInit(m);
+  THCPComplexDoubleStorage_postInit(m);
+  THCPComplexFloatStorage_postInit(m);
 
   bool has_half = true;
 
@@ -546,7 +548,7 @@ void initModule(PyObject *module) {
   // so this condition might not always be true...
   shared::initCudartBindings(module);
   shared::initNvtxBindings(module);
-#ifdef USE_CUDNN
+#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
   shared::initCudnnBindings(module);
 #endif
 }

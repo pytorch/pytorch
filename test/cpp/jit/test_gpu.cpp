@@ -526,10 +526,10 @@ void testGPU_FusionReplaceAll() {
 void testGPU_FusionParser() {
   auto g = std::make_shared<Graph>();
   const auto graph0_string = R"IR(
-    graph(%0 : Float(2),
-          %1 : Float(2)):
-      %c0 : Float(2) = aten::mul(%0, %1)
-      %d0 : Float(2) = aten::mul(%c0, %0)
+    graph(%0 : Float(2:1),
+          %1 : Float(2:1)):
+      %c0 : Float(2:1) = aten::mul(%0, %1)
+      %d0 : Float(2:1) = aten::mul(%c0, %0)
       return (%d0))IR";
   torch::jit::parseIR(graph0_string, g.get());
 

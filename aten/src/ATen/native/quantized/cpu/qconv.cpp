@@ -5,7 +5,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/SmallVector.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
@@ -165,9 +165,9 @@ SmallVector<int64_t, 5> MakeConvOutputShape<3>(
  *
  */
 template <int kSpatialDim, bool kReluFused>
-class QConvInt8 final : public c10::OperatorKernel {
+class QConvInt8 final {
  public:
-  Tensor operator()(
+  static Tensor run(
       Tensor act,
       Tensor packed_weight,
       torch::List<int64_t> stride,
@@ -256,7 +256,7 @@ class QConvInt8 final : public c10::OperatorKernel {
     }
   }
 
-  at::Tensor FbgemmConv(
+  static at::Tensor FbgemmConv(
       Tensor act,
       Tensor packed_weight,
       torch::List<int64_t> stride,
@@ -501,7 +501,7 @@ class QConvInt8 final : public c10::OperatorKernel {
 #endif
 
 #ifdef USE_PYTORCH_QNNPACK
-  at::Tensor QnnpackConv(
+  static at::Tensor QnnpackConv(
       Tensor act,
       Tensor packed_weight,
       torch::List<int64_t> stride,
@@ -555,13 +555,15 @@ class QConvInt8 final : public c10::OperatorKernel {
         {stride_w, stride_h},
         {dilation_w, dilation_h},
         {pad_h, pad_w, pad_h, pad_w},
+        /*adjustment=*/{0, 0},
         groups,
         C,
         M,
         kernel_zp,
         kernel_scale,
         output_min,
-        output_max);
+        output_max,
+        /*transpose=*/false);
 
     auto input_scale = act_nhwc.q_scale();
 
@@ -611,7 +613,7 @@ class QConvInt8 final : public c10::OperatorKernel {
         "be greater than 0.")
 
     // Allocate output Tensor and a buffer for QNNPACK to use
-    Tensor output = at::_empty_affine_quantized(
+    Tensor output = at::native::empty_affine_quantized(
         output_shape,
         at::device(kCPU)
            .dtype(kQUInt8)
@@ -643,26 +645,17 @@ class QConvInt8 final : public c10::OperatorKernel {
 #endif
 };
 
-static auto registry =
-    c10::RegisterOperators()
-        .op("quantized::conv2d(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
-            c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
-                DispatchKey::QuantizedCPU))
-        .op("_quantized::conv2d(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
-            c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
-                DispatchKey::QuantizedCPU))
-        .op("quantized::conv2d_relu(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
-            c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
-                DispatchKey::QuantizedCPU))
-        .op("_quantized::conv2d_relu(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
-            c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
-                DispatchKey::QuantizedCPU))
-        .op("quantized::conv3d(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
-            c10::RegisterOperators::options().kernel<QConvInt8<3, false>>(
-                DispatchKey::QuantizedCPU))
-        .op("quantized::conv3d_relu(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
-            c10::RegisterOperators::options().kernel<QConvInt8<3, true>>(
-                DispatchKey::QuantizedCPU));
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("conv2d",      QConvInt8<2, false>::run);
+  m.impl("conv2d_relu", QConvInt8<2, true>::run);
+  m.impl("conv3d",      QConvInt8<3, false>::run);
+  m.impl("conv3d_relu", QConvInt8<3, true>::run);
+}
+
+TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
+  m.impl("conv2d",      QConvInt8<2, false>::run);
+  m.impl("conv2d_relu", QConvInt8<2, true>::run);
+}
 
 } // namespace
 } // namespace native
