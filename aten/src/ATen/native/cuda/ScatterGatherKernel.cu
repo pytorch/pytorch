@@ -118,7 +118,7 @@ struct cuda_scatter_gather_base_kernel {
       scatter_shape_check(self, dim, index, src);
     }
     else {
-      gather_shape_check(self, dim, index);
+      gather_shape_check(self, dim, index, src);
     }
 
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
