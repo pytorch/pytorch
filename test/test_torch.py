@@ -12290,7 +12290,7 @@ class TestTorchDeviceType(TestCase):
             ("cosh", doubles, True, True, 'cuda'),
             ("digamma", doubles, True, True, 'cpu'),
             ("erf", doubles, True, True, 'cpu'),
-            ("erf", doubles, False, True, 'cuda'),
+            ("erf", doubles, True, True, 'cuda'),
             ("erfc", doubles, True, True, 'cpu'),
             ("erfc", doubles, False, True, 'cuda'),
             ("erfinv", doubles, True, True, 'cpu'),

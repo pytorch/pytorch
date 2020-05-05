@@ -86,6 +86,14 @@ void sigmoid_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void erf_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "erf_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::erf(a);
+    });
+  });
+}
+
 void erfinv_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "erfinv_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
@@ -127,6 +135,7 @@ REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel_cuda);
+REGISTER_DISPATCH(erf_stub, &erf_kernel_cuda);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel_cuda);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
