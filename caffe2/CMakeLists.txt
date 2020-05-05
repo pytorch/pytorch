@@ -48,16 +48,22 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
 endif()
 
+if (USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
+   set(NNPACK_AND_FAMILY_DISABLED OFF)
+else()
+   set(NNPACK_AND_FAMILY_DISABLED ON)
+endif()
+
 # ---[ Caffe2 build
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
 
 # For pthreadpool_new_if_impl. TODO: Remove when threadpools are unitied.
-if(NOT MSVC AND USE_XNNPACK)
-  if(NOT TARGET fxdiv)
-    set(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
-    set(FXDIV_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    add_subdirectory(
+if (NOT MSVC AND NOT NNPACK_AND_FAMILY_DISABLED)
+  IF(NOT TARGET fxdiv)
+    SET(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
+    SET(FXDIV_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    ADD_SUBDIRECTORY(
       "${FXDIV_SOURCE_DIR}"
       "${CMAKE_BINARY_DIR}/FXdiv")
   endif()
@@ -595,7 +601,7 @@ elseif(USE_CUDA)
 endif()
 
 
-if(NOT MSVC AND USE_XNNPACK)
+if (NOT MSVC AND NOT NNPACK_AND_FAMILY_DISABLED)
   TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
 endif()
 
@@ -758,6 +764,15 @@ if(USE_OPENMP AND OPENMP_FOUND)
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
   target_compile_options(torch_cpu INTERFACE ${OpenMP_CXX_FLAGS})
   target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
+endif()
+
+if (USE_TENSORRT)
+  find_library(MEMCPY_FIX_LIB libmemcpy-2.14.so)
+  target_link_libraries(torch_cuda PRIVATE ${MEMCPY_FIX_LIB})
+  message(STATUS "Added shared lib fix for memcpy@GLIBC_2.14" ${MEMCPY_FIX_LIB})
+else()
+  # Unneeded and not present if building without NVIDIA-built TensorRT
+  set(MEMCPY_FIX_LIB "")
 endif()
 
 
