@@ -758,6 +758,17 @@ class TestSparse(TestCase):
         test_shape(2, 20, [3, 17, 19, 5])
         test_shape(2, 20, [3, 17, 19, 0])
 
+    def test_add_sub_nnz(self):
+        # nnz should not grow unbounded (gh-34964)
+        x = torch.randn(10, device=self.device).to_sparse()
+        x.add_(x)
+        x.add_(x)
+        self.assertLessEqual(x._nnz(), 10)
+
+        x.sub_(2 * x)
+        x.sub_(2 * x)
+        self.assertLessEqual(x._nnz(), 10)
+
     def test_cat(self):
         # shapes: list of tuples (sparse_dims, nnz, sizes)
         def test_shapes(shapes, dim, fail_message=None):
@@ -1211,7 +1222,6 @@ class TestSparse(TestCase):
         self._test_spadd_shape(10, [50, 30, 20], [2, 0])
 
     @cuda_only
-    @skipIfRocm
     @unittest.skipIf(not TEST_WITH_ROCM, "runs only on ROCm")
     def test_sparse_add_out_bfloat16(self):
         # fp32
@@ -1226,7 +1236,7 @@ class TestSparse(TestCase):
         y = y.bfloat16()
         res_bf16 = torch.add(x, y)
         res_bf16 = res_bf16.float()  # to compare with reference
-        self.assertEqual(res_fp32, res_bf16, prec=1e-2)
+        self.assertEqual(res_fp32, res_bf16, atol=1e-2)
 
     def test_norm(self):
         def test_shape(sparse_dims, nnz, with_size):

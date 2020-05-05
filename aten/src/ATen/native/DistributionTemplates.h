@@ -66,9 +66,14 @@ at::Tensor& random_impl(at::Tensor& self, c10::optional<Generator> generator) {
   return self;
 }
 
-#define CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(var, name, min, max, dtype) \
-  if (var < min || var > max) { \
-    TORCH_WARN(name , " is out of bounds for ", dtype, ". This warning will become an error in version 1.6 release, please fix the code in advance"); \
+#define CHECK_OUT_OF_BOUNDS(var, name, min, max, dtype) \
+  TORCH_CHECK(var >= min && var <= max, name , " is out of bounds for ", dtype); \
+
+#define WARN_OUT_OF_BOUNDS(var, name, digits, dtype) \
+  if (var < -(1LL << digits) || var > (1LL << digits)) { \
+    TORCH_WARN(name , " is out of bounds [-(2^", digits, "), 2^", digits, "]. ", \
+      "Due to precision limitations ", dtype, " can support discrete uniform distribution only within this range. ", \
+      "This warning will become an error in version 1.7 release, please fix the code in advance"); \
   }
 
 static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMeta dtype) {
@@ -77,15 +82,19 @@ static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "check_random_fp_bounds", [&] {
       const auto min = static_cast<double>(std::numeric_limits<scalar_t>::lowest());
       const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
-      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(from, "from", min, max, dtype);
-      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(to_inc, "to - 1", min, max, dtype);
+      CHECK_OUT_OF_BOUNDS(from, "from", min, max, dtype);
+      CHECK_OUT_OF_BOUNDS(to_inc, "to - 1", min, max, dtype);
+
+      constexpr auto digits = std::numeric_limits<scalar_t>::digits;
+      WARN_OUT_OF_BOUNDS(from, "from", digits, dtype);
+      WARN_OUT_OF_BOUNDS(to_inc, "to - 1", digits, dtype);
     });
   } else if (isIntegralType(scalar_type, /*includeBool=*/true)) {
     AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, scalar_type, "check_random_integral_bounds", [&]() {
       const auto min = static_cast<int64_t>(std::numeric_limits<scalar_t>::lowest());
       const auto max = static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
-      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(from, "from", min, max, dtype);
-      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(to_inc, "to - 1", min, max, dtype);
+      CHECK_OUT_OF_BOUNDS(from, "from", min, max, dtype);
+      CHECK_OUT_OF_BOUNDS(to_inc, "to - 1", min, max, dtype);
     });
   } else {
     TORCH_CHECK(false, "check_random_bounds handles only integral, floating-point and boolean types");
@@ -272,8 +281,8 @@ at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optiona
       const auto dtype = self.dtype();
       const auto min = static_cast<double>(std::numeric_limits<scalar_t>::lowest());
       const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
-      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(from, "from", min, max, dtype);
-      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(to, "to", min, max, dtype);
+      CHECK_OUT_OF_BOUNDS(from, "from", min, max, dtype);
+      CHECK_OUT_OF_BOUNDS(to, "to", min, max, dtype);
       TORCH_CHECK(from <= to, "uniform_ expects to return a [from, to) range, but found from=", from, " > to=", to);
       TORCH_CHECK((to - from) <= std::numeric_limits<scalar_t>::max(),
             "uniform_ expects to-from <= std::numeric_limits<", toString(self.scalar_type()),
@@ -318,6 +327,17 @@ Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> 
   return self;
 }
 
-#undef CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING
+// ==================================================== Cauchy ========================================================
+
+template<template<typename> class cauchy_kernel, typename RNG>
+Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Generator> gen) {
+  auto iter = TensorIterator::nullary_op(self);
+  cauchy_kernel<RNG>()(iter, median, sigma, gen);
+  return self;
+}
+
+#undef CHECK_OUT_OF_BOUNDS
+#undef WARN_OUT_OF_BOUNDS
 
 }}}
+
