@@ -319,14 +319,14 @@ template <typename T1, typename T2> using pair = std::pair<T1, T2>;
 #endif
 
 template <typename scalar_t>
-struct LessOrNan {
+struct LessEqualOrNan {
   C10_DEVICE bool operator () (scalar_t a, scalar_t b) const {
     return at::_isnan(a) || a <= b;
   }
 };
 
 template <typename scalar_t>
-struct GreaterOrNan {
+struct GreaterEqualOrNan {
   C10_DEVICE bool operator () (scalar_t a, scalar_t b) const {
     return at::_isnan(a) || a >= b;
   }
@@ -366,12 +366,12 @@ struct ArgReductionOps {
 
 template <typename scalar_t>
 struct ArgMaxOps :
-  public detail::ArgReductionOps<detail::GreaterOrNan<scalar_t>> {
+  public detail::ArgReductionOps<detail::GreaterEqualOrNan<scalar_t>> {
 };
 
 template <typename scalar_t>
 struct ArgMinOps :
-  public detail::ArgReductionOps<detail::LessOrNan<scalar_t>> {
+  public detail::ArgReductionOps<detail::LessEqualOrNan<scalar_t>> {
 };
 
 }} // namespace at::native
