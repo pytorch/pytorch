@@ -15012,7 +15012,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 out = torch.empty_like(y)
                 torch.addmv(y, a, x, out=out)
 
-            assert torch.allclose(out, control)
+            self.assertEqual(out, control, atol=1.e-4)
 
         for use_out, row_major, incx, incy, lda_tail in product((False, True), (False, True), (1, 2), (1, 2), (0, 1)):
             _test(use_out, row_major, incx, incy, lda_tail)
