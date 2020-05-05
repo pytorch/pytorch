@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tensorpipe/core/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 
 namespace torch {
@@ -38,6 +39,29 @@ TORCH_API std::string wireSerialize(
 TORCH_API std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
     const void* data,
     size_t data_size);
+
+// TensorPipeEntry represents serialized tensorpipe message,
+// plus reserved tensor datas to keep memory lifetime.
+struct TensorPipeEntry {
+  tensorpipe::Message message;
+  // To keep original user tensors + cloned sparse tensors.
+  std::vector<torch::Tensor> reservedTensors;
+  // To keep memory of tensors who do not own underlying
+  // memory, say created from torch::from_blob()
+  std::vector<std::vector<uint8_t>> copiedTensors;
+};
+
+// TensorPipe doesn't own any underlying memory. Users are required to
+// keep rpcMessage alive for the returned TensorPipeEntry to be valid,
+// since TensorPipe message just keeps raw pointers to the memory.
+TORCH_API TensorPipeEntry tensorpipeSerialize(const Message& rpcMessage);
+
+// The passed-in tensorpipe message is partial, which just contains
+// necessary information for memory allocation, like payload length
+// and tensor metadata. The returned RPC message doesn't have any
+// data, but would be valid after tensorpipe finishs data transfer.
+TORCH_API Message
+tensorpipeAllocateMessage(const tensorpipe::Message& tpMessage);
 
 // Some Tensors are effectively views of larger Tensors, where only a small
 // subset of the Storage data is referenced. This normally is good and avoids

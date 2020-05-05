@@ -156,6 +156,7 @@ Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section
 If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9 or above
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
+- [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
 If you want to disable CUDA support, export environment variable `USE_CUDA=0`.
 Other potentially useful environment variables may be found in `setup.py`.
