@@ -49,7 +49,7 @@ class C10_API Scalar {
     v.member[1] = c10::convert<double>(vv.imag());       \
   }
 
-  DEFINE_IMPLICIT_COMPLEX_CTOR(at::ComplexHalf, ComplexHalf, z)
+  DEFINE_IMPLICIT_COMPLEX_CTOR(c10::complex<c10::Half>, ComplexHalf, z)
   DEFINE_IMPLICIT_COMPLEX_CTOR(std::complex<float>, ComplexFloat, z)
   DEFINE_IMPLICIT_COMPLEX_CTOR(std::complex<double>, ComplexDouble, z)
   DEFINE_IMPLICIT_COMPLEX_CTOR(c10::complex<float>, ComplexFloat, z)
