@@ -2751,9 +2751,10 @@ struct to_ir {
     // through RPC in TorchScript,
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
-    if (apply.inputs().size() < 2 || apply.inputs().size() > 4) {
+    if (apply.inputs().size() < 2 || apply.inputs().size() > 5) {
       throw ErrorReport(apply)
           << "Possible forms of call to rpc_async(..) are\n"
+          << "rpc_async(dst_worker_name, user_callable, args, kwargs, timeout)\n"
           << "rpc_async(dst_worker_name, user_callable, args, kwargs)\n"
           << "rpc_async(dst_worker_name, user_callable, args)\n"
           << "rpc_async(dst_worker_name, user_callable)\n"
@@ -2785,7 +2786,13 @@ struct to_ir {
     // If `kwargs` is an empty dict, users are allowed to not pass `kwargs`.
     // If `args` and `kwargs` are an empty tuple and an empty dict,
     // respectively, users are allowed to not pass `args` and `kwargs`.
-    TreeList args_kwargs_trees(input_trees.begin() + 2, input_trees.end());
+
+    TreeList args_kwargs_trees(
+        input_trees.begin() + 2,
+        apply.inputs().size() == 5 ? input_trees.end() - 1 : input_trees.end());
+
+    // Parse timeout, if applicable
+    Value* timeout = apply.inputs().size() == 5 ? emitExpr(Expr(input_trees[4])) : nullptr;
 
     // Get user callable.
     const auto& callablePtrs = user_callable_function_value->callees();
@@ -2842,6 +2849,9 @@ struct to_ir {
 
       for (const auto& tree : args_kwargs_trees) {
         rpc_async_node->addInput(emitExpr(Expr(tree)));
+      }
+      if (timeout) {
+        rpc_async_node->addInput(timeout);
       }
     }
     Value* rpc_async_node_output = rpc_async_node->output();
