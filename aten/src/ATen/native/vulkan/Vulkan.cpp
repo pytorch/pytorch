@@ -571,6 +571,7 @@ void VImage::addImageMemoryBarrier(
       &barrier);
 }
 
+namespace vkutil {
 VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(
     uint32_t binding,
     VkDescriptorType descriptorType) {
@@ -622,7 +623,7 @@ void allocateDescriptorSet(
   allocateInfo.pSetLayouts = descriptorSetLayout;
   VK_CHECK(vkAllocateDescriptorSets(device, &allocateInfo, descriptorSet));
 }
-
+} // namespace vkutil
 ComputeUnit::~ComputeUnit() {
   vkDestroyShaderModule(context().device(), computeShaderModule_, nullptr);
   vkDestroyPipelineLayout(context().device(), pipelineLayout_, nullptr);
@@ -795,21 +796,21 @@ void copyFromBufferToImage(VBuffer& buffer, VImage& image) {
 
   VkDescriptorSetLayout descrSetLayout = {};
   VkDescriptorSetLayoutBinding bindings[] = {
-      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
-      descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
-      descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
-  createDescriptorSetLayout(
+      vkutil::descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+      vkutil::descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+      vkutil::descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
+  vkutil::createDescriptorSetLayout(
       device, bindings, 3 /* bindingsCount */, &descrSetLayout);
 
   VkDescriptorPool descrPool = {};
   VkDescriptorPoolSize poolSizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
                                       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
                                       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
-  createDescriptorPool(
+  vkutil::createDescriptorPool(
       device, poolSizes, 3 /* poolSizeCount */, 1 /* maxSets */, &descrPool);
 
   VkDescriptorSet descrSet = {};
-  allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
+  vkutil::allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
 
   image.bind(
       descrSet, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
@@ -854,10 +855,11 @@ void copyFromImageToBuffer(VImage& image, VBuffer& buffer) {
 
   VkDescriptorSetLayout descrSetLayout = {};
   VkDescriptorSetLayoutBinding bindings[] = {
-      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-      descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
-      descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
-  createDescriptorSetLayout(
+      vkutil::descriptorSetLayoutBinding(
+          0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+      vkutil::descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+      vkutil::descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
+  vkutil::createDescriptorSetLayout(
       device, bindings, 3 /* bindingsCount */, &descrSetLayout);
 
   VkDescriptorPool descrPool = {};
@@ -865,11 +867,11 @@ void copyFromImageToBuffer(VImage& image, VBuffer& buffer) {
       {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
-  createDescriptorPool(
+  vkutil::createDescriptorPool(
       device, poolSizes, 3 /* poolSizeCount */, 1 /* maxSets */, &descrPool);
 
   VkDescriptorSet descrSet = {};
-  allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
+  vkutil::allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
 
   image.bind(
       descrSet,

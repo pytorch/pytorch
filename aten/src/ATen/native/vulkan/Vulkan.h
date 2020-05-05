@@ -238,7 +238,7 @@ void copyFromImageToBuffer(VImage& image, VBuffer& buffer);
 
 class VulkanTensor final : public c10::intrusive_ptr_target {
   class Impl {
-    friend class VulkanTensor;
+    // friend class VulkanTensor;
 
    public:
     Impl(std::vector<int64_t> sizes) : sizes_(std::move(sizes)) {
@@ -327,6 +327,7 @@ class VulkanTensor final : public c10::intrusive_ptr_target {
   std::shared_ptr<Impl> pImpl;
 };
 
+namespace vkutil {
 VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(
     uint32_t binding,
     VkDescriptorType descriptorType);
@@ -349,6 +350,7 @@ void allocateDescriptorSet(
     VkDescriptorPool descriptorPool,
     const VkDescriptorSetLayout* descriptorSetLayout,
     VkDescriptorSet* descriptorSet);
+} // namespace vkutil
 
 struct WorkGroupSize {
   uint32_t x;
