@@ -11,14 +11,16 @@
 #include <vector>
 #include <regex>
 
-// Test below is from https://stackoverflow.com/a/41186162
-#if __cplusplus >= 201103L &&                             \
+// Test below is adapted from https://stackoverflow.com/a/41186162
+#if defined(_MSVC_LANG) && _MSVC_LANG >= 201103L
+  // Compiler has working regex. MSVC has erroneous __cplusplus.
+#elif __cplusplus >= 201103L &&                           \
     (!defined(__GLIBCXX__) || (__cplusplus >= 201402L) || \
         (defined(_GLIBCXX_REGEX_DFS_QUANTIFIERS_LIMIT) || \
          defined(_GLIBCXX_REGEX_STATE_LIMIT)           || \
              (defined(_GLIBCXX_RELEASE)                && \
              _GLIBCXX_RELEASE > 4)))
-  // Have working regex
+  // Compiler has working regex.
 #else
   static_assert(false, "Compiler does not have proper regex support.");
 #endif
