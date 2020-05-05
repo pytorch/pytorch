@@ -37,7 +37,7 @@ caffe2_binary_target("split_db.cc")
 
 caffe2_binary_target("db_throughput.cc")
 
-if(BUILD_TEST)
+if(BUILD_CAFFE2_TEST)
   # Core overhead benchmark
   caffe2_binary_target("core_overhead_benchmark.cc")
   target_link_libraries(core_overhead_benchmark benchmark)
@@ -48,7 +48,7 @@ if(USE_CUDA)
   target_link_libraries(inspect_gpu ${CUDA_LIBRARIES})
   caffe2_binary_target("print_core_object_sizes_gpu.cc")
 
-  if(BUILD_TEST)
+  if(BUILD_CAFFE2_TEST)
     # Core overhead benchmark
     caffe2_binary_target("core_overhead_benchmark_gpu.cc")
     target_link_libraries(core_overhead_benchmark_gpu benchmark ${CUDA_curand_LIBRARY})
@@ -59,7 +59,7 @@ if(USE_ROCM)
   caffe2_hip_binary_target("hip/inspect_gpu.cc")
   caffe2_hip_binary_target("hip/print_core_object_sizes_gpu.cc")
 
-  if(BUILD_TEST)
+  if(BUILD_CAFFE2_TEST)
     # Core overhead benchmark
     caffe2_hip_binary_target("hip/core_overhead_benchmark_gpu.cc")
     target_link_libraries(core_overhead_benchmark_gpu benchmark)
