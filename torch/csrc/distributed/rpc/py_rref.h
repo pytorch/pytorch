@@ -34,7 +34,7 @@ class PyRRef {
 
   // create a proxy on this RRef, which can be used to launch RPC on the owner
   // of this RRef to run functions on the object referenced by this RRef.
-  py::object createRRefProxy(PyRRef& self, const RRefProxyType& mode) const;
+  py::object createRRefProxy(const RRefProxyType& mode) const;
 
  private:
   c10::intrusive_ptr<RRef> rref_;

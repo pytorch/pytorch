@@ -219,8 +219,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
               )")
           .def(
               "rpc_sync",
-              [&](PyRRef& self) {
-                return self.createRRefProxy(self, RRefProxyType::RPC_SYNC);
+              [](const PyRRef& self) {
+                return self.createRRefProxy(RRefProxyType::RPC_SYNC);
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -243,8 +243,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
               )")
           .def(
               "rpc_async",
-              [&](PyRRef& self) {
-                return self.createRRefProxy(self, RRefProxyType::RPC_ASYNC);
+              [](const PyRRef& self) {
+                return self.createRRefProxy(RRefProxyType::RPC_ASYNC);
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -267,8 +267,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
               )")
           .def(
               "remote",
-              [&](PyRRef& self) {
-                return self.createRRefProxy(self, RRefProxyType::REMOTE);
+              [](const PyRRef& self) {
+                return self.createRRefProxy(RRefProxyType::REMOTE);
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
