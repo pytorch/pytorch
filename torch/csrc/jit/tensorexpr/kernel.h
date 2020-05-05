@@ -42,7 +42,7 @@ inline std::vector<ExprHandle> computeIndicesToBroadcast(
   return bcast;
 }
 
-class TensorExprKernel {
+class TORCH_API TensorExprKernel {
  public:
   explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
 
@@ -51,6 +51,8 @@ class TensorExprKernel {
   void fallback(Stack& stack) {
     InterpreterState(code_).run(stack);
   }
+
+  Stmt* getStmtForInputs(const at::ArrayRef<IValue>& inputs);
 
  private:
   enum BackendType {
@@ -61,6 +63,7 @@ class TensorExprKernel {
   };
 
   void compile();
+  void lowerToBackend(const at::ArrayRef<IValue>& inputs);
 
   void runKernel(Stack& stack);
 
@@ -153,21 +156,23 @@ class TensorExprKernel {
 
   Tensor* computeValue(const torch::jit::Value* v);
 
-  void lowerToBackend(BackendType backendType);
+  void flattenTensors(BackendType backendType);
+  Stmt* generateStmt(BackendType backendType);
+  std::vector<CodeGen::BufferArg> prepareBufferArgs();
 
-  void pickAndCheckBackendType(const at::ArrayRef<IValue>& inputs);
+  std::string getCodegenName(BackendType backendType);
+  void codegenRun(
+      at::Device device,
+      const std::vector<CodeGen::CallArg>& runArgs);
 
-  void codeGenRun(const std::vector<CodeGen::CallArg>& runArgs);
+  std::vector<CodeGen::CallArg> prepareRunArgs(
+      const at::ArrayRef<IValue>& inputs,
+      std::vector<at::Tensor>& outputs,
+      at::Device device);
+  BackendType inferBackendTypeFromDevice(at::Device device);
+  at::Device pickDeviceType(const at::ArrayRef<IValue>& inputs);
 
   void bindInput(const torch::jit::Value* input);
-
-  ExprHandle createInputIndexExpr(
-      const Buffer& buffer,
-      const std::vector<VarHandle>& axes,
-      const c10::VaryingShape& sizes,
-      const c10::VaryingStrides& strides,
-      const c10::VaryingStrides& contiguity,
-      const std::unordered_map<int64_t, VarHandle>& sizeVars);
 
  private:
   struct ShapeArg {
@@ -207,12 +212,11 @@ class TensorExprKernel {
   int64_t nInputs_ = 0;
   std::vector<KernelArg> kernelArgs_;
   std::vector<Tensor*> tensorOutputs_;
+  std::vector<Tensor*> flatTensorOutputs_;
   std::unordered_map<int64_t, Tensor*> tensors_;
   std::unordered_map<int64_t, VarHandle> scalars_;
   std::unordered_map<size_t, std::unique_ptr<CodeGen>> codegenCache_;
   KernelArena kernelArena_;
-  BackendType backendType_ = BackendType::kUninitialized;
-  at::Device device_ = at::kCPU;
   std::vector<TypePtr> inputTypes_;
   std::shared_ptr<Graph> graph_;
   Code code_;

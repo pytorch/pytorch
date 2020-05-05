@@ -16,7 +16,7 @@ def zero_gradients(x):
 
 def make_jacobian(input, num_out):
     if isinstance(input, torch.Tensor):
-        if not input.is_floating_point():
+        if not input.is_floating_point() and not input.is_complex():
             return None
         if not input.requires_grad:
             return None
@@ -197,7 +197,7 @@ def _differentiable_outputs(x):
 
 def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True, check_sparse_nnz=False, nondet_tol=0.0):
     r"""Check gradients computed via small finite differences against analytical
-    gradients w.r.t. tensors in :attr:`inputs` that are of floating point type
+    gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
     and with ``requires_grad=True``.
 
     The check between numerical and analytical gradients uses :func:`~torch.allclose`.
@@ -248,12 +248,12 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     for inp in tupled_inputs:
         if isinstance(inp, torch.Tensor):
             if inp.requires_grad:
-                if inp.dtype != torch.float64:
+                if not (inp.dtype == torch.float64 or inp.dtype == torch.complex128):
                     warnings.warn(
                         'At least one of the inputs that requires gradient '
-                        'is not of double precision floating point. '
+                        'is not of double precision floating point or complex. '
                         'This check will likely fail if all the inputs are '
-                        'not of double precision floating point. ')
+                        'not of double precision floating point or complex. ')
                 any_input_requiring_grad = True
                 inp.retain_grad()
             else:
@@ -342,7 +342,7 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
                   nondet_tol=0.0):
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and
-    :attr:`grad_outputs` that are of floating point type and with
+    :attr:`grad_outputs` that are of floating point or complex type and with
     ``requires_grad=True``.
 
     This function checks that backpropagating through the gradients computed

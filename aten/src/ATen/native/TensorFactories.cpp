@@ -330,7 +330,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data_ptr<scalar_t>();
     at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       for(int64_t i = p_begin; i < p_end; i++)
@@ -912,6 +912,37 @@ Tensor hann_window(
   window_function_checks("hann_window", options, window_length);
   return native::hamming_window(
       window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, options);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~ vandermonde_matrix ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+Tensor vander(const Tensor& x, c10::optional<int64_t> N, bool increasing) {
+  TORCH_CHECK(x.dim() == 1, "x must be a one-dimensional tensor.");
+
+  // Acquires n, defaulting to size if not provided
+  int64_t n = x.size(0);
+  if (N.has_value()) {
+    n = *N;
+    TORCH_CHECK(n >= 0, "N must be non-negative.");
+  }
+
+  // Note: result is long if x is an integer tensor (like int8) because
+  // cumprod promotes integer tensors to long
+  auto result = at::empty({x.size(0), n}, x.options().dtype(at::promote_types(x.scalar_type(), c10::ScalarType::Long)));
+
+  if (n > 0) {
+    result.select(1, 0).fill_(1);
+  }
+  if (n > 1) {
+    result.slice(1, 1).copy_(x.unsqueeze(1));
+    result.slice(1, 1).copy_(at::cumprod(result.slice(1, 1), 1));
+  }
+
+  if (!increasing) {
+    return at::flip(result, {1});
+  }
+  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -273,7 +273,10 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return CreateFunctionalGraphs(g); })
       .def(
           "_jit_pass_remove_mutation",
-          [](std::shared_ptr<Graph>& g) { return RemoveMutation(g); })
+          [](std::shared_ptr<Graph>& g) {
+            RemoveListMutation(g);
+            return RemoveTensorMutation(g);
+          })
       .def(
           "_jit_pass_inline_functional_graphs",
           [](std::shared_ptr<Graph>& g) { return InlineFunctionalGraphs(g); })
@@ -284,6 +287,9 @@ void initJITBindings(PyObject* module) {
           },
           py::arg("graph"),
           py::arg("addmm_fusion_enabled") = false)
+      .def(
+          "_jit_pass_fuse_addmm",
+          [](std::shared_ptr<Graph>& g) { return FuseAddMM(g); })
       .def(
           "_jit_pass_canonicalize",
           [](const std::shared_ptr<Graph>& g) { return Canonicalize(g); })
@@ -488,6 +494,7 @@ void initJITBindings(PyObject* module) {
             return getTECudaPointwiseBlockSize() = block_size;
           })
       .def("_jit_set_texpr_fuser_enabled", &setTensorExprFuserEnabled)
+      .def("_jit_texpr_fuser_enabled", &tensorExprFuserEnabled)
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {

@@ -4,7 +4,7 @@ import warnings
 import torch
 import torch.backends.cudnn as cudnn
 
-from torch._six import PY2, PY37
+from torch._six import PY37
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple
 
 from collections import OrderedDict
@@ -78,6 +78,7 @@ _builtin_ops = [
     (torch._C._get_tracing_state, "aten::_get_tracing_state"),
     (warnings.warn, "aten::warn"),
     (torch._VF.stft, "aten::stft"),
+    (torch._VF.istft, "aten::istft"),
     (torch._VF.cdist, "aten::cdist"),
     (torch._VF.norm, "aten::norm"),
     (torch._VF.nuclear_norm, "aten::nuclear_norm"),
@@ -93,7 +94,7 @@ def _gen_torch_functional_registered_ops():
     # but we are currently only able to compile some of the functions. additionally, 
     # some functions directly map to their aten:: implementations. 
     # TODO: add support for more ops
-    ops = ["stft", "lu", "lu_unpack", "cdist", "norm"]
+    ops = ["stft", "istft", "lu", "lu_unpack", "cdist", "norm"]
     return set(getattr(torch.functional, name) for name in ops)
 
 _functional_registered_ops = _gen_torch_functional_registered_ops()
@@ -116,9 +117,8 @@ def _get_builtin_table():
     for mod in _modules_containing_builtins:
         register_all(mod)
 
-    if not PY2:
-        _builtin_ops.append((math.gcd, "aten::gcd"))
-        _builtin_ops.append((math.isfinite, "aten::isfinite"))
+    _builtin_ops.append((math.gcd, "aten::gcd"))
+    _builtin_ops.append((math.isfinite, "aten::isfinite"))
     if PY37:
         _builtin_ops.append((math.remainder, "aten::mathremainder"))
 

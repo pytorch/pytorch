@@ -18,7 +18,7 @@ void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
 }
 
-static bool tensorExprFuserEnabled() {
+bool tensorExprFuserEnabled() {
   static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR");
   if (!enable_c_str) {
     return texpr_fuser_enabled_;
@@ -265,7 +265,7 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   return {++(++iter), false};
 }
 
-void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
+void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
   if (!tensorExprFuserEnabled()) {
     return;
   }

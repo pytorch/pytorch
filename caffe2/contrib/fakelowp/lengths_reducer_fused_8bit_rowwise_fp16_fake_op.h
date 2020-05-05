@@ -78,7 +78,6 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
     std::vector<float> rowTempSums[2];
     rowTempSums[0].resize(block_size);
     rowTempSums[1].resize(block_size);
-    std::vector<float> sumWeightedOffsets(2);
 
     // block_size is the number of elements and fused_block_size is the size of
     // an entire row, including scale and bias.
@@ -86,8 +85,6 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
     const int64_t fused_block_size = block_size + scale_bias_offset;
     int64_t current = 0;
     for (int m = 0; m < output_size; ++m) {
-      sumWeightedOffsets[0] = 0.0;
-      sumWeightedOffsets[1] = 0.0;
       memset(out, 0, sizeof(float) * block_size);
       memset(rowTempSums[0].data(), 0, sizeof(float) * block_size);
       memset(rowTempSums[1].data(), 0, sizeof(float) * block_size);
@@ -147,9 +144,6 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
               &scale, &scale, 1, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
           fbgemm::RoundToFloat16(
               &bias, &bias, 1, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
-        }
-
-        if (!use_fp16_for_embedding_only && !use_acc_fp32) {
           scale *= weight;
           // Fake fp16 rounding of scale and bias
           fbgemm::RoundToFloat16(
@@ -191,14 +185,20 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
 
         } else if (use_nnpi_fma) {
           std::vector<float> mScale(block_size, scale);
+          std::vector<float> mBias(block_size, bias);
+          std::vector<float> mWeight(block_size, weight);
+
+          fake_fp16::fma_fp16(
+              block_size,
+              mBias.data(),
+              mWeight.data(),
+              rowTempSums[accIdx].data());
+
           fake_fp16::fma_fp16(
               block_size,
               mScale.data(),
               input_rounded.data(),
               rowTempSums[accIdx].data());
-
-          fake_fp16::fma_fp16(1, &weight, &bias, &sumWeightedOffsets[accIdx]);
-
         } else if (use_acc_fp16) {
           bias *= weight;
           fbgemm::RoundToFloat16(
@@ -239,11 +239,9 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
               block_size,
               FLAGS_caffe2_fbgemm_fake_fp16_clamp);
         } else if (use_acc_fp32) {
-          bias *= weight;
-          scale *= weight;
           for (int j = 0; j < block_size; ++j) {
-            rowTempSums[accIdx].data()[j] = scale * input_rounded.data()[j] +
-                bias + rowTempSums[accIdx].data()[j];
+            float deqVal = scale * input_rounded[j] + bias;
+            rowTempSums[accIdx][j] += deqVal * weight;
           }
         } else {
           bias *= weight;
@@ -259,21 +257,18 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
         ++current;
       }
 
-      if (use_nnpi_fma) {
+      if (use_nnpi_fma || use_acc_fp32) {
         for (int j = 0; j < block_size; ++j) {
           out[j] = rowTempSums[0][j] + rowTempSums[1][j];
         }
+      }
+
+      if (use_nnpi_fma) {
         fbgemm::RoundToFloat16(
             reinterpret_cast<const float*>(out),
             out,
             block_size,
             FLAGS_caffe2_fbgemm_fake_fp16_clamp);
-      }
-
-      if (use_acc_fp32) {
-        for (int j = 0; j < block_size; ++j) {
-          out[j] = rowTempSums[0][j] + rowTempSums[1][j];
-        }
       }
 
       if (normalize_by_length && lengths_data[m]) {
@@ -293,27 +288,6 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
         // hack: context is not really used
         math::Scale<float, float, CPUContext>(
             block_size, scale, out, out, nullptr);
-      }
-
-      // Fake fp16 rounding of out
-      if (use_nnpi_fma) {
-        float totalWeightedOffsets =
-            sumWeightedOffsets[0] + sumWeightedOffsets[1];
-        fbgemm::RoundToFloat16(
-            &totalWeightedOffsets,
-            &totalWeightedOffsets,
-            1,
-            FLAGS_caffe2_fbgemm_fake_fp16_clamp);
-
-        for (int j = 0; j < block_size; j++) {
-          out[j] += totalWeightedOffsets;
-        }
-
-        fbgemm::RoundToFloat16(
-            reinterpret_cast<const float*>(out),
-            reinterpret_cast<float*>(out),
-            block_size,
-            FLAGS_caffe2_fbgemm_fake_fp16_clamp);
       }
 
       out += block_size;

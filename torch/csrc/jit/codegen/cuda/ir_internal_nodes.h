@@ -99,9 +99,10 @@ struct TORCH_CUDA_API BinaryOp : public Expr {
 };
 
 /*
- * Simply a representation of an iterable from 0 to size. TensorDomains which
- * represent how to iterate over a tensor is made up of IterDomains. We directly
- * set parallization strategies on IterDomains.
+ * Simply a representation of an annotated 1D iterable from start to extent.
+ * TensorDomains which represent how to iterate over a tensor is made up of
+ * IterDomains to form an ND iterable. We directly set parallization strategies
+ * on IterDomains.
  */
 struct TORCH_CUDA_API IterDomain : public Val {
   ~IterDomain() = default;
@@ -109,7 +110,8 @@ struct TORCH_CUDA_API IterDomain : public Val {
   IterDomain() = delete;
 
   IterDomain(
-      Val* int_size,
+      Val* _start,
+      Val* _extent,
       ParallelType _parallel_method = ParallelType::Serial,
       bool _reduction_domain = false);
 
@@ -157,7 +159,14 @@ struct TORCH_CUDA_API IterDomain : public Val {
       TORCH_CHECK(
           t != ParallelType::Vectorize, "Vectorization not yet supported.");
       if (t == ParallelType::Unroll)
-        TORCH_CHECK(false, "Unrolling not yet supported.");
+        TORCH_CHECK(
+            start()->isZeroInt() && extent()->isConstScalar(),
+            "Unrolling only supported with start = 0 and extent as a const int, but got ",
+            "a start of ",
+            start(),
+            " and extent ",
+            extent(),
+            " .");
     }
   }
 
@@ -165,7 +174,10 @@ struct TORCH_CUDA_API IterDomain : public Val {
     return parallel_method_;
   }
 
-  Val* size() const;
+  Val* start() const noexcept {
+    return start_;
+  }
+  Val* extent() const;
 
   IterDomain(const IterDomain& other) = delete;
   IterDomain& operator=(const IterDomain& other) = delete;
@@ -174,12 +186,24 @@ struct TORCH_CUDA_API IterDomain : public Val {
   IterDomain& operator=(IterDomain&& other) = delete;
 
  private:
-  Val* const size_;
+  Val* const start_;
+  Val* const extent_;
   ParallelType parallel_method_ = ParallelType::Serial;
   bool is_reduction_domain_;
 };
-
-// A list of IterDomains representing how to iterate across a given Tensor.
+/*
+ * TensorDomain holds a vector of IterDomains. It holds an IterDomain for every
+ * logical axis in its associated tensor. TensorDomain does not directly hold
+ * the Tensor it is associated with, and in theory could be associated with
+ * multiple tensors. TensorDomain's primary responsibility is to provide a
+ * mechanism to access history of transformations that were used to generate it.
+ * This is done through the normal interaction of Expr/Val in Fusion. i.e. if we
+ * want to know the previous operation generating a particular TensorDomain we
+ * can simply call FusionGuard::getCurFusion()->origin(a_tensor_domain) which
+ * should give us an operation in the list [split, merge, reorder] or similar
+ * operations that take in a TensorDomain, applies a transformation and outputs
+ * a tensor domain.
+ */
 struct TORCH_CUDA_API TensorDomain : public Val {
   ~TensorDomain() = default;
 
@@ -192,7 +216,7 @@ struct TORCH_CUDA_API TensorDomain : public Val {
   TensorDomain(std::vector<IterDomain*> _domain)
       : Val(ValType::TensorDomain), domain_(_domain) {}
 
-  std::vector<IterDomain*>::size_type size() const {
+  std::vector<IterDomain*>::size_type nDims() const {
     return domain_.size();
   }
 
@@ -207,6 +231,18 @@ struct TORCH_CUDA_API TensorDomain : public Val {
   // i here is int, as we want to accept negative value and ::size_type can be a
   // uint.
   IterDomain* axis(int i) const;
+
+  // Split "axis" into 2 axes where the inner axes is size of "factor"
+  // and outer axis is size axis.size() / factor
+  TensorDomain* split(int axis, int factor);
+
+  // Merge "axis" and "axis+1" into 1 dimension
+  TensorDomain* merge(int axis);
+
+  // Reorder axes according to map[old_pos] = new_pos
+  TensorDomain* reorder(const std::unordered_map<int, int>& axis2pos);
+
+  TensorDomain* rootDomain();
 
  private:
   std::vector<IterDomain*> domain_;
@@ -329,7 +365,7 @@ struct TORCH_CUDA_API ForLoop : public Expr {
   ~ForLoop() = default;
   ForLoop(
       Val* _index,
-      IterDomain* _range,
+      IterDomain* _iter_domain,
       const std::vector<Expr*>& _body = {},
       Expr* parent_scope = nullptr);
 
@@ -343,8 +379,8 @@ struct TORCH_CUDA_API ForLoop : public Expr {
     return index_;
   }
 
-  IterDomain* range() const noexcept {
-    return range_;
+  IterDomain* iter_domain() const noexcept {
+    return iter_domain_;
   }
 
   Scope& body() noexcept {
@@ -365,7 +401,7 @@ struct TORCH_CUDA_API ForLoop : public Expr {
 
  private:
   Val* const index_;
-  IterDomain* const range_;
+  IterDomain* const iter_domain_;
   Scope body_;
   Expr* parent_scope_;
 };
@@ -458,7 +494,7 @@ struct TORCH_CUDA_API TensorIndex : public Val {
         "Cannot index with a value other than an int.");
   }
 
-  std::vector<Val*>::size_type size() const {
+  std::vector<Val*>::size_type nDims() const {
     return indices_.size();
   }
 

@@ -47,6 +47,7 @@ struct Add;
  */
 
 struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
+ public:
   std::ostream& os;
   bool print_inline_ = false;
 
@@ -65,7 +66,6 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
 
   void printHeader(Fusion* fusion, const std::string& kernel_name_);
 
- public:
   IRPrinter(std::ostream& _os) : os(_os) {}
 
   virtual void handle(Fusion* const f);

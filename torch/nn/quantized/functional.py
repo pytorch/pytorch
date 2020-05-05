@@ -4,8 +4,10 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from typing import List, Optional
+
 import torch
-from torch._jit_internal import List as _List
+from torch import Tensor
 from torch.nn.modules.utils import _pair, _triple
 
 # Although some of the functions and docstrings are mirrored from the torch.nn,
@@ -301,7 +303,7 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
     if return_indices:
         raise NotImplementedError("return_indices is not yet implemented!")
     if stride is None:
-        stride = torch.jit.annotate(_List[int], [])
+        stride = torch.jit.annotate(List[int], [])
     return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
                                           dilation, ceil_mode, return_indices)
 
@@ -343,8 +345,8 @@ def leaky_relu(input, negative_slope=0.01, inplace=False,
     """
     if scale is not None and zero_point is not None:
         assert not inplace, "Cannot rescale with `inplace`"
-        output = torch.quantize_per_tensor(torch.zeros(input.shape),
-                                           scale, int(zero_point), input.dtype)
+        output = torch._empty_affine_quantized(
+            input.shape, scale=scale, zero_point=int(zero_point), dtype=input.dtype)
         torch._C._nn.leaky_relu(input, negative_slope, out=output)
         return output
     if inplace:
@@ -368,8 +370,8 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
         return torch._C._nn.hardtanh_(input, min_val, max_val)
     return torch._C._nn.hardtanh(input, min_val, max_val)
 
-def hardswish(input, inplace=False):
-    # type: (Tensor, bool) -> Tensor
+def hardswish(input, scale, zero_point):
+    # type: (Tensor, float, int) -> Tensor
     r"""Applies the quantized version of the hardswish function, element-wise,
     as described in the paper:
 
@@ -384,7 +386,7 @@ def hardswish(input, inplace=False):
 
     Args:
         input: quantized input
-        inplace: Inplace modification of the input tensor
+        scale, zero_point: Scale and zero point of the output tensor.
 
     See :class:`~torch.nn.Hardswish` for more details.
 
@@ -393,9 +395,7 @@ def hardswish(input, inplace=False):
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardswish' must be quantized!")
-    if inplace:
-        return torch._C._nn.hardswish_(input)
-    return torch._C._nn.hardswish(input)
+    return torch._ops.ops.quantized.hardswish(input, scale, zero_point)
 
 def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
     # type: (Tensor, Optional[float], bool, Optional[float], Optional[int]) -> Tensor
@@ -418,8 +418,8 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
 
     if scale is not None and zero_point is not None:
         assert not inplace, "Cannot rescale with `inplace`"
-        output = torch.quantize_per_tensor(torch.zeros(input.shape),
-                                           scale, int(zero_point), input.dtype)
+        output = torch._empty_affine_quantized(
+            input.shape, scale=scale, zero_point=int(zero_point), dtype=input.dtype)
         torch._C._nn.elu(input, alpha, out=output)
         return output
     elif inplace:

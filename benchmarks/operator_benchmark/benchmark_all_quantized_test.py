@@ -12,6 +12,7 @@ from pt import ( # noqa
     qcomparators_test,
     qconv_test,
     qinterpolate_test,
+    qlayernorm_test,
     qlinear_test,
     qobserver_test,
     qpool_test,

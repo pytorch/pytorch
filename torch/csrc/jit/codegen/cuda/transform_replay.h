@@ -3,7 +3,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
 #include <algorithm>
@@ -136,16 +135,26 @@ struct TORCH_CUDA_API TransformReplay : public TransformIter {
    * "record" based on influence axes. Will also update influence and propagate
    * it forward.
    */
-  TensorView* replay(Split* expr, TensorView* tv);
-  TensorView* replay(Merge* expr, TensorView* tv);
-  TensorView* replay(Reorder* expr, TensorView* tv);
+  TensorDomain* replay(Split* expr, TensorDomain* tv);
+  TensorDomain* replay(Merge* expr, TensorDomain* tv);
+  TensorDomain* replay(Reorder* expr, TensorDomain* tv);
 
   /*
    * Takes replay_ref and replays its transformations on replay_target
    * Replays from begining of both TensorDomains. could be more efficient to try
-   * and find a common ancestor to start from, but that's outside the scope of
-   * this work for now.
-   *
+   * and find a common ancestor to start from, but likely not a worthwhile
+   * optimization.
+   */
+  TensorDomain* runReplay(
+      TensorDomain* replay_ref,
+      TensorDomain* replay_target,
+      int compute_at_axis);
+
+  /*
+   * Takes replay_ref and replays its transformations on replay_target
+   * Replays from begining of both TensorDomains. could be more efficient to try
+   * and find a common ancestor to start from, but likely not a worthwhile
+   * optimization.
    */
   TensorView* runReplay(
       TensorView* replay_ref,
@@ -175,6 +184,10 @@ struct TORCH_CUDA_API TransformReplay : public TransformIter {
   static TensorView* fullReplay(
       TensorView* replay_ref,
       TensorView* replay_target);
+
+  static TensorDomain* fullReplay(
+      TensorDomain* replay_ref,
+      TensorDomain* replay_target);
 };
 
 } // namespace fuser

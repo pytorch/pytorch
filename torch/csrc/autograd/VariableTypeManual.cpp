@@ -80,7 +80,7 @@ namespace {
 void backward(
     const Tensor& self,
     const Tensor& gradient,
-    bool keep_graph,
+    c10::optional<bool> keep_graph,
     bool create_graph) {
   torch::autograd::backward({self}, {gradient}, keep_graph, create_graph);
 }
@@ -374,7 +374,7 @@ static auto registry = torch::RegisterOperators()
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .impl_unboxedOnlyKernel<decltype(VariableType::copy_), &VariableType::copy_>(DispatchKey::Autograd))
   .op(torch::RegisterOperators::options()
-    .schema("aten::backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()")
+    .schema("aten::backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     // For backward(), we need the catch-all kernel (see comment above), but we also need the Autograd backend
     // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,

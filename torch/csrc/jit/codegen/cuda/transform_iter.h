@@ -4,7 +4,6 @@
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
 
 namespace torch {
 namespace jit {
@@ -32,15 +31,15 @@ struct TORCH_CUDA_API TransformIter : public IterVisitor {
   // order operations root->td.
   TensorDomain* runBackward(TensorDomain* td, bool generate_record);
 
-  virtual TensorView* replay(Split* expr, TensorView* tv);
-  virtual TensorView* replay(Merge* expr, TensorView* tv);
-  virtual TensorView* replay(Reorder* expr, TensorView* tv);
+  virtual TensorDomain* replay(Split* expr, TensorDomain* tv);
+  virtual TensorDomain* replay(Merge* expr, TensorDomain* tv);
+  virtual TensorDomain* replay(Reorder* expr, TensorDomain* tv);
 
   // dispatch
-  TensorView* replay(Expr* expr, TensorView* tv);
+  TensorDomain* replay(Expr* expr, TensorDomain* tv);
 
   // Runs through operations recorded in record from root-> present
-  TensorView* runReplay(TensorView* tv);
+  TensorDomain* runReplay(TensorDomain* tv);
 
   // Forward record from root, to replay_ref/ref_root
   std::vector<Expr*> record;

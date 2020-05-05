@@ -76,6 +76,34 @@ TEST(HARDSWISH_OP, unit_batch_with_input_zero_point) {
   }
 }
 
+TEST(HARDSWISH_OP, unit_batch_with_output_scale) {
+  for (size_t channels = 1; channels < 100; channels += 15) {
+    for (float outputScale = 1.0e-2f; outputScale < 1.0e+2f;
+         outputScale *= 10.0f) {
+      HardswishOperatorTester()
+          .batchSize(1)
+          .channels(channels)
+          .outputScale(outputScale)
+          .iterations(1)
+          .testQ8();
+    }
+  }
+}
+
+TEST(HARDSWISH_OP, unit_batch_with_output_zero_point) {
+  for (size_t channels = 1; channels < 100; channels += 15) {
+    for (int32_t outputZeroPoint = 0; outputZeroPoint <= 255;
+         outputZeroPoint += 51) {
+      HardswishOperatorTester()
+          .batchSize(1)
+          .channels(channels)
+          .outputZeroPoint(uint8_t(outputZeroPoint))
+          .iterations(1)
+          .testQ8();
+    }
+  }
+}
+
 TEST(HARDSWISH_OP, small_batch) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     HardswishOperatorTester()

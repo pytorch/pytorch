@@ -143,6 +143,66 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
 
 };
 
+// QNNPACK AND XNNPACK may out-of-bound access the input and / or output
+// tensors. This is by-design, and chosen to make the implementation of
+// micro-kernels both simpler and faster as a result of not having to
+// individually handle the corner cases where the number of processed elements
+// is not a multiple of SIMD register width.  This behavior will trigger ASAN
+// though, and may result in a segfault if the accessed memory location just so
+// happens to fall on a page the current process has no read access to.  Here we
+// define a custom allocator that allocates the extra storage required to keep
+// this behavior safe.  This allocator could have been restricted to QNNPACK and
+// XNNPACK only, but that would have negative performance ramifications, as
+// input tensors must now be reallocated, and copied over, if the tensor is not
+// allocated with this allocator to begin with.  Making this allocator the
+// default on mobile builds minimizes the probability of unnecessary
+// reallocations and copies, and also enables acceleration of operations where
+// the output tensor is allocated outside of the function doing the
+// implementation, wherein the implementation cannot simply re-allocate the
+// output with the guarding allocator.
+//
+// PreGuardBytes: Number of guard bytes to allocate before the allocation.
+// PostGuardBytes: Number of guard bytes to allocate after the allocation.
+
+template <uint32_t PreGuardBytes, uint32_t PostGuardBytes>
+class DefaultMobileCPUAllocator final : public at::Allocator {
+ public:
+  DefaultMobileCPUAllocator() = default;
+  virtual ~DefaultMobileCPUAllocator() override = default;
+
+  static void deleter(void* const pointer) {
+    if (C10_UNLIKELY(!pointer)) {
+      return;
+    }
+
+    c10::free_cpu(pointer);
+  }
+
+  virtual DataPtr allocate(const size_t nbytes) const override {
+    if (C10_UNLIKELY(0u == nbytes)) {
+      return {
+          nullptr,
+          nullptr,
+          &deleter,
+          at::Device(DeviceType::CPU),
+      };
+    }
+
+    void* const data = c10::alloc_cpu(PreGuardBytes + nbytes + PostGuardBytes);
+
+    return {
+        reinterpret_cast<uint8_t*>(data) + PreGuardBytes,
+        data,
+        &deleter,
+        at::Device(DeviceType::CPU),
+    };
+  }
+
+  virtual DeleterFnPtr raw_deleter() const override {
+    return deleter;
+  }
+};
+
 void NoDelete(void*) {}
 
 at::Allocator* GetCPUAllocator() {
@@ -153,6 +213,30 @@ void SetCPUAllocator(at::Allocator* alloc) {
   SetAllocator(DeviceType::CPU, alloc);
 }
 
+// The Mobile CPU allocator must always be present even on non-mobile builds
+// because QNNPACK and XNNPACK are not mobile specific.
+//
+// Pre-guard: 8 bytes for QNNPACK, but set to gAlignment to ensure SIMD
+//            alignment, not on the allocated memory, but memory location
+//            returned to the user.
+// Post-guard: 16 bytes for XNNPACK.
+
+static DefaultMobileCPUAllocator<gAlignment, 16u> g_mobile_cpu_allocator;
+
+at::Allocator* GetDefaultMobileCPUAllocator() {
+  return &g_mobile_cpu_allocator;
+}
+
+#ifdef C10_MOBILE
+
+at::Allocator* GetDefaultCPUAllocator() {
+  return GetDefaultMobileCPUAllocator();
+}
+
+REGISTER_ALLOCATOR(DeviceType::CPU, &g_mobile_cpu_allocator);
+
+#else
+
 // Global default CPU Allocator
 static DefaultCPUAllocator g_cpu_alloc;
 
@@ -161,6 +245,8 @@ at::Allocator* GetDefaultCPUAllocator() {
 }
 
 REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc);
+
+#endif /* C10_Mobile */
 
 void MemoryAllocationReporter::New(void* ptr, size_t nbytes) {
   std::lock_guard<std::mutex> guard(mutex_);

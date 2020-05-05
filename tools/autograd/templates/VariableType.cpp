@@ -1,7 +1,7 @@
 #include "torch/csrc/autograd/VariableTypeUtils.h"
 
 #include <ATen/TypeDefault.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 // ${generated_comment}
 
@@ -31,6 +31,15 @@ using namespace torch::autograd::generated;
 namespace torch { namespace autograd {
 
 namespace VariableType {
+namespace{
+  void reset_grad_accumulator(Variable & self) {
+    AutogradMeta* meta = torch::autograd::impl::get_autograd_meta(self);
+    if (meta != nullptr) {
+      meta->grad_accumulator_.reset();
+    }
+  }
+}
+
 // Comment the anonymous namespace so that the generated functions
 // can be accessed from outside of the files (register_mobile_autograd.cpp).
 // Later when we merge the mobile op registration the anonymous namespace
@@ -42,8 +51,9 @@ ${type_derived_method_definitions}
 
 namespace {
 
-auto registerer = torch::import()
-  ${wrapper_registrations};
+TORCH_LIBRARY_IMPL(aten, Autograd, m) {
+  ${wrapper_registrations}
+}
 
 }
 

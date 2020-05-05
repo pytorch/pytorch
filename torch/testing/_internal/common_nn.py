@@ -226,6 +226,14 @@ module_tests = [
         desc='with_negval'
     ),
     dict(
+        module_name='LeakyReLU',
+        constructor_args=(0.0,),
+        cpp_constructor_args='torch::nn::LeakyReLUOptions().negative_slope(0.0)',
+        input_fn=lambda: torch.randn(10, 10),
+        check_inplace=True,
+        desc='with_zero_negval'
+    ),
+    dict(
         module_name='LogSigmoid',
         input_size=(2, 3, 4),
         reference_fn=lambda i, *_: i.sigmoid().log(),
@@ -3819,9 +3827,9 @@ criterion_tests = [
     ),
     dict(
         module_name='MultiMarginLoss',
-        constructor_args=(1, 1., torch.rand(10)),
+        constructor_args=(1, 1., torch.rand(10).double()),
         cpp_constructor_args='torch::nn::MultiMarginLossOptions().p(1).margin(1.).weight(torch::rand(10))',
-        legacy_constructor_args=(1, torch.rand(10)),
+        legacy_constructor_args=(1, torch.rand(10).double()),
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
         reference_fn=lambda i, t, m:
@@ -4385,7 +4393,7 @@ class TestBase(object):
 class ModuleTest(TestBase):
 
     def __init__(self, *args, **kwargs):
-        super(ModuleTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.jacobian_input = kwargs.get('jacobian_input', True)
         self.should_test_cuda = kwargs.get('test_cuda', True)
         self.should_test_pickle = kwargs.get('pickle', True)
@@ -4561,7 +4569,7 @@ class CriterionTest(TestBase):
     _required_arg_names = TestBase._required_arg_names.union({'target'})
 
     def __init__(self, *args, **kwargs):
-        super(CriterionTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.should_test_cuda = kwargs.get('test_cuda', True)
         self.check_forward_only = kwargs.get('check_forward_only', True)
 
@@ -4638,7 +4646,7 @@ class InputVariableMixin(object):
 
 class NewModuleTest(InputVariableMixin, ModuleTest):
     def __init__(self, *args, **kwargs):
-        super(NewModuleTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.cudnn = kwargs.get('cudnn', False)
         self.check_inplace = kwargs.get('check_inplace', False)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
@@ -4792,7 +4800,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     # TODO: check that criterions don't ignore grad_output
 
     def __init__(self, *args, **kwargs):
-        super(NewCriterionTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)

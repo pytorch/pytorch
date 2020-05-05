@@ -53,28 +53,33 @@ class VarSubMutator : public IRMutator {
   }
 
   const Expr* mutate(const ReduceOp* var) override {
-    auto accum = var->accumulator().node()->accept_mutator(this);
-    Stmt* init = var->initializer()->accept_mutator(this);
+    const Expr* init = var->initializer()->accept_mutator(this);
     auto body = var->body().node()->accept_mutator(this);
-    std::vector<const Var*> new_vars;
+    std::vector<const Expr*> new_outer;
+    std::vector<const Var*> new_inner;
+
+    for (auto* v : var->output_args()) {
+      new_outer.push_back(v->accept_mutator(this));
+    }
 
     for (auto* v : var->reduce_args()) {
       const Expr* e = v->accept_mutator(this);
       if (const Var* new_var = dynamic_cast<const Var*>(e)) {
-        new_vars.push_back(new_var);
+        new_inner.push_back(new_var);
       } else {
         VarFinder varFinder;
         auto varlist = varFinder.findVars(e);
-        new_vars.insert(new_vars.end(), varlist.begin(), varlist.end());
+        new_inner.insert(new_inner.end(), varlist.begin(), varlist.end());
       }
     }
 
     return new ReduceOp(
-        ExprHandle(accum),
+        const_cast<Buf*>(var->accumulator()),
         init,
         ExprHandle(body),
         var->interaction(),
-        new_vars);
+        new_outer,
+        new_inner);
   }
 
  private:

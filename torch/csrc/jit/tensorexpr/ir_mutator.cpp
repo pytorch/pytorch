@@ -271,16 +271,27 @@ const Expr* IRMutator::mutate(const RoundOff* v) {
 }
 
 const Expr* IRMutator::mutate(const ReduceOp* v) {
-  auto accum = v->accumulator().node()->accept_mutator(this);
-  Stmt* init = v->initializer()->accept_mutator(this);
+  const Expr* buf_new_expr = v->accumulator()->accept_mutator(this);
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf_new_expr);
+  const Expr* init = v->initializer()->accept_mutator(this);
   auto body = v->body().node()->accept_mutator(this);
 
+  std::vector<const Expr*> new_output_args;
+  std::vector<const Var*> new_reduce_args;
+  for (auto* e : v->output_args()) {
+    new_output_args.push_back(e->accept_mutator(this));
+  }
+  for (auto* r : v->reduce_args()) {
+    new_reduce_args.push_back(static_cast<const Var*>(r->accept_mutator(this)));
+  }
+
   return new ReduceOp(
-      ExprHandle(accum),
+      buf_new,
       init,
       ExprHandle(body),
       v->interaction(),
-      v->reduce_args());
+      new_output_args,
+      new_reduce_args);
 }
 
 const Expr* IRMutator::mutate(const BaseCallNode* v) {
@@ -327,7 +338,7 @@ Stmt* IRMutator::mutate(const For* v) {
 Stmt* IRMutator::mutate(const Block* v) {
   bool any_change = false;
   std::vector<Stmt*> stmts;
-  for (Stmt* stmt : v->stmts()) {
+  for (Stmt* stmt : *v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
     if (stmt != stmt_new) {
       any_change = true;
@@ -366,6 +377,27 @@ Stmt* IRMutator::mutate(const Store* v) {
     return (Stmt*)v;
   }
   return new Store(buf_new, indices_new, value_new, mask_new);
+}
+
+Stmt* IRMutator::mutate(const AtomicAdd* v) {
+  const Buf* buf = v->buf();
+
+  bool any_index_changed = false;
+  std::vector<const Expr*> indices_new;
+  for (const Expr* ind : v->indices()) {
+    const Expr* new_ind = ind->accept_mutator(this);
+    if (new_ind != ind) {
+      any_index_changed = true;
+    }
+    indices_new.push_back(new_ind);
+  }
+  const Expr* value = v->value();
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
+  const Expr* value_new = value->accept_mutator(this);
+  if (buf == buf_new && !any_index_changed && value == value_new) {
+    return (Stmt*)v;
+  }
+  return new AtomicAdd(buf_new, indices_new, value_new);
 }
 
 Stmt* IRMutator::mutate(const Allocate* v) {
@@ -437,6 +469,7 @@ class StmtClone : public IRMutator {
   Stmt* mutate(const Allocate* v) override;
   Stmt* mutate(const Free* v) override;
   Stmt* mutate(const Cond* v) override;
+  Stmt* mutate(const AtomicAdd* v) override;
 };
 
 Stmt* StmtClone::mutate(const LetStmt* v) {
@@ -460,7 +493,7 @@ Stmt* StmtClone::mutate(const For* v) {
 
 Stmt* StmtClone::mutate(const Block* v) {
   std::vector<Stmt*> stmts;
-  for (Stmt* stmt : v->stmts()) {
+  for (Stmt* stmt : *v) {
     stmts.push_back(stmt->accept_mutator(this));
   }
   return new Block(stmts);
@@ -468,6 +501,10 @@ Stmt* StmtClone::mutate(const Block* v) {
 
 Stmt* StmtClone::mutate(const Store* v) {
   return new Store(v->buf(), v->indices(), v->value(), v->mask());
+}
+
+Stmt* StmtClone::mutate(const AtomicAdd* v) {
+  return new AtomicAdd(v->buf(), v->indices(), v->value());
 }
 
 Stmt* StmtClone::mutate(const Allocate* v) {

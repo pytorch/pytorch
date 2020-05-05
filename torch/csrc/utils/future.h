@@ -124,6 +124,7 @@ class TORCH_API Future final {
     if (completed_) {
       lock.unlock();
       cb();
+      return;
     }
     callbacks_.emplace_back(std::move(cb));
   }

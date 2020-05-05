@@ -827,8 +827,10 @@ void checkScopeCallbacks() {
 }
 
 void testRecordFunction() {
+  // enable observers
+  c10::impl::IncludeDispatchKeyGuard observer_guard(c10::DispatchKey::Profiler);
   // disabling the inlining of method calls
-  GraphOptimizerEnabledGuard guard(false);
+  GraphOptimizerEnabledGuard opt_guard(false);
 
   // [(fn, [[sizes], [sizes], ...]), ...]
   TracedTestInputs traced_inputs;
@@ -856,22 +858,24 @@ void testRecordFunction() {
       [](const autograd::profiler::RecordFunction&) {},
       /* needs_inputs */ true);
 
-  auto t = torch::randn({1, 2, 3}, at::kCPU);
-  t.set_requires_grad(true);
-  auto t2 = invokeTestRecordFunction(t);
-  t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
-  auto eager_inputs = traced_inputs;
-  traced_inputs.clear();
+  TracedTestInputs eager_inputs, jit_inputs;
+  {
+    auto t = torch::randn({1, 2, 3}, at::kCPU);
+    t.set_requires_grad(true);
+    auto t2 = invokeTestRecordFunction(t);
+    t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
+    eager_inputs = traced_inputs;
+    traced_inputs.clear();
 
-  TORCH_CHECK(ts_names.empty());
+    TORCH_CHECK(ts_names.empty());
 
-  t = torch::randn({1, 2, 3}, at::kCPU);
-  t.set_requires_grad(true);
-  t2 = invokeTestRecordFunctionJIT(t);
-  t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
-  auto jit_inputs = traced_inputs;
-  traced_inputs.clear();
-
+    t = torch::randn({1, 2, 3}, at::kCPU);
+    t.set_requires_grad(true);
+    t2 = invokeTestRecordFunctionJIT(t);
+    t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
+    jit_inputs = traced_inputs;
+    traced_inputs.clear();
+  }
   autograd::profiler::popCallback();
 
   TORCH_CHECK(ts_names.size() == 2);
@@ -936,6 +940,36 @@ void testRecordFunction() {
   // test the scope of the callbacks
   checkScopeCallbacks();
   cleanUpScopeCallbacks();
+
+  // check record function guard
+  std::vector<std::string> fn_names;
+  std::mutex mtx;
+  autograd::profiler::pushCallback(
+      [&fn_names, &mtx](const autograd::profiler::RecordFunction& fn) {
+        std::lock_guard<std::mutex> lock(mtx);
+        fn_names.push_back(fn.name().str());
+        return true;
+      },
+      [](const autograd::profiler::RecordFunction&) {},
+      /* needs_inputs */ false);
+  {
+    autograd::profiler::RecordFunctionGuard g1(false);
+    {
+      RECORD_USER_SCOPE("A");
+      {
+        autograd::profiler::RecordFunctionGuard g2(true);
+        RECORD_USER_SCOPE("B");
+        {
+          autograd::profiler::DisableRecordFunctionGuard g3;
+          RECORD_USER_SCOPE("C");
+        }
+      }
+      { RECORD_USER_SCOPE("D"); }
+    }
+  }
+  TORCH_CHECK(fn_names.size() == 1);
+  TORCH_CHECK(fn_names[0] == "B");
+  cleanUpScopeCallbacks();
 }
 
 class TestThreadLocalDebugInfo : public at::DebugInfoBase {
@@ -964,6 +998,9 @@ void checkDebugInfo(at::DebugInfoKind kind, int model_id) {
 }
 
 void testThreadLocalDebugInfo() {
+  // enable observers
+  c10::impl::IncludeDispatchKeyGuard observer_guard(c10::DispatchKey::Profiler);
+
   TORCH_CHECK(
       at::ThreadLocalDebugInfo::get(at::DebugInfoKind::TEST_INFO) == nullptr);
   auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();

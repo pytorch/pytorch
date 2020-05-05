@@ -12,7 +12,7 @@ if(USE_FAKELOWP)
   # extensions.
   if(CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
     add_library(caffe2_fakelowp_ops OBJECT ${FAKELOWP_CPU_SRCS})  
-    add_dependencies(caffe2_fakelowp_ops fbgemm Caffe2_PROTO c10)
+    add_dependencies(caffe2_fakelowp_ops fbgemm cpuinfo Caffe2_PROTO c10)
     target_include_directories(caffe2_fakelowp_ops BEFORE
       PRIVATE $<BUILD_INTERFACE:${FBGEMM_SOURCE_DIR}/include>)
     if(MSVC)

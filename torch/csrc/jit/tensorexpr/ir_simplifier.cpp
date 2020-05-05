@@ -1042,6 +1042,69 @@ Stmt* PolynomialTransformer::mutate(const Cond* v) {
   return new Cond(cond_new, true_new, false_new);
 }
 
+Stmt* PolynomialTransformer::mutate(const For* v) {
+  const Expr* var = v->var();
+  const Expr* start = v->start();
+  const Expr* stop = v->stop();
+  Stmt* body = v->body();
+  LoopOptions loop_options = v->loop_options();
+  const Expr* var_new_expr = var->accept_mutator(this);
+  const Var* var_new = dynamic_cast<const Var*>(var_new_expr);
+  const Expr* start_new = start->accept_mutator(this);
+  const Expr* stop_new = stop->accept_mutator(this);
+  Stmt* body_new = body;
+
+  const Expr* loops = new Sub(stop_new, start_new);
+  loops = loops->accept_mutator(this);
+  if (loop_options.isDefault() && loops->isConstant()) {
+    if (immediateEquals(loops, 0)) {
+      return new Block({});
+    } else if (immediateEquals(loops, 1)) {
+      body_new = Substitute(body, {{var_new, start_new}});
+      body_new = body_new->accept_mutator(this);
+      return body_new;
+    }
+  }
+
+  body_new = body_new->accept_mutator(this);
+  if (!body_new) {
+    return new Block({});
+  }
+
+  if (var == var_new && start == start_new && stop == stop_new &&
+      body == body_new) {
+    return (Stmt*)v;
+  }
+  if (body_new == body) {
+    body_new = Stmt::clone(body);
+  }
+  return new For(var_new, start_new, stop_new, body_new, loop_options);
+}
+
+Stmt* PolynomialTransformer::mutate(const Block* v) {
+  std::vector<Stmt*> stmts;
+  for (Stmt* stmt : *v) {
+    Stmt* stmt_new = stmt->accept_mutator(this);
+    if (stmt_new == nullptr) {
+      continue;
+    }
+
+    if (auto* subBlock = dynamic_cast<Block*>(stmt_new)) {
+      for (Block::iterator I = subBlock->begin(), E = subBlock->end();
+           I != E;) {
+        // Be careful to avoid invalidating the iterator.
+        Stmt* s = *(I++);
+        subBlock->remove_stmt(s);
+        stmts.push_back(s);
+      }
+    } else {
+      stmts.push_back(Stmt::clone(stmt_new));
+    }
+  }
+
+  return new Block(stmts);
+}
+
 // TermExpander
 
 const Expr* TermExpander::mutate(const Term* v) {

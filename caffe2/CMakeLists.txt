@@ -53,7 +53,7 @@ endif()
 # addressed yet.
 
 # For pthreadpool_new_if_impl. TODO: Remove when threadpools are unitied.
-if(NOT MSVC)
+if(NOT MSVC AND USE_XNNPACK)
   if(NOT TARGET fxdiv)
     set(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
     set(FXDIV_BUILD_BENCHMARKS OFF CACHE BOOL "")
@@ -257,9 +257,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(GENERATED_CXX_TORCH
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_0.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_2.cpp"
     )
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
@@ -269,6 +269,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_1.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_2.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_3.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_4.cpp"
     )
   endif()
 
@@ -315,6 +320,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
+    "${TOOLS_PATH}/autograd/templates/ProfiledType.cpp"
     "${TOOLS_PATH}/autograd/templates/Functions.h"
     "${TOOLS_PATH}/autograd/templates/Functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_functions.h"
@@ -333,8 +339,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/load_derivatives.py"
     "${TOOLS_PATH}/autograd/nested_dict.py"
     "${TOOLS_PATH}/autograd/utils.py"
-    "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
-    "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
+    "${TOOLS_PATH}/jit/gen_unboxing_wrappers.py"
+    "${TOOLS_PATH}/jit/templates/generated_unboxing_wrappers.cpp"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -345,164 +351,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     DEPENDS ${TORCH_GENERATED_CODE}
     )
 
-
-  set(TORCH_SRCS
-    ${GENERATED_CXX_TORCH}
-    ${GENERATED_H_TORCH}
-    ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/autograd.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/custom_function.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/cpp_hook.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/function_hook.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/functions/accumulate_grad.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/functions/basic_ops.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/functions/utils.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/record_function.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/record_function_ops.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/autodiff.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/ir/attributes.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/argument_spec.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/pass_manager.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/pickler.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/unpickler.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/graph_executor.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/import_source.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/import_export_helpers.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/instruction.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/interpreter.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/ir/constants.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/ir/node_hashing.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/ir/type_hashing.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/ir/ir.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/ir/irparser.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/jit_log.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/operator.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/register_c10_ops.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/ir/subgraph_matcher.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/symbolic_script.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/profiling_record.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/profiling_graph_executor_impl.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python/update_graph_executor_opt.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/ir/alias_analysis.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/bailout_graph.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/clear_undefinedness.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/clear_profiling.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/constant_pooling.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/common_subexpression_elimination.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/create_functional_graphs.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/insert_guards.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/inliner.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/lift_closures.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/inline_forked_closures.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_ops.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize_ops.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/erase_number_types.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/fixup_trace_scope_blocks.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/inline_fork_wait.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/graph_rewrite_helper.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/guard_elimination.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/liveness.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/lower_graph.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/lower_tuples.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/remove_inplace_ops.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/shape_analysis.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/requires_grad_analysis.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_autogradzero.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/subgraph_rewrite.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/tensorexpr_fuser.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/python_print.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/utils/subgraph_utils.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/utils/memory_dag.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/prepack_folding.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/quantization.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/xnnpack_rewrite.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/fuse_linear.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/freeze_module.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/print_handler.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/interface.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/register_ops_utils.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops_fulljit.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops_c10.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/register_string_ops.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/register_special_ops.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/ir/scope.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/ir_emitter.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/name_mangler.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/convert_to_ssa.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/exit_transforms.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/inline_loop_condition.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/schema_matching.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/script_type_parser.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/sugared_value.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/parser.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/builtin_functions.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/canonicalize_modified_loop.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/edit_distance.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/logging.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/api/module.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/api/object.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/jit_exception.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/string_to_type.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/source_range_serialization.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/type_name_uniquer.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/tracer.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/testing/hooks_for_testing.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/kernel_cache.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/compiler.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/executor.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/codegen.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/fallback.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/api/function_impl.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/runtime/vararg_functions.cpp
-
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/bounds_inference.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/codegen.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/eval.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/expr.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/function.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/hash_provider.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_mutator.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_printer.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_simplifier.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_visitor.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/kernel.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/loopnest.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/mem_arena.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/tensor.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/types.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/unique_name_manager.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/mobile/type_parser.cpp
-    )
+  set(TORCH_SRCS ${GENERATED_CXX_TORCH})
+  list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
+  append_filelist("libtorch_cmake_sources" TORCH_SRCS)
 
   # Required workaround for LLVM 9 includes.
   if(NOT MSVC)
@@ -514,7 +365,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_ops.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_autograd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
        )
@@ -538,35 +388,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
     )
     if(USE_DISTRIBUTED)
-      list(APPEND TORCH_SRCS
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/container.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/context.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/engine/dist_engine.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/recvrpc_backward.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/autograd_metadata.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_call.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_remote_call.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_resp.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_context.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_proto.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_impl.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/torchscript_functions.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_remote_call.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_resp.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/types.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/utils.cpp
-      )
+      append_filelist("libtorch_distributed_sources" TORCH_SRCS)
     endif()
   endif()
 
@@ -586,8 +408,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_iostream.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/iter_visitor.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_cache.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_loops.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_utils.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower2device.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
@@ -697,6 +522,10 @@ endif()
 
 
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
+if(HAVE_SOVERSION)
+  set_target_properties(torch_cpu PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
 if(USE_LLVM AND LLVM_FOUND)
@@ -721,6 +550,10 @@ file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
 # Wrapper library for people who link against torch and expect both CPU and CUDA support
 # Contains "torch_cpu" and "torch_cuda"
 add_library(torch ${DUMMY_EMPTY_FILE})
+if(HAVE_SOVERSION)
+  set_target_properties(torch PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 
 if(USE_ROCM)
   filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cu|hip)$")
@@ -762,8 +595,8 @@ elseif(USE_CUDA)
 endif()
 
 
-if(NOT MSVC)
-  target_link_libraries(torch_cpu PRIVATE fxdiv)
+if(NOT MSVC AND USE_XNNPACK)
+  TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
 endif()
 
 # ==========================================================
@@ -785,36 +618,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/include)
   endif()
 
-  if(USE_CUDA)
-    if(MSVC)
-      if(NOT NVTOOLEXT_HOME)
-        set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
-      endif()
-      if(DEFINED ENV{NVTOOLSEXT_PATH})
-        set(NVTOOLEXT_HOME $ENV{NVTOOLSEXT_PATH})
-        file(TO_CMAKE_PATH ${NVTOOLEXT_HOME} NVTOOLEXT_HOME)
-      endif()
-      set(TORCH_CUDA_LIBRARIES
-        ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
-        ${CUDA_LIBRARIES})
-      target_include_directories(torch_cuda PUBLIC "${NVTOOLEXT_HOME}/include")
-      # -INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
-      # Related issue: https://github.com/pytorch/pytorch/issues/31611
-      target_link_libraries(torch_cuda INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
-
-    elseif(APPLE)
-      set(TORCH_CUDA_LIBRARIES
-        ${CUDA_TOOLKIT_ROOT_DIR}/lib/libcudart.dylib
-        ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvrtc.dylib
-        ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib
-        ${CUDA_LIBRARIES})
-
-    else()
-      find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
-      set(TORCH_CUDA_LIBRARIES
-        ${LIBNVTOOLSEXT}
-        ${CUDA_LIBRARIES})
-    endif()
+  if(USE_CUDA AND MSVC)
+    # -INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
+    # Related issue: https://github.com/pytorch/pytorch/issues/31611
+    target_link_libraries(torch_cuda INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
   endif()
 
 
@@ -851,7 +658,12 @@ endif()
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
     FILES_MATCHING PATTERN "*.h")
-  install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h" "${TORCH_SRC_DIR}/custom_class.h" "${TORCH_SRC_DIR}/custom_class_detail.h"
+  install(FILES
+    "${TORCH_SRC_DIR}/script.h"
+    "${TORCH_SRC_DIR}/extension.h"
+    "${TORCH_SRC_DIR}/custom_class.h"
+    "${TORCH_SRC_DIR}/library.h"
+    "${TORCH_SRC_DIR}/custom_class_detail.h"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 
@@ -1197,9 +1009,7 @@ endif()
 if(USE_CUDA)
 
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
-  target_link_libraries(torch_cuda PUBLIC c10_cuda)
-
-  target_link_libraries(torch_cuda PUBLIC ${TORCH_CUDA_LIBRARIES})
+  target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
 
   target_include_directories(
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1226,6 +1036,10 @@ endif()
 # this we have to preload those libs in a global namespace.
 if(BUILD_SHARED_LIBS)
   add_library(torch_global_deps SHARED ${TORCH_SRC_DIR}/csrc/empty.c)
+  if(HAVE_SOVERSION)
+    set_target_properties(torch_global_deps PROPERTIES
+        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+  endif()
   set_target_properties(torch_global_deps PROPERTIES LINKER_LANGUAGE C)
   if(USE_MPI)
       target_link_libraries(torch_global_deps ${MPI_CXX_LIBRARIES})
@@ -1236,9 +1050,8 @@ if(BUILD_SHARED_LIBS)
   # with RTLD_GLOBAL, we'll do the "normal" search process again (and
   # not find them, because they're usually in non-standard locations)
   if(USE_CUDA)
-    target_link_libraries(torch_global_deps ${TORCH_CUDA_LIBRARIES})
     target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
-    target_link_libraries(torch_global_deps torch::cudart)
+    target_link_libraries(torch_global_deps torch::cudart torch::nvtoolsext)
   endif()
 
   install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")

@@ -287,12 +287,16 @@ std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
     IValueFormatter formatter) {
-  if (the_list.toListRef().size() == 0) {
-    out << "annotate(" << the_list.type()->python_str() << ", [])";
+  auto list_elem_type = the_list.type()->expect<ListType>()->getElementType();
+  if (the_list.toListRef().size() == 0 ||
+      !elementTypeCanBeInferredFromMembers(list_elem_type)) {
+    out << "annotate(" << the_list.type()->python_str() << ", ";
+    printList(out, the_list.toListRef(), "[", "]", formatter);
+    out << ")";
+    return out;
   } else {
     return printList(out, the_list.toListRef(), "[", "]", formatter);
   }
-  return out;
 }
 
 template <typename Dict>
@@ -470,6 +474,72 @@ std::shared_ptr<ClassType> ivalue::Object::type() const {
   return type_.type_->expect<ClassType>();
 }
 
+IValue IValue::deepcopy() const {
+  IValue::HashAliasedIValueMap memo;
+  return deepcopy(memo);
+}
+
+IValue IValue::deepcopy(
+    IValue::HashAliasedIValueMap& memo) const {
+  if (memo.count(*this)) {
+    return memo.at(*this);
+  }
+  IValue copy;
+  switch(tag) {
+    case IValue::Tag::Tensor:
+      copy = IValue(toTensor().clone());
+      break;
+    case IValue::Tag::Tuple: {
+      std::vector<IValue> copied_tuple;
+      for (const auto& e : toTuple()->elements()) {
+        copied_tuple.push_back(e.deepcopy(memo));
+      }
+      copy = IValue(ivalue::Tuple::create(copied_tuple));
+    }
+      break;
+    case IValue::Tag::GenericList: {
+      auto list = toList();
+      auto copied_list = c10::impl::GenericList(list.elementType());
+      for (IValue v : list) {
+        copied_list.push_back(v.deepcopy(memo));
+      }
+      copy = IValue(copied_list);
+    }
+      break;
+    case IValue::Tag::GenericDict: {
+      auto dict = toGenericDict();
+      auto copied_dict = c10::impl::GenericDict(dict.keyType(), dict.valueType());
+      for (const auto& entry : dict) {
+        copied_dict.insert(entry.key().deepcopy(memo), entry.value().deepcopy(memo));
+      }
+      copy = IValue(copied_dict);
+    }
+      break;
+    case IValue::Tag::Object: {
+      copy = IValue(toObject()->deepcopy(memo));
+      break;
+    case IValue::Tag::String:
+    case IValue::Tag::None:
+    case IValue::Tag::Double:
+    case IValue::Tag::Int:
+    case IValue::Tag::Bool:
+    case IValue::Tag::Device:
+    case IValue::Tag::Uninitialized:
+      copy = *this;
+      break;
+    default:
+      AT_ERROR("Can't deepcopy IValue with tag: ", tagKind());
+    }
+  }
+  // NB: this doesn't work if an object contains itself, and it may
+  // come up in the future when we expand the object system, we will
+  // have a follow up PR to fix this when it becomes an issue.
+  if (!isAliasOf(copy)) {
+    memo[*this] = copy;
+  }
+  return copy;
+}
+
 std::string ivalue::Object::name() const {
   return type()->name()->qualifiedName();
 }
@@ -494,30 +564,17 @@ void ivalue::Object::resizeObject(size_t slot) {
   slots_.resize(type()->numAttributes());
 }
 
-
-static bool CompareKeys(const std::pair<IValue, IValue>& aWrap,
-                        const std::pair<IValue, IValue>& bWrap) {
-  const auto a = aWrap.first;
-  const auto b = bWrap.first;
-  if (a.isString() && b.isString()) {
-    return a.toStringRef().compare(b.toStringRef()) < 0;
-  } else if (a.isInt() && b.isInt()) {
-    return a.toInt() < b.toInt();
-  } else if (a.isDouble() && b.isDouble()) {
-    return a.toDouble() < b.toDouble();
-  } else if (a.isTensor() && b.isTensor()) {
-    return a.toTensor().unsafeGetTensorImpl() < b.toTensor().unsafeGetTensorImpl();
-  }
-  AT_ERROR("Illegal dict key");
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
+  IValue::HashAliasedIValueMap memo;
+  return deepcopy(memo);
 }
 
-std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict) {
-  std::vector<std::pair<IValue, IValue>> ordered;
-  for (auto& element : dict) {
-    ordered.emplace_back(element.key(), element.value());
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedIValueMap& memo) const {
+  auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
+  for (auto i = 0; i < slots_.size(); ++i) {
+    object->setSlot(i, slots_[i].deepcopy(memo));
   }
-  std::sort(ordered.begin(), ordered.end(), CompareKeys);
-  return ordered;
+  return object;
 }
 
 StrongTypePtr::StrongTypePtr(
