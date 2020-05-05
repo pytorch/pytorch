@@ -20,28 +20,25 @@ namespace at {
 
 class CAFFE2_API LegacyTypeDispatch {
  public:
-  void initForDispatchKeySet(DispatchKeySet ts) {
-    // TODO: Avoid use of legacyExtractDispatchKey here.  The key
-    // problem is that you may get a DispatchKeySet with
-    // Autograd set; should you initialize the "underlying"
-    // type in that case?  Hard to say.
-    auto b = dispatchKeyToBackend(legacyExtractDispatchKey(ts));
-    auto p = backendToDeviceType(b);
+  void initCPU() {
     static std::once_flag cpu_once;
+    std::call_once(cpu_once, [] {
+      getLegacyDeviceTypeInit().initCPU();
+    });
+  }
+
+  void initCUDA() {
     static std::once_flag cuda_once;
-    if (p == DeviceType::CPU) {
-      std::call_once(cpu_once, [] {
-        getLegacyDeviceTypeInit().initCPU();
-      });
-    } else if (p == DeviceType::CUDA) {
-      std::call_once(cuda_once, [] {
-        getLegacyDeviceTypeInit().initCUDA();
-      });
-    } else if (p == DeviceType::HIP) {
-      std::call_once(cuda_once, [] {
-        getLegacyDeviceTypeInit().initHIP();
-      });
-    }
+    std::call_once(cuda_once, [] {
+      getLegacyDeviceTypeInit().initCUDA();
+    });
+  }
+
+  void initHIP() {
+    static std::once_flag hip_once;
+    std::call_once(hip_once, [] {
+      getLegacyDeviceTypeInit().initHIP();
+    });
   }
 };
 

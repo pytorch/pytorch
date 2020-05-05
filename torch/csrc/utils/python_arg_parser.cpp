@@ -515,12 +515,18 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
 }
 
 std::string FunctionSignature::toString() const {
+  // TODO: consider printing more proper schema strings with defaults, optionals, etc.
   std::ostringstream ss;
+  bool keyword_already = false;
   ss << "(";
   int i = 0;
   for (auto& param : params) {
     if (i != 0) {
       ss << ", ";
+    }
+    if (param.keyword_only && !keyword_already) {
+      ss << "*, ";
+      keyword_already = true;
     }
     ss << param.type_name() << " " << param.name;
     i++;

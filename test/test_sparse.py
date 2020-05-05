@@ -7,10 +7,9 @@ torch.set_default_dtype(torch.double)
 import itertools
 import functools
 import random
-import sys
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM
+    do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
@@ -759,6 +758,17 @@ class TestSparse(TestCase):
         test_shape(2, 20, [3, 17, 19, 5])
         test_shape(2, 20, [3, 17, 19, 0])
 
+    def test_add_sub_nnz(self):
+        # nnz should not grow unbounded (gh-34964)
+        x = torch.randn(10, device=self.device).to_sparse()
+        x.add_(x)
+        x.add_(x)
+        self.assertLessEqual(x._nnz(), 10)
+
+        x.sub_(2 * x)
+        x.sub_(2 * x)
+        self.assertLessEqual(x._nnz(), 10)
+
     def test_cat(self):
         # shapes: list of tuples (sparse_dims, nnz, sizes)
         def test_shapes(shapes, dim, fail_message=None):
@@ -912,6 +922,139 @@ class TestSparse(TestCase):
         test_shape(10, 0, 100, 0)
         test_shape(10, 100, 0, 0)
         test_shape(10, 100, 0, 20)
+
+    @unittest.skipIf(
+        IS_WINDOWS and TEST_CUDA,
+        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
+    )
+    @unittest.skipIf(
+        TEST_CUDA and (
+            not torch.version.cuda
+            or [int(x) for x in torch.version.cuda.split(".")] < [10, 1]),
+        "bmm sparse-dense requires CUDA 10.1 or greater"
+    )
+    def test_bmm(self):
+        def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
+            a_list = []
+            b_list = []
+            for mat_idx in range(num_mats):
+                a_mat = self._gen_sparse(2, nnz, [dim_i, dim_j])[0]
+                b_mat = torch.randn([dim_j, dim_k])
+                if self.is_cuda:
+                    a_mat = a_mat.cuda()
+                    b_mat = b_mat.cuda()
+                a_list.append(a_mat)
+                b_list.append(b_mat)
+
+            a = torch.stack(a_list)
+            b = torch.stack(b_list)
+            ab = a.bmm(b)
+
+            # Compare each matrix against result from mm()
+            for mat_idx in range(num_mats):
+                a_mat = a_list[mat_idx]
+                b_mat = b_list[mat_idx]
+                ab_mat_bmm = ab[mat_idx]
+                ab_mat_mm = a_mat.mm(b_mat)
+                self.assertEqual(ab_mat_bmm, ab_mat_mm)
+
+        test_shape(10, 10, 100, 99, 20)
+        test_shape(10, 100, 1000, 200, 20)
+        test_shape(10, 64, 10000, 300, 20)
+        test_shape(10, 0, 100, 99, 0)
+        test_shape(10, 10, 0, 100, 0)
+        test_shape(10, 10, 100, 0, 0)
+        test_shape(10, 10, 100, 0, 20)
+        test_shape(10, 10, 100, 0, 20)
+
+        a = torch.rand([10, 23, 32])
+        a[3] = torch.zeros(23, 32)
+        a[6] = torch.zeros(23, 32)
+        a = a.to_sparse()
+        b = torch.rand([10, 32, 10])
+        b[4] = torch.zeros(32, 10)
+        b[6] = torch.zeros(32, 10)
+        if self.is_cuda:
+            a = a.cuda()
+            b = b.cuda()
+        ab = a.bmm(b)
+        for mat_idx in range(ab.size(0)):
+            ab_mat = ab[mat_idx]
+            ab_mat_check = a[mat_idx].mm(b[mat_idx])
+            self.assertEqual(ab_mat, ab_mat_check)
+
+        ab_traspose_check = b.transpose(1, 2).to_sparse().bmm(
+            a.transpose(1, 2).to_dense()
+        ).transpose(1, 2)
+        self.assertEqual(ab, ab_traspose_check)
+
+    @cuda_only
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
+    )
+    @unittest.skipIf(
+        (not torch.version.cuda
+            or [int(x) for x in torch.version.cuda.split(".")] < [10, 1]),
+        "bmm sparse-dense requires CUDA 10.1 or greater"
+    )
+    def test_bmm_deterministic(self):
+        def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
+            a_list = []
+            b_list = []
+            for mat_idx in range(num_mats):
+                a_list.append(self._gen_sparse(2, nnz, [dim_i, dim_j])[0])
+                b_list.append(torch.randn([dim_j, dim_k]))
+
+            a = torch.stack(a_list).cuda()
+            b = torch.stack(b_list).cuda()
+            ab_nondeterministic = torch._bmm(a, b, deterministic=False)
+            ab_deterministic = torch._bmm(a, b, deterministic=True)
+            diff_abs = (ab_deterministic - ab_nondeterministic).abs()
+            diff_rel = diff_abs / ab_deterministic.abs()
+            diff_rel[torch.isnan(diff_rel)] = 0
+
+            # deterministic and non-deterministic results should either be
+            # equal or within a small relative difference
+            equal_abs_or_rel = diff_abs.eq(0).logical_or(diff_rel.lt(0.001))
+            self.assertTrue(equal_abs_or_rel.all())
+
+        test_shape(10, 10, 100, 99, 20)
+        test_shape(10, 100, 1000, 200, 20)
+        test_shape(10, 64, 10000, 300, 20)
+        test_shape(10, 0, 100, 99, 0)
+        test_shape(10, 10, 0, 100, 0)
+        test_shape(10, 10, 100, 0, 0)
+        test_shape(10, 10, 100, 0, 20)
+        test_shape(10, 10, 100, 0, 20)
+
+    @cuda_only
+    @unittest.skipIf(
+        not IS_WINDOWS,
+        "this test ensures bmm sparse-dense CUDA gives an error when run on Windows"
+    )
+    def test_bmm_windows_error(self):
+        a = torch.rand(2, 2, 2).to_sparse().cuda()
+        b = torch.rand(2, 2, 2).cuda()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "bmm sparse-dense CUDA is not supported on Windows"):
+            ab = a.bmm(b)
+
+    @cuda_only
+    @skipIfRocm
+    @unittest.skipIf(
+        (torch.version.cuda
+            and [int(x) for x in torch.version.cuda.split(".")] >= [10, 1]),
+        "this test ensures bmm gives error if CUDA version is less than 10.1"
+    )
+    def test_bmm_cuda_version_error(self):
+        a = torch.rand(2, 2, 2).to_sparse().cuda()
+        b = torch.rand(2, 2, 2).cuda()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "bmm sparse-dense requires CUDA 10.1 or greater"):
+            ab = a.bmm(b)
 
     @cpu_only
     def test_saddmm(self):
@@ -1093,7 +1236,7 @@ class TestSparse(TestCase):
         y = y.bfloat16()
         res_bf16 = torch.add(x, y)
         res_bf16 = res_bf16.float()  # to compare with reference
-        self.assertEqual(res_fp32, res_bf16, prec=1e-2)
+        self.assertEqual(res_fp32, res_bf16, atol=1e-2)
 
     def test_norm(self):
         def test_shape(sparse_dims, nnz, with_size):
@@ -2151,10 +2294,7 @@ class TestSparse(TestCase):
         self.assertEqual(list(t.coalesce().values().size()), [1, 3])
 
     def test_pickle(self):
-        if sys.version_info[0] == 2:
-            import cPickle as pickle
-        else:
-            import pickle
+        import pickle
 
         shape_sparse_dim_nnz = [
             ((), 0, 2),

@@ -1,4 +1,5 @@
 import contextlib
+import io
 import unittest
 from copy import deepcopy
 from collections import OrderedDict
@@ -7,7 +8,7 @@ import torch
 from torch import nn
 import torch.nn.parallel as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES, PY3
+from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_utils import skipIfRocm
@@ -257,7 +258,7 @@ class TestDataParallel(TestCase):
         test(s.cpu(), None, inp, [1, 0], should_fail=True)
         test(s.cuda(1), None, inp, [1, 0], should_fail=False)
 
-    @unittest.skipIf(not TEST_MULTIGPU or not PY3, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_model_no_refcycles(self):
         # Python 2.7 will create reference cycles with the following
         # Module on multiple GPUs, but Python 3 shouldn't unless
@@ -646,7 +647,7 @@ class TestDataParallel(TestCase):
             def forward(self, x):
                 with self._testcase.assertWarnsRegex(
                         UserWarning,
-                        r"Calling \.zero_grad\(\) from a module that was passed to a nn\.DataParallel\(\) has no effect."):
+                        r"Calling \.zero_grad\(\) from a module created with nn\.DataParallel\(\) has no effect."):
                     self.zero_grad()
                 return x
 
@@ -668,6 +669,17 @@ class TestDataParallel(TestCase):
         model = dp.DataParallel(Model().cuda().to(dtype=torch.float32))
         input = torch.randn((8, 8), dtype=torch.float32, device="cuda")
         self.assertTrue(model(input).dtype is torch.float16)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_save_replica_module(self):
+        # DataParallel replicas can be saved (gh-37182)
+        module = torch.nn.Linear(8, 8).cuda()
+        dpm = torch.nn.parallel.replicate(module, devices=[0, 1], detach=False)
+        data = io.BytesIO()
+        torch.save(dpm, data)
+        dpm = torch.nn.parallel.replicate(module, devices=[0, 1], detach=True)
+        torch.save(dpm, data)
 
 
 if __name__ == '__main__':

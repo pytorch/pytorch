@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
 
 namespace torch {
@@ -31,6 +32,22 @@ std::vector<Expr*> ExprSort::getExprs(
   ExprSort es;
   es.traverse(fusion, from_outputs_only, breadth_first);
   return es.exprs;
+}
+
+void InputsOf::handle(TensorView* tv) {
+  if (FusionGuard::getCurFusion()->hasInput(tv))
+    inputs.push_back(tv);
+}
+
+std::vector<TensorView*> InputsOf::output(Fusion* fusion, Val* output_) {
+  TORCH_CHECK(
+      fusion->hasOutput(output_),
+      "Asked for the inputs of ",
+      output_,
+      " however, it is not an output of the provided fusion.");
+  InputsOf io;
+  io.traverseFrom(FusionGuard::getCurFusion(), {output_});
+  return io.inputs;
 }
 
 Fusion::~Fusion() {
@@ -138,6 +155,10 @@ std::vector<Expr*> Fusion::exprs(bool from_outputs_only, bool breadth_first) {
   if (breadth_first)
     TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
   return ExprSort::getExprs(this, from_outputs_only, breadth_first);
+}
+
+std::vector<TensorView*> Fusion::inputsOf(Val* val) {
+  return InputsOf::output(this, val);
 }
 
 void Fusion::print() {

@@ -40,8 +40,9 @@ class LLVMCodeGenImpl : public IRVisitor {
   std::unique_ptr<llvm::Module> module_;
   llvm::Function* fn_;
   llvm::BasicBlock* bb_;
-  llvm::Value* value_;
+  llvm::Value* value_{nullptr};
   llvm::JITTargetAddress kernelAddress_;
+  std::unique_ptr<void* []> argv_ { nullptr };
 
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
@@ -66,6 +67,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   ~LLVMCodeGenImpl() = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
+  void** getArgvAddress() const;
 
   void visit(const Add* v) override;
   void visit(const Sub* v) override;
@@ -184,15 +186,16 @@ static void* argToPtr(
 }
 
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
-  if (args.size() != buffer_args().size()) {
+  const auto& buf_args = buffer_args();
+  if (args.size() != buf_args.size()) {
     throw malformed_input("wrong number of args in call");
   }
 
-  std::vector<void*> argv;
-  for (size_t i = 0; i < buffer_args().size(); i++) {
-    auto const& bufferArg = buffer_args()[i];
+  void** argv = impl_->getArgvAddress();
+  for (size_t i = 0, e = buf_args.size(); i < e; i++) {
+    auto const& bufferArg = buf_args[i];
     auto const& callArg = args[i];
-    argv.push_back(argToPtr(bufferArg, callArg));
+    argv[i] = argToPtr(bufferArg, callArg);
   }
   value<float>(argv);
   USE_TRIGGER(llvm_codegen_executed);
@@ -204,6 +207,10 @@ void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
 
 llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
   return kernelAddress_;
+}
+
+void** LLVMCodeGenImpl::getArgvAddress() const {
+  return argv_.get();
 }
 
 LLVMCodeGenImpl::LLVMCodeGenImpl(
@@ -261,6 +268,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
       llvm::orc::ThreadSafeModule(std::move(module_), context_)));
   auto sym = jit_->findSymbol("wrapper");
   kernelAddress_ = cantFail(sym.getAddress());
+  argv_ = std::make_unique<void*[]>(params.size());
 
   USE_TRIGGER(llvm_codegen_created);
 }
@@ -324,6 +332,12 @@ void LLVMCodeGenImpl::emitKernel(
 
   // Compile the kernel.
   stmt->accept(this);
+
+  // If the kernel is empty, set a default return value.
+  if (value_ == nullptr) {
+    value_ = llvm::ConstantInt::get(IntTy_, 0);
+  }
+
   irb_.CreateRet(value_);
 
 #if DEBUG_PRINT
@@ -913,7 +927,11 @@ void LLVMCodeGenImpl::visit(const For* v) {
   // Set up phi node for index variable.
   auto idx = irb_.CreatePHI(IntTy_, 2);
   idx->addIncoming(start, preheader);
-  varToVal_.emplace(v->var(), idx);
+  if (!varToVal_.count(v->var())) {
+    varToVal_.emplace(v->var(), idx);
+  } else {
+    throw std::runtime_error("var should not exist before");
+  }
 
   // Create the body and exit blocks.
   auto body = llvm::BasicBlock::Create(getContext(), "body", fn_);
@@ -938,11 +956,13 @@ void LLVMCodeGenImpl::visit(const For* v) {
 
   // Exit the loop.
   irb_.SetInsertPoint(exit);
+
+  varToVal_.erase(v->var());
   value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
 void LLVMCodeGenImpl::visit(const Block* v) {
-  for (Stmt* s : v->stmts()) {
+  for (Stmt* s : *v) {
     s->accept(this);
   }
 }
@@ -1448,11 +1468,43 @@ void LLVMCodeGenImpl::visit(const FunctionCall* v) {
 }
 
 void LLVMCodeGenImpl::visit(const Allocate* v) {
-  throw unimplemented_lowering(v);
+  llvm::Value* size =
+      llvm::ConstantInt::getSigned(LongTy_, v->dtype().byte_size());
+  for (const Expr* e : v->dims()) {
+    e->accept(this);
+    size = irb_.CreateMul(size, irb_.CreateZExt(value_, LongTy_));
+  }
+
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
+
+  if (llvm::ConstantInt* CI = llvm::dyn_cast<llvm::ConstantInt>(size)) {
+    if (CI->getSExtValue() < 512) {
+      llvm::Value* alloca = irb_.CreateAlloca(dtypeToLLVM(v->dtype()), size);
+      varToVal_[v->buffer_var()] = alloca;
+      return;
+    }
+  }
+
+  llvm::Instruction* I = llvm::CallInst::CreateMalloc(
+      irb_.GetInsertBlock(),
+      LongTy_,
+      dtypeToLLVM(v->dtype()),
+      size,
+      nullptr,
+      nullptr);
+
+  // Insert the bitcast into the block.
+  irb_.SetInsertPoint(irb_.GetInsertBlock());
+  llvm::Value* malloc = irb_.Insert(I);
+  varToVal_[v->buffer_var()] = malloc;
 }
 
 void LLVMCodeGenImpl::visit(const Free* v) {
-  throw unimplemented_lowering(v);
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
+  llvm::Value* ptr = varToVal_.at(v->buffer_var());
+  if (!llvm::isa<llvm::AllocaInst>(ptr)) {
+    irb_.Insert(llvm::CallInst::CreateFree(ptr, irb_.GetInsertBlock()));
+  }
 }
 
 void LLVMCodeGenImpl::visit(const Cond* v) {

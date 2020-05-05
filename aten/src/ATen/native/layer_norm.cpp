@@ -12,6 +12,7 @@
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+#include <torch/library.h>
 
 namespace at {
 namespace native {
@@ -60,13 +61,12 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
-Tensor layer_norm(
+std::tuple<Tensor, Tensor, Tensor, int64_t, int64_t> _prepare_layer_norm_inputs(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const Tensor& weight /* optional */,
-    const Tensor& bias /* optional */,
-    double eps,
-    bool /* cudnn_enable, deprecated */) {
+    const Tensor& bias /* optional */) {
+
   const int normalized_ndim = normalized_shape.size();
   TORCH_CHECK(
       normalized_ndim >= 1,
@@ -119,11 +119,74 @@ Tensor layer_norm(
   const auto& X = input.is_contiguous() ? input : input.contiguous();
   const auto& gamma = weight.is_contiguous() ? weight : weight.contiguous();
   const auto& beta = bias.is_contiguous() ? bias : bias.contiguous();
+
+  return std::make_tuple(X, gamma, beta, M, N);
+}
+
+Tensor layer_norm(
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& weight /* optional */,
+    const Tensor& bias /* optional */,
+    double eps,
+    bool /* cudnn_enable, deprecated */) {
+
+  auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto X = std::get<0>(inputs);
+  auto gamma = std::get<1>(inputs);
+  auto beta = std::get<2>(inputs);
+  auto M = std::get<3>(inputs);
+  auto N = std::get<4>(inputs);
+
   return std::get<0>(at::native_layer_norm(X, gamma, beta, M, N, eps));
+}
+
+Tensor quantized_layer_norm_impl(
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& weight /* optional */,
+    const Tensor& bias /* optional */,
+    double eps,
+    double output_scale,
+    int64_t output_zero_point) {
+
+  auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto X = std::get<0>(inputs);
+  auto gamma = std::get<1>(inputs);
+  auto beta = std::get<2>(inputs);
+  auto M = std::get<3>(inputs);
+  auto N = std::get<4>(inputs);
+
+  Tensor Y = at::_empty_affine_quantized(
+    X.sizes(),
+    X.scalar_type(),
+    output_scale,
+    output_zero_point,
+    X.suggest_memory_format());
+
+  if (M > 0) {
+    quantized_layer_norm_stub(kCPU, X, gamma, beta, M, N, eps, &Y);
+  }
+  return Y;
+}
+
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  // TODO: this is kind of... blegh
+  m.impl("layer_norm", [](
+    Tensor input,
+    std::vector<int64_t> normalized_shape,  // because IntArrayRef doesn't work
+    Tensor weight /* optional */,
+    Tensor bias /* optional */,
+    double eps,
+    double output_scale,
+    int64_t output_zero_point) {
+      return quantized_layer_norm_impl(input, normalized_shape, weight, bias, eps, output_scale, output_zero_point);
+  });
 }
 
 DEFINE_DISPATCH(LayerNormKernel);
 DEFINE_DISPATCH(LayerNormBackwardKernel);
+DEFINE_DISPATCH(quantized_layer_norm_stub);
 
 } // namespace native
 } // namespace at

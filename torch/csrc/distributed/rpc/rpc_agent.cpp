@@ -83,7 +83,11 @@ std::shared_ptr<FutureMessage> RpcAgent::sendWithRetries(
 }
 
 void RpcAgent::retryExpiredRpcs() {
-  // storing futures and exception messages for non-retriable error-ed futures.
+  // Stores the retried futures so callbacks can be added outside the lock.
+  std::vector<
+      std::pair<std::shared_ptr<FutureMessage>, std::shared_ptr<RpcRetryInfo>>>
+      futures;
+  // Stores futures and exception messages for non-retriable error-ed futures.
   std::vector<std::pair<std::shared_ptr<FutureMessage>, std::string>>
       errorFutures;
 
@@ -164,6 +168,7 @@ void RpcAgent::retryExpiredRpcs() {
         rpcRetryCallback(fm, newTime, earliestRpc);
       });
     }
+    futures.clear();
 
     // For exceptions caught while retrying RPC's above, we set those futures
     // with errors now that we have released the lock.
@@ -175,11 +180,9 @@ void RpcAgent::retryExpiredRpcs() {
     errorFutures.clear();
 
     // If there are no more RPC's set to be retried at the current timepoint,
-    // we can remove the corresponsing unordered_set from the retry map. We
-    // must also clear the futures vector.
+    // we can remove the corresponsing unordered_set from the retry map.
     {
       std::lock_guard<std::mutex> retryMapLock(rpcRetryMutex_);
-      futures.clear();
       if (earliestRpcList.empty()) {
         rpcRetryMap_.erase(earliestTimeout);
       }

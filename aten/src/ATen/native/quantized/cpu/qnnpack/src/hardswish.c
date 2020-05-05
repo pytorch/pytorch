@@ -67,23 +67,6 @@ enum pytorch_qnnp_status pytorch_qnnp_create_hardswish_nc_q8(
     goto error;
   }
 
-  status = pytorch_qnnp_status_unsupported_parameter;
-
-  if (output_scale != input_scale) {
-    pytorch_qnnp_log_error(
-        "failed to create Hardswish operator with %.7g output scale: only output scale equal to input scale is supported",
-        output_scale);
-    goto error;
-  }
-
-  if (output_zero_point != input_zero_point) {
-    pytorch_qnnp_log_error(
-        "failed to create Hardswish operator with %" PRIu8
-        " output zero point: only output zero point equal to input zero point is supported",
-        output_zero_point);
-    goto error;
-  }
-
   status = pytorch_qnnp_status_out_of_memory;
 
   hardswish_op = calloc(1, sizeof(struct pytorch_qnnp_operator));

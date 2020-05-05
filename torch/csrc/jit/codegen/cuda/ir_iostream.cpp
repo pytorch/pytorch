@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
 
 #include <iostream>
 
@@ -42,7 +41,9 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
   for (Val* val : vals) {
     switch (val->getValType().value()) {
       case (ValType::TensorView):
-        os << "Tensor<" << val->getDataType().value() << "> T" << val->name();
+        os << "Tensor<" << val->getDataType().value() << ", "
+           << static_cast<TensorView*>(val)->getRootDomain()->nDims() << "> T"
+           << val->name();
         break;
       case (ValType::Scalar):
         os << val->getDataType().value() << " " << val;
@@ -70,9 +71,9 @@ void IRPrinter::handle(Fusion* fusion) {
 
 void IRPrinter::handle(const TensorDomain* const td) {
   os << "[ ";
-  for (std::vector<const IterDomain*>::size_type i = 0; i < td->size(); i++) {
+  for (std::vector<const IterDomain*>::size_type i = 0; i < td->nDims(); i++) {
     handle(td->axis(i));
-    if (i != td->size() - 1)
+    if (i != td->nDims() - 1)
       os << ", ";
   }
   os << " ]";
@@ -107,8 +108,13 @@ void IRPrinter::handle(const IterDomain* const id) {
     default:
       os << id->parallel_method();
   }
+
   os << "{";
-  print_inline(id->size());
+  if (!id->start()->isZeroInt()) {
+    print_inline(id->start());
+    os << " : ";
+  }
+  print_inline(id->extent());
   os << "}";
 }
 
@@ -256,7 +262,7 @@ void IRPrinter::handle(const BinaryOp* const bop) {
 }
 
 void IRPrinter::handle(const ForLoop* const fl) {
-  if (fl->range()->isThread()) {
+  if (fl->iter_domain()->isThread()) {
     for (auto& expr : fl->constBody().exprs())
       handle(expr);
     return;
@@ -265,10 +271,12 @@ void IRPrinter::handle(const ForLoop* const fl) {
   indent();
   os << "for(size_t ";
   handle(fl->index());
-  os << "{0}; ";
+  os << " = ";
+  print_inline(fl->iter_domain()->start());
+  os << "; ";
   handle(fl->index());
   os << " < ";
-  print_inline(fl->range()->size());
+  print_inline(fl->iter_domain()->extent());
   os << "; ++";
   handle(fl->index());
   os << " ) {\n";
@@ -343,8 +351,6 @@ void IRPrinter::printKernel(
     const std::vector<Expr*>& exprs,
     const std::string& kernel_name) {
   Fusion* fusion = FusionGuard::getCurFusion();
-  // if(exprs.size() != 0)
-  //   fusion = exprs[0]->fusion();
 
   printHeader(fusion, kernel_name);
   for (auto* expr : exprs) {

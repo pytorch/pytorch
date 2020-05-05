@@ -189,9 +189,6 @@ class ExecMode(Enum):
     RPC_ASYNC = 4  # Run the operation using rpc_async
 
 
-@unittest.skipIf(
-    not torch._six.PY3, "Pytorch distributed autograd package does not support python2"
-)
 class DistAutogradTest(RpcAgentTestFixture):
     def _exec_func_with_dst(self, dst, exec_mode, method, *args):
         if ExecMode.LOCAL == exec_mode:
@@ -1213,7 +1210,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
     def test_backward_node_failure(self):
-        rpc._set_rpc_timeout(timedelta(milliseconds=5000))
+        rpc._set_rpc_timeout(5)  # 5 seconds
         initialize_pg(self.init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
@@ -1429,15 +1426,6 @@ class DistAutogradTest(RpcAgentTestFixture):
 
     _backward_done = False
 
-    @staticmethod
-    def _set_backward_done():
-        DistAutogradTest._backward_done = True
-
-    @staticmethod
-    def _wait_backward_done():
-        while not DistAutogradTest._backward_done:
-            time.sleep(0.1)
-
     @dist_init(clean_shutdown=False)
     @unittest.skipIf(
         IS_MACOS,
@@ -1445,7 +1433,7 @@ class DistAutogradTest(RpcAgentTestFixture):
     )
     def test_backward_node_failure_python_udf(self):
         # Set a short timeout to quickly time out failed RPCs.
-        rpc._set_rpc_timeout(timedelta(milliseconds=5000))
+        rpc._set_rpc_timeout(5)  # 5 seconds
         initialize_pg(self.init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
@@ -1465,6 +1453,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             if self.rank == 2:
                 return
 
+            store = dist.distributed_c10d._get_default_store()
             if self.rank == 0:
                 # Wait for rank 2 to die.
                 shutdown_error_regex = get_shutdown_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
@@ -1475,23 +1464,13 @@ class DistAutogradTest(RpcAgentTestFixture):
                     # Run backwards, and validate we receive an error since rank 2 is dead.
                     dist_autograd.backward(context_id, [res.sum()])
 
-                # Tell other nodes RPC is done.
-                for i in range(self.world_size):
-                    if i != self.rank and i != 2:
-                        # Due to non-graceful shutdown of workers, this RPC may not return successfully.
-                        # For example, the destination worker could process the RPC, exit and begin shutdown, and
-                        # shutdown RPC before responding and satisfying this RPC. Therefore, we swallow possible errors here.
-                        try:
-                            rpc.rpc_sync(
-                                worker_name(i),
-                                DistAutogradTest._set_backward_done,
-                                args=(),
-                            )
-                        except Exception as e:
-                            pass
+                # Mark rank 0 is done in the store, since the RPC framework on
+                # some nodes might be broken at this point (listenLoop() in
+                # ProcessGroupAgent might've exited).
+                store.set('test_backward_node_failure_python_udf_rank0_done', "True")
             else:
                 # Wait for backward to finish on rank 0.
-                DistAutogradTest._wait_backward_done()
+                store.wait(['test_backward_node_failure_python_udf_rank0_done'], timedelta(seconds=10))
 
     @staticmethod
     def _nested_python_udf(t1, t2, dst):
@@ -2091,10 +2070,37 @@ class DistAutogradTest(RpcAgentTestFixture):
             # refcount.
             self.assertTrue(p_g == p_a)
 
-@unittest.skipIf(
-    not torch._six.PY3,
-    "Pytorch distributed autograd package does not support python2",
-)
+    @dist_init
+    def test_post_hooks(self):
+        self.hook_called_times = 0
+
+        def post_hook_add_one(output_grads, input_grads):
+            self.hook_called_times += 1
+            return output_grads
+
+        def post_hook_add_two(output_grads, input_grads):
+            self.hook_called_times += 2
+            return output_grads
+
+        t = torch.rand(10, 10, requires_grad=True)
+        a = t + t
+
+        # Register post hooks
+        accumulate_grad_0 = a.grad_fn.next_functions[0][0]
+        accumulate_grad_0.register_hook(post_hook_add_one)
+        accumulate_grad_0.register_hook(post_hook_add_two)
+
+        accumulate_grad_1 = a.grad_fn.next_functions[1][0]
+        accumulate_grad_1.register_hook(post_hook_add_two)
+
+        with dist_autograd.context() as context_id:
+            loss = a.sum()
+            dist_autograd.backward(context_id, [loss])
+            self.assertEqual(5, self.hook_called_times)
+            grads = dist_autograd.get_gradients(context_id)
+            self.assertEqual(1, len(grads))
+            self.assertTrue(t in grads)
+
 class FaultyAgentDistAutogradTest(FaultyRpcAgentTestFixture):
     # Reusing a simplified helper function from DistAutogradTest to ensure
     # autograd context is successfully cleaned up even when RPCs are failing.

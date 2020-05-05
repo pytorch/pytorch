@@ -8,6 +8,7 @@
 #include "torch/csrc/jit/tensorexpr/function.h"
 #include "torch/csrc/jit/tensorexpr/ir.h"
 #include "torch/csrc/jit/tensorexpr/ir_printer.h"
+#include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
 #include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
@@ -388,10 +389,9 @@ void testLLVMVectorizerLoadStoreTest() {
   Buffer c_buf(BufHandle(c->func_var()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
-  l.vectorize(*dynamic_cast<Block*>(s)->stmts().begin());
+  l.vectorize(dynamic_cast<Block*>(s)->front());
 
-  ASSERT_TRUE(
-      dynamic_cast<For*>(*dynamic_cast<Block*>(s)->stmts().begin()) == nullptr);
+  ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
 
   LLVMCodeGen cg(s, {a, c_buf});
 
@@ -1173,6 +1173,176 @@ void testLLVMDynamicShape2D() {
   testWithSize(1, 8);
   testWithSize(16, 32);
   testWithSize(37, 11);
+}
+
+void testLLVMEmptyStmt() {
+  KernelScope kernel_scope;
+  Stmt* s = new Block({});
+
+  LLVMCodeGen cg(s, {});
+  cg.call({});
+  // Just don't crash.
+}
+
+void testLLVMEliminatedStmt() {
+  KernelScope kernel_scope;
+  Buffer a(BufHandle("a", {1}, kFloat));
+
+  Tensor* c = Compute("c", {{0, "m"}}, [&](const VarHandle& m) { return m; });
+
+  LoopNest l({c});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+  s = IRSimplifier::simplify(s);
+  LLVMCodeGen cg(s, {a, c});
+  std::vector<float> aData(1, 1.0f);
+  std::vector<float> cData(0, 0.0f);
+  cg.call({aData, cData});
+}
+
+void testLLVMSimpleReduction() {
+  KernelScope kernel_scope;
+
+  int M = 128;
+  int N = 64;
+  const int kTotalSize = M * N;
+
+  Buffer a("a", kFloat, {1, M, N});
+
+  // TODO: why doesn't implicit vector<DimArg> work?
+  std::vector<DimArg> axis = {DimArg(1)};
+  std::vector<DimArg> reduce_axis = {DimArg(M), DimArg(N)};
+  Tensor* b = Reduce("sum", axis, Sum(), a, reduce_axis);
+  LoopNest loop({b});
+
+  loop.prepareForCodegen();
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  LLVMCodeGen cg(s, {a, b});
+
+  PaddedBuffer<float> a_v(1, M, N, "a_v");
+  PaddedBuffer<float> b_v(1, "b_v");
+  PaddedBuffer<float> b_ref(1, "b_ref");
+
+  b_ref(0) = 0;
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      int v = i + j;
+      a_v(0, i, j) = v;
+      b_ref(0) += v;
+    }
+  }
+
+  cg.call({a_v, b_v});
+
+  ExpectAllNear(b_v, b_ref, 1e-5);
+}
+
+void testLLVMRFactorReduction() {
+  KernelScope kernel_scope;
+
+  int M = 128;
+  int N = 64;
+  const int kTotalSize = M * N;
+
+  Buffer a("a", kFloat, {1, M, N});
+
+  // TODO: why doesn't implicit vector<DimArg> work?
+  std::vector<DimArg> axis = {DimArg(1)};
+  std::vector<DimArg> reduce_axis = {DimArg(M), DimArg(N)};
+  Tensor* b = Reduce("sum", axis, Sum(), a, reduce_axis);
+  LoopNest loop({b});
+
+  std::vector<For*> loops = loop.getLoopStmtsFor(b);
+  For* loop_m = loops.at(1);
+  For* loop_n = loops.at(2);
+  loop.reorderAxis(b, loop_m, loop_n);
+
+  loops = loop.getLoopStmtsFor(b);
+  loop_m = loops.at(2);
+  loop_n = loops.at(1);
+  loop.rfactor(b->body(), loop_n->var(), loop_n->body());
+
+  loop.prepareForCodegen();
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  LLVMCodeGen cg(s, {a, b});
+
+  PaddedBuffer<float> a_v(1, M, N, "a_v");
+  PaddedBuffer<float> b_v(1, "b_v");
+  PaddedBuffer<float> b_ref(1, "b_ref");
+
+  b_ref(0) = 0;
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      int v = i + j;
+      a_v(0, i, j) = v;
+      b_ref(0) += v;
+    }
+  }
+
+  cg.call({a_v, b_v});
+
+  ExpectAllNear(b_v, b_ref, 1e-5);
+}
+
+void testLLVMRFactorVectorizedReduction() {
+  KernelScope kernel_scope;
+
+  int M = 128;
+  int N = 64;
+  const int kTotalSize = M * N;
+
+  Buffer a("a", kFloat, {1, M, N});
+
+  // TODO: why doesn't implicit vector<DimArg> work?
+  std::vector<DimArg> axis = {DimArg(1)};
+  std::vector<DimArg> reduce_axis = {DimArg(M), DimArg(N)};
+  Tensor* b = Reduce("sum", axis, Sum(), a, reduce_axis);
+  LoopNest loopnest({b});
+  std::vector<For*> loops = loopnest.getLoopStmtsFor(b);
+  For* loop_k = loops.at(0);
+  For* loop_m = loops.at(1);
+  For* loop_n = loops.at(2);
+  loopnest.reorderAxis(b, loop_n, loop_m);
+  loops = loopnest.getLoopStmtsFor(b);
+  loop_k = loops.at(0);
+  loop_n = loops.at(1);
+  loop_m = loops.at(2);
+  // Case-III reductions
+  loopnest.rfactor(b->body(), loop_n->var());
+  loopnest.prepareForCodegen();
+  Stmt* s = loopnest.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  Block* root_block = dynamic_cast<Block*>(s);
+  auto I = root_block->begin();
+  ++I;
+
+  For* outer_loop = dynamic_cast<For*>(*I);
+  loopnest.vectorize(outer_loop);
+
+  s = IRSimplifier::simplify(s);
+  LLVMCodeGen cg(s, {a, b});
+
+  PaddedBuffer<float> a_v(1, M, N, "a_v");
+  PaddedBuffer<float> b_v(1, "b_v");
+  PaddedBuffer<float> b_ref(1, "b_ref");
+
+  b_ref(0) = 0;
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      int v = i + j;
+      a_v(0, i, j) = v;
+      b_ref(0) += v;
+    }
+  }
+
+  cg.call({a_v, b_v});
+
+  ExpectAllNear(b_v, b_ref, 1e-5);
 }
 
 } // namespace jit

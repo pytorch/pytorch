@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/partition.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
 namespace torch {
@@ -54,6 +55,23 @@ inline bool isFusableNode(const Node* const node) {
   return (isNodeParsible(node) || node->kind() == prim::CudaFusionGroup);
 }
 
+// TODO: how would symbolic shape from profiling executor play with this?
+static bool compatible_broadcast_shape(
+    const c10::VaryingShape<int64_t>& e,
+    const c10::VaryingShape<int64_t>& a) {
+  if (e.isComplete() && a.isComplete()) {
+    auto e_size = e.concrete_sizes().value();
+    auto a_size = a.concrete_sizes().value();
+    for (size_t i = 0; i < e_size.size(); i++) {
+      if (e_size[i] != a_size[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
 } // namespace
 
 bool isFusableCudaFusionGroup(const Node* const node) {
@@ -69,7 +87,30 @@ bool isFusableCudaFusionGroup(
   if (isFusableNode(node)) {
     auto device = getDevice(fusion);
 
-    return (device.has_value() && isFusableDevice(node, device.value()));
+    auto tensor_type = fusion->outputs()[0]->type()->cast<TensorType>();
+    if (tensor_type) {
+      for (auto output : node->outputs()) {
+        // We only check shape of tensor output
+        auto output_type = output->type()->cast<TensorType>();
+        if (output_type) {
+          bool output_tensor = false;
+          for (auto use : output->uses()) {
+            if (use.user != fusion) {
+              output_tensor = true;
+              break;
+            }
+          }
+          // if the output is not used by outside, there's no need to check its
+          // shape
+          if (output_tensor &&
+              !compatible_broadcast_shape(
+                  tensor_type->sizes(), output_type->sizes())) {
+            return false;
+          }
+        }
+      }
+      return (device.has_value() && isFusableDevice(node, device.value()));
+    }
   }
   return false;
 }

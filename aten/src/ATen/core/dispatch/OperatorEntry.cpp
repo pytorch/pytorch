@@ -27,16 +27,10 @@ namespace {
   }
 }
 
-OperatorEntry::OperatorEntry(FunctionSchema&& schema)
-: name_(schema.operator_name())
-, schema_(std::move(schema))
-, dispatchTable_(*schema_)
-, kernels_() {
-}
-
 OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 : name_(std::move(operator_name))
 , schema_()
+, debug_()
 , dispatchTable_(name_)
 , kernels_() {
 }
@@ -49,34 +43,36 @@ void OperatorEntry::prepareForDeregistration() {
 }
 
 namespace {
-  void checkSchema(const OperatorName& name, const FunctionSchema& from_def, const FunctionSchema& inferred) {
+  void checkSchema(const OperatorName& name, const FunctionSchema& from_def, const std::string& from_def_debug, const FunctionSchema& inferred, const std::string& inferred_debug) {
     c10::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
     if (schema_difference.has_value()) {
       TORCH_CHECK(false,
-        "In registration for ", toString(name), ": expected schema of operator to be \"", toString(from_def), "\", ",
-        "but got inferred schema \"", toString(inferred), "\". ",
+        "In registration for ", toString(name), ": expected schema of operator to be \"", toString(from_def), "\" (", from_def_debug, "), ",
+        "but got inferred schema \"", toString(inferred), "\" (", inferred_debug, "). ",
         *schema_difference);
     }
   }
 }
 
-void OperatorEntry::registerSchema(FunctionSchema&& schema) {
+void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
   for (auto i = kernels_.begin(); i != kernels_.end(); ++i) {
     for (auto j = i->second.begin(); j != i->second.end(); ++j) {
       if (j->inferred_function_schema != nullptr) {
-        checkSchema(name_, schema, *j->inferred_function_schema);
+        checkSchema(name_, schema, debug, *j->inferred_function_schema, j->debug);
       }
     }
   }
   // NB: don't register schema until after we've checked everything!
   schema_ = std::move(schema);
+  debug_ = std::move(debug);
   dispatchTable_.registerSchema(*schema_);
 }
 
 void OperatorEntry::deregisterSchema() {
   TORCH_INTERNAL_ASSERT(schema_.has_value());
   schema_ = c10::nullopt;
+  debug_ = c10::nullopt;
   dispatchTable_.deregisterSchema();
 }
 
@@ -89,7 +85,7 @@ std::list<OperatorEntry::KernelEntry>::iterator OperatorEntry::registerKernel(
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   if (schema_ && inferred_function_schema) {
-    checkSchema(name_, *schema_, *inferred_function_schema);
+    checkSchema(name_, *schema_, *debug_, *inferred_function_schema, debug);
   }
 
   // Add the kernel to the kernels list,
@@ -150,6 +146,7 @@ void OperatorEntry::checkInvariants() const {
     TORCH_INTERNAL_ASSERT(schema_->operator_name() == name_);
     dispatchTable_.dispatchKeyExtractor().checkInvariants(*schema_);
   }
+  TORCH_INTERNAL_ASSERT(schema_.has_value() == debug_.has_value());
   TORCH_INTERNAL_ASSERT(name_ == dispatchTable_.operatorName());
   TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end());
   for (const auto& kv : kernels_) {
@@ -171,6 +168,7 @@ std::string OperatorEntry::dumpState() const {
   oss << "name: " << name_ << "\n";
   if (schema_) {
     oss << "schema: " << *schema_ << "\n";
+    oss << "debug: " << *debug_ << "\n";
     oss << "alias analysis kind: " << toString(schema_->aliasAnalysis()) << (schema_->isDefaultAliasAnalysisKind() ? " (default)" : "") << "\n";
   } else {
     oss << "schema: (none)\n";

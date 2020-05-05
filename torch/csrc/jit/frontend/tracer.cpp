@@ -242,9 +242,39 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
         fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }));
     graph->insertNode(tuple_node);
     return tuple_node->output();
+  } else if (iv.isGenericDict()) {
+    if (tracing_mode_strict) {
+      throw std::runtime_error(
+          "Encountering a dict at the output of the tracer" +
+          std::string(STRICT_TRACER_MSG));
+    }
+    auto dict = iv.toGenericDict();
+    TypePtr key_type = dict.keyType();
+    TypePtr value_type = dict.valueType();
+
+    bool key_type_valid = key_type->isSubtypeOf(StringType::get()) ||
+        key_type->isSubtypeOf(TensorType::get());
+    bool value_type_valid = value_type->isSubtypeOf(TensorType::get());
+
+    if (!key_type_valid || !value_type_valid) {
+      std::ostringstream os;
+      os << "output " << i << " (" << dict << ") of traced region "
+         << "cannot be understood by the tracer, only dict[str, Tensor] "
+         << "or dict[Tensor, Tensor] can be a dictionary output of a traced function";
+      throw std::runtime_error(os.str());
+    }
+    std::vector<Value*> keys;
+    std::vector<Value*> values;
+    for (const auto& entry : dict) {
+      keys.emplace_back(getValue(entry.key()));
+      values.emplace_back(getOutput(entry.value(), i));
+    }
+    auto dict_node = graph->createDict(key_type, value_type, keys, values);
+    graph->insertNode(dict_node);
+    return dict_node->output();
   } else {
     AT_ERROR(
-        "Only tensors, lists and tuples of tensors can be output from traced functions");
+        "Only tensors, lists, tuples of tensors, or dictionary of tensors can be output from traced functions");
   }
 }
 
@@ -288,15 +318,17 @@ static IValue addInput(
     auto unpack_node = state->graph->insertNode(list_unpack);
     auto elem_values = unpack_node->outputs();
 
-    const auto order = iterationOrder(dict);
-    AT_ASSERT(order.size() == elem_values.size());
+    AT_ASSERT(dict.size() == elem_values.size());
 
     size_t i = 0;
-    for (const auto& pair : order) {
+    for (const auto& entry : dict) {
       dict.insert_or_assign(
-          pair.first,
+          entry.key(),
           addInput(
-              state, pair.second, dict_type->getValueType(), elem_values[i++]));
+              state,
+              entry.value(),
+              dict_type->getValueType(),
+              elem_values[i++]));
     }
 
     return dict;
@@ -471,19 +503,18 @@ void TracingState::setValue(const IValue& v, Value* value) {
     TypePtr key_type = dict.keyType();
     TypePtr value_type = dict.valueType();
     auto dict_size = dict.size();
-    const auto order = iterationOrder(dict);
     auto handle_unpack = [&](Symbol opname) {
       auto unpack_to_list = graph->insert(opname, {value});
       auto list_unpack = graph->createListUnpack(unpack_to_list, dict_size);
       auto unpack_node = graph->insertNode(list_unpack);
       auto elem_values = unpack_node->outputs();
-      AT_ASSERT(order.size() == elem_values.size());
+      AT_ASSERT(dict.size() == elem_values.size());
       size_t i = 0;
-      for (const auto& pair : order) {
+      for (const auto& entry : dict) {
         if (opname == aten::keys) {
-          setValue(pair.first, elem_values[i]);
+          setValue(entry.key(), elem_values[i]);
         } else {
-          setValue(pair.second, elem_values[i]);
+          setValue(entry.value(), elem_values[i]);
         }
         ++i;
       }
@@ -671,6 +702,17 @@ void addInputs(
     list_node = g->insertNode(
         g->createList(TensorType::get(), fmap(value, getValueTrace)));
   }
+  n->addInput(list_node->output());
+}
+
+void addInputs(
+    Node* n,
+    const char* name,
+    ArrayRef<c10::intrusive_ptr<c10::ivalue::Object>> value,
+    const ClassTypePtr& class_type) {
+  Graph* g = n->owningGraph();
+  Node* list_node =
+      g->insertNode(g->createList(class_type, fmap(value, getValueTrace)));
   n->addInput(list_node->output());
 }
 

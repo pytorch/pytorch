@@ -106,13 +106,43 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 
 // See NOTE [ Autograd View Variables ] for details.
 inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable,
-                      CreationMeta creation_meta=CreationMeta::DEFAULT) {
+        c10::optional<std::function<Tensor(const Tensor&)>> view_func=c10::nullopt,
+        CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
+    // Set `view_func` using the root base as input.
+    // `view_func` is used to recover views in backward when as_strided is not supported.
+    // See Note [View + Inplace update on base tensor] and [View + Inplace update on view tensor]
+    // for more details how we use this function in backward.
+    if (view_func.has_value()) {
+      auto fn = view_func.value();
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base_var));
+      if (diff_view_meta->has_view_fn()) {
+        auto prev_fn = diff_view_meta->view_fn();
+        view_func = [=](const at::Tensor& root_base) {
+          auto temp = prev_fn(root_base);
+          return fn(temp);
+        };
+      } else {
+        // When base_var is a view but doesn't carry a view_fn in DifferentiableViewMeta, it's
+        // a view that doesn't support inplace update, e.g. unbind.
+        // In this case we should throw an error when inplace update happens in **forward**.
+        // One would naturally think the following function will be first called in backward pass.
+        // But the first call site is indeed in **forward** pass when we refresh `grad_fn`
+        // triggered by inplace update.
+        // Search Note [View + Inplace update for view tensor] to for the call site.
+        view_func = [=](const at::Tensor& root_base) {
+          TORCH_CHECK(false, "This view is the output of a function that returns multiple views."
+                  "Such functions do not allow the output views to be modified inplace."
+                  "You should replace the inplace operation by an out-of-place one");
+          return root_base;
+        };
+      }
+    }
     base_var = base_var._base();
   }
   if (is_differentiable) {
-    return make_variable_differentiable_view(std::move(base_var), std::move(tensor), creation_meta);
+    return make_variable_differentiable_view(std::move(base_var), std::move(tensor), creation_meta, std::move(view_func));
   } else {
     TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                 "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");

@@ -86,20 +86,57 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
     @skipIfRocm
     def test_scalar_input(self):
-        def t(x, y, z):
-            # type: (Tensor, Tensor, float) -> Tensor
+        def t(x : torch.Tensor, y : torch.Tensor, z : float):
             o = x + y
             o = o + z
             return o
         t_jit = torch.jit.script(t)
-        x = torch.randn(4, 8, dtype=torch.float, device="cuda")
-        y = torch.randn(4, 8, dtype=torch.float, device="cuda")
+        x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        y = torch.randn(4, 8, 1, 32, dtype=torch.float, device="cuda")
+        y = y.expand(4, 8, 32, 32)
         jit_o = t_jit(x, y, 2.0)
         jit_o = t_jit(x, y, 2.0)
         o = t(x, y, 2.0)
         self.assertEqual(o, jit_o)
         self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, 2.0)))
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
+    @skipIfRocm
+    def test_broadcasting(self):
+        def t(x : torch.Tensor, y : torch.Tensor, z : float):
+            o = x + y
+            o = o + z
+            return o
+        t_jit = torch.jit.script(t)
+        x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        y = torch.randn(32, 32, dtype=torch.float, device="cuda")
+        jit_o = t_jit(x, y, 2.0)
+        jit_o = t_jit(x, y, 2.0)
+        o = t(x, y, 2.0)
+        self.assertEqual(o, jit_o)
+        self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, 2.0)))
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
+    @skipIfRocm
+    def test_broadcasting_multiple_output_shape(self):
+        def t(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
+            o = x + 12
+            o1 = o + y
+            o2 = o + z
+            oo = o1.sum() + o2.sum()
+            return oo
+        t_jit = torch.jit.script(t)
+        x = torch.randn(32, 32, dtype=torch.float, device="cuda")
+        y = torch.randn(2, 32, 32, dtype=torch.float, device="cuda")
+        z = torch.randn(4, 32, 32, dtype=torch.float, device="cuda")
+        jit_o = t_jit(x, y, z)
+        jit_o = t_jit(x, y, z)
+        o = t(x, y, z)
+        self.assertEqual(o, jit_o)
+        # Currently cannot fuse this
+        self.assertFalse(self._has_cuda_fusion_group(t_jit.graph_for(x, y, z)))
 
 if __name__ == '__main__':
     run_tests()

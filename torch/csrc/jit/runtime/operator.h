@@ -149,20 +149,12 @@ struct TORCH_API Operator {
     const FunctionSchema& schemaRef = schema();
     c10::AliasAnalysisKind alias_analysis = schemaRef.aliasAnalysis();
 
-    if (C10_LIKELY(schemaRef.name() != "aten::backward")) {
-      // note: we exclude aten::backward from this check because
-      // it has alias info to denote mutability of its self argument
-      // but apart from that is AliasAnalysisKind::CONSERVATIVE
-      // and has to be CONSERVATIVE because it has side-effects
-      // that affect more than just its own arguments.
-      // TODO Find a better way to do this.
-      TORCH_CHECK(
-          alias_analysis == AliasAnalysisKind::FROM_SCHEMA ||
-              !schemaRef.hasAnyAliasInfo(),
-          "In operator registration: Tried to register operator ",
-          schemaRef,
-          " with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA.");
-    }
+    TORCH_CHECK(
+        alias_analysis == AliasAnalysisKind::FROM_SCHEMA ||
+            !schemaRef.hasAnyAliasInfo(),
+        "In operator registration: Tried to register operator ",
+        schemaRef,
+        " with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA.");
     return alias_analysis;
   }
 

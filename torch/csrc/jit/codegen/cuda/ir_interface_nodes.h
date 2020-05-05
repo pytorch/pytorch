@@ -18,7 +18,7 @@ namespace fuser {
 
 /*
  * A Float32 value. For now we don't have any other type besides
- * Float32.reorder_ This value can be a symbolic value (defined after the kernel
+ * Float32. This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).
  */
 struct TORCH_CUDA_API Float : public Val {
@@ -76,13 +76,14 @@ struct TORCH_CUDA_API Int : public Val {
     return maybe_value_;
   }
 
-  bool sameAs(const Int* const other) const;
+  virtual bool sameAs(const Int* const other) const;
 
  private:
   const c10::optional<int> maybe_value_;
 };
 
 struct TransformReplay;
+struct TransformIter;
 struct OptOutMutator;
 struct GPULower;
 /*
@@ -92,6 +93,14 @@ struct GPULower;
  * these transformations are kept and used for generating actual code referncing
  * physical memory. Generally when users are thinking of code generation in
  * reference to a Tensor, this is the class they should be interacting with.
+ *
+ * The reason we need both TensorView and TensorDomain is that we need to have a
+ * record of both what is being computed and how it is being computed. For
+ * Example we may have the operation: TV3[I, J, K] = TV2[I, J, K] + TV1[I, J, K]
+ * The mathematical operationss here are on the tensor views TV1, TV2, and TV3.
+ * This operation is a pointwise operation. To compute this pointwise operation
+ * we iterate over the 3D TensorDomain [I, J, K], where K is the fastest
+ * changing dimension.
  */
 struct TORCH_CUDA_API TensorView : public Val {
   ~TensorView() = default;
@@ -156,28 +165,17 @@ struct TORCH_CUDA_API TensorView : public Val {
 
   // Split "axis" into 2 axes where the inner axes is size of "factor"
   // and outer axis is size axis.size() / factor
-  TensorView* split(int axis, int factor) {
-    return split_(this, axis, factor);
-  }
+  TensorView* split(int axis, int factor);
 
   // Merge "axis" and "axis+1" into 1 dimension
-  TensorView* merge(int axis) {
-    return merge_(this, axis);
-  }
+  TensorView* merge(int axis);
 
-  // Reorder axes according to map[old_pos] = new_pos
-  TensorView* reorder(const std::unordered_map<int, int>& map) {
-    return reorder_(this, map);
-  }
+  // Reorder axes according to axis2pos[old_pos] = new_pos
+  TensorView* reorder(const std::unordered_map<int, int>& axis2pos);
 
-  // Implementations for split/merge/reorder
-  friend TORCH_CUDA_API TensorView* split_(TensorView*, int axis, int factor);
-  friend TORCH_CUDA_API TensorView* merge_(TensorView*, int axis);
-  friend TORCH_CUDA_API TensorView* reorder_(
-      TensorView*,
-      const std::unordered_map<int, int>&);
-  friend TORCH_CUDA_API OptOutMutator;
   friend TORCH_CUDA_API TransformReplay;
+  friend TORCH_CUDA_API TransformIter;
+  friend TORCH_CUDA_API OptOutMutator;
   friend TORCH_CUDA_API GPULower;
 
  protected:

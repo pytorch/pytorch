@@ -20,14 +20,23 @@ def num_profiled_runs(num_runs):
 
 class BaseTestClass(unittest.TestCase):
     def setUp(self):
-        # TODO: read the old value and restore it rather than always set to True
-        # on exit
+        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
+        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+
+        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
+        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
+        torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)
+        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         torch._C._jit_set_texpr_fuser_enabled(True)
 
     def tearDown(self):
-        torch._C._jit_set_texpr_fuser_enabled(False)
-        torch._C._jit_override_can_fuse_on_gpu(True)
+        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
+        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+
+        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
+        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
 
 class TestTensorExprFuser(BaseTestClass):
     def test_easy(self):

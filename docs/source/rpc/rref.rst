@@ -1,3 +1,5 @@
+:orphan:
+
 .. _remote-reference-protocol:
 
 Remote Reference Protocol
@@ -39,7 +41,7 @@ Assumptions
 
 RRef protocol is designed with the following assumptions.
 
-- **Transient Network Failures**: The RRef design aims to handle transient
+- **Transient Network Failures**: The RRef design handles transient
   network failures by retrying messages. Node crashes or permanent network
   partition is beyond the scope. When those incidents occur, the application
   may take down all workers, revert to the previous checkpoint, and resume
@@ -48,8 +50,8 @@ RRef protocol is designed with the following assumptions.
   :meth:`~torch.distributed.rpc.rpc_sync`,
   :meth:`~torch.distributed.rpc.rpc_async` or
   :meth:`~torch.distributed.rpc.remote` are not idempotent and therefore
-  cannot be retried. However, internal RRef control messages will be made
-  idempotent and retryable.
+  cannot be retried. However, internal RRef control messages are idempotent and
+  retried upon message failure.
 - **Out of Order Message Delivery**: We do not assume message delivery order
   between any pair of nodes, because both sender and receiver are using multiple
   threads. There is no guarantee on which message will be processed first.

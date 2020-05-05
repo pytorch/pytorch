@@ -38,6 +38,10 @@ file(GLOB C10_SRCS
 file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
 file(GLOB_RECURSE C10_HEADERS *.h)
 add_library(c10 ${C10_SRCS} ${C10_HEADERS})
+if(HAVE_SOVERSION)
+  set_target_properties(c10 PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 # If building shared library, set dllimport/dllexport proper.
 target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 # Enable hidden visibility if compiler supports it.
@@ -52,6 +56,15 @@ endif()
 
 if(${USE_GLOG})
     target_link_libraries(c10 PUBLIC glog::glog)
+endif()
+
+find_package(Backtrace)
+if(Backtrace_FOUND)
+  target_include_directories(c10 PRIVATE ${Backtrace_INCLUDE_DIRS})
+  target_link_libraries(c10 PRIVATE ${Backtrace_LIBRARIES})
+  target_compile_definitions(c10 PRIVATE SUPPORTS_BACKTRACE=1)
+else()
+  target_compile_definitions(c10 PRIVATE SUPPORTS_BACKTRACE=0)
 endif()
 
 if(USE_NUMA)
