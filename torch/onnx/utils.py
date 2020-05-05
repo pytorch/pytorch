@@ -751,6 +751,10 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
         import torch.onnx.symbolic_registry as sym_registry
 
         sym_registry.register_version('', opset_version)
+        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            import torch.onnx.symbolic_caffe2
+            domain = 'caffe2'
+            torch.onnx.symbolic_caffe2.register_quantized_ops(domain, opset_version)
 
         # See Note [Export inplace]
         # TODO: I think this is not necessary anymore
@@ -823,9 +827,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
         elif ns == "quantized":
             domain = ''
             if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
-                import torch.onnx.symbolic_caffe2
                 domain = 'caffe2'
-                torch.onnx.symbolic_caffe2.register_quantized_ops(domain, opset_version)
             symbolic_fn = _find_symbolic_fn(ns, domain, op_name, opset_version, operator_export_type)
             if symbolic_fn is None:
                 return symbolic_fn
