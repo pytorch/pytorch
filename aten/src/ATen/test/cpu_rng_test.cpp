@@ -89,10 +89,8 @@ Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> 
 
 // ==================================================== Cauchy ========================================================
 
-Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> generator) {
-  auto iter = TensorIterator::nullary_op(self);
-  native::templates::cpu::cauchy_kernel(iter, median, sigma, check_generator<TestCPUGenerator>(generator));
-  return self;
+Tensor& cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> generator) {
+  return at::native::templates::cauchy_impl_<native::templates::cpu::CauchyKernel, TestCPUGenerator>(self, median, sigma, generator);
 }
 
 // ================================================== LogNormal =======================================================
@@ -128,7 +126,7 @@ TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   m.impl_UNBOXED("normal.Tensor_Tensor",     normal_Tensor_Tensor);
   m.impl_UNBOXED("uniform_",                 uniform_);
   // Cauchy
-  m.impl_UNBOXED("cauchy_",                  custom_rng_cauchy_);
+  m.impl_UNBOXED("cauchy_",                  cauchy_);
   // LogNormal
   m.impl_UNBOXED("log_normal_",              log_normal_);
   // Geometric

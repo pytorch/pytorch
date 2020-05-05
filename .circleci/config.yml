@@ -1244,10 +1244,16 @@ jobs:
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
+          mkdir -p ~/workspace/build_artifacts
+          docker cp $id:/var/lib/jenkins/workspace/pytorch.github.io/docs/master ~/workspace/build_artifacts
+
           # Save the docs build so we can debug any problems
           export DEBUG_COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}-debug
           docker commit "$id" ${DEBUG_COMMIT_DOCKER_IMAGE}
           time docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
+    - store_artifacts: 
+        path: ~/workspace/build_artifacts/master
+        destination: docs
 
   pytorch_cpp_doc_push:
     environment:
