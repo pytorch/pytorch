@@ -7908,6 +7908,18 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2), data.flip(0, 1))
         self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2), data.flip(0, 1, 2))
 
+        # Complex Dtypes
+        def test_complex_flip(dtype):
+            complex_data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=device, dtype=dtype).view(2, 2, 2)
+            self.assertEqual(torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], dtype=dtype).view(2, 2, 2), complex_data.flip(0))
+            self.assertEqual(torch.tensor([3, 4, 1, 2, 7, 8, 5, 6], dtype=dtype).view(2, 2, 2), complex_data.flip(1))
+            self.assertEqual(torch.tensor([2, 1, 4, 3, 6, 5, 8, 7], dtype=dtype).view(2, 2, 2), complex_data.flip(2))
+            self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2], dtype=dtype).view(2, 2, 2), complex_data.flip(0, 1))
+            self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1], dtype=dtype).view(2, 2, 2), complex_data.flip(0, 1, 2))
+
+        test_complex_flip(torch.complex64)
+        test_complex_flip(torch.complex128)
+
         # check for wrap dim
         self.assertEqual(torch.tensor([2, 1, 4, 3, 6, 5, 8, 7]).view(2, 2, 2), data.flip(-1))
         # check for permute
@@ -7962,6 +7974,17 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.tensor([2, 4, 1, 3]).view(2, 2), data.rot90(1, [0, 1]))
         self.assertEqual(torch.tensor([4, 3, 2, 1]).view(2, 2), data.rot90(2, [0, 1]))
         self.assertEqual(torch.tensor([3, 1, 4, 2]).view(2, 2), data.rot90(3, [0, 1]))
+
+        def test_complex_rot90(dtype):
+            data = torch.arange(1, 5, device=device).view(2, 2)
+            data = data.to(dtype)
+            self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype).view(2, 2), data.rot90(0, [0, 1]))
+            self.assertEqual(torch.tensor([2, 4, 1, 3], dtype=dtype).view(2, 2), data.rot90(1, [0, 1]))
+            self.assertEqual(torch.tensor([4, 3, 2, 1], dtype=dtype).view(2, 2), data.rot90(2, [0, 1]))
+            self.assertEqual(torch.tensor([3, 1, 4, 2], dtype=dtype).view(2, 2), data.rot90(3, [0, 1]))
+
+        test_complex_rot90(torch.complex64)
+        test_complex_rot90(torch.complex128)
 
         # test for default args k=1, dims=[0, 1]
         self.assertEqual(data.rot90(), data.rot90(1, [0, 1]))
