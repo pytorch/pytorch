@@ -33,7 +33,7 @@ using graph_rewrite_helper::getFuncName;
 using graph_rewrite_helper::getIValue;
 using graph_rewrite_helper::getValue;
 using graph_rewrite_helper::PatternInfo;
-using graph_rewrite_helper::replaceConvolutionWithConv2d;
+using graph_rewrite_helper::replaceConvolutionWithAtenConv;
 
 // Map of quantization parameter name and value
 // for example _scale, _zero_point,
@@ -1093,7 +1093,7 @@ void InsertObserversHelper::preprocess(
   ConstantPooling(graph);
   ConstantPropagation(graph);
   // must do constant propagation first before replacement
-  replaceConvolutionWithConv2d(graph);
+  replaceConvolutionWithAtenConv(graph);
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
 
@@ -1539,7 +1539,7 @@ void insertDeQuantForAllUse(
     // in the same block so that quant fusion can happen
     WithInsertPoint ins(user);
     Node* dequant = insertDeQuant(graph, quantized_val, original_val, i);
-    user->replaceInputWith(original_val, dequant->output());
+    user->replaceInput(uses[i].offset, dequant->output());
   }
 }
 
