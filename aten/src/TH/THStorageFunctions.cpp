@@ -41,10 +41,12 @@
 
 THStorage* THStorage_new(caffe2::TypeMeta data_type) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      data_type,
-      0,
-      getTHDefaultAllocator(),
-      true).release();
+                           c10::StorageImpl::use_byte_size_t(),
+                           data_type,
+                           0,
+                           getTHDefaultAllocator(),
+                           true)
+                           .release();
   return storage;
 }
 
@@ -56,11 +58,6 @@ void THStorage_free(THStorage* storage) {
   c10::raw::intrusive_ptr::decref(storage);
 }
 
-ptrdiff_t THStorage_size(const THStorage *self)
-{
-  return self->numel();
-}
-
 void THStorage_retain(THStorage *storage)
 {
   if (storage) {
@@ -68,26 +65,23 @@ void THStorage_retain(THStorage *storage)
   }
 }
 
-void THStorage_resize(THStorage* storage, ptrdiff_t size) {
+void THStorage_resizeBytes(THStorage* storage, ptrdiff_t size_bytes) {
   if (storage->resizable()) {
     /* case when the allocator does not have a realloc defined */
     at::DataPtr new_data;
-    if (size != 0) {
-      new_data = storage->allocator()->allocate(storage->itemsize() * size);
+    if (size_bytes != 0) {
+      new_data = storage->allocator()->allocate(size_bytes);
     }
     at::DataPtr old_data = storage->set_data_ptr(std::move(new_data));
-    ptrdiff_t old_size = storage->numel();
-    storage->set_numel(size);
+    ptrdiff_t old_capacity = storage->nbytes();
+    storage->set_nbytes(size_bytes);
     if (old_data != nullptr) {
-      ptrdiff_t copy_size = old_size;
-      if (storage->numel() < copy_size) {
-        copy_size = storage->numel();
+      ptrdiff_t copy_capacity = old_capacity;
+      if (storage->nbytes() < copy_capacity) {
+        copy_capacity = storage->nbytes();
       }
-      if (copy_size > 0) {
-        memcpy(
-            storage->data(),
-            old_data.get(),
-            storage->itemsize() * copy_size);
+      if (copy_capacity > 0) {
+        memcpy(storage->data(), old_data.get(), copy_capacity);
       }
     }
   } else {
