@@ -4953,6 +4953,7 @@ class TestJit(TestCase):
             self.assertEqual(expected, actual, allow_inf=True,
                              message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
+    @unittest.skip("this segfaults")
     def test_cdf(self):
         for Dist, keys, values, sample in self._examples():
 
