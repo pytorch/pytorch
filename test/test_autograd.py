@@ -421,6 +421,17 @@ class TestAutograd(TestCase):
             self.assertEqual(x.grad, expected_grad)
             self.assertIsNone(x_list[i].grad)
 
+    def test_hook_with_no_name(self):
+        # Create a hook that do not have a __name__ attribute
+        class MyHookClass:
+            def __call__(self, grad):
+                return grad.clone()
+
+        x = torch.randn(5, requires_grad=True).clone()
+        x.register_hook(MyHookClass())
+        x.sum().backward()
+        # Should run fine
+
     def test_sharded_grad(self):
         leaves = [torch.zeros(5, 5, requires_grad=True) for _ in range(10)]
         intermediates = [l * i + l * l for i, l in enumerate(leaves)]
@@ -4170,7 +4181,8 @@ def add_test(
                     if is_inplace:
                         self_variable.requires_grad = False
                     # need to record this because methods can change the size (e.g. unsqueeze)
-                    args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs, dtype=dtype, device=device)
+                    args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace,
+                                                                  call_kwargs=kwargs, dtype=dtype, device=device)
                     self_tensor = deepcopy(self_variable)
                     args_tensor = deepcopy(unpack_variables(args_variable))
                     if not exclude_tensor_method(name, test_name):
@@ -4192,7 +4204,7 @@ def add_test(
 
                         if not is_inplace and name not in EXCLUDE_GRADCHECK:
                             run_grad_and_gradgrad_checks(self, name, test_name, fn,
-                                                        output_variable, (self_variable,) + args_variable)
+                                                         output_variable, (self_variable,) + args_variable)
 
                     # functional interface tests
                     if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
@@ -4205,7 +4217,7 @@ def add_test(
                         # could run the gradchecks again, but skip since we did it for the methods above.
                         run_gradcheck = exclude_tensor_method(name, test_name) and not is_inplace and name not in EXCLUDE_GRADCHECK
                         run_functional_checks(self, test_name, name, fn,
-                                            run_gradcheck, f_args_variable, f_args_tensor)
+                                              run_gradcheck, f_args_variable, f_args_tensor)
 
                     # check for correct type of input and input.grad
                     if not is_inplace:
@@ -4236,14 +4248,14 @@ def add_test(
                                 output_variable = (output_variable,)
                             inplace_self_variable = deepcopy(self_variable)
                             inplace_self_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
-                                                            for i in (inplace_self_variable,))
+                                                               for i in (inplace_self_variable,))
                             inplace_args_variable = deepcopy(args_variable)
                             inplace_args_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
-                                                            for i in inplace_args_variable)
+                                                               for i in inplace_args_variable)
 
                             inplace_output_variable = (
                                 getattr(inplace_self_variable_copy[0], inplace_name)(*inplace_args_variable_copy,
-                                                                                    **kwargs_variable))
+                                                                                     **kwargs_variable))
                             if not isinstance(inplace_output_variable, tuple):
                                 inplace_output_variable = (inplace_output_variable,)
                             self.assertEqual(inplace_output_variable, output_variable)
@@ -5331,6 +5343,24 @@ class TestAutogradDeviceType(TestCase):
 
             m = torch.cat((asd, asd))
             m.sum().backward()
+
+
+    @deviceCountAtLeast(2)
+    def test_scalar_different_devices(self, devices):
+        a = torch.rand([], requires_grad=True, device=devices[0])
+        b = torch.rand(10, requires_grad=True, device=devices[1])
+
+        c = b * a
+        c.sum().backward()
+
+
+    @onlyCUDA
+    def test_scalar_different_device_types(self, device):
+        c = torch.tensor(3.0, device='cpu', requires_grad=True) * torch.rand(2, 2, device=device)
+        c.sum().backward()
+
+        d = torch.tensor(3.0, device=device, requires_grad=True) * torch.rand(2, 2, device='cpu')
+        d.sum().backward()
 
 
     # NOTE: flaky on ROCm CI
