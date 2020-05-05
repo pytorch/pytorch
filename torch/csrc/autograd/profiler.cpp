@@ -358,6 +358,7 @@ bool profilerEnabled() {
 }
 
 void enableProfiler(const ProfilerConfig& new_config) {
+  LOG(INFO) << "Debug: in enableProfiler";
   TORCH_CHECK(new_config.state != ProfilerState::NVTX || cuda_stubs->enabled(),
     "Can't use NVTX profiler - PyTorch was compiled without CUDA");
 
@@ -367,19 +368,20 @@ void enableProfiler(const ProfilerConfig& new_config) {
   auto state = std::make_shared<ProfilerThreadLocalState>(new_config);
   at::ThreadLocalDebugInfo::_push(at::DebugInfoKind::PROFILER_STATE, state);
 
-
   pushProfilingCallbacks();
   g_.emplace_back(std::make_shared<at::RecordFunctionGuard>());
 
   if (new_config.state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
     // to generate some dummy events first before recording synchronization events
+    LOG(INFO) << "Debug: mark __start_profile (1)";
     for (int idx = 0; idx < kCUDAWarmupStart; ++idx) {
       cuda_stubs->onEachDevice([state](int /* unused */) {
           state->mark("__cuda_startup");
           cuda_stubs->synchronize();
       });
     }
+    LOG(INFO) << "Debug: mark __start_profile (2)";
 
     // cuda events must be on the same device, so we need a start event recorded
     // for each gpu. we then use this event to synchronize time on the GPU
@@ -388,7 +390,9 @@ void enableProfiler(const ProfilerConfig& new_config) {
         state->mark("__cuda_start_event");
     });
   }
+  LOG(INFO) << "Debug: mark __start_profile (3)";
   state->mark("__start_profile", false);
+  LOG(INFO) << "Debug: return from enableProfiler";
 }
 
 thread_event_lists disableProfiler() {
