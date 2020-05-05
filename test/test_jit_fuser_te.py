@@ -52,7 +52,7 @@ def warmup_forward(f, *args):
     return results
 
 
-class TestFuser(JitTestCase):
+class TestFuserTE(JitTestCase):
     def setUp(self):
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
@@ -791,6 +791,14 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_milstm_cuda(self):
+        import os
+        os.environ['PYTORCH_JIT_LOG_LEVEL'] = '>>tensorexpr_fuser:>>profiling_graph_executor_impl'
+        old_profiling_executor2 = torch._C._jit_set_profiling_executor(True)
+        old_profiling_mode2 = torch._C._jit_set_profiling_mode(True)
+        print("old_profiling_executor2 = ", old_profiling_executor2)
+        print("old_profiling_mode2 = ", old_profiling_mode2)
+        torch._C._jit_set_profiling_executor(old_profiling_executor2)
+        torch._C._jit_set_profiling_mode(old_profiling_mode2)
         inputs = get_milstm_inputs('cuda', training=True)
         module = self.checkScript(MiLSTMCell, inputs)
         forward_graph = module.graph_for(*inputs)
@@ -800,6 +808,8 @@ class TestFuser(JitTestCase):
             .check_next("return").check(FUSION_GROUP).run(str(forward_graph))
         hy, cy = module(*inputs)
         warmup_backward((hy + cy).sum())
+        del os.environ['PYTORCH_JIT_LOG_LEVEL']
+
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
