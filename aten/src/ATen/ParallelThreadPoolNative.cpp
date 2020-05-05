@@ -78,9 +78,9 @@ void launch(std::function<void()> func) {
   );
 
 #if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
-  intraop_launch(fn);
+  intraop_launch(std::move(fn));
 #else
-  get_pool().run(fn);
+  get_pool().run(std::move(fn));
 #endif
 }
 
