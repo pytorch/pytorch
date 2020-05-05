@@ -31,6 +31,10 @@ from torch.quantization._quantize_script import quantize_dynamic_script
 from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
 from torch.testing._internal.common_quantization import ConvModel, AnnotatedConvModel
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
+from torch.testing._internal.common_quantized import (
+    override_quantized_engine,
+    supported_qengines,
+)
 
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
@@ -44,6 +48,14 @@ from torch.jit._recursive import wrap_cpp_module
 # Standard library
 import itertools
 import unittest
+
+def override_qengines(qfunction):
+    def test_fn(*args, **kwargs):
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                result = qfunction(*args, **kwargs)
+        return result
+    return test_fn
 
 class TestQuantizeScriptJitPasses(JitTestCase):
     """ Test graph mode quantization passes used by quantize_script
@@ -1194,8 +1206,8 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
     """ Test graph mode post training static quantization works
     for individual ops end to end.
     """
-    def _test_op_impl(self, module, data, quantized_op):
-        qconfig_dict = {'': get_default_qconfig('fbgemm')}
+    def _test_op_impl(self, module, data, quantized_op, qengine='fbgemm'):
+        qconfig_dict = {'': get_default_qconfig(qengine)}
         model = torch.jit.script(module).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
         FileCheck().check(quantized_op) \
@@ -1207,11 +1219,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
 
         return model
 
-    @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+    @override_qengines
     def test_quantized_conv2d(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1222,7 +1230,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 return self.conv(x)
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(), data, "quantized::conv2d")
+        model = self._test_op_impl(M(), data, "quantized::conv2d", qengine=torch.backends.quantized.engine)
         # make sure there is only one quantize_per_tensor for input
         # and conv2d_prepack is folded
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
@@ -1232,11 +1240,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .run(model.graph)
 
 
-    @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
     def test_quantized_conv3d(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1245,17 +1248,16 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
 
             def forward(self, x):
                 return self.conv(x)
+        if 'fbgemm' in supported_qengines:
+            data = [(torch.rand((1, 3, 10, 10, 10), dtype=torch.float),
+                     torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+            model = self._test_op_impl(M(), data, "quantized::conv3d")
+            # make sure there is only one quantize_per_tensor for input
+            # and conv3d_prepack is folded
+            FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                       .run(model.graph)
 
-        data = [(torch.rand((1, 3, 10, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(), data, "quantized::conv3d")
-        # make sure there is only one quantize_per_tensor for input
-        # and conv3d_prepack is folded
-        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
-                   .run(model.graph)
-
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @override_qengines
     def test_quantized_conv2d_relu(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1268,7 +1270,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
 
         data = [(torch.randn(1, 1, 10, 10, dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(), data, "quantized::conv2d_relu")
+        model = self._test_op_impl(M(), data, "quantized::conv2d_relu", qengine=torch.backends.quantized.engine)
 
         FileCheck().check_not("aten::conv2d") \
                    .check_not("aten::relu") \
@@ -1276,9 +1278,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .check_not("quantized::relu(") \
                    .run(model.graph)
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
     def test_quantized_conv3d_relu(self):
         class M(torch.nn.Module):
             def __init__(self, functional):
@@ -1292,19 +1291,20 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
             def forward(self, x):
                 return self.relu(self.conv(x))
 
-        data = [(torch.randn(1, 1, 5, 5, 5, dtype=torch.float),
-                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(functional=False), data,
-                                   "quantized::conv3d_relu")
-        model_functional = self._test_op_impl(M(functional=True), data,
-                                              "quantized::conv3d_relu")
+        if 'fbgemm' in supported_qengines:
+            data = [(torch.randn(1, 1, 5, 5, 5, dtype=torch.float),
+                     torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+            model = self._test_op_impl(M(functional=False), data,
+                                       "quantized::conv3d_relu")
+            model_functional = self._test_op_impl(M(functional=True), data,
+                                                  "quantized::conv3d_relu")
 
-        checker = FileCheck().check_not("aten::conv3d") \
-                             .check_not("aten::relu") \
-                             .check_not("quantized::conv3d(") \
-                             .check_not("quantized::relu(")
-        checker.run(model.graph)
-        checker.run(model_functional.graph)
+            checker = FileCheck().check_not("aten::conv3d") \
+                                 .check_not("aten::relu") \
+                                 .check_not("quantized::conv3d(") \
+                                 .check_not("quantized::relu(")
+            checker.run(model.graph)
+            checker.run(model_functional.graph)
 
     def test_quantized_add(self):
         class Add(torch.nn.Module):
@@ -1420,9 +1420,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                        .check("quantized::add_scalar_relu") \
                        .run(m.graph_for(data))
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @override_qengines
     def test_quantized_cat(self):
         """ Note that we to support the case that torch.cat is quantized
         indepdently, we need to have an observer that works
@@ -1440,7 +1438,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 return torch.cat([x, y], 1)
 
         m = torch.jit.script(M().eval())
-        m = prepare_script(m, {'': default_qconfig}, True)
+        m = prepare_script(m, {'': get_default_qconfig(torch.backends.quantized.engine)}, True)
         # four for input and output of conv and one for output of cat
         # this also tests the ListConstruct can preserve the observed property so that
         # torch.cat knows that inputs are observed
