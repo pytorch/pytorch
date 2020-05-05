@@ -6,6 +6,8 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
+#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -422,6 +424,48 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           "sync",
           &ProcessGroupAgent::sync,
+          py::call_guard<py::gil_scoped_release>());
+
+  // Base class: torch.distributed.rpc.RpcBackendOptions.
+  py::class_<TensorPipeRpcBackendOptions>(
+      module, "TensorPipeRpcBackendOptions", rpcBackendOptions)
+      .def(py::init<>())
+      .def_readwrite(
+          "worker_name_to_id", &TensorPipeRpcBackendOptions::workerNameToId);
+
+  shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
+      .def(
+          py::init<
+              worker_id_t /* selfId */,
+              std::string /* selfName */,
+              std::shared_ptr<::c10d::Store> /* addressStore */,
+              TensorPipeRpcBackendOptions /* TensorPipeBackendOptions */>(),
+          py::arg("worker_id"),
+          py::arg("name"),
+          py::arg("address_store"),
+          py::arg("tensorpipe_backend_options"))
+      .def(
+          "join",
+          &TensorPipeAgent::join,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "shutdown",
+          &TensorPipeAgent::shutdown,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (TensorPipeAgent::*)(void)const) &
+              RpcAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (TensorPipeAgent::*)(const std::string&)const) &
+              TensorPipeAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_infos",
+          (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
+              TensorPipeAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>());
 
   module.def("_is_current_rpc_agent_set", &RpcAgent::isCurrentRpcAgentSet);

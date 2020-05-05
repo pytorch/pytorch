@@ -13,7 +13,7 @@ namespace profiler {
 TORCH_API RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle);
 
 // Schedules RecordFunction's end callbacks to be run on completion of a future.
-void _call_end_callbacks_on_fut(
+TORCH_API void _call_end_callbacks_on_fut(
     const at::Tensor& handle,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut);
 

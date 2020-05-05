@@ -224,7 +224,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
-      .def("_jit_pass_swap_dequantize", &SwapDeQuant)
+      .def("_jit_pass_swap_dequantize", &PropagateQuantizationOps)
       .def(
           "_jit_pass_swap_functional_linear",
           [](std::shared_ptr<Graph>& graph) { SwapFunctionalLinear(graph); })
@@ -495,6 +495,9 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_set_texpr_fuser_enabled", &setTensorExprFuserEnabled)
       .def("_jit_texpr_fuser_enabled", &tensorExprFuserEnabled)
+      .def(
+          "_jit_pass_fuse_tensorexprs",
+          [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
