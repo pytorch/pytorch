@@ -1671,6 +1671,40 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 4, requires_grad=True)
         self.run_test(ReduceLogSumExpModel(), x)
 
+    def test_softmax(self):
+        for i in range(-4, 3):
+            model = torch.nn.Softmax(dim=i)
+            input = torch.randn(3, 4, 5, 6)
+            self.run_test(model, input)
+
+            class SoftmaxUnknownRank(torch.nn.Module):
+                def __init__(self, i):
+                    super().__init__()
+                    self.softmax = torch.nn.Softmax(dim=i)
+
+                def forward(self, x):
+                    return self.softmax(x.reshape(3, 4, 5, 6))
+
+            model = torch.jit.script(SoftmaxUnknownRank(i))
+            self.run_test(model, input)
+
+    def test_softmax_large_values(self):
+        input = torch.tensor([[-1e12, -1e12, -1e12], [1e12, 0.0, -5.0], [3.0, 4.0, 5.0]])
+        for i in range(-2, 1):
+            model = torch.nn.Softmax(dim=i)
+            self.run_test(model, input)
+
+            class SoftmaxUnknownRank(torch.nn.Module):
+                def __init__(self, i):
+                    super().__init__()
+                    self.softmax = torch.nn.Softmax(dim=i)
+
+                def forward(self, x):
+                    return self.softmax(x.reshape(3, 3))
+
+            model = torch.jit.script(SoftmaxUnknownRank(i))
+            self.run_test(model, input)
+
     def test_logsoftmax(self):
         for i in range(7)[2:]:
             model = torch.nn.LogSoftmax(dim=i - 1)

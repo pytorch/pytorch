@@ -154,7 +154,7 @@ Example::
 
 add_docstr(torch.add,
            r"""
-.. function:: add(input, other, out=None)
+add(input, other, out=None)
 
 Adds the scalar :attr:`other` to each element of the input :attr:`input`
 and returns a new resulting tensor.
@@ -770,7 +770,13 @@ tensor of size 0. If :attr:`minlength` is specified, the number of bins is at le
 ``out[n] += weights[i]`` if :attr:`weights` is specified else
 ``out[n] += 1``.
 
-.. include:: cuda_deterministic.rst
+Note:
+    In some circumstances when using the CUDA backend with CuDNN, this operator
+    may select a nondeterministic algorithm to increase performance. If this is
+    undesirable, you can try to make the operation deterministic (potentially at
+    a performance cost) by setting ``torch.backends.cudnn.deterministic =
+    True``.
+    Please see the notes on :doc:`/notes/randomness` for background.
 
 Arguments:
     input (Tensor): 1-d int tensor
@@ -1529,7 +1535,7 @@ Example::
 
 add_docstr(torch.dequantize,
            r"""
-.. function:: dequantize(tensor) -> Tensor
+dequantize(tensor) -> Tensor
 
 Given a quantized Tensor, dequantize it and return an fp32 Tensor
 
@@ -1819,7 +1825,7 @@ Example::
 
 add_docstr(torch.div,
            r"""
-.. function:: div(input, other, out=None) -> Tensor
+div(input, other, out=None) -> Tensor
 
 Divides each element of the input ``input`` with the scalar ``other`` and
 returns a new resulting tensor.
@@ -3337,7 +3343,7 @@ Example::
 
 add_docstr(torch.max,
            r"""
-.. function:: max(input) -> Tensor
+max(input) -> Tensor
 
 Returns the maximum value of all elements in the ``input`` tensor.
 
@@ -3424,7 +3430,7 @@ Example::
 
 add_docstr(torch.argmax,
            r"""
-.. function:: argmax(input) -> LongTensor
+argmax(input) -> LongTensor
 
 Returns the indices of the maximum value of all elements in the :attr:`input` tensor.
 
@@ -3471,7 +3477,7 @@ Example::
 
 add_docstr(torch.mean,
            r"""
-.. function:: mean(input) -> Tensor
+mean(input) -> Tensor
 
 Returns the mean value of all elements in the :attr:`input` tensor.
 
@@ -3519,7 +3525,7 @@ Example::
 
 add_docstr(torch.median,
            r"""
-.. function:: median(input) -> Tensor
+median(input) -> Tensor
 
 Returns the median value of all elements in the :attr:`input` tensor.
 
@@ -3578,7 +3584,7 @@ Example::
 
 add_docstr(torch.min,
            r"""
-.. function:: min(input) -> Tensor
+min(input) -> Tensor
 
 Returns the minimum value of all elements in the :attr:`input` tensor.
 
@@ -3666,7 +3672,7 @@ Example::
 
 add_docstr(torch.argmin,
            r"""
-.. function:: argmin(input) -> LongTensor
+argmin(input) -> LongTensor
 
 Returns the indices of the minimum value of all elements in the :attr:`input` tensor.
 
@@ -3837,7 +3843,7 @@ Example::
 
 add_docstr(torch.mul,
            r"""
-.. function:: mul(input, other, out=None)
+mul(input, other, out=None)
 
 Multiplies each element of the input :attr:`input` with the scalar
 :attr:`other` and returns a new resulting tensor.
@@ -4149,7 +4155,7 @@ Example::
 
 add_docstr(torch.normal,
            r"""
-.. function:: normal(mean, std, *, generator=None, out=None) -> Tensor
+normal(mean, std, *, generator=None, out=None) -> Tensor
 
 Returns a tensor of random numbers drawn from separate normal distributions
 whose mean and standard deviation are given.
@@ -4391,7 +4397,7 @@ Example::
 
 add_docstr(torch.pow,
            r"""
-.. function:: pow(input, exponent, out=None) -> Tensor
+pow(input, exponent, out=None) -> Tensor
 
 Takes the power of each element in :attr:`input` with :attr:`exponent` and
 returns a tensor with the result.
@@ -4459,7 +4465,7 @@ Example::
 
 add_docstr(torch.prod,
            r"""
-.. function:: prod(input, dtype=None) -> Tensor
+prod(input, dtype=None) -> Tensor
 
 Returns the product of all elements in the :attr:`input` tensor.
 
@@ -4627,7 +4633,7 @@ Args:
 
 add_docstr(torch.randint,
            r"""
-randint(low=0, high, size, *, generator=None, out=None, \
+randint(low=0, high, size, \*, generator=None, out=None, \
         dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random integers generated uniformly
@@ -5424,7 +5430,7 @@ Example::
 
 add_docstr(torch.std,
            r"""
-.. function:: std(input, unbiased=True) -> Tensor
+std(input, unbiased=True) -> Tensor
 
 Returns the standard-deviation of all elements in the :attr:`input` tensor.
 
@@ -5475,7 +5481,7 @@ Example::
 
 add_docstr(torch.std_mean,
            r"""
-.. function:: std_mean(input, unbiased=True) -> (Tensor, Tensor)
+std_mean(input, unbiased=True) -> (Tensor, Tensor)
 
 Returns the standard-deviation and mean of all elements in the :attr:`input` tensor.
 
@@ -5525,7 +5531,7 @@ Example::
 
 add_docstr(torch.sum,
            r"""
-.. function:: sum(input, dtype=None) -> Tensor
+sum(input, dtype=None) -> Tensor
 
 Returns the sum of all elements in the :attr:`input` tensor.
 
@@ -6358,7 +6364,7 @@ Example::
 
 add_docstr(torch.var,
            r"""
-.. function:: var(input, unbiased=True) -> Tensor
+var(input, unbiased=True) -> Tensor
 
 Returns the variance of all elements in the :attr:`input` tensor.
 
@@ -6409,7 +6415,7 @@ Example::
 
 add_docstr(torch.var_mean,
            r"""
-.. function:: var_mean(input, unbiased=True) -> (Tensor, Tensor)
+var_mean(input, unbiased=True) -> (Tensor, Tensor)
 
 Returns the variance and mean of all elements in the :attr:`input` tensor.
 
@@ -6685,7 +6691,7 @@ Example::
 
 add_docstr(torch.where,
            r"""
-.. function:: where(condition, x, y) -> Tensor
+where(condition, x, y) -> Tensor
 
 Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
 
@@ -7485,7 +7491,7 @@ Example::
 
 add_docstr(torch.trapz,
            r"""
-.. function:: trapz(y, x, *, dim=-1) -> Tensor
+trapz(y, x, *, dim=-1) -> Tensor
 
 Estimate :math:`\int y\,dx` along `dim`, using the trapezoid rule.
 
@@ -7531,7 +7537,7 @@ Returns:
 
 add_docstr(torch.repeat_interleave,
            r"""
-.. function:: repeat_interleave(input, repeats, dim=None) -> Tensor
+repeat_interleave(input, repeats, dim=None) -> Tensor
 
 Repeat elements of a tensor.
 
