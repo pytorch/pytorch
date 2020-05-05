@@ -126,11 +126,10 @@ Tensor* Reduce(
   all_vars.insert(all_vars.end(), vars.begin(), vars.end());
   all_vars.insert(all_vars.end(), reduce_vars.begin(), reduce_vars.end());
 
-  Buf* func_result = new Buf(new Var(func_name, kHandle), dims);
-
   ExprHandle body =
       Reducer::getReduceBody(body_func, VarVectorToVarHandleVector(all_vars));
   std::vector<const Expr*> output_args(vars.begin(), vars.end());
+  Buf* func_result = new Buf(new Var(func_name, kHandle), dims, body.dtype());
   const ReduceOp* reduce_op =
       reducer(func_result, body, output_args, reduce_vars);
   dims.insert(dims.end(), reduce_dims.begin(), reduce_dims.end());
