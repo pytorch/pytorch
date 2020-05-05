@@ -382,6 +382,7 @@ def gen_nn_functional(out):
         'celu_',
         'rrelu_',
         'pixel_shuffle',
+        'channel_shuffle',
         'pdist',
         'cosine_similarity',
     ]
