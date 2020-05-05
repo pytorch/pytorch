@@ -440,6 +440,7 @@ libtorch_python_distributed_sources = [
     "torch/csrc/distributed/rpc/python_functions.cpp",
     "torch/csrc/distributed/rpc/python_rpc_handler.cpp",
     "torch/csrc/distributed/rpc/request_callback_impl.cpp",
+    "torch/csrc/distributed/rpc/tensorpipe_agent.cpp",
     "torch/csrc/distributed/rpc/testing/faulty_process_group_agent.cpp",
     "torch/csrc/distributed/rpc/testing/init.cpp",
     "torch/csrc/distributed/rpc/unpickled_python_call.cpp",
