@@ -364,6 +364,17 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   if (--replica.pending == 0) {
     // Prescale bucket contents to turn the global sum into the global average.
     replica.contents.div_(process_group_->getSize());
+
+    auto currentStream = at::cuda::getCurrentCUDAStream(replica.contents.device().index());
+    auto defaultStream = at::cuda::getDefaultCUDAStream(replica.contents.device().index());
+    // The other stream will block.
+    // if (currentStream != defaultStream) {
+    //   LOG(INFO) << "Detected different cuda streams";
+    //   at::cuda::CUDAEvent event;
+    //   // Note that this event record has to be after the copy_ call.
+    //   event.record(currentStream);
+    //   replica.events.push_back(std::move(event));
+    // }
     // Kick off reduction if all replicas for this bucket are ready.
     if (--bucket.pending == 0) {
       mark_bucket_ready(bucket_index.bucket_index);
@@ -416,9 +427,10 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
       // these operations are implicitly sequenced, and we don't need to
       // do any extra synchronization here.
       //
-      for (const at::cuda::CUDAEvent& cudaEvent : replica.events) {
-        cudaEvent.synchronize();
-      }
+      // LOG(INFO) << "calling sync on " << replica.events.size() << "events.";
+      // for (const at::cuda::CUDAEvent& cudaEvent : replica.events) {
+      //   cudaEvent.synchronize();
+      // }
       tensors.push_back(replica.contents);
     }
     bucket.work = process_group_->allreduce(tensors);
@@ -684,6 +696,12 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
           grad = at::empty(bucket_view.sizes(), bucket_view.options());
         }
         grad.copy_(bucket_view);
+        // Hack!
+        auto currentStream = at::cuda::getCurrentCUDAStream();
+        at::cuda::CUDAEvent event;
+        event.record(currentStream);
+        event.synchronize();
+
       }
     }
   }
