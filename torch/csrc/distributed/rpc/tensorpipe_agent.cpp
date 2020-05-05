@@ -31,7 +31,7 @@ void TensorPipeAgent::TimeSeriesMetricsTracker::addData(uint64_t dataPoint) {
   ++currentCount_;
 }
 
-float TensorPipeAgent::TimeSeriesMetricsTracker::computeAverage() {
+float TensorPipeAgent::TimeSeriesMetricsTracker::computeAverage() const {
   return currentCount_ == 0 ? 0 : currentSum_ / (float)currentCount_;
 }
 
