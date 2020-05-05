@@ -40,7 +40,7 @@ class EventList(list):
         Example: In event list [[0, 10], [1, 3], [3, 4]] would have make [0, 10]
         be a parent of two other intervals.
 
-        If for any reason two intervals intersect only partialy, this function
+        If for any reason two intervals intersect only partially, this function
         will not record a parent child relationship between then.
         """
         if self.cpu_children_populated:
@@ -291,11 +291,13 @@ class profile(object):
     def __repr__(self):
         if self.function_events is None:
             return '<unfinished torch.autograd.profile>'
+        self.function_events.populate_cpu_children()
         return repr(self.function_events)
 
     def __str__(self):
         if self.function_events is None:
             return '<unfinished torch.autograd.profile>'
+        self.function_events.populate_cpu_children()
         return str(self.function_events)
 
     def _check_finish(self):
