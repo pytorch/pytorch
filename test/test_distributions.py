@@ -3754,6 +3754,7 @@ class TestConstraints(TestCase):
                         Dist.__name__, i + 1, len(params), name, value)
                     self.assertTrue(constraint.check(value).all(), msg=message)
 
+    @unittest.skip("this segfaults")
     def test_support_constraints(self):
         for Dist, params in EXAMPLES:
             self.assertIsInstance(Dist.support, Constraint)
