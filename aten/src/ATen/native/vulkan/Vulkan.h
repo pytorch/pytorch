@@ -236,10 +236,36 @@ void copyFromBufferToImage(VBuffer& buffer, VImage& image);
 
 void copyFromImageToBuffer(VImage& image, VBuffer& buffer);
 
+// VulkanTensor is a handle that holds shared pointer to VulkanTensor:Impl,
+// that owns Tensor representation on GPU.
+//  VulkanTensor is copyable and moveable (copying and moving pointer to Impl).
+//
+// VulkanTensor::Impl is moveable only, owns Vulkan device memory for Tensor
+// data. Tensor can be represented in several formats. 0. VBuffer - (wrapper on
+// vulkan VkBuffer), supports all tensor dimensions, Currently data is in
+// Contiguous format (NCHW), in plan to preserve at::Tensor memory format (3d or
+// 4d tensors can be in NHWC ChannelsLast format). Currently, it is located in
+// host visible memory that can be memory mapped to CPU memory.
+//
+// 1. VImage(TexC4) - (wrapper on vulkan VkImage), optional representation of 4
+// dimensional tensor
+//  as VkImage, that can be used in shaders as texture or storage image.
+//  Currently it is 3-dimensional image (x, y, z) with 4 component * 16 bit for
+//  each (x, y, z). For NCHW, NHWC: image x - W image y - H image z - N * C
+// 2. VImage (other format) - Currently not added, but for some operations
+// another texture
+//  packing format can be beneficial for performance.
+//
+// Contract about synchronization between representations:
+// 1.VImage(TexC4) representation is allocated lazily with calling vimage(),
+// fails for dimensions not equal 4.
+//
+// In current implementation where data can be in 0.VBuffer
+// and/or 1.VImage(TexC4): If image allocated - image data has priority. That's
+// why VulkanTensor::copyDataToHost has logic if image allocated -
+// copyFromImageToBuffer first.
 class VulkanTensor final : public c10::intrusive_ptr_target {
   class Impl {
-    // friend class VulkanTensor;
-
    public:
     Impl(std::vector<int64_t> sizes) : sizes_(std::move(sizes)) {
       numel_ = std::accumulate(

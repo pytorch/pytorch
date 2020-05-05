@@ -126,7 +126,7 @@ void VContext::createInstance() {
     }
   }
 
-  VkApplicationInfo applicationInfo = {};
+  VkApplicationInfo applicationInfo{};
   applicationInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   applicationInfo.pApplicationName = "pytorch";
   applicationInfo.applicationVersion = 0;
@@ -134,7 +134,7 @@ void VContext::createInstance() {
   applicationInfo.engineVersion = 0;
   applicationInfo.apiVersion = VK_API_VERSION_1_0;
 
-  VkInstanceCreateInfo createInfo = {};
+  VkInstanceCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   createInfo.flags = 0;
   createInfo.pApplicationInfo = &applicationInfo;
@@ -146,7 +146,7 @@ void VContext::createInstance() {
   vkCreateInstance(&createInfo, nullptr, &instance_);
 
   if (enableValidationLayers_) {
-    VkDebugReportCallbackCreateInfoEXT debugReportCallbackCreateInfo = {};
+    VkDebugReportCallbackCreateInfoEXT debugReportCallbackCreateInfo{};
     debugReportCallbackCreateInfo.sType =
         VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
     debugReportCallbackCreateInfo.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT |
@@ -214,15 +214,15 @@ uint32_t VContext::getComputeQueueFamilyIndex() {
 }
 
 void VContext::createDevice() {
-  VkDeviceQueueCreateInfo queueCreateInfo = {};
+  VkDeviceQueueCreateInfo queueCreateInfo{};
   queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
   queueFamilyIndex_ = getComputeQueueFamilyIndex();
   queueCreateInfo.queueFamilyIndex = queueFamilyIndex_;
   queueCreateInfo.queueCount = 1;
   float queuePriorities = 1.0;
   queueCreateInfo.pQueuePriorities = &queuePriorities;
-  VkDeviceCreateInfo deviceCreateInfo = {};
-  VkPhysicalDeviceFeatures deviceFeatures = {};
+  VkDeviceCreateInfo deviceCreateInfo{};
+  VkPhysicalDeviceFeatures deviceFeatures{};
 
   deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
   deviceCreateInfo.enabledLayerCount = enabledValidationLayers_.size();
@@ -240,7 +240,7 @@ void VContext::createDevice() {
   VkPhysicalDeviceProperties physicalDeviceProperties;
   vkGetPhysicalDeviceProperties(physicalDevice_, &physicalDeviceProperties);
 
-  VkCommandPoolCreateInfo commandPoolCreateInfo = {};
+  VkCommandPoolCreateInfo commandPoolCreateInfo{};
   commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
   commandPoolCreateInfo.flags = 0;
   commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex_;
@@ -299,7 +299,7 @@ VBuffer::VBuffer(
     : bufferSizeBytes_(bufferSizeBytes), descriptorType_(descriptorType) {
   auto device = context().device();
   auto physicalDevice = context().physicalDevice();
-  VkBufferCreateInfo bufferCreateInfo = {};
+  VkBufferCreateInfo bufferCreateInfo{};
   bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   bufferCreateInfo.size = bufferSizeBytes_;
   bufferCreateInfo.usage = bufferUsageFlags;
@@ -307,7 +307,7 @@ VBuffer::VBuffer(
   VK_CHECK(vkCreateBuffer(device, &bufferCreateInfo, nullptr, &buffer_));
   VkMemoryRequirements memoryRequirements;
   vkGetBufferMemoryRequirements(device, buffer_, &memoryRequirements);
-  VkMemoryAllocateInfo allocateInfo = {};
+  VkMemoryAllocateInfo allocateInfo{};
   allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
   allocateInfo.allocationSize = memoryRequirements.size;
   allocateInfo.memoryTypeIndex = findMemoryType(
@@ -337,7 +337,7 @@ void VBuffer::copyFromHostToDevice(void* data, int64_t size) {
 }
 
 VkDescriptorBufferInfo VBuffer::makeDescriptorBufferInfo() {
-  VkDescriptorBufferInfo info = {};
+  VkDescriptorBufferInfo info{};
   info.buffer = buffer_;
   info.offset = 0;
   info.range = bufferSizeBytes_;
@@ -404,7 +404,7 @@ VImage::VImage(uint32_t W, uint32_t H, uint32_t C)
   auto device = context().device();
   auto physicalDevice = context().physicalDevice();
 
-  VkImageCreateInfo imageInfo = {};
+  VkImageCreateInfo imageInfo{};
   imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   imageInfo.imageType = imageType_;
   imageInfo.extent.width = W_;
@@ -424,9 +424,9 @@ VImage::VImage(uint32_t W, uint32_t H, uint32_t C)
 
   VK_CHECK(vkCreateImage(device, &imageInfo, nullptr, &image_));
 
-  VkMemoryRequirements memReqs = {};
+  VkMemoryRequirements memReqs{};
   vkGetImageMemoryRequirements(device, image_, &memReqs);
-  VkMemoryAllocateInfo allocInfo = {};
+  VkMemoryAllocateInfo allocInfo{};
   allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
   allocInfo.allocationSize = memReqs.size;
   allocInfo.memoryTypeIndex = findMemoryType(
@@ -452,7 +452,7 @@ VImage::~VImage() noexcept {
 }
 
 VkImageViewCreateInfo VImage::makeImageViewCreateInfo() {
-  VkImageViewCreateInfo info = {};
+  VkImageViewCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   info.image = image_;
   info.viewType = viewType_;
@@ -466,7 +466,7 @@ VkImageViewCreateInfo VImage::makeImageViewCreateInfo() {
 }
 
 VkSamplerCreateInfo VImage::makeSamplerCreateInfo() {
-  VkSamplerCreateInfo info = {};
+  VkSamplerCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
   info.magFilter = filter_;
   info.minFilter = filter_;
@@ -599,7 +599,7 @@ void createDescriptorPool(
     uint32_t poolSizeCount,
     uint32_t maxSets,
     VkDescriptorPool* descriptorPool) {
-  VkDescriptorPoolCreateInfo createInfo = {};
+  VkDescriptorPoolCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   createInfo.pNext = nullptr;
   createInfo.flags = 0;
@@ -615,7 +615,7 @@ void allocateDescriptorSet(
     VkDescriptorPool descriptorPool,
     const VkDescriptorSetLayout* descriptorSetLayout,
     VkDescriptorSet* descriptorSet) {
-  VkDescriptorSetAllocateInfo allocateInfo = {};
+  VkDescriptorSetAllocateInfo allocateInfo{};
   allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
   allocateInfo.pNext = nullptr;
   allocateInfo.descriptorPool = descriptorPool;
@@ -636,7 +636,7 @@ void ComputeUnit::createComputePipeline(
     const VkDescriptorSetLayout& descrSetLayout,
     WorkGroupSize& workGroupSize) {
   auto device = context().device();
-  VkShaderModuleCreateInfo createInfo = {};
+  VkShaderModuleCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
   createInfo.pCode = code;
   createInfo.codeSize = codeSize;
@@ -661,7 +661,7 @@ void ComputeUnit::createComputePipeline(
   spInfo.dataSize = sizeof(workGroupSize);
   spInfo.pData = &workGroupSize;
 
-  VkPipelineShaderStageCreateInfo shaderStageCreateInfo = {};
+  VkPipelineShaderStageCreateInfo shaderStageCreateInfo{};
   shaderStageCreateInfo.sType =
       VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
   shaderStageCreateInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -669,7 +669,7 @@ void ComputeUnit::createComputePipeline(
   shaderStageCreateInfo.pName = "main";
   shaderStageCreateInfo.pSpecializationInfo = &spInfo;
 
-  VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
+  VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
   pipelineLayoutCreateInfo.sType =
       VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
   pipelineLayoutCreateInfo.setLayoutCount = 1;
@@ -678,7 +678,7 @@ void ComputeUnit::createComputePipeline(
   VK_CHECK(vkCreatePipelineLayout(
       device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout_));
 
-  VkComputePipelineCreateInfo pipelineCreateInfo = {};
+  VkComputePipelineCreateInfo pipelineCreateInfo{};
   pipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
   pipelineCreateInfo.stage = shaderStageCreateInfo;
   pipelineCreateInfo.layout = pipelineLayout_;
@@ -721,7 +721,7 @@ void ComputeUnit::createComputePipelineCompile(
 
 void ComputeUnit::createCommandBuffer(VkDescriptorSet& descriptorSet) {
   auto device = context().device();
-  VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
+  VkCommandBufferAllocateInfo commandBufferAllocateInfo{};
   commandBufferAllocateInfo.sType =
       VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   commandBufferAllocateInfo.commandPool = context().commandPool();
@@ -731,7 +731,7 @@ void ComputeUnit::createCommandBuffer(VkDescriptorSet& descriptorSet) {
   VK_CHECK(vkAllocateCommandBuffers(
       device, &commandBufferAllocateInfo, &commandBuffer_));
 
-  VkCommandBufferBeginInfo beginInfo = {};
+  VkCommandBufferBeginInfo beginInfo{};
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   VK_CHECK(vkBeginCommandBuffer(commandBuffer_, &beginInfo));
@@ -757,13 +757,13 @@ void ComputeUnit::dispatchCommandBuffer(
 }
 
 void ComputeUnit::runCommandBuffer() {
-  VkSubmitInfo submitInfo = {};
+  VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &commandBuffer_;
 
   VkFence fence;
-  VkFenceCreateInfo fenceCreateInfo = {};
+  VkFenceCreateInfo fenceCreateInfo{};
   fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
   fenceCreateInfo.flags = 0;
   VK_CHECK(vkCreateFence(context().device(), &fenceCreateInfo, NULL, &fence))
@@ -794,7 +794,7 @@ void copyFromBufferToImage(VBuffer& buffer, VImage& image) {
   VBuffer constBuffer =
       makeUniformConstBuffer((void*)&constBlock, sizeof(constBlock));
 
-  VkDescriptorSetLayout descrSetLayout = {};
+  VkDescriptorSetLayout descrSetLayout{};
   VkDescriptorSetLayoutBinding bindings[] = {
       vkutil::descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
       vkutil::descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
@@ -802,14 +802,14 @@ void copyFromBufferToImage(VBuffer& buffer, VImage& image) {
   vkutil::createDescriptorSetLayout(
       device, bindings, 3 /* bindingsCount */, &descrSetLayout);
 
-  VkDescriptorPool descrPool = {};
+  VkDescriptorPool descrPool{};
   VkDescriptorPoolSize poolSizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
                                       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
                                       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
   vkutil::createDescriptorPool(
       device, poolSizes, 3 /* poolSizeCount */, 1 /* maxSets */, &descrPool);
 
-  VkDescriptorSet descrSet = {};
+  VkDescriptorSet descrSet{};
   vkutil::allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
 
   image.bind(
@@ -853,7 +853,7 @@ void copyFromImageToBuffer(VImage& image, VBuffer& buffer) {
   VBuffer constBuffer =
       makeUniformConstBuffer((void*)&constBlock, sizeof(constBlock));
 
-  VkDescriptorSetLayout descrSetLayout = {};
+  VkDescriptorSetLayout descrSetLayout{};
   VkDescriptorSetLayoutBinding bindings[] = {
       vkutil::descriptorSetLayoutBinding(
           0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
@@ -862,7 +862,7 @@ void copyFromImageToBuffer(VImage& image, VBuffer& buffer) {
   vkutil::createDescriptorSetLayout(
       device, bindings, 3 /* bindingsCount */, &descrSetLayout);
 
-  VkDescriptorPool descrPool = {};
+  VkDescriptorPool descrPool{};
   VkDescriptorPoolSize poolSizes[] = {
       {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
@@ -870,7 +870,7 @@ void copyFromImageToBuffer(VImage& image, VBuffer& buffer) {
   vkutil::createDescriptorPool(
       device, poolSizes, 3 /* poolSizeCount */, 1 /* maxSets */, &descrPool);
 
-  VkDescriptorSet descrSet = {};
+  VkDescriptorSet descrSet{};
   vkutil::allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
 
   image.bind(
