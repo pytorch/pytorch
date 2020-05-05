@@ -542,7 +542,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'type_method_formals': List[str],
     'variants': str,
     'with_gil': bool,
-    'zero_dim_dispatch_when_scalar': str,
 })
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
@@ -884,20 +883,19 @@ def create_generic(top_env, declarations):
         # type: (THFormal, bool, bool) -> List[str]
         # Note: broadcast_dims can change type...
         # return the actuals that will be passed to the broadcast function.
-        # 1) in the common case, this is the broadcasted argument (e.g. "self") followed by the tensors
-        #    that it is broadcasted against (comma-separated) (e.g. "self, tensor1, tensor2").
-        # 2) in the broadcast_dims case, this is the broadcasted argument (e.g. "self") followed by the sizes
-        #    it is broadcasted to (as an initializer list), so e.g. the specification
-        #    "mat1.dim0,mat2.dim1" gets transformed to "self, {mat1.size(0),mat2.size(1)}"
-        if not broadcast_dims:
-            broadcast_actuals = [broadcast_arg['name']] + broadcast_arg['broadcast'].split()[0].split(",")
-        else:
-            broadcast_dims_spec = broadcast_arg['broadcast'].split()[1].split(':')[1].split(',')
-            # generate size call for each dimension
-            broadcast_dims = ([x.split('.')[0] + '.size(' + x.split('.')[1].replace('dim', '') + ')'  # type: ignore
-                              for x in broadcast_dims_spec])
-            broadcast_dims_init_list = '{' + ','.join(broadcast_dims) + '}'  # type: ignore
-            broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
+        # in the broadcast_dims case (the only currently supported case), this is
+        # the broadcasted argument (e.g. "self") followed by the sizes it is broadcasted
+        # to (as an initializer list), so e.g. the specification:
+        # "mat1.dim0,mat2.dim1"
+        # gets transformed to
+        # "self, {mat1.size(0),mat2.size(1)}"
+        assert broadcast_dims
+        broadcast_dims_spec = broadcast_arg['broadcast'].split()[1].split(':')[1].split(',')
+        # generate size call for each dimension
+        broadcast_dims = ([x.split('.')[0] + '.size(' + x.split('.')[1].replace('dim', '') + ')'  # type: ignore
+                          for x in broadcast_dims_spec])
+        broadcast_dims_init_list = '{' + ','.join(broadcast_dims) + '}'  # type: ignore
+        broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
 
         return broadcast_actuals
 
@@ -1377,23 +1375,6 @@ def create_derived(backend_type_env, declarations):
         return [get_argument(env, argument, option)
                 for argument in arguments]
 
-    # TODO: Delete this per https://github.com/pytorch/pytorch/issues/33094
-    # after all TH uses are ported
-    def handle_zero_dim(env, option):
-        # type: (Environment, FunctionOption) -> List[str]
-        zero_dim_dispatch = option.get('zero_dim_dispatch_when_scalar', '')
-        if not zero_dim_dispatch:
-            return []
-        broadcasts_arg = zero_dim_dispatch in option.get('broadcast_actuals', '')
-        # if the argument broadcasts, then this would only affect cases where all broadcasted
-        # tensors were zero-dim, which is inconsistent with the scalar handling.
-        if broadcasts_arg:
-            return []
-        zero_dim_actuals = [arg['name']
-                            if arg['name'] != zero_dim_dispatch else "{}.item()".format(arg['name'])
-                            for arg in option['formals_list']]
-        return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
-
     def allocate_arg(arg, output_count, backend, scalar_name):
         # type: (THFormal, int, str, str) -> List[str]
         name = arg['name']
@@ -1444,7 +1425,6 @@ def create_derived(backend_type_env, declarations):
     def emit_body(env, option, scalar_type_cases):
         # type: (Environment, FunctionOption, List[str]) -> List[str]
         body = []  # type: List[str]
-        body += handle_zero_dim(env, option)
 
         switch_prologue = []  # type: List[str]
         output_count = 0
