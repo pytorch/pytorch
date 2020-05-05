@@ -259,13 +259,16 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
 
  private:
   RangeEventList& getEventList(int64_t thread_id = -1) {
+    std::cerr << "                                                  (1) in getEventList: thread_id = " << thread_id << std::endl;
     bool is_current_thread = (thread_id < 0) ||
         thread_id == at::RecordFunction::currentThreadId();
+    std::cerr << "                                                  (2) in getEventList: is_current_thread = " << is_current_thread << std::endl;
 
     if (is_current_thread) {
       // check if we can get a list without taking a state's lock
       auto it = tls_lists_cache_.find(this);
       if (it != tls_lists_cache_.end()) {
+        std::cerr << "                                                  (3) in getEventList: found tls list = " << ((void*)it->second) << std::endl;
         return *(it->second);
       }
     }
@@ -275,26 +278,32 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
     if (thread_id < 0) {
       thread_id = at::RecordFunction::currentThreadId();
     }
+    std::cerr << "                                                  (4) in getEventList: thread_id = " << thread_id << std::endl;
     RangeEventList* list_ptr = nullptr;
     {
       std::lock_guard<std::mutex> guard(state_mutex_);
       auto it = event_lists_map_.find(thread_id);
       if (it != event_lists_map_.end()) {
         list_ptr = it->second.get();
+        std::cerr << "                                                  (5) in getEventList: found list_ptr = " << ((void*)list_ptr) << std::endl;
       } else {
         auto event_list = std::make_shared<RangeEventList>();
         event_lists_map_[thread_id] = event_list;
         list_ptr = event_list.get();
+        std::cerr << "                                                  (6) in getEventList: created new list = " << ((void*)list_ptr) << std::endl;
       }
+      std::cerr << "                                                  (6) in getEventList: event_lists_map_.size() = " << event_lists_map_.size() << std::endl;
     }
 
     if (is_current_thread) {
       if (tls_lists_cache_.size() >= kMaxTLSCacheSize) {
+        std::cerr << "                                                  (7) in getEventList: clear TLS cache " << std::endl;
         tls_lists_cache_.clear();
       }
+      std::cerr << "                                                  (8) in getEventList" << std::endl;
       tls_lists_cache_[this] = list_ptr;
     }
-
+    std::cerr << "                                                  (9) in getEventList: return = " << ((void*)list_ptr) << std::endl;
     return *list_ptr;
   }
 
