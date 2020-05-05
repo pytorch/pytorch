@@ -16,17 +16,11 @@ using torch::jit::push;
 
 // Implementations located in torch/csrc/jit/runtime/register_prim_ops_c10.cpp
 TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
-  m.impl("Int.Tensor",[](at::Tensor a) {
-    return a.item<int64_t>();
-  });
+  m.impl("Int.Tensor", [](at::Tensor a) { return a.item<int64_t>(); });
 
-  m.impl("Int.bool", [](bool b) {
-    return static_cast<int64_t>(b);
-  });
+  m.impl("Int.bool", [](bool b) { return static_cast<int64_t>(b); });
 
-  m.impl("Int.float", [](double d) {
-    return static_cast<int64_t>(d);
-  });
+  m.impl("Int.float", [](double d) { return static_cast<int64_t>(d); });
 
   m.impl("Int.Scalar", [](Scalar scalar) {
     return static_cast<int64_t>(scalar.toInt());
