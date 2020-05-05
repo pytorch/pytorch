@@ -333,7 +333,7 @@ template <typename Func>
 auto wrap_pybind_function(Func&& f) {
   using traits = c10::guts::function_traits<Func>;
   return torch::detail::wrap_pybind_function_impl_(
-    std::forward<Func>(f), std::make_index_sequence<traits::arity>{});
+    std::forward<Func>(f), std::make_index_sequence<traits::arity()>{});
 }
 
 } // namespace torch

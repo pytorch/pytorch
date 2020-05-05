@@ -246,7 +246,7 @@ struct assert_is_valid_input_type {
 
   template<class Functor, bool AllowDeprecatedTypes>
   typename guts::function_traits<Functor>::return_type call_functor_with_args_from_stack(Functor* functor, Stack* stack) {
-    constexpr size_t num_ivalue_args = guts::function_traits<Functor>::arity;
+    constexpr size_t num_ivalue_args = guts::function_traits<Functor>::arity();
     return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, stack, std::make_index_sequence<num_ivalue_args>());
   }
 
@@ -277,7 +277,7 @@ struct assert_is_valid_input_type {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
-      constexpr size_t num_inputs = guts::function_traits<KernelFunctor>::arity;
+      constexpr size_t num_inputs = guts::function_traits<KernelFunctor>::arity();
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       auto output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
       torch::jit::drop(*stack, num_inputs);
@@ -291,7 +291,7 @@ struct assert_is_valid_input_type {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
-      constexpr size_t num_inputs = guts::function_traits<KernelFunctor>::arity;
+      constexpr size_t num_inputs = guts::function_traits<KernelFunctor>::arity();
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
       torch::jit::pop(*stack, num_inputs);

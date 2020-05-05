@@ -18,7 +18,7 @@ constexpr int block_work_size = BLOCK_WORK_SIZE;
 // `needs_dynamic_casting` compares the types expected by iterator
 // (i.e. dtypes of the operands) with the actual type of the arguments
 // of func_t
-template<typename func_t, int nargs=c10::guts::function_traits<func_t>::arity>
+template<typename func_t, int nargs=c10::guts::function_traits<func_t>::arity()>
 struct needs_dynamic_casting {
   static bool check(TensorIterator& iter) {
     using traits = c10::guts::function_traits<func_t>;
@@ -103,7 +103,7 @@ void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
 
   using traits = c10::guts::function_traits<func_t>;
   static_assert(
-      traits::arity == 2,
+      traits::arity() == 2,
       "gpu_kernel_with_scalars only supports two input arguments");
 
   if (iter.is_cpu_scalar(1)) {

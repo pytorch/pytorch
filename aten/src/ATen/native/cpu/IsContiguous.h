@@ -34,13 +34,13 @@ struct IsContiguous<0, -1, traits, s> {
 template <typename traits,
     typename std::enable_if<std::is_void<typename traits::return_type>::value>::type* = nullptr>
 static inline bool is_contiguous(const int64_t* strides) {
-  return IsContiguous<traits::arity, traits::arity - 1, traits>::eval(strides);
+  return IsContiguous<traits::arity(), traits::arity() - 1, traits>::eval(strides);
 }
 
 template <typename traits,
     typename std::enable_if<!std::is_void<typename traits::return_type>::value>::type* = nullptr>
 static inline bool is_contiguous(const int64_t* strides) {
-  return IsContiguous<traits::arity, traits::arity, traits>::eval(strides);
+  return IsContiguous<traits::arity(), traits::arity(), traits>::eval(strides);
 }
 
 // input at `s` is scalar (stride 0); output and other inputs are contiguous
@@ -48,15 +48,15 @@ static inline bool is_contiguous(const int64_t* strides) {
 template <typename traits, int s,
     typename std::enable_if<std::is_void<typename traits::return_type>::value>::type* = nullptr>
 static inline bool is_contiguous_scalar(const int64_t* strides) {
-  static_assert(s > 0 && s <= traits::arity, "scalar argument index out of bounds");
-  return IsContiguous<traits::arity, traits::arity - 1, traits, s>::eval(strides);
+  static_assert(s > 0 && s <= traits::arity(), "scalar argument index out of bounds");
+  return IsContiguous<traits::arity(), traits::arity() - 1, traits, s>::eval(strides);
 }
 
 template <typename traits, int s,
     typename std::enable_if<!std::is_void<typename traits::return_type>::value>::type* = nullptr>
 static inline bool is_contiguous_scalar(const int64_t* strides) {
-  static_assert(s > 0 && s <= traits::arity, "scalar argument index out of bounds");
-  return IsContiguous<traits::arity, traits::arity, traits, s>::eval(strides);
+  static_assert(s > 0 && s <= traits::arity(), "scalar argument index out of bounds");
+  return IsContiguous<traits::arity(), traits::arity(), traits, s>::eval(strides);
 }
 
 }}}

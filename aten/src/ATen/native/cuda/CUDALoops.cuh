@@ -111,7 +111,7 @@ invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t stri
 template <typename func_t, typename index_t, typename traits = c10::guts::function_traits<func_t>>
 C10_HOST_DEVICE typename traits::return_type
 invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i) {
-  using Indices = std::make_index_sequence<traits::arity>;
+  using Indices = std::make_index_sequence<traits::arity()>;
   return invoke_impl<traits>(f, data, strides, i, Indices{});
 }
 
@@ -125,7 +125,7 @@ invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t stri
 template <typename func_t, typename index_t, typename traits = c10::guts::function_traits<func_t>>
 C10_HOST_DEVICE typename traits::return_type
 invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i) {
-  using Indices = std::make_index_sequence<traits::arity>;
+  using Indices = std::make_index_sequence<traits::arity()>;
   return invoke_impl<traits>(f, data, strides, dtypes, i, Indices{});
 }
 
@@ -167,7 +167,7 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   int remaining = N - block_work_size * blockIdx.x;
 
   if (remaining < block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
-    auto input_calc = TrivialOffsetCalculator<traits::arity>();
+    auto input_calc = TrivialOffsetCalculator<traits::arity()>();
     auto output_calc = TrivialOffsetCalculator<1>();
     auto policy = memory::policies::unroll<array_t, decltype(input_calc), decltype(output_calc)>(data, remaining, input_calc, output_calc);
     elementwise_kernel_helper(f, policy);
@@ -191,7 +191,7 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
-  auto input_calc = TrivialOffsetCalculator<traits::arity>();
+  auto input_calc = TrivialOffsetCalculator<traits::arity()>();
   auto output_calc = TrivialOffsetCalculator<1>();
 
   switch (vec_size) {
@@ -226,10 +226,10 @@ template <typename func_t>
 void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   using traits = c10::guts::function_traits<func_t>;
   using arg0_t = typename traits::return_type;
-  constexpr int ntensors = traits::arity + 1;
+  constexpr int ntensors = traits::arity() + 1;
 
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
-  TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity + 1);
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity() + 1);
 
   at::detail::Array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {
@@ -248,7 +248,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
 
   if (!dynamic_casting) {
     // !contiguous
-    auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
+    auto input_offset_calculator = make_input_offset_calculator<traits::arity()>(iter);
     auto output_offset_calculator = make_output_offset_calculator(iter);
     modern::launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator);
     return;
@@ -279,7 +279,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
       });
     }
   } else {
-    auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
+    auto offset_calc = ::make_offset_calculator<traits::arity() + 1>(iter);
     if (needs_dynamic_casting<func_t>::check(iter)) {
       legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);

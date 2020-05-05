@@ -89,7 +89,7 @@ template <class Functor, bool AllowDeprecatedTypes>
 typename c10::guts::function_traits<Functor>::return_type
 call_torchbind_method_from_stack(Functor& functor, jit::Stack& stack) {
   constexpr size_t num_ivalue_args =
-      c10::guts::function_traits<Functor>::arity;
+      c10::guts::function_traits<Functor>::arity();
   return call_torchbind_method_from_stack<Functor, AllowDeprecatedTypes>(
       functor, stack, std::make_index_sequence<num_ivalue_args>());
 }
@@ -102,7 +102,7 @@ struct BoxedProxy {
   void operator()(jit::Stack& stack, Func& func) {
     auto retval = call_torchbind_method_from_stack<Func, false>(func, stack);
     constexpr size_t num_ivalue_args =
-        c10::guts::function_traits<Func>::arity;
+        c10::guts::function_traits<Func>::arity();
     torch::jit::drop(stack, num_ivalue_args);
     stack.emplace_back(c10::ivalue::from(std::move(retval)));
   }
@@ -113,7 +113,7 @@ struct BoxedProxy<void, Func> {
   void operator()(jit::Stack& stack, Func& func) {
     call_torchbind_method_from_stack<Func, false>(func, stack);
     constexpr size_t num_ivalue_args =
-        c10::guts::function_traits<Func>::arity;
+        c10::guts::function_traits<Func>::arity();
     torch::jit::drop(stack, num_ivalue_args);
     stack.emplace_back(c10::IValue());
   }

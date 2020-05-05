@@ -21,7 +21,7 @@ namespace detail {
 //    using args_t = typename traits::ArgsTuple;
 //    args_t args;
 //    #pragma unroll
-//    for (int i = 0; i < traits::arity; i++) {
+//    for (int i = 0; i < traits::arity(); i++) {
 //      std::get<i>(args) = ....
 //    }
 //
@@ -226,7 +226,7 @@ template<typename func_t, typename array_t>
 inline int can_vectorize_up_to(array_t pointers) {
   using traits = c10::guts::function_traits<func_t>;
   using return_t = typename traits::return_type;
-  constexpr int arity = traits::arity;
+  constexpr int arity = traits::arity();
   int result = can_vectorize_up_to<return_t>(pointers[0]);
   // We need to get the type for each argument of `func_t`, this can only
   // be done at compile time.

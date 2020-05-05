@@ -108,7 +108,7 @@ invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t stri
 template <typename func_t, typename index_t, typename traits = c10::guts::function_traits<func_t>>
 C10_HOST_DEVICE typename traits::return_type
 invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i) {
-  using Indices = std::make_index_sequence<traits::arity>;
+  using Indices = std::make_index_sequence<traits::arity()>;
   return invoke_impl<traits>(f, data, strides, i, Indices{});
 }
 
@@ -122,7 +122,7 @@ invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t stri
 template <typename func_t, typename index_t, typename traits = c10::guts::function_traits<func_t>>
 C10_HOST_DEVICE typename traits::return_type
 invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i) {
-  using Indices = std::make_index_sequence<traits::arity>;
+  using Indices = std::make_index_sequence<traits::arity()>;
   return invoke_impl<traits>(f, data, strides, dtypes, i, Indices{});
 }
 
@@ -140,7 +140,7 @@ __device__ inline constexpr decltype(auto) invoke_with_array_impl(func_t f, arra
 }
 template <typename func_t, typename array_t>
 __device__ inline constexpr decltype(auto) invoke_with_array(func_t f, array_t a) {
-  constexpr auto arity = c10::guts::function_traits<func_t>::arity;
+  constexpr auto arity = c10::guts::function_traits<func_t>::arity();
   return invoke_with_array_impl(f, a, std::make_index_sequence<arity>{});
 }
 
@@ -164,11 +164,11 @@ struct arg_type_helper<func_t, 0> {
 };
 
 template <typename func_t>
-using type = typename arg_type_helper<func_t, c10::guts::function_traits<func_t>::arity>::type;
+using type = typename arg_type_helper<func_t, c10::guts::function_traits<func_t>::arity()>::type;
 
 }  // namespace arg_type
 
-template<typename func_t, int remaining=c10::guts::function_traits<func_t>::arity-1>
+template<typename func_t, int remaining=c10::guts::function_traits<func_t>::arity()-1>
 struct has_same_arg_types {
   using traits = c10::guts::function_traits<func_t>;
   static constexpr bool value = std::is_same<
@@ -199,12 +199,12 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   using traits = c10::guts::function_traits<func_t>;
   using return_t = typename traits::return_type;
   using arg_t = detail::arg_type::type<func_t>;
-  constexpr int arity = traits::arity;
+  constexpr int arity = traits::arity();
 
   // We need to create array to hold all the arguments, for nullary `f`, this means array of size 0.
   // Unfortunately the compiler don't allow us to create array of 0 size, so for this case, we create
   // an array of size 1 and just don't use it.
-  constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
+  constexpr int nargs = traits::arity() == 0 ? 1 : traits::arity();
 
   int tid = threadIdx.x;
   int idx = block_work_size * blockIdx.x + tid;
@@ -270,10 +270,10 @@ template <typename func_t>
 void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   using traits = c10::guts::function_traits<func_t>;
   using arg0_t = typename traits::return_type;
-  constexpr int ntensors = traits::arity + 1;
+  constexpr int ntensors = traits::arity() + 1;
 
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
-  TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity + 1);
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity() + 1);
 
   at::detail::Array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {
@@ -308,7 +308,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
       });
     }
   } else {
-    auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
+    auto offset_calc = ::make_offset_calculator<traits::arity() + 1>(iter);
     if (needs_dynamic_casting<func_t>::check(iter)) {
       legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);
