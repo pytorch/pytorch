@@ -172,7 +172,9 @@ struct ProfilerThreadLocalState
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxMarkA(name.c_str());
     } else {
-      getEventList().record(
+      auto& list = getEventList();
+      std::cerr << "Debug: in state mark, &list = " << ((void*)&list) << std::endl;
+      list.record(
           EventKind::Mark,
           at::StringView(std::move(name)),
           at::RecordFunction::currentThreadId(),
@@ -220,7 +222,9 @@ struct ProfilerThreadLocalState
         cuda_stubs->nvtxRangePushA(name.str());
       }
     } else {
-      getEventList().record(
+      auto& list = getEventList();
+      std::cerr << "Debug: in state pushRange, &list = " << ((void*)&list) << std::endl;
+      list.record(
           EventKind::PushRange,
           name,
           at::RecordFunction::currentThreadId(),
@@ -314,6 +318,7 @@ struct ProfilerThreadLocalState
   std::mutex state_mutex_;
   std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
       event_lists_map_;
+
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false, false);
   at::CallbackHandle handle_;
 
