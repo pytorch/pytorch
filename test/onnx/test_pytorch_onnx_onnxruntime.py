@@ -188,7 +188,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_model_test_with_external_data(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
-    @skipIfUnsupportedOpsetVersion([12])
     def test_mobilenet_v2_with_external_data(self):
         model = torchvision.models.mobilenet_v2(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
@@ -205,43 +204,36 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,))
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_densenets(self):
         model = torchvision.models.densenet121(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_googlenet(self):
         model = torchvision.models.googlenet(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_inception(self):
         model = torchvision.models.inception_v3(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_mnasnet(self):
         model = torchvision.models.mnasnet1_0(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_mobilenet(self):
         model = torchvision.models.mobilenet_v2(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_resnet(self):
         model = torchvision.models.resnet50(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,))
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_shufflenet(self):
         model = torchvision.models.shufflenet_v2_x1_0(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
@@ -252,7 +244,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,))
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_vgg(self):
         model = torchvision.models.vgg19(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
@@ -261,32 +252,27 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfUnsupportedOpsetVersion([12])
     def test_fcn(self):
         model = torchvision.models.segmentation.segmentation.fcn_resnet101(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfUnsupportedOpsetVersion([12])
     def test_deeplab(self):
         model = torchvision.models.segmentation.segmentation.deeplabv3_resnet101(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_r3d_18_video(self):
         model = torchvision.models.video.r3d_18(pretrained=True)
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_mc3_18_video(self):
         model = torchvision.models.video.mc3_18(pretrained=True)
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_r2plus1d_18_video(self):
         model = torchvision.models.video.r2plus1d_18(pretrained=True)
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
