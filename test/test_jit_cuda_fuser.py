@@ -184,7 +184,7 @@ class TestCudaFuser(JitTestCase):
         o = t(x, y, 2.0)
         self.assertEqual(o, jit_o)
         self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, 2.0)))
-      
+
     def _unary_test_helper(self, operation):
         def t(x : torch.Tensor, z : float):
             o = x + z
@@ -205,7 +205,7 @@ class TestCudaFuser(JitTestCase):
         operations = [torch.neg, torch.abs, torch.log, torch.log10, torch.log1p, torch.log2, torch.lgamma, torch.exp, torch.expm1, torch.erf, torch.erfc, torch.cos, torch.acos, torch.cosh, torch.sin, torch.asin, torch.tan, torch.atan, torch.sqrt, torch.rsqrt, torch.ceil, torch.floor, torch.round, torch.trunc, torch.frac, torch.reciprocal, torch.relu, torch.sigmoid, torch.tanh, torch.nn.functional.gelu]
         for op in operations:
             self._unary_test_helper(op)
-        
+
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
     @skipIfRocm
@@ -228,17 +228,17 @@ class TestCudaFuser(JitTestCase):
             return o
         add_jit = torch.jit.script(add)
         self._run_helper(add_jit, add, True, x, y, 2.0)
-      
+
         def clamp0(x : torch.Tensor, f : float):
             o = torch.rand_like(x)
-            o = o * torch.clamp(x, min = f)
+            o = o * torch.clamp(x, min=f)
             return o
         clamp0_jit = torch.jit.script(clamp0)
         self._run_helper(clamp0_jit, clamp0, True, x, 0.5)
 
         def clamp1(x : torch.Tensor, f : float, ff : float):
             o = torch.rand_like(x)
-            o = o * torch.clamp(x, min = f, max = ff)
+            o = o * torch.clamp(x, min=f, max=ff)
             return o
         clamp1_jit = torch.jit.script(clamp1)
         self._run_helper(clamp1_jit, clamp1, True, x, -0.2, 0.7)
