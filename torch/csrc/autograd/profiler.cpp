@@ -18,6 +18,8 @@
 #include <c10/core/Allocator.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <iostream>
+
 namespace torch { namespace autograd { namespace profiler {
 
 namespace {
@@ -157,8 +159,8 @@ struct ProfilerThreadLocalState
   }
 
   void mark(
-    std::string name,
-    bool include_cuda = true) {
+      std::string name,
+      bool include_cuda = true) {
     if (config_.state == ProfilerState::Disabled) {
       return;
     }
@@ -174,10 +176,10 @@ struct ProfilerThreadLocalState
   }
 
   void pushRange(
-    const at::StringView& name,
-    const char* msg = "",
-    int64_t sequence_nr = -1,
-    std::vector<std::vector<int64_t>>&& shapes = {}) {
+      const at::StringView& name,
+      const char* msg = "",
+      int64_t sequence_nr = -1,
+      std::vector<std::vector<int64_t>>&& shapes = {}) {
     if (config_.state == ProfilerState::Disabled) {
       return;
     }
@@ -382,7 +384,7 @@ bool profilerEnabled() {
 }
 
 void enableProfiler(const ProfilerConfig& new_config) {
-  LOG(INFO) << "Debug: in enableProfiler";
+  std::cerr << "Debug: in enableProfiler" << std::endl;
   TORCH_CHECK(new_config.state != ProfilerState::NVTX || cuda_stubs->enabled(),
     "Can't use NVTX profiler - PyTorch was compiled without CUDA");
 
@@ -398,14 +400,14 @@ void enableProfiler(const ProfilerConfig& new_config) {
   if (new_config.state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
     // to generate some dummy events first before recording synchronization events
-    LOG(INFO) << "Debug: mark __start_profile (1)";
+    std::cerr << "Debug: mark __start_profile (1)" << std::endl;
     for (int idx = 0; idx < kCUDAWarmupStart; ++idx) {
       cuda_stubs->onEachDevice([state](int /* unused */) {
           state->mark("__cuda_startup");
           cuda_stubs->synchronize();
       });
     }
-    LOG(INFO) << "Debug: mark __start_profile (2)";
+    std::cerr << "Debug: mark __start_profile (2)" << std::endl;
 
     // cuda events must be on the same device, so we need a start event recorded
     // for each gpu. we then use this event to synchronize time on the GPU
@@ -414,9 +416,9 @@ void enableProfiler(const ProfilerConfig& new_config) {
         state->mark("__cuda_start_event");
     });
   }
-  LOG(INFO) << "Debug: mark __start_profile (3)";
+  std::cerr << "Debug: mark __start_profile (3)" << std::endl;
   state->mark("__start_profile", false);
-  LOG(INFO) << "Debug: return from enableProfiler";
+  std::cerr << "Debug: return from enableProfiler" << std::endl;
 }
 
 thread_event_lists disableProfiler() {
