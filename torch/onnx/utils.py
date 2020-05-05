@@ -752,6 +752,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
 
         sym_registry.register_version('', opset_version)
         from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
+        # For opsets < 9, ATEN_FALLBACK does not enable quant ops. For these opsets,
+        # exporter uses the regular ATen operator
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and \
                 opset_version >= _default_onnx_opset_version:
             import torch.onnx.symbolic_caffe2
