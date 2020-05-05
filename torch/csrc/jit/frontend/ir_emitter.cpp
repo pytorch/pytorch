@@ -1496,21 +1496,13 @@ struct to_ir {
   }
 
   CondValue emitHasAttr(const Expr& objExpr, const Expr& attrExpr) {
-    auto obj = emitExpr(objExpr);
-    const auto& type = obj->type();
+    auto obj = emitSugaredExpr(objExpr, 1);
     if (attrExpr.kind() != TK_STRINGLITERAL) {
       throw ErrorReport(attrExpr)
           << "hasattr's second argument must be a string literal";
     }
-    auto cls = type->cast<ClassType>();
-    if (!cls) {
-      throw ErrorReport(objExpr)
-          << "hasattr's first argument must be an object, got "
-          << type->python_str() << " instead";
-    }
-
     const std::string& name = StringLiteral(attrExpr).text();
-    const bool hasAttr = cls->hasAttribute(name);
+    const bool hasAttr = obj->hasAttr(objExpr.range(), method, name);
     return CondValue(*graph, objExpr.range(), hasAttr, {});
   }
 

@@ -221,24 +221,6 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
-     // reference function parse_to_conversion in python_arg_parsing.h
-     Operator(
-         "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
-         [](Stack& stack) {
-           bool non_blocking;
-           bool copy;
-           pop(stack, non_blocking, copy);
-           c10::optional<at::ScalarType> scalarType =
-               pop(stack).toOptional<at::ScalarType>();
-           c10::optional<c10::Device> device =
-               pop(stack).toOptional<c10::Device>();
-           at::Tensor self = pop(stack).toTensor();
-           push(
-               stack,
-               to_dispatch(self, device, scalarType, non_blocking, copy));
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
      Operator(
          "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
          [](Stack& stack) {
@@ -307,15 +289,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::is_cuda(Tensor a) -> bool",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.is_cuda());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::is_sparse(Tensor a) -> bool",
          [](Stack& stack) {
            at::Tensor a;
@@ -373,16 +346,7 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
-     Operator(
-         "prim::type(Device self) -> str",
-         [](Stack& stack) {
-           auto d = pop(stack);
-           push(
-               stack,
-               DeviceTypeName(d.toDevice().type(), /* lower_case=*/true));
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
+
      Operator(
          "prim::index(Device self) -> int?",
          [](Stack& stack) {
@@ -819,18 +783,6 @@ RegisterOperators reg2({
           return 0;
         },
         aliasAnalysisFromSchema()),
-    // tensor length op (size of 1st dimension)
-    Operator(
-        "aten::len.Tensor(Tensor t) -> int",
-        [](Stack& stack) {
-          at::Tensor t = pop(stack).toTensor();
-          if (t.dim() == 0) {
-            AT_ERROR("len() of a 0-d tensor");
-          }
-          push(stack, t.sizes()[0]);
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
     Operator(
         "aten::__getitem__.str(str s, int index) -> str",
         [](Stack& stack) {
@@ -888,32 +840,7 @@ RegisterOperators reg2({
             CREATE_SPECIALIZED_LIST_OPS("bool", bool)
                 CREATE_SPECIALIZED_LIST_OPS("Tensor", at::Tensor)
 
-// these ops are not defined for Tensor
-#define CREATE_COMPARATOR_LIST_OPS_SPECIALIZED(decl_type, value_type)         \
-  Operator(                                                                   \
-      "prim::min." decl_type "(" decl_type "[] l, " decl_type                 \
-      "[] r) -> " decl_type "[]",                                             \
-      minList<value_type>,                                                    \
-      aliasAnalysisFromSchema()),                                             \
-      Operator(                                                               \
-          "prim::max." decl_type "(" decl_type "[] l, " decl_type             \
-          "[] r) -> " decl_type "[]",                                         \
-          maxList<value_type>,                                                \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "prim::min.self_" decl_type "(" decl_type "[] self) -> " decl_type, \
-          listMin<value_type>,                                                \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "prim::max.self_" decl_type "(" decl_type "[] self) -> " decl_type, \
-          listMax<value_type>,                                                \
-          aliasAnalysisFromSchema()),
-                    CREATE_COMPARATOR_LIST_OPS_SPECIALIZED("int", int64_t)
-                        CREATE_COMPARATOR_LIST_OPS_SPECIALIZED("float", double)
-                            CREATE_COMPARATOR_LIST_OPS_SPECIALIZED("bool", bool)
-
 #undef CREATE_GENERIC_LIST_OPS
-#undef CREATE_COMPARATOR_LIST_OPS_SPECIALIZED
 #undef CREATE_SPECIALIZED_LIST_OPS
 
     // `listContains<T>` is not implemented for non-primitive types
@@ -1089,70 +1016,6 @@ RegisterOperators reg2({
     CREATE_COPY_OP(float, double),
 #undef CREATE_COPY_OP
 
-    // int ** int produces a float, because negative exponents produce float
-    // results
-    DEFINE_GENERIC_OP(
-        aten::pow,
-        static_cast<double>(pow(a, b)),
-        static_cast<double>(pow(a, b)),
-        float,
-        float),
-    DEFINE_INT_FLOAT_OP(aten::pow, pow(a, b), float),
-    DEFINE_SCALAR_BINARY_OP(
-        aten::pow,
-        static_cast<double>(pow(a, b)),
-        static_cast<double>(pow(a, b)),
-        float),
-
-    DEFINE_BINARY_OP(aten::pow, pow(a, b)),
-    // min and max are in prim:: because there is a difference between
-    // the python builtin 'min' and 'torch.min'
-    DEFINE_BINARY_OP(prim::min, a < b ? a : b),
-    DEFINE_BINARY_OP(prim::max, a > b ? a : b),
-
-    // Pass in two ops for handling int and float separately as % in C++ only
-    // works for int The modulus calculation is different between C++ and Python
-    // (on negative), we preserve the python behavior as it's more common and
-    // match python syntax, hence the conversion.
-    DEFINE_GENERIC_OP(
-        aten::remainder,
-        (b + (a % b)) % b,
-        fmod((b + fmod(a, b)), b),
-        int,
-        float),
-    DEFINE_INT_FLOAT_OP(aten::remainder, fmod((b + fmod(a, b)), b), float),
-    DEFINE_SCALAR_BINARY_OP(
-        aten::remainder,
-        (b + (a % b)) % b,
-        fmod((b + fmod(a, b)), b),
-        Scalar),
-
-    DEFINE_GENERIC_OP(
-        aten::floordiv,
-        floordiv(a, b),
-        std::floor(a / b),
-        int,
-        float),
-    DEFINE_INT_FLOAT_OP(aten::floordiv, std::floor(a / b), float),
-    DEFINE_SCALAR_BINARY_OP(
-        aten::floordiv,
-        floordiv(a, b),
-        std::floor(a / b),
-        Scalar),
-
-    // NB: This is the python truediv operation
-    DEFINE_GENERIC_OP(
-        aten::div,
-        static_cast<double>(a) / static_cast<double>(b),
-        a / b,
-        float,
-        float),
-    DEFINE_SCALAR_BINARY_OP(
-        aten::div,
-        static_cast<double>(a) / static_cast<double>(b),
-        a / b,
-        float),
-
     // only used in loop unrolling, not exposed to end users
     DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b),
 
@@ -1303,10 +1166,6 @@ RegisterOperators reg2({
           return 0;
         },
         aliasAnalysisFromSchema()),
-
-    DEFINE_BOOL_OP(aten::__and__, a&& b),
-    DEFINE_BOOL_OP(aten::__or__, a || b),
-    DEFINE_BOOL_OP(aten::__xor__, a != b),
 
     DEFINE_UNARY_OP(aten::neg, -a, int, float),
     Operator(

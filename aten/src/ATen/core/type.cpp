@@ -942,6 +942,9 @@ torch::jit::Function& ClassType::getMethod(const std::string& name) const {
       "'");
   return *method;
 }
+bool ClassType::hasMethod(const std::string& name) const {
+  return findMethod(name) != nullptr;
+}
 
 void ClassType::unsafeRemoveMethod(const std::string& name) {
   size_t slot = 0;
