@@ -62,8 +62,8 @@ class QLinearUnpackWeightInt8 final {
         cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
     TORCH_CHECK(
         pack_ptr.orig_weight.defined(),
-        "Cannot access original weight tensor. "
-        "quantized::linear_unpack is currently not supported for qnnpack.");
+        "Cannot unpack weights. "
+        "Call at::globalContext()::setReleaseOriginalWeights(false) before packing or loading to enable unpacking.");
     return std::tuple<at::Tensor, c10::optional<Tensor>>(
         pack_ptr.orig_weight, pack_ptr.bias);
   }

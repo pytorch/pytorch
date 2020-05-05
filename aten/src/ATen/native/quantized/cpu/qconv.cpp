@@ -598,7 +598,7 @@ class QConvInt8 final {
           reinterpret_cast<uint8_t*>(qnnp_w_data),
           reinterpret_cast<int32_t*>(bias.data_ptr<c10::qint32>()));
       pack_w = pack_data.w.get();
-      if (at::globalContext().releaseOriginalWeights()) {
+      if (at::globalContext().releaseWeightsWhenPrepacking()) {
         // On mobile, we release the original weight by resetting the intrusive_ptr.
         // Calling unpack after this will throw an assertion.
         pack_data.orig_weight.reset();

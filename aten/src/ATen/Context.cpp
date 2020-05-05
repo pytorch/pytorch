@@ -149,11 +149,11 @@ bool Context::isXNNPACKAvailable() const {
 #endif
 }
 
-bool Context::releaseOriginalWeights() const {
+bool Context::releaseWeightsWhenPrepacking() const {
   return release_original_weights;
 }
 
-void Context::setReleaseOriginalWeights(bool e) {
+void Context::setReleaseWeightsWhenPrepacking(bool e) {
   release_original_weights = e;
 }
 
