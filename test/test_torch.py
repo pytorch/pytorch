@@ -11843,11 +11843,6 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "x must be a one-dimensional tensor."):
             torch.vander(torch.stack((x, x)))
 
-        # This passes on the xla backend
-        if device != 'xla':
-            with self.assertRaises(RuntimeError):
-                torch.vander(x.to(torch.complex64))
-
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
