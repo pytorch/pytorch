@@ -117,24 +117,34 @@ struct TORCH_API Module : public Object {
   // register_buffer method. With this simplification, we only need to track
   // whether a slot is a parameter to be able to classify it.
   void register_buffer(const std::string& name, at::Tensor v) {
-    type()->addOrCheckAttribute(name, TensorType::get());
+    bool is_param = false;
+    bool was_registered_as_buffer = true;
+    std::cout << "called register_buffer" << std::endl;
+    type()->addOrCheckAttribute(name, TensorType::get(), is_param, was_registered_as_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
+
   void register_parameter(
       const std::string& name,
       at::Tensor v,
       bool is_buffer) {
-    type()->addOrCheckAttribute(name, TensorType::get(), !is_buffer);
+      std::cout << "called register_parameter" << std::endl;
+
+    type()->addOrCheckAttribute(name, TensorType::get(), !is_buffer, is_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
+
   void register_attribute(
       const std::string& name,
       const TypePtr t,
       IValue v,
-      bool is_param = false) {
-    type()->addOrCheckAttribute(name, t, is_param);
+      bool is_param = false,
+      bool was_registered_as_buffer = false) {
+    std::cout << "called register_attribute" << std::endl;
+    type()->addOrCheckAttribute(name, t, is_param, was_registered_as_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
+
   void register_module(const std::string& name, const Module& module) {
     type()->addOrCheckAttribute(name, module.type());
     _ivalue()->setAttr(name, module._ivalue());

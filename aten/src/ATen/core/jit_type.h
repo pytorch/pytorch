@@ -1716,7 +1716,8 @@ struct CAFFE2_API ClassType : public NamedType {
   size_t addAttribute(
       const std::string& name,
       const TypePtr& type,
-      bool is_parameter = false);
+      bool is_parameter = false,
+      bool was_registered_as_buffer = false);
 
   // [Internal Only] Remove attribute from the ClassType,
   // caller is responsible to make sure the modification is safe:
@@ -1731,10 +1732,11 @@ struct CAFFE2_API ClassType : public NamedType {
   size_t addOrCheckAttribute(
       const std::string& name,
       TypePtr ty,
-      bool is_parameter = false) {
+      bool is_parameter = false,
+      bool was_registered_as_buffer = false) {
     auto slot_idx = findAttributeSlot(name);
     if (!slot_idx) {
-      return addAttribute(name, ty, is_parameter);
+      return addAttribute(name, ty, is_parameter, was_registered_as_buffer);
     }
 
     TORCH_CHECK(
@@ -1847,10 +1849,17 @@ struct CAFFE2_API ClassType : public NamedType {
   bool is_module() const override {
     return bool(parameterSlots_);
   }
+
   bool is_parameter(size_t slot) const {
     TORCH_INTERNAL_ASSERT(
         is_module(), "asking for parameterSlots of non-Module");
     return parameterSlots_->at(slot);
+  }
+
+  bool is_buffer_written_attribute(size_t slot) const {
+    TORCH_INTERNAL_ASSERT(
+        is_module(), "asking for bufferWrittenSlots of non-Module");
+    return bufferWrittenSlots_->at(slot);
   }
 
   void addMethod(torch::jit::Function* method);
@@ -1909,6 +1918,8 @@ struct CAFFE2_API ClassType : public NamedType {
   // if present, this class inherits from torch.nn.Module
   // and these are the indices of the attributes which are parameters
   std::shared_ptr<std::vector<bool>> parameterSlots_;
+  // TODO - a comment
+  std::shared_ptr<std::vector<bool>> bufferWrittenSlots_;
 
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;

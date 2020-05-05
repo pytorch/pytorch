@@ -1089,6 +1089,7 @@ ClassType::ClassType(
       compilation_unit_(std::move(cu)) {
   if (is_module) {
     parameterSlots_ = std::make_shared<std::vector<bool>>();
+    bufferWrittenSlots_ = std::make_shared<std::vector<bool>>();
   }
 }
 
@@ -1129,10 +1130,13 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
 size_t ClassType::addAttribute(
     const std::string& name,
     const TypePtr& type,
-    bool is_parameter) {
-  const char* what = is_parameter ? "parameter" : "attribute";
+    bool is_parameter,
+    bool was_registered_as_buffer) {
+  std::string what = is_parameter ? "parameter" : "attribute";
+  what += (was_registered_as_buffer? "buffer" : "not buffer");
+
   checkNotExist(name, what);
-  checkNoAny(*this, what, name, type);
+  checkNoAny(*this, what.c_str(), name, type);
 
   size_t slot = attributeNames_.size();
   attributeNames_.push_back(name);
@@ -1148,8 +1152,13 @@ size_t ClassType::addAttribute(
         "Expecting parameter to have either None, Tensor or Optional[Tensor] type, but got: ",
         toString(type));
   }
+  if (was_registered_as_buffer) {
+      // TODO: Check is_module
+      // TODO: check type is tensor
+  }
   if (is_module()) {
     parameterSlots_->push_back(is_parameter);
+    bufferWrittenSlots_->push_back(was_registered_as_buffer);
   }
   return slot;
 }
@@ -1160,6 +1169,7 @@ void ClassType::unsafeRemoveAttribute(const std::string& name) {
   attributeTypes_.erase(attributeTypes_.begin() + slot);
   if (is_module()) {
     parameterSlots_->erase(parameterSlots_->begin() + slot);
+    bufferWrittenSlots_->erase(bufferWrittenSlots_->begin() + slot);
   }
 }
 

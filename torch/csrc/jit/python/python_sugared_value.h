@@ -166,6 +166,10 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       const SourceRange& loc,
       Function& m);
 
+  std::shared_ptr<SugaredModuleDict> getSugaredNamedBufferDict(
+      const SourceRange& loc,
+      Function& m);
+
   void setAttr(
       const SourceRange& loc,
       Function& m,

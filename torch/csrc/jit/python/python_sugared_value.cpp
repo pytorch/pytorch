@@ -278,6 +278,43 @@ void recurseThroughNestedModules(
   };
 }
 
+std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredNamedBufferDict(
+    const SourceRange& loc,
+    Function& m) {
+    std::vector<std::string> paramNames;
+
+    const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
+    for (size_t i = 0; i < selfType->numAttributes(); ++i) {
+      std::cout << selfType->getAttributeName(i) << std::endl;
+      std::cout << selfType->getAttribute(i)->python_str() << std::endl;
+      if (selfType->is_buffer_written_attribute(i)) {
+          paramNames.push_back(selfType->getAttributeName(i));
+          std::cout << "is is_buffer_written_attribute" << std::endl;
+      } else {
+        std::cout << "is not is_buffer_written_attribute" << std::endl;
+      }
+    }
+
+    std::vector<SugaredValuePtr> keys;
+    std::vector<SugaredValuePtr> values;
+    for (const auto& name : paramNames) {
+      // auto name_v = std::make_shared
+      auto name_v =
+          std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
+      Value* module_v = m.graph()->insertGetAttr(self_, name);
+      auto mod_v = std::make_shared<ModuleValue>(
+          module_v, concreteType_->findSubmoduleConcreteType(name));
+
+      keys.push_back(name_v);
+      values.push_back(mod_v);
+  }
+
+  return std::make_shared<SugaredModuleDict>(
+      std::make_shared<ModuleValue>(self_, concreteType_),
+      std::make_shared<SugaredTupleValue>(keys),
+      std::make_shared<SugaredTupleValue>(values));
+  }
+
 std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredModuleDict(
     const SourceRange& loc,
     Function& m) {
@@ -321,7 +358,7 @@ std::shared_ptr<SugaredValue> SugaredModuleDict::attr(
     return std::make_shared<ModuleDictMethod>(keys_, "keys");
   } else if (field == "values" || field == "children") {
     return std::make_shared<ModuleDictMethod>(modules_, field);
-  } else if (field == "items" || field == "named_children") {
+  } else if (field == "items" || field == "named_children" || field == "named_buffers") {
     auto iterator = std::make_shared<IterableTree>();
     iterator->addChild(loc, m, keys_);
     iterator->addChild(loc, m, modules_);
@@ -391,6 +428,9 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return toSugaredValue(v, m, loc);
   }
 
+  std::cout << "FIELD" << std::endl;
+  std::cout << field << std::endl;
+  std::cout << "END" << std::endl;
   // 2. Special case: for module dicts we manually desugar items(), keys(),
   // values() calls into the appropriate method.
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
@@ -402,6 +442,10 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   if (field == "named_modules" || field == "modules" || field == "children" ||
       field == "named_children") {
     return getSugaredModuleDict(loc, m)->attr(loc, m, field);
+  }
+
+  if (field == "named_buffers") {
+    return getSugaredNamedBufferDict(loc, m)->attr(loc, m, field);
   }
 
   // 3. Check if this is the name of an overloaded method.

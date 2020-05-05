@@ -246,6 +246,8 @@ void SimpleValue::setAttr(
             << " are not yet supported";
       }
 
+      std::cout << "Adding attribute to simpleValue::" << std::endl;
+
       classType->addAttribute(field, newValue->type());
       expectedType = newValue->type();
 
