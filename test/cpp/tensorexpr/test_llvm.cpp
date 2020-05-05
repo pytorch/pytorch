@@ -1257,7 +1257,7 @@ void testLLVMRFactorReduction() {
   std::vector<For*> loops = loop.getLoopStmtsFor(b);
   For* loop_m = loops.at(1);
   For* loop_n = loops.at(2);
-  loop.reorderAxis(b, loop_m, loop_n);
+  loop.reorderAxis(loop_m, loop_n);
 
   loops = loop.getLoopStmtsFor(b);
   loop_m = loops.at(2);
@@ -1306,7 +1306,7 @@ void testLLVMRFactorVectorizedReduction() {
   For* loop_k = loops.at(0);
   For* loop_m = loops.at(1);
   For* loop_n = loops.at(2);
-  loopnest.reorderAxis(b, loop_n, loop_m);
+  loopnest.reorderAxis(loop_n, loop_m);
   loops = loopnest.getLoopStmtsFor(b);
   loop_k = loops.at(0);
   loop_n = loops.at(1);

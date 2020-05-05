@@ -560,7 +560,7 @@ void testReorderedReductionInitializer() {
   l.setGPUBlockIndex(loops[0], 0);
   l.setGPUThreadIndex(loops[1], 0);
 
-  l.reorderAxis(tensor, loops[1], loops[2]);
+  l.reorderAxis(loops[1], loops[2]);
 
   Stmt* s = l.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -767,7 +767,6 @@ void testReduce3DRfactorRepeated() {
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}, {k, "k"}});
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  auto vk = loops.at(2)->var(); // k
   auto vn = loops.at(1)->var(); // n
   auto vm = loops.at(0)->var(); // m
   loop.rfactor(c->body(), vm);
