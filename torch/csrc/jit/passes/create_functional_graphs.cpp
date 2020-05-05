@@ -300,13 +300,13 @@ struct MutationRemover {
       Value* mutated_value,
       Node* mutating_op) {
     // if cond:
-    //    x0 = op()
+    //    x = op()
     // else:
-    //    x1 = op()
-    // x2.add_(1)
-    // if x0 and x1 have no other uses and are unaliased in the graph,
+    //    x = op()
+    // x = add_(1)
+    // if x in both blocks have no other uses and are unaliased in the graph,
     // and we make the if node and the mutation atomic,
-    // then removing mutation to x2 does not change observable semantics
+    // then removing mutation add_ does not change observable semantics
 
     if (mutated_value->node()->kind() != prim::If) {
       return false;
