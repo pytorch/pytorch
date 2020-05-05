@@ -7,7 +7,7 @@
 #include <c10/util/Half.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <ATen/detail/FunctionTraits.h>
+#include <c10/util/Metaprogramming.h>
 #include <ATen/core/DistributionsHelper.h>
 
 #include <curand.h>
@@ -174,13 +174,13 @@ __global__ void distribution_binary_elementwise_kernel(
     int numel,
     func_t f,
     std::pair<uint64_t, uint64_t> seeds,
-    typename function_traits<func_t>::result_type *output_data,
-    const typename function_traits<func_t>::template arg<1>::type *input_data_1,
-    const typename function_traits<func_t>::template arg<2>::type *input_data_2,
+    typename c10::guts::function_traits<func_t>::return_type *output_data,
+    const typename c10::guts::function_traits<func_t>::template arg<1>::type *input_data_1,
+    const typename c10::guts::function_traits<func_t>::template arg<2>::type *input_data_2,
     inp_offset_calc_t inp_calc,
     out_offset_calc_t out_calc) {
-  using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
-  using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
+  using input_t_1 = typename c10::guts::function_traits<func_t>::template arg<1>::type;
+  using input_t_2 = typename c10::guts::function_traits<func_t>::template arg<2>::type;
 
   input_t_1 inputs_1[thread_work_size];
   input_t_2 inputs_2[thread_work_size];
@@ -222,10 +222,10 @@ __global__ void distribution_binary_elementwise_kernel(
 
 template <typename func_t>
 void distribution_binary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64_t> seeds, const func_t &f) {
-  static_assert(std::is_same<typename function_traits<func_t>::template arg<0>::type, curandStatePhilox4_32_10_t&>::value, "the first argument of functor must be curandStatePhilox4_32_10_t");
-  using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
-  using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
-  using output_t = typename function_traits<func_t>::result_type;
+  static_assert(std::is_same<typename c10::guts::function_traits<func_t>::template arg<0>::type, curandStatePhilox4_32_10_t&>::value, "the first argument of functor must be curandStatePhilox4_32_10_t");
+  using input_t_1 = typename c10::guts::function_traits<func_t>::template arg<1>::type;
+  using input_t_2 = typename c10::guts::function_traits<func_t>::template arg<2>::type;
+  using output_t = typename c10::guts::function_traits<func_t>::return_type;
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
