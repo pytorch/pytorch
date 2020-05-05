@@ -2805,7 +2805,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(DimModel(), empty_input)
         self.run_test(DimModel(), multi_dim_input)
 
-    @unittest.skip("Enable this once einsum supported in ORT")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_einsum(self):
         class EinsumModelBatchDiagonal(torch.nn.Module):
@@ -2842,7 +2841,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(EinsumModelTranspose(), input=(x,))
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_crossentropyloss(self):
         x = torch.randn(3, 5)
@@ -2994,7 +2992,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, requires_grad=True)
         self.run_test(EmptyBranchModel(), x)
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss(self):
         class NLLModel(torch.nn.Module):
@@ -3012,7 +3009,6 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_none(self):
         class NLLModel(torch.nn.Module):
@@ -3031,7 +3027,6 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_mean(self):
         class NLLModel(torch.nn.Module):
@@ -3050,7 +3045,6 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_sum(self):
         class NLLModel(torch.nn.Module):
@@ -3069,7 +3063,6 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_mean_weights(self):
         class NLLModel(torch.nn.Module):
@@ -3088,7 +3081,6 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_mean_ignore_index(self):
         class NLLModel(torch.nn.Module):
@@ -3107,7 +3099,6 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_mean_ignore_index_weights(self):
         class NLLModel(torch.nn.Module):
