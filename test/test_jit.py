@@ -3594,6 +3594,27 @@ class TestScript(JitTestCase):
                 # there should still be a Bailout after disable_grad call
                 FileCheck().check("disable_grad").check("BailOut[").check("BailoutTemplate").run(g)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
+    def test_profiling_merge(self):
+        @torch.jit.script
+        def test_not_const(x):
+            if x.size(0) == 1:
+                return 1
+            else:
+                return 2
+
+        with enable_profiling_mode():
+            old_num_runs = torch._C._jit_set_num_profiled_runs(2)
+            test_not_const(torch.rand([1, 2]))
+            test_not_const(torch.rand([2, 2]))
+            test_not_const(torch.rand([3, 2]))
+
+            graph_str = torch.jit.last_executed_optimized_graph()
+            FileCheck().check("Double(*:2, 2:1) = ").run(graph_str)
+            FileCheck().check_not("Double(1:2, 2:1) = ").run(graph_str)
+
+        torch._C._jit_set_num_profiled_runs(old_num_runs)
+
     def test_nested_bailouts(self):
         @torch.jit.script
         def fct_loop(x):
@@ -4713,7 +4734,7 @@ def foo(x):
 
     @skipIfRocm
     def test_torchbind_instantiate_missing_class(self):
-        with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class foo.IDontExist but it does not exist!'):
+        with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class \'foo.IDontExist\', but it does not exist!'):
             torch.classes.foo.IDontExist(3, 4, 5)
 
     @skipIfRocm
@@ -18024,33 +18045,6 @@ def normalize_check_ad(check_ad, name):
     check_ad = [[t] if isinstance(t, str) else t for t in check_ad]
 
     return check_ad
-
-
-class TestDocs(unittest.TestCase):
-    @slowTest
-    def test_docs(self):
-        import subprocess
-        docs_dir = '../docs'
-        docs_dir = [os.path.dirname(__file__), '..', 'docs']
-        docs_dir = os.path.join(*docs_dir)
-
-        def report_error(result):
-            out = result.stdout.decode('utf-8')
-            err = result.stderr.decode('utf-8')
-            raise RuntimeError("{}\n{}\n".format(err, out) +
-                               "Docs build failed (run `cd docs && " +
-                               "pip install -r requirements.txt && make doctest`)")
-        result = subprocess.run(
-            ['pip', 'install', '-r', 'requirements.txt'],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
-        if result.returncode != 0:
-            report_error(result)
-
-        result = subprocess.run(
-            ['make', 'doctest'],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
-        if result.returncode != 0:
-            report_error(result)
 
 
 class TestProducerVersion(unittest.TestCase):
