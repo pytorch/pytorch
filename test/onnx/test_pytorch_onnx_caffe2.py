@@ -1109,14 +1109,14 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
     @skipIfUnsupportedOpsetVersion([10])
-    def test_upsample(self):
+    def test_caffe2_upsample(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         model = nn.Upsample(size=[v * 2 for v in x.size()[2:]], mode='nearest')
         self.run_model_test(model, train=False, input=(x),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
     @skipIfUnsupportedOpsetVersion([10])
-    def test_interpolate_upsample(self):
+    def test_caffe2_interpolate_upsample(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
                 super(MyModel, self).__init__()
