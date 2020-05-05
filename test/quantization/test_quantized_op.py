@@ -327,12 +327,14 @@ class TestQuantizedOps(TestCase):
 
 
     """Tests the correctness of the quantized::qlayer_norm op."""
-    @given(shapes=hu.array_shapes(3, 5, 1, 32),
+    @given(shapes=hu.array_shapes(4, 4, 1, 32),
            torch_type=st.sampled_from((torch.qint8, torch.quint8)),
            X_rand_scale=st.floats(0.01, 1e3),
            Y_scale=st.floats(0.2, 2.6),
-           Y_zero_point=st.integers(0, 5))
-    def test_qlayer_norm(self, shapes, torch_type, X_rand_scale, Y_scale, Y_zero_point):
+           Y_zero_point=st.integers(0, 5),
+           channels_last=st.sampled_from((False, True)))
+    def test_qlayer_norm(self, shapes, torch_type, X_rand_scale, Y_scale,
+                         Y_zero_point, channels_last):
         if "fbgemm" not in torch.backends.quantized.supported_engines:
             return
 
@@ -359,6 +361,8 @@ class TestQuantizedOps(TestCase):
             qX = torch.quantize_per_tensor(X, scale=X_scale,
                                            zero_point=X_zero_point,
                                            dtype=torch_type)
+            if channels_last:
+                qX = qX.contiguous(memory_format=torch.channels_last)
             dqX = qX.dequantize()
 
             # Enforce non-homogeneous inputs
@@ -1591,16 +1595,18 @@ class TestQuantizedOps(TestCase):
            torch_type=st.sampled_from((torch.qint8, torch.quint8)),
            X_rand_scale=st.floats(0.01, 1e3),
            Y_scale=st.floats(0.2, 2.6),
-           Y_zero_point=st.integers(0, 5))
+           Y_zero_point=st.integers(0, 5),
+           channels_last=st.sampled_from((False, True)))
     def test_group_norm(self, batches, num_groups, channels_per_group,
                         elements_per_channel, torch_type, X_rand_scale,
-                        Y_scale, Y_zero_point):
+                        Y_scale, Y_zero_point, channels_last):
         if "fbgemm" not in torch.backends.quantized.supported_engines:
             return
 
         with override_quantized_engine("fbgemm"):
             num_channels = num_groups * channels_per_group
-            shapes = (batches, num_channels, elements_per_channel)
+            # minimum rank for for channels_last
+            shapes = (batches, num_channels, elements_per_channel, 1)
 
             # In the FP kernel, sums and sums of squares are calculated in floating point.
             # In the int8 and uint8 versions of the quantized kernel, they are
@@ -1632,6 +1638,8 @@ class TestQuantizedOps(TestCase):
             eps = 0.001
 
             qX = torch.quantize_per_tensor(X, X_scale, X_zero_point, torch_type)
+            if channels_last:
+                qX = qX.contiguous(memory_format=torch.channels_last)
             dqX = qX.dequantize()
 
             # Enforce non-homogeneous inputs
@@ -1658,13 +1666,14 @@ class TestQuantizedOps(TestCase):
                 message="GroupNorm failed:\n {} input vs\n {} actual vs \n{} expected"
                 .format(X, qY, qY_hat))
 
-    @given(shapes=hu.array_shapes(3, 5, 2, 32),
+    @given(shapes=hu.array_shapes(4, 4, 2, 32),
            torch_type=st.sampled_from((torch.qint8, torch.quint8)),
            X_rand_scale=st.floats(0.01, 1e3),
            Y_scale=st.floats(0.2, 2.6),
-           Y_zero_point=st.integers(0, 5))
+           Y_zero_point=st.integers(0, 5),
+           channels_last=st.sampled_from((False, True)))
     def test_instance_norm(self, shapes, torch_type, X_rand_scale,
-                           Y_scale, Y_zero_point):
+                           Y_scale, Y_zero_point, channels_last):
         if "fbgemm" not in torch.backends.quantized.supported_engines:
             return
 
@@ -1698,6 +1707,8 @@ class TestQuantizedOps(TestCase):
             eps = 0.001
 
             qX = torch.quantize_per_tensor(X, X_scale, X_zero_point, torch_type)
+            if channels_last:
+                qX = qX.contiguous(memory_format=torch.channels_last)
             dqX = qX.dequantize()
 
             # Enforce non-homogeneous inputs
