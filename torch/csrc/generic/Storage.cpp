@@ -135,7 +135,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 static Py_ssize_t THPStorage_(length)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-  return self->cdata->nbytes() / sizeof(scalar_t);
+  return THWStorage_(size)(LIBRARY_STATE self->cdata);
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
@@ -146,15 +146,10 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
   if (THPUtils_checkLong(index)) {
     int64_t nindex = THPUtils_unpackLong(index);
     if (nindex < 0)
-      nindex += (self->cdata->nbytes() / sizeof(scalar_t));
-    if (nindex < 0 || nindex >= (self->cdata->nbytes() / sizeof(scalar_t))) {
-      PyErr_Format(
-          PyExc_IndexError,
-          "index %" PRId64
-          " out of range for storage of "
-          "size %" PRId64,
-          (int64_t)nindex,
-          (int64_t)(self->cdata->nbytes() / sizeof(scalar_t)));
+      nindex += THWStorage_(size)(LIBRARY_STATE self->cdata);
+    if (nindex < 0 || nindex >= self->cdata->numel()) {
+      PyErr_Format(PyExc_IndexError, "index %" PRId64 " out of range for storage of "
+              "size %" PRId64, (int64_t) nindex, (int64_t) self->cdata->numel());
       return nullptr;
     }
     scalar_t value = THWStorage_(get)(LIBRARY_STATE self->cdata, nindex);
@@ -162,7 +157,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
   /* Slice index */
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, slicelength, step;
-    int64_t len = self->cdata->nbytes() / sizeof(scalar_t);
+    int64_t len = THWStorage_(size)(LIBRARY_STATE self->cdata);
     if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
       return nullptr;
     if (step != 1) {
@@ -175,20 +170,15 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
 
     at::StorageImpl* old_storage = self->cdata;
     c10::raw::intrusive_ptr::incref(old_storage);
-    caffe2::TypeMeta dtype = old_storage->dtype();
     at::Storage new_storage(c10::make_intrusive<at::StorageImpl>(
-        c10::StorageImpl::use_byte_size_t(),
-        dtype,
-        slicelength * dtype.itemsize(),
-        at::DataPtr(
-            static_cast<void*>(data + start),
-            old_storage,
-            [](void* s) {
-              c10::raw::intrusive_ptr::decref(static_cast<at::StorageImpl*>(s));
-            },
-            old_storage->device()),
-        old_storage->allocator(),
-        /* resizable */ false));
+      old_storage->dtype(),
+      slicelength,
+      at::DataPtr(static_cast<void*>(data + start),
+                  old_storage,
+                  [](void* s) { c10::raw::intrusive_ptr::decref(static_cast<at::StorageImpl*>(s)); },
+                  old_storage->device()),
+      old_storage->allocator(),
+      /* resizable */ false));
 
     PyObject *_ret = THPStorage_(New)(new_storage.unsafeReleaseStorageImpl());
     return _ret;
@@ -216,7 +206,7 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
     return 0;
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, slicelength, step;
-    int64_t len = self->cdata->nbytes() / sizeof(scalar_t);
+    int64_t len = THWStorage_(size)(LIBRARY_STATE self->cdata);
     if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
       return -1;
     if (step != 1) {

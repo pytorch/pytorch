@@ -223,7 +223,7 @@ c10::List<at::Tensor> cloneSparseTensors(
     if (!t.has_storage()) {
       return false; // avoid throwing below.
     }
-    auto storageSize = t.storage().nbytes();
+    auto storageSize = t.storage().elementSize() * t.storage().numel();
     auto usefulSize = t.element_size() * t.numel();
     constexpr size_t kMinMultiple = 2;
     constexpr size_t kMinRecopyBytes = 8 * 1024;
