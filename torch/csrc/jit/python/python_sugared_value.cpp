@@ -289,9 +289,6 @@ std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredNamedBufferDict(
       std::cout << selfType->getAttribute(i)->python_str() << std::endl;
       if (selfType->is_buffer_written_attribute(i)) {
           paramNames.push_back(selfType->getAttributeName(i));
-          std::cout << "is is_buffer_written_attribute" << std::endl;
-      } else {
-        std::cout << "is not is_buffer_written_attribute" << std::endl;
       }
     }
 
@@ -428,9 +425,6 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
     return toSugaredValue(v, m, loc);
   }
 
-  std::cout << "FIELD" << std::endl;
-  std::cout << field << std::endl;
-  std::cout << "END" << std::endl;
   // 2. Special case: for module dicts we manually desugar items(), keys(),
   // values() calls into the appropriate method.
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {

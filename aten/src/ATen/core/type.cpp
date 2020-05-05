@@ -1132,6 +1132,7 @@ size_t ClassType::addAttribute(
     const TypePtr& type,
     bool is_parameter,
     bool was_registered_as_buffer) {
+
   std::string what = is_parameter ? "parameter" : "attribute";
   what += (was_registered_as_buffer? "buffer" : "not buffer");
 

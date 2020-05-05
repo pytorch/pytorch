@@ -119,7 +119,6 @@ struct TORCH_API Module : public Object {
   void register_buffer(const std::string& name, at::Tensor v) {
     bool is_param = false;
     bool was_registered_as_buffer = true;
-    std::cout << "called register_buffer" << std::endl;
     type()->addOrCheckAttribute(name, TensorType::get(), is_param, was_registered_as_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
@@ -128,8 +127,6 @@ struct TORCH_API Module : public Object {
       const std::string& name,
       at::Tensor v,
       bool is_buffer) {
-      std::cout << "called register_parameter" << std::endl;
-
     type()->addOrCheckAttribute(name, TensorType::get(), !is_buffer, is_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
@@ -140,7 +137,6 @@ struct TORCH_API Module : public Object {
       IValue v,
       bool is_param = false,
       bool was_registered_as_buffer = false) {
-    std::cout << "called register_attribute" << std::endl;
     type()->addOrCheckAttribute(name, t, is_param, was_registered_as_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
