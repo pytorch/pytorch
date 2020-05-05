@@ -553,13 +553,15 @@ class ConvolutionOperatorTester {
             {subsamplingWidth(), subsamplingHeight()},
             {dilationWidth(), dilationHeight()},
             {paddingTop(), paddingLeft(), paddingBottom(), paddingRight()},
+            /*adjustment_dims=*/{0, 0},
             groups(),
             groupInputChannels() * groups(),
             groupOutputChannels() * groups(),
             kernelZeroPoint.data(),
             requantization_scale.data(),
             qmin(),
-            qmax());
+            qmax(),
+            /*transpose=*/false);
           auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
               new qnnpack::PrePackConvWeights(
                   conv_p,

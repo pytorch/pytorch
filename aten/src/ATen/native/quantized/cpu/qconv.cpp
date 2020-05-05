@@ -595,13 +595,15 @@ class QConvInt8 final {
           {stride_w, stride_h},
           {dilation_w, dilation_h},
           {pad_h, pad_w, pad_h, pad_w},
+          /*adjustment=*/{0, 0},
           groups,
           C,
           M,
           weight_zp_data,
           pack_data.requantization_scale.data(),
           output_min,
-          output_max);
+          output_max,
+          /*transpose=*/false);
 
       // Update the input scale to not pack again.
       pack_data.input_scale = input_scale;
@@ -624,7 +626,7 @@ class QConvInt8 final {
         "be greater than 0.")
 
     // Allocate output Tensor and a buffer for QNNPACK to use
-    Tensor output = at::_empty_affine_quantized(
+    Tensor output = at::native::empty_affine_quantized(
         output_shape,
         at::device(kCPU)
            .dtype(kQUInt8)
@@ -638,13 +640,15 @@ class QConvInt8 final {
         {stride_w, stride_h},
         {dilation_w, dilation_h},
         {pad_h, pad_w, pad_h, pad_w},
+        /*adjustment=*/{0, 0},
         groups,
         C,
         M,
         (uint8_t*)pack_data.w_zero_points.data_ptr<c10::quint8>(),
         pack_data.requantization_scale.data(),
         output_min,
-        output_max);
+        output_max,
+        /*transpose=*/false);
 
     const pytorch_qnnp_status run_status = qnnpack::qnnpackConv(
         conv_p,
