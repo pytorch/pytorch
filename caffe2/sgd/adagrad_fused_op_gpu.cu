@@ -198,9 +198,11 @@ __global__ void sparse_adagrad_fused_length_weighted_sum_gradient_kernel(
 
       // TODO: trying to reduce the variable number (common subexpression
       // elimination).
-      auto in_grad_temp = grad[gradIdx] + weight_decay * param[paramIdx];
-      auto out_grad_temp = in_weight_temp * in_grad_temp;
+      auto in_grad_temp = grad[gradIdx];
       w_grad += in_grad_temp * param[paramIdx];
+
+      auto out_grad_temp =
+          in_weight_temp * in_grad_temp + weight_decay * param[paramIdx];
 
       // TODO: split it into two kernels to make it more similar to exact fusion
       // kernel (not Approx on CPUs).
@@ -399,9 +401,10 @@ __global__
       const size_t paramIdx = index * post + i; // index for param
       // TODO: trying to reduce the variable number (common subexpression
       // elimination).
-      auto in_grad_temp = grad[gradIdx] + weight_decay * param[paramIdx];
-      auto out_grad_temp = in_weight_temp * in_grad_temp;
+      auto in_grad_temp = grad[gradIdx];
       w_grad += in_grad_temp * param[paramIdx];
+      auto out_grad_temp =
+          in_weight_temp * in_grad_temp + weight_decay * param[paramIdx];
 
       // TODO: split it into two kernels to make it more similar to exact fusion
       // kernel (not Approx on CPUs).
@@ -1119,6 +1122,10 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, AUX_GRAD);
 };
 
+// For GPU, the implementation of the exact and approx (RowWise)SparseAdagrad
+// fusion are both approximate implementations.
+// When we don't have the duplicated indices, the outputs are the same as the
+// CPU implementation.
 REGISTER_CUDA_OPERATOR(
     SparseAdagradFusedWithSparseLengthsSumGradient,
     CUDASparseAdagradFusedWithSparseLengthsSumGradientOp<
