@@ -87,6 +87,7 @@ ${return_type} ${type_wrapper_name}(${type_method_formals}) {
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
 ${return_type} ${type_wrapper_name}(${type_method_formals}) {
     ${named_guard_declaration}
+    ${device_init}
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
 }
@@ -717,6 +718,14 @@ def find_multidispatch_formals(formals):
     return [f for f in formals if is_multidispatch_formal(f)]
 
 
+def find_formal_by_type(formal_name, formals):
+    # type: (str,List[AtFormal]) -> Optional[AtFormal]
+    for formal in formals:
+        if formal_name == formal['dynamic_type']:
+            return formal
+    return None
+
+
 def format_formal(f):
     # type: (AtFormal) -> str
     return '{} {}'.format(f['type'], f['name'])
@@ -758,6 +767,26 @@ def gen_dispatch_key_init(var_name, formals):
         'DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);',
         'DispatchKey {} = c10::impl::dispatchTypeId(_dk_set, _dk_mask);'.format(var_name),
     ]
+
+
+def is_factory(option):
+    # type: (FunctionOption) -> bool
+    formals = option['formals_list']
+    return find_formal_by_type('TensorOptions', formals) is not None and 'method' not in option['variants']
+
+
+def gen_device_init(option, backend_type_env):
+    # type: (FunctionOption, Environment) -> List[str]
+    # generate a device init statement, if the passed function option is a Tensor factory.
+    #
+    if not is_factory(option):
+        return []
+
+    name = option['name']
+    device_type = backend_type_env['DeviceType']
+    assert device_type in ['CPU', 'CUDA'], \
+        "{}: unsupported device type '{}'".format(name, device_type)
+    return ['globalLegacyTypeDispatch().init{}();'.format(device_type)]
 
 
 def create_generic(top_env, declarations):
@@ -1093,12 +1122,6 @@ def create_generic(top_env, declarations):
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
 
-        def find_formal(formal_name, formals):
-            for formal in formals:
-                if formal_name == formal['dynamic_type']:
-                    return formal
-            return None
-
         def gen_tensor_method(option, formals):
             # type: (Any, List[AtFormal]) -> FunctionCode
             def swizzle_self(f):  # blegh
@@ -1182,7 +1205,7 @@ def create_generic(top_env, declarations):
 
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
-        assert find_formal('Type', formals) is None, \
+        assert find_formal_by_type('Type', formals) is None, \
             "Found Type argument in {}({}). Use TensorOptions instead.".format(
                 option['name'], ", ".join(option['method_formals_with_defaults']))
 
@@ -1197,7 +1220,7 @@ def create_generic(top_env, declarations):
         # For method-only entries, the first argument should be self
         if is_method and not is_namespace_function:
             assert formals[0]['name'] == 'self'
-        is_factory_method = find_formal('TensorOptions', formals) and 'method' not in option['variants']
+        is_factory_method = is_factory(option)
 
         check_methods_do_not_start_with_underscore(option['name'], is_method)
 
@@ -1206,7 +1229,7 @@ def create_generic(top_env, declarations):
         # first argument.  Scalar type test will be removed once TH is removed.
         # If you need more complex device guard behavior, you should disable
         # device guard and then manually add the guards you need.
-        dispatch_options = find_formal('TensorOptions', formals)
+        dispatch_options = find_formal_by_type('TensorOptions', formals)
         guard_tensor = None if dispatch_options else find_dispatch_tensor(formals)
         option['device_guard_declaration'] = device_guard(option, dispatch_options, guard_tensor)
         option['named_guard_declaration'] = named_guard(option, find_tensors(formals),
@@ -1572,12 +1595,18 @@ def create_derived(backend_type_env, declarations):
 
             backend = backend_type_env['Backend']
             if backend in option['backend_types']:
+
                 native_dispatch = dispatch.get(backend)
+
                 type_object_declarations.append(
                     NATIVE_DISPATCH_DECLARATION.substitute(env))
+
                 option['native_type_method_dispatch'] = native_dispatch
+                option['device_init'] = gen_device_init(option, backend_type_env)
+
                 type_object_definitions.append(
                     NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
+
                 if native_dispatch:
                     if option['use_c10_dispatcher'] == 'full':
                         op_registrations.append(OpRegistration(

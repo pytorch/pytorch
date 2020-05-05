@@ -251,11 +251,11 @@ class MultiProcessTestCase(TestCase):
         subprocess_error = False
         while True:
             # check to see if any subprocess exited with an error early.
-            for p in self.processes:
-                # This is the exited code processes exit with if they
+            for (i, p) in enumerate(self.processes):
+                # This is the exit code processes exit with if they
                 # encountered an exception.
                 if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE:
-                    print("Some process exited badly, terminating rest.")
+                    print("Process {} terminated with exit code {}, terminating remaining processes.".format(i, p.exitcode))
                     active_children = torch.multiprocessing.active_children()
                     for ac in active_children:
                         ac.terminate()
