@@ -676,6 +676,36 @@ class RpcTest(RpcAgentTestFixture):
             )
             self.assertEqual(ret, torch.ones(n, n) * 2)
 
+    @dist_init
+    def test_multi_rpc_async(self):
+        import gc
+
+        def make_rpc(n):
+            return rpc.rpc_async(
+                worker_name(dst_rank),
+                torch.add,
+                args=(torch.ones(n, n), torch.ones(n, n)),
+            )
+
+        dst_rank = (self.rank + 1) % self.world_size
+        for i in range(20):
+            n = i + self.rank + 1
+            m = n + 1
+            fut1 = make_rpc(n)
+            ret1 = fut1.wait()
+            # delete fut's references to the returned tensor
+            del fut1
+            gc.collect()
+
+            fut2 = make_rpc(m)
+            ret2 = fut2.wait()
+            # delete fut's references to the returned tensor
+            del fut2
+            gc.collect()
+
+            self.assertEqual(ret1, torch.ones(n, n) * 2)
+            self.assertEqual(ret2, torch.ones(m, m) * 2)
+
     def _run_uneven_workload(self, num_repeat=30):
         # worker0 drives and waits for worker1 and worker2
         # throughout the test.
