@@ -126,23 +126,24 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
   scalar_t* values_data_base = values.data_ptr<scalar_t>();
   iscalar_t* indices_data_base = indices.data_ptr<iscalar_t>();
   scalar_t* out_values_data_base = out_values.data_ptr<scalar_t>();
-  /* Compute pool indices */
   auto sizes = input.sizes().vec();
+  auto nvalues = get_nvalues(sizes, sparse_dim);
 
+  /* Compute pool indices */
   std::vector<iscalar_t> offsets = get_offsets<iscalar_t>(indices, sizes, dim);
   iscalar_t mx_p;
   std::vector<iscalar_t> pool = get_dense_offsets<iscalar_t>(mx_p, offsets);
 
-  /* Compute mx */
+  /* Compute mx - a max tensor along sparse dimension */
   std::vector<int64_t> mx_sizes(sizes.begin() + sparse_dim - 1, sizes.end());
   mx_sizes[0] = mx_p;
   at::Tensor mx = at::empty(mx_sizes, values.options());
   scalar_t* mx_data_base = mx.data_ptr<scalar_t>();
-  auto nvalues = get_nvalues(sizes, sparse_dim);
-
-  auto ninf = -std::numeric_limits<scalar_t>::infinity();
-  for (int64_t j=0; j < nvalues * mx_p; j++) {
-    mx_data_base[j] = ninf;
+  {
+    auto ninf = -std::numeric_limits<scalar_t>::infinity();
+    for (int64_t j=0; j < nvalues * mx_p; j++) {
+      mx_data_base[j] = ninf;
+    }
   }
 
   for (int64_t i=0; i < nnz; i++) {
