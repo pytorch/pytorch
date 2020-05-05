@@ -33,12 +33,19 @@ class VulkanTensor : public c10::intrusive_ptr_target {
   VulkanTensor(const VulkanTensor&) = default;
   VulkanTensor& operator=(const VulkanTensor&) = default;
 
-  std::vector<int64_t> sizes();
+  inline std::shared_ptr<Impl> impl() {
+    return pImpl;
+  }
+  inline std::shared_ptr<Impl> impl() const {
+    return pImpl;
+  }
+  std::vector<int64_t> sizes() const;
   void setDataFromHost(const float* data);
   void copyDataToHost(float* data);
-  bool hasStorage();
+  bool hasStorage() const;
   void allocateStorage();
 
+ private:
   std::shared_ptr<Impl> pImpl;
 };
 

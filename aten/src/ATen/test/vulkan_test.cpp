@@ -3,6 +3,22 @@
 #include "ATen/ATen.h"
 #include "ATen/vulkan/Context.h"
 
+bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
+  double maxValue = 0.0;
+  for (auto& tensor : inputs) {
+    maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
+  }
+  // return diff.abs().max().item<float>() < 2e-6 * maxValue;
+  return diff.abs().max().item<float>() < 0.01;
+}
+bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
+  return checkRtol(a - b, {a, b});
+}
+
+bool exactlyEqual(const at::Tensor& a, const at::Tensor& b) {
+  return (a - b).abs().max().item<float>() == 0.f;
+}
+
 TEST(VulkanTest, ToVulkanToCpu) {
   if (!at::vulkan::is_available())
     return;
@@ -12,7 +28,7 @@ TEST(VulkanTest, ToVulkanToCpu) {
   ASSERT_TRUE(tv.options().device().type() == at::kVulkan);
   auto t2 = tv.cpu();
   ASSERT_TRUE(t2.options().device().type() == at::kCPU);
-  ASSERT_TRUE(t2.equal(t));
+  ASSERT_TRUE(almostEqual(t2, t));
 }
 
 TEST(VulkanTest, FailOnStrides) {
@@ -38,7 +54,7 @@ TEST(VulkanTest, UpsampleNearest2D) {
   auto t_out =
       tv_out.to(at::TensorOptions{at::Device{at::kCPU}}.dtype(at::kFloat));
 
-  ASSERT_TRUE(t_out.equal(t_out_expected));
+  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
 TEST(VulkanTest, Add) {
@@ -52,7 +68,7 @@ TEST(VulkanTest, Add) {
   auto tv_out = at::add(tv_in0, tv_in1, 2);
   auto t_out = tv_out.cpu();
 
-  ASSERT_TRUE(t_out.equal(t_out_expected));
+  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
 TEST(VulkanTest, Conv2dWeightsOnCPU) {
@@ -70,6 +86,6 @@ TEST(VulkanTest, Conv2dWeightsOnCPU) {
   auto tv_in = t_in.vulkan();
   auto tv_out = at::conv2d(tv_in, t_w, t_b, stride, padding, dilation, groups);
   auto t_out = tv_out.cpu();
-
-  ASSERT_TRUE(t_out.equal(t_out_expected));
+  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
+

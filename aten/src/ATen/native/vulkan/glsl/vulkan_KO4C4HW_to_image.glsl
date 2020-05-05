@@ -1,18 +1,22 @@
-#version 310 es
+#version 450 core
 layout(std430) buffer;
-layout(rgba32f, binding=0) writeonly uniform mediump image3D uOutput;
-layout(binding=2) readonly buffer kernel{
+layout(std430) uniform;
+layout(set=0, rgba16f, binding=0) writeonly mediump uniform image3D uOutput;
+layout(set=0, binding=1) readonly buffer kernel{
     vec4 data[];
 } uKernel;
+layout(set=0, binding=2) uniform constBlock{
+    int KWxKH;
+    int C_4;
+} uConstBlock;
 
-layout(location = 3) uniform int uKWxKH;
-layout(location = 4) uniform int uC_4;
-
-layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+layout (local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
   ivec3 pos = ivec3(gl_GlobalInvocationID) * ivec3(4, 1, 1);
-  int bufferIdx = pos.x*uKWxKH + 4*pos.y*uC_4*uKWxKH + 4*pos.z;
+  int KWxKH = uConstBlock.KWxKH;
+  int C_4 = uConstBlock.C_4;
+  int bufferIdx = pos.x*KWxKH + 4*pos.y*C_4*KWxKH + 4*pos.z;
   vec4 v0 = uKernel.data[bufferIdx+0];
   vec4 v1 = uKernel.data[bufferIdx+1];
   vec4 v2 = uKernel.data[bufferIdx+2];

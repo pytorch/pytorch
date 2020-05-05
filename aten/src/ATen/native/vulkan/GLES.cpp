@@ -479,11 +479,6 @@ std::unique_ptr<GLShader> createShader(
     const char* content,
     const std::vector<std::string>& prefix = {}) {
   std::ostringstream tc;
-  tc << "#version 310 es\n";
-  tc << "#define PRECISION highp\n";
-  tc << "precision PRECISION float;\n";
-  tc << "#define FORMAT rgba32f\n";
-
   for (auto& s : prefix) {
     tc << s << "\n";
   }
@@ -864,11 +859,8 @@ void conv2d(
   convProgram->useProgram();
   GL_CHECK_ERROR;
   bindImageTexInProgram(output.texId(), 0 /* unit */);
-  GL_CHECK_ERROR;
   bindTexInProgram(input.texId(), 0, 1 /* binding */);
-  GL_CHECK_ERROR;
   bindTexInProgram(kernelTex->id(), 1, 2 /* binding */);
-  GL_CHECK_ERROR;
   biasBuf->bindInProgram(3);
   GL_CHECK_ERROR;
 
@@ -876,11 +868,8 @@ void conv2d(
   glUniform2i(5, KW, KH);
   glUniform2i(6, SX, SY);
   glUniform2i(7, DX, DY);
-  glUniform1i(8, 4);
-  GL_CHECK_ERROR;
-
-  glUniform3i(10, OW, OH, OC_4);
-  glUniform3i(11, W, H, C_4);
+  glUniform3i(8, OW, OH, OC_4);
+  glUniform3i(9, W, H, C_4);
   GL_CHECK_ERROR;
 
   compute(
