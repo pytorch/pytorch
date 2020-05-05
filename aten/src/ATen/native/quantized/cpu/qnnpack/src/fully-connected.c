@@ -104,8 +104,6 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_nc_q8(
 
   fully_connected->kernel_zero_point = kernel_zero_points[0];
 
-  // TODO Kimish: Passing address of stack variable, kernel_zero_point
-  // and requantization_scale is not safe. Fix this.
   fully_connected->conv_quantization_params =
       pytorch_qnnp_compute_conv_quantization_params(
           input_zero_point,
