@@ -16,9 +16,9 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_UBSAN, TestCase, IS_PPC, IS_MACOS
+from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
-    override_quantized_engine
+    override_quantized_engine, supported_qengines
 
 np_dtype = {
     torch.quint8 : np.uint8,
@@ -333,7 +333,7 @@ class TestQuantizedOps(TestCase):
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
     def test_qlayer_norm(self, shapes, torch_type, X_rand_scale, Y_scale, Y_zero_point):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
+        if "fbgemm" not in supported_qengines:
             return
 
         with override_quantized_engine("fbgemm"):
@@ -1595,7 +1595,7 @@ class TestQuantizedOps(TestCase):
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
     def test_batch_norm2d(self, X, Y_scale, Y_zero_point):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
+        if "fbgemm" not in supported_qengines:
             return
 
         with override_quantized_engine("fbgemm"):
@@ -1618,7 +1618,7 @@ class TestQuantizedOps(TestCase):
             self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
 
     def test_batch_norm2d_relu(self):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
+        if "fbgemm" not in supported_qengines:
             return
 
         # hypothesis too slow for this test, create test cases manually
@@ -1668,7 +1668,7 @@ class TestQuantizedOps(TestCase):
                     message="{} vs {}".format(qy, quantize_ref))
 
     def test_batch_norm3d(self):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
+        if "fbgemm" not in supported_qengines:
             return
 
         # hypothesis too slow for this test, create test cases manually
@@ -1724,11 +1724,9 @@ class TestDynamicQuantizedLinear(TestCase):
     def test_qlinear(self, batch_size, input_channels, output_channels,
                      use_bias, use_relu, use_multi_dim_input, use_channelwise, qengine):
 
-        if qengine not in torch.backends.quantized.supported_engines:
+        if qengine not in supported_qengines:
             return
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_ASAN or TEST_WITH_UBSAN or IS_MACOS:
-                return
             use_channelwise = False
             use_relu = False
 
@@ -1922,13 +1920,10 @@ class TestQuantizedLinear(unittest.TestCase):
            qengine=st.sampled_from(("qnnpack", "fbgemm")))
     def test_qlinear(self, batch_size, input_channels, output_channels, use_bias,
                      use_relu, use_multi_dim_input, use_channelwise, qengine):
-        if qengine not in torch.backends.quantized.supported_engines:
+        if qengine not in supported_qengines:
             return
         decimal_val = 4
         if qengine == 'qnnpack':
-            # QNNPACK qlinear is flaky on MACOS. Issue #27326
-            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
-                return
             use_channelwise = False
             use_multi_dim_input = False
             # QNNPACK supports uint8 in the kernels. In the op we shift the int8
@@ -2046,11 +2041,9 @@ class TestQuantizedLinear(unittest.TestCase):
            use_channelwise=st.booleans(),
            qengine=st.sampled_from(("qnnpack", "fbgemm")))
     def test_qlinear_unpack(self, W, use_channelwise, qengine):
-        if qengine not in torch.backends.quantized.supported_engines:
+        if qengine not in supported_qengines:
             return
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN:
-                return
             use_channelwise = False
 
         with override_quantized_engine(qengine):
@@ -2311,12 +2304,9 @@ class TestQuantizedConv(unittest.TestCase):
             use_channelwise,
             qengine
     ):
-        if qengine not in torch.backends.quantized.supported_engines:
+        if qengine not in supported_qengines:
             return
         if qengine == 'qnnpack':
-            # QNNPACK qconv is flaky on MACOS. Issue #27326
-            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
-                return
             use_channelwise = False
 
         input_channels = input_channels_per_group * groups
@@ -2370,11 +2360,9 @@ class TestQuantizedConv(unittest.TestCase):
     def test_qconv_unpack(
         self, inputs, stride_h, stride_w, pad_h, pad_w, channelwise, qengine
     ):
-        if qengine not in torch.backends.quantized.supported_engines:
+        if qengine not in supported_qengines:
             return
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN:
-                return
             channelwise = False
 
         with override_quantized_engine(qengine):
@@ -2422,12 +2410,8 @@ class TestQuantizedConv(unittest.TestCase):
         use_bias,
         qengine,
     ):
-        if qengine not in torch.backends.quantized.supported_engines:
+        if qengine not in supported_qengines:
             return
-        if qengine == 'qnnpack':
-            # QNNPACK qconv is flaky on MACOS. Issue #27326
-            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
-                return
 
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
@@ -2533,7 +2517,7 @@ class TestQuantizedConv(unittest.TestCase):
         use_channelwise,
         qengine
     ):
-        if qengine not in torch.backends.quantized.supported_engines:
+        if qengine not in supported_qengines:
             return
 
         input_channels = input_channels_per_group * groups
@@ -2590,7 +2574,7 @@ class TestQuantizedConv(unittest.TestCase):
         self, inputs, stride_d, stride_h, stride_w, pad_d, pad_h, pad_w,
         channelwise, qengine
     ):
-        if qengine not in torch.backends.quantized.supported_engines:
+        if qengine not in supported_qengines:
             return
 
         with override_quantized_engine(qengine):
@@ -2625,13 +2609,8 @@ class TestPadding(TestCase):
         self.assertEqual(qy_ref, qy_hat)
 
 
-@unittest.skipUnless('qnnpack' in torch.backends.quantized.supported_engines,
-                     "This Pytorch Build has not been built with QNNPACK")
-@unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")
-@unittest.skipIf(TEST_WITH_UBSAN,
-                 "QNNPACK does not play well with UBSAN at the moment,"
-                 " so we skip the test if we are in a UBSAN environment.")
-@unittest.skipIf(IS_MACOS, "QNNPACK tests are flaky on MacOS currently - Issue #29326")
+@unittest.skipUnless('qnnpack' in supported_qengines,
+                     "This Pytorch Build has not been built with or does not support QNNPACK")
 class TestQNNPackOps(TestCase):
     """Tests the correctness of the quantized::qnnpack_relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
