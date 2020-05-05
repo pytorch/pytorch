@@ -1123,10 +1123,7 @@ void LoopNest::reorderAxis(Tensor* t, For* a, For* b) {
 
   // Do a shallow copy of the inner blocks.
   Block* body = new Block({});
-  for (auto* s : inner->body()->stmts()) {
-    inner->body()->remove_stmt(s);
-    body->append_stmt(s);
-  }
+  body->splice(body->end(), inner->body());
 
   For* before{outer};
   For* after{nullptr};
@@ -1156,7 +1153,9 @@ void LoopNest::reorderAxis(Tensor* t, For* a, For* b) {
 
     bool pastMidpoint = false;
     bool hadBeforeStmts = false;
-    for (Stmt* s : loop->body()->stmts()) {
+    for (auto I = loop->body()->begin(), E = loop->body()->end(); I != E;) {
+      // Be careful not to invalidate the iterator.
+      Stmt* s = *(I++);
       if (s == last) {
         // This is the midpoint.
         loop->body()->remove_stmt(s);
@@ -1281,7 +1280,7 @@ static Store* getStoreStmtOfProducer(Stmt* s) {
     return st;
   }
   if (Block* b = dynamic_cast<Block*>(s)) {
-    for (Stmt* ss : b->stmts()) {
+    for (Stmt* ss : *b) {
       if (Store* st = dynamic_cast<Store*>(ss)) {
         return st;
       }
