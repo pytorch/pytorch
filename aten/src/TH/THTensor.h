@@ -11,6 +11,9 @@
 #include <TH/THGenerateAllTypes.h>
 
 #include <TH/generic/THTensor.h>
+#include <TH/THGenerateComplexTypes.h>
+
+#include <TH/generic/THTensor.h>
 #include <TH/THGenerateHalfType.h>
 
 #include <TH/generic/THTensor.h>
