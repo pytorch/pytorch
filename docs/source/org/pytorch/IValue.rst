@@ -38,40 +38,40 @@ dictStringKeyFrom
 
    Creates a new \ ``IValue``\  of type \ ``Dict[str, V]``\ .
 
-from
-^^^^
+from(Tensor)
+^^^^^^^^^^^^
 
 .. java:method:: public static IValue from(Tensor tensor)
    :outertype: IValue
 
    Creates a new \ ``IValue``\  of type \ ``Tensor``\ .
 
-from
-^^^^
+from(boolean)
+^^^^^^^^^^^^^
 
 .. java:method:: public static IValue from(boolean value)
    :outertype: IValue
 
    Creates a new \ ``IValue``\  of type \ ``bool``\ .
 
-from
-^^^^
+from(long)
+^^^^^^^^^^
 
 .. java:method:: public static IValue from(long value)
    :outertype: IValue
 
    Creates a new \ ``IValue``\  of type \ ``int``\ .
 
-from
-^^^^
+from(double)
+^^^^^^^^^^^^
 
 .. java:method:: public static IValue from(double value)
    :outertype: IValue
 
    Creates a new \ ``IValue``\  of type \ ``float``\ .
 
-from
-^^^^
+from(String)
+^^^^^^^^^^^^
 
 .. java:method:: public static IValue from(String value)
    :outertype: IValue
@@ -162,40 +162,40 @@ isTuple
 .. java:method:: public boolean isTuple()
    :outertype: IValue
 
-listFrom
-^^^^^^^^
+listFrom(boolean...)
+^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static IValue listFrom(boolean... list)
    :outertype: IValue
 
    Creates a new \ ``IValue``\  of type \ ``List[bool]``\ .
 
-listFrom
-^^^^^^^^
+listFrom(long...)
+^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static IValue listFrom(long... list)
    :outertype: IValue
 
    Creates a new \ ``IValue``\  of type \ ``List[int]``\ .
 
-listFrom
-^^^^^^^^
+listFrom(double...)
+^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static IValue listFrom(double... list)
    :outertype: IValue
 
    Creates a new \ ``IValue``\  of type \ ``List[float]``\ .
 
-listFrom
-^^^^^^^^
+listFrom(Tensor...)
+^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static IValue listFrom(Tensor... list)
    :outertype: IValue
 
    Creates a new \ ``IValue``\  of type \ ``List[Tensor]``\ .
 
-listFrom
-^^^^^^^^
+listFrom(IValue...)
+^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static IValue listFrom(IValue... array)
    :outertype: IValue
