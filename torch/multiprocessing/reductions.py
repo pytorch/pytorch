@@ -1,6 +1,5 @@
 import torch
 import torch.utils.hooks
-from torch._namedtensor_internals import check_serializing_named_tensor
 import os
 import threading
 import multiprocessing
@@ -84,8 +83,8 @@ def reduce_event(event):
 
 
 def rebuild_tensor(cls, storage, metadata):
-    storage_offset, size, stride, requires_grad = metadata
-    t = torch._utils._rebuild_tensor(storage, storage_offset, size, stride)
+    storage_offset, size, stride, requires_grad, names = metadata
+    t = torch._utils._rebuild_tensor(storage, storage_offset, size, stride, names)
     if cls == torch.nn.parameter.Parameter:
         # we have to pass requires_grad into constructor, rather than set it as an
         # attribute later, because it's an important check for Integer Tensors to
@@ -98,7 +97,8 @@ def rebuild_tensor(cls, storage, metadata):
 
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                         storage_cls, storage_device, storage_handle, storage_size_bytes, storage_offset_bytes,
-                        requires_grad, ref_counter_handle, ref_counter_offset, event_handle, event_sync_required):
+                        requires_grad, ref_counter_handle, ref_counter_offset, event_handle, event_sync_required,
+                        names):
     # If storage_handle is None, storage points to nullptr.
     if storage_handle is None or storage_size_bytes == 0:
         storage = storage_cls(0)
@@ -120,7 +120,7 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
             storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset)
 
-    t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
+    t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride, names)
     if tensor_cls == torch.nn.parameter.Parameter:
         t = torch.nn.parameter.Parameter(t)
     t.requires_grad = requires_grad
@@ -136,7 +136,6 @@ def reduce_tensor(tensor):
                            "If you just want to transfer the data, call detach() on the tensor "
                            "before serializing (e.g., putting it on the queue).")
 
-    check_serializing_named_tensor(tensor)
     torch.utils.hooks.warn_if_has_hooks(tensor)
 
     # Note [CUDA IPC and the caching allocator]
@@ -256,10 +255,10 @@ def reduce_tensor(tensor):
                  ref_counter_handle,
                  ref_counter_offset,
                  event_handle,
-                 event_sync_required))
+                 event_sync_required, tensor.names))
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
-    metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad)
+    metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad, tensor.names if tensor.has_names() else None)
     return (rebuild_tensor, (type(tensor), storage, metadata))
 
 

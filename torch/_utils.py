@@ -125,14 +125,19 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 # OrderedDict(), if you pass a None you'll run afoul #12219.
 
 
-def _rebuild_tensor(storage, storage_offset, size, stride):
+def _rebuild_tensor(storage, storage_offset, size, stride, names=None):
     # first construct a tensor with the correct dtype/device
     t = torch.tensor([], dtype=storage.dtype, device=storage.device)
-    return t.set_(storage, storage_offset, size, stride)
+    t = t.set_(storage, storage_offset, size, stride)
+    if names is not None:
+        return t.rename(*names)
+    else:
+        return t
 
 
-def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks):
-    tensor = _rebuild_tensor(storage, storage_offset, size, stride)
+
+def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks, names=None):
+    tensor = _rebuild_tensor(storage, storage_offset, size, stride, names)
     tensor.requires_grad = requires_grad
     # NB: This line exists only for backwards compatibility; the
     # general expectation is that backward_hooks is an empty

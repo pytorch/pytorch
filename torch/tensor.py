@@ -1,6 +1,6 @@
 import torch
 import torch._C as _C
-from torch._namedtensor_internals import update_names, check_serializing_named_tensor, resolve_ellipsis
+from torch._namedtensor_internals import update_names, resolve_ellipsis
 from torch._namedtensor_internals import unzip_namedshape, single_ellipsis_index, is_ellipsis
 from collections import OrderedDict
 import torch.utils.hooks as hooks
@@ -71,7 +71,6 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
-        check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         # Note: Numpy array is chosen to be the rebuild component for XLA Tensor.
@@ -129,7 +128,8 @@ class Tensor(torch._C._TensorBase):
                     tuple(self.size()),
                     self.stride(),
                     self.requires_grad,
-                    OrderedDict())  # previously was self._backward_hooks
+                    OrderedDict(),  # previously was self._backward_hooks
+                    self.names)
             return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):

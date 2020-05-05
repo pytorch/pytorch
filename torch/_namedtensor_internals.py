@@ -7,13 +7,6 @@ subject to change or deletion.
 """
 
 
-def check_serializing_named_tensor(tensor):
-    if tensor.has_names():
-        raise RuntimeError(
-            "NYI: Named tensors don't support serialization. Please drop "
-            "names via `tensor = tensor.rename(None)` before serialization.")
-
-
 def build_dim_map(tensor):
     """Returns a map of { dim: dim_name } where dim is a name if the dim is named
     and the dim index otherwise."""

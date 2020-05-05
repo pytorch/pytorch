@@ -271,8 +271,6 @@ We also do not support the following subsystems, though some may work out
 of the box:
 
 - distributions
-- serialization (:func:`torch.load`, :func:`torch.save`)
-- multiprocessing
 - JIT
 - distributed
 - ONNX
