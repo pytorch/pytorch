@@ -33,10 +33,10 @@ def export_to_pbtxt(model, inputs, *args, **kwargs):
         *args, **kwargs)
 
 
-def export_to_pb(model, inputs, operator_export_type=torch.onnx.OperatorExportTypes.ONNX, *args, **kwargs):
+def export_to_pb(model, inputs, *args, **kwargs):
     f = io.BytesIO()
     with torch.no_grad():
-        torch.onnx.export(model, inputs, f, operator_export_type=operator_export_type, *args, **kwargs)
+        torch.onnx.export(model, inputs, f, *args, **kwargs)
     return f.getvalue()
 
 
