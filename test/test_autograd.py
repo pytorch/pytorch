@@ -2769,7 +2769,7 @@ class TestAutograd(TestCase):
 
     def test_profiler_aggregation_table(self):
         """
-        Test if the profiling result is aggregated for `repr(prof)` and `str(prof)`
+        Test if the profiling result is aggregated for `str(prof)`
 
         See: https://github.com/pytorch/pytorch/issues/37500
         """
