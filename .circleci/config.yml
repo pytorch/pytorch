@@ -517,6 +517,7 @@ jobs:
         command: |
           set -e
           docker stats --all --no-stream
+          echo "cd workspace; python test/print_test_stats.py test" | docker exec -u jenkins -i "$id" bash
           echo "Retrieving test reports"
           docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
         when: always
