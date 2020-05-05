@@ -205,56 +205,34 @@ private:
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
 struct RangeEventList {
-  // This mutex is used to serialize access when different threads are writing
-  // to the same instance of RangeEventList.
-  std::mutex mutex_;
-  constexpr static size_t MB = 1024 * 1024;
-  constexpr static size_t event_block_size = 16 * MB;
-  constexpr static size_t num_block_elements =
-    event_block_size / ceilToMultiple(sizeof(Event), alignof(Event));
-  static_assert(sizeof(Event[num_block_elements]) <= event_block_size,
-                "num_block_elements is calculated incorrectly");
-  using block_type = std::vector<Event>;
+  RangeEventList() {
+    events_.reserve(kReservedCapacity);
+  }
 
   template<typename... Args>
   void record(Args&&... args) {
     std::lock_guard<std::mutex> guard(mutex_);
-    if (blocks.empty() || blocks.front().size() == num_block_elements) {
-      allocBlock();
-    }
-    blocks.front().emplace_back(std::forward<Args>(args)...);
+    events_.emplace_back(std::forward<Args>(args)...);
   }
 
   std::vector<Event> consolidate() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    std::forward_list<block_type> localBlocks;
-    localBlocks.swap(blocks);
-    lock.unlock();
+    std::lock_guard<std::mutex> lock(mutex_);
     std::vector<Event> result;
-
-    for (auto & block : localBlocks) {
-      result.insert(result.begin(),
-                    std::make_move_iterator(block.begin()),
-                    std::make_move_iterator(block.end()));
-    }
+    result.insert(
+        result.begin(),
+        std::make_move_iterator(events_.begin()),
+        std::make_move_iterator(events_.end()));
+    events_.erase(events_.begin(), events_.end());
     return result;
   }
 
-  std::forward_list<block_type> blocks;
-  private:
-     // allocBlock() assumes that mutex_ is held when called, in order to prevent
-    // multiple threads' block writes stomping over each other.
-    void allocBlock() {
-      blocks.emplace_front();
-      auto & new_block = blocks.front();
-      new_block.reserve(num_block_elements);
-      // Materialize all pages in the new block to release jitter when recording events.
-      const char * const end_ptr = reinterpret_cast<char*>(new_block.data() + num_block_elements);
-      for (volatile const char * ptr = reinterpret_cast<char*>(new_block.data());
-          ptr < end_ptr; ptr += 4 * 1024) {
-        (*ptr);
-      }
-    }
+ private:
+  // This mutex is used to serialize access when different threads are writing
+  // to the same instance of RangeEventList.
+  std::mutex mutex_;
+  std::vector<Event> events_;
+
+  static const size_t kReservedCapacity = 1024;
 };
 
 using thread_event_lists = std::vector<std::vector<Event>>;
