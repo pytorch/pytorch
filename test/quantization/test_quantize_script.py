@@ -1618,7 +1618,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         FileCheck().check_not("aten::layer_norm") \
                    .run(m.graph)
 
-
     def test_swap_dequantize_all_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general ops without actually checking for execution of these ops
@@ -1642,6 +1641,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.hardtanh = torch.nn.Hardtanh()
                 self.elu = torch.nn.ELU()
                 self.hardsigmoid = torch.nn.Hardsigmoid()
+                self.relu = torch.nn.ReLU()
+                self.relu6 = torch.nn.ReLU6()
+                self.leaky_relu = torch.nn.LeakyReLU()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1694,6 +1696,14 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = F.elu(x)
                 x = self.hardsigmoid(x)
                 x = F.hardsigmoid(x)
+                x = self.relu(x)
+                x = F.relu(x)
+                x.relu_()
+                x = self.relu6(x)
+                x = F.relu6(x)
+                x = self.leaky_relu(x)
+                x = F.leaky_relu(x)
+                x.leaky_relu_()
                 x = self.conv(x)
                 return x
 
