@@ -64,25 +64,34 @@ if platform.system() == 'Windows':
 
     kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
     dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
+    with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
 
     for dll_path in dll_paths:
         if sys.version_info >= (3, 8):
             os.add_dll_directory(dll_path)
-        else:
+        elif with_load_library_flags:
             res = kernel32.AddDllDirectory(dll_path)
             if res == 0:
                 err = ctypes.WinError(ctypes.get_last_error())
                 err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
                 raise err
+        else:
+            dll_paths = [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]
+            dll_paths = list(filter(os.path.exists, dll_paths)) + [os.environ['PATH']]
+
+            os.environ['PATH'] = ';'.join(dll_paths)
 
     import glob
     dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
     for dll in dlls:
-        res = kernel32.LoadLibraryExW(dll, 0, 0x00001100)
-        if res == 0:
-            err = ctypes.WinError(ctypes.get_last_error())
-            err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
-            raise err
+        if with_load_library_flags:
+            res = kernel32.LoadLibraryExW(dll, 0, 0x00001100)
+            if res == 0:
+                err = ctypes.WinError(ctypes.get_last_error())
+                err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
+                raise err
+        else:
+            ctypes.CDLL(dll)
 
 
 # See Note [Global dependencies]
