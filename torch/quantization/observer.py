@@ -284,6 +284,7 @@ class MinMaxObserver(_ObserverBase):
     def forward(self, x_orig):
         r"""Records the running minimum and maximum of ``x``."""
         x = x_orig.detach()  # avoid keeping autograd tape
+        x = x.to(self.min_val.dtype)
         min_val = self.min_val
         max_val = self.max_val
         if min_val.numel() == 0 or max_val.numel() == 0:
@@ -292,8 +293,10 @@ class MinMaxObserver(_ObserverBase):
         else:
             min_val = torch.min(torch.min(x), min_val)
             max_val = torch.max(torch.max(x), max_val)
-        self.min_val = min_val
-        self.max_val = max_val
+        self.min_val.resize_(min_val.shape)
+        self.max_val.resize_(max_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
         return x_orig
 
     @torch.jit.export
@@ -375,6 +378,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
 
     def forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
+        x = x.to(self.min_val.dtype)
         min_val = self.min_val
         max_val = self.max_val
         if min_val.numel() == 0 or max_val.numel() == 0:
@@ -383,8 +387,10 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         else:
             min_val = min_val + self.averaging_constant * (torch.min(x) - min_val)
             max_val = max_val + self.averaging_constant * (torch.max(x) - max_val)
-        self.min_val = min_val
-        self.max_val = max_val
+        self.min_val.resize_(min_val.shape)
+        self.max_val.resize_(max_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
         return x_orig
 
 
@@ -566,6 +572,9 @@ class PerChannelMinMaxObserver(_ObserverBase):
         new_axis_list[self.ch_axis] = 0
         new_axis_list[0] = self.ch_axis
         y = x.permute(tuple(new_axis_list))
+        # Need to match dtype of min/max because the updates to buffers
+        # are done in place and types need to match for comparisons
+        y = y.to(self.min_vals.dtype)
         y = torch.flatten(y, start_dim=1)
         if min_vals.numel() == 0 or max_vals.numel() == 0:
             min_vals = torch.min(y, 1)[0]
@@ -573,8 +582,10 @@ class PerChannelMinMaxObserver(_ObserverBase):
         else:
             min_vals = torch.min(torch.min(y, 1)[0], min_vals)
             max_vals = torch.max(torch.max(y, 1)[0], max_vals)
-        self.min_vals = min_vals
-        self.max_vals = max_vals
+        self.min_vals.resize_(min_vals.shape)
+        self.max_vals.resize_(max_vals.shape)
+        self.min_vals.copy_(min_vals)
+        self.max_vals.copy_(max_vals)
         return x_orig
 
     @torch.jit.export
@@ -641,6 +652,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
 
     def forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
+        x = x.to(self.min_vals.dtype)
         min_vals = self.min_vals
         max_vals = self.max_vals
         x_dim = x.size()
@@ -656,8 +668,10 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         else:
             min_vals = min_vals + self.averaging_constant * (torch.min(y, 1)[0] - min_vals)
             max_vals = max_vals + self.averaging_constant * (torch.max(y, 1)[0] - max_vals)
-        self.min_vals = min_vals
-        self.max_vals = max_vals
+        self.min_vals.resize_(min_vals.shape)
+        self.max_vals.resize_(max_vals.shape)
+        self.min_vals.copy_(min_vals)
+        self.max_vals.copy_(max_vals)
         return x_orig
 
 class HistogramObserver(_ObserverBase):
@@ -880,9 +894,11 @@ class HistogramObserver(_ObserverBase):
         if min_val.numel() == 0 or max_val.numel() == 0:
             min_val = torch.min(x)
             max_val = torch.max(x)
-            self.min_val = min_val
-            self.max_val = max_val
-            self.histogram = torch.histc(x, self.bins, min=min_val, max=max_val)
+            self.min_val.resize_(min_val.shape)
+            self.min_val.copy_(min_val)
+            self.max_val.resize_(max_val.shape)
+            self.max_val.copy_(max_val)
+            torch.histc(x, self.bins, min=min_val, max=max_val, out=self.histogram)
         else:
             new_min = torch.min(x)
             new_max = torch.max(x)
@@ -905,9 +921,12 @@ class HistogramObserver(_ObserverBase):
                     start_idx,
                     self.bins)
 
-            self.histogram = combined_histogram
-            self.min_val = combined_min
-            self.max_val = combined_max
+            self.histogram.resize_(combined_histogram.shape)
+            self.histogram.copy_(combined_histogram)
+            self.min_val.resize_(combined_min.shape)
+            self.min_val.copy_(combined_min)
+            self.max_val.resize_(combined_max.shape)
+            self.max_val.copy_(combined_max)
         return x_orig
 
     @torch.jit.export
