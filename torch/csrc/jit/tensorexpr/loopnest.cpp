@@ -1441,8 +1441,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   }
 
   // TODO: Use name-hint of the producer instead of "temp"
-  const Buf* temp_buf =
-      new Buf(new Var("temp", kHandle), dims, st->value()->dtype());
+  const Buf* temp_buf = new Buf("temp", dims, st->value()->dtype());
 
   // Generate index variables for 'temp'
   std::vector<const Expr*> temp_indices(dims.size());
