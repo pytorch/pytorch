@@ -4141,7 +4141,7 @@ complex_list = ['add', '__radd__', 'sub', '__rsub__', 'mul', '__rmul__', 'div', 
                 'exp', 'sin', 'cos', 't', 'view', 'reshape', 'reshape_as', 'roll', 'view_as',
                 'expand', 'lerp', 'sum', 'repeat', 'zero_', 'clone', 'tril', 'triu', 'fill_',
                 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze', 'chunk', 'split', 'split_with_sizes',
-                'resize', 'resize_as']
+                'resize', 'resize_as', 'addcdiv', 'cross', ]
 
 def add_test(
         name,
