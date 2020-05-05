@@ -120,6 +120,25 @@ class TensorPipeAgent : public RpcAgent {
 
   mutable std::mutex mutex_;
   uint64_t nextMessageID_{0};
+
+  // Struct for capturing Time-Series Metrics
+  struct TimeSeriesMetricsTracker {
+    uint64_t currentSum_;
+    uint64_t currentCount_;
+
+    explicit TimeSeriesMetricsTracker(
+        uint64_t currentSum = 0,
+        uint64_t currentCount = 0);
+
+    void addData(uint64_t dataPoint);
+    float computeAverage();
+  };
+
+  // Map of Time-Series metrics tracked by the RPC Agent
+  std::unordered_map<std::string, std::unique_ptr<TimeSeriesMetricsTracker>>
+      timeSeriesMetrics_;
+  // Mutex to guard timeSeriesMetrics_
+  std::mutex metricsMutex_;
 };
 
 } // namespace rpc

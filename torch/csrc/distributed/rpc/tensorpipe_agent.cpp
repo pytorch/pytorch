@@ -19,6 +19,24 @@ namespace rpc {
 
 constexpr long kToMilliseconds = 1000;
 
+//////////////////////////  MetricsTracker  /////////////////////////////////
+
+TimeSeriesMetricsTracker::TimeSeriesMetricsTracker(
+    uint64_t currentSum,
+    uint64_t currentCount)
+    : currentSum_(currentSum), currentCount_(currentCount) {}
+
+void TimeSeriesMetricsTracker::addData(uint64_t dataPoint) {
+  currentSum_ += dataPoint;
+  ++currentCount_;
+}
+
+float TimeSeriesMetricsTracker::computeAverage() {
+  return currentCount_ == 0 ? 0 : currentSum_ / (float)currentCount_;
+}
+
+////////////////////////  TensorpipeRpcAgent  /////////////////////////////////
+
 TensorPipeAgent::TensorPipeAgent(
     worker_id_t selfId,
     std::string selfName,
