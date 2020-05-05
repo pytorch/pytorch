@@ -227,6 +227,15 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
     TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
     TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
     bucket_view.copy_(grad.view({-1}), /* non_blocking */ true);
+    auto currentStream = at::cuda::getCurrentCUDAStream();
+    auto defaultStream = at::cuda::getDefaultCUDAStream();
+    // The other stream will block.
+    if (currentStream != defaultStream) {
+      at::cuda::CUDAEvent event;
+      // Note that this event record has to be after the copy_ call.
+      event.record(currentStream);
+      replica.events.push_back(std::move(event));
+    }
   } else {
     bucket_view.zero_();
   }
@@ -407,6 +416,9 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
       // these operations are implicitly sequenced, and we don't need to
       // do any extra synchronization here.
       //
+      for (const at::cuda::CUDAEvent& cudaEvent : replica.events) {
+        cudaEvent.synchronize();
+      }
       tensors.push_back(replica.contents);
     }
     bucket.work = process_group_->allreduce(tensors);

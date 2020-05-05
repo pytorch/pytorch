@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <c10d/ProcessGroup.hpp>
+#include <ATen/cuda/CUDAEvent.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 
@@ -140,7 +141,7 @@ class Reducer {
     // Memory copies from gradient tensors into the bucket are potentially
     // done on different CUDA streams. We record an event for every copy
     // so that we can synchronize with them prior to kicking off the reduction.
-    // std::vector<at::cuda::CUDAEvent> events;
+    std::vector<at::cuda::CUDAEvent> events;
   };
 
   // A bucket holds N bucket replicas (1 per model replica).
