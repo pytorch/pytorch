@@ -25,24 +25,30 @@ void THStorage_(copy##TYPENAMESRC)(THStorage *storage, TH##TYPENAMESRC##Storage 
     data[i] = static_cast<scalar_t>(src_data[i]);                           \
 }
 
-IMPLEMENT_THStorage_COPY(Byte)
-IMPLEMENT_THStorage_COPY(Char)
-IMPLEMENT_THStorage_COPY(Short)
-IMPLEMENT_THStorage_COPY(Int)
-IMPLEMENT_THStorage_COPY(Long)
-IMPLEMENT_THStorage_COPY(Float)
-IMPLEMENT_THStorage_COPY(Double)
-IMPLEMENT_THStorage_COPY(Half)
-IMPLEMENT_THStorage_COPY(Bool)
-IMPLEMENT_THStorage_COPY(BFloat16)
-#ifdef THQUINT8
-IMPLEMENT_THStorage_COPY(QUInt8)
-#endif
-#ifdef THQINT8
-IMPLEMENT_THStorage_COPY(QInt8)
-#endif
-#ifdef THQINT32
-IMPLEMENT_THStorage_COPY(QInt32)
+// TODO: Add cross-dtype storage copy for complex storage
+#if !defined(TH_REAL_IS_COMPLEXFLOAT) && !defined(TH_REAL_IS_COMPLEXDOUBLE)
+  IMPLEMENT_THStorage_COPY(Byte)
+  IMPLEMENT_THStorage_COPY(Char)
+  IMPLEMENT_THStorage_COPY(Short)
+  IMPLEMENT_THStorage_COPY(Int)
+  IMPLEMENT_THStorage_COPY(Long)
+  IMPLEMENT_THStorage_COPY(Float)
+  IMPLEMENT_THStorage_COPY(Double)
+  IMPLEMENT_THStorage_COPY(Half)
+  IMPLEMENT_THStorage_COPY(Bool)
+  IMPLEMENT_THStorage_COPY(BFloat16)
+  #ifdef THQUINT8
+    IMPLEMENT_THStorage_COPY(QUInt8)
+  #endif
+  #ifdef THQINT8
+    IMPLEMENT_THStorage_COPY(QInt8)
+  #endif
+  #ifdef THQINT32
+    IMPLEMENT_THStorage_COPY(QInt32)
+  #endif
+#else
+  IMPLEMENT_THStorage_COPY(ComplexFloat)
+  IMPLEMENT_THStorage_COPY(ComplexDouble)
 #endif
 
 #endif

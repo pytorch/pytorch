@@ -290,21 +290,22 @@ PyObject* rpc_init(PyObject* /* unused */) {
                       >>> rref.remote().view(1, 4).to_here()  # returns tensor([[1., 1., 1., 1.]])
               )")
           .def(
-              py::pickle(
-                  [](const PyRRef& self) {
-                    TORCH_CHECK(
-                        false,
-                        "Can not pickle rref in python pickler, rref can only be pickled when using RPC");
-                    // __getstate__
-                    return self.pickle();
-                  },
-                  [](py::tuple t) { // NOLINT
-                    TORCH_CHECK(
-                        false,
-                        "Can not unpickle rref in python pickler, rref can only be unpickled when using RPC");
-                    // __setstate__
-                    return PyRRef::unpickle(t);
-                  }),
+              "__getstate__",
+              [](const PyRRef& /* unused */) {
+                TORCH_CHECK(
+                    false,
+                    "Can not pickle rref in python pickler, rref can only be "
+                    "pickled when using RPC");
+              },
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "__setstate__",
+              [](const PyRRef& /* unused */, const py::tuple& /* unused */) {
+                TORCH_CHECK(
+                    false,
+                    "Can not unpickle rref in python pickler, rref can only be "
+                    "unpickled when using RPC");
+              },
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_serialize",
@@ -482,7 +483,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
          const float rpcTimeoutSeconds,
          const py::args& args,
          const py::kwargs& kwargs) {
-        return std::make_shared<torch::jit::PythonFutureWrapper>(
+        return std::make_shared<jit::PythonFutureWrapper>(
             pyRpcBuiltin(dst, opName, rpcTimeoutSeconds, args, kwargs));
       },
       py::call_guard<py::gil_scoped_acquire>());
@@ -493,7 +494,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
          const float rpcTimeoutSeconds) {
-        return std::make_shared<torch::jit::PythonFutureWrapper>(
+        return std::make_shared<jit::PythonFutureWrapper>(
             pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rpcTimeoutSeconds),
             [](const py::object& value) {
               py::gil_scoped_release release;
@@ -507,7 +508,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               // also no pybind handling code can help shown the Python
               // exception.
               pythonRpcHandler.handleException(value);
-            });
+            } /* unwrap_func */);
       },
       py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),

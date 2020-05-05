@@ -44,6 +44,15 @@
 #endif
 
 namespace torch {
+
+#ifdef USE_DISTRIBUTED
+namespace distributed {
+namespace rpc {
+class PyRRef;
+} // namespace rpc
+} // namespace distributed
+#endif
+
 namespace jit {
 
 py::object toPyObject(IValue ivalue);

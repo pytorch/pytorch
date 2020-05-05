@@ -5,10 +5,6 @@
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
-namespace jit {
-struct PythonFutureWrapper;
-}
-
 namespace distributed {
 namespace rpc {
 

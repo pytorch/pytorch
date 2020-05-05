@@ -7,7 +7,7 @@ import threading
 
 import torch
 import torch.distributed as dist
-from torch.jit import Future  # noqa
+from torch.jit import Future  # noqa F401
 
 from . import (
     RpcBackendOptions,
@@ -202,7 +202,8 @@ def shutdown(graceful=True):
     ``graceful=False``, this is a local shutdown, and it does not wait for other
     RPC processes to reach this method.
 
-    Warning, future.wait() should not be called after shutdown().
+    .. warning::
+        Warning, ``future.wait()`` should not be called after ``shutdown()``.
 
     Arguments:
         graceful (bool): Whether to do a graceful shutdown or not. If True,

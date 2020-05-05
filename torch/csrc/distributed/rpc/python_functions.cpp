@@ -108,7 +108,7 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
 
 class PythonAwareJitFuture : public JitFuture {
  public:
-  PythonAwareJitFuture(TypePtr type) : JitFuture(std::move(type)) {}
+  explicit PythonAwareJitFuture(TypePtr type) : JitFuture(std::move(type)) {}
 
   void release_resources() override {
     if (completed() && !hasError() && value().isPyObject()) {

@@ -62,7 +62,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def(
       "_call_end_callbacks_on_fut",
       [](const at::Tensor& handle,
-         const std::shared_ptr<c10::ivalue::Future>& fut) {
+         const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
         torch::autograd::profiler::_call_end_callbacks_on_fut(handle, fut);
       });
 #endif

@@ -1,6 +1,6 @@
 #pragma once
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/utils/future.h>
 
 namespace torch {
 namespace autograd {
@@ -15,23 +15,7 @@ TORCH_API RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle);
 // Schedules RecordFunction's end callbacks to be run on completion of a future.
 void _call_end_callbacks_on_fut(
     const at::Tensor& handle,
-    const std::shared_ptr<c10::ivalue::Future> fut) {
-  // Add a callback onto the future to mark run RecordFunction's end callbacks
-  // when the future is completed.
-  fut->addCallback(
-      // Copy handle by value to persist after the python context manager is
-      // exited.
-      [handle]() {
-        TORCH_INTERNAL_ASSERT(
-            handle.defined(),
-            "Undefined RecordFunction handle. This can happen if the handle is "
-            "not correctly persisted and is destroyed before the future is "
-            "realized.");
-        auto& rec = getRecordFunctionFromTensor(handle);
-        rec._end();
-      });
-}
-
+    const c10::intrusive_ptr<c10::ivalue::Future>& fut);
 
 } // namespace profiler
 } // namespace autograd

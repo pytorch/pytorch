@@ -98,6 +98,11 @@ class RRefAPITest:
 
 
 @torch.jit.script
+def no_arg():
+    return 0
+
+
+@torch.jit.script
 def one_arg(value):
     return value + 1
 
@@ -474,11 +479,6 @@ def rpc_async_call_remote_torchscript_in_torchscript(
     fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
     ret = fut.wait()
     return ret
-
-
-@torch.jit.script
-def no_arg():
-    return 0
 
 
 class JitRpcAsyncOpTest:
