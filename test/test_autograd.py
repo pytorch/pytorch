@@ -2779,11 +2779,9 @@ class TestAutograd(TestCase):
             torch.einsum("i->", x)
 
         prof_str = str(prof)
-        prof_repr = repr(prof)
         prof_table = prof.table()
 
         self.assertEqual(prof_table, prof_str)
-        self.assertEqual(prof_table, prof_repr)
 
     def test_profiler_function_event_avg(self):
         avg = FunctionEventAvg()

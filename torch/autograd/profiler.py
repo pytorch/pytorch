@@ -291,7 +291,6 @@ class profile(object):
     def __repr__(self):
         if self.function_events is None:
             return '<unfinished torch.autograd.profile>'
-        self.function_events.populate_cpu_children()
         return repr(self.function_events)
 
     def __str__(self):
