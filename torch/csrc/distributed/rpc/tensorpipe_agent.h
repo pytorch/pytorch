@@ -169,7 +169,7 @@ class TensorPipeAgent : public RpcAgent {
     // being tracked) to the running sum and count.
     void addData(uint64_t dataPoint);
     // Returns the average of all the data points seen so far.
-    float computeAverage const();
+    float computeAverage() const;
   };
 
   // Map of Time-Series metrics tracked by the RPC Agent
