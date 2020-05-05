@@ -125,25 +125,6 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  erfc, THCNumerics<scalar_t>::erfc,  Real)
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC
 
-void THCTensor_(clamp)(THCState *state, THCTensor *self_, THCTensor *src, scalar_t min_value,
-  scalar_t max_value)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  if (self_ == src) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorClampOp<scalar_t>(min_value, max_value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src, TensorClampOp<scalar_t>(min_value, max_value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
 void THCTensor_(crossKernel)(THCState *state, THCTensor *self, THCTensor *x, THCTensor *y, int dimension)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self, x, y));
