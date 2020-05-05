@@ -552,46 +552,6 @@
         - THTensor* other
 ]]
 [[
-  name: _th_clamp
-  cname: clamp
-  variants: function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real min
-    - real max
-]]
-[[
-  name: _th_clamp_min
-  cname: cmaxValue
-  variants: function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real min
-]]
-[[
-  name: _th_clamp_max
-  cname: cminValue
-  variants: function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real max
-]]
-[[
   name: _th_dot
   backend_types: {CUDA: [floating_point], CPU: [all]}
   cname: dot
