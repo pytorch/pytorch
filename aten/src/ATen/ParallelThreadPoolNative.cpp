@@ -84,5 +84,13 @@ void launch(std::function<void()> func) {
 #endif
 }
 
+void launch_no_thread_state(std::function<void()> fn) {
+#if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
+  intraop_launch(std::move(fn));
+#else
+  get_pool().run(std::move(fn));
+#endif
+}
+
 } // namespace at
 #endif
