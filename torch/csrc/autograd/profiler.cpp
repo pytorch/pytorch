@@ -158,7 +158,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
     for (const auto& list : result) {
       total_elem_num += list.size();
     }
-    std::cerr << "in state consolidate, event_lists_map_.size(): " << event_lists_map_.size() << ", total_elem_num = " << total_elem_num << std::endl;
+    std::cerr << "Debug: in state consolidate, event_lists_map_.size(): " << event_lists_map_.size() << ", total_elem_num = " << total_elem_num << std::endl;
     return result;
   }
 
@@ -403,6 +403,8 @@ void enableProfiler(const ProfilerConfig& new_config) {
 }
 
 thread_event_lists disableProfiler() {
+  std::cerr << "Debug: in disableProfiler" << std::endl;
+
   // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
   auto state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
   auto state_ptr = static_cast<ProfilerThreadLocalState*>(state.get());
@@ -413,11 +415,14 @@ thread_event_lists disableProfiler() {
   at::removeCallback(state_ptr->callbackHandle());
 
   if (state_ptr->config().state == ProfilerState::NVTX) {
+    std::cerr << "Debug: return empty result list" << std::endl;
     return thread_event_lists();
   }
 
+  std::cerr << "Debug: mark __stop_profile" << std::endl;
   state_ptr->mark("__stop_profile");
 
+  std::cerr << "Debug: calling state consolidate" << std::endl;
   return state_ptr->consolidate();
 }
 
