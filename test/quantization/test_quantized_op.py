@@ -3042,7 +3042,6 @@ class TestComparatorOps(TestCase):
             self.assertEqual(result_ref, result,
                              "'tensor.{}(tensor)'' failed".format(op))
 
-    @unittest.skip("FIXME: Failing due to overflow error without width option")
     @given(A=hu.tensor(shapes=((3, 4, 5),),
                        qparams=hu.qparams()),
            b=hu.floats(allow_infinity=False, allow_nan=False))
@@ -3061,16 +3060,22 @@ class TestComparatorOps(TestCase):
         for op in ops_under_test_reversible:
             result_ref = getattr(dqA, op)(b)
             result = getattr(qA, op)(b)
+            note("result_ref 1: {}".format(result_ref))
+            note("result 1: {}".format(result))
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
             # Reversed broadcasting.
             result_ref = getattr(b, op)(dqA)
             result = getattr(b, op)(qA)
+            note("result_ref 2: {}".format(result_ref))
+            note("result 2: {}".format(result))
             self.assertEqual(result_ref, result,
                              "'scalar.{}(tensor)'' failed".format(op))
 
         for op in ops_under_test_nonreversible:
             result_ref = getattr(dqA, op)(b)
             result = getattr(qA, op)(b)
+            note("result_ref 3: {}".format(result_ref))
+            note("result 3: {}".format(result))
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
