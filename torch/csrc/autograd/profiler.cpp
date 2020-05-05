@@ -171,7 +171,9 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxMarkA(name.c_str());
     } else {
-      getEventList().record(
+      auto& list = getEventList();
+      std::cerr << "Debug: in state mark, &list = " << ((void*)&list) << std::endl;
+      list.record(
           EventKind::Mark,
           at::StringView(std::move(name)),
           at::RecordFunction::currentThreadId(),
@@ -219,7 +221,9 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
         cuda_stubs->nvtxRangePushA(name.str());
       }
     } else {
-      getEventList().record(
+      auto& list = getEventList();
+      std::cerr << "Debug: in state pushRange, &list = " << ((void*)&list) << std::endl;
+      list.record(
           EventKind::PushRange,
           name,
           at::RecordFunction::currentThreadId(),
@@ -235,7 +239,9 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxRangePop();
     } else {
-      getEventList(thread_id).record(
+      auto& list = getEventList(thread_id);
+      std::cerr << "Debug: in state popRange, thread_id = " << thread_id << " , &list = " << ((void*)&list) << std::endl;
+      list.record(
           EventKind::PopRange,
           at::StringView(""),
           thread_id,
@@ -296,7 +302,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
   std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
       event_lists_map_;
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false);
-  at::CallbackHandle handle_;
+  at::CallbackHandle handle_; // = 0
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
