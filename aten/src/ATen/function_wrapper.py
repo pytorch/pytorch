@@ -14,12 +14,6 @@ except ImportError:
     def TypedDict(name, attrs, total=True):  # type: ignore
         return Dict[Any, Any]
 
-import sys
-if sys.version_info[0] == 3:
-    string_type = str
-else:
-    string_type = basestring
-
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #
 # what has to be done to add a Operation ...
@@ -93,6 +87,7 @@ ${return_type} ${type_wrapper_name}(${type_method_formals}) {
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
 ${return_type} ${type_wrapper_name}(${type_method_formals}) {
     ${named_guard_declaration}
+    ${device_init}
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
 }
@@ -246,6 +241,8 @@ scalar_types = [
     ('Short', 'int16_t', 'Long', False),
     ('Half', 'Half', 'Double', True),
     ('BFloat16', 'BFloat16', 'BFloat16AccrealNotDefined', True),
+    ('ComplexFloat', 'ComplexFloat', 'ComplexDouble', False),
+    ('ComplexDouble', 'ComplexDouble', 'ComplexDouble', False),
 ]
 
 static_dispatch_backends = ['CPU', 'QuantizedCPU']
@@ -340,16 +337,16 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                 '(c10::Storage(scalarTypeToTypeMeta(${ScalarName}), 0, allocator(), true),'
+                 '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(${ScalarName}), 0, allocator(), true),'
                  'DispatchKey::${Backend}).release()',
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
                      'DispatchKey::${Backend}).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
                      'DispatchKey::${Backend}).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
                      'DispatchKey::${Backend}).release()',
 }
 
@@ -546,7 +543,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'type_method_formals': List[str],
     'variants': str,
     'with_gil': bool,
-    'zero_dim_dispatch_when_scalar': str,
 })
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
@@ -722,6 +718,14 @@ def find_multidispatch_formals(formals):
     return [f for f in formals if is_multidispatch_formal(f)]
 
 
+def find_formal_by_type(formal_name, formals):
+    # type: (str,List[AtFormal]) -> Optional[AtFormal]
+    for formal in formals:
+        if formal_name == formal['dynamic_type']:
+            return formal
+    return None
+
+
 def format_formal(f):
     # type: (AtFormal) -> str
     return '{} {}'.format(f['type'], f['name'])
@@ -763,6 +767,26 @@ def gen_dispatch_key_init(var_name, formals):
         'DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);',
         'DispatchKey {} = c10::impl::dispatchTypeId(_dk_set, _dk_mask);'.format(var_name),
     ]
+
+
+def is_factory(option):
+    # type: (FunctionOption) -> bool
+    formals = option['formals_list']
+    return find_formal_by_type('TensorOptions', formals) is not None and 'method' not in option['variants']
+
+
+def gen_device_init(option, backend_type_env):
+    # type: (FunctionOption, Environment) -> List[str]
+    # generate a device init statement, if the passed function option is a Tensor factory.
+    #
+    if not is_factory(option):
+        return []
+
+    name = option['name']
+    device_type = backend_type_env['DeviceType']
+    assert device_type in ['CPU', 'CUDA'], \
+        "{}: unsupported device type '{}'".format(name, device_type)
+    return ['globalLegacyTypeDispatch().init{}();'.format(device_type)]
 
 
 def create_generic(top_env, declarations):
@@ -888,20 +912,19 @@ def create_generic(top_env, declarations):
         # type: (THFormal, bool, bool) -> List[str]
         # Note: broadcast_dims can change type...
         # return the actuals that will be passed to the broadcast function.
-        # 1) in the common case, this is the broadcasted argument (e.g. "self") followed by the tensors
-        #    that it is broadcasted against (comma-separated) (e.g. "self, tensor1, tensor2").
-        # 2) in the broadcast_dims case, this is the broadcasted argument (e.g. "self") followed by the sizes
-        #    it is broadcasted to (as an initializer list), so e.g. the specification
-        #    "mat1.dim0,mat2.dim1" gets transformed to "self, {mat1.size(0),mat2.size(1)}"
-        if not broadcast_dims:
-            broadcast_actuals = [broadcast_arg['name']] + broadcast_arg['broadcast'].split()[0].split(",")
-        else:
-            broadcast_dims_spec = broadcast_arg['broadcast'].split()[1].split(':')[1].split(',')
-            # generate size call for each dimension
-            broadcast_dims = ([x.split('.')[0] + '.size(' + x.split('.')[1].replace('dim', '') + ')'  # type: ignore
-                              for x in broadcast_dims_spec])
-            broadcast_dims_init_list = '{' + ','.join(broadcast_dims) + '}'  # type: ignore
-            broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
+        # in the broadcast_dims case (the only currently supported case), this is
+        # the broadcasted argument (e.g. "self") followed by the sizes it is broadcasted
+        # to (as an initializer list), so e.g. the specification:
+        # "mat1.dim0,mat2.dim1"
+        # gets transformed to
+        # "self, {mat1.size(0),mat2.size(1)}"
+        assert broadcast_dims
+        broadcast_dims_spec = broadcast_arg['broadcast'].split()[1].split(':')[1].split(',')
+        # generate size call for each dimension
+        broadcast_dims = ([x.split('.')[0] + '.size(' + x.split('.')[1].replace('dim', '') + ')'  # type: ignore
+                          for x in broadcast_dims_spec])
+        broadcast_dims_init_list = '{' + ','.join(broadcast_dims) + '}'  # type: ignore
+        broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
 
         return broadcast_actuals
 
@@ -1041,7 +1064,7 @@ def create_generic(top_env, declarations):
         for t_raw in ret:
             # See Note [field_name versus name]
             field_name = None
-            if isinstance(t_raw, string_type):
+            if isinstance(t_raw, str):
                 t = t_raw
                 name = None
             else:
@@ -1098,12 +1121,6 @@ def create_generic(top_env, declarations):
         # be const_casted to be accepted as native function's non-const argument
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
-
-        def find_formal(formal_name, formals):
-            for formal in formals:
-                if formal_name == formal['dynamic_type']:
-                    return formal
-            return None
 
         def gen_tensor_method(option, formals):
             # type: (Any, List[AtFormal]) -> FunctionCode
@@ -1188,7 +1205,7 @@ def create_generic(top_env, declarations):
 
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
-        assert find_formal('Type', formals) is None, \
+        assert find_formal_by_type('Type', formals) is None, \
             "Found Type argument in {}({}). Use TensorOptions instead.".format(
                 option['name'], ", ".join(option['method_formals_with_defaults']))
 
@@ -1203,7 +1220,7 @@ def create_generic(top_env, declarations):
         # For method-only entries, the first argument should be self
         if is_method and not is_namespace_function:
             assert formals[0]['name'] == 'self'
-        is_factory_method = find_formal('TensorOptions', formals) and 'method' not in option['variants']
+        is_factory_method = is_factory(option)
 
         check_methods_do_not_start_with_underscore(option['name'], is_method)
 
@@ -1212,7 +1229,7 @@ def create_generic(top_env, declarations):
         # first argument.  Scalar type test will be removed once TH is removed.
         # If you need more complex device guard behavior, you should disable
         # device guard and then manually add the guards you need.
-        dispatch_options = find_formal('TensorOptions', formals)
+        dispatch_options = find_formal_by_type('TensorOptions', formals)
         guard_tensor = None if dispatch_options else find_dispatch_tensor(formals)
         option['device_guard_declaration'] = device_guard(option, dispatch_options, guard_tensor)
         option['named_guard_declaration'] = named_guard(option, find_tensors(formals),
@@ -1381,23 +1398,6 @@ def create_derived(backend_type_env, declarations):
         return [get_argument(env, argument, option)
                 for argument in arguments]
 
-    # TODO: Delete this per https://github.com/pytorch/pytorch/issues/33094
-    # after all TH uses are ported
-    def handle_zero_dim(env, option):
-        # type: (Environment, FunctionOption) -> List[str]
-        zero_dim_dispatch = option.get('zero_dim_dispatch_when_scalar', '')
-        if not zero_dim_dispatch:
-            return []
-        broadcasts_arg = zero_dim_dispatch in option.get('broadcast_actuals', '')
-        # if the argument broadcasts, then this would only affect cases where all broadcasted
-        # tensors were zero-dim, which is inconsistent with the scalar handling.
-        if broadcasts_arg:
-            return []
-        zero_dim_actuals = [arg['name']
-                            if arg['name'] != zero_dim_dispatch else "{}.item()".format(arg['name'])
-                            for arg in option['formals_list']]
-        return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
-
     def allocate_arg(arg, output_count, backend, scalar_name):
         # type: (THFormal, int, str, str) -> List[str]
         name = arg['name']
@@ -1448,7 +1448,6 @@ def create_derived(backend_type_env, declarations):
     def emit_body(env, option, scalar_type_cases):
         # type: (Environment, FunctionOption, List[str]) -> List[str]
         body = []  # type: List[str]
-        body += handle_zero_dim(env, option)
 
         switch_prologue = []  # type: List[str]
         output_count = 0
@@ -1596,12 +1595,18 @@ def create_derived(backend_type_env, declarations):
 
             backend = backend_type_env['Backend']
             if backend in option['backend_types']:
+
                 native_dispatch = dispatch.get(backend)
+
                 type_object_declarations.append(
                     NATIVE_DISPATCH_DECLARATION.substitute(env))
+
                 option['native_type_method_dispatch'] = native_dispatch
+                option['device_init'] = gen_device_init(option, backend_type_env)
+
                 type_object_definitions.append(
                     NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
+
                 if native_dispatch:
                     if option['use_c10_dispatcher'] == 'full':
                         op_registrations.append(OpRegistration(

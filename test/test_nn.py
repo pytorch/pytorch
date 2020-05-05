@@ -2446,6 +2446,70 @@ class TestNN(NNTestCase):
         pruned_tensor = p.prune(t, default_mask)
         self.assertEqual(t * expected_mask, pruned_tensor)
 
+    def test_rnn_pruning(self):
+        l = torch.nn.LSTM(32, 32)
+        # This Module has 4 parameters called:
+        # 'weight_ih_l0', 'weight_hh_l0', 'bias_ih_l0', 'bias_hh_l0'
+
+        # Pruning one of them causes one of the weights to become a tensor
+        prune.l1_unstructured(l, 'weight_ih_l0', 0.5)
+        assert (
+            sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights])
+            == 3
+        )
+
+        # Removing the pruning reparametrization restores the Parameter
+        prune.remove(l, 'weight_ih_l0')
+        assert (
+            sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights])
+            == 4
+        )
+
+        # Make sure that, upon removal of the reparametrization, the
+        # `._parameters` and `.named_parameters` contain the right params.
+        # Specifically, the original weight ('weight_ih_l0') should be placed
+        # back in the parameters, while the reparametrization component
+        # ('weight_ih_l0_orig') should be removed.
+        assert 'weight_ih_l0' in l._parameters
+        assert l._parameters['weight_ih_l0'] is not None
+        assert 'weight_ih_l0_orig' not in l._parameters
+        assert 'weight_ih_l0' in dict(l.named_parameters())
+        assert dict(l.named_parameters())['weight_ih_l0'] is not None
+        assert 'weight_ih_l0_orig' not in dict(l.named_parameters())
+
+
+    def test_rnn_weight_norm(self):
+        l = torch.nn.LSTM(32, 32)
+        # This Module has 4 parameters called:
+        # 'weight_ih_l0', 'weight_hh_l0', 'bias_ih_l0', 'bias_hh_l0'
+
+        # Applying weight norm on one of them causes it to become a tensor
+        l = torch.nn.utils.weight_norm(l, name='weight_ih_l0')
+        assert (
+            sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights])
+            == 3
+        )
+
+        # Removing the weight norm reparametrization restores the Parameter
+        l = torch.nn.utils.remove_weight_norm(l, name='weight_ih_l0')
+        assert (
+            sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights])
+            == 4
+        )
+
+        # Make sure that, upon removal of the reparametrization, the
+        # `._parameters` and `.named_parameters` contain the right params.
+        # Specifically, the original weight ('weight_ih_l0') should be placed
+        # back in the parameters, while the reparametrization components
+        # ('weight_ih_l0_v' and 'weight_ih_l0_g') should be removed.
+        assert 'weight_ih_l0' in l._parameters
+        assert l._parameters['weight_ih_l0'] is not None
+        assert 'weight_ih_l0_v' not in l._parameters
+        assert 'weight_ih_l0_g' not in l._parameters
+        assert 'weight_ih_l0' in dict(l.named_parameters())
+        assert dict(l.named_parameters())['weight_ih_l0'] is not None
+        assert 'weight_ih_l0_v' not in dict(l.named_parameters())
+        assert 'weight_ih_l0_g' not in dict(l.named_parameters())
 
     def test_weight_norm(self):
         input = torch.randn(3, 5)
@@ -7199,6 +7263,89 @@ class TestNN(NNTestCase):
 
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
 
+    def test_channel_shuffle(self):
+        #  3D tensor
+        x = torch.tensor(
+            [[[1, 2],
+              [5, 6],
+              [9, 10],
+              [13, 14],
+              ]]
+        )
+        y_ref = torch.tensor(
+            [[[1, 2],
+              [9, 10],
+              [5, 6],
+              [13, 14],
+              ]]
+        )
+        #  ChannelsFirst
+        y = F.channel_shuffle(x, 2)
+        self.assertEqual(y, y_ref)
+        #  ChannelsLast not supported for 3dim
+
+        #  4D tensor
+        x = torch.tensor(
+            [[[[1, 2],
+               [3, 4]],
+              [[5, 6],
+               [7, 8]],
+              [[9, 10],
+               [11, 12]],
+              [[13, 14],
+               [15, 16]],
+              ]]
+        )
+        y_ref = torch.tensor(
+            [[[[1, 2],
+               [3, 4]],
+              [[9, 10],
+               [11, 12]],
+              [[5, 6],
+               [7, 8]],
+              [[13, 14],
+               [15, 16]],
+              ]]
+        )
+        #  ChannelsFirst NCHW
+        y = F.channel_shuffle(x, 2)
+        self.assertEqual(y, y_ref)
+        #  ChannelsLast NHWC
+        y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last), 2)
+        y = y.contiguous(memory_format=torch.contiguous_format)
+        self.assertEqual(y, y_ref)
+
+        #  5D tensor
+        x = torch.tensor(
+            [[[[[1, 2],
+               [3, 4]]],
+              [[[5, 6],
+               [7, 8]]],
+              [[[9, 10],
+               [11, 12]]],
+              [[[13, 14],
+               [15, 16]]],
+              ]]
+        )
+        y_ref = torch.tensor(
+            [[[[[1, 2],
+               [3, 4]]],
+              [[[9, 10],
+               [11, 12]]],
+              [[[5, 6],
+               [7, 8]]],
+              [[[13, 14],
+               [15, 16]]],
+              ]]
+        )
+        #  ChannelsFirst NCHW
+        y = F.channel_shuffle(x, 2)
+        self.assertEqual(y, y_ref)
+        #  ChannelsLast NHWC
+        y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last_3d), 2)
+        y = y.contiguous(memory_format=torch.contiguous_format)
+        self.assertEqual(y, y_ref)
+
     def test_upsamplingNearest1d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2)
@@ -11078,7 +11225,7 @@ class TestNNDeviceType(NNTestCase):
     def test_maxpool3d_non_square_backward(self, device):
         # previous CUDA routine of this backward calculates kernel launch grid size
         # with last two dimensions interchanged, so the tailing along the longer dim
-        # get ignored. Here we test whether every potision gets gradient.
+        # get ignored. Here we test whether every position gets gradient.
         for dim in (2, 3, 4):
             shape = tuple(32 if i != dim else 256 for i in range(4))
             x = torch.randn(shape, device=device, requires_grad=True)
