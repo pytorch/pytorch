@@ -446,10 +446,18 @@ C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
   return max * std::sqrt(1 + rr * rr);
 }
 
+#ifdef __HIP_PLATFORM_HCC__
+#define ROCm_Bug(x)
+#else
+#define ROCm_Bug(x) x
+#endif
+
 template<typename T>
 C10_HOST_DEVICE T arg(const c10::complex<T>& z) {
-  return std::atan2(std::imag(z), std::real(z));
+  return ROCm_Bug(std)::atan2(std::imag(z), std::real(z));
 }
+
+#undef ROCm_Bug
 
 template<typename T>
 constexpr T norm(const c10::complex<T>& z) {
