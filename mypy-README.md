@@ -159,6 +159,130 @@ Stub files to be moved to inline annotations:
 - [ ] `torch/utils/data/sampler.pyi`
 - [ ] `torch/utils/hooks.pyi`
 
+Files with ignored errors:
+
+- [ ] `caffe2.contrib.aten.docs.sample]`
+- [ ] `caffe2.contrib.gloo.gloo_test]`
+- [ ] `caffe2.contrib.nccl.nccl_ops_test]`
+- [ ] `caffe2.contrib.playground.*]`
+- [ ] `caffe2.contrib.prof.cuda_profile_ops_test]`
+- [ ] `caffe2.contrib.tensorboard.tensorboard_exporter]`
+- [ ] `caffe2.contrib.tensorboard.tensorboard_exporter_test]`
+- [ ] `caffe2.contrib.warpctc.ctc_ops_test]`
+- [ ] `caffe2.core.nomnigraph.op_gen]`
+- [ ] `caffe2.distributed.store_ops_test_util]`
+- [ ] `caffe2.experiments.python.SparseTransformer]`
+- [ ] `caffe2.experiments.python.convnet_benchmarks]`
+- [ ] `caffe2.experiments.python.device_reduce_sum_bench]`
+- [ ] `caffe2.proto.*]`
+- [ ] `caffe2.python.*]`
+- [ ] `caffe2.quantization.server.*]`
+- [ ] `torch._classes]`
+- [ ] `torch._jit_internal]`
+- [ ] `torch._lobpcg]`
+- [ ] `torch._overrides]`
+- [ ] `torch._six]`
+- [ ] `torch._tensor_str]`
+- [ ] `torch._utils]`
+- [ ] `torch.autograd._functions.tensor]`
+- [ ] `torch.autograd.anomaly_mode]`
+- [ ] `torch.autograd.function]`
+- [ ] `torch.autograd.functional]`
+- [ ] `torch.autograd.gradcheck]`
+- [ ] `torch.autograd.profiler]`
+- [ ] `torch.autograd.variable]`
+- [ ] `torch.backends.cuda]`
+- [ ] `torch.backends.cudnn.rnn]`
+- [ ] `torch.backends.cudnn]`
+- [ ] `torch.backends.quantized]`
+- [ ] `torch.contrib._tensorboard_vis]`
+- [ ] `torch.cuda.*]`
+- [ ] `torch.distributed.*]`
+- [ ] `torch.distributions.*]`
+- [ ] `torch.functional.*]`
+- [ ] `torch.hub]`
+- [ ] `torch.jit._builtins]`
+- [ ] `torch.jit._logging]`
+- [ ] `torch.jit._recursive]`
+- [ ] `torch.jit.annotations]`
+- [ ] `torch.jit.frontend]`
+- [ ] `torch.jit.quantized.modules.utils]`
+- [ ] `torch.jit.quantized]`
+- [ ] `torch.jit.supported_ops]`
+- [ ] `torch.jit.supported_tensor_ops]`
+- [ ] `torch.jit.unsupported_tensor_ops]`
+- [ ] `torch.jit]`
+- [ ] `torch.multiprocessing.pool]`
+- [ ] `torch.multiprocessing.queue]`
+- [ ] `torch.multiprocessing.reductions]`
+- [ ] `torch.multiprocessing.spawn]`
+- [ ] `torch.multiprocessing]`
+- [ ] `torch.nn.cpp]`
+- [ ] `torch.nn.functional]`
+- [ ] `torch.nn.intrinsic.qat.modules.conv_fused]`
+- [ ] `torch.nn.intrinsic.quantized.modules.bn_relu]`
+- [ ] `torch.nn.intrinsic.quantized.modules.conv_relu]`
+- [ ] `torch.nn.intrinsic.quantized.modules.linear_relu]`
+- [ ] `torch.nn.parallel._functions]`
+- [ ] `torch.nn.qat.modules.activations]`
+- [ ] `torch.nn.qat.modules.conv]`
+- [ ] `torch.nn.quantized.dynamic.modules.linear]`
+- [ ] `torch.nn.quantized.dynamic.modules.rnn]`
+- [ ] `torch.nn.quantized.functional]`
+- [ ] `torch.nn.quantized.modules.activation]`
+- [ ] `torch.nn.quantized.modules.batchnorm]`
+- [ ] `torch.nn.quantized.modules.conv]`
+- [ ] `torch.nn.quantized.modules.functional_modules]`
+- [ ] `torch.nn.quantized.modules.linear]`
+- [ ] `torch.nn.quantized.modules.normalization]`
+- [ ] `torch.nn.quantized.modules.utils]`
+- [ ] `torch.nn.quantized.modules]`
+- [ ] `torch.nn.utils.memory_format]`
+- [ ] `torch.nn.utils.prune]`
+- [ ] `torch.onnx.symbolic_caffe2]`
+- [ ] `torch.onnx.symbolic_helper]`
+- [ ] `torch.onnx.symbolic_opset11]`
+- [ ] `torch.onnx.symbolic_opset8]`
+- [ ] `torch.onnx.symbolic_opset9]`
+- [ ] `torch.onnx.symbolic_registry]`
+- [ ] `torch.onnx.utils]`
+- [ ] `torch.quantization._numeric_suite]`
+- [ ] `torch.quantization._quantize_script]`
+- [ ] `torch.quantization.default_mappings]`
+- [ ] `torch.quantization.fake_quantize]`
+- [ ] `torch.quantization.fuse_modules]`
+- [ ] `torch.quantization.observer]`
+- [ ] `torch.quantization.stubs]`
+- [ ] `torch.quasirandom]`
+- [ ] `torch.random]`
+- [ ] `torch.serialization]`
+- [ ] `torch.sparse]`
+- [ ] `torch.storage]`
+- [ ] `torch.tensor]`
+- [ ] `torch.testing._internal.*]`
+- [ ] `torch.utils.bottleneck.__main__]`
+- [ ] `torch.utils.bundled_inputs]`
+- [ ] `torch.utils.checkpoint]`
+- [ ] `torch.utils.collect_env]`
+- [ ] `torch.utils.cpp_extension]`
+- [ ] `torch.utils.data._utils.collate]`
+- [ ] `torch.utils.data._utils.signal_handling]`
+- [ ] `torch.utils.data._utils.worker]`
+- [ ] `torch.utils.data.dataset]`
+- [ ] `torch.utils.data.distributed]`
+- [ ] `torch.utils.data]`
+- [ ] `torch.utils.hipify.hipify_python]`
+- [ ] `torch.utils.show_pickle]`
+- [ ] `torch.utils.tensorboard.*]`
+- [ ] `torch.utils]`
+
+
+Files with missing stub files:
+
+- [ ] `torch._C._jit_tree_views]`
+- [ ] `torch._C]`
+- [ ] `torch.for_onnx.onnx]`
+
 
 ### Scripts to regenerate the above task list
 
@@ -180,4 +304,31 @@ for subdir, dirs, files in os.walk(rootdir):
 
 for filepath in sorted(filepaths):
     print("- [ ] `" + filepath[len(rootdir)-5:] + "`")
+```
+
+
+```
+with open('mypy.ini', 'r') as f:
+    lines = f.readlines()
+
+
+errors_list = []
+imports_list = []
+
+for ix, line in enumerate(lines):
+    if line.startswith("ignore_missing_imports"):
+        if lines[ix-1].startswith("[mypy-torch."):
+            imports_list.append(lines[ix-1][6:-1])
+    elif line.startswith("ignore_errors"):
+        errors_list.append(lines[ix-1][6:-1])
+
+
+print("Files with ignored errors:\n")
+for f in sorted(errors_list):
+    print("- [ ] `" + f + "`")
+
+
+print("\n\nFiles with missing stub files:\n")
+for f in sorted(imports_list):
+    print("- [ ] `" + f + "`")
 ```
