@@ -16,6 +16,35 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestFunctionalBlocks(JitTestCase):
+    def test_list_functional_graph(self):
+        def fn(x, y, z):
+            out = torch.cat((x, y, z))
+            return out + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8
+
+        graph = torch.jit.script(fn).graph
+        self.run_pass('create_functional_graphs', graph)
+        # ListConstruct makes it into functional graph
+        FileCheck().check("Tensor = prim::Functional").check_not("ListConstruct").check("return").run(graph)
+
+        def fn(x, y, z):
+            x = x + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8
+            return [x, y, z]
+
+        graph = torch.jit.script(fn).graph
+        self.run_pass('create_functional_graphs', graph)
+        # list escapes so it doesn't make it into functional graph
+        FileCheck().check("Tensor = prim::Functional").check("ListConstruct").check("return").run(graph)
+
+        def fn(x, y, z):
+            x = x + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8
+            out = torch.cat(torch.broadcast_tensors(x, y, z))
+            return out + 2
+
+        graph = torch.jit.script(fn).graph
+        self.run_pass('create_functional_graphs', graph)
+        # output of broadcast_tensors may alias input
+        FileCheck().check("Tensor = prim::Functional").check("ListConstruct").check("return").run(graph)
+
     def test_subgraph_creation(self):
         def fn(x, y, z):
             x = x + 1

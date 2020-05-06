@@ -128,6 +128,24 @@ struct FunctionalGraphSlicer {
     return changed;
   }
 
+  bool escapesScope(Value * v) {
+    if (v->node()->kind() != prim::ListConstruct) {
+      return aliasDb_->escapesScope(v);
+    }
+    // currently when a value enters a List we consider it entering the
+    // wildcard set, so it will fail escape analysis. however,
+    // if the list is only used once in an aten op, and the op output
+    // doesn't alias the input, we know the value doesn't escape.
+    // this a fix to support aten ops with lists, although
+    // in the long term we may try other strategies
+    if (v->uses().size() != 1 || !v->uses().at(0).user->kind().is_aten()) {
+      return false;
+    }
+    auto use = v->uses().at(0).user;
+    return !aliasDb_->mayContainAlias(use->inputs(), use->outputs());
+  }
+
+
   bool AnalyzeFunctionalSubset(Node* n) {
     // TODO: clarify hasSideEffects, isNondeterministic
     bool is_functional_node = true;
@@ -143,7 +161,7 @@ struct FunctionalGraphSlicer {
     // - allow outputs which alias the wildcard set but do not "re-escape"
     for (Value* v : n->outputs()) {
       bool has_writers = aliasDb_->hasWriters(v);
-      bool escapes_scope = aliasDb_->escapesScope(v);
+      bool escapes_scope = escapesScope(v);
       if (has_writers) {
         mutated_values_.insert(v);
       }
