@@ -15,7 +15,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-#define DISABLED_FALLBACK true
+constexpr auto DISABLED_FALLBACK = true;
 
 namespace {
 

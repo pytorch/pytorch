@@ -451,7 +451,7 @@ void fixComputeAt(Fusion* fusion) {
     TensorView* ctv = tv->getComputeAtView();
 
     if (ctv != nullptr && visited.find(ctv) == visited.end()) {
-      ctv->computeAt(tv, ctv->getComputeAtAxis());
+      ctv->computeAt(tv, static_cast<int>(ctv->getComputeAtAxis()));
       tv->clearComputeAt();
     }
     visited.emplace(tv);

@@ -19,6 +19,10 @@ typedef Node JitOp;
 namespace fuser {
 namespace cuda {
 
+constexpr auto NUM_UNARY_OPS             = 31;
+constexpr auto NUM_BINARY_OPS            = 24;
+constexpr auto NUM_BINARY_OPS_WITH_ALPHA = 4;
+
 namespace {
 
 typedef Val* CgValue;
@@ -155,7 +159,7 @@ class IrParser {
     // This is a one-time look up, our hash registry indexes on the pointer in
     // OperatorRegistry.
 
-    std::array<const char*, 4> BinaryOpWithAlpha = {
+    std::array<const char*, NUM_BINARY_OPS_WITH_ALPHA> BinaryOpWithAlpha = {
         "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
         "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
         "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
@@ -188,7 +192,7 @@ class IrParser {
           });
     }
 
-    std::array<const char*, 24> BinaryOp = {
+    std::array<const char*, NUM_BINARY_OPS> BinaryOp = {
         "aten::div(Tensor self, Tensor other) -> Tensor",
         "aten::div(Tensor self, Scalar other) -> Tensor",
         "aten::mul(Tensor self, Tensor other) -> Tensor",
@@ -245,7 +249,7 @@ class IrParser {
     }
 
     // TODO: cast operations should be merged in.
-    std::array<const char*, 31> UnaryOp = {
+    std::array<const char*, NUM_UNARY_OPS> UnaryOp = {
         "aten::neg(Tensor self) -> Tensor",
         "aten::abs(Tensor self) -> Tensor",
         "aten::log(Tensor self) -> Tensor",

@@ -177,12 +177,12 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
   // vvv NVRTC COMPILATION vvv
 
   // lazily construct context if non-existing yet;
-  CUcontext pctx = 0;
+  CUcontext pctx = nullptr;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
         *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    cudaFree(0);
+    cudaFree(nullptr);
   }
 
   // set device for the operation;
