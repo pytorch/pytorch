@@ -92,6 +92,15 @@ def prof_meth_call(*args, **kwargs):
 torch._C.ScriptFunction.__call__ = prof_func_call
 torch._C.ScriptMethod.__call__ = prof_meth_call
 
+def _get_test_report_path():
+    # allow users to override the test file location. We need this
+    # because the distributed tests run the same test file multiple
+    # times with different configurations.
+    override = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
+    test_source = override if override is not None else 'python-unittest'
+    return os.path.join('test-reports', test_source)
+
+
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
@@ -100,6 +109,9 @@ parser.add_argument('--accept', action='store_true')
 parser.add_argument('--ge_config', type=str)
 parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test_bailouts', action='store_true')
+parser.add_argument('--save-xml', nargs='?', type=str,
+                    const=_get_test_report_path(),
+                    default=_get_test_report_path() if bool(os.environ.get('IN_CIRCLECI')) else None)
 
 GRAPH_EXECUTOR = ProfilingMode.SIMPLE if IS_SANDCASTLE else ProfilingMode.PROFILING
 args, remaining = parser.parse_known_args()
@@ -112,6 +124,7 @@ else:
 
 TEST_BAILOUTS = args.test_bailouts
 TEST_IN_SUBPROCESS = args.subprocess
+TEST_SAVE_XML = args.save_xml
 REPEAT_COUNT = args.repeat
 SEED = args.seed
 if not expecttest.ACCEPT:
@@ -168,8 +181,6 @@ def repeat_test_for_types(dtypes):
 
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
 IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
-IN_CIRCLECI = bool(os.environ.get('IN_CIRCLECI'))
-TEST_REPORT_SOURCE_OVERRIDE = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
 
 PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
@@ -196,30 +207,21 @@ def run_tests(argv=UNITTEST_ARGS):
 
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
+    elif TEST_SAVE_XML is not None:
+        # import here so that non-CI doesn't need xmlrunner installed
+        import xmlrunner
+        test_report_path = TEST_SAVE_XML
+        os.makedirs(test_report_path, exist_ok=True)
+        verbose = '--verbose' in argv or '-v' in argv
+        if verbose:
+            print('Test results will be stored in {}'.format(test_report_path))
+        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
+    elif REPEAT_COUNT > 1:
+        for _ in range(REPEAT_COUNT):
+            if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
+                sys.exit(-1)
     else:
-        if IN_CIRCLECI:
-            # import here so that non-CI doesn't need xmlrunner installed
-            import xmlrunner
-            # allow users to override the test file location. We need this
-            # because the distributed tests run the same test file multiple
-            # times with different configurations.
-            if TEST_REPORT_SOURCE_OVERRIDE is not None:
-                test_source = TEST_REPORT_SOURCE_OVERRIDE
-            else:
-                test_source = 'python-unittest'
-
-            test_report_path = os.path.join('test-reports', test_source)
-            os.makedirs(test_report_path, exist_ok=True)
-            verbose = '--verbose' in argv or '-v' in argv
-            if verbose:
-                print('Test results will be stored in {}'.format(test_report_path))
-            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
-        elif REPEAT_COUNT > 1:
-            for _ in range(REPEAT_COUNT):
-                if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
-                    sys.exit(-1)
-        else:
-            unittest.main(argv=argv)
+        unittest.main(argv=argv)
 
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
