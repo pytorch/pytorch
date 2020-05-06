@@ -27,12 +27,12 @@ class Transformer(Module):
         num_encoder_layers: the number of sub-encoder-layers in the encoder (default=6).
         num_decoder_layers: the number of sub-decoder-layers in the decoder (default=6).
         dim_feedforward: the dimension of the feedforward network model (default=2048).
-        batch_first: if the src tensor is in the shape of (N, S, E) instead of (S, N, E) and the tgt tensor is
-            in the shape of (N, T, E) instead of (T, N, E) (default=False).
         dropout: the dropout value (default=0.1).
         activation: the activation function of encoder/decoder intermediate layer, relu or gelu (default=relu).
         custom_encoder: custom encoder (default=None).
         custom_decoder: custom decoder (default=None).
+        batch_first: if the src tensor is in the shape of (N, S, E) instead of (S, N, E) and the tgt tensor is
+            in the shape of (N, T, E) instead of (T, N, E) (default=False).
 
     Examples::
         >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12)
@@ -45,8 +45,9 @@ class Transformer(Module):
     """
 
     def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
-                 num_decoder_layers=6, dim_feedforward=2048, batch_first=False,
-                 dropout=0.1, activation="relu", custom_encoder=None, custom_decoder=None):
+                 num_decoder_layers=6, dim_feedforward=2048,
+                 dropout=0.1, activation="relu", custom_encoder=None, custom_decoder=None
+                 batch_first=False):
         super(Transformer, self).__init__()
 
         if custom_encoder is not None:

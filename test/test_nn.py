@@ -4586,7 +4586,7 @@ class TestNN(NNTestCase):
         tgt_length = 15
 
         transformer = nn.Transformer(d_model, nhead, num_encoder_layers, num_decoder_layers,
-                                     dim_feedforward, batch_first, dropout)
+                                     dim_feedforward, dropout, batch_first)
         src = torch.randn(seq_length, bsz, d_model)
         src_mask = transformer.generate_square_subsequent_mask(seq_length).double()
         tgt = torch.randn(tgt_length, bsz, d_model)
@@ -4619,7 +4619,7 @@ class TestNN(NNTestCase):
 
         # find the output of a transformer module without batch_first
         transformer = nn.Transformer(d_model, nhead, num_encoder_layers, num_decoder_layers,
-                                     dim_feedforward, batch_first=False, dropout=dropout)
+                                     dim_feedforward, dropout=dropout, batch_first=False)
         # use deterministic weights
         for idx, p in enumerate(transformer.parameters()):
             x = p.data
@@ -4629,7 +4629,7 @@ class TestNN(NNTestCase):
             p.data.copy_(x)
         # compare the output to a transformer module with batch_first
         transformer_batch_first = nn.Transformer(d_model, nhead, num_encoder_layers, num_decoder_layers,
-                                                 dim_feedforward, batch_first=True, dropout=dropout)
+                                                 dim_feedforward, dropout=dropout, batch_first=True)
         # also use deterministic weights
         for idx, p in enumerate(transformer_batch_first.parameters()):
             x = p.data
