@@ -604,11 +604,15 @@ inline IValue toIValue(
       AT_ERROR("RRef is only supported with the distributed package");
 #endif
     } break;
-    case TypeKind::PyObjectType:
+    case TypeKind::PyObjectType: {
       // convert a py::handle to the IValue that holds the py::object
-      return c10::ivalue::ConcretePyObjectHolder::create(
-          obj.cast<py::object>());
-
+      py::object py_obj;
+      {
+        py::gil_scoped_acquire ag;
+        py_obj = obj.cast<py::object>();
+      }
+      return c10::ivalue::ConcretePyObjectHolder::create(std::move(py_obj));
+    }
     case TypeKind::CapsuleType: {
       return IValue::make_capsule(
           py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj));

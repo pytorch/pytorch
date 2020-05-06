@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -304,21 +305,22 @@ PyObject* rpc_init(PyObject* /* unused */) {
                       >>> rref.remote().view(1, 4).to_here()  # returns tensor([[1., 1., 1., 1.]])
               )")
           .def(
-              py::pickle(
-                  [](const PyRRef& self) {
-                    TORCH_CHECK(
-                        false,
-                        "Can not pickle rref in python pickler, rref can only be pickled when using RPC");
-                    // __getstate__
-                    return self.pickle();
-                  },
-                  [](py::tuple t) { // NOLINT
-                    TORCH_CHECK(
-                        false,
-                        "Can not unpickle rref in python pickler, rref can only be unpickled when using RPC");
-                    // __setstate__
-                    return PyRRef::unpickle(t);
-                  }),
+              "__getstate__",
+              [](const PyRRef& /* unused */) {
+                TORCH_CHECK(
+                    false,
+                    "Can not pickle rref in python pickler, rref can only be "
+                    "pickled when using RPC");
+              },
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "__setstate__",
+              [](const PyRRef& /* unused */, const py::tuple& /* unused */) {
+                TORCH_CHECK(
+                    false,
+                    "Can not unpickle rref in python pickler, rref can only be "
+                    "unpickled when using RPC");
+              },
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_serialize",
@@ -361,7 +363,7 @@ Wait on future to complete and return the object it completed with.
 If the future completes with an error, an exception is thrown.
           )")
       .def(
-          "add_done_callback",
+          "_then",
           [&](FutureIValue& fut, py::function cb) {
             // We need this an additional layer of wrapper here to guard the
             // destruction of the py::function object. Because, the
@@ -376,36 +378,39 @@ If the future completes with an error, an exception is thrown.
             // here to explicitly acquire GIL and decouple value destruction and
             // callback destruction.
             PythonFunction pf(std::move(cb));
-            fut.addCallback([pf](const FutureIValue& fut) {
-              pybind11::gil_scoped_acquire ag;
-              pf.func_(fut);
+            return fut.then<IValue>([pf](const FutureIValue& fut) -> IValue {
+              if (fut.hasError()) {
+                throw std::runtime_error(c10::str(
+                    "Parent Future reported error: ",
+                    (*fut.error()).what()));
+              } else {
+                try {
+                  pybind11::gil_scoped_acquire ag;
+                  py::object ret =
+                      pf.func_(torch::jit::toPyObject(fut.constValue()));
+                  return jit::toIValue(std::move(ret), PyObjectType::get());
+                } catch (py::error_already_set& e) {
+                  auto err = std::runtime_error(c10::str(
+                      "Got the following error when running the callback: ",
+                      e.what()));
+                  {
+                    pybind11::gil_scoped_acquire ag;
+                    // Release ownership on py::objects and also restore Python
+                    // Error Indicator.
+                    e.restore();
+                    // Clear the Python Error Indicator as we has recorded the
+                    // exception in the response message.
+                    PyErr_Clear();
+                  }
+
+                  throw err;
+                } catch (...) {
+                  throw std::runtime_error("Unknown error when running callback");
+                }
+              }
             });
           },
-          py::call_guard<py::gil_scoped_release>(),
-          R"(
-              Registers a callback to the ``Future``, which will be fired
-              when the value in ``Future`` is ready. Multiple callbacks can
-              be added to the same ``Future``, and will be invoked in the
-              same order as they were added. The callback takes one argument,
-              which is the reference to this ``Future``. The callback function
-              can use the ``Future.wait()`` API to get the value.
-
-              Arguments:
-                  callback (callable): a Python callable, which takes this
-                  ``Future`` object as the only argument.
-
-              Example::
-                  >>> from torch.distributed import rpc
-                  >>> import torch
-                  >>>
-                  >>> def callback(fut):
-                  >>>     print(f"RPC return value is {fut.wait()}.")
-                  >>>
-                  >>> fut = rpc.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
-                  >>> # The inserted callback will print the return value when
-                  >>> # receiving the response from "worker1"
-                  >>> fut.add_done_callback(callback)
-          )");
+          py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,
@@ -499,6 +504,48 @@ If the future completes with an error, an exception is thrown.
       .def(
           "sync",
           &ProcessGroupAgent::sync,
+          py::call_guard<py::gil_scoped_release>());
+
+  // Base class: torch.distributed.rpc.RpcBackendOptions.
+  py::class_<TensorPipeRpcBackendOptions>(
+      module, "TensorPipeRpcBackendOptions", rpcBackendOptions)
+      .def(py::init<>())
+      .def_readwrite(
+          "worker_name_to_id", &TensorPipeRpcBackendOptions::workerNameToId);
+
+  shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
+      .def(
+          py::init<
+              worker_id_t /* selfId */,
+              std::string /* selfName */,
+              std::shared_ptr<::c10d::Store> /* addressStore */,
+              TensorPipeRpcBackendOptions /* TensorPipeBackendOptions */>(),
+          py::arg("worker_id"),
+          py::arg("name"),
+          py::arg("address_store"),
+          py::arg("tensorpipe_backend_options"))
+      .def(
+          "join",
+          &TensorPipeAgent::join,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "shutdown",
+          &TensorPipeAgent::shutdown,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (TensorPipeAgent::*)(void)const) &
+              RpcAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (TensorPipeAgent::*)(const std::string&)const) &
+              TensorPipeAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_infos",
+          (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
+              TensorPipeAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>());
 
   module.def("_is_current_rpc_agent_set", &RpcAgent::isCurrentRpcAgentSet);

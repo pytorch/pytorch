@@ -302,11 +302,11 @@ def get_rref_debug_info():
 def add_use_future_cb(to, x, y, z):
     out = concurrent.futures.Future()
 
-    def callback(fut):
-        out.set_result(fut.wait() + z)
+    def callback(ret):
+        out.set_result(ret + z)
 
     fut = rpc.rpc_async(to, torch.add, args=(x, y))
-    fut.add_done_callback(callback)
+    fut._then(callback)
     return out.result()
 
 
@@ -2372,8 +2372,7 @@ class RpcTest(RpcAgentTestFixture):
         set_by_cb = concurrent.futures.Future()
         n = self.rank + 1
 
-        def callback(fut):
-            ret = fut.wait()
+        def callback(ret):
             self.assertEqual(ret, torch.ones(n, n) * 2)
             set_by_cb.set_result(ret.clone() + 1)
 
@@ -2383,11 +2382,32 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(n, n), torch.ones(n, n))
         )
 
-        fut.add_done_callback(callback)
+        fut._then(callback)
 
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
         self.assertEqual(set_by_cb.result(), torch.ones(n, n) * 2 + 1)
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+    @dist_init
+    def test_callback_wrong_args(self):
+        set_by_cb = concurrent.futures.Future()
+        n = self.rank + 1
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n))
+        )
+
+        cb_fut = fut._then(my_function)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "my\\_function\\(\\) missing 2 required positional arguments"
+        ):
+            cb_fut.wait()
 
     @dist_init
     def test_multi_callbacks(self):
@@ -2395,8 +2415,7 @@ class RpcTest(RpcAgentTestFixture):
         set_by_cbs = [concurrent.futures.Future() for _ in range(num_cbs)]
         n = self.rank + 1
 
-        def callback(idx, fm):
-            ret = fm.wait()
+        def callback(idx, ret):
             self.assertEqual(ret, torch.ones(n, n) * 2)
             set_by_cbs[idx].set_result(ret.clone() + idx)
 
@@ -2407,7 +2426,7 @@ class RpcTest(RpcAgentTestFixture):
         )
 
         for idx in range(num_cbs):
-            fut.add_done_callback(partial(callback, idx))
+            fut._then(partial(callback, idx))
 
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
@@ -2459,3 +2478,102 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
         self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)
         self.assertEqual(self.rpc_backend_options.rpc_timeout, rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
+
+    @dist_init(faulty_messages=["RREF_FORK_REQUEST", "RREF_CHILD_ACCEPT"])
+    def test_custom_faulty_messages(self):
+        self.assertEqual(
+            set(["RREF_FORK_REQUEST", "RREF_CHILD_ACCEPT"]),
+            set(self.rpc_backend_options.messages_to_fail),
+        )
+
+    @dist_init(faulty_messages=[])
+    def test_no_faulty_messages(self):
+        self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 0)
+
+    @dist_init(messages_to_delay={"SCRIPT_CALL": 1.5})
+    def test_custom_messages_to_delay(self):
+        self.assertEqual(self.rpc_backend_options.messages_to_delay, {"SCRIPT_CALL": 1.5})
+
+    @dist_init(faulty_messages=[])
+    def test_rpc_builtin_timeout(self):
+        next_rank = (self.rank + 1) % self.world_size
+        dst_worker = worker_name(next_rank)
+        expected_error = get_timeout_error_regex(
+            dist_utils.TEST_CONFIG.rpc_backend_name
+        )
+        # PYTHON_CALL message types which correspond to Python UDF over RPC
+        # by default get a delay (see faulty_rpc_agent_test_fixture)
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            rpc.rpc_sync(
+                dst_worker,
+                torch.add,
+                args=(torch.tensor(1), torch.tensor(1)),
+                timeout=1,
+            )
+
+        fut = rpc.rpc_async(
+            dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1)), timeout=1
+        )
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            fut.wait()
+
+        # Ensure that the currently set default timeout is large enough such
+        # that RPCs with delays still complete.
+        self.assertEqual(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC, rpc.get_rpc_timeout())
+        fut = rpc.rpc_async(
+            dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
+        )
+        fut.wait()
+
+        # Ensure timeout if we set a new default and don't override
+        rpc._set_rpc_timeout(0.001)
+        fut = rpc.rpc_async(
+            dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
+        )
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            fut.wait()
+
+        # Ensure run to completion if we specify timeout of 0
+        fut = rpc.rpc_async(
+            dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1)), timeout=0
+        )
+        fut.wait()
+        # Reset for clean shutdown
+        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
+
+    @dist_init(faulty_messages=[], messages_to_delay={"SCRIPT_CALL": 1.5})
+    def test_rpc_script_timeout(self):
+        next_rank = (self.rank + 1) % self.world_size
+        dst_worker = worker_name(next_rank)
+        expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            rpc.rpc_sync(dst_worker, my_script_func, args=(torch.tensor(1),), timeout=1)
+
+        fut = rpc.rpc_async(dst_worker, my_script_func, args=(torch.tensor(1),), timeout=1)
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            fut.wait()
+
+        # Ensure that the currently set default timeout is large enough such
+        # that RPCs with delays still complete.
+        self.assertEqual(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC, rpc.get_rpc_timeout())
+        fut = rpc.rpc_async(
+            dst_worker, my_script_func, args=(torch.tensor(1),)
+        )
+        fut.wait()
+
+        # Ensure timeout if we set a new default and don't override
+        rpc._set_rpc_timeout(0.001)
+        fut = rpc.rpc_async(
+            dst_worker, my_script_func, args=(torch.tensor(1),)
+        )
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            fut.wait()
+
+        # Ensure run to completion if we specify timeout of 0
+        rpc._set_rpc_timeout(0.001)
+        fut = rpc.rpc_async(
+            dst_worker, my_script_func, args=(torch.tensor(1),), timeout=0
+        )
+        fut.wait()
+        # Reset for clean shutdown
+        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)

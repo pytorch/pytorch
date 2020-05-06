@@ -465,7 +465,7 @@ jobs:
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
-        name: Test
+        name: Download Docker image
         no_output_timeout: "90m"
         command: |
           set -e
@@ -495,11 +495,15 @@ jobs:
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
 
-          retrieve_test_reports() {
-            echo "retrieving test reports"
-            docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
-          }
-          trap "retrieve_test_reports" ERR
+          # Pass environment variables to the next step
+          # See https://circleci.com/docs/2.0/env-vars/#using-parameters-and-bash-environment
+          echo "export PARALLEL_FLAGS=\"${PARALLEL_FLAGS}\"" >> $BASH_ENV
+          echo "export id=$id" >> $BASH_ENV
+    - run:
+        name: Run tests
+        no_output_timeout: "90m"
+        command: |
+          set -e
 
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
@@ -507,9 +511,15 @@ jobs:
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export CIRCLE_PULL_REQUEST=${CIRCLE_PULL_REQUEST}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
-          retrieve_test_reports
+    - run:
+        name: Report results
+        no_output_timeout: "5m"
+        command: |
+          set -e
           docker stats --all --no-stream
+          echo "Retrieving test reports"
+          docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
+        when: always
     - store_test_results:
         path: test-reports
 
@@ -1244,10 +1254,16 @@ jobs:
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
+          mkdir -p ~/workspace/build_artifacts
+          docker cp $id:/var/lib/jenkins/workspace/pytorch.github.io/docs/master ~/workspace/build_artifacts
+
           # Save the docs build so we can debug any problems
           export DEBUG_COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}-debug
           docker commit "$id" ${DEBUG_COMMIT_DOCKER_IMAGE}
           time docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
+    - store_artifacts:
+        path: ~/workspace/build_artifacts/master
+        destination: docs
 
   pytorch_cpp_doc_push:
     environment:
@@ -1727,6 +1743,31 @@ jobs:
           docker stats --all --no-stream
     - store_test_results:
         path: bazel-testlogs
+
+  pytorch_doc_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-doc-test
+      # TODO: stop hardcoding this
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
+    resource_class: medium
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - attach_scripts
+    - setup_linux_system_environment
+    - setup_ci_environment
+    - run:
+        name: Doc test
+        no_output_timeout: "30m"
+        command: |
+          set -ex
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export GITHUB_PYTORCHBOT_TOKEN=${GITHUB_PYTORCHBOT_TOKEN}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && . ./.jenkins/pytorch/docs-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
   promote_s3:
     <<: *promote_common
@@ -2304,6 +2345,9 @@ workflows:
           requires:
             - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_cpp_doc_push:
+          requires:
+            - pytorch_linux_xenial_py3_6_gcc5_4_build
+      - pytorch_doc_test:
           requires:
             - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_linux_test:

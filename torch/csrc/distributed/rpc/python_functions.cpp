@@ -105,15 +105,6 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
       true /*forceGradRecording*/);
 }
 
-void DeleteFutureIValue(FutureIValue* fv) {
-  if (fv->constValue().isPyObject()) {
-    pybind11::gil_scoped_acquire ag;
-    delete fv;
-  } else {
-    delete fv;
-  }
-}
-
 } // namespace
 
 using namespace torch::distributed::autograd;
@@ -121,36 +112,22 @@ using namespace torch::distributed::autograd;
 std::shared_ptr<FutureIValue> toFutureIValue(
     const std::shared_ptr<FutureMessage>& fm,
     bool hasValue) {
-  if (hasValue) {
-    // NB: The custom deleter is necessary because the FutureIValue object
-    // holds a py::object and it would require GIL to delete.
-    std::shared_ptr<FutureIValue> fv(new FutureIValue(), DeleteFutureIValue);
+  auto fv = std::make_shared<FutureIValue>();
 
-    fm->addCallback([fv](const FutureMessage& fm) {
-      // Don't need to acquire GIL here, as toPyObj acquires GIL
-      // when creating the py::object
-      if (fm.hasError()) {
-        fv->setError(*fm.error());
-      } else {
-        fv->markCompleted(
-            jit::toIValue(toPyObj(fm.constValue()), PyObjectType::get()));
-      }
-    });
+  fm->addCallback([fv, hasValue](const FutureMessage& fm) {
+    if (fm.hasError()) {
+      fv->setError(*fm.error());
+    } else if (hasValue) {
+      // Don't need to acquire GIL here, as toPyObj and toIValue acquires GIL
+      // when creating/copying the py::object
+      fv->markCompleted(
+          jit::toIValue(toPyObj(fm.constValue()), PyObjectType::get()));
+    } else {
+      fv->markCompleted(IValue());
+    }
+  });
 
-    return fv;
-  } else {
-    auto fv = std::make_shared<FutureIValue>();
-
-    fm->addCallback([fv](const FutureMessage& fm) {
-      if (fm.hasError()) {
-        fv->setError(*fm.error());
-      } else {
-        fv->markCompleted(IValue());
-      }
-    });
-
-    return fv;
-  }
+  return fv;
 }
 
 std::shared_ptr<FutureIValue> pyRpcBuiltin(
