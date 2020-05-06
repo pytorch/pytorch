@@ -180,6 +180,18 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
   return it->meta_;
 }
 
+// std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
+//     findSubmoduleConcreteType(const std::string& name) const {
+//   const auto it = std::find_if(
+//       data_.modules_.cbegin(),
+//       data_.modules_.cend(),
+//       [&](const ConcreteModuleTypeBuilder::ModuleInfo& info) {
+//         return info.name_ == name;
+//       });
+//   TORCH_INTERNAL_ASSERT(it != data_.modules_.end());
+//   return it->meta_;
+// }
+
 void ConcreteModuleTypeBuilder::setIterableModuleKind(IterableModuleKind kind) {
   iterableModuleKind_ = kind;
 }
