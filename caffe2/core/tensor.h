@@ -260,8 +260,8 @@ class CAFFE2_API Tensor final {
    */
   string DebugString() const {
     std::stringstream ss;
-    ss << "A Tensor of item size " << impl_->dtype().itemsize() << " and type "
-       << impl_->dtype().name() << " and dimension (";
+    ss << "A Tensor of item size " << impl_->storage().itemsize()
+       << " and type " << impl_->dtype().name() << " and dimension (";
     for (int d : impl_->sizes()) {
       ss << d << ",";
     }
@@ -402,7 +402,7 @@ class CAFFE2_API Tensor final {
    * Return the number of bytes each item takes in the tensor.
    */
   inline size_t itemsize() const {
-    return impl_->dtype().itemsize();
+    return impl_->storage().itemsize();
   }
 
   /**
