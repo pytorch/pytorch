@@ -362,8 +362,10 @@ TensorPipeEntry tensorpipeSerialize(const Message& rpcMessage) {
   c10::List<at::Tensor> tensors = cloneSparseTensors(rpcMessage.tensors());
 
   // Payload
-  tpMessage.data = (uint8_t*)(payload.data());
-  tpMessage.length = payload.size();
+  tensorpipe::Message::Payload tpPayload;
+  tpPayload.data = (uint8_t*)(payload.data());
+  tpPayload.length = payload.size();
+  tpMessage.payloads.push_back(std::move(tpPayload));
 
   // Metadata - encode rpc message type and message id into
   // 8 bytes respectively
@@ -414,7 +416,12 @@ TensorPipeEntry tensorpipeSerialize(const Message& rpcMessage) {
 
 Message tensorpipeAllocateMessage(const tensorpipe::Message& tpMessage) {
   // Payload, message type and message id
-  std::vector<char> payload(tpMessage.length);
+  TORCH_INTERNAL_ASSERT(
+      tpMessage.payloads.size() == 1,
+      "message expected to contain 1 payload, whereas it contained ",
+      tpMessage.payloads.size(),
+      " payloads");
+  std::vector<char> payload(tpMessage.payloads[0].length);
   TORCH_INTERNAL_ASSERT(
       tpMessage.metadata.size() == 2 * sizeof(int64_t),
       "message metadata must be ",
