@@ -242,29 +242,38 @@ void copyFromImageToBuffer(VImage& image, VBuffer& buffer);
 //  VulkanTensor is copyable and moveable (copying and moving pointer to Impl).
 //
 // VulkanTensor::Impl is moveable only, owns Vulkan device memory for Tensor
-// data. Tensor can be represented in several formats. 0. VBuffer - (wrapper on
-// vulkan VkBuffer), supports all tensor dimensions, Currently data is in
-// Contiguous format (NCHW), in plan to preserve at::Tensor memory format (3d or
-// 4d tensors can be in NHWC ChannelsLast format). Currently, it is located in
+// data. Tensor can be represented in several formats. 
+//
+// 0. VBuffer - (wrapper on  vulkan VkBuffer), supports all tensor dimensions, 
+// data is in  Contiguous format (NCHW), in plan to preserve at::Tensor memory format
+// (3d or 4d tensors can be in NHWC ChannelsLast format). It is located in
 // host visible memory that can be memory mapped to CPU memory.
 //
-// 1. VImage(TexC4) - (wrapper on vulkan VkImage), optional representation of 4
-// dimensional tensor
-//  as VkImage, that can be used in shaders as texture or storage image.
-//  Currently it is 3-dimensional image (x, y, z) with 4 component * 16 bit for
-//  each (x, y, z). For NCHW, NHWC: image x - W; image y - H; image z - N * C
+// 1. VImage(TexC4) - (wrapper on vulkan VkImage), optional representation of 
+// tensors with dimension <= 4 as VkImage, sed in shaders as texture or storage image.
+// It is 3-dimensional image (x, y, z) with 4 component * 16 bit for each triple (x, y, z). 
+// For NCHW, NHWC: 
+// For dim==4: image.x - W sizes[3]; image.y - H sizes[2]; image.z - (N sizes[0] * C sizes[1]) / 4
+// For dim==3: image.x - W sizes[2]; image.y - H sizes[1]; image.z - (C sizes[0]) / 4
+// For dim==2: image.x - W sizes[1]; image.y - H sizes[0]; image.z : 1
+// For dim==1: image.x - W sizes[0]; image.y : 1; image.z : 1
+//
+//
 // 2. VImage (other format) - Currently not added, but for some operations
 // another texture
 //  packing format can be beneficial for performance.
 //
 // Contract about synchronization between representations:
 // 1.VImage(TexC4) representation is allocated lazily with calling image(),
-// fails for dimensions not equal 4.
+// fails for dimensions > 4.
 //
-// In current implementation where data can be in 0.VBuffer
-// and/or 1.VImage(TexC4): If image allocated - image data has priority. That's
-// why VulkanTensor::copyDataToHost has logic if image allocated -
-// copyFromImageToBuffer first.
+// Tensor data can be in 0.VBuffer and/or 1.VImage(TexC4),
+// If Tensor can be represented as image - VulkanTensor::Impl::canBeImage() returns true.
+// Image representation created lazily by call VulkanTensor::Impl::image(),
+// if it is called on Tensor with !canBeImage() - it fails.
+//
+// If image allocated - image data has priority.
+// VulkanTensor::copyDataToHost checks if image allocated - copyFromImageToBuffer first.
 class VulkanTensor final : public c10::intrusive_ptr_target {
   class Impl {
    public:
@@ -291,6 +300,10 @@ class VulkanTensor final : public c10::intrusive_ptr_target {
 
     inline VBuffer& buffer() {
       return *(buffer_.get());
+    }
+
+    inline bool canBeImage() {
+      return dim() <= 4;
     }
 
     inline bool hasImage() {
