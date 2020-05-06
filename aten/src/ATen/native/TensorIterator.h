@@ -380,6 +380,7 @@ protected:
   void mark_outputs();
   void check_mem_overlaps();
   void compute_shape();
+  void resize_outputs();
   void compute_strides();
   void reorder_dimensions();
   void permute_dimensions(IntArrayRef perm);

@@ -13586,9 +13586,7 @@ class TestTorchDeviceType(TestCase):
     def test_memory_format_operators(self, device):
         def chunk_op(x, y):
             x1, x2 = x.chunk(2, dim=1)
-            y1, y2 = x.chunk(2, dim=1)
-            y1 = y1.contiguous()
-            return y1 + x1
+            return x1 + x2
 
         def unsqueeze_op_add(x, y):
             return x[0].unsqueeze(0) + 3
@@ -13596,15 +13594,23 @@ class TestTorchDeviceType(TestCase):
         def unsqueeze_op_clone(x, y):
             return x[0].unsqueeze(0).clone()
 
-        def test_helper(x, y, memory_format):
+        def test_helper(x, y, bias, memory_format):
+            return_contig_fns = [
+                lambda x, y: y + x,
+                lambda x, y: y * x,
+                lambda x, y: y.addcdiv(x, y, value=2),
+                lambda x, y: y.addcmul(x, y, value=2),
+            ]
+            bias_fns = [
+                lambda x, b: x + b,
+                lambda x, b: b + x,
+            ]
             fns = [
                 lambda x, y: x.clone(),
                 lambda x, y: x + 3,
                 lambda x, y: 3 * x,
                 lambda x, y: x + y,
-                lambda x, y: y + x,
                 lambda x, y: x * y,
-                lambda x, y: y * x,
                 lambda x, y: abs(x),
                 lambda x, y: x.abs(),
                 lambda x, y: x.abs_(),
@@ -13614,10 +13620,8 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.add_(y, alpha=3),
                 lambda x, y: x.addcdiv(y, y, value=2),
                 lambda x, y: x.addcdiv_(y, y, value=2),
-                lambda x, y: y.addcdiv(x, y, value=2),
                 lambda x, y: x.addcmul(y, y, value=2),
                 lambda x, y: x.addcmul_(y, y, value=2),
-                lambda x, y: y.addcmul(x, y, value=2),
                 lambda x, y: x.asin(),
                 lambda x, y: x.asin_(),
                 # lambda x, y: x.atan(), # https://github.com/pytorch/pytorch/issues/24538
@@ -13696,13 +13700,35 @@ class TestTorchDeviceType(TestCase):
                     result.is_contiguous(memory_format=memory_format),
                     "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), memory_format))
 
+            for fn in bias_fns:
+                x_c = x.contiguous()
+                b_c = bias.contiguous()
+                result_c = fn(x_c, b_c)
+                result = fn(x, bias)
+                self.assertEqual(result, result_c)
+                self.assertTrue(
+                    result.is_contiguous(memory_format=memory_format),
+                    "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), memory_format))
+
+            for fn in return_contig_fns:
+                x_c = x.contiguous()
+                y_c = y.contiguous()
+                result_c = fn(x_c, y_c)
+                result = fn(x, y)
+                self.assertEqual(result, result_c)
+                self.assertTrue(
+                    result.is_contiguous(memory_format=torch.contiguous_format),
+                    "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), torch.contiguous_format))
+
         test_helper(
             torch.randn((4, 3, 8, 8), device=device).contiguous(memory_format=torch.channels_last),
             abs(torch.randn((4, 3, 8, 8), device=device)) + 1,
+            torch.randn((1, 3, 1, 1), device=device).contiguous(memory_format=torch.channels_last),
             torch.channels_last)
         test_helper(
             torch.randn((4, 3, 8, 8, 8), device=device).contiguous(memory_format=torch.channels_last_3d),
             abs(torch.randn((4, 3, 8, 8, 8), device=device)) + 1,
+            torch.randn((1, 3, 1, 1, 1), device=device).contiguous(memory_format=torch.channels_last_3d),
             torch.channels_last_3d)
 
     def _test_unique_scalar_empty(self, dtype, device, f):

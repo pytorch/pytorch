@@ -11096,6 +11096,15 @@ class TestNNDeviceType(NNTestCase):
             self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, device)
             self._test_conv_cudnn_nhwc_nchw(nn.ConvTranspose2d, n, c, h, w, k, filter_size, device)
 
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfCudnnVersionLessThan(7603)
+    def test_conv2d_cudnn_preserve_memory_format(self, device):
+        x = torch.rand(200, 24, 56, 56, dtype=torch.float16, device='cuda').to(memory_format=torch.channels_last)
+        w = torch.rand(24, 1, 3, 3, dtype=torch.float16, device='cuda').to(memory_format=torch.channels_last)
+        r = F.conv2d(x, w, None, (2,2), (1, 1), (1, 1), 24)
+        self.assertTrue(r.is_contiguous(memory_format=torch.channels_last))
+
     # torch.half is erroring out on Windows with CUDA 10.1 + cuDNN 7.6.4
     # returning CUDNN_STATUS_BAD_PARAM
     # Disabling that specific test for now [see issue # 33918]
