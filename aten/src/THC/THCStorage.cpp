@@ -19,11 +19,9 @@
 
 #include <c10/util/intrusive_ptr.h>
 
-void THCStorage_resizeBytes(
-    THCState* state,
-    THCStorage* self,
-    ptrdiff_t size_bytes) {
-  THArgCheck(size_bytes >= 0, 2, "invalid size");
+void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
+{
+  THArgCheck(size >= 0, 2, "invalid size");
   THAssert(self->allocator() != nullptr);
   int device;
   THCudaCheck(cudaGetDevice(&device));
@@ -31,27 +29,32 @@ void THCStorage_resizeBytes(
   if (!self->resizable())
     THError("Trying to resize storage that is not resizable");
 
-  if (size_bytes == 0) {
+  size_t itemsize = self->itemsize();
+
+  if(size == 0)
+  {
     self->set_data_ptr(at::DataPtr(nullptr, at::Device(at::DeviceType::CUDA, device)));
-    self->set_nbytes(0);
-  } else {
-    at::DataPtr data = self->allocator()->allocate(size_bytes);
+    self->set_numel(0);
+  }
+  else
+  {
+    at::DataPtr data =
+      self->allocator()->allocate(size * itemsize);
 
     if (self->data_ptr()) {
       // Enable p2p access when the memcpy is across devices
       THCState_getPeerToPeerAccess(state, device, THCStorage_getDevice(state, self));
 
-      THCudaCheck(cudaMemcpyAsync(
-          data.get(),
-          self->data(),
-          THMin(self->nbytes(), size_bytes),
-          cudaMemcpyDeviceToDevice,
-          c10::cuda::getCurrentCUDAStream()));
+      THCudaCheck(cudaMemcpyAsync(data.get(),
+                                  self->data(),
+                                  THMin(self->numel(), size) * itemsize,
+                                  cudaMemcpyDeviceToDevice,
+                                  c10::cuda::getCurrentCUDAStream()));
     }
 
     // Destructively overwrite data_ptr
     self->set_data_ptr(std::move(data));
-    self->set_nbytes(size_bytes);
+    self->set_numel(size);
   }
 }
 
@@ -63,11 +66,9 @@ THCStorage* THCStorage_new(
     THCState* state,
     caffe2::TypeMeta data_type) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-                           c10::StorageImpl::use_byte_size_t(),
-                           data_type,
-                           0,
-                           c10::cuda::CUDACachingAllocator::get(),
-                           true)
-                           .release();
+      data_type,
+      0,
+      c10::cuda::CUDACachingAllocator::get(),
+      true).release();
   return storage;
 }
