@@ -164,7 +164,7 @@ struct ProfilerThreadLocalState
       auto & list = it->second;
       elem_left += list.size();
     }
-    std::cerr << "Debug(" << RecordFunction::currentThreadId() << "): in state consolidate, &event_lists_map_: " << ((void*)&event_lists_map_) << " , event_lists_map_.size(): " << event_lists_map_.size() << ", total_elem_num[result] = " << total_elem_num << ", elem_left = " << elem_left << std::endl;
+    std::cerr << "Debug(" << at::RecordFunction::currentThreadId() << "): in state consolidate, &event_lists_map_: " << ((void*)&event_lists_map_) << " , event_lists_map_.size(): " << event_lists_map_.size() << ", total_elem_num[result] = " << total_elem_num << ", elem_left = " << elem_left << std::endl;
     return result;
   }
 
@@ -178,7 +178,7 @@ struct ProfilerThreadLocalState
       cuda_stubs->nvtxMarkA(name.c_str());
     } else {
       auto& list = getEventList();
-      std::cerr << "Debug(" << RecordFunction::currentThreadId() << "): in state mark, &list = " << ((void*)&list) << std::endl;
+      std::cerr << "Debug(" << at::RecordFunction::currentThreadId() << "): in state mark, &list = " << ((void*)&list) << std::endl;
       list.record(
           EventKind::Mark,
           at::StringView(std::move(name)),
@@ -228,7 +228,7 @@ struct ProfilerThreadLocalState
       }
     } else {
       auto& list = getEventList();
-      std::cerr << "Debug(" << RecordFunction::currentThreadId() << "): in state pushRange, &list = " << ((void*)&list) << std::endl;
+      std::cerr << "Debug(" << at::RecordFunction::currentThreadId() << "): in state pushRange, &list = " << ((void*)&list) << std::endl;
       list.record(
           EventKind::PushRange,
           name,
@@ -282,7 +282,7 @@ struct ProfilerThreadLocalState
  private:
   RangeEventList& getEventList(int64_t thread_id = -1) {
     std::cerr << "                                                  (0) in getEventList: this = " << ((void*)this) << " , &event_lists_map_ = " << ((void*)&event_lists_map_) << std::endl;
-    std::cerr << "                                                  (1) in getEventList: thread_id = " << thread_id << ", current: " << RecordFunction::currentThreadId() << std::endl;
+    std::cerr << "                                                  (1) in getEventList: thread_id = " << thread_id << ", current: " << at::RecordFunction::currentThreadId() << std::endl;
     bool is_current_thread = (thread_id < 0) ||
         thread_id == at::RecordFunction::currentThreadId();
     std::cerr << "                                                  (2) in getEventList: is_current_thread = " << is_current_thread << std::endl;
