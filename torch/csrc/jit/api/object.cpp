@@ -35,6 +35,10 @@ void Object::define(const std::string& src, const ResolverPtr& resolver) {
       *type()->name(), src, resolver ? resolver : nativeResolver(), &self);
 }
 
+Object Object::copy() const {
+  return Object(_ivalue()->copy());
+}
+
 Object Object::deepcopy() const {
   c10::IValue::HashAliasedIValueMap memo;
   return deepcopy(memo);

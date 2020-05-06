@@ -934,6 +934,7 @@ void initJitScriptBindings(PyObject* module) {
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
       .def("_clone_instance", &Module::clone_instance)
+      .def("copy", &Module::copy)
       .def("deepcopy", &Module::deepcopy)
       .def_property_readonly("qualified_name", [](const Module& self) {
         return self.type()->name()->qualifiedName();
