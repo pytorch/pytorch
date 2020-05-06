@@ -162,7 +162,7 @@ struct ProfilerThreadLocalState
     size_t elem_left = 0;
     for (auto it = event_lists_map_.begin(); it != event_lists_map_.end(); ++it) {
       auto & list = it->second;
-      elem_left += list.size();
+      elem_left += list->size();
     }
     std::cerr << "Debug(" << at::RecordFunction::currentThreadId() << "): in state consolidate, &event_lists_map_: " << ((void*)&event_lists_map_) << " , event_lists_map_.size(): " << event_lists_map_.size() << ", total_elem_num[result] = " << total_elem_num << ", elem_left = " << elem_left << std::endl;
     return result;
