@@ -399,8 +399,6 @@ THFormal = TypedDict('THFormal', {
     'annotation': str,
     'allocate': bool,
     'mask': bool,
-    'resize': str,
-    'zero': bool,
 }, total=False)
 
 # Generic ATen formal or native_functions.yaml formal argument.
@@ -1339,15 +1337,6 @@ def create_derived(backend_type_env, declarations):
             'auto {} = Tensor({}::reclaim({}));'.format(name, intrusive_ptr_type, tensor_arg),
         ]
 
-    def resize_arg(arg):
-        # type: (THFormal) -> str
-        resize = arg['resize']
-        if isinstance(resize, str):
-            return "{}.resize_({}.sizes());".format(arg['name'], resize)
-        else:
-            dims = ['{}.size({})'.format(name, dim) for name, dim in resize]
-            return "{}.resize_({{ {} }});".format(arg['name'], ','.join(dims))
-
     def handle_call(env, option, cimpl):
         # type: (Environment, FunctionOption, FunctionOption) -> str
         is_nn = option['mode'] == 'NN'
@@ -1432,14 +1421,6 @@ def create_derived(backend_type_env, declarations):
                                 arg['name'], check_cast))
 
                         initializers = []
-
-                        # resize tensors for special ops that require it
-                        if 'resize' in arg:
-                            initializers.append(resize_arg(arg))
-
-                        # also special handling where we zero some outputs.
-                        if arg.get('zero', False):
-                            initializers.append("{}.zero_();".format(arg['name']))
 
                         # only initialize non-null arguments
                         if nullable_argument(arg) and len(initializers) > 0:
