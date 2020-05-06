@@ -18,7 +18,7 @@ Tensor &addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, c
     return result;
   }
 
-  AT_DISPATCH_FLOATING_TYPES(mat.scalar_type(), "addmv_impl_cuda", [&] {
+  AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES(mat.scalar_type(), "addmv_impl_cuda", [&] {
     auto beta = beta_.to<scalar_t>();
     auto alpha = alpha_.to<scalar_t>();
     if (mat.stride(0) == 1) {
