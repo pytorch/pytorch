@@ -285,10 +285,12 @@ endif()
 # this conundrum by prefering to pick the internal Caffe2 implementation if
 # BUILD_CAFFE2_OPS is on.  This will force both PyTorch and Caffe2 to use the
 # Caffe2 pthreadpool version (remember we cannot have two copies in one binary)
-# and in doing so we achieve our goal of keeping Caffe2's behavior intact.
-# Otherwise we take the liberty of picking the open source version for PyTorch.
-# All of admittedly error prone logic logic can be removed and simplified if and
-# when we decide to migrate Caffe2 to open source pthreadpool as well.
+# and in doing so we achieve our goal of keeping Caffe2's behavior intact if
+# at the cost of some performance loss to PyTorch.  Otherwise, if BUILD_CAFFE2_OPS
+# is not requested, we take the liberty of picking the open source version to
+# improve PyTorch's performance.  All of this admittedly error prone logic
+# can be removed and simplified if and when we decide to migrate Caffe2 to the
+# open source pthreadpool as well.
 
 if(NOT USE_SYSTEM_PTHREADPOOL)
   # Opt for custom Caffe2 implementation whenever BUILD_CAFFE2_OPS is enabled
@@ -323,6 +325,8 @@ if(NOT USE_SYSTEM_PTHREADPOOL)
         "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool")
       set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
     endif()
+
+    list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
   endif()
 endif()
 
