@@ -122,17 +122,6 @@ void TensorPipeAgent::pipeRead(
 
     // Allocate memory and fill in pointers
     Message rpcMessage = tensorpipeAllocateMessage(tpMessage);
-    TORCH_INTERNAL_ASSERT(
-        tpMessage.payloads.size() == 1, "Payload num mismatch");
-    TORCH_INTERNAL_ASSERT(
-        rpcMessage.tensors().size() == tpMessage.tensors.size(),
-        "Tensor num mismatch");
-    tpMessage.payloads[0].data = (uint8_t*)(rpcMessage.payload().data());
-    for (size_t i = 0; i < rpcMessage.tensors().size(); i++) {
-      auto& rpcTensor = rpcMessage.tensors()[i];
-      auto& tpTensor = tpMessage.tensors[i];
-      tpTensor.data = (uint8_t*)(rpcTensor.data_ptr());
-    }
 
     pipe->read(
         std::move(tpMessage),

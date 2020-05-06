@@ -414,7 +414,7 @@ TensorPipeEntry tensorpipeSerialize(const Message& rpcMessage) {
                          std::move(copiedTensors)};
 }
 
-Message tensorpipeAllocateMessage(const tensorpipe::Message& tpMessage) {
+Message tensorpipeAllocateMessage(tensorpipe::Message& tpMessage) {
   // Payload, message type and message id
   TORCH_INTERNAL_ASSERT(
       tpMessage.payloads.size() == 1,
@@ -422,6 +422,7 @@ Message tensorpipeAllocateMessage(const tensorpipe::Message& tpMessage) {
       tpMessage.payloads.size(),
       " payloads");
   std::vector<char> payload(tpMessage.payloads[0].length);
+  tpMessage.payloads[0].data = (uint8_t*)(payload.data());
   TORCH_INTERNAL_ASSERT(
       tpMessage.metadata.size() == 2 * sizeof(int64_t),
       "message metadata must be ",
@@ -437,7 +438,7 @@ Message tensorpipeAllocateMessage(const tensorpipe::Message& tpMessage) {
   // Tensors
   std::vector<torch::Tensor> tensors;
   tensors.reserve(tpMessage.tensors.size());
-  for (const tensorpipe::Message::Tensor& tpTensor : tpMessage.tensors) {
+  for (tensorpipe::Message::Tensor& tpTensor : tpMessage.tensors) {
     const std::string& metadata = tpTensor.metadata;
     size_t metadataPos = 0;
     auto metaDataReadFunc = [&](char* buf, size_t n) -> size_t {
@@ -458,9 +459,10 @@ Message tensorpipeAllocateMessage(const tensorpipe::Message& tpMessage) {
 
     torch::jit::Unpickler unpickler(
         metaDataReadFunc, nullptr, nullptr, sectionReadFunc, {});
-    auto ival = unpickler.parse_ivalue();
-    auto&& t = ival.toTensor();
-    tensors.emplace_back(std::move(t));
+    c10::IValue ival = unpickler.parse_ivalue();
+    at::Tensor rpcTensor = ival.toTensor();
+    tpTensor.data = (uint8_t*)(rpcTensor.data_ptr());
+    tensors.emplace_back(std::move(rpcTensor));
   }
 
   return Message(std::move(payload), std::move(tensors), mType, mId);
