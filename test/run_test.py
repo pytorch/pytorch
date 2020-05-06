@@ -17,8 +17,6 @@ import torch._six
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
-PY33 = sys.version_info >= (3, 3)
-PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'test_autograd',
@@ -59,10 +57,10 @@ TESTS = [
     'test_type_hints',
     'test_utils',
     'test_namedtuple_return_api',
-    'test_jit_fuser',
-    'test_jit_simple',
+    'test_jit_profiling',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
+    'test_jit_fuser_profiling',
     'test_tensorboard',
     'test_namedtensor',
     'test_type_promotion',
@@ -71,29 +69,19 @@ TESTS = [
     'test_overrides',
     'test_jit_fuser_te',
     'test_tensorexpr',
+    'distributed/nn/jit/test_instantiator',
+    'distributed/nn/api/test_remote_module_spawn',
+    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
+    'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'distributed/rpc/jit/test_dist_autograd_spawn',
+    'distributed/rpc/test_dist_autograd_spawn',
+    'distributed/rpc/test_dist_optimizer_spawn',
+    'distributed/rpc/test_rpc_spawn',
+    'test_jit_py3',
+    'test_determination',
+    'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/faulty_agent/test_rpc_spawn',
 ]
-
-# skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
-if PY33:
-    TESTS.extend([
-        'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
-        'distributed/rpc/faulty_agent/test_rpc_spawn',
-        'distributed/rpc/jit/test_dist_autograd_spawn',
-        'distributed/rpc/test_dist_autograd_spawn',
-        'distributed/rpc/test_dist_optimizer_spawn',
-        'distributed/rpc/test_rpc_spawn',
-    ])
-
-# skip < 3.6 b/c fstrings added in 3.6
-if PY36:
-    TESTS.extend([
-        'test_jit_py3',
-        'test_determination',
-        'distributed/nn/jit/test_instantiator',
-        'distributed/nn/api/test_remote_module_spawn',
-        'distributed/rpc/jit/test_rpc_spawn',
-        'distributed/rpc/faulty_agent/test_rpc_spawn',
-    ])
 
 WINDOWS_BLACKLIST = [
     'distributed/nn/jit/test_instantiator',
@@ -118,13 +106,13 @@ ROCM_BLACKLIST = [
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
-    'test_cpp_extensions_aot_ninja',
     'test_determination',
     'test_multiprocessing',
     'test_jit_simple',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
     'test_tensorexpr',
+    'test_type_hints',
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch
@@ -136,8 +124,9 @@ SLOW_TESTS = [
     'test_jit_legacy',
     'test_dataloader',
     'test_overrides',
-    'test_jit_simple',
     'test_jit',
+    'test_jit_profiling',
+    'test_jit_fuser_profiling',
     'test_torch',
     'distributed/test_distributed',
     'distributed/rpc/test_rpc_spawn',

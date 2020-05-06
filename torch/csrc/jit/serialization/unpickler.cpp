@@ -410,9 +410,11 @@ PickleOpCode Unpickler::readInstruction() {
       }
       at::DataPtr storage_ptr = read_record_(key);
       int64_t numel = args.at(4).toInt();
+      caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
       at::Storage storage(
-          at::CPU(type).typeMeta(),
-          numel,
+          c10::Storage::use_byte_size_t(),
+          dtype,
+          numel * dtype.itemsize(),
           std::move(storage_ptr),
           /*allocator=*/nullptr,
           /*resizable=*/false); // NB: we didn't set any allocator for the
@@ -490,7 +492,13 @@ void Unpickler::readGlobal(
         if (entry != type_cache_.end()) {
           type = entry->second;
         } else {
-          type = c10::parseType(type_str);
+          if (type_resolver_ == nullptr) {
+            // If we haven't injected a custom way of retrieving types from
+            // names, use a barebones type parser.
+            type = c10::parseType(type_str);
+          } else {
+            type = type_resolver_(type_str).type_;
+          }
           type_cache_[type_str] = type;
         }
         // TODO: Use lookahead to avoid creating the tuple and immediately

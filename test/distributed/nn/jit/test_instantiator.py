@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import unittest
-import uuid
 from typing import Tuple
 
 import torch
@@ -21,31 +20,40 @@ class MyModule(nn.Module):
     pass
 
 
-def create_module() -> MyModuleInterface:
+def create_module():
     return MyModule()
 
 
+def bad_create_module():
+    pass
+
+
 class TestInstantiator(unittest.TestCase):
-    def test_get_return_type_from_callable_expect_module_interface(self):
-        return_type = instantiator.get_return_type_from_callable(create_module)
+    def test_infer_module_interface_cls_from_interface(self):
+        return_type = instantiator.infer_module_interface_cls(create_module, MyModuleInterface)
         self.assertEqual(return_type, MyModuleInterface)
 
-    def test_get_return_type_from_callable_expect_module_type(self):
-        return_type = instantiator.get_return_type_from_callable(MyModule)
+    def test_infer_module_interface_cls_from_ctor(self):
+        return_type = instantiator.infer_module_interface_cls(MyModule, None)
         self.assertEqual(return_type, MyModule)
 
+    def test_infer_module_interface_cls_from_nothing(self):
+        with self.assertRaisesRegex(ValueError, "Can't infer"):
+            instantiator.infer_module_interface_cls(bad_create_module, None)
+
     def test_get_arg_return_types_from_interface(self):
-        args_str, arg_types_str, return_type_str = instantiator.get_arg_return_types_from_interface(
-            MyModuleInterface
-        )
+        (
+            args_str,
+            arg_types_str,
+            return_type_str,
+        ) = instantiator.get_arg_return_types_from_interface(MyModuleInterface)
         self.assertEqual(args_str, "tensor, number, word")
         self.assertEqual(arg_types_str, "tensor: Tensor, number: int, word: str")
         self.assertEqual(return_type_str, "Tuple[Tensor, int, str]")
 
     def test_instantiate_remote_module_template(self):
-        generated_module_name = f"_remote_module_{uuid.uuid4().hex}"
         generated_module = instantiator.instantiate_remote_module_template(
-            generated_module_name, MyModuleInterface, True  # is_scriptable
+            MyModuleInterface, True  # is_scriptable
         )
         self.assertTrue(hasattr(generated_module, "_RemoteModule"))
         self.assertTrue(hasattr(generated_module, "_remote_forward"))

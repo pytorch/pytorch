@@ -7,6 +7,7 @@
 #endif
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
@@ -17,6 +18,7 @@
 #include <caffe2/serialize/istream_adapter.h>
 
 #include <ATen/ATen.h>
+#include <fmt/format.h>
 
 #include <fstream>
 #include <string>
@@ -44,12 +46,11 @@ void postSetStateValidate(const IValue& v) {
     if (attrType->kind() != TypeKind::OptionalType) {
       TORCH_CHECK(
           !slot.isNone(),
-          "The field '",
-          attrName,
-          "' was left unitialized after __setstate__, but expected a ",
-          "value of type '",
-          attrType->python_str(),
-          "'");
+          fmt::format(
+              "The field '{}' was left uninitialized after '__setstate__', "
+              "but expected a value of type '{}'",
+              attrName,
+              attrType->python_str()));
     }
   }
 }
@@ -135,7 +136,7 @@ class ScriptModuleDeserializer final {
 
 IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
   auto type_resolver = [&](const c10::QualifiedName& qn) {
-    auto cls = source_importer_.loadNamedType(qn)->expect<ClassType>();
+    auto cls = source_importer_.loadType(qn);
     return c10::StrongTypePtr(compilation_unit_, std::move(cls));
   };
 
@@ -179,6 +180,65 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       archive_name, type_resolver, obj_loader, device_, *reader_.get());
 }
 
+void rewriteQuantizedConvForBC(const Module& module) {
+  const std::string& old_quantized_conv2d = R"(
+graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point):
+         %r = quantized::conv2d(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
+         return (%r) )";
+
+  const std::string& old_quantized_conv2d_relu = R"(
+graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point):
+         %r = quantized::conv2d_relu(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
+         return (%r) )";
+
+  const std::string& old_quantized_conv3d = R"(
+graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point):
+         %r = quantized::conv3d(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
+         return (%r) )";
+
+  const std::string& old_quantized_conv3d_relu = R"(
+graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point):
+         %r = quantized::conv3d_relu(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
+         return (%r) )";
+
+  const std::string& new_quantized_conv2d = R"(
+graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point):
+         %r = quantized::conv2d(%x, %packed_params, %r_scale, %r_zero_point)
+         return (%r) )";
+
+  const std::string& new_quantized_conv2d_relu = R"(
+graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point):
+         %r = quantized::conv2d_relu(%x, %packed_params, %r_scale, %r_zero_point)
+         return (%r) )";
+
+  const std::string& new_quantized_conv3d = R"(
+graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point):
+         %r = quantized::conv3d(%x, %packed_params, %r_scale, %r_zero_point)
+         return (%r) )";
+
+  const std::string& new_quantized_conv3d_relu = R"(
+graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point):
+         %r = quantized::conv3d_relu(%x, %packed_params, %r_scale, %r_zero_point)
+         return (%r) )";
+
+  SubgraphRewriter rewriter;
+  static const std::vector<std::pair<std::string, std::string>>
+      patterns_and_replacements = {
+          {old_quantized_conv2d, new_quantized_conv2d},
+          {old_quantized_conv2d_relu, new_quantized_conv2d_relu},
+          {old_quantized_conv3d, new_quantized_conv3d},
+          {old_quantized_conv3d_relu, new_quantized_conv3d_relu},
+      };
+  for (const auto& item : patterns_and_replacements) {
+    rewriter.RegisterRewritePattern(item.first, item.second);
+  }
+  rewriter.runOnModule(module);
+
+  for (const Module& child : module.children()) {
+    rewriteQuantizedConvForBC(child);
+  }
+}
+
 Module ScriptModuleDeserializer::deserialize(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
@@ -207,7 +267,9 @@ Module ScriptModuleDeserializer::deserialize(
   for (auto constant : tuple->elements()) {
     constants_table_.push_back(constant.toTensor());
   }
-  return Module(readArchive("data").toObject());
+  auto m = Module(readArchive("data").toObject());
+  rewriteQuantizedConvForBC(m);
+  return m;
 }
 
 } // namespace

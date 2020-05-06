@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-from typing import Tuple
+from typing import Tuple, Any
 
 import torch
 import torch.distributed.rpc as rpc
@@ -11,11 +11,13 @@ from ${module_interface_cls_module_name} import ${module_interface_cls_name} as 
 class _RemoteModule(nn.Module):  # noqa
     module_rref: RRef[module_interface_cls]  # noqa
     is_scriptable: bool
+    global_unique_name: str
 
-    def __init__(self, module_rref, is_scriptable):
+    def __init__(self, module_rref, is_scriptable, global_unique_name):
         super().__init__()
         self.module_rref = module_rref
         self.is_scriptable = is_scriptable
+        self.global_unique_name = global_unique_name
 
     ${jit_export_decorator}
     def forward_async(self, ${arg_types})${arrow_and_future_return_type}:  # noqa
@@ -45,3 +47,12 @@ ${jit_script_decorator}
 def _remote_forward(module_rref: RRef[module_interface_cls], ${arg_types})${arrow_and_return_type}:  # noqa
     module = module_rref.local_value()
     return module.forward(${args}, ${kwargs})
+
+
+${jit_interface_decorator}
+class _RemoteModuleInterface:
+    def forward_async(self, ${arg_types})${arrow_and_future_return_type}:  # noqa
+        pass
+
+    def forward(self, ${arg_types})${arrow_and_return_type}:  # noqa
+        pass

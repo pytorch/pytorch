@@ -137,7 +137,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_constant_fold",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict,
+             std::map<std::string, IValue>& paramsDict,
              int opset_version) {
             ConstantFoldONNX(
                 graph->block(),
@@ -224,7 +224,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
-      .def("_jit_pass_swap_dequantize", &SwapDeQuant)
+      .def("_jit_pass_swap_dequantize", &PropagateQuantizationOps)
       .def(
           "_jit_pass_swap_functional_linear",
           [](std::shared_ptr<Graph>& graph) { SwapFunctionalLinear(graph); })
@@ -273,7 +273,10 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return CreateFunctionalGraphs(g); })
       .def(
           "_jit_pass_remove_mutation",
-          [](std::shared_ptr<Graph>& g) { return RemoveMutation(g); })
+          [](std::shared_ptr<Graph>& g) {
+            RemoveListMutation(g);
+            return RemoveTensorMutation(g);
+          })
       .def(
           "_jit_pass_inline_functional_graphs",
           [](std::shared_ptr<Graph>& g) { return InlineFunctionalGraphs(g); })
@@ -491,6 +494,10 @@ void initJITBindings(PyObject* module) {
             return getTECudaPointwiseBlockSize() = block_size;
           })
       .def("_jit_set_texpr_fuser_enabled", &setTensorExprFuserEnabled)
+      .def("_jit_texpr_fuser_enabled", &tensorExprFuserEnabled)
+      .def(
+          "_jit_pass_fuse_tensorexprs",
+          [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
@@ -518,7 +525,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict) {
+             std::map<std::string, IValue>& paramsDict) {
             UnpackQuantizedWeights(graph, paramsDict);
             return paramsDict;
           },
@@ -526,11 +533,40 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_quantization_insert_permutes",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict) {
+             std::map<std::string, IValue>& paramsDict) {
             insertPermutes(graph, paramsDict);
             return paramsDict;
           },
-          pybind11::return_value_policy::move);
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_pass_filter_non_tensor_arguments",
+          [](std::map<std::string, IValue> params) {
+            std::map<std::string, at::Tensor> retval;
+            for (auto& kv : params) {
+              if (kv.second.isTensor()) {
+                retval[kv.first] = std::move(kv.second).toTensor();
+              }
+            }
+            return retval;
+          })
+      .def("_jit_decay_packed_param_input_types", [](Graph& g) {
+        for (Value* i : g.inputs()) {
+          if (i->type() ==
+                  getCustomClass(
+                      "__torch__.torch.classes.quantized.Conv2dPackedParamsBase") ||
+              i->type() ==
+                  getCustomClass(
+                      "__torch__.torch.classes.quantized.Conv3dPackedParamsBase")) {
+            // Dummy CompleteTensorType to appease ONNX validator.
+            i->setType(TensorType::create(
+                at::kQInt8,
+                c10::kCPU,
+                std::vector<int64_t>{1},
+                std::vector<int64_t>{1},
+                c10::nullopt));
+          }
+        }
+      });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")

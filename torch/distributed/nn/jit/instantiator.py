@@ -4,22 +4,34 @@ import inspect
 import os
 
 import torch
+from torch.distributed.nn.jit.templates import dir_path as TEMPLATE_DIR_PATH
+
+
 try:
     # For fb.
     from src.ATen.code_template import CodeTemplate
 except ImportError:
     # For open-source.
     from tools.shared.module_loader import import_module
-    CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
-from torch.distributed.nn.jit.templates import dir_path as TEMPLATE_DIR_PATH
+
+    CodeTemplate = import_module(
+        "code_template", "aten/src/ATen/code_template.py"
+    ).CodeTemplate
 
 
-def get_return_type_from_callable(callable_obj):
-    sig = inspect.signature(callable_obj)
-    return_annotation = sig.return_annotation
-    if return_annotation is inspect.Signature.empty:
-        return callable_obj
-    return return_annotation
+def infer_module_interface_cls(module_creator, module_interface_cls):
+    # If module_interface_cls is provided, use it.
+    if module_interface_cls is not None:
+        return module_interface_cls
+
+    # Otherwise, if module_creator is a class ctor, use it.
+    if inspect.isclass(module_creator):
+        return module_creator
+
+    raise ValueError(
+        "Can't infer module_interface_cls, "
+        "because neither module_interface_cls nor module_creator return type is provided."
+    )
 
 
 def get_arg_return_types_from_interface(module_interface):
@@ -78,8 +90,14 @@ def write(out_path, text):
 
 
 def instantiate_remote_module_template(
-    generated_module_name, module_interface_cls, is_scriptable
+    module_interface_cls, is_scriptable
 ):
+    # Generate the template instance name.
+    module_interface_cls_name = torch.jit._qualified_name(module_interface_cls).replace(
+        ".", "_"
+    )
+    generated_module_name = f"_remote_module_{module_interface_cls_name}"
+
     if is_scriptable:
         args_str, arg_types_str, return_type_str = get_arg_return_types_from_interface(
             module_interface_cls
@@ -97,6 +115,7 @@ def instantiate_remote_module_template(
     jit_decorator_str_map = dict(
         jit_script_decorator="@torch.jit.script",
         jit_export_decorator="@torch.jit.export",
+        jit_interface_decorator="@torch.jit.interface",
     )
     if is_scriptable is False:
         jit_decorator_str_map = {

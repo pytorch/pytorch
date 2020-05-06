@@ -34,21 +34,24 @@ namespace impl {
   // supported_primitive_arg_types defines which primitive types we allow in
   // kernel functions as arguments or returns.
   // Additionally, we support lists, dicts and optionals containing these types.
-  using supported_primitive_arg_types = guts::typelist::typelist<
+using supported_primitive_arg_types = guts::typelist::typelist<
     int64_t,
     double,
     bool,
     std::string,
     at::Tensor,
     at::Scalar,
-    c10::QScheme
-  >;
+    c10::QScheme,
+    c10::ScalarType>;
 
-  template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
-    assert_is_valid_input_type() {
-      auto tmap = c10::getCustomClassTypeMap();
-      TORCH_CHECK(c10::isCustomClassRegistered<T>(), "Tried to use undefined class as input argument");
-    }
+template <class T, bool AllowDeprecatedTypes, class Enable = void>
+struct assert_is_valid_input_type {
+  assert_is_valid_input_type() {
+    auto tmap = c10::getCustomClassTypeMap();
+    TORCH_CHECK(
+        c10::isCustomClassRegistered<T>(),
+        "Tried to use undefined class as input argument");
+  }
   };
 
   template<class T, bool AllowDeprecatedTypes>
@@ -306,24 +309,6 @@ namespace impl {
     }
   };
   template<class KernelFunctor> using wrap_kernel_functor_unboxed = wrap_kernel_functor_unboxed_<KernelFunctor, typename guts::infer_function_traits_t<KernelFunctor>::func_type>;
-
-  template<class KernelFunctor, class... Args>
-  class KernelFactory final {
-    static_assert(std::is_constructible<KernelFunctor, Args...>::value, "Wrong argument types for constructor of kernel functor.");
-
-  public:
-    explicit constexpr KernelFactory(Args... args)
-    : constructor_parameters_(std::move(args)...) {}
-
-    std::unique_ptr<OperatorKernel> operator()() const {
-      return guts::apply(
-        [] (const Args&... params) -> std::unique_ptr<OperatorKernel> {return guts::make_unique_base<OperatorKernel, KernelFunctor>(params...); },
-        constructor_parameters_);
-    }
-
-  private:
-    std::tuple<Args...> constructor_parameters_;
-  };
 }
 
 }
