@@ -552,13 +552,14 @@ void initJITBindings(PyObject* module) {
       .def("_jit_decay_packed_param_input_types", [](Graph& g) {
         for (Value* i : g.inputs()) {
           if (i->type() ==
-                 getCustomClass(
+                  getCustomClass(
                       "__torch__.torch.classes.quantized.Conv2dPackedParamsBase") ||
               i->type() ==
                   getCustomClass(
                       "__torch__.torch.classes.quantized.Conv3dPackedParamsBase") ||
-              i->type() == getCustomClass(
-                  "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
+              i->type() ==
+                  getCustomClass(
+                      "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
             // Dummy CompleteTensorType to appease ONNX validator.
             i->setType(TensorType::create(
                 at::kQInt8,

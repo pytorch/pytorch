@@ -1,7 +1,7 @@
 #include <torch/library.h>
 
-#include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/cpu/packed_params.h>
 #include <torch/custom_class.h>
 
 torch::jit::class_<LinearPackedParamsBase> register_linear_params();

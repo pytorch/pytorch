@@ -272,33 +272,31 @@ struct SourceImporterImpl : public Resolver,
     };
 
     // module demangled qualname -> ReplacementDescr
-    static std::unordered_map<std::string, AttrTypeReplacementDescr>
-        replacements{
-            {"__torch__.torch.nn.quantized.modules.linear.LinearPackedParams",
-             {"_packed_params",
-              "Tensor",
-              "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
-            {"__torch__.torch.nn.quantized.modules.linear.Linear",
-             {"_packed_params",
-              "Tensor",
-              "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
-            {"__torch__.torch.nn.quantized.modules.conv.Conv2d",
-              {"_packed_params",
-               "Tensor",
-               "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
-            {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d",
-              {"_packed_params",
-               "Tensor",
-               "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
-            {"__torch__.torch.nn.quantized.modules.conv.Conv3d",
-              {"_packed_params",
-               "Tensor",
-               "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}},
-            {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d",
-              {"_packed_params",
-               "Tensor",
-               "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}}
-        };
+    static std::unordered_map<std::string, AttrTypeReplacementDescr> replacements{
+        {"__torch__.torch.nn.quantized.modules.linear.LinearPackedParams",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+        {"__torch__.torch.nn.quantized.modules.linear.Linear",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+        {"__torch__.torch.nn.quantized.modules.conv.Conv2d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
+        {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
+        {"__torch__.torch.nn.quantized.modules.conv.Conv3d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}},
+        {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}}};
     static std::regex mangle_re("\\.___torch_mangle_\\d+");
     auto demangled_classname =
         std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
