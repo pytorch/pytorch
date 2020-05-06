@@ -64,7 +64,6 @@ from torch.testing._internal.common_quantization import (
     test_only_train_fn,
     prepare_dynamic,
     convert_dynamic,
-    skipIfNoFBGEMM,
 )
 
 # annotated models
@@ -130,38 +129,38 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 quantize(model, test_only_eval_fn, self.calib_data, inplace=True)
                 checkQuantized(model)
 
-    @skipIfNoFBGEMM
     def test_two_layers(self):
         r"""TwoLayerLinearModel has two Linear modules but we only quantize the second one
         `fc2`, and `fc1`is not quantized
         """
-        with override_quantized_engine('fbgemm'):
-            model = AnnotatedTwoLayerLinearModel()
-            model = prepare(model)
+        if 'fbgemm' in supported_qengines:
+            with override_quantized_engine('fbgemm'):
+                model = AnnotatedTwoLayerLinearModel()
+                model = prepare(model)
 
-            self.checkNoPrepModules(model)
-            self.checkObservers(model)
-            self.checkNoPrepModules(model.fc1)
-            self.checkHasPrepModules(model.fc2)
-
-            test_only_eval_fn(model, self.calib_data)
-            model = convert(model)
-
-            def checkQuantized(model):
                 self.checkNoPrepModules(model)
+                self.checkObservers(model)
                 self.checkNoPrepModules(model.fc1)
                 self.checkHasPrepModules(model.fc2)
-                self.assertEqual(type(model.fc1), torch.nn.Linear)
-                self.checkWrappedQuantizedLinear(model.fc2)
+
                 test_only_eval_fn(model, self.calib_data)
-                self.checkScriptable(model, self.calib_data)
+                model = convert(model)
 
-            checkQuantized(model)
+                def checkQuantized(model):
+                    self.checkNoPrepModules(model)
+                    self.checkNoPrepModules(model.fc1)
+                    self.checkHasPrepModules(model.fc2)
+                    self.assertEqual(type(model.fc1), torch.nn.Linear)
+                    self.checkWrappedQuantizedLinear(model.fc2)
+                    test_only_eval_fn(model, self.calib_data)
+                    self.checkScriptable(model, self.calib_data)
 
-            # test one line API
-            model = quantize(AnnotatedTwoLayerLinearModel(), test_only_eval_fn,
-                             self.calib_data)
-            checkQuantized(model)
+                checkQuantized(model)
+
+                # test one line API
+                model = quantize(AnnotatedTwoLayerLinearModel(), test_only_eval_fn,
+                                 self.calib_data)
+                checkQuantized(model)
 
     def test_nested1(self):
         r"""Test quantization for nested model, top level 'fc3' and
@@ -205,44 +204,44 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 checkQuantized(model)
 
 
-    @skipIfNoFBGEMM
     def test_nested2(self):
-        model = AnnotatedSubNestedModel()
-        model = prepare(model)
+        if 'fbgemm' in supported_qengines:
+            model = AnnotatedSubNestedModel()
+            model = prepare(model)
 
-        def checkPrepModules(model, before_calib=False):
-            if before_calib:
-                self.checkObservers(model)
-            self.checkNoPrepModules(model)
-            self.checkNoPrepModules(model.sub1)
-            self.checkNoPrepModules(model.sub1.fc)
-            self.checkNoPrepModules(model.sub1.relu)
-            self.checkHasPrepModules(model.sub2)
-            self.checkNoPrepModules(model.sub2.module.fc1)
-            self.checkNoPrepModules(model.sub2.module.fc2)
-            self.checkHasPrepModules(model.fc3)
+            def checkPrepModules(model, before_calib=False):
+                if before_calib:
+                    self.checkObservers(model)
+                self.checkNoPrepModules(model)
+                self.checkNoPrepModules(model.sub1)
+                self.checkNoPrepModules(model.sub1.fc)
+                self.checkNoPrepModules(model.sub1.relu)
+                self.checkHasPrepModules(model.sub2)
+                self.checkNoPrepModules(model.sub2.module.fc1)
+                self.checkNoPrepModules(model.sub2.module.fc2)
+                self.checkHasPrepModules(model.fc3)
 
-        checkPrepModules(model, True)
+            checkPrepModules(model, True)
 
-        test_only_eval_fn(model, self.calib_data)
-        model = convert(model)
-
-        def checkQuantized(model):
-            checkPrepModules(model)
-            self.checkLinear(model.sub1.fc)
-            self.assertEqual(type(model.sub1.relu), torch.nn.ReLU)
-            self.checkQuantizedLinear(model.sub2.module.fc1)
-            self.checkQuantizedLinear(model.sub2.module.fc2)
-            self.checkWrappedQuantizedLinear(model.fc3)
             test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
+            model = convert(model)
 
-        checkQuantized(model)
+            def checkQuantized(model):
+                checkPrepModules(model)
+                self.checkLinear(model.sub1.fc)
+                self.assertEqual(type(model.sub1.relu), torch.nn.ReLU)
+                self.checkQuantizedLinear(model.sub2.module.fc1)
+                self.checkQuantizedLinear(model.sub2.module.fc2)
+                self.checkWrappedQuantizedLinear(model.fc3)
+                test_only_eval_fn(model, self.calib_data)
+                self.checkScriptable(model, self.calib_data)
 
-        # test one line API
-        model = quantize(AnnotatedSubNestedModel(), test_only_eval_fn,
-                         self.calib_data)
-        checkQuantized(model)
+            checkQuantized(model)
+
+            # test one line API
+            model = quantize(AnnotatedSubNestedModel(), test_only_eval_fn,
+                             self.calib_data)
+            checkQuantized(model)
 
     def test_nested3(self):
         r"""More complicated nested test case with child qconfig overrides
@@ -312,30 +311,31 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 model = quantize(AnnotatedSkipQuantModel(qengine), test_only_eval_fn, self.calib_data)
                 checkQuantized(model)
 
-    @skipIfNoFBGEMM
+
     def test_manual(self):
         r"""User inserts QuantStub and DeQuantStub in model code
         and call the quantization utility functions.
         """
-        model = QuantStubModel()
-        # propagate the qconfig of parents to children, model is changed
-        # inplace
-        model = prepare(model)
-        self.checkObservers(model)
+        if 'fbgemm' in supported_qengines:
+            model = QuantStubModel()
+            # propagate the qconfig of parents to children, model is changed
+            # inplace
+            model = prepare(model)
+            self.checkObservers(model)
 
-        test_only_eval_fn(model, self.calib_data)
-        model = convert(model)
-
-        def checkQuantized(model):
-            self.assertEqual(type(model.fc), nnq.Linear)
             test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
+            model = convert(model)
 
-        checkQuantized(model)
+            def checkQuantized(model):
+                self.assertEqual(type(model.fc), nnq.Linear)
+                test_only_eval_fn(model, self.calib_data)
+                self.checkScriptable(model, self.calib_data)
 
-        # test one line API
-        model = quantize(QuantStubModel(), test_only_eval_fn, self.calib_data)
-        checkQuantized(model)
+            checkQuantized(model)
+
+            # test one line API
+            model = quantize(QuantStubModel(), test_only_eval_fn, self.calib_data)
+            checkQuantized(model)
 
     def test_resnet_base(self):
         r"""Test quantization for bottleneck topology used in resnet/resnext
@@ -362,29 +362,29 @@ class TestPostTrainingStatic(QuantizationTestCase):
 
                 checkQuantized(model)
 
-    @skipIfNoFBGEMM
     def test_normalization(self):
         r"""
         Test quantization of normalization layers
         """
-        model = NormalizationTestModel()
-        model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
-        prepare(model, inplace=True)
-        self.checkObservers(model)
-        test_only_eval_fn(model, self.calib_data)
-        model = convert(model)
-
-        def checkQuantized(model):
-            self.checkNoPrepModules(model.layer_norm)
-            self.assertEqual(type(model.layer_norm), nnq.LayerNorm)
+        if 'fbgemm' in supported_qengines:
+            model = NormalizationTestModel()
+            model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+            prepare(model, inplace=True)
+            self.checkObservers(model)
             test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
+            model = convert(model)
 
-        checkQuantized(model)
+            def checkQuantized(model):
+                self.checkNoPrepModules(model.layer_norm)
+                self.assertEqual(type(model.layer_norm), nnq.LayerNorm)
+                test_only_eval_fn(model, self.calib_data)
+                self.checkScriptable(model, self.calib_data)
 
-        model_oneline = quantize(
-            NormalizationTestModel(), test_only_eval_fn, self.calib_data)
-        checkQuantized(model)
+            checkQuantized(model)
+
+            model_oneline = quantize(
+                NormalizationTestModel(), test_only_eval_fn, self.calib_data)
+            checkQuantized(model)
 
     def test_save_load_state_dict(self):
         r"""Test PTQ flow of creating a model and quantizing it and saving the quantized state_dict
@@ -422,33 +422,35 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 out = model(x)
                 self.assertEqual(ref, out)
 
-    @skipIfNoFBGEMM
     def test_activations(self):
         r"""
         Test quantization of activations
         """
-        model = ActivationsTestModel()
-        model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
-        prepare(model, inplace=True)
-        self.checkObservers(model)
-        test_only_eval_fn(model, self.calib_data)
-        model = convert(model)
-
-        def checkQuantized(model):
-            self.checkNoPrepModules(model.hardswish)
-            self.assertEqual(type(model.hardswish), nnq.Hardswish)
+        if 'fbgemm' in supported_qengines:
+            model = ActivationsTestModel()
+            model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+            prepare(model, inplace=True)
+            self.checkObservers(model)
             test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
+            model = convert(model)
 
-        checkQuantized(model)
+            def checkQuantized(model):
+                self.checkNoPrepModules(model.hardswish)
+                self.assertEqual(type(model.hardswish), nnq.Hardswish)
+                test_only_eval_fn(model, self.calib_data)
+                self.checkScriptable(model, self.calib_data)
 
-        # test one line API
-        model_oneline = quantize(ActivationsTestModel(), test_only_eval_fn,
-                                 self.calib_data)
-        checkQuantized(model_oneline)
+            checkQuantized(model)
+
+            # test one line API
+            model_oneline = quantize(ActivationsTestModel(), test_only_eval_fn,
+                                     self.calib_data)
+            checkQuantized(model_oneline)
 
 
-@skipIfNoFBGEMM
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class TestPostTrainingDynamic(QuantizationTestCase):
     def test_single_layer(self):
         r"""Dynamic Quantize SingleLayerLinearDynamicModel which has one Linear module,
@@ -1025,45 +1027,45 @@ class TestGraphModePostTrainingStatic(QuantizationTestCase):
                         inplace=False)
                     self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
-    @skipIfNoFBGEMM
     def test_observer_with_ignored_function(self):
         r"""Test observers with ignored function and make sure it works in
         graph mode
         """
-        # eager mode
-        annotated_linear_model = AnnotatedSingleLayerLinearModel('fbgemm').eval()
-        for qconfig in [
-                QConfig(
-                    activation=default_observer,
-                    weight=default_weight_observer),
-                QConfig(
-                    activation=default_histogram_observer,
-                    weight=default_weight_observer),
-                QConfig(
-                    activation=default_observer,
-                    weight=default_per_channel_weight_observer),
-        ]:
-            annotated_linear_model.qconfig = qconfig
-            linear_model = SingleLayerLinearModel().eval()
-            # copy the weight from eager mode so that we can
-            # compare the result of the two quantized models later
-            linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
-            linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
-            model_eager = quantize(annotated_linear_model, test_only_eval_fn,
-                                   self.calib_data)
+        if 'fbgemm' in supported_qengines:
+            # eager mode
+            annotated_linear_model = AnnotatedSingleLayerLinearModel('fbgemm').eval()
+            for qconfig in [
+                    QConfig(
+                        activation=default_observer,
+                        weight=default_weight_observer),
+                    QConfig(
+                        activation=default_histogram_observer,
+                        weight=default_weight_observer),
+                    QConfig(
+                        activation=default_observer,
+                        weight=default_per_channel_weight_observer),
+            ]:
+                annotated_linear_model.qconfig = qconfig
+                linear_model = SingleLayerLinearModel().eval()
+                # copy the weight from eager mode so that we can
+                # compare the result of the two quantized models later
+                linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
+                linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
+                model_eager = quantize(annotated_linear_model, test_only_eval_fn,
+                                       self.calib_data)
 
-            qconfig_dict = {'': qconfig}
-            model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
-            model_script = torch.jit.script(linear_model)
-            result_eager = model_eager(self.calib_data[0][0])
-            for model_under_test in [model_traced, model_script]:
-                model_quantized = quantize_script(
-                    model_under_test,
-                    qconfig_dict,
-                    test_only_eval_fn,
-                    [self.calib_data],
-                    inplace=False)
-                self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+                qconfig_dict = {'': qconfig}
+                model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
+                model_script = torch.jit.script(linear_model)
+                result_eager = model_eager(self.calib_data[0][0])
+                for model_under_test in [model_traced, model_script]:
+                    model_quantized = quantize_script(
+                        model_under_test,
+                        qconfig_dict,
+                        test_only_eval_fn,
+                        [self.calib_data],
+                        inplace=False)
+                    self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
     def test_conv(self):
         r"""Compare the result of quantizing conv layer in
@@ -1256,7 +1258,9 @@ class TestFunctionalModule(QuantizationTestCase):
         checkQuantized(model)
         self.checkScriptable(model, [(xq, xq)], check_save_load=True)
 
-@skipIfNoFBGEMM
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class TestFusion(QuantizationTestCase):
     def test_fuse_module_train(self):
         model = ModelForFusion(default_qat_qconfig).train()
