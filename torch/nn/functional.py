@@ -3112,17 +3112,20 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             _scale_factor_repeated = [scale_factor for _ in range(scale_factor_len)]  # noqa: C416
         scale_factor_list = torch.jit.annotate(List[Optional[float]], [elem for elem in _scale_factor_repeated])  # noqa: C416
 
+    # Give this variable a short name because it has to be repeated multiple times below.
+    sfl = scale_factor_list
+
     # TODO: rewrite _interp_output_size as inner function when TS supports closures, or just inline it.
     closed_over_args = (input, size, scale_factor, recompute_scale_factor)
     output_size = _interp_output_size(closed_over_args)
     if input.dim() == 3 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest1d(input, output_size, scale_factor_list[0])
+        return torch._C._nn.upsample_nearest1d(input, output_size, sfl[0])
     elif input.dim() == 4 and mode == 'nearest':
         return torch._C._nn.upsample_nearest2d(input, output_size,
-                                               scale_factor_list[0], scale_factor_list[1])
+                                               sfl[0], sfl[1])
     elif input.dim() == 5 and mode == 'nearest':
         return torch._C._nn.upsample_nearest3d(input, output_size,
-                                               scale_factor_list[0], scale_factor_list[1], scale_factor_list[2])
+                                               sfl[0], sfl[1], sfl[2])
     elif input.dim() == 3 and mode == 'area':
         return adaptive_avg_pool1d(input, output_size)
     elif input.dim() == 4 and mode == 'area':
@@ -3131,7 +3134,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         return adaptive_avg_pool3d(input, output_size)
     elif input.dim() == 3 and mode == 'linear':
         assert align_corners is not None
-        return torch._C._nn.upsample_linear1d(input, output_size, align_corners, scale_factor_list[0])
+        return torch._C._nn.upsample_linear1d(input, output_size, align_corners, sfl[0])
     elif input.dim() == 3 and mode == 'bilinear':
         raise NotImplementedError("Got 3D input, but bilinear mode needs 4D input")
     elif input.dim() == 3 and mode == 'trilinear':
@@ -3141,7 +3144,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     elif input.dim() == 4 and mode == 'bilinear':
         assert align_corners is not None
         return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners,
-                                                scale_factor_list[0], scale_factor_list[1])
+                                                sfl[0], sfl[1])
     elif input.dim() == 4 and mode == 'trilinear':
         raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
     elif input.dim() == 5 and mode == 'linear':
@@ -3151,11 +3154,11 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     elif input.dim() == 5 and mode == 'trilinear':
         assert align_corners is not None
         return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners,
-                                                 scale_factor_list[0], scale_factor_list[1], scale_factor_list[2])
+                                                 sfl[0], sfl[1], sfl[2])
     elif input.dim() == 4 and mode == 'bicubic':
         assert align_corners is not None
         return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners,
-                                               scale_factor_list[0], scale_factor_list[1])
+                                               sfl[0], sfl[1])
     else:
         raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"
                                   " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear"
