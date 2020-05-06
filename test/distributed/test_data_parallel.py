@@ -681,6 +681,22 @@ class TestDataParallel(TestCase):
         dpm = torch.nn.parallel.replicate(module, devices=[0, 1], detach=True)
         torch.save(dpm, data)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_module_with_no_inputs(self):
+        # gh-37814
+        class Holder(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = torch.nn.Parameter(torch.arange(3).float())
+
+            def forward(self):
+                return self.x
+
+        expected = torch.arange(3).float().cuda()
+        holder = dp.DataParallel(Holder().cuda())
+        output = holder()
+        for replica in output.split(3):
+            self.assertEqual(expected, replica)
 
 if __name__ == '__main__':
     run_tests()
