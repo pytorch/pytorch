@@ -6820,14 +6820,14 @@
   python_module: nn
   dispatch:
     CPU: slow_conv2d_backward_out_cpu
-    CUDA: legacy::cuda::_thnn_conv2d_backward_out
+    CUDA: slow_conv2d_backward_out_cuda
 
 - func: thnn_conv2d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   use_c10_dispatcher: full
   python_module: nn
   dispatch:
     CPU: slow_conv2d_backward_cpu
-    CUDA: legacy::cuda::_thnn_conv2d_backward
+    CUDA: slow_conv2d_backward_cuda
 
 - func: thnn_conv_depthwise2d.out(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
