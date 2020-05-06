@@ -228,6 +228,7 @@ class TORCH_API TensorExprKernel {
 TORCH_API int& getTECudaPointwiseLoopLevels();
 TORCH_API int& getTECudaPointwiseBlockCount();
 TORCH_API int& getTECudaPointwiseBlockSize();
+TORCH_API bool fallbackAllowed();
 
 } // namespace tensorexpr
 } // namespace jit
