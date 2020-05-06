@@ -594,6 +594,51 @@ class TestJit(JitTestCase):
         torch._C._jit_pass_peephole(fn.graph)
         self.assertEqual(s, str(fn.graph))
 
+    def test_peephole_list_ops(self):
+        @torch.jit.script
+        def foo(x, y, z):
+            return len([x, y, z])
+
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check("value=3").check_next("return").run(foo.graph)
+
+        @torch.jit.script
+        def foo(x, y, z):
+            li = [x, y, z]
+            for i in range(len(x)):
+                li.append(x)
+            return len([x, y, z])
+
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check_not("aten::len").run(foo.graph)
+
+        @torch.jit.script
+        def foo(x, y, z):
+            li = [x, y, z]
+            return li[1], li[-2]
+
+        FileCheck().check("aten::__getitem__").run(foo.graph)
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check_not("aten::__getitem__").run(foo.graph)
+
+        @torch.jit.script
+        def foo(x, y, z):
+            li = [x, y, z]
+            return li[-7]
+
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check("aten::__getitem__").run(foo.graph)
+
+        @torch.jit.script
+        def foo(x, y, z):
+            li = [x, y, z]
+            for i in range(len(x)):
+                li.append(x)
+            return li[-2]
+
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check("aten::__getitem__").run(foo.graph)
+
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_peephole_cuda(self):
         a = torch.tensor([0.4], device='cpu')
