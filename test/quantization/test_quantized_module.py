@@ -35,7 +35,7 @@ def override_qengines(qfunction):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 result = qfunction(*args, **kwargs)
-        return result
+            return result
     return test_fn
 
 class TestStaticQuantizedModule(QuantizationTestCase):
