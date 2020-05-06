@@ -349,6 +349,23 @@ class TestJit(JitTestCase):
 
         self.checkTrace(f, (x, y))
 
+    def test_trace_checking_with_global_name(self):
+        class MyClass(torch.nn.Module):
+            def __init__(self):
+                super(MyClass, self).__init__()
+
+            def forward(self, xs: List[Tensor]):
+                y = torch.cat(xs, dim=0)
+                return y
+
+        model = MyClass()
+        # Simulate these inputs being in the globals, like they would be if,
+        # e.g. they were defined outermost scope of a script
+        global input1, input2
+        input1 = torch.ones(2, 2)
+        input2 = torch.ones(2, 2)
+        m2 = torch.jit.trace(model, ((input1, input2),))
+
     def test_trace_aliased_parameter(self):
         class M(nn.Module):
             def __init__(self, x):
@@ -17101,7 +17118,59 @@ a")
         torch.jit.script(MaybeHasAttr2(True))
         torch.jit.script(MaybeHasAttr2(False))
 
+        class MyMod(torch.nn.Module):
+            def forward(self):
+                if hasattr(self, "foo"):
+                    return 1
+                else:
+                    return 0
 
+            @torch.jit.export
+            def fee(self):
+                return 1
+
+        self.checkModule(MyMod(), ())
+
+        class HasAttrMod(torch.nn.Module):
+            __constants__ = ["fee"]
+
+            def __init__(self):
+                super().__init__()
+                self.fee = 3
+
+            def forward(self):
+                a = hasattr(self, "fee")
+                b = hasattr(self, "foo")
+                c = hasattr(self, "hi")
+                d = hasattr(self, "nonexistant")
+                return (a, b, c, d)
+
+            def foo(self):
+                return 1
+
+            @torch.jit._overload_method
+            def hi(self, x: Tensor): ...  # noqa: E704
+
+            def hi(self, x):  # noqa: F811
+                return 2
+
+        self.checkModule(HasAttrMod(), ())
+
+        @torch.jit.script
+        class FooTest(object):
+            def __init__(self):
+                self.x = 1
+
+            def foo(self, y):
+                return self.x + y
+
+        def foo():
+            a = FooTest()
+            val1 = hasattr(a, "foo"), hasattr(a, "x"), hasattr(a, "bla")
+            val2 = hasattr(FooTest, "foo"), hasattr(FooTest, "a")
+            return val1, val2
+
+        self.assertEqual(foo(), torch.jit.script(foo)())
 
     def test_optional_tuple(self):
         def fn(x=None):
