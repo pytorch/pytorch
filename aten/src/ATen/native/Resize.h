@@ -19,10 +19,10 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, int64_t new_size) 
     if (!THTensor_getStoragePtr(self)) {
       THTensor_stealAndSetStoragePtr(self, THStorage_new(self->dtype()));
     }
-    int64_t new_size_bytes =
-        (new_size + self->storage_offset()) * self->dtype().itemsize();
-    if (new_size_bytes > self->storage().nbytes()) {
-      THStorage_resizeBytes(THTensor_getStoragePtr(self), new_size_bytes);
+    if (new_size + self->storage_offset() > self->storage().numel()) {
+      THStorage_resize(
+          THTensor_getStoragePtr(self),
+          new_size + self->storage_offset());
     }
   }
 }
@@ -61,31 +61,19 @@ static inline void checkInBoundsForStorage(
     IntArrayRef size,
     IntArrayRef stride,
     int64_t storage_offset,
-    const caffe2::TypeMeta& data_type,
     const Storage& new_storage) {
-  int64_t storage_size_bytes =
-      detail::computeStorageNbytes(size, stride, data_type.itemsize());
-  int64_t storage_offset_bytes = storage_offset * data_type.itemsize();
-  if (storage_size_bytes == 0) {
+  int64_t storage_size = detail::computeStorageSize(size, stride);
+  if (storage_size == 0) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
   }
-  int64_t new_storage_size_bytes = new_storage.nbytes();
+  int64_t new_storage_size = new_storage.numel();
   TORCH_CHECK(
-      storage_size_bytes + storage_offset_bytes <= new_storage_size_bytes,
-      "setStorage: sizes ",
-      size,
-      ", strides ",
-      stride,
-      ","
-      " storage offset ",
-      storage_offset,
-      ", and itemsize ",
-      data_type.itemsize(),
-      " requiring a storage size of ",
-      storage_size_bytes,
-      " are out of bounds for storage of size ",
-      new_storage_size_bytes);
+      storage_offset + storage_size <= new_storage_size,
+      "setStorage: sizes ", size, ", strides ", stride, ","
+      " and storage offset ", storage_offset,
+      " requiring a storage size of ", storage_size + storage_offset,
+      " are out of bounds for storage with numel ", new_storage_size);
 }
 
 static inline void checkSetStorage(Tensor& result, Storage storage, int64_t storage_offset,
@@ -136,8 +124,7 @@ inline void setStrided(
     IntArrayRef stride,
     int64_t storage_offset) {
   auto* self_ = self.unsafeGetTensorImpl();
-  checkInBoundsForStorage(
-      size, stride, storage_offset, self_->dtype(), self_->storage());
+  checkInBoundsForStorage(size, stride, storage_offset, self_->storage());
 
   /* storage offset */
   TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
