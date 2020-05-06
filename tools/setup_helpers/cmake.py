@@ -165,6 +165,10 @@ class CMake:
                 USE_NINJA and not os.path.exists(ninja_build_file)):
             # Everything's in place. Do not rerun.
             return
+        ninja_deps_file = os.path.join(self.build_dir, '.ninja_deps')
+        if IS_WINDOWS and USE_NINJA and os.path.exists(ninja_deps_file):
+            # Cannot rerun ninja on Windows
+            os.remove(ninja_deps_file)
 
         args = []
         if USE_NINJA:
