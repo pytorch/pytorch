@@ -137,19 +137,15 @@ IMPLEMENT_THFILE_SCALAR(Float, float)
 IMPLEMENT_THFILE_SCALAR(Double, double)
 IMPLEMENT_THFILE_SCALAR(Half, THHalf)
 
-#define IMPLEMENT_THFILE_STORAGE(TYPEC, TYPE)                             \
-  size_t THFile_read##TYPEC(THFile* self, TH##TYPEC##Storage* storage) {  \
-    return THFile_read##TYPEC##Raw(                                       \
-        self,                                                             \
-        TH##TYPEC##Storage_data(storage),                                 \
-        storage->nbytes() / sizeof(TYPE));                                \
-  }                                                                       \
-                                                                          \
-  size_t THFile_write##TYPEC(THFile* self, TH##TYPEC##Storage* storage) { \
-    return THFile_write##TYPEC##Raw(                                      \
-        self,                                                             \
-        TH##TYPEC##Storage_data(storage),                                 \
-        storage->nbytes() / sizeof(TYPE));                                \
+#define IMPLEMENT_THFILE_STORAGE(TYPEC, TYPE)                           \
+  size_t THFile_read##TYPEC(THFile *self, TH##TYPEC##Storage *storage)    \
+  {                                                                     \
+    return THFile_read##TYPEC##Raw(self, TH##TYPEC##Storage_data(storage), storage->numel()); \
+  }                                                                     \
+                                                                        \
+  size_t THFile_write##TYPEC(THFile *self, TH##TYPEC##Storage *storage)   \
+  {                                                                     \
+    return THFile_write##TYPEC##Raw(self, TH##TYPEC##Storage_data(storage), storage->numel()); \
   }
 
 IMPLEMENT_THFILE_STORAGE(Byte, uint8_t)
