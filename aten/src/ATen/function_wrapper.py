@@ -779,15 +779,12 @@ def gen_device_init(option, backend_type_env):
     # type: (FunctionOption, Environment) -> List[str]
     # generate a device init statement, if the passed function option is a Tensor factory.
     #
-    if not is_factory(option):
-        return []
-
-    name = option['name']
-    device_type = backend_type_env['DeviceType']
-    assert device_type in ['CPU', 'CUDA'], \
-        "{}: unsupported device type '{}'".format(name, device_type)
-    return ['globalLegacyTypeDispatch().init{}();'.format(device_type)]
-
+    if is_factory(option):
+        name = option['name']
+        device_type = backend_type_env['DeviceType']
+        if device_type == 'CUDA' or device_type == 'HIP':
+            return ['globalContext().lazyInit{}();'.format(device_type)]
+    return []
 
 def create_generic(top_env, declarations):
     # type: (TopEnvironment, List[FunctionOption]) -> Tuple[List[OutputDeclaration], List[OpRegistration]]
