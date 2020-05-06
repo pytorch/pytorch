@@ -822,7 +822,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           [](const ExprHandle& a,
              const ExprHandle& threshold,
              const ExprHandle& value) {
-            return ifThenElse(CompareSelect::make(a, threshold, kGT), a, value);
+            return CompareSelect::make(a, threshold, a, value, kGT);
           });
     } break;
 
@@ -831,7 +831,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           "aten_where",
           v,
           [](const ExprHandle& a0, const ExprHandle& a1, const ExprHandle& a2) {
-            return ifThenElse(a0, a1, a2);
+            return CompareSelect::make(a0, ExprHandle(0), a1, a2, kNE);
           });
     } break;
 
