@@ -144,7 +144,8 @@ CAFFE2_API void check_dim_size(
 
 namespace detail {
 CAFFE2_API std::vector<int64_t> defaultStrides(IntArrayRef sizes);
-CAFFE2_API int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides);
+CAFFE2_API size_t
+computeStorageNbytes(IntArrayRef sizes, IntArrayRef strides, size_t itemsize);
 CAFFE2_API c10::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
