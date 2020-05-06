@@ -362,8 +362,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 }
 
-// This method controls how we desugar attribute lookups on ScriptModules.
-std::shared_ptr<SugaredValue> ModuleValue::attr(
+// This method controls how we desugar attribute lookups on ScriptModules
+std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
@@ -455,14 +455,35 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return attr(loc, m, field);
   }
 
-  // We've exhausted all possibilities. Bailout with a hint to the user.
+  return nullptr;
+}
+
+bool ModuleValue::hasAttr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  return tryGetAttr(loc, m, field) != nullptr;
+}
+
+// This method controls how we desugar attribute lookups on ScriptModules.
+std::shared_ptr<SugaredValue> ModuleValue::attr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  if (auto attr = tryGetAttr(loc, m, field)) {
+    return attr;
+  }
+
+  // We don't define this attr. Bailout with a hint to the user.
   std::string hint;
   if (auto failureReason = concreteType_->findFailedAttribute(field)) {
     hint = *failureReason;
   }
 
-  throw ErrorReport(loc) << "Module '" << selfType->name()->name() << "'"
-                         << " has no attribute '" << field << "' " << hint;
+  throw ErrorReport(loc)
+      << "Module '"
+      << concreteType_->getJitType()->expect<ClassType>()->name()->name() << "'"
+      << " has no attribute '" << field << "' " << hint;
 }
 
 SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
@@ -494,6 +515,18 @@ std::shared_ptr<SugaredValue> PythonClassValue::attr(
   }
 
   return ClassValue::attr(loc, m, field);
+}
+
+bool PythonClassValue::hasAttr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  try {
+    py::getattr(py_type_, field.c_str());
+    return true;
+  } catch (py::error_already_set& e) {
+    return false;
+  }
 }
 
 void ModuleValue::setAttr(
