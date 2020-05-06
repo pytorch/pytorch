@@ -2,6 +2,7 @@
 #include <ATen/native/cuda/Reduce.cuh>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/SharedReduceOps.h>
+#include <ATen/native/cpu/zmath.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/ReduceOps.h>
 
@@ -36,8 +37,9 @@ static void sum_kernel_cuda(TensorIterator& iter) {
     return sum_kernel_impl<at::BFloat16, float, float>(iter);
   }
   #endif
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, iter.dtype(), "sum_cuda", [&]() {
-    sum_kernel_impl<scalar_t>(iter);
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, iter.dtype(), "sum_cuda", [&]() {
+    using value_t = typename ztype<scalar_t>::value_t;
+    sum_kernel_impl<value_t>(iter);
   });
 }
 
