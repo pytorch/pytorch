@@ -3620,7 +3620,7 @@ class TestScript(JitTestCase):
             else:
                 return 2
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             old_num_runs = torch._C._jit_set_num_profiled_runs(2)
             test_not_const(torch.rand([1, 2]))
             test_not_const(torch.rand([2, 2]))
