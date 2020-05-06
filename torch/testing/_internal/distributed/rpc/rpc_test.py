@@ -2410,7 +2410,7 @@ class RpcTest(RpcAgentTestFixture):
             cb_fut.wait()
 
     @dist_init
-    def test_multi_callbacks(self):
+    def test_callback_multi(self):
         num_cbs = 10
         set_by_cbs = [concurrent.futures.Future() for _ in range(num_cbs)]
         n = self.rank + 1
@@ -2470,6 +2470,18 @@ class RpcTest(RpcAgentTestFixture):
         )._then(callback)
 
         self.assertEqual(fut.wait(), torch.ones(2, 2) + 3)
+
+    @dist_init
+    def test_callback_torchscript(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+
+        fut = rpc.rpc_async(
+            dst,
+            torch.add,
+            args=(torch.ones(2, 2), 1)
+        )._then(my_script_func)
+
+        self.assertEqual(fut.wait(), (torch.ones(2, 2) + 1) * 2)
 
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
