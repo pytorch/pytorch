@@ -4163,6 +4163,7 @@ def add_test(
             new_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg for i, arg in enumerate(args)]
             test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
             if dtype.is_complex:
+                # TODO: remove this. this is temporary while we ramp up the complex support.
                 if name in complex_list and 'scalar' not in test_name and 'constant' not in test_name:
                     test_name = test_name + '_complex'
                 else:
@@ -5282,6 +5283,13 @@ class TestAutogradFunctional(TestCase):
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
+
+    def test_min_max_median_backprops_to_single_value(self, device):
+        for f in [torch.min, torch.max, torch.median]:
+            x = torch.tensor([1., 0., 1., 0., 1., 0.], device=device, requires_grad=True)
+            y = f(x)
+            y.backward()
+            self.assertEqual(x.grad.sum(), 1.)
 
     # skip this test if running on rocm, because in cdist
     # we use __shfl_down_sync on CUDA for fast reduction
