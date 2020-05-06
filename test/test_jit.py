@@ -316,20 +316,6 @@ class TestJit(JitTestCase):
 
         traced_rec = torch.jit.trace(rec, (input))
 
-    def test_trace_aliased_input(self):
-        class MyClass(torch.nn.Module):
-            def __init__(self):
-                super(MyClass, self).__init__()
-
-            def forward(self, xs: List[Tensor]):
-                y = torch.cat(xs, dim=0)  # torch.stack() results in error as well
-                return y
-
-
-        model = MyClass()
-        sample = torch.ones(2, 2)
-        m2 = torch.jit.trace(model, ((sample, sample, sample),))
-
     def test_trace_legacy_ctor(self):
         class MyModule(nn.Module):
             def forward(self, x):
@@ -362,6 +348,23 @@ class TestJit(JitTestCase):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
         self.checkTrace(f, (x, y))
+
+    def test_trace_checking_with_global_name(self):
+        class MyClass(torch.nn.Module):
+            def __init__(self):
+                super(MyClass, self).__init__()
+
+            def forward(self, xs: List[Tensor]):
+                y = torch.cat(xs, dim=0)
+                return y
+
+        model = MyClass()
+        # Simulate these inputs being in the globals, like they would be if,
+        # e.g. they were defined outermost scope of a script
+        global input1, input2
+        input1 = torch.ones(2, 2)
+        input2 = torch.ones(2, 2)
+        m2 = torch.jit.trace(model, ((input1, input2),))
 
     def test_trace_aliased_parameter(self):
         class M(nn.Module):
@@ -3468,6 +3471,53 @@ class TestScript(JitTestCase):
             .check("aten::mul") \
             .run(m.inlined_graph)
 
+    def test_code_with_constants(self):
+        """
+        Check that the `code_with_constants` property correctly returns graph CONSTANTS in the
+        CONSTANTS.cN format used in the output of the `code` property.
+        """
+        @torch.jit.script
+        def foo(x=torch.ones(1)):
+            return x
+
+        class Moddy(torch.nn.Module):
+            def __init__(self):
+                super(Moddy, self).__init__()
+
+            def forward(self, x):
+                return foo()
+
+        m = torch.jit.script(Moddy())
+        src, CONSTANTS = m.code_with_constants
+
+        self.assertEqual(CONSTANTS.c0, torch.ones(1))
+        self.assertEqual(src, m.code)
+
+    def test_code_with_constants_restore(self):
+        """
+        Check that the `code_with_constants` property correctly works on restoration after save() + load()
+        """
+        @torch.jit.script
+        def foo(x=torch.ones(1)):
+            return x
+
+        class Moddy(torch.nn.Module):
+            def __init__(self):
+                super(Moddy, self).__init__()
+
+            def forward(self, x):
+                return foo()
+
+        m = torch.jit.script(Moddy())
+        src, CONSTANTS = m.code_with_constants
+        eic = self.getExportImportCopy(m)
+
+        src_eic, CONSTANTS_eic = eic.code_with_constants
+
+        self.assertEqual(src, src_eic)
+        self.assertEqual(CONSTANTS.c0, CONSTANTS_eic.c0)
+
+
     def test_oneline_func(self):
         def fn(x): return x  # noqa: E704
 
@@ -3560,6 +3610,27 @@ class TestScript(JitTestCase):
                 g = torch.jit.last_executed_optimized_graph()
                 # there should still be a Bailout after disable_grad call
                 FileCheck().check("disable_grad").check("BailOut[").check("BailoutTemplate").run(g)
+
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
+    def test_profiling_merge(self):
+        @torch.jit.script
+        def test_not_const(x):
+            if x.size(0) == 1:
+                return 1
+            else:
+                return 2
+
+        with enable_profiling_mode():
+            old_num_runs = torch._C._jit_set_num_profiled_runs(2)
+            test_not_const(torch.rand([1, 2]))
+            test_not_const(torch.rand([2, 2]))
+            test_not_const(torch.rand([3, 2]))
+
+            graph_str = torch.jit.last_executed_optimized_graph()
+            FileCheck().check("Double(*:2, 2:1) = ").run(graph_str)
+            FileCheck().check_not("Double(1:2, 2:1) = ").run(graph_str)
+
+        torch._C._jit_set_num_profiled_runs(old_num_runs)
 
     def test_nested_bailouts(self):
         @torch.jit.script
@@ -4680,7 +4751,7 @@ def foo(x):
 
     @skipIfRocm
     def test_torchbind_instantiate_missing_class(self):
-        with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class foo.IDontExist but it does not exist!'):
+        with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class \'foo.IDontExist\', but it does not exist!'):
             torch.classes.foo.IDontExist(3, 4, 5)
 
     @skipIfRocm
@@ -4701,6 +4772,57 @@ def foo(x):
 
         mod = TorchBindOptionalExplicitAttr()
         scripted = torch.jit.script(mod)
+
+    def _test_lower_graph_impl(self, model, data):
+        model.qconfig = torch.quantization.default_qconfig
+        model = torch.quantization.prepare(model)
+        model = torch.quantization.convert(model)
+
+        outputs = model(data)
+        input_names = ["x"]
+
+        def export_to_onnx(model, input, input_names):
+            outputs = model(input)
+
+            traced = torch.jit.trace(model, input)
+            buf = io.BytesIO()
+            torch.jit.save(traced, buf)
+            buf.seek(0)
+
+            model = torch.jit.load(buf)
+            f = io.BytesIO()
+            torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs,
+                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        onnx_model = export_to_onnx(model, data, input_names)
+
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
+    def test_lower_graph_linear(self):
+        model = torch.quantization.QuantWrapper(torch.nn.Linear(5, 10, bias=True)).to(dtype=torch.float)
+        data_numpy = np.random.rand(1, 2, 5).astype(np.float32)
+        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
+        self._test_lower_graph_impl(model, data)
+
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
+    def test_lower_graph_conv2d(self):
+        model = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True)).to(dtype=torch.float)
+        data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
+        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
+        self._test_lower_graph_impl(model, data)
+
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
+    @unittest.skip("onnx opset9 does not support quantize_per_tensor and caffe2 \
+    does not support conv3d")
+    def test_lower_graph_conv3d(self):
+        model = torch.quantization.QuantWrapper(torch.nn.Conv3d(3, 5, 2, bias=True)).to(dtype=torch.float)
+        data_numpy = np.random.rand(1, 3, 6, 6, 6).astype(np.float32)
+        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
+        self._test_lower_graph_impl(model, data)
 
     def test_jitter_bug(self):
         @torch.jit.script
@@ -5952,8 +6074,12 @@ a")
         # Misc sequence advanced indexing
         inp = consec((4, 8, 5))
         to_check = [
+            # [[0, 1, 3]]
+            ['[i]', {'i': [0, 1, 3]}],
             # [[0, 2], [1, 3]]
             ['[i, j]', {'i': [0, 2], 'j': [1, 3]}],
+            # [[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
+            ['[i, j]', {'i': [[0, 1], [0, 1]], 'j': [[0, 1], [0, 1]]}],
             # [[0, 2], [1, 3], [1, 1]]
             ['[i, j, k]', {'i': [0, 2], 'j': [1, 3], 'k': [1, 1]}],
             # [[0, 2], 1, [1, 1]]
@@ -5997,6 +6123,22 @@ a")
         for expr, argdict in to_check:
             tensordict = {k: torch.tensor(v) for (k, v) in argdict.items()}
             check_indexing(expr, inp, **tensordict)
+
+    def test_adv_indexing_list(self):
+        # indexing with list is equivalent to indexing with tensor
+        def func1(x):
+            return x[[0, 1, 5]]
+
+        def func2(x):
+            return x[[0, 1], [0, 1]]
+
+        def func3(x):
+            return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
+
+        input = torch.rand((6, 2))
+        self.checkScript(func1, (input,))
+        self.checkScript(func2, (input,))
+        self.checkScript(func3, (input,))
 
     def test_keyword(self):
         @torch.jit.script
@@ -16970,7 +17112,59 @@ a")
         torch.jit.script(MaybeHasAttr2(True))
         torch.jit.script(MaybeHasAttr2(False))
 
+        class MyMod(torch.nn.Module):
+            def forward(self):
+                if hasattr(self, "foo"):
+                    return 1
+                else:
+                    return 0
 
+            @torch.jit.export
+            def fee(self):
+                return 1
+
+        self.checkModule(MyMod(), ())
+
+        class HasAttrMod(torch.nn.Module):
+            __constants__ = ["fee"]
+
+            def __init__(self):
+                super().__init__()
+                self.fee = 3
+
+            def forward(self):
+                a = hasattr(self, "fee")
+                b = hasattr(self, "foo")
+                c = hasattr(self, "hi")
+                d = hasattr(self, "nonexistant")
+                return (a, b, c, d)
+
+            def foo(self):
+                return 1
+
+            @torch.jit._overload_method
+            def hi(self, x: Tensor): ...  # noqa: E704
+
+            def hi(self, x):  # noqa: F811
+                return 2
+
+        self.checkModule(HasAttrMod(), ())
+
+        @torch.jit.script
+        class FooTest(object):
+            def __init__(self):
+                self.x = 1
+
+            def foo(self, y):
+                return self.x + y
+
+        def foo():
+            a = FooTest()
+            val1 = hasattr(a, "foo"), hasattr(a, "x"), hasattr(a, "bla")
+            val2 = hasattr(FooTest, "foo"), hasattr(FooTest, "a")
+            return val1, val2
+
+        self.assertEqual(foo(), torch.jit.script(foo)())
 
     def test_optional_tuple(self):
         def fn(x=None):
@@ -17914,33 +18108,6 @@ def normalize_check_ad(check_ad, name):
     check_ad = [[t] if isinstance(t, str) else t for t in check_ad]
 
     return check_ad
-
-
-class TestDocs(unittest.TestCase):
-    @slowTest
-    def test_docs(self):
-        import subprocess
-        docs_dir = '../docs'
-        docs_dir = [os.path.dirname(__file__), '..', 'docs']
-        docs_dir = os.path.join(*docs_dir)
-
-        def report_error(result):
-            out = result.stdout.decode('utf-8')
-            err = result.stderr.decode('utf-8')
-            raise RuntimeError("{}\n{}\n".format(err, out) +
-                               "Docs build failed (run `cd docs && " +
-                               "pip install -r requirements.txt && make doctest`)")
-        result = subprocess.run(
-            ['pip', 'install', '-r', 'requirements.txt'],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
-        if result.returncode != 0:
-            report_error(result)
-
-        result = subprocess.run(
-            ['make', 'doctest'],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
-        if result.returncode != 0:
-            report_error(result)
 
 
 class TestProducerVersion(unittest.TestCase):
