@@ -180,7 +180,6 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
   return it->meta_;
 }
 
-
 void ConcreteModuleTypeBuilder::setIterableModuleKind(IterableModuleKind kind) {
   iterableModuleKind_ = kind;
 }
@@ -209,7 +208,8 @@ void ConcreteModuleTypeBuilder::addAttribute(
   TORCH_INTERNAL_ASSERT(type->cast<FunctionType>() == nullptr);
   attributes_.insert(
       std::move(name),
-      ConcreteModuleTypeBuilder::Attribute(unshapedType(type), isParameter, wasRegisteredAsBuffer));
+      ConcreteModuleTypeBuilder::Attribute(
+          unshapedType(type), isParameter, wasRegisteredAsBuffer));
 }
 
 void ConcreteModuleTypeBuilder::addFunctionAttribute(

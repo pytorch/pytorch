@@ -281,30 +281,30 @@ void recurseThroughNestedModules(
 std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredNamedBufferDict(
     const SourceRange& loc,
     Function& m) {
-    std::vector<std::string> paramNames;
-    std::vector<SugaredValuePtr> values;
+  std::vector<std::string> paramNames;
+  std::vector<SugaredValuePtr> values;
 
-    const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
-    for (size_t i = 0; i < selfType->numAttributes(); ++i) {
-      if (selfType->is_buffer_written_attribute(i)) {
-          paramNames.push_back(selfType->getAttributeName(i));
-      }
+  const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
+  for (size_t i = 0; i < selfType->numAttributes(); ++i) {
+    if (selfType->is_buffer_written_attribute(i)) {
+      paramNames.push_back(selfType->getAttributeName(i));
     }
+  }
 
-    std::vector<SugaredValuePtr> keys;
-    for (const auto& name : paramNames) {
-      auto name_v =
-          std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
-      Value* tensor_v = m.graph()->insertGetAttr(self_, name);
-      values.push_back(tryGetAttr(loc, m, name));
-      keys.push_back(name_v);
+  std::vector<SugaredValuePtr> keys;
+  for (const auto& name : paramNames) {
+    auto name_v =
+        std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
+    Value* tensor_v = m.graph()->insertGetAttr(self_, name);
+    values.push_back(tryGetAttr(loc, m, name));
+    keys.push_back(name_v);
   }
 
   return std::make_shared<SugaredModuleDict>(
       std::make_shared<ModuleValue>(self_, concreteType_),
       std::make_shared<SugaredTupleValue>(keys),
       std::make_shared<SugaredTupleValue>(values));
-  }
+}
 
 std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredModuleDict(
     const SourceRange& loc,
@@ -349,7 +349,9 @@ std::shared_ptr<SugaredValue> SugaredModuleDict::attr(
     return std::make_shared<ModuleDictMethod>(keys_, "keys");
   } else if (field == "values" || field == "children") {
     return std::make_shared<ModuleDictMethod>(modules_, field);
-  } else if (field == "items" || field == "named_children" || field == "named_buffers") {
+  } else if (
+      field == "items" || field == "named_children" ||
+      field == "named_buffers") {
     auto iterator = std::make_shared<IterableTree>();
     iterator->addChild(loc, m, keys_);
     iterator->addChild(loc, m, modules_);

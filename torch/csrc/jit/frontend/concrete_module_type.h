@@ -61,7 +61,11 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
     pyClass_ = std::move(pyClass);
   }
   void addConstant(std::string name, py::object value);
-  void addAttribute(std::string name, TypePtr type, bool isParameter, bool wasRegisteredAsBuffer);
+  void addAttribute(
+      std::string name,
+      TypePtr type,
+      bool isParameter,
+      bool wasRegisteredAsBuffer);
   void addFunctionAttribute(
       std::string name,
       const TypePtr& type,
@@ -118,7 +122,9 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
 
   struct Attribute {
     Attribute(TypePtr type, bool isParam, bool wasRegisteredAsBuffer)
-        : type_(std::move(type)), isParam_(isParam), wasRegisteredAsBuffer_(wasRegisteredAsBuffer) {}
+        : type_(std::move(type)),
+          isParam_(isParam),
+          wasRegisteredAsBuffer_(wasRegisteredAsBuffer) {}
 
     friend bool operator==(const Attribute& lhs, const Attribute& rhs) {
       return *(lhs.type_) == *(rhs.type_) && lhs.isParam_ == rhs.isParam_;
