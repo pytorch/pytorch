@@ -15,9 +15,10 @@ __global__ void stochastic_rounding_kernel(
   curandStatePhilox4_32_10_t state;
   curand_init(seed_and_offset.first, tid, seed_and_offset.second, &state);
 
+  round_stochastically<output_t, input_t, at::Half> rounder;
+
   for (int64_t i = tid; i < numel; i += blockDim.x * gridDim.x) {
-    float inp = static_cast<float>(input[i]);
-    output[i] = round_stochastically<output_t>(inp, curand_uniform(&state));
+    output[i] = rounder(input[i], curand_uniform(&state));
   }
 }
 

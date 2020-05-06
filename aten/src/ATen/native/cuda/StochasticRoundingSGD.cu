@@ -19,6 +19,8 @@ __global__ void stochastic_rounding_sgd_step_kernel(
   curandStatePhilox4_32_10_t state;
   curand_init(seeds.first, tid, seeds.second, &state);
 
+  round_stochastically<scalar_t, float, at::Half> rounder;
+
   for (int i = tid; i < numel; i += blockDim.x * gridDim.x) {
     float weight = static_cast<float>(weights[i]);
     float gradient = static_cast<float>(gradients[i]) * (*inv_scale);
@@ -42,9 +44,9 @@ __global__ void stochastic_rounding_sgd_step_kernel(
 
     weight -= lr * gradient;
 
-    weights[i] = round_stochastically<scalar_t>(weight, random_values.x);
+    weights[i] = rounder(weight, random_values.x);
     if (momentum != 0.0f)
-      momentum_buffer[i] = round_stochastically<scalar_t>(velocity, random_values.y);
+      momentum_buffer[i] = rounder(velocity, random_values.y);
   }
 }
 

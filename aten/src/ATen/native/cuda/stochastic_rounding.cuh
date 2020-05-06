@@ -44,17 +44,24 @@ __device__ __forceinline__ float get_delta_fp16(float x) {
 }
 
 // Natalia magic
-template <typename scalar_t>
-__device__ __forceinline__ scalar_t round_stochastically(float x, float random_value) {
-  if (x == 0.0) {
-    return scalar_t(0.0);
+template <typename out_type, typename in_type, typename round_to_prec=at::Half>
+struct round_stochastically {
+  static_assert(std::is_same<round_to_prec, at::Half>::value, "round_stochastically only supports round_to_prec=at::Half");
+};
+
+template <typename out_type, typename in_type>
+struct round_stochastically<out_type, in_type, at::Half> {
+  __device__ __forceinline__ out_type operator()(in_type x, float random_value) {
+    if (x == 0.0) {
+      return out_type(0.0);
+    }
+    float delta = get_delta_fp16(static_cast<float>(x));
+    float val;
+    if (x < 0.0) {
+      val = x - random_value * delta;
+    } else {
+      val = x + random_value * delta;
+    }
+    return maybe_upcast<out_type>(__float2half_rz(val));
   }
-  float delta = get_delta_fp16(x);
-  float val;
-  if (x < 0.0) {
-    val = x - random_value * delta;
-  } else {
-    val = x + random_value * delta;
-  }
-  return maybe_upcast<scalar_t>(__float2half_rz(val));
-}
+};

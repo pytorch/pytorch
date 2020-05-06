@@ -21,6 +21,8 @@ __global__ void stochastic_rounding_adam_step_kernel(
   curandStatePhilox4_32_10_t state;
   curand_init(seeds.first, tid, seeds.second, &state);
 
+  round_stochastically<scalar_t, float, at::Half> rounder;
+
   float m_correction = 1.0 - powf(beta1, step);
   float v_correction = 1.0 - powf(beta2, step);
 
@@ -54,11 +56,11 @@ __global__ void stochastic_rounding_adam_step_kernel(
 
     weight -= (lr / m_correction) * m / (sqrtf(max_v / v_correction) + eps);
 
-    weights[i] = round_stochastically<scalar_t>(weight, random_values.x);
-    exp_avg[i] = round_stochastically<scalar_t>(m, random_values.y);
-    exp_avg_sq[i] = round_stochastically<scalar_t>(sqrtf(v), random_values.z);
+    weights[i] = rounder(weight, random_values.x);
+    exp_avg[i] = rounder(m, random_values.y);
+    exp_avg_sq[i] = rounder(sqrtf(v), random_values.z);
     if (is_amsgrad) {
-      max_exp_avg_sq[i] = round_stochastically<scalar_t>(sqrtf(max_v), random_values.w);
+      max_exp_avg_sq[i] = rounder(sqrtf(max_v), random_values.w);
     }
   }
 }
