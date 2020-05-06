@@ -10,11 +10,14 @@
 namespace torch {
 namespace jit {
 
-size_t normalizeIndex(int64_t index, size_t len) {
+c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
   if (index < 0) {
-    return index + len;
-  } else {
+    index = index + len;
+  }
+  if (index >= 0 && index < static_cast<int64_t>(len)) {
     return index;
+  } else {
+    return c10::nullopt;
   }
 }
 
@@ -79,11 +82,9 @@ struct PeepholeOptimizeListIdiomsImpl {
         if (list_creation_node->kind() == prim::ListConstruct) {
           if (auto index = toIValue(node->inputs().at(1))) {
             size_t list_size = list_creation_node->inputs().size();
-            int64_t norm_index = normalizeIndex(index->toInt(), list_size);
-            if (norm_index >= 0 &&
-                norm_index < static_cast<int64_t>(list_size)) {
+            if (auto norm_index = normalizeIndex(index->toInt(), list_size)) {
               node->output()->replaceAllUsesWith(
-                  list_creation_node->inputs().at(norm_index));
+                  list_creation_node->inputs().at(*norm_index));
             }
           }
         }

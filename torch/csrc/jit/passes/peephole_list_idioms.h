@@ -5,7 +5,8 @@
 namespace torch {
 namespace jit {
 
-// Optimizes list idioms. Currently this is invoked as part of PeepholeOptimize
+// Peephole Optimizes List Ops such as len(li) and li[1].
+// Currently this is invoked as part of PeepholeOptimize
 TORCH_API void PeepholeOptimizeListIdioms(const std::shared_ptr<Graph>& graph);
 
 } // namespace jit
