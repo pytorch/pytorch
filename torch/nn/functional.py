@@ -3121,11 +3121,9 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     if input.dim() == 3 and mode == 'nearest':
         return torch._C._nn.upsample_nearest1d(input, output_size, sfl[0])
     elif input.dim() == 4 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest2d(input, output_size,
-                                               sfl[0], sfl[1])
+        return torch._C._nn.upsample_nearest2d(input, output_size, sfl[0], sfl[1])
     elif input.dim() == 5 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest3d(input, output_size,
-                                               sfl[0], sfl[1], sfl[2])
+        return torch._C._nn.upsample_nearest3d(input, output_size, sfl[0], sfl[1], sfl[2])
     elif input.dim() == 3 and mode == 'area':
         return adaptive_avg_pool1d(input, output_size)
     elif input.dim() == 4 and mode == 'area':
@@ -3143,8 +3141,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         raise NotImplementedError("Got 4D input, but linear mode needs 3D input")
     elif input.dim() == 4 and mode == 'bilinear':
         assert align_corners is not None
-        return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners,
-                                                sfl[0], sfl[1])
+        return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, sfl[0], sfl[1])
     elif input.dim() == 4 and mode == 'trilinear':
         raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
     elif input.dim() == 5 and mode == 'linear':
@@ -3153,12 +3150,10 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
     elif input.dim() == 5 and mode == 'trilinear':
         assert align_corners is not None
-        return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners,
-                                                 sfl[0], sfl[1], sfl[2])
+        return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, sfl[0], sfl[1], sfl[2])
     elif input.dim() == 4 and mode == 'bicubic':
         assert align_corners is not None
-        return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners,
-                                               sfl[0], sfl[1])
+        return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners, sfl[0], sfl[1])
     else:
         raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"
                                   " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear"
