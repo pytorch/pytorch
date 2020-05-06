@@ -2037,7 +2037,7 @@ class TestQuantizedLinear(unittest.TestCase):
            use_channelwise=st.booleans())
     @override_qengines
     def test_qlinear_unpack(self, W, use_channelwise):
-        if qengine == 'qnnpack':
+        if torch.backends.quantized.engine == 'qnnpack':
             use_channelwise = False
 
         W, (W_scale, W_zp, torch_type) = W
