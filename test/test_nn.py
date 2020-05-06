@@ -4586,7 +4586,7 @@ class TestNN(NNTestCase):
         tgt_length = 15
 
         transformer = nn.Transformer(d_model, nhead, num_encoder_layers, num_decoder_layers,
-                                     dim_feedforward, dropout, batch_first)
+                                     dim_feedforward, dropout=dropout, batch_first=batch_first)
         src = torch.randn(seq_length, bsz, d_model)
         src_mask = transformer.generate_square_subsequent_mask(seq_length).double()
         tgt = torch.randn(tgt_length, bsz, d_model)
@@ -5246,7 +5246,8 @@ class TestNN(NNTestCase):
             encoder_input = torch.randn(encoder_input_shape)
             decoder_input = torch.randn(decoder_input_shape)
             model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers,
-                                            num_decoder_layers, dim_feedforward, batch_first, dropout)
+                                            num_decoder_layers, dim_feedforward,
+                                            dropout=dropout, batch_first=batch_first)
 
             if src_mask_len is not None:
                 src_mask = model.generate_square_subsequent_mask(src_mask_len)
@@ -5291,7 +5292,7 @@ class TestNN(NNTestCase):
         correct_encoder_input_shape = (seq_len, bsz, d_model)
         correct_decoder_input_shape = (tgt_len, bsz, d_model)
 
-        def update_shape(shape, dim, new_dim_size):
+        def update_shape(shape, dim, new_dim_size)
             new_shape = list(shape)
             new_shape[dim] = new_dim_size
             return tuple(new_shape)
@@ -5366,11 +5367,13 @@ class TestNN(NNTestCase):
         # Correct activations
         for activation in activations:
             model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers, num_decoder_layers,
-                                            dim_feedforward, batch_first, dropout, activation)
+                                            dim_feedforward, dropout=dropout, activation=activation,
+                                            batch_first=batch_first)
         # Incorrect activation
         with self.assertRaises(RuntimeError):
             model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers, num_decoder_layers,
-                                            dim_feedforward, batch_first, dropout, wrong_activation)
+                                            dim_feedforward, dropout=dropout,
+                                            activation=wrong_activation, batch_first=batch_first)
 
     def test_transformer_layer_args_check(self):
         model_names = ['TransformerEncoderLayer', 'TransformerDecoderLayer']
