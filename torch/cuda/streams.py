@@ -17,7 +17,7 @@ class Stream(torch._C._CudaStreamBase):
                                  represent higher priorities.
     """
 
-    def __new__(cls, device=None, priority=0, **kwargs):
+    def __new__(cls, device=None, priority=0 if torch.version.cuda else 1, **kwargs):
         with torch.cuda.device(device):
             return super(Stream, cls).__new__(cls, priority=priority, **kwargs)
 

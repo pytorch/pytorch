@@ -1178,7 +1178,6 @@ class TestCuda(TestCase):
         self.assertNotEqual(hash(s0), hash(s3))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_streams_priority(self):
         low, high = torch.cuda.Stream.priority_range()
         s0 = torch.cuda.Stream(device=0, priority=low)

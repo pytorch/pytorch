@@ -56,6 +56,23 @@
 namespace c10 {
 namespace cuda {
 
+namespace {
+
+// Global stream constants
+#ifndef __HIP_PLATFORM_HCC__
+// Note: lower numbers are higher priorities, zero is default priority
+static int kHighPriority = -1;
+static int kDefaultPriority = 0;
+static int kLowPriority = 0;
+#else
+// Note: lower numbers are higher priorities, one is default priority
+static int kHighPriority = 0;
+static int kDefaultPriority = 1;
+static int kLowPriority = 2;
+#endif // __HIP_PLATFORM_HCC__
+
+} // anonymous namespace
+
 // Value object representing a CUDA stream.  This is just a wrapper
 // around c10::Stream, but it comes with a little extra CUDA-specific
 // functionality (conversion to cudaStream_t), and a guarantee that
@@ -120,14 +137,10 @@ public:
   }
 
   int priority() const {
-    #ifndef __HIP_PLATFORM_HCC__
       DeviceGuard guard{stream_.device()};
       int priority = 0;
       C10_CUDA_CHECK(cudaStreamGetPriority(stream(), &priority));
       return priority;
-    #else
-      AT_ERROR("cuStreamGetPriority with HIP is not supported");
-    #endif
   }
 
   /// Explicit conversion to cudaStream_t.
@@ -154,14 +167,10 @@ public:
   }
 
   static std::tuple<int, int> priority_range() {
-    #ifndef __HIP_PLATFORM_HCC__
       int least_priority, greatest_priority;
       C10_CUDA_CHECK(
         cudaDeviceGetStreamPriorityRange(&least_priority, &greatest_priority));
       return std::make_tuple(least_priority, greatest_priority);
-    #else
-      AT_ERROR("cuDeviceGetStreamPriorityRange with HIP is not supported");
-    #endif
   }
 
   // Deleted for now; use CUDAEvent::block instead

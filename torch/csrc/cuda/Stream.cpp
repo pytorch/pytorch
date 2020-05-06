@@ -5,6 +5,7 @@
 #include <torch/csrc/THP.h>
 
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 
 #include <structmember.h>
 #include <cuda_runtime_api.h>
@@ -18,7 +19,7 @@ static PyObject * THCPStream_pynew(
   int current_device;
   THCudaCheck(cudaGetDevice(&current_device));
 
-  int priority = 0;
+  int priority = c10::cuda::kDefaultPriority;
   uint64_t cdata = 0;
 
   static char *kwlist[] = {"priority", "_cdata", nullptr};
@@ -36,7 +37,7 @@ static PyObject * THCPStream_pynew(
     cdata ?
     at::cuda::CUDAStream::unpack(cdata) :
     at::cuda::getStreamFromPool(
-      /* isHighPriority */ priority < 0 ? true : false);
+      /* isHighPriority */ priority < c10::cuda::kDefaultPriority ? true : false);
 
   THCPStream* self = (THCPStream *)ptr.get();
   self->cdata = stream.pack();
