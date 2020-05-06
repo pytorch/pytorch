@@ -1594,7 +1594,7 @@ class TestQuantizedOps(TestCase):
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=32),
-                       qparams=hu.qparams()),
+                       qparams=hu.qparams(dtypes=(torch.quint8, torch.qint8))),
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
     def test_batch_norm2d(self, X, Y_scale, Y_zero_point):
@@ -1627,7 +1627,7 @@ class TestQuantizedOps(TestCase):
         # hypothesis too slow for this test, create test cases manually
         max_sides = (4, 5)
         side_lens = (1, 8, 11)
-        torch_types = (torch.qint8, torch.quint8, torch.qint32)
+        torch_types = (torch.qint8, torch.quint8)
         combined = [max_sides, side_lens, torch_types]
         test_cases = itertools.product(*combined)
 
@@ -1676,7 +1676,7 @@ class TestQuantizedOps(TestCase):
 
         # hypothesis too slow for this test, create test cases manually
         side_lens = (1, 8, 11)
-        torch_types = (torch.qint8, torch.quint8, torch.qint32)
+        torch_types = (torch.qint8, torch.quint8)
         combined = [side_lens, torch_types]
         test_cases = itertools.product(*combined)
 
@@ -2241,10 +2241,6 @@ class TestQuantizedConv(unittest.TestCase):
         Y_q = qconv_fn(
             X_q,
             W_prepack,
-            strides,
-            pads,
-            dilations,
-            groups,
             Y_scale,
             Y_zero_point,
         )
@@ -2285,10 +2281,10 @@ class TestQuantizedConv(unittest.TestCase):
            Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
-           use_relu=st.booleans(),
+           use_relu=st.sampled_from([False]),
            use_channelwise=st.booleans(),
            qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_qconv(
+    def test_qconv2d(
             self,
             batch_size,
             input_channels_per_group,
@@ -3045,7 +3041,6 @@ class TestComparatorOps(TestCase):
             self.assertEqual(result_ref, result,
                              "'tensor.{}(tensor)'' failed".format(op))
 
-    @unittest.skip("FIXME: Failing due to overflow error without width option")
     @given(A=hu.tensor(shapes=((3, 4, 5),),
                        qparams=hu.qparams()),
            b=hu.floats(allow_infinity=False, allow_nan=False))
@@ -3064,16 +3059,22 @@ class TestComparatorOps(TestCase):
         for op in ops_under_test_reversible:
             result_ref = getattr(dqA, op)(b)
             result = getattr(qA, op)(b)
+            note("result_ref 1: {}".format(result_ref))
+            note("result 1: {}".format(result))
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
             # Reversed broadcasting.
             result_ref = getattr(b, op)(dqA)
             result = getattr(b, op)(qA)
+            note("result_ref 2: {}".format(result_ref))
+            note("result 2: {}".format(result))
             self.assertEqual(result_ref, result,
                              "'scalar.{}(tensor)'' failed".format(op))
 
         for op in ops_under_test_nonreversible:
             result_ref = getattr(dqA, op)(b)
             result = getattr(qA, op)(b)
+            note("result_ref 3: {}".format(result_ref))
+            note("result 3: {}".format(result))
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
