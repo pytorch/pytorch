@@ -350,6 +350,23 @@ class TestJit(JitTestCase):
 
         self.checkTrace(f, (x, y))
 
+    def test_trace_checking_with_global_name(self):
+        class MyClass(torch.nn.Module):
+            def __init__(self):
+                super(MyClass, self).__init__()
+
+            def forward(self, xs: List[Tensor]):
+                y = torch.cat(xs, dim=0)
+                return y
+
+        model = MyClass()
+        # Simulate these inputs being in the globals, like they would be if,
+        # e.g. they were defined outermost scope of a script
+        global input1, input2
+        input1 = torch.ones(2, 2)
+        input2 = torch.ones(2, 2)
+        m2 = torch.jit.trace(model, ((input1, input2),))
+
     def test_trace_aliased_parameter(self):
         class M(nn.Module):
             def __init__(self, x):
@@ -4536,6 +4553,8 @@ def foo(x):
         x = torch.rand(3, 4)
         self.assertEqual(scripted(x), eic(x))
 
+    def _test_lower_graph_impl(self, model, data):
+        model.qconfig = torch.quantization.default_qconfig
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
                          ' with instruction set support avx2 or newer.')
@@ -4556,6 +4575,9 @@ def foo(x):
         model = torch.quantization.prepare(model)
         model = torch.quantization.convert(model)
 
+        outputs = model(data)
+        input_names = ["x"]
+
         def export_to_onnx(model, input, input_names):
             outputs = model(input)
 
@@ -4568,51 +4590,36 @@ def foo(x):
             f = io.BytesIO()
             torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs,
                               operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
-
-        x_numpy = np.random.rand(1, 2, 5).astype(np.float32)
-        x = torch.from_numpy(x_numpy).to(dtype=torch.float)
-        outputs = model(x)
-        input_names = ["x"]
-        onnx_model = export_to_onnx(model, x, input_names)
-
+        onnx_model = export_to_onnx(model, data, input_names)
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
                          ' with instruction set support avx2 or newer.')
-    def test_lower_graph_conv(self):
-        class ConvModel(torch.nn.Module):
-            def __init__(self):
-                super(ConvModel, self).__init__()
-                self.qconfig = torch.quantization.default_qconfig
-                self.conv = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True).to(dtype=torch.float))
+    def test_lower_graph_linear(self):
+        model = torch.quantization.QuantWrapper(torch.nn.Linear(5, 10, bias=True)).to(dtype=torch.float)
+        data_numpy = np.random.rand(1, 2, 5).astype(np.float32)
+        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
+        self._test_lower_graph_impl(model, data)
 
-            def forward(self, x):
-                x = self.conv(x)
-                return x
-        qconfig = torch.quantization.default_qconfig
-        model = ConvModel()
-        model.qconfig = qconfig
-        model = torch.quantization.prepare(model)
-        model = torch.quantization.convert(model)
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
+    def test_lower_graph_conv2d(self):
+        model = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True)).to(dtype=torch.float)
+        data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
+        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
+        self._test_lower_graph_impl(model, data)
 
-        x_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
-        x = torch.from_numpy(x_numpy).to(dtype=torch.float)
-        outputs = model(x)
-        input_names = ["x"]
-
-        def export_to_onnx(model, input, input_names):
-            outputs = model(input)
-
-            traced = torch.jit.trace(model, input)
-            buf = io.BytesIO()
-            torch.jit.save(traced, buf)
-            buf.seek(0)
-
-            model = torch.jit.load(buf)
-            f = io.BytesIO()
-            torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs,
-                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
-        onnx_model = export_to_onnx(model, x, input_names)
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
+    @unittest.skip("onnx opset9 does not support quantize_per_tensor and caffe2 \
+    does not support conv3d")
+    def test_lower_graph_conv3d(self):
+        model = torch.quantization.QuantWrapper(torch.nn.Conv3d(3, 5, 2, bias=True)).to(dtype=torch.float)
+        data_numpy = np.random.rand(1, 3, 6, 6, 6).astype(np.float32)
+        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
+        self._test_lower_graph_impl(model, data)
 
     def test_jitter_bug(self):
         @torch.jit.script
@@ -5864,8 +5871,12 @@ a")
         # Misc sequence advanced indexing
         inp = consec((4, 8, 5))
         to_check = [
+            # [[0, 1, 3]]
+            ['[i]', {'i': [0, 1, 3]}],
             # [[0, 2], [1, 3]]
             ['[i, j]', {'i': [0, 2], 'j': [1, 3]}],
+            # [[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
+            ['[i, j]', {'i': [[0, 1], [0, 1]], 'j': [[0, 1], [0, 1]]}],
             # [[0, 2], [1, 3], [1, 1]]
             ['[i, j, k]', {'i': [0, 2], 'j': [1, 3], 'k': [1, 1]}],
             # [[0, 2], 1, [1, 1]]
@@ -5909,6 +5920,22 @@ a")
         for expr, argdict in to_check:
             tensordict = {k: torch.tensor(v) for (k, v) in argdict.items()}
             check_indexing(expr, inp, **tensordict)
+
+    def test_adv_indexing_list(self):
+        # indexing with list is equivalent to indexing with tensor
+        def func1(x):
+            return x[[0, 1, 5]]
+
+        def func2(x):
+            return x[[0, 1], [0, 1]]
+
+        def func3(x):
+            return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
+
+        input = torch.rand((6, 2))
+        self.checkScript(func1, (input,))
+        self.checkScript(func2, (input,))
+        self.checkScript(func3, (input,))
 
     def test_keyword(self):
         @torch.jit.script
