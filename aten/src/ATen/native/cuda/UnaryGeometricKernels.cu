@@ -136,9 +136,24 @@ __host__ __device__ static inline scalar_t tanh_wrapper(scalar_t v) {
 }
 
 void tanh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "tanh_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "tanh_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "tanh_cuda", [&] {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return tanh_wrapper(a);
+      });
+    });
+  });
+}
+
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t tan_wrapper(scalar_t v) {
+  return ::tan(v);
+}
+
+void tan_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "tan_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return tanh_wrapper(a);
+      return tan_wrapper(a);
     });
   });
 }
@@ -150,5 +165,6 @@ REGISTER_DISPATCH(cos_stub, &cos_kernel_cuda);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel_cuda);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel_cuda);
 REGISTER_DISPATCH(tanh_stub, &tanh_kernel_cuda);
+REGISTER_DISPATCH(tan_stub, &tan_kernel_cuda);
 
 }} // namespace at::native
