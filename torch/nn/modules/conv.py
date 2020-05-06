@@ -41,6 +41,10 @@ class _ConvNd(Module):
         self.output_padding = output_padding
         self.groups = groups
         self.padding_mode = padding_mode
+        # `_reversed_padding_repeated_twice` is the padding to be passed to
+        # `F.pad` if needed (e.g., for non-zero padding types that are
+        # implemented as two ops: padding + conv). `F.pad` accepts paddings in
+        # reverse order than the dimension.
         self._reversed_padding_repeated_twice = _reverse_repeat_tuple(self.padding, 2)
         if transposed:
             self.weight = Parameter(torch.Tensor(

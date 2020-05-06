@@ -3252,7 +3252,7 @@ for padding_mode, cpp_padding_mode in zip(
         padding = tuple(range(1, d + 1))
         cpp_padding = '{' + ', '.join(map(str, padding)) + '}'
         input_size = (2, 2) + (4,) * d
-        output_size = (2, 3) + tuple(p + 1 for p in padding)  # simplified from `(3 + 2 * p - 3) // 2`
+        output_size = (2, 3) + tuple(p + 1 for p in padding)  # simplified from `(4 + 2 * p - 3) // 2 + 1`
         new_module_tests.append(
             dict(
                 module_name='Conv{}d'.format(d),
