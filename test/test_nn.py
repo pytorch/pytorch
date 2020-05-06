@@ -3257,11 +3257,11 @@ class TestNN(NNTestCase):
 
                 # result = reference
                 self.assertEqual(tuple(result.shape), (batch_sz, d_model))
-                torch.testing.assert_allclose(result, reference)
+                torch.testing.assert_allclose(result, reference, rtol=1e-02, atol=1e-5)
 
                 # result_weight = ref_attn_weight
                 self.assertEqual(tuple(result_weight.shape), tuple(ref_attn_weight.shape))
-                torch.testing.assert_allclose(result_weight, ref_attn_weight)
+                torch.testing.assert_allclose(result_weight, ref_attn_weight, rtol=1e-02, atol=1e-5)
 
         def test_multihead_attn_add_bias_kv():
             _multihead_attn_test_helper(add_bias_kv=True)
@@ -4688,17 +4688,17 @@ class TestNN(NNTestCase):
         result = model(encoder_input)
         ref_output = torch.Tensor([[[2.258703, 0.127985, -0.697881, 0.170862]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
         # 0 values are NOT masked. This shouldn't mask anything.
         mask = torch.Tensor([[0]]) == 1
         result = model(encoder_input, src_key_padding_mask=mask)
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
         # 1 values are masked. Since there is only 1 input embedding this
         # will result in nan.
         mask = torch.Tensor([[1]]) == 1
         result = model(encoder_input, src_key_padding_mask=mask)
-        self.assertTrue(np.isnan(result).all())
+        self.assertTrue(np.isnan(result.detach()).all())
 
         # deterministic input
         encoder_input = torch.Tensor([[[1, 2, 3, 4]],
@@ -4707,18 +4707,18 @@ class TestNN(NNTestCase):
         ref_output = torch.Tensor([[[2.272644, 0.119035, -0.691669, 0.153486]],
                                    [[2.272644, 0.119035, -0.691669, 0.153486]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
         # all 0 which is no masking
         mask = torch.Tensor([[0, 0]]) == 1
         result = model(encoder_input, src_key_padding_mask=mask)
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
         mask = torch.Tensor([[1, 0]]) == 1
         result = model(encoder_input, src_key_padding_mask=mask)
         ref_output = torch.Tensor([[[2.301516, 0.092249, -0.679101, 0.103088]],
                                    [[2.301516, 0.092249, -0.679101, 0.103088]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
         # deterministic input
         encoder_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
@@ -4743,12 +4743,12 @@ class TestNN(NNTestCase):
                                    [[2.416246, 0.017512, -0.610712, -0.082961],
                                     [2.422901, 0.024187, -0.606178, -0.074929]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
         # all 0
         mask = torch.zeros([2, 5]) == 1
         result = model(encoder_input, src_key_padding_mask=mask)
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
         mask[0, 1] = 1
         mask[1, 3] = 1
         mask[1, 4] = 1
@@ -4764,7 +4764,7 @@ class TestNN(NNTestCase):
                                    [[2.416531, 0.017498, -0.610513, -0.083181],
                                     [2.4242, 0.024653, -0.605266, -0.074959]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
     def test_transformerencoderlayer_gelu(self):
         # this is a deterministic test for TransformerEncoderLayer with gelu activation
@@ -4790,7 +4790,7 @@ class TestNN(NNTestCase):
         result = model(encoder_input)
         ref_output = torch.Tensor([[[2.249815, 0.131006, -0.702199, 0.177868]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
         # deterministic input
         encoder_input = torch.Tensor([[[1, 2, 3, 4]],
@@ -4799,7 +4799,7 @@ class TestNN(NNTestCase):
         ref_output = torch.Tensor([[[2.264103, 0.121417, -0.696012, 0.159724]],
                                    [[2.264103, 0.121417, -0.696012, 0.159724]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
         # deterministic input
         encoder_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
@@ -4824,7 +4824,7 @@ class TestNN(NNTestCase):
                                    [[2.41383916, 0.02686345, -0.61256377, -0.06380707],
                                     [2.42000277, 0.03800944, -0.60824798, -0.04754947]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
     def test_transformerdecoderlayer(self):
         # this is a deterministic test for TransformerDecoderLayer
@@ -4852,7 +4852,7 @@ class TestNN(NNTestCase):
         result = model(decoder_input, memory_input)
         ref_output = torch.Tensor([[[2.314351, 0.094805, -0.671322, 0.101977]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
         # deterministic input
         decoder_input = torch.Tensor([[[9, 10, 11, 12]],
@@ -4862,7 +4862,7 @@ class TestNN(NNTestCase):
         ref_output = torch.Tensor([[[2.422245, 0.051716, -0.606338, -0.024756]],
                                    [[2.422245, 0.051716, -0.606338, -0.024756]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
         # deterministic input
         decoder_input = torch.Tensor([[[1, 2, 3, 4]],
@@ -4873,7 +4873,7 @@ class TestNN(NNTestCase):
         ref_output = torch.Tensor([[[2.343536, 0.085561, -0.654954, 0.074991]],
                                    [[2.343536, 0.085561, -0.654954, 0.074991]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
         # deterministic input
         decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
@@ -4900,7 +4900,7 @@ class TestNN(NNTestCase):
                                    [[2.431934, 0.028196, -0.599802, -0.073809],
                                     [2.432306, 0.028858, -0.599542, -0.072846]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
         # key_padding_mask
         key_padding_mask = torch.zeros(2, 3) == 1
@@ -4912,7 +4912,7 @@ class TestNN(NNTestCase):
                                    [[2.431934, 0.028196, -0.599802, -0.073809],
                                     [2.432306, 0.028858, -0.599542, -0.072846]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
         # key_padding_mask
         key_padding_mask[0, 2] = 1
@@ -4926,7 +4926,7 @@ class TestNN(NNTestCase):
                                    [[2.432278, 0.028152, -0.599555, -0.074139],
                                     [2.432659, 0.029244, -0.599294, -0.072382]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
         # memory_key_padding_mask
         key_padding_mask = torch.zeros(2, 5) == 1
@@ -4938,7 +4938,7 @@ class TestNN(NNTestCase):
                                    [[2.431934, 0.028196, -0.599802, -0.073809],
                                     [2.432306, 0.028858, -0.599542, -0.072846]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
         # memory_key_padding_mask
         key_padding_mask[0, 4] = 1
@@ -4952,7 +4952,7 @@ class TestNN(NNTestCase):
                                    [[2.431515, 0.027687, -0.600096, -0.074459],
                                     [2.433075, 0.028543, -0.598987, -0.073985]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
     def test_transformerdecoderlayer_gelu(self):
         # this is a deterministic test for TransformerDecoderLayer with gelu activation
@@ -4981,7 +4981,7 @@ class TestNN(NNTestCase):
         result = model(decoder_input, memory_input)
         ref_output = torch.Tensor([[[2.306435, 0.095946, -0.675796, 0.10687]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
         # deterministic input
         decoder_input = torch.Tensor([[[9, 10, 11, 12]],
@@ -4991,7 +4991,7 @@ class TestNN(NNTestCase):
         ref_output = torch.Tensor([[[2.415448, 0.054389, -0.610932, -0.0156613]],
                                    [[2.415448, 0.054389, -0.610932, -0.0156613]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
         # deterministic input
         decoder_input = torch.Tensor([[[1, 2, 3, 4]],
@@ -5002,7 +5002,7 @@ class TestNN(NNTestCase):
         ref_output = torch.Tensor([[[2.338531, 0.087709, -0.65776, 0.080646]],
                                    [[2.338531, 0.087709, -0.65776, 0.080646]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
         # deterministic input
         decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
@@ -5029,7 +5029,7 @@ class TestNN(NNTestCase):
                                    [[2.42205716, 0.03488046, -0.60683681, -0.05460596],
                                     [2.42240309, 0.0354595, -0.60659063, -0.05378816]]])
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-2, atol=1e-5)
 
     @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
     def test_cudnn_rnn_dropout_states_device(self):
