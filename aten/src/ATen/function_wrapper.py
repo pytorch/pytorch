@@ -337,16 +337,16 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                 '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(${ScalarName}), 0, allocator(), true),'
+                 '(c10::Storage(scalarTypeToTypeMeta(${ScalarName}), 0, allocator(), true),'
                  'DispatchKey::${Backend}).release()',
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
+                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
                      'DispatchKey::${Backend}).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
+                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
                      'DispatchKey::${Backend}).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
+                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
                      'DispatchKey::${Backend}).release()',
 }
 
