@@ -700,7 +700,7 @@ struct to_ir {
   // see [setstate type]
   static TypePtr getTypeForSetStateArg(const Def& def, const Self* self) {
     TORCH_CHECK(self, "Expected __setstate__ to have a `self` argument");
-    auto getstate = self->getClassType()->getMethod("__getstate__");
+    auto getstate = self->getClassType()->findMethod("__getstate__");
     if (!getstate) {
       throw ErrorReport(def.range())
           << "`__setstate__` defined but not `__getstate__`. "
@@ -711,7 +711,7 @@ struct to_ir {
     getstate->ensure_defined();
     return self->getClassType()
         ->getMethod("__getstate__")
-        ->getSchema()
+        .getSchema()
         .returns()
         .at(0)
         .type();
@@ -1884,9 +1884,9 @@ struct to_ir {
       // __iadd__ is not present)
       auto type = lhs->type()->expect<ClassType>();
       std::string magic_method_name;
-      if (type->getMethod(in_place_method_name)) {
+      if (type->findMethod(in_place_method_name)) {
         magic_method_name = in_place_method_name;
-      } else if (type->getMethod(out_of_place_method_name)) {
+      } else if (type->findMethod(out_of_place_method_name)) {
         magic_method_name = out_of_place_method_name;
       } else {
         throw ErrorReport(stmt.range())
