@@ -4535,15 +4535,15 @@
 
 - func: addbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_addbmm_out
-    CUDA: legacy::cuda::_th_addbmm_out
+    CPU: addbmm_cpu_out
+    CUDA: addbmm_cuda_out
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_addbmm
-    CUDA: legacy::cuda::_th_addbmm
+    CPU: addbmm_cpu
+    CUDA: addbmm_cuda
 
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method
