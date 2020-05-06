@@ -592,7 +592,6 @@ class ConvTranspose1d(_ConvTransposeNd):
         if w.qscheme() != torch.per_tensor_affine:
             raise NotImplementedError(
                 "Only per-tensor quantization is supported.")
-        print("THe weight shape before packing is ", w.shape);
         self._packed_params = torch.ops.quantized.conv_transpose1d_prepack(
             w, b, self.stride, self.padding, self.output_padding, self.dilation,
             self.groups)
