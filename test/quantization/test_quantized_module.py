@@ -11,7 +11,12 @@ from torch.testing._internal.common_quantization import (
     prepare_dynamic,
     _make_conv_test_input,
 )
-from torch.testing._internal.common_quantized import _calculate_dynamic_qparams, override_quantized_engine, supported_qengines
+from torch.testing._internal.common_quantized import (
+    _calculate_dynamic_qparams,
+    override_quantized_engine,
+    supported_qengines,
+    override_qengines,
+)
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
@@ -26,17 +31,6 @@ quantized operator implementations correctly in the user facing APIs, these are
 not correctness test for the underlying quantized operators. For correctness
 test please see `caffe2/test/test_quantized_op.py`.
 '''
-
-# TODO: Update all quantization tests to use this decorator.
-# Currently for some of the tests it seems to have inconsistent params
-# for fbgemm vs qnnpack.
-def override_qengines(qfunction):
-    def test_fn(*args, **kwargs):
-        for qengine in supported_qengines:
-            with override_quantized_engine(qengine):
-                # qfunction should not return anything.
-                qfunction(*args, **kwargs)
-    return test_fn
 
 class TestStaticQuantizedModule(QuantizationTestCase):
     def test_relu(self):
