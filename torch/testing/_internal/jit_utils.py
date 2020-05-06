@@ -16,6 +16,7 @@ import functools
 # Testing utils
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
     freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS
+from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
 
 # Standard library
 from contextlib import contextmanager
