@@ -126,6 +126,8 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   THPQInt8Storage_postInit(module);
   THPQInt32Storage_postInit(module);
   THPBFloat16Storage_postInit(module);
+  THPComplexDoubleStorage_postInit(module);
+  THPComplexFloatStorage_postInit(module);
   THPAutograd_initFunctions();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -476,7 +478,7 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
 PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   auto scalar_type = torch::tensors::get_default_scalar_type();
-  auto dtype = (PyObject*)torch::getDtype(scalar_type);
+  auto dtype = (PyObject*)torch::getTHPDtype(scalar_type);
   Py_INCREF(dtype);
   return dtype;
   END_HANDLE_TH_ERRORS
@@ -524,20 +526,6 @@ PyObject *THPModule_isEnabledXNNPACK(PyObject * /* unused */)
   else Py_RETURN_FALSE;
 }
 
-PyObject *THPModule_setReleaseWeightsWhenPrepacking(PyObject *_unused, PyObject *arg)
-{
-  THPUtils_assert(PyBool_Check(arg), "set_release_original_weights expects a bool, "
-          "but got %s", THPUtils_typename(arg));
-  at::globalContext().setReleaseWeightsWhenPrepacking(arg == Py_True);
-  Py_RETURN_NONE;
-}
-
-PyObject *THPModule_releaseWeightsWhenPrepacking(PyObject *_unused, PyObject *noargs)
-{
-  if (at::globalContext().releaseWeightsWhenPrepacking()) Py_RETURN_TRUE;
-  else Py_RETURN_FALSE;
-}
-
 //NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       nullptr},
@@ -579,8 +567,6 @@ static PyMethodDef TorchMethods[] = {
   {"_set_qengine", (PyCFunction)THPModule_setQEngine, METH_O, nullptr},
   {"_supported_qengines", (PyCFunction)THPModule_supportedQEngines, METH_NOARGS, nullptr},
   {"_is_xnnpack_enabled", (PyCFunction)THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
-  {"_set_release_original_weights", (PyCFunction)THPModule_setReleaseWeightsWhenPrepacking, METH_O,  nullptr},
-  {"_get_release_original_weights", (PyCFunction)THPModule_releaseWeightsWhenPrepacking, METH_NOARGS,     nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 
@@ -594,6 +580,8 @@ bool THCPCharStorage_init(PyObject *module);
 bool THCPByteStorage_init(PyObject *module);
 bool THCPBoolStorage_init(PyObject *module);
 bool THCPBFloat16Storage_init(PyObject *module);
+bool THCPComplexDoubleStorage_init(PyObject *module);
+bool THCPComplexFloatStorage_init(PyObject *module);
 
 void THCPStream_init(PyObject *module);
 void THCPEvent_init(PyObject *module);
@@ -618,6 +606,8 @@ bool THDPCharStorage_init(PyObject *module);
 bool THDPByteStorage_init(PyObject *module);
 bool THDPBoolStorage_init(PyObject *module);
 bool THDPBFloat16Storage_init(PyObject *module);
+bool THDPComplexDoubleStorage_init(PyObject *module);
+bool THDPComplexFloatStorage_init(PyObject *module);
 
 static std::vector<PyMethodDef> methods;
 
@@ -711,6 +701,8 @@ PyObject* initModule() {
   ASSERT_TRUE(THPQInt8Storage_init(module));
   ASSERT_TRUE(THPQInt32Storage_init(module));
   ASSERT_TRUE(THPBFloat16Storage_init(module));
+  ASSERT_TRUE(THPComplexDoubleStorage_init(module));
+  ASSERT_TRUE(THPComplexFloatStorage_init(module));
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
@@ -727,6 +719,8 @@ PyObject* initModule() {
   ASSERT_TRUE(THCPByteStorage_init(module));
   ASSERT_TRUE(THCPBoolStorage_init(module));
   ASSERT_TRUE(THCPBFloat16Storage_init(module));
+  ASSERT_TRUE(THCPComplexDoubleStorage_init(module));
+  ASSERT_TRUE(THCPComplexFloatStorage_init(module));
 
   THCPStream_init(module);
   THCPEvent_init(module);

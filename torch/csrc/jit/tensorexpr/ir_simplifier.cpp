@@ -1083,14 +1083,17 @@ Stmt* PolynomialTransformer::mutate(const For* v) {
 
 Stmt* PolynomialTransformer::mutate(const Block* v) {
   std::vector<Stmt*> stmts;
-  for (Stmt* stmt : v->stmts()) {
+  for (Stmt* stmt : *v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
     if (stmt_new == nullptr) {
       continue;
     }
 
     if (auto* subBlock = dynamic_cast<Block*>(stmt_new)) {
-      for (auto* s : subBlock->stmts()) {
+      for (Block::iterator I = subBlock->begin(), E = subBlock->end();
+           I != E;) {
+        // Be careful to avoid invalidating the iterator.
+        Stmt* s = *(I++);
         subBlock->remove_stmt(s);
         stmts.push_back(s);
       }
