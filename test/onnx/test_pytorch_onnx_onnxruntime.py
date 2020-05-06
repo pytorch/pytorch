@@ -1478,6 +1478,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(1., 6., requires_grad=True)
         self.run_test(MyModule(), x)
 
+    @unittest.skip("Enable this once topk smallest bug is fixed in ORT")
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_topk_smallest_unsorted(self):
         class MyModule(torch.nn.Module):
