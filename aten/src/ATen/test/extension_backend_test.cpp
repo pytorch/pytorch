@@ -14,12 +14,7 @@ Tensor empty_override(IntArrayRef size, const TensorOptions & options, c10::opti
   test_int = 1;
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
-          Storage::use_byte_size_t(),
-          caffe2::TypeMeta::Make<float>(),
-          0,
-          at::DataPtr(nullptr, Device(DeviceType::MSNPU, 1)),
-          nullptr,
-          false),
+          caffe2::TypeMeta::Make<float>(), 0, at::DataPtr(nullptr, Device(DeviceType::MSNPU, 1)), nullptr, false),
       DispatchKey::MSNPU);
   return Tensor(std::move(tensor_impl));
 }

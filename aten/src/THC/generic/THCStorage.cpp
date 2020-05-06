@@ -14,6 +14,11 @@ scalar_t* THCStorage_(data)(THCState *state, const THCStorage *self)
   return self->data<scalar_t>();
 }
 
+ptrdiff_t THCStorage_(size)(THCState *state, const THCStorage *self)
+{
+  return THStorage_size(self);
+}
+
 int THCStorage_(elementSize)(THCState *state)
 {
   return sizeof(scalar_t);
@@ -21,10 +26,7 @@ int THCStorage_(elementSize)(THCState *state)
 
 void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, scalar_t value)
 {
-  THArgCheck(
-      (index >= 0) && (index < (self->nbytes() / sizeof(scalar_t))),
-      2,
-      "index out of bounds");
+  THArgCheck((index >= 0) && (index < self->numel()), 2, "index out of bounds");
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 #if HIP_VERSION >= 301
   THCudaCheck(hipMemcpyWithStream(THCStorage_(data)(state, self) + index, &value, sizeof(scalar_t),
@@ -40,10 +42,7 @@ void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, scalar
 
 scalar_t THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 {
-  THArgCheck(
-      (index >= 0) && (index < (self->nbytes() / sizeof(scalar_t))),
-      2,
-      "index out of bounds");
+  THArgCheck((index >= 0) && (index < self->numel()), 2, "index out of bounds");
   scalar_t value;
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 #if HIP_VERSION >= 301
@@ -60,24 +59,20 @@ scalar_t THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t ind
 THCStorage* THCStorage_(new)(THCState *state)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-                           c10::StorageImpl::use_byte_size_t(),
-                           caffe2::TypeMeta::Make<scalar_t>(),
-                           0,
-                           c10::cuda::CUDACachingAllocator::get(),
-                           true)
-                           .release();
+      caffe2::TypeMeta::Make<scalar_t>(),
+      0,
+      c10::cuda::CUDACachingAllocator::get(),
+      true).release();
   return storage;
 }
 
 THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-                           c10::StorageImpl::use_byte_size_t(),
-                           caffe2::TypeMeta::Make<scalar_t>(),
-                           size * sizeof(scalar_t),
-                           c10::cuda::CUDACachingAllocator::get(),
-                           true)
-                           .release();
+      caffe2::TypeMeta::Make<scalar_t>(),
+      size,
+      c10::cuda::CUDACachingAllocator::get(),
+      true).release();
   return storage;
 }
 
@@ -85,12 +80,10 @@ THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
                                           at::Allocator* allocator)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-                           c10::StorageImpl::use_byte_size_t(),
-                           caffe2::TypeMeta::Make<scalar_t>(),
-                           size * sizeof(scalar_t),
-                           allocator,
-                           true)
-                           .release();
+      caffe2::TypeMeta::Make<scalar_t>(),
+      size,
+      allocator,
+      true).release();
   return storage;
 }
 
@@ -113,13 +106,11 @@ THCStorage* THCStorage_(newWithDataAndAllocator)(
     ptrdiff_t size,
     at::Allocator* allocator) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-                           c10::StorageImpl::use_byte_size_t(),
-                           caffe2::TypeMeta::Make<scalar_t>(),
-                           size * sizeof(scalar_t),
-                           std::move(data),
-                           allocator,
-                           allocator != nullptr)
-                           .release();
+      caffe2::TypeMeta::Make<scalar_t>(),
+      size,
+      std::move(data),
+      allocator,
+      allocator != nullptr).release();
   return storage;
 }
 
