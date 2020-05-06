@@ -415,6 +415,9 @@ def _model_to_graph(model, args, verbose=False,
     if verbose:
         print(graph)
 
+    params_dict = torch._C._jit_pass_filter_non_tensor_arguments(params_dict)
+    torch._C._jit_decay_packed_param_input_types(graph)
+
     return graph, params_dict, torch_out
 
 
