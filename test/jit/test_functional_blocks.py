@@ -128,7 +128,6 @@ class TestFunctionalBlocks(JitTestCase):
         self.assertEqual(test_intermediary_use(), fn())
 
     def test_remove_mutation_if_output(self):
-
         def foo(x, cond: bool):
             if cond:
                 y = x + 5
@@ -139,10 +138,9 @@ class TestFunctionalBlocks(JitTestCase):
 
         out_eager = foo(torch.tensor(5), True)
         foo_script = torch.jit.script(foo)
-        self.run_pass('inline', mod.forward.graph)
-        FileCheck().check("aten::add_").check("aten::relu_").run(mod.forward.graph)
-        self.run_pass('remove_mutation', mod.forward.graph)
-        FileCheck().check_not("aten::add_").run(mod.forward.graph)
+        FileCheck().check("aten::add_").run(foo_script.graph)
+        self.run_pass('remove_mutation', foo_script.graph)
+        FileCheck().check_not("aten::add_").run(foo_script.graph)
 
         self.assertEqual(out_eager, foo_script(torch.tensor(5), True))
 
