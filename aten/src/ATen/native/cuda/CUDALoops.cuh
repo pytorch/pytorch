@@ -335,9 +335,15 @@ void gpu_kernel_multiple_outputs_impl(TensorIterator& iter, const func_t& f) {
 
   int64_t numel = iter.numel();
 
-  auto input_calc = make_input_offset_calculator<num_inputs>(iter);
-  auto output_calc = make_output_offset_calculator<num_outputs>(iter);
-  modern::launch_unrolled_kernel_for_multi_outputs<num_outputs>(numel, f, data, input_calc, output_calc);
+  if (iter.is_contiguous()) {
+    auto input_calc = TrivialOffsetCalculator<num_inputs>();
+    auto output_calc = TrivialOffsetCalculator<num_outputs>();
+    modern::launch_unrolled_kernel_for_multi_outputs<num_outputs>(numel, f, data, input_calc, output_calc);
+  } else {
+    auto input_calc = make_input_offset_calculator<num_inputs>(iter);
+    auto output_calc = make_output_offset_calculator<num_outputs>(iter);
+    modern::launch_unrolled_kernel_for_multi_outputs<num_outputs>(numel, f, data, input_calc, output_calc);
+  }
 }
 
 }} // namespace at::native
