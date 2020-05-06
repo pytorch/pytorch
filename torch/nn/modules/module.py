@@ -84,7 +84,7 @@ class Module(object):
         self.training = True
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
-        self._persistent_buffers = set()
+        self._persistent_buffers_set = set()
         self._backward_hooks = OrderedDict()
         self._forward_hooks = OrderedDict()
         self._forward_pre_hooks = OrderedDict()
@@ -112,7 +112,10 @@ class Module(object):
         considered a model parameter. For example, BatchNorm's ``running_mean``
         is not a parameter, but is part of the module's state. Buffers, by
         default, are persistent and will be saved alongside parameters. This
-        behavior can be changed by setting :attr:`persistent` to ``False``.
+        behavior can be changed by setting :attr:`persistent` to ``False``. The
+        only difference between a persistent buffer and a non-persistent buffer
+        is that the latter will not be a part of this module's
+        :attr:`state_dict`.
 
         Buffers can be accessed as attributes using given names.
 
@@ -121,7 +124,7 @@ class Module(object):
                 from this module using the given name
             tensor (Tensor): buffer to be registered.
             persistent (bool): whether the buffer is part of this module's
-                `state_dict`.
+                :attr:`state_dict`.
 
         Example::
 
@@ -147,9 +150,9 @@ class Module(object):
         else:
             self._buffers[name] = tensor
             if persistent:
-                self._persistent_buffers.add(name)
+                self._persistent_buffers_set.add(name)
             else:
-                self._persistent_buffers.discard(name)
+                self._persistent_buffers_set.discard(name)
 
     def register_parameter(self, name, param):
         r"""Adds a parameter to the module.
@@ -615,18 +618,20 @@ class Module(object):
             type(self).__name__, name))
 
     def __setattr__(self, name, value):
-        def remove_from(*dicts):
-            for d in dicts:
+        def remove_from(*dicts_or_sets):
+            for d in dicts_or_sets:
                 if name in d:
-                    del d[name]
+                    if isinstance(d, dict):
+                        del d[name]
+                    else:
+                        d.discard(name)
 
         params = self.__dict__.get('_parameters')
         if isinstance(value, Parameter):
             if params is None:
                 raise AttributeError(
                     "cannot assign parameters before Module.__init__() call")
-            remove_from(self.__dict__, self._buffers, self._modules)
-            self._persistent_buffers.discard(name)
+            remove_from(self.__dict__, self._buffers, self._modules, self._persistent_buffers_set)
             self.register_parameter(name, value)
         elif params is not None and name in params:
             if value is not None:
@@ -640,8 +645,7 @@ class Module(object):
                 if modules is None:
                     raise AttributeError(
                         "cannot assign module before Module.__init__() call")
-                remove_from(self.__dict__, self._parameters, self._buffers)
-                self._persistent_buffers.discard(name)
+                remove_from(self.__dict__, self._parameters, self._buffers, self._persistent_buffers_set)
                 modules[name] = value
             elif modules is not None and name in modules:
                 if value is not None:
@@ -665,7 +669,7 @@ class Module(object):
             del self._parameters[name]
         elif name in self._buffers:
             del self._buffers[name]
-            self._persistent_buffers.discard(name)
+            self._persistent_buffers_set.discard(name)
         elif name in self._modules:
             del self._modules[name]
         else:
@@ -699,7 +703,7 @@ class Module(object):
             if param is not None:
                 destination[prefix + name] = param if keep_vars else param.detach()
         for name, buf in self._buffers.items():
-            if buf is not None and name in self._persistent_buffers:
+            if buf is not None and name in self._persistent_buffers_set:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
@@ -778,7 +782,7 @@ class Module(object):
         for hook in self._load_state_dict_pre_hooks.values():
             hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
-        persistent_buffers = {k: v for k, v in self._buffers.items() if k in self._persistent_buffers}
+        persistent_buffers = {k: v for k, v in self._buffers.items() if k in self._persistent_buffers_set}
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
         local_state = {k: v for k, v in local_name_params if v is not None}
 
