@@ -8876,6 +8876,86 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, '{} with out= kwarg'.format(fn_name))
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_argmaxmin_numpy2d(self, device):
+        example = [[-1, 2, 1], [5, 3, -2]]
+
+        t_types = [torch.double,
+                torch.float,
+                torch.int64,
+                torch.int32,
+                torch.int16]
+
+        n_types = [np.double,
+                np.float,
+                np.int64,
+                np.int32,
+                np.int16]
+
+        for i in range(len(t_types)):
+            t = torch.tensor(example, device=device, dtype=t_types[i])
+            n = np.array(example, dtype=n_types[i])
+
+            self.assertEqual(t.argmax().item(), n.argmax().item())
+            self.assertEqual(t.argmax(dim=None).item(), n.argmax().item())
+            self.assertEqual(t.argmax(dim=0), torch.from_numpy(n.argmax(axis=0)).to(device))
+            self.assertEqual(t.argmax(dim=1), torch.from_numpy(n.argmax(axis=1)).to(device))
+            # test that non-contiguous tensors work
+            self.assertEqual(t[:, :2].argmax().item(), n[:,:2].argmax().item())
+
+            # argmin
+            self.assertEqual(t.argmin().item(), n.argmin().item())
+            self.assertEqual(t.argmin(dim=None).item(), n.argmin().item())
+            self.assertEqual(t.argmin(dim=0), torch.from_numpy(n.argmin(axis=0)).to(device))
+            self.assertEqual(t.argmin(dim=1), torch.from_numpy(n.argmin(axis=1)).to(device))
+            # test that non-contiguous tensors work
+            self.assertEqual(t[:, :2].argmin().item(), n[:, :2].argmin().item())
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_argmaxmin_numpy3d(self, device):
+        # dim 2, 3, 3
+        example = [[[-12,  8, -14],
+            [12,  12,  12],
+            [ 8,  9, 9]],
+
+            [[-8, -5,  -7],
+            [4,  6,  2],
+            [15, -19, -13]]]
+
+        t_types = [torch.double,
+                torch.float,
+                torch.int64,
+                torch.int32,
+                torch.int16]
+
+        n_types = [np.double,
+                np.float,
+                np.int64,
+                np.int32,
+                np.int16]
+
+        for i in range(len(t_types)):
+            t = torch.tensor(example, device=device, dtype=t_types[i])
+            n = np.array(example, dtype=n_types[i])
+
+            self.assertEqual(t.argmax().item(), n.argmax().item())
+            self.assertEqual(t.argmax(dim=None).item(), n.argmax().item())
+            self.assertEqual(t.argmax(dim=0), torch.from_numpy(n.argmax(axis=0)).to(device))
+            self.assertEqual(t.argmax(dim=1), torch.from_numpy(n.argmax(axis=1)).to(device))
+            self.assertEqual(t.argmax(dim=2), torch.from_numpy(n.argmax(axis=2)).to(device))
+            # test that non-contiguous tensors work
+            self.assertEqual(t[:, :2, :1].argmax().item(), n[:,:2, :1].argmax().item())
+
+            # argmin
+            self.assertEqual(t.argmin().item(), n.argmin().item())
+            self.assertEqual(t.argmin(dim=None).item(), n.argmin().item())
+            self.assertEqual(t.argmin(dim=0), torch.from_numpy(n.argmin(axis=0)).to(device))
+            self.assertEqual(t.argmin(dim=1), torch.from_numpy(n.argmin(axis=1)).to(device))
+            self.assertEqual(t.argmin(dim=2), torch.from_numpy(n.argmin(axis=2)).to(device))
+            # test that non-contiguous tensors work
+            self.assertEqual(t[:, :2, :1].argmin().item(), n[:, :2, :1].argmin().item())
+
+
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
     def test_reduction_vectorized_corner(self, device, dtype):
