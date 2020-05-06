@@ -1397,24 +1397,24 @@ void testGPU_FusionUnaryOps() {
       {at::tanh, UnaryOpType::Tanh, "tanh"},
       {at::trunc, UnaryOpType::Trunc, "trunc"}};
 
-  //std::for_each(ops.begin(), ops.end(), [](OpTuple& op) {
-  //  test_op(
-  //      /*blocks*/ 640,
-  //      /*threads*/ 64,
-  //      /*name*/ std::get<2>(op),
-  //      /*Aten Func   */
-  //      [&op](std::array<IValue, 1>& vals) {
-  //        return std::get<0>(op)(vals[0].toTensor());
-  //      },
-  //      /*JIT  Func   */
-  //      [&op](Val* in1) -> Val* { return unaryOp(std::get<1>(op), in1); },
-  //      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-  //      /*Inputs Tuple*/
-  //      std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
-  //});
+  std::for_each(ops.begin(), ops.end(), [](OpTuple& op) {
+    test_op(
+        /*blocks*/ 640,
+        /*threads*/ 64,
+        /*name*/ std::get<2>(op),
+        /*Aten Func   */
+        [&op](std::array<IValue, 1>& vals) {
+          return std::get<0>(op)(vals[0].toTensor());
+        },
+        /*JIT  Func   */
+        [&op](Val* in1) -> Val* { return unaryOp(std::get<1>(op), in1); },
+        /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
+        /*Inputs Tuple*/
+        std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
+  });
 
   test_op(
-      /*blocks*/ 640,
+      /*blocks*/ 128,
       /*threads*/ 64,
       /*name*/ "rand_like",
       /*Aten Func   */
