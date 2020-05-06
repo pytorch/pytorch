@@ -752,7 +752,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
 
         sym_registry.register_version('', opset_version)
         from torch.onnx.symbolic_helper import _default_onnx_opset_version
-        # Quantized op registration overwrites opset 9 symbolics with Saffe2 symbolics.
+        # Quantized op registration overwrites opset 9 symbolics with Caffe2 symbolics.
         # Again in Caffe2 symbolics we check if an op is registered as a quantized op, and if not,
         # we fallback to opset 9 symbolics. 
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and opset_version == 9:
