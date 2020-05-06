@@ -727,6 +727,7 @@
     CPU: clamp
     CUDA: clamp
     QuantizedCPU: quantized_clamp
+    Vulkan: vulkan_clamp
 
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
   supports_named_tensor: True
@@ -734,6 +735,7 @@
   dispatch:
     CPU: _clamp__cpu
     CUDA: _clamp__cuda
+    Vulkan: _clamp__vulkan
 
 - func: clamp.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
@@ -3354,6 +3356,7 @@
     CUDA: legacy::cuda::_th_addmm
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
+    Vulkan: vulkan_addmm
   supports_named_tensor: True
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
@@ -5751,6 +5754,7 @@
     CPU: hardtanh_
     CUDA: hardtanh_
     QuantizedCPU: quantized_hardtanh_
+    Vulkan: vulkan_hardtanh_
 
 - func: hardswish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

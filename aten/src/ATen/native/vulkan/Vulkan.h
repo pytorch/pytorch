@@ -112,7 +112,8 @@ class VBuffer final {
 
   explicit VBuffer(
       VkDeviceSize bufferSizeBytes,
-      VkBufferUsageFlags bufferUsageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+      VkBufferUsageFlags bufferUsageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
       VkDescriptorType descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
   ~VBuffer() noexcept;
@@ -251,13 +252,13 @@ void copyFromImageToBuffer(VImage& image, VBuffer& buffer);
 // dimensional tensor
 //  as VkImage, that can be used in shaders as texture or storage image.
 //  Currently it is 3-dimensional image (x, y, z) with 4 component * 16 bit for
-//  each (x, y, z). For NCHW, NHWC: image x - W image y - H image z - N * C
+//  each (x, y, z). For NCHW, NHWC: image x - W; image y - H; image z - N * C
 // 2. VImage (other format) - Currently not added, but for some operations
 // another texture
 //  packing format can be beneficial for performance.
 //
 // Contract about synchronization between representations:
-// 1.VImage(TexC4) representation is allocated lazily with calling vimage(),
+// 1.VImage(TexC4) representation is allocated lazily with calling image(),
 // fails for dimensions not equal 4.
 //
 // In current implementation where data can be in 0.VBuffer

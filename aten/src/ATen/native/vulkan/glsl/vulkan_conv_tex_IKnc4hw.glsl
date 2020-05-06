@@ -20,8 +20,7 @@ layout(set=0, binding=4) uniform constBlock{
 
 layout (local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
-void main()
-{
+void main() {
   ivec3 gpos = ivec3(gl_GlobalInvocationID);
   if (all(lessThan(gpos, uConstBlock.outputSize.xyz))) {
     ivec3 pos = gpos * ivec3(4, 1, 1);

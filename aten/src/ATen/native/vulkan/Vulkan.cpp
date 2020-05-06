@@ -2,7 +2,6 @@
 
 #include <stdio.h>
 #include <unistd.h>
-#include <cassert>
 #include <cstring>
 #include <iostream>
 
@@ -904,10 +903,31 @@ void copyFromImageToBuffer(VImage& image, VBuffer& buffer) {
 // VulkanTensor
 
 VImage& VulkanTensor::Impl::image() {
+  auto d = dim();
+  TORCH_INTERNAL_ASSERT(
+      d <= 4,
+      "Vulkan: Only Tensors with dim <= 4 can be represented as Vulkam Image");
   if (!image_ && buffer_) {
-    auto W = sizes_[3];
-    auto H = sizes_[2];
-    auto C = sizes_[1] * sizes_[0];
+    auto W = 0;
+    auto H = 0;
+    auto C = 0;
+    if (d == 4) {
+      W = sizes_[3];
+      H = sizes_[2];
+      C = sizes_[1] * sizes_[0];
+    } else if (d == 3) {
+      W = sizes_[2];
+      H = sizes_[1];
+      C = sizes_[0];
+    } else if (d == 2) {
+      W = sizes_[1];
+      H = sizes_[0];
+      C = 1;
+    } else if (d == 1) {
+      W = sizes_[0];
+      H = 1;
+      C = 1;
+    }
     image_ = std::make_unique<VImage>(W, H, C);
     copyFromBufferToImage(*buffer_, *image_);
   }
@@ -915,8 +935,18 @@ VImage& VulkanTensor::Impl::image() {
 }
 
 void VulkanTensor::Impl::allocateStorage() {
-  const auto bufferSize =
-      sizeof(float) * sizes_[0] * ALIGN_UP4(sizes_[1]) * sizes_[2] * sizes_[3];
+  auto bufferSize = sizeof(float) * numel_;
+  const auto d = dim();
+  if (d == 4) {
+    bufferSize = sizeof(float) * ALIGN_UP4(sizes_[0] * sizes_[1]) * sizes_[2] *
+        sizes_[3];
+  } else if (d == 3) {
+    bufferSize = sizeof(float) * ALIGN_UP4(sizes_[0]) * sizes_[1] * sizes_[2];
+  } else if (d == 2) {
+    bufferSize = sizeof(float) * 4 * sizes_[0] * sizes_[1];
+  } else if (d == 1) {
+    bufferSize = sizeof(float) * 4 * sizes_[0];
+  }
   const auto bufferSizeAligned =
       ROUND_UP(bufferSize, context().limits().minStorageBufferOffsetAlignment);
   buffer_ = std::make_unique<VBuffer>(bufferSizeAligned);

@@ -1,6 +1,7 @@
 #ifdef USE_VULKAN
 
 #include <ATen/native/vulkan/Vulkan.h>
+#include <c10/util/Optional.h>
 
 namespace at {
 namespace native {
@@ -40,6 +41,20 @@ void conv2d(
     int64_t DY,
     int64_t DX,
     int64_t G);
+
+void clamp(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    float min,
+    float max);
+
+void addmm(
+    VulkanTensor& output,
+    const VulkanTensor& t,
+    const VulkanTensor& m1,
+    const VulkanTensor& m2,
+    float beta,
+    float alpha);
 } // namespace vulkan
 } // namespace details
 } // namespace vulkan

@@ -1,9 +1,10 @@
 #ifdef USE_VULKAN
 
-#include <cassert>
-
-#include <ATen/native/vulkan/Vulkan.h>
 #include <ATen/native/vulkan/VulkanOps.h>
+#include <ATen/native/vulkan/Vulkan.h>
+#include <c10/util/Optional.h>
+#include <iostream>
+#include <limits>
 
 namespace at {
 namespace native {
@@ -310,8 +311,8 @@ void conv2d(
   const int64_t KHE = (KH - 1) * DY + 1;
   const int64_t OW = ((W - KWE + 2 * PX) / SX) + 1;
   const int64_t OH = ((H - KHE + 2 * PY) / SY) + 1;
-  assert(osizes[2] == OH);
-  assert(osizes[3] == OW);
+  TORCH_INTERNAL_ASSERT(osizes[2] == OH);
+  TORCH_INTERNAL_ASSERT(osizes[3] == OW);
 
   VImage inputImage{W, H, C};
   copyFromBufferToImage(input.impl()->buffer(), inputImage);
@@ -408,6 +409,208 @@ void conv2d(
 
   copyFromImageToBuffer(outputImage, output.impl()->buffer());
 }
+
+void clamp(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    float min,
+    float max) {
+  auto sizes = output.impl()->sizes();
+  auto C = sizes[0] * sizes[1];
+  auto H = sizes[2];
+  auto W = sizes[3];
+  auto C_4 = UP_DIV(C, 4);
+
+  auto device = context().device();
+  auto physicalDevice = context().physicalDevice();
+  struct ConstBlock {
+    int32_t W;
+    int32_t H;
+    int32_t C_4;
+    int32_t C;
+    float min;
+    float max;
+  };
+  ConstBlock constBlock{W, H, C_4, C, min, max};
+  VBuffer constBuffer =
+      makeUniformConstBuffer((void*)&constBlock, sizeof(constBlock));
+
+  VkDescriptorSetLayout descrSetLayout{};
+  VkDescriptorSetLayoutBinding bindings[] = {
+      vkutil::descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+      vkutil::descriptorSetLayoutBinding(
+          1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+      vkutil::descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
+  vkutil::createDescriptorSetLayout(
+      device, bindings, 3 /* bindingsCount */, &descrSetLayout);
+
+  VkDescriptorPool descrPool{};
+  VkDescriptorPoolSize poolSizes[] = {
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
+  vkutil::createDescriptorPool(
+      device, poolSizes, 3 /* poolSizeCount */, 1 /* maxSets */, &descrPool);
+
+  VkDescriptorSet descrSet{};
+  vkutil::allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
+  output.impl()->image().bind(
+      descrSet, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
+  input.impl()->image().bind(
+      descrSet,
+      1,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  constBuffer.bind(descrSet, 2);
+
+  WorkGroupSize workGroupSize{8, 8, 1};
+  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(vulkan_clamp),
+                          descrSetLayout,
+                          workGroupSize};
+  computeUnit.createCommandBuffer(descrSet);
+  output.impl()->image().addImageMemoryBarrier(
+      computeUnit.commandBuffer(),
+      VK_IMAGE_LAYOUT_UNDEFINED,
+      VK_IMAGE_LAYOUT_GENERAL);
+  input.impl()->image().addImageMemoryBarrier(
+      computeUnit.commandBuffer(),
+      VK_IMAGE_LAYOUT_GENERAL,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  computeUnit.dispatchCommandBuffer(
+      UP_DIV(W, workGroupSize.x),
+      UP_DIV(H, workGroupSize.y),
+      UP_DIV(C, workGroupSize.z));
+  computeUnit.runCommandBuffer();
+  vkDestroyDescriptorPool(device, descrPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
+}
+
+void addmm(
+    VulkanTensor& output,
+    const VulkanTensor& t,
+    const VulkanTensor& m1,
+    const VulkanTensor& m2,
+    float beta,
+    float alpha) {
+  auto m1Sizes = m1.impl()->sizes();
+  auto m2Sizes = m2.impl()->sizes();
+  TORCH_INTERNAL_ASSERT(m1Sizes.size() == 2);
+  TORCH_INTERNAL_ASSERT(m2Sizes.size() == 2);
+  uint32_t m1H = m1Sizes[0];
+  uint32_t m1W = m1Sizes[1];
+  uint32_t m1C = 1;
+  uint32_t m1C_4 = UP_DIV(m1C, 4);
+
+  uint32_t m2H = m2Sizes[0];
+  uint32_t m2W = m2Sizes[1];
+  uint32_t m2C = 1;
+  uint32_t m2C_4 = UP_DIV(m2C, 4);
+
+  uint32_t OH = m1Sizes[0];
+  uint32_t OW = m2Sizes[1];
+
+  TORCH_INTERNAL_ASSERT(m1W == m2H);
+  TORCH_INTERNAL_ASSERT(m1C == m2C);
+
+  uint32_t C = m1C;
+  uint32_t C_4 = UP_DIV(C, 4);
+  uint32_t K = m1W;
+
+  auto tSizes = t.impl()->sizes();
+  uint32_t TH = tSizes[0];
+  uint32_t TW = tSizes[1];
+  uint32_t TC = 1;
+
+  auto device = context().device();
+  auto physicalDevice = context().physicalDevice();
+
+  struct ConstBlock {
+    int32_t OW;
+    int32_t OH;
+    int32_t C_4;
+    int32_t C;
+    float beta;
+    float alpha;
+    int32_t K;
+  };
+  ConstBlock constBlock{OW, OH, C_4, C, beta, alpha, K};
+  VBuffer constBuffer =
+      makeUniformConstBuffer((void*)&constBlock, sizeof(constBlock));
+
+  VkDescriptorSetLayout descrSetLayout{};
+  VkDescriptorSetLayoutBinding bindings[] = {
+      vkutil::descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+      vkutil::descriptorSetLayoutBinding(
+          1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+      vkutil::descriptorSetLayoutBinding(
+          2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+      vkutil::descriptorSetLayoutBinding(
+          3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+      vkutil::descriptorSetLayoutBinding(4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
+  vkutil::createDescriptorSetLayout(
+      device, bindings, 5 /* bindingsCount */, &descrSetLayout);
+
+  VkDescriptorPool descrPool{};
+  VkDescriptorPoolSize poolSizes[] = {
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
+  vkutil::createDescriptorPool(
+      device, poolSizes, 5 /* poolSizeCount */, 1 /* maxSets */, &descrPool);
+
+  VkDescriptorSet descrSet{};
+  vkutil::allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
+  output.impl()->image().bind(
+      descrSet, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
+  m1.impl()->image().bind(
+      descrSet,
+      1,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  m2.impl()->image().bind(
+      descrSet,
+      2,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  t.impl()->image().bind(
+      descrSet,
+      3,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  constBuffer.bind(descrSet, 4);
+
+  WorkGroupSize workGroupSize{8, 8, 1};
+  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(vulkan_addmm),
+                          descrSetLayout,
+                          workGroupSize};
+  computeUnit.createCommandBuffer(descrSet);
+  output.impl()->image().addImageMemoryBarrier(
+      computeUnit.commandBuffer(),
+      VK_IMAGE_LAYOUT_UNDEFINED,
+      VK_IMAGE_LAYOUT_GENERAL);
+  m1.impl()->image().addImageMemoryBarrier(
+      computeUnit.commandBuffer(),
+      VK_IMAGE_LAYOUT_GENERAL,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  m2.impl()->image().addImageMemoryBarrier(
+      computeUnit.commandBuffer(),
+      VK_IMAGE_LAYOUT_GENERAL,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  t.impl()->image().addImageMemoryBarrier(
+      computeUnit.commandBuffer(),
+      VK_IMAGE_LAYOUT_GENERAL,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  computeUnit.dispatchCommandBuffer(
+      UP_DIV(OW, workGroupSize.x),
+      UP_DIV(OH, workGroupSize.y),
+      UP_DIV(C_4, workGroupSize.z));
+  computeUnit.runCommandBuffer();
+  vkDestroyDescriptorPool(device, descrPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
+}
+
 } // namespace vulkan
 } // namespace details
 } // namespace vulkan

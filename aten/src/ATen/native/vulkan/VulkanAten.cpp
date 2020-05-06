@@ -233,6 +233,56 @@ at::Tensor vulkan_convolution(
   return new_with_vtensor_vulkan(std::move(voutput), input.options());
 }
 
+Tensor vulkan_addmm(
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    Scalar beta,
+    Scalar alpha) {
+  VTensor& t = vtensor_from_vulkan(self);
+  VTensor& m1 = vtensor_from_vulkan(mat1);
+  VTensor& m2 = vtensor_from_vulkan(mat2);
+  float b = beta.to<float>();
+  float a = alpha.to<float>();
+
+  VTensor output = VTensor{self.sizes().vec()};
+  output.allocateStorage();
+  at::native::vulkan::details::VULKAN_GL::addmm(output, t, m1, m2, b, a);
+  return new_with_vtensor_vulkan(std::move(output), self.options());
+}
+
+Tensor vulkan_clamp(
+    const Tensor& self,
+    c10::optional<Scalar> min,
+    c10::optional<Scalar> max) {
+  VTensor& x = vtensor_from_vulkan(self);
+  VTensor output = VTensor{self.sizes().vec()};
+  output.allocateStorage();
+  float minValue = min.has_value() ? min.value().to<float>()
+                                   : std::numeric_limits<float>::min();
+  float maxValue = max.has_value() ? max.value().to<float>()
+                                   : std::numeric_limits<float>::max();
+  at::native::vulkan::details::VULKAN_GL::clamp(output, x, minValue, maxValue);
+  return new_with_vtensor_vulkan(std::move(output), self.options());
+}
+
+Tensor& _clamp__vulkan(
+    Tensor& self,
+    c10::optional<Scalar> min,
+    c10::optional<Scalar> max) {
+  auto y = vulkan_clamp(self, min, max);
+  self.copy_(y);
+  return self;
+}
+
+Tensor vulkan_hardtanh(const Tensor& self, Scalar min, Scalar max) {
+  return vulkan_clamp(self, min, max);
+}
+
+Tensor& vulkan_hardtanh_(Tensor& self, Scalar min, Scalar max) {
+  return _clamp__vulkan(self, min, max);
+}
+
 } // namespace native
 } // namespace at
 #endif

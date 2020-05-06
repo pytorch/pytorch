@@ -8,8 +8,7 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
   for (auto& tensor : inputs) {
     maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
   }
-  // return diff.abs().max().item<float>() < 2e-6 * maxValue;
-  return diff.abs().max().item<float>() < 0.01;
+  return diff.abs().max().item<float>() < (0.01 + 2e-3 * maxValue);
 }
 bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
   return checkRtol(a - b, {a, b});
@@ -40,7 +39,7 @@ TEST(VulkanTest, FailOnStrides) {
   ASSERT_ANY_THROW(tv.stride(0));
 }
 
-TEST(VulkanTest, UpsampleNearest2D) {
+TEST(VulkanTest, upsampleNearest2D) {
   if (!at::vulkan::is_available())
     return;
 
@@ -57,7 +56,7 @@ TEST(VulkanTest, UpsampleNearest2D) {
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
-TEST(VulkanTest, Add) {
+TEST(VulkanTest, add) {
   if (!at::vulkan::is_available())
     return;
   auto t_in0 = at::rand({1, 2, 2, 3}, at::device(at::kCPU).dtype(at::kFloat));
@@ -71,7 +70,7 @@ TEST(VulkanTest, Add) {
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
-TEST(VulkanTest, Conv2dWeightsOnCPU) {
+TEST(VulkanTest, conv2dWeightsOnCPU) {
   if (!at::vulkan::is_available())
     return;
   auto t_in = at::rand({1, 3, 3, 3}, at::device(at::kCPU).dtype(at::kFloat));
@@ -89,3 +88,51 @@ TEST(VulkanTest, Conv2dWeightsOnCPU) {
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
+TEST(VulkanTest, addmm) {
+  if (!at::vulkan::is_available())
+    return;
+  auto t_m1 = at::rand({2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_m2 = at::rand({2, 3}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_b = at::rand({2, 3}, at::device(at::kCPU).dtype(at::kFloat));
+
+  float beta = 100;
+  float alpha = 2;
+  auto t_out_expected = at::addmm(t_b, t_m1, t_m2, beta, alpha);
+
+  auto tv_m1 = t_m1.vulkan();
+  auto tv_m2 = t_m2.vulkan();
+  auto tv_b = t_b.vulkan();
+  auto tv_out = at::addmm(tv_b, tv_m1, tv_m2, beta, alpha);
+  auto t_out = tv_out.cpu();
+  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+}
+
+TEST(VulkanTest, clamp) {
+  if (!at::vulkan::is_available())
+    return;
+  float min = -0.5;
+  float max = 0.5;
+  auto t_in = at::rand({1, 3, 16, 16}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::clamp(t_in, min, max);
+
+  auto tv_in = t_in.vulkan();
+  auto tv_out = at::clamp(tv_in, min, max);
+  auto t_out = tv_out.cpu();
+
+  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+}
+
+TEST(VulkanTest, hardtanh_) {
+  if (!at::vulkan::is_available())
+    return;
+  float min = -0.5;
+  float max = 0.5;
+  auto t_in = at::rand({1, 3, 16, 16}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::hardtanh_(t_in, min, max);
+
+  auto tv_in = t_in.vulkan();
+  auto tv_out = at::hardtanh_(tv_in, min, max);
+  auto t_out = tv_out.cpu();
+
+  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+}
