@@ -75,11 +75,36 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         export_raw_ir (bool, default False): [DEPRECATED. use operator_export_type]
             export the internal IR directly instead of converting it to ONNX ops.
         operator_export_type (enum, default OperatorExportTypes.ONNX):
-            OperatorExportTypes.ONNX: all ops are exported as regular ONNX ops.
+            OperatorExportTypes.ONNX: all ops are exported as regular ONNX ops
+            (with ONNX namespace). e.g. node: aten::add -> onnx::Add)
             OperatorExportTypes.ONNX_ATEN: all ops are exported as ATen ops.
-            OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing, fall back on ATen op.
-            OperatorExportTypes.RAW: export raw ir.
-            OperatorExportTypes.ONNX_ATEN_FALLTHROUGH: if symbolic is missing, pass through the op.
+            (with aten namespace, e.g. node: aten::add -> aten::ATen[operator="add"])
+            OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing for
+            an ATen op, fall back. registered ops are exported with ONNX namespace.
+            e.g. graph:
+            graph(%0 : Float):
+              %3 : int = prim::Constant[value=0]()
+              %4 : Float = aten::triu(%0, %3) # missing op
+              %5 : Float = aten::mul(%4, %0) # registered op
+              return (%5)
+            is exported as:
+            graph(%0 : Float):
+              %1 : Long() = onnx::Constant[value={0}]()
+              %2 : Float = aten::ATen[operator="triu"](%0, %1)  # missing op
+              %3 : Float = onnx::Mul(%2, %0) # registered op
+              return (%3)
+            OperatorExportTypes.RAW: export raw ir. no op is converted to ONNX.
+            OperatorExportTypes.ONNX_ATEN_FALLTHROUGH: if op is not registered,
+            pass through op as is.
+            e.g. graph:
+            graph(%x.1 : Float):
+              %1 : Tensor = prim::Uninitialized()
+              %2 : int[] = aten::size(%x.1)
+            is exported as:
+            graph(%x.2 : Float):
+              %1 : Tensor = prim::Uninitialized()
+              %2 : int[] = onnx::Shape(%x.2)
+
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
             evolve before next stable release, by default we export to one stable
