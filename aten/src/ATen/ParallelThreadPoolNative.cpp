@@ -84,7 +84,7 @@ void launch(std::function<void()> func) {
 #endif
 }
 
-void launch_no_thread_state(std::function<void()> fn) {
+void launch_internal_no_thread_state(std::function<void()> fn) {
 #if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
   intraop_launch(std::move(fn));
 #else
