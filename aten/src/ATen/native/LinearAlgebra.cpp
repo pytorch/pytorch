@@ -171,6 +171,30 @@ Tensor ger(const Tensor& self, const Tensor& vec2) {
   return result;
 }
 
+Tensor addbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm");
+  return legacy::cpu::_th_addbmm(b_self, batch1, batch2, beta, alpha);
+}
+
+Tensor& addbmm_cpu_out(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out");
+  return legacy::cpu::_th_addbmm_out(result, b_self, batch1, batch2, beta, alpha);
+}
+
+Tensor addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+  return legacy::cpu::_th_addmm(b_self, mat1, mat2, beta, alpha);
+}
+
+Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return legacy::cpu::_th_addmm_out(result, b_self, mat1, mat2, beta, alpha);
+}
+
 template <typename scalar_t, bool is_bmm>
 inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, Scalar beta_, Scalar alpha_) {
   int64_t bs = result.size(0);
