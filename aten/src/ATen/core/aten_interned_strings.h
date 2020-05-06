@@ -530,6 +530,7 @@ _(aten, ones_like) \
 _(aten, orgqr) \
 _(aten, ormqr) \
 _(aten, pairwise_distance) \
+_(aten, _euclidean_dist) \
 _(aten, pdist) \
 _(aten, cdist) \
 _(aten, permute) \
