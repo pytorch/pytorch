@@ -2431,7 +2431,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
         for idx in range(num_cbs):
-            print(set_by_cbs[idx].result())
             self.assertEqual(
                 set_by_cbs[idx].result(),
                 torch.ones(n, n) * 2 + idx
@@ -2450,6 +2449,27 @@ class RpcTest(RpcAgentTestFixture):
             args=(dst2, torch.ones(2, 2), 1, 2)
         )
         self.assertEqual(ret, torch.ones(2, 2) + 1 + 2)
+
+    @dist_init
+    def test_callback_with_ret(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+
+        def callback(ret):
+            fut = rpc.rpc_async(
+                dst,
+                torch.add,
+                args=(ret, 1)
+            )._then(lambda x: x + 1)
+
+            return fut.wait()
+
+        fut = rpc.rpc_async(
+            dst,
+            torch.add,
+            args=(torch.ones(2, 2), 1)
+        )._then(callback)
+
+        self.assertEqual(fut.wait(), torch.ones(2, 2) + 3)
 
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
