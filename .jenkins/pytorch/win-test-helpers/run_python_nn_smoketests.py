@@ -49,10 +49,13 @@ if __name__ == "__main__":
         print("Command:", command_string)
         try:
             subprocess.check_call(command_args)
-        except:
-            command_args = ["C:\\Program Files (x86)\\Windows Kits\\10\\Debuggers\\x64\\cdb.exe",
-                            "-o", "-c", "~*g; q"] + command_args
-            command_string = " ".join(command_args)
-            print("Reruning with traceback enabled")
-            print("Command:", command_string)
-            subprocess.check_call(command_args)
+        except subprocess.CalledProcessError as e:
+            sdk_root = os.environ.get('WindowsSdkDir', 'C:\\Program Files (x86)\\Windows Kits\\10')
+            debugger = os.path.join(sdk_root, 'Debuggers', 'x64', 'cdb.exe')
+            if os.path.exists(debugger):
+                command_args = [debugger, "-o", "-c", "~*g; q"] + command_args
+                command_string = " ".join(command_args)
+                print("Reruning with traceback enabled")
+                print("Command:", command_string)
+                subprocess.run(command_args, check=False)
+            exit(e.returncode)
