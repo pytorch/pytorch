@@ -217,8 +217,7 @@ struct vectorized {
 template <typename data_t, typename inp_calc_t, typename out_calc_t, int num_outputs>
 struct multi_outputs_unroll : unroll<data_t, inp_calc_t, out_calc_t, num_outputs> {
 
-  __device__ multi_outputs_unroll(data_t data, int remaining, inp_calc_t ic, out_calc_t oc):
-    unroll<data_t, inp_calc_t, out_calc_t, num_outputs>({data, remaining, ic, oc}) {}
+  using unroll<data_t, inp_calc_t, out_calc_t, num_outputs>::unroll;
 
   template <typename return_t>
   __device__ inline void store(return_t *from, int idx) {
