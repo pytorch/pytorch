@@ -12954,6 +12954,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta, out=out))
 
+        # TODO: update this once torch.addmm is supported for complex
+        if dtype.is_complex:
+            return
+
         # torch.addmm
         input = torch.full((2, 3), value, dtype=dtype, device=device)
         mat2 = torch.ones((0, 3), dtype=dtype, device=device)

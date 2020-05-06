@@ -2,7 +2,7 @@ import os
 import unittest
 
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
+from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA
 import torch
 import torch.backends.cudnn
