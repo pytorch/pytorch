@@ -24,27 +24,12 @@ except ImportError:
 # where they can be called directly by a native function, they can be wrapped
 # by a native function that handles dispatch
 
-# Handle broadcasting for TH functions that need it
-LEGACY_TH_DECLARATION_BROADCAST = CodeTemplate("""\
+LEGACY_TH_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals});
 """)
 
-LEGACY_TH_DEFINITION_BROADCAST = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}) {
-    ${named_guard_declaration}
-    ${device_guard_declaration}
-    Tensor ${broadcast_returns};
-    std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
-    return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
-}
-""")
-
-LEGACY_TH_DECLARATION = CodeTemplate("""\
-${return_type} ${method_prefix_derived}${api_name}(${type_method_formals});
-""")
-
 LEGACY_TH_DEFINITION = CodeTemplate("""\
-${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${type_method_formals}) {
     ${named_guard_declaration}
     ${device_guard_declaration}
     ${type_definition_body}
@@ -414,8 +399,6 @@ THFormal = TypedDict('THFormal', {
     'annotation': str,
     'allocate': bool,
     'mask': bool,
-    # Broadcast is originally a str but gets unwrapped to a List or Dict in-place
-    'broadcast': Any,
     'resize': str,
     'zero': bool,
 }, total=False)
@@ -481,10 +464,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'arguments': List[THFormal],
     'backend_types': Dict[str, List[str]],
     'backends': List[str],
-    'broadcast_actuals': List[str],
-    'broadcast_function': str,
-    'broadcast_modified_actuals': List[str],
-    'broadcast_returns': List[str],
     'buffers': List[NNBuffer],
     # cimpls is really a List[FunctionOption]
     'cimpls': List[Any],
@@ -519,7 +498,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'method_actuals': List[str],
     'method_formals_with_defaults': List[str],
     'method_formals': List[str],
-    'method_prefix_derived': str,
     'named_guard_declaration': str,
     'mode': str,
     'python_module': str,
@@ -554,7 +532,6 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('category_override', str),
     ('matches_jit_signature', bool),
     ('schema_string', str),
-    ('method_prefix_derived', str),
     ('arguments', List[AtFormal]),
     ('method_of', List[str]),
     ('mode', str),
@@ -898,33 +875,6 @@ def create_generic(top_env, declarations):
             return return_types[0]['type']
         return "std::tuple<{}>".format(','.join(r['type'] for r in return_types))
 
-    def get_broadcast_argument(option):
-        # type: (FunctionOption) -> Optional[THFormal]
-        for argument in option['arguments']:
-            if argument.get('broadcast'):
-                return argument
-        return None
-
-    def get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims):
-        # type: (THFormal, bool, bool) -> List[str]
-        # Note: broadcast_dims can change type...
-        # return the actuals that will be passed to the broadcast function.
-        # in the broadcast_dims case (the only currently supported case), this is
-        # the broadcasted argument (e.g. "self") followed by the sizes it is broadcasted
-        # to (as an initializer list), so e.g. the specification:
-        # "mat1.dim0,mat2.dim1"
-        # gets transformed to
-        # "self, {mat1.size(0),mat2.size(1)}"
-        assert broadcast_dims
-        broadcast_dims_spec = broadcast_arg['broadcast'].split()[1].split(':')[1].split(',')
-        # generate size call for each dimension
-        broadcast_dims = ([x.split('.')[0] + '.size(' + x.split('.')[1].replace('dim', '') + ')'  # type: ignore
-                          for x in broadcast_dims_spec])
-        broadcast_dims_init_list = '{' + ','.join(broadcast_dims) + '}'  # type: ignore
-        broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
-
-        return broadcast_actuals
-
     def process_legacy_th_option(option):
         # type: (FunctionOption) -> None
         # Mutably populate option with derived values computed from values
@@ -961,9 +911,6 @@ def create_generic(top_env, declarations):
         dispatch_tensor = find_dispatch_tensor(formals)
         is_namespace_function = is_function and dispatch_tensor is not None
 
-        broadcast_arg = get_broadcast_argument(option)
-        # "s_" for "same size".
-        option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
         if option['mode'] == 'TH':
             option['device_guard'] = False
         option['device_guard_declaration'] = device_guard(option, False, dispatch_tensor)
@@ -972,21 +919,6 @@ def create_generic(top_env, declarations):
         option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, False, dispatch_tensor)
 
         assert option['extended_method'], 'Expected legacy operator to be an extended method'
-
-        if broadcast_arg is not None:
-            broadcast_inplace = 'inplace' in broadcast_arg['broadcast']
-            broadcast_dims = 'dims:' in broadcast_arg['broadcast']
-            option['broadcast_actuals'] = get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims)
-            if not broadcast_dims:
-                option['broadcast_returns'] = (["b_" + x for x in option['broadcast_actuals']
-                                               if x != broadcast_arg['name'] or not broadcast_inplace])
-            else:
-                option['broadcast_returns'] = ["b_" + broadcast_arg['name']]
-
-            option['broadcast_function'] = 'expand_' + ('inplace' if broadcast_inplace
-                                                        else 'size' if broadcast_dims else 'outplace')
-            option['broadcast_modified_actuals'] = ['b_' + y if 'b_' + y in option['broadcast_returns'] else y
-                                                    for y in option['actuals']]
 
     def native_get_formals(option, include_constants=False):
         # type: (FunctionOption, bool) -> List[AtFormal]
@@ -1221,7 +1153,6 @@ def create_generic(top_env, declarations):
 
         check_methods_do_not_start_with_underscore(option['name'], is_method)
 
-        option['method_prefix_derived'] = ''
         # NB: Device guard and scalar type generated code is still based on the
         # first argument.  Scalar type test will be removed once TH is removed.
         # If you need more complex device guard behavior, you should disable
@@ -1233,10 +1164,6 @@ def create_generic(top_env, declarations):
                                                         find_tensorlists(formals))
         option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, dispatch_options, guard_tensor)
 
-        broadcast_arg = get_broadcast_argument(option)
-        if broadcast_arg is not None:
-            raise Exception("broadcasting is not yet supported for native functions, "
-                            "but specified for function {}", option['name'])
         top_env['aten_ops'].append(OPERATOR_NAME_FULL.substitute(option))
 
         option['native_type_method_dispatch'] = type_method_dispatch
@@ -1311,7 +1238,6 @@ def create_generic(top_env, declarations):
             category_override=option['category_override'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
-            method_prefix_derived=option['method_prefix_derived'],
             arguments=formals,
             method_of=method_of,
             mode=option['mode'],
@@ -1570,11 +1496,6 @@ def create_derived(backend_type_env, declarations):
             env = nested_dict(option, backend_type_env)
             body = emit_body(env, option, option['backend_types'][backend])  # type: ignore
             option['type_definition_body'] = body
-            if option.get('broadcast_actuals', None):
-                legacy_th_declarations.append(
-                    LEGACY_TH_DECLARATION_BROADCAST.substitute(env))
-                legacy_th_definitions.append(
-                    LEGACY_TH_DEFINITION_BROADCAST.substitute(env))
             legacy_th_declarations.append(
                 LEGACY_TH_DECLARATION.substitute(env))
             legacy_th_definitions.append(
