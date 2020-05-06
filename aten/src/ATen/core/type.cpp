@@ -1154,8 +1154,15 @@ size_t ClassType::addAttribute(
         toString(type));
   }
   if (was_registered_as_buffer) {
-      // TODO: Check is_module
-      // TODO: check type is tensor
+    TORCH_INTERNAL_ASSERT(is_module(), "registering a buffer to a non module");
+    TORCH_CHECK(
+        (type->kind() == TensorType::Kind) ||
+            (type->kind() == OptionalType::Kind &&
+            type->expect<OptionalType>()->getElementType()->kind() ==
+                TensorType::Kind) ||
+            (type->kind() == NoneType::Kind),
+        "Expecting registered buffer value to have either None, Tensor or Optional[Tensor] type, but got: ",
+        toString(type));
   }
   if (is_module()) {
     parameterSlots_->push_back(is_parameter);

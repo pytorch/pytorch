@@ -292,20 +292,12 @@ std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredNamedBufferDict(
     }
 
     std::vector<SugaredValuePtr> keys;
-    // std::vector<SugaredValuePtr> values;
     for (const auto& name : paramNames) {
-      // auto name_v = std::make_shared
       auto name_v =
           std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
       Value* tensor_v = m.graph()->insertGetAttr(self_, name);
       values.push_back(tryGetAttr(loc, m, name));
-
-      // auto mod_v = std::make_shared<ModuleValue>(
-      //     module_v, concreteType_->findSubmoduleConcreteType(name));
-      // auto value = getitem(loc, m, tensor_v);
-
       keys.push_back(name_v);
-      // values.push_back(mod_v);
   }
 
   return std::make_shared<SugaredModuleDict>(

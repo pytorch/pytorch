@@ -1918,7 +1918,10 @@ struct CAFFE2_API ClassType : public NamedType {
   // if present, this class inherits from torch.nn.Module
   // and these are the indices of the attributes which are parameters
   std::shared_ptr<std::vector<bool>> parameterSlots_;
-  // TODO - a comment
+
+  // if present, this class inherits from torch.nn.Module
+  // and these are the indices of the attributes which are registered buffers
+  // `register_buffer` is the only way to write a buffer. See: https://pytorch.org/docs/stable/nn.html
   std::shared_ptr<std::vector<bool>> bufferWrittenSlots_;
 
   // List of methods associated with this class.
