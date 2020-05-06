@@ -571,7 +571,9 @@ class ExprBuilder(Builder):
         base = build_expr(ctx, expr.value)
         sub_type = type(expr.slice)
         if sub_type is ast.Index:
-            if isinstance(expr.slice.value, ast.Tuple) or isinstance(expr.slice.value, ast.List):
+            if isinstance(expr.slice.value, ast.Tuple):
+                # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
+                # XXX: Indexing using a list is **different**! It triggers advanced indexing.
                 indices = []
                 for index_expr in expr.slice.value.elts:
                     indices.append(build_expr(ctx, index_expr))

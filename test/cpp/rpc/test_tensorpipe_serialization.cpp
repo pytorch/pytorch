@@ -78,7 +78,7 @@ TEST(TensorpipeSerialize, RecopySparseTensors) {
   at::Tensor main = torch::randn({k1K, k1K});
   at::Tensor tiny = main.select(0, 2); // Select a row in the middle
   EXPECT_EQ(tiny.numel(), k1K);
-  EXPECT_EQ(tiny.storage().numel(), k1K * k1K);
+  EXPECT_EQ(tiny.storage().nbytes() / tiny.itemsize(), k1K * k1K);
 
   std::vector<at::Tensor> tensors{main, tiny};
   std::vector<char> payload = {'1', '2', '3'};
