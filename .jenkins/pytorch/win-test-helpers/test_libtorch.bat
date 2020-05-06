@@ -19,33 +19,42 @@ for /r "." %%a in (*.exe) do (
 goto :eof
 
 :libtorch_check
+set TEST_NAME=%~1
+set TEST_BINARY=%~2
 :: Skip verify_api_visibility as it a compile level test
-if "%~1" == "verify_api_visibility" goto :eof
+if "%TEST_NAME%" == "verify_api_visibility" goto :eof
 
 :: See https://github.com/pytorch/pytorch/issues/25161
-if "%~1" == "c10_metaprogramming_test" goto :eof
-if "%~1" == "module_test" goto :eof
+if "%TEST_NAME%" == "c10_metaprogramming_test" goto :eof
+if "%TEST_NAME%" == "module_test" goto :eof
 :: See https://github.com/pytorch/pytorch/issues/25312
-if "%~1" == "converter_nomigraph_test" goto :eof
+if "%TEST_NAME%" == "converter_nomigraph_test" goto :eof
 :: See https://github.com/pytorch/pytorch/issues/35636
-if "%~1" == "generate_proposals_op_gpu_test" goto :eof
+if "%TEST_NAME%" == "generate_proposals_op_gpu_test" goto :eof
 :: See https://github.com/pytorch/pytorch/issues/35648
-if "%~1" == "reshape_op_gpu_test" goto :eof
+if "%TEST_NAME%" == "reshape_op_gpu_test" goto :eof
 :: See https://github.com/pytorch/pytorch/issues/35651
-if "%~1" == "utility_ops_gpu_test" goto :eof
+if "%TEST_NAME%" == "utility_ops_gpu_test" goto :eof
 
-echo Running "%~2"
-if "%~1" == "c10_intrusive_ptr_benchmark" (
-  call "%~2"
+:: Skip cuda tests on a cpu agent
+if "%USE_CUDA%" == "0" (
+  if NOT "%TEST_NAME:cuda=%" == "%TEST_NAME%" goto :eof
+  if NOT "%TEST_NAME:gpu=%" == "%TEST_NAME%" goto :eof
+  if NOT "%TEST_NAME:cudnn=%" == "%TEST_NAME%" goto :eof
+)
+
+echo Running "%TEST_BINARY%"
+if "%TEST_NAME%" == "c10_intrusive_ptr_benchmark" (
+  call "%TEST_BINARY%"
   goto :eof
 )
-call "%~2" --gtest_output=xml:%TEST_OUT_DIR%\%~1.xml
+call "%TEST_BINARY%" --gtest_output=xml:%TEST_OUT_DIR%\%TEST_NAME%.xml
 if errorlevel 1 (
-  echo %1 failed with exit code %errorlevel%
+  echo %TEST_NAME% failed with exit code %errorlevel%
   exit /b 1
 )
 if not errorlevel 0 (
-  echo %1 failed with exit code %errorlevel%
+  echo %TEST_NAME% failed with exit code %errorlevel%
   exit /b 1
 )
 
