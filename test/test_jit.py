@@ -6928,6 +6928,8 @@ a")
         inputs = self._make_scalar_vars([1, 1, 10], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
+
+    @unittest.skip("temporary skip")
     def test_fibb(self):
         def func(lim):
             first = 1
