@@ -1,5 +1,8 @@
 #pragma once
 
+// DO NOT DEFINE STATIC DATA IN THIS HEADER!
+// See Note [Do not compile initializers with AVX]
+
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
@@ -50,7 +53,6 @@ static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
 template <> class Vec256<BFloat16> {
 private:
   __m256i values;
-  static const Vec256<BFloat16> ones;
 public:
   using value_type = uint16_t;
   static constexpr int size() {
@@ -433,30 +435,28 @@ Vec256<BFloat16> inline operator^(const Vec256<BFloat16>& a, const Vec256<BFloat
   return _mm256_xor_si256(a, b);
 }
 
-const Vec256<BFloat16> Vec256<BFloat16>::ones(1.0f);
-
 Vec256<BFloat16> Vec256<BFloat16>::eq(const Vec256<BFloat16>& other) const {
-  return (*this == other) & Vec256<BFloat16>::ones;
+  return (*this == other) & Vec256<BFloat16>(1.0f);
 }
 
 Vec256<BFloat16> Vec256<BFloat16>::ne(const Vec256<BFloat16>& other) const {
-  return (*this != other) & Vec256<BFloat16>::ones;
+  return (*this != other) & Vec256<BFloat16>(1.0f);
 }
 
 Vec256<BFloat16> Vec256<BFloat16>::gt(const Vec256<BFloat16>& other) const {
-  return (*this > other) & Vec256<BFloat16>::ones;
+  return (*this > other) & Vec256<BFloat16>(1.0f);
 }
 
 Vec256<BFloat16> Vec256<BFloat16>::ge(const Vec256<BFloat16>& other) const {
-  return (*this >= other) & Vec256<BFloat16>::ones;
+  return (*this >= other) & Vec256<BFloat16>(1.0f);
 }
 
 Vec256<BFloat16> Vec256<BFloat16>::lt(const Vec256<BFloat16>& other) const {
-  return (*this < other) & Vec256<BFloat16>::ones;
+  return (*this < other) & Vec256<BFloat16>(1.0f);
 }
 
 Vec256<BFloat16> Vec256<BFloat16>::le(const Vec256<BFloat16>& other) const {
-  return (*this <= other) & Vec256<BFloat16>::ones;
+  return (*this <= other) & Vec256<BFloat16>(1.0f);
 }
 
 // frac. Implement this here so we can use subtraction
