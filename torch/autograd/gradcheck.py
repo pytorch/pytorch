@@ -262,10 +262,10 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         raise ValueError(
             'gradcheck expects at least one input tensor to require gradient, '
             'but none of the them have requires_grad=True.')
-        if some_input_not_requiring_grad:
-            raise ValueError(
-                'gradcheck expects if at least one input tensor is required gradient, '
-                'then all other inputs should have requires_grad=True.')
+    if some_input_not_requiring_grad:
+        raise ValueError(
+            'gradcheck expects if at least one input tensor is required gradient, '
+            'then all other inputs should have requires_grad=True.')
 
     func_out = func(*tupled_inputs)
     output = _differentiable_outputs(func_out)
