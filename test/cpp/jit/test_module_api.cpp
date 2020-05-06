@@ -34,7 +34,7 @@ void testModuleClone() {
   ASSERT_EQ(Module(p2.attr("c2").toObject()).attr(attr_name).toInt(), 3);
 }
 
-void testModuleCloneInstance() {
+void testModuleCopy() {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   auto attr_name = "attr";
@@ -44,7 +44,8 @@ void testModuleCloneInstance() {
   m.register_attribute(attr_name, IntType::get(), v, false);
 
   Module m2 = m.clone();
-  Module m3 = m.clone_instance();
+  Module m3 = m.copy();
+
   // Make sure copy works
   ASSERT_EQ(m2.attr(attr_name).toInt(), 2);
   ASSERT_EQ(m3.attr(attr_name).toInt(), 2);
@@ -52,7 +53,7 @@ void testModuleCloneInstance() {
   // clone will copy both type and data, therefore we'll have a
   // different type
   ASSERT_NE(m.type(), m2.type());
-  // clone_instance only copies data, type is shared
+  // copy only copies data, type is shared
   ASSERT_EQ(m.type(), m3.type());
 
   // change value of copied instance
@@ -81,7 +82,7 @@ void testModuleDeepcopy() {
   m.setattr(tensor_list_attr, list);
 
   Module m2 = m.deepcopy();
-  Module m3 = m.clone_instance();
+  Module m3 = m.copy();
   // Make sure copy works
   ASSERT_EQ(m2.attr(int_attr).toInt(), 2);
   ASSERT_EQ(m3.attr(int_attr).toInt(), 2);
@@ -90,13 +91,14 @@ void testModuleDeepcopy() {
   ASSERT_TRUE(!IValue(m2._ivalue()).overlaps(IValue(m._ivalue())));
   ASSERT_TRUE(IValue(m3._ivalue()).overlaps(IValue(m._ivalue())));
 
-  // Both deepcopy and clone_instance will preserve the type
+  // Both deepcopy and copy will preserve the type
   ASSERT_EQ(m.type(), m2.type());
   ASSERT_EQ(m.type(), m3.type());
 
   // change int value of copied instances
   m2.setattr(int_attr, IValue(3));
   m3.setattr(int_attr, IValue(4));
+
   // Verify value of original instance doesn't change
   ASSERT_EQ(m.attr(int_attr).toInt(), 2);
   ASSERT_EQ(m2.attr(int_attr).toInt(), 3);
@@ -106,8 +108,8 @@ void testModuleDeepcopy() {
   at::Tensor t1 = m.attr(tensor_attr).toTensor();
   at::Tensor t2 =
       m2.attr(tensor_attr).toTensor(); // deepcopy will copy the Tensor
-  at::Tensor t3 = m3.attr(tensor_attr)
-                      .toTensor(); // clone_instance will not copy the Tensor
+  at::Tensor t3 =
+      m3.attr(tensor_attr).toTensor(); // copy will not copy the Tensor
   // check copy works
   ASSERT_TRUE(t1.equal(t2));
   ASSERT_TRUE(t1.equal(t3));
