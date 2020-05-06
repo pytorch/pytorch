@@ -4,7 +4,7 @@
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
 
@@ -24,6 +24,7 @@ struct PeepholeOptimizeImpl {
       bool disable_shape_peepholes)
       : graph_(graph), shape_peepholes_(!disable_shape_peepholes) {
     run(graph->block());
+    PeepholeOptimizeListIdioms(graph);
   }
 
   // The intent for this optimization pass is to catch all of the small, easy to
