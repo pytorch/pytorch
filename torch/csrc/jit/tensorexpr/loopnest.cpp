@@ -1087,34 +1087,55 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   // TODO: record history of transformations
 }
 
-void LoopNest::reorderAxis(Tensor* t, For* a, For* b) {
+For* findOuterFor(For* a, For* b) {
+  Stmt* s = b; // guess b is the latter.
+  while (s != nullptr) {
+    if (s == a) {
+      // yes, b is after a.
+      return a;
+    }
+    s = s->get_parent();
+  }
+
+  // check that the two are in the same loop nest.
+  s = a;
+  while (s != nullptr) {
+    if (s == b) {
+      // a is after b.
+      return b;
+    }
+    s = s->get_parent();
+  }
+
+  // a and b have no relationship.
+  return nullptr;
+}
+
+void LoopNest::reorderAxis(For* a, For* b) {
   if (a == b) {
     // nothing to do.
     return;
   }
   // find inner and outer.
-  For* outer{nullptr};
-  For* inner{nullptr};
+  For* outer = findOuterFor(a, b);
+  if (outer == nullptr) {
+    throw std::runtime_error("Reordered a loop not in LoopNest");
+  }
+
+  For* inner = a == outer ? b : a;
   std::deque<For*> internal_axes;
 
   // Find relevant axes, store reversed.
-  for (For* loop : getLoopStmtsFor(t)) {
-    if (loop == a || loop == b) {
-      if (outer == nullptr) {
-        outer = loop;
-        internal_axes.push_front(loop);
-      } else {
-        inner = loop;
-        internal_axes.push_front(loop);
-      }
-    } else if (outer && !inner) {
-      internal_axes.push_front(loop);
+  Stmt* s = inner;
+  while (s != outer) {
+    if (For* f = dynamic_cast<For*>(s)) {
+      internal_axes.push_back(f);
     }
+
+    s = s->get_parent();
   }
 
-  if (!inner || !outer) {
-    throw std::runtime_error("Reordered a loop not in LoopNest");
-  }
+  internal_axes.push_back(outer);
 
   Block* root = dynamic_cast<Block*>(outer->get_parent());
   CHECK(root);
