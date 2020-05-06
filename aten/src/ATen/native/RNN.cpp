@@ -310,7 +310,7 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     const auto kFuncName = "quantized::linear_dynamic";
     const auto kOvrldName = "";
     const std::vector<c10::IValue> output_ih_list =
-        callOp(kFuncName, kOvrldName, input_ih, packed_w_ih);
+        call_unboxed_super_slow_temp_shim(kFuncName, kOvrldName, input_ih, packed_w_ih);
     TORCH_INTERNAL_ASSERT(
         output_ih_list.size() == 1,
         "The output vector should have exact one element");
@@ -321,7 +321,7 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     const auto kFuncName = "quantized::linear_dynamic";
     const auto kOvrldName = "";
     const std::vector<c10::IValue> output_hh_list =
-        callOp(kFuncName, kOvrldName, input_hh, packed_w_hh);
+        call_unboxed_super_slow_temp_shim(kFuncName, kOvrldName, input_hh, packed_w_hh);
     TORCH_INTERNAL_ASSERT(
         output_hh_list.size() == 1,
         "The output vector should have exact one element");
@@ -338,9 +338,9 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
   CellParamsSerializationType __getstate__() const override {
     // Boxed dispatch nonsense
     // This will be cleaned up in the subsequent PR
-    auto unpacked_ih = callOp("quantized::linear_unpack", "", packed_w_ih);
+    auto unpacked_ih = call_unboxed_super_slow_temp_shim("quantized::linear_unpack", "", packed_w_ih);
     TORCH_INTERNAL_ASSERT(unpacked_ih.size() == 2);
-    auto unpacked_hh = callOp("quantized::linear_unpack", "", packed_w_hh);
+    auto unpacked_hh = call_unboxed_super_slow_temp_shim("quantized::linear_unpack", "", packed_w_hh);
     TORCH_INTERNAL_ASSERT(unpacked_hh.size() == 2);
 
     std::vector<at::Tensor> tensors_to_serialize{
@@ -366,13 +366,13 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
 
     // Boxed dispatch nonsense
     // This will be cleaned up in the subsequent PR
-    auto packed_ih = callOp(
+    auto packed_ih = call_unboxed_super_slow_temp_shim(
         "quantized::linear_prepack",
         "",
         /*w_ih=*/std::move(tensors[0]),
         /*b_ih=*/b_ih);
     TORCH_INTERNAL_ASSERT(packed_ih.size() == 1);
-    auto packed_hh = callOp(
+    auto packed_hh = call_unboxed_super_slow_temp_shim(
         "quantized::linear_prepack",
         "",
         /*w_hh=*/std::move(tensors[1]),
@@ -445,7 +445,7 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
     const auto kFuncName = "quantized::linear_dynamic_fp16";
     const auto kOvrldName = "";
     const std::vector<c10::IValue> output_list =
-        callOp(kFuncName, kOvrldName, input, packed_weight);
+        call_unboxed_super_slow_temp_shim(kFuncName, kOvrldName, input, packed_weight);
     TORCH_INTERNAL_ASSERT(
         output_list.size() == 1,
         "The output vector should have exact one element");
@@ -469,9 +469,9 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
   CellParamsSerializationType __getstate__() const override {
     // Boxed dispatch nonsense
     // This will be cleaned up in the subsequent PR
-    auto unpacked_ih = callOp("quantized::linear_unpack_fp16", "", packed_ih);
+    auto unpacked_ih = call_unboxed_super_slow_temp_shim("quantized::linear_unpack_fp16", "", packed_ih);
     TORCH_INTERNAL_ASSERT(unpacked_ih.size() == 2);
-    auto unpacked_hh = callOp("quantized::linear_unpack_fp16", "", packed_hh);
+    auto unpacked_hh = call_unboxed_super_slow_temp_shim("quantized::linear_unpack_fp16", "", packed_hh);
     TORCH_INTERNAL_ASSERT(unpacked_hh.size() == 2);
 
     std::vector<at::Tensor> tensors_to_serialize{
@@ -494,13 +494,13 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
 
     // Boxed dispatch nonsense
     // This will be cleaned up in the subsequent PR
-    auto packed_ih = callOp(
+    auto packed_ih = call_unboxed_super_slow_temp_shim(
         "quantized::linear_prepack_fp16",
         "",
         /*w_ih=*/std::move(tensors[0]),
         /*b_ih=*/tensors[2]);
     TORCH_INTERNAL_ASSERT(packed_ih.size() == 1);
-    auto packed_hh = callOp(
+    auto packed_hh = call_unboxed_super_slow_temp_shim(
         "quantized::linear_prepack_fp16",
         "",
         /*w_hh=*/std::move(tensors[1]),

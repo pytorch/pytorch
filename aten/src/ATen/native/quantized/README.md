@@ -194,7 +194,7 @@ namespace at {
      Prefer calling c10::OperatorHandle::callUnboxed<Args...>(args...).
   */
   template <class... Args>
-  inline std::vector<torch::IValue> callOp_slow(
+  inline std::vector<torch::IValue> callOp(
       const torch::OperatorHandle& op,
       Args... args) {
     auto stack = makeStack(std::forward<Args>(args)...);
@@ -209,7 +209,7 @@ namespace at {
      Prefer calling c10::OperatorHandle::callUnboxed<Args...>(args...).
   */
   template <class... Args>
-  inline std::vector<torch::IValue> callOp_slow(
+  inline std::vector<torch::IValue> callOp(
       const char* func_name,
       const char* overload_name,
       Args... args) {

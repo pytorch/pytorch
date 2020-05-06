@@ -11,7 +11,7 @@ inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
 // and likely has to re-unbox them when calling the kernel.
 // Prefer calling c10::OperatorHandle::callUnboxed<Args...>(args...).
 template <class... Args>
-inline std::vector<c10::IValue> callOp_slow(
+inline std::vector<c10::IValue> call_unboxed_super_slow_temp_shim(
     const c10::OperatorHandle& op,
     Args... args) {
   auto stack = makeStack(std::forward<Args>(args)...);
@@ -23,7 +23,7 @@ inline std::vector<c10::IValue> callOp_slow(
 // and likely has to re-unbox them when calling the kernel.
 // Prefer calling c10::OperatorHandle::callUnboxed<Args...>(args...).
 template <class... Args>
-inline std::vector<c10::IValue> callOp_slow(
+inline std::vector<c10::IValue> call_unboxed_super_slow_temp_shim(
     const char* func_name,
     const char* overload_name,
     Args... args) {
