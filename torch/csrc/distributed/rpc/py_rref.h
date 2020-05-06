@@ -30,7 +30,7 @@ class PyRRef {
   // Future that is associated with the creation of this RRef on the remote end.
   // This is only used to get the future corresponding to the rref for profiling
   // use cases.
-  const std::shared_ptr<FutureMessage> getFuture() const;
+  const std::shared_ptr<FutureIValue> getFuture() const;
 
   // create a proxy on this RRef, which can be used to launch RPC on the owner
   // of this RRef to run functions on the object referenced by this RRef.
