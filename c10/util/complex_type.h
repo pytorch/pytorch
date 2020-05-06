@@ -290,7 +290,6 @@ constexpr complex<double> operator"" _id(unsigned long long imag) {
 
 } // namespace complex_literals
 
-} // namespace c10
 
 template<typename T>
 constexpr c10::complex<T> operator+(const c10::complex<T>& val) {
@@ -416,6 +415,8 @@ std::basic_istream<CharT, Traits>& operator>>(std::basic_istream<CharT, Traits>&
   return is;
 }
 
+} // namespace c10
+
 // std functions
 //
 // The implementation of these functions also follow the design of C++20
@@ -445,10 +446,18 @@ C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
   return max * std::sqrt(1 + rr * rr);
 }
 
+#ifdef __HIP_PLATFORM_HCC__
+#define ROCm_Bug(x)
+#else
+#define ROCm_Bug(x) x
+#endif
+
 template<typename T>
 C10_HOST_DEVICE T arg(const c10::complex<T>& z) {
-  return std::atan2(std::imag(z), std::real(z));
+  return ROCm_Bug(std)::atan2(std::imag(z), std::real(z));
 }
+
+#undef ROCm_Bug
 
 template<typename T>
 constexpr T norm(const c10::complex<T>& z) {

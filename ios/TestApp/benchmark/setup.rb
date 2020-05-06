@@ -63,7 +63,7 @@ targets.each do |target|
     target.resources_build_phase.add_file_reference(config_file_ref, true)
 end
 puts "Linking static libraries..."
-libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
+libs = ['libc10.a', 'libclog.a', 'libpthreadpool.a', 'libnnpack.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
 targets.each do |target|
     target.frameworks_build_phases.clear
     for lib in libs do

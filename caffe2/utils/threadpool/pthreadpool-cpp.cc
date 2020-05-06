@@ -40,8 +40,8 @@ void PThreadPool::run(
   pthreadpool_parallelize_1d(
       threadpool_.get(),
       // Note: pthreadpool_parallelize_1d() is a blocking function.  The function
-      // pointer to this lambda passed on to pthreadpool_parallelize_1d()cannot go
-      // out of scope until pthreadpool_parallelize_1d() returns.
+      // pointer to this lambda passed on to pthreadpool_parallelize_1d() cannot
+      // go out of scope until pthreadpool_parallelize_1d() returns.
       [](void* const context, const size_t item) {
         const union {
           void* const as_void_ptr;

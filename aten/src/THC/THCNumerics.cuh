@@ -208,9 +208,7 @@ struct THCNumerics<at::Half> {
 
   static inline __host__ __device__ at::Half exp(at::Half a) { return std::exp(a); }
   static inline __host__ __device__ at::Half sqrt(at::Half a) { return ::sqrt(a); }
-  static inline __host__ __device__ at::Half tan(at::Half a) { return ::tan(a); }
   static inline __host__ __device__ at::Half atan(at::Half a) { return ::atan(a); }
-  static inline __host__ __device__ at::Half erf(at::Half a) { return ::erf(a); }
   static inline __host__ __device__ at::Half erfc(at::Half a) { return ::erfc(a); }
   static inline __host__ __device__ at::Half add(at::Half a, at::Half b) { return a + b; }
   static inline __host__ __device__ at::Half div(at::Half a, at::Half b) { return a / b; }
@@ -258,9 +256,7 @@ struct THCNumerics<float> {
 
   static inline __host__ __device__  float exp  (float a) { return   expf(a); }
   static inline __host__ __device__  float sqrt (float a) { return  sqrtf(a); }
-  static inline __host__ __device__  float tan  (float a) { return   tanf(a); }
   static inline __host__ __device__  float atan (float a) { return  atanf(a); }
-  static inline __host__ __device__  float erf  (float a) { return   erff(a); }
   static inline __host__ __device__  float erfc (float a) { return  erfcf(a); }
   static inline __host__ __device__  float add  (float a, float b) { return a + b; }
   static inline __host__ __device__  float div  (float a, float b) { return a / b; }
@@ -287,9 +283,7 @@ struct THCNumerics<at::BFloat16> {
 
   static inline __host__ __device__  at::BFloat16 exp  (at::BFloat16 a) { return   expf(a); }
   static inline __host__ __device__  at::BFloat16 sqrt (at::BFloat16 a) { return  sqrtf(a); }
-  static inline __host__ __device__  at::BFloat16 tan  (at::BFloat16 a) { return   tanf(a); }
   static inline __host__ __device__  at::BFloat16 atan (at::BFloat16 a) { return  atanf(a); }
-  static inline __host__ __device__  at::BFloat16 erf  (at::BFloat16 a) { return   erff(a); }
   static inline __host__ __device__  at::BFloat16 erfc (at::BFloat16 a) { return  erfcf(a); }
   static inline __host__ __device__  at::BFloat16 add  (at::BFloat16 a, at::BFloat16 b) { return a + b; }
   static inline __host__ __device__  at::BFloat16 div  (at::BFloat16 a, at::BFloat16 b) { return a / b; }
@@ -337,9 +331,7 @@ struct THCNumerics<double> {
 
   static inline __host__ __device__  double exp  (double a) { return   ::exp(a); }
   static inline __host__ __device__  double sqrt (double a) { return  ::sqrt(a); }
-  static inline __host__ __device__  double tan  (double a) { return   ::tan(a); }
   static inline __host__ __device__  double atan (double a) { return  ::atan(a); }
-  static inline __host__ __device__  double erf  (double a) { return   ::erf(a); }
   static inline __host__ __device__  double erfc (double a) { return  ::erfc(a); }
   static inline __host__ __device__  double add  (double a, double b) { return a + b; }
   static inline __host__ __device__  double div  (double a, double b) { return a / b; }
