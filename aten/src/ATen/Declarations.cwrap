@@ -589,8 +589,7 @@
     - arguments:
       - arg: THTensor* result
         output: True
-      - arg: THTensor* self
-        broadcast: mat1,mat2 dims:mat1.dim0,mat2.dim1
+      - THTensor* self
       - THTensor* mat1
       - THTensor* mat2
       - real beta
