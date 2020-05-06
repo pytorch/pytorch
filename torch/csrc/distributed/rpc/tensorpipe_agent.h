@@ -115,10 +115,10 @@ class TensorPipeAgent : public RpcAgent {
   void trackNetworkData(
       uint64_t requestSize,
       uint64_t responseSize,
-      worker_id_t destRank);
+      worker_id_t destWorkerId);
 
   // Collects metrics from failed RPC calls
-  void trackNetworkError(uint64_t requestSize, worker_id_t destRank);
+  void trackNetworkError(uint64_t requestSize, worker_id_t destWorkerId);
 
   // State per client pipe to keep tracking of pending response message
   // and error sate. pendingResponseMessage_ should be protected by

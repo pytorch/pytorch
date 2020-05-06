@@ -452,20 +452,20 @@ NetworkSourceInfo TensorPipeAgent::getNetworkSourceInfo() {
 void TensorPipeAgent::trackNetworkData(
     uint64_t requestSize,
     uint64_t responseSize,
-    worker_id_t destRank) {
+    worker_id_t destWorkerId) {
   std::lock_guard<std::mutex> lock(networkDataMutex_);
-  networkData_[destRank].numCalls++;
-  networkData_[destRank].totalSentBytes += requestSize;
-  networkData_[destRank].totalRecvBytes += responseSize;
+  networkData_[destWorkerId].numCalls++;
+  networkData_[destWorkerId].totalSentBytes += requestSize;
+  networkData_[destWorkerId].totalRecvBytes += responseSize;
 }
 
 void TensorPipeAgent::trackNetworkError(
     uint64_t requestSize,
-    worker_id_t destRank) {
+    worker_id_t destWorkerId) {
   std::lock_guard<std::mutex> lock(networkDataMutex_);
-  networkData_[destRank].numCalls++;
-  networkData_[destRank].totalSentBytes += requestSize;
-  networkData_[destRank].totalErrors++;
+  networkData_[destWorkerId].numCalls++;
+  networkData_[destWorkerId].totalSentBytes += requestSize;
+  networkData_[destWorkerId].totalErrors++;
 }
 
 } // namespace rpc
