@@ -5266,6 +5266,13 @@ class TestAutogradFunctional(TestCase):
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
 
+    def test_min_max_median_backprops_to_single_value(self, device):
+        for f in [torch.min, torch.max, torch.median]:
+            x = torch.tensor([1., 0., 1., 0., 1., 0.], device=device, requires_grad=True)
+            y = f(x)
+            y.backward()
+            self.assertEqual(x.grad.sum(), 1.)
+
     # skip this test if running on rocm, because in cdist
     # we use __shfl_down_sync on CUDA for fast reduction
     # and it gives incorrect results on rocm platform
