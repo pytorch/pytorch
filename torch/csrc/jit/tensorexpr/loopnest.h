@@ -38,7 +38,7 @@ class TORCH_API LoopNest {
   void prepareForCodegen();
   void splitWithTail(For* f, int factor, For** outer, For** inner, For** tail);
   void splitWithMask(For* f, int factor, For** outer, For** inner);
-  void reorderAxis(Tensor* t, For* a, For* b);
+  void reorderAxis(For* a, For* b);
 
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
