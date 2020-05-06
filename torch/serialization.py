@@ -593,7 +593,7 @@ def _get_layout(name):
     return cache[name]
 
 
-_get_layout.cache = {}  # type: ignore[attr-defined]
+_get_layout.cache = {}
 copyreg.pickle(torch.layout, lambda obj: (_get_layout, (str(obj),)))
 
 
