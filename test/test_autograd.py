@@ -4274,7 +4274,7 @@ def add_test(
                                         i.grad.zero_()
                             for io, o in zip(inplace_output_variable, output_variable):
                                 if dtype.is_complex:
-                                    grad = randn_like(io).to(torch.complex64)
+                                    grad = randn_like(io).to(torch.cdouble)
                                 else:
                                     grad = randn_like(io).double()
                                 io.backward(grad)
