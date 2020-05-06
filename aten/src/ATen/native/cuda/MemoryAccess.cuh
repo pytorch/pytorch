@@ -77,13 +77,12 @@ struct unroll_load_helper {
 
 template <int current>
 struct multi_outputs_store_helper {
-  template<int ntensors, int num_outputs, typename out_t>
+  template<int ntensors, int num_outputs, typename ...Args>
   C10_HOST_DEVICE static void apply(
       at::detail::Array<char*, ntensors> data,
       at::detail::Array<uint32_t, num_outputs> offsets,
-      out_t ret) {
-    static_assert(is_tuple<out_t>::value);
-    using T = typename thrust::tuple_element<current, out_t>::type;
+      thrust::tuple<Args...> ret) {
+    using T = typename thrust::tuple_element<current, thrust::tuple<Args...>>::type;
     T *to = reinterpret_cast<T *>(data[current]) + offsets[current];
     *to = thrust::get<current>(ret);
   }

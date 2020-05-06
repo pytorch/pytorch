@@ -55,6 +55,7 @@ static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& it
 
 template <int num_outputs = 1>
 static OffsetCalculator<num_outputs> make_output_offset_calculator(const TensorIterator& iter) {
+  TORCH_INTERNAL_ASSERT(num_outputs == iter.noutputs());
   std::array<const int64_t*, num_outputs> strides;
   int64_t element_sizes[num_outputs];
   for (int i = 0; i < num_outputs; i++) {
@@ -160,9 +161,8 @@ template <typename func_t>
 void gpu_kernel_multiple_outputs_impl(TensorIterator& iter, const func_t& f) {
   using traits = function_traits<func_t>;
   using output_t = typename traits::result_type;
-  TORCH_INTERNAL_ASSERT(memory::detail::is_tuple<output_t>::value);
+  static_assert(is_tuple<output_t>::value, "f's return type must be `thrust::tuple`");
   constexpr int num_outputs = thrust::tuple_size<output_t>::value;
-  TORCH_INTERNAL_ASSERT(num_outputs > 1);
   constexpr int num_inputs = traits::arity;
   constexpr int ntensors = num_outputs + num_inputs;
 
