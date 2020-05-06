@@ -11096,7 +11096,6 @@ class TestNNDeviceType(NNTestCase):
             self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, device)
             self._test_conv_cudnn_nhwc_nchw(nn.ConvTranspose2d, n, c, h, w, k, filter_size, device)
 
-
     # torch.half is erroring out on Windows with CUDA 10.1 + cuDNN 7.6.4
     # returning CUDNN_STATUS_BAD_PARAM
     # Disabling that specific test for now [see issue # 33918]
