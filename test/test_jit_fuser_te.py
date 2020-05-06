@@ -338,7 +338,7 @@ class TestFuser(JitTestCase):
         funcs = (func2, funcInf, funcNegInf, funcOptMin, funcOptMax)
         for f, inputs in product(funcs, [[a, b], [a, nan]]):
             inp1, inp2 = inputs
-            s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING)
+            s = self.checkScript(f, (inp1, inp2))
             self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})
             c = s(inp1, inp2)
             with enable_profiling_mode_for_profiling_tests():
@@ -986,7 +986,7 @@ class TestFuser(JitTestCase):
         s1 = torch.randn(5, 1, requires_grad=True, device='cuda')
         s2 = torch.randn(5, 5, requires_grad=True, device='cuda')
 
-        module = self.checkScript(my_broadcasted_cell, (s1, s1, s1), profiling=ProfilingMode.PROFILING)
+        module = self.checkScript(my_broadcasted_cell, (s1, s1, s1))
         forward_graph = module.graph_for(s1, s1, s1)
         self.assertAllFused(forward_graph, except_for=("aten::size", "prim::BroadcastSizes",
                                                        "aten::_size_if_not_equal"))
@@ -998,7 +998,7 @@ class TestFuser(JitTestCase):
             args = s2 if i < 1 else s1, s2 if i < 2 else s1, s2
             args = [a.detach_().requires_grad_() for a in args]
             # recompile, so we don't trigger bailouts
-            module = self.checkScript(my_broadcasted_cell, args, profiling=ProfilingMode.PROFILING)
+            module = self.checkScript(my_broadcasted_cell, args)
             res = module(s2 if i < 1 else s1, s2 if i < 2 else s1, s2)
             warmup_backward(res.sum(), args)
             grads = torch.autograd.grad(res.sum(), args)

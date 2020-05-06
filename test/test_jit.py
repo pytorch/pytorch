@@ -15258,7 +15258,7 @@ a")
             x.add_(torch.ones(2, 3))
             return x_view
 
-        self.checkScript(fn, (), profiling=ProfilingMode.SIMPLE)
+        self.checkScript(fn, ())
 
     def test_cpp_function_tensor_str(self):
         x = torch.randn(2, 2)
