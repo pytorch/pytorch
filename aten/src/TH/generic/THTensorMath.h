@@ -17,7 +17,6 @@ TH_API void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTe
 
 TH_API ptrdiff_t THTensor_(numel)(THTensor *t);
 
-TH_API void THTensor_(addmv)(THTensor *r_, THTensor *t, THTensor *mat,  THTensor *vec, scalar_t beta, scalar_t alpha);
 TH_API void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *mat1, THTensor *mat2, scalar_t beta, scalar_t alpha);
 TH_API void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, scalar_t beta, scalar_t alpha);
 
@@ -31,8 +30,6 @@ TH_API accreal THTensor_(sumall)(THTensor *t);
 
 void THTensor_(preserveReduceDimSemantics)(THTensor *r_, int in_dims, int reduce_dimension, int keepdim);
 
-TH_API void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim);
-TH_API void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim);
 TH_API scalar_t THTensor_(minall)(THTensor *t);
 TH_API scalar_t THTensor_(maxall)(THTensor *t);
 
@@ -52,7 +49,6 @@ TH_API void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTen
 TH_API void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim);
 TH_API accreal THTensor_(trace)(THTensor *t);
 
-TH_API void THTensor_(diag)(THTensor *r_, THTensor *t, int k);
 
 TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder);
 
@@ -68,5 +64,8 @@ TH_API accreal THTensor_(std_all)(THTensor *self, bool unbiased);
 #endif
 #endif
 #endif
-#endif
-#endif
+#else
+TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
+TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder);
+#endif /* !defined(TH_REAL_IS_HALF) */
+#endif /* TH_GENERIC_FILE*/

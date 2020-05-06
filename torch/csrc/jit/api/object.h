@@ -48,9 +48,7 @@ struct TORCH_API Object {
           "'");
       _ivalue()->setSlot(*slot, std::move(v));
     } else {
-      TORCH_CHECK(
-          false,
-          "Module has no attribute '", name, "'");
+      TORCH_CHECK(false, "Module has no attribute '", name, "'");
     }
   }
 
@@ -80,8 +78,8 @@ struct TORCH_API Object {
   }
 
   bool hasattr(const std::string& name) const {
-    return _ivalue()->type()->hasAttribute(name)
-      || _ivalue()->type()->hasConstant(name);
+    return _ivalue()->type()->hasAttribute(name) ||
+        _ivalue()->type()->hasConstant(name);
   }
 
   // each object owns its methods. The reference returned here
@@ -126,6 +124,12 @@ struct TORCH_API Object {
     return _ivalue()->slots().size();
   }
 
+  // Copies all the attributes of the object recursively without creating new
+  // `ClassType`, including deepcopy of Tensors
+  Object deepcopy() const;
+
+  Object deepcopy(c10::IValue::HashAliasedIValueMap& memo) const;
+
  private:
   // mutable be we lazily initialize in module_object.
   mutable ObjectPtr _ivalue_;
@@ -135,6 +139,6 @@ namespace script {
 // We once had a `script::` namespace that was deleted. This is for backcompat
 // of the public API; new code should not use this type alias.
 using Object = ::torch::jit::Object;
-}
+} // namespace script
 } // namespace jit
 } // namespace torch

@@ -50,10 +50,10 @@ struct TORCH_API LBFGSParamState : public OptimizerCloneableParamState<LBFGSPara
   ~LBFGSParamState() = default;
 };
 
-class TORCH_API LBFGS : public LossClosureOptimizer {
+class TORCH_API LBFGS : public Optimizer {
  public:
    explicit LBFGS(std::vector<OptimizerParamGroup> param_groups,
-       LBFGSOptions defaults) : LossClosureOptimizer(std::move(param_groups), std::make_unique<LBFGSOptions>(defaults)) {
+       LBFGSOptions defaults = {}) : Optimizer(std::move(param_groups), std::make_unique<LBFGSOptions>(defaults)) {
      TORCH_CHECK(param_groups_.size() == 1, "LBFGS doesn't support per-parameter options (parameter groups)");
      if (defaults.max_eval() == c10::nullopt) {
        auto max_eval_val = (defaults.max_iter() * 5) / 4;
@@ -64,13 +64,9 @@ class TORCH_API LBFGS : public LossClosureOptimizer {
    }
    explicit LBFGS(
        std::vector<Tensor> params,
-       LBFGSOptions defaults) : LBFGS({std::move(OptimizerParamGroup(params))}, defaults) {}
+       LBFGSOptions defaults = {}) : LBFGS({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   Tensor step(LossClosure closure) override;
-  void add_parameters(const std::vector<Tensor>& parameters) override;
-  const std::vector<Tensor>& parameters() const noexcept override;
-  std::vector<Tensor>& parameters() noexcept override;
-  size_t size() const noexcept override;
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
 

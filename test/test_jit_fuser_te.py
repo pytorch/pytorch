@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode
+    enable_profiling_mode, skipIfRocm
 
 from textwrap import dedent
 from itertools import product, permutations
@@ -18,6 +18,11 @@ from itertools import product, permutations
 from test_jit import JitTestCase, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
     backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell, _inline_everything
+
+from te_utils import CudaCodeGenExecuted
+
+torch._C._jit_set_profiling_executor(True)
+torch._C._jit_set_profiling_mode(True)
 
 FUSION_GROUP = 'tensorexpr::Group'
 
@@ -51,23 +56,24 @@ class TestFuser(JitTestCase):
     def setUp(self):
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
+
         torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)
-        torch._C._jit_register_tensorexpr_fuser()
-        torch._C._jit_set_texpr_fuser_enabled(True)
 
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
-        if GRAPH_EXECUTOR != ProfilingMode.PROFILING:
-            torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-            torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+
+        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
+        torch._C._jit_set_texpr_fuser_enabled(True)
 
     def tearDown(self):
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
-        torch._C._jit_set_texpr_fuser_enabled(False)
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
         torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+
+        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
+        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
+
+        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
 
     def assertAllFused(self, graph, except_for=()):
 
@@ -795,7 +801,9 @@ class TestFuser(JitTestCase):
         hy, cy = module(*inputs)
         warmup_backward((hy + cy).sum())
 
+    @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_rand_cuda(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
@@ -878,6 +886,7 @@ class TestFuser(JitTestCase):
         self.assertEqual(out[0, :] + torch.zeros(4, 4, device='cuda'), out)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_rand_diamond(self):
         def fn_test_diamond(x, y):
             r = torch.rand_like(y)

@@ -19,6 +19,8 @@
 #include <android/log.h>
 #endif
 
+using namespace torch::autograd::profiler;
+
 namespace pytorch_jni {
 
 namespace {
@@ -85,21 +87,37 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
 #endif
 
 #ifdef TRACE_ENABLED
-  static void onFunctionEnter(
-      const torch::autograd::profiler::RecordFunction& fn) {
+  static bool onFunctionEnter(
+      const RecordFunction& fn) {
     Trace::beginSection(fn.name().str());
+    return true;
   }
 
-  static void onFunctionExit(const torch::autograd::profiler::RecordFunction&) {
+  static void onFunctionExit(const RecordFunction&) {
     Trace::endSection();
   }
 #endif
 
   static void preModuleLoadSetupOnce() {
+    auto qengines = at::globalContext().supportedQEngines();
+    if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
+        qengines.end()) {
+      at::globalContext().setQEngine(at::QEngine::QNNPACK);
+    }
+
 #ifdef __ANDROID__
     torch::jit::setPrintHandler([](const std::string& s) {
       __android_log_print(ANDROID_LOG_DEBUG, "pytorch-print", "%s", s.c_str());
     });
+#endif
+
+#ifdef TRACE_ENABLED
+    pushCallback(
+        &onFunctionEnter,
+        &onFunctionExit,
+        /* need_inputs */ false,
+        /* sampling_prob */ 1.0,
+        /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE});
 #endif
   }
 
@@ -109,14 +127,6 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
       return 0;
     }();
     ((void)once);
-
-#ifdef TRACE_ENABLED
-    torch::autograd::profiler::pushCallback(
-        &onFunctionEnter,
-        &onFunctionExit,
-        /* need_inputs */ false,
-        /* sampled */ false);
-#endif
   }
 
   PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {

@@ -2,6 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/native/TypeProperties.h>
 #include <ATen/Dispatch.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/Optional.h>
@@ -257,7 +258,8 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 } // namespace
 
 Tensor cat_cuda(TensorList inputs, int64_t dimension) {
-  Tensor out = at::empty({0}, inputs.front().options());
+  ScalarType high_type = result_type(inputs);
+  Tensor out = at::empty({0}, inputs.front().options().dtype(high_type));
   cat_out_cuda(out, inputs, dimension);
   return out;
 }
@@ -297,6 +299,11 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   const Tensor *notSkippedTensor = NULL;  // non-owning reference
   int nDims = 0;
 
+  // Check for type promotion
+  TORCH_CHECK(canCast(result_type(inputs), out.scalar_type()), "input types ",
+                      " can't be cast to the desired output type ",
+                      out.scalar_type());
+
   // Inputs cannot alias the output tensor
   for (int i = 0; i < inputs.size(); i++) {
     auto lap = at::get_overlap_status(out, inputs[i]);
@@ -324,6 +331,12 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
 
   TORCH_CHECK(inputs.size() > 0, "invalid number of inputs ", inputs.size());
   TORCH_CHECK(dimension >= 0, "invalid dimension ", dimension);
+
+  for (const Tensor& t: inputs) {
+    TORCH_CHECK(t.device() == notSkippedTensor->device(),
+                "All input tensors must be on the same device. Received ",
+                t.device(), " and ", notSkippedTensor->device());
+  }
 
   c10::MemoryFormat memory_format = compute_output_memory_format(inputs);
 
@@ -355,30 +368,30 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   // 4. The number of dimensions is <= 4
   // 5. All input tensors are contiguous (output tensor may be non-contig)
   // 6. All input tensors can use 32-bit indexing
-  // 7. All input tensors are on the same device
 
   const bool all32BitIndexable = std::all_of(inputs.begin(), inputs.end(),
     [] (const Tensor& t) {
       return at::cuda::detail::canUse32BitIndexMath(t);
     });
-  Device firstDevice = notSkippedTensor->device();
-  const bool allSameDevice = std::all_of(inputs.begin(), inputs.end(),
-    [firstDevice](const Tensor& t) {
-      return t.device() == firstDevice;
-    });
   const bool allContiguous = std::all_of(inputs.begin(), inputs.end(),
     [=](const Tensor& t) {
       return !t.defined() || t.is_contiguous(memory_format);
     });
+  ScalarType firstType = inputs[0].scalar_type();
+  const bool allSameType = std::all_of(inputs.begin(), inputs.end(),
+    [firstType](const Tensor& t) {
+      return t.scalar_type() == firstType;
+    });
+
   if (inputs.size() > 1 &&
       !hasSkippedInput &&
       out.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
       at::cuda::detail::canUse32BitIndexMath(out) &&
       allContiguous &&
       all32BitIndexable &&
-      allSameDevice) {
+      allSameType) {
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(
         at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
         out.scalar_type(), "cat_cuda", [&]() {
       parallel_cat<scalar_t>(out, inputs, dimension, nDims, memory_format);

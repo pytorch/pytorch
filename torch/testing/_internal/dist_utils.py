@@ -27,12 +27,19 @@ TEST_CONFIG = TestConfig()
 INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
-def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
+def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
+              faulty_messages=None, messages_to_delay=None):
     """
     We use this decorator for setting up and tearing down state since
     MultiProcessTestCase runs each `test*` method in a separate process and
     each process just runs the `test*` method without actually calling
     'setUp' and 'tearDown' methods of unittest.
+
+    Note: pass the string representation of MessageTypes that should be used
+    with the faulty agent's send function. By default, all retriable messages
+    ("RREF_FORK_REQUEST", "RREF_CHILD_ACCEPT", "RREF_USER_DELETE",
+    "CLEANUP_AUTOGRAD_CONTEXT_REQ") will use the faulty send (this default is
+    set from faulty_rpc_agent_test_fixture.py).
     """
 
     # If we use dist_init without arguments (ex: @dist_init), old_test_method is
@@ -46,6 +53,8 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
             dist_init,
             setup_rpc=setup_rpc,
             clean_shutdown=clean_shutdown,
+            faulty_messages=faulty_messages,
+            messages_to_delay=messages_to_delay,
         )
 
     @wraps(old_test_method)
@@ -56,6 +65,13 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
         api._ignore_rref_leak = False
 
         self.worker_id = self.rank
+
+        if (
+            rpc.backend_registry.backend_registered("FAULTY_PROCESS_GROUP")
+            and self.rpc_backend
+            == rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP
+        ):
+            _build_faulty_backend_options(self, faulty_messages, messages_to_delay)
 
         if setup_rpc:
             rpc.init_rpc(
@@ -85,6 +101,31 @@ TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry
     num_send_recv_threads=8,
 )
 
+def _build_faulty_backend_options(faulty_agent_fixture, faulty_messages, messages_to_delay):
+    '''
+    Constructs the backend options object for the faulty process group agent
+    based on the faulty_messages input to dist_init.
+    '''
+    messages_to_fail = (
+        faulty_messages
+        if faulty_messages is not None
+        else faulty_agent_fixture.retryable_message_types
+    )
+    messages_to_delay = (
+        messages_to_delay
+        if messages_to_delay is not None
+        else faulty_agent_fixture.default_messages_to_delay
+    )
+    TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
+        test_object.rpc_backend,
+        init_method=test_object.init_method,
+        num_send_recv_threads=8,
+        num_fail_sends=faulty_agent_fixture.num_fail_sends,
+        messages_to_fail=messages_to_fail,
+        messages_to_delay=messages_to_delay,
+    )
+
+
 def noop():
     pass
 
@@ -102,7 +143,7 @@ def wait_until_node_failure(rank, expected_error_regex=".*"):
             rpc.rpc_sync("worker{}".format(rank), noop, args=())
             time.sleep(0.1)
         except Exception as e:
-            if re.match(pattern=expected_error_regex, string=str(e)):
+            if re.search(pattern=expected_error_regex, string=str(e)):
                 return str(e)
 
 # Shutdown sequence is not well defined, so we may see any of the following errors
@@ -113,7 +154,13 @@ def get_shutdown_error_regex(rpc_backend):
     is used to match against possible errors to ensure failures were raised properly.
     """
     if rpc_backend == "PROCESS_GROUP":
-        error_regexes = ["Encountered exception in ProcessGroupAgent::enqueueSend"]
+        error_regexes = [
+            "Encountered exception in ProcessGroupAgent::enqueueSend",
+            "Encountered exception in ProcessGroupAgent::listenLoop()",
+            "Exception in thread pool task",
+            "Connection reset by peer",
+            "Connection closed by peer"
+        ]
     else:
         error_regexes = [
             "Request aborted during client shutdown",
@@ -126,6 +173,18 @@ def get_shutdown_error_regex(rpc_backend):
     # Strip out the last | or else it will match anything
     error_regex = error_regex[:-1]
     return error_regex
+
+def get_timeout_error_regex(rpc_backend_name):
+    """
+    Given an RPC backend name, returns a partial string indicating the error we
+    should receive when an RPC has timed out. Useful for use with
+    assertRaisesRegex() to ensure we have the right errors during timeout.
+    """
+    if rpc_backend_name in ["PROCESS_GROUP", "FAULTY_PROCESS_GROUP"]:
+        return "RPC ran for more than"
+    else:
+        return "(Timed out)|(Task expired)"
+
 
 def wait_until_pending_users_flushed():
     '''
@@ -158,3 +217,16 @@ def initialize_pg(init_method, rank, world_size):
 
 def worker_name(rank):
     return "worker{}".format(rank)
+
+def get_function_event(function_events, partial_event_name):
+    """
+    Returns the first event that matches partial_event_name in the provided
+    function_events. These function_events should be the output of
+    torch.autograd.profiler.function_events().
+
+    Args:
+    function_events: function_events returned by the profiler.
+    event_name (str): partial key that the event was profiled with.
+    """
+    event = [event for event in function_events if partial_event_name in event.name][0]
+    return event

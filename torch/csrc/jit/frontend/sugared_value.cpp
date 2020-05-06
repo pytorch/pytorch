@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
-#include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 
 namespace torch {
 namespace jit {
@@ -62,6 +62,20 @@ struct EnumClassHash {
     return static_cast<std::size_t>(t);
   }
 };
+
+bool SimpleValue::hasAttr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  auto class_type = value_->type()->cast<ClassType>();
+  if (!class_type) {
+    throw ErrorReport(loc) << "hasattr's first argument must be an object, got "
+                           << value_->type()->python_str() << " instead";
+  }
+
+  return class_type->getMethod(field) || class_type->hasAttribute(field) ||
+      class_type->hasConstant(field);
+}
 
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
 // callable value that will resolve to foo(x, y, z) when called.

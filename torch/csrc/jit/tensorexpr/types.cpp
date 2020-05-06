@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/types.h>
+
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 
@@ -10,6 +11,7 @@ namespace tensorexpr {
 
 bool is_integral(const ScalarType& type) {
   switch (type) {
+    case ScalarType::Bool:
     case ScalarType::Byte:
     case ScalarType::Char:
     case ScalarType::Short:

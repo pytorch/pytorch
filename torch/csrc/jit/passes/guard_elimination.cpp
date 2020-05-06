@@ -1,7 +1,7 @@
+#include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <memory>
@@ -22,6 +22,8 @@ struct GuardElimination {
     GRAPH_DUMP("After moveGuardsToDefs", graph_);
     coalesceGuards(graph_->block());
     GRAPH_DUMP("After coalesceGuards", graph_);
+    removeDominatedGuards(graph_->block());
+    GRAPH_DUMP("After removeDominatedGuards", graph_);
     eliminateRedundantGuards(graph_->block());
     GRAPH_DUMP("After eliminateRedundantGuards", graph_);
   }
@@ -109,6 +111,70 @@ struct GuardElimination {
         inputs_to_guards.clear();
         for (Block* ib : n->blocks()) {
           coalesceGuards(ib);
+        }
+      }
+    }
+  }
+
+  bool isDominatedBy(Node* node, Node* dominator) {
+    while (node) {
+      if (node->owningBlock() == dominator->owningBlock()) {
+        return dominator->isBefore(node);
+      }
+      node = node->owningBlock()->owningNode();
+    }
+    return false;
+  }
+
+  void removeDominatedGuards(Block* b) {
+    // If a Node guards a value which isn't mutated, then that node
+    // can replace all other guards of the value which it dominates
+    for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+      auto n = *it;
+      if (n->kind() == prim::Guard) {
+        Value* input = n->input();
+        if (aliasDb_->hasWriters(input)) {
+          continue;
+        }
+        Value* guard_output = n->output();
+
+        // find all uses of the input that the guard node dominates
+        std::vector<Use> uses = input->uses();
+        while (uses.size() > 0) {
+          auto use = uses.at(uses.size() - 1);
+          uses.pop_back();
+
+          if (!isDominatedBy(use.user, n)) {
+            continue;
+          }
+
+          // the dominated guard type may be different from the dominator
+          // if it is only executed for a subtype, or if it is executed
+          // in a different global context for grad enabled
+          // check that the types are equal before continuing
+
+          auto dominator_type = guard_output->type();
+          auto dominated_type = use.user->output()->type();
+
+          if (*dominator_type == *dominated_type) {
+            use.user->replaceInput(use.offset, guard_output);
+          }
+        }
+
+        // remove redundant dominated guards
+        std::vector<Use> users = n->output()->uses();
+        for (auto use : users) {
+          auto user = use.user;
+          if (user->kind() == prim::Guard) {
+            GRAPH_UPDATE(
+                "Removing dominated guard ", user, " and replacing with ", n);
+            user->output()->replaceAllUsesWith(guard_output);
+            user->destroy();
+          }
+        }
+      } else {
+        for (Block* ib : n->blocks()) {
+          removeDominatedGuards(ib);
         }
       }
     }
@@ -222,6 +288,7 @@ struct GuardElimination {
     const static auto no_exceptions = std::unordered_set<size_t>{};
     switch (n->kind()) {
       case aten::add:
+      case aten::add_:
       case aten::sub:
       case aten::mul:
       case aten::div:
@@ -279,6 +346,7 @@ struct GuardElimination {
       case aten::addcmul:
       case aten::where:
       case aten::_cast_Float:
+      case aten::_cast_Long:
       case aten::_sigmoid_backward:
       case aten::_tanh_backward:
       case aten::__and__:
@@ -286,9 +354,24 @@ struct GuardElimination {
       case aten::__xor__:
       case aten::__lshift__:
       case aten::__rshift__:
+      case aten::bitwise_not:
+      case aten::bitwise_and:
+      case aten::bitwise_or:
+      case aten::bitwise_xor:
         return checkInputs(n, no_exceptions, true);
+      case aten::softmax:
+        return checkInputs(n, std::unordered_set<size_t>{1}, true);
+      case aten::multinomial:
+        return checkInputs(n, std::unordered_set<size_t>{2, 3}, false);
+      case aten::flatten:
+      case aten::argmax:
+      case aten::squeeze:
       case aten::avg_pool2d:
         return checkInputs(n, no_exceptions, false);
+      case aten::conv1d:
+      case aten::conv2d:
+      case aten::conv3d:
+        return checkInputs(n, std::unordered_set<size_t>{2, 6}, false);
       case aten::slice:
         return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
             // check that the dimension argument is constant

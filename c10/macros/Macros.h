@@ -18,10 +18,18 @@
 // file.
 
 #ifndef C10_USING_CUSTOM_GENERATED_MACROS
-#include "c10/macros/cmake_macros.h"
+#include <c10/macros/cmake_macros.h>
 #endif // C10_USING_CUSTOM_GENERATED_MACROS
 
-#include "c10/macros/Export.h"
+#include <c10/macros/Export.h>
+
+#if defined(__clang__)
+  #define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
+  #define __ubsan_ignore_undefined__ __attribute__((no_sanitize("undefined")))
+#else
+  #define __ubsan_ignore_float_divide_by_zero__
+  #define __ubsan_ignore_undefined__
+#endif
 
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
@@ -33,6 +41,9 @@
 #define C10_CONCATENATE(s1, s2) C10_CONCATENATE_IMPL(s1, s2)
 
 #define C10_MACRO_EXPAND(args) args
+
+#define C10_STRINGIZE_IMPL(x) #x
+#define C10_STRINGIZE(x) C10_STRINGIZE_IMPL(x)
 
 /**
  * C10_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
@@ -252,9 +263,7 @@ __host__ __device__
     (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
 #define C10_IOS 1
 #define C10_MOBILE 1
-#elif (defined(__APPLE__) && TARGET_OS_MAC)
-#define C10_IOS 1
-#endif // ANDROID / IOS / MACOS
+#endif // ANDROID / IOS
 
 // Portably determine if a type T is trivially copyable or not.
 #if defined(__GNUG__) && __GNUC__ < 5
