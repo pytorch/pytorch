@@ -75,11 +75,6 @@ struct unroll_load_helper {
   }
 };
 
-// check the return type is `thrust::tuple`, not `std::tuple`.
-template <typename T> struct is_tuple: std::false_type {};
-
-template <typename ...T> struct is_tuple<thrust::tuple<T...>>: std::true_type {};
-
 template <int current>
 struct multi_outputs_store_helper {
   template<int ntensors, int num_outputs, typename out_t>
