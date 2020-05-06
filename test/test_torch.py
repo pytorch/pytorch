@@ -8667,6 +8667,15 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, '{} with out= kwarg'.format(fn_name))
 
+    @largeCUDATensorTest('10GB')
+    def test_reduction_split(self, device):
+        # Test reduction when there is a 32bit-indexing split
+        # https://github.com/pytorch/pytorch/issues/37583
+        input_ = torch.randn(5, 14400, 14400, device=device)
+        result = input_.sum(dim=0)
+        expect = input_[0] + input_[1] + input_[2] + input_[3] + input_[4]
+        self.assertEqual(result, expect)
+
     @slowTest
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
