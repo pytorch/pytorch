@@ -1308,6 +1308,12 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
       scalars_.emplace(input->unique(), v);
       break;
     }
+    case TypeKind::BoolType: {
+      VarHandle v("v" + input->debugName(), kBool);
+      kernelArgs_.emplace_back(v);
+      scalars_.emplace(input->unique(), v);
+      break;
+    }
     case TypeKind::IntType: {
       VarHandle v("v" + input->debugName(), kInt);
       kernelArgs_.emplace_back(v);
