@@ -8778,9 +8778,8 @@ for test_params in module_tests + new_module_tests:
         test_params['input_fn'] = gen_long_tensor_input(test_params['input_size'])
         test_params['reference_fn'] = reference_fn
         test_params['check_forward_only'] = True
-        if fullname and "Conv" in fullname:
-            # Currently we don't support conv2d/conv3d for LongTensor in CUDA
-            test_params['test_cuda'] = False
+        # Currently we don't support conv2d/conv3d for LongTensor in CUDA
+        test_params['test_cuda'] = False
         test = NewModuleTest(**test_params)
 
         add_test(test, decorator)
