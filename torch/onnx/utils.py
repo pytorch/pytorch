@@ -729,16 +729,14 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 # help the target of an ONNX export export more efficiently.  However,
 # ONNX doesn't currently formalize inplace. Fortunately, it's sound to drop
 # inplace annotations, but we are losing information this way.
+
+
 def _find_symbolic_fn(ns, domain, op_name, opset_version, operator_export_type, msg=''):
     import torch.onnx.symbolic_registry as sym_registry
     if not sym_registry.is_registered_op(op_name, domain, opset_version):
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLTHROUGH:
             # Use the original node directly
             return None
-        else:
-            warnings.warn("ONNX export failed on operator {}::{} because "
-                          "torch.onnx.symbolic_opset{}.{} does not exist. {}"
-                          .format(ns, op_name, opset_version, op_name, msg))
     return sym_registry.get_registered_op(op_name, domain, opset_version)
 
 
