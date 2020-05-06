@@ -7,7 +7,7 @@ import string
 from textwrap import dedent
 from torch._six import PY2
 from torch._C._jit_tree_views import (
-    ClassDef, Ident, Stmt, Decl, Def, Ident, Var,
+    ClassDef, Ident, Stmt, Decl, Def, Var,
     EmptyTypeAnnotation, Param, ExprStmt, Assign,
     Delete, Return, Raise, Assert, AugAssign, While,
     For, If, Pass, Break, Continue, Apply, Dots, Select,
