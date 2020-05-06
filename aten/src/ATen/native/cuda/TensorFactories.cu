@@ -52,14 +52,12 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<
   auto* allocator = at::cuda::getCUDADeviceAllocator();
   int64_t nelements = prod_intlist(size);
   auto dtype = options.dtype();
-  int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
-      dtype,
-      size_bytes,
-      allocator->allocate(size_bytes),
-      allocator,
-      /*resizeable=*/true);
+    dtype,
+    nelements,
+    allocator->allocate(nelements * dtype.itemsize()),
+    allocator,
+    /*resizeable=*/true);
 
   auto tensor = detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDA);
   // Default TensorImpl has size [0]

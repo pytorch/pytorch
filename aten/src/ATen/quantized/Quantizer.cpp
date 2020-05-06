@@ -81,12 +81,10 @@ inline Tensor new_qtensor(
   TORCH_CHECK(
       isQIntType(typeMetaToScalarType(dtype)),
       "ScalarType is not supported in new_qtensor.");
-  int64_t size_bytes = nelements * dtype.itemsize();
   auto storage = c10::make_intrusive<StorageImpl>(
-      StorageImpl::use_byte_size_t(),
       dtype,
-      size_bytes,
-      allocator->allocate(size_bytes),
+      nelements,
+      allocator->allocate(nelements * dtype.itemsize()),
       allocator,
       /*resizable=*/true);
   auto tensor = detail::make_tensor<QTensorImpl>(

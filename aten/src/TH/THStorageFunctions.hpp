@@ -32,6 +32,7 @@
 //
 
 TH_CPP_API THStorage* THStorage_new(caffe2::TypeMeta data_type);
+TH_API ptrdiff_t THStorage_size(const THStorage *self);
 
 TH_API void THStorage_retain(THStorage *storage);
-TH_API void THStorage_resizeBytes(THStorage* storage, ptrdiff_t size_bytes);
+TH_API void THStorage_resize(THStorage *storage, ptrdiff_t size);

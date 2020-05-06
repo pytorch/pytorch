@@ -298,20 +298,17 @@ std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
   return strides;
 }
 
-size_t computeStorageNbytes(
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    size_t itemsize_bytes) {
+int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
-  size_t size = 1;
+  int64_t size = 1;
   for(size_t i = 0; i < sizes.size(); i++) {
     if(sizes[i] == 0) {
       return 0;
     }
     size += strides[i]*(sizes[i]-1);
   }
-  return size * itemsize_bytes;
+  return size;
 }
 
 // On a high level,
