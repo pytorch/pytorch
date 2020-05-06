@@ -34,16 +34,12 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&top_desc_));
     MIOPEN_ENFORCE(miopenCreatePoolingDescriptor(&pooling_desc_));
 
-    if ((operator_def.type().substr(0, 9) == "MaxPool") ||
-        (operator_def.type().substr(0, 17) == "MaxPoolGradient") ||
-        (operator_def.type().substr(0, 9) == "MaxPool3D") ||
-        (operator_def.type().substr(0, 17) == "MaxPool3DGradient"))  {
+    if ((operator_def.type().substr(0, 7) == "MaxPool") ||
+        (operator_def.type().substr(0, 15) == "MaxPoolGradient")) {
       mode_ = miopenPoolingMax;
     } else if (
-        (operator_def.type().substr(0, 13) == "AveragePool") ||
-        (operator_def.type().substr(0, 21) == "AveragePoolGradient") ||
-        (operator_def.type().substr(0, 13) == "AveragePool3D") ||
-        (operator_def.type().substr(0, 21) == "AveragePool3DGradient")) {
+        (operator_def.type().substr(0, 11) == "AveragePool") ||
+        (operator_def.type().substr(0, 19) == "AveragePoolGradient")) {
       mode_ = miopenPoolingAverage;
     } else {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
@@ -163,11 +159,9 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&top_desc_));
     MIOPEN_ENFORCE(miopenCreatePoolingDescriptor(&pooling_desc_));
 
-    if ((operator_def.type().substr(0, 7) == "MaxPool") ||
-       (operator_def.type().substr(0, 7) == "MaxPool3D")) {
+    if (operator_def.type().substr(0, 7) == "MaxPool") {
       mode_ = miopenPoolingMax;
-    } else if ((operator_def.type().substr(0, 11) == "AveragePool") ||
-              (operator_def.type().substr(0, 11) == "AveragePool3D")) {
+    } else if ((operator_def.type().substr(0, 11) == "AveragePool") {
       mode_ = miopenPoolingAverage;
     } else {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
