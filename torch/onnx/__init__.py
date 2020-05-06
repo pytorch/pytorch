@@ -94,16 +94,18 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
               %3 : Float = onnx::Mul(%2, %0) # registered op
               return (%3)
             OperatorExportTypes.RAW: export raw ir. no op is converted to ONNX.
-            OperatorExportTypes.ONNX_ATEN_FALLTHROUGH: if op is not registered,
+            OperatorExportTypes.ONNX_ATEN_FALLTHROUGH: if any op is not registered,
             pass through op as is.
             e.g. graph:
             graph(%x.1 : Float):
               %1 : Tensor = prim::Uninitialized()
               %2 : int[] = aten::size(%x.1)
+              return (%2)
             is exported as:
             graph(%x.2 : Float):
               %1 : Tensor = prim::Uninitialized()
               %2 : int[] = onnx::Shape(%x.2)
+              return (%2)
 
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
