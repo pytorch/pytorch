@@ -202,7 +202,36 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
     @skipIfRocm
     def test_unary_ops(self):
-        operations = [torch.neg, torch.abs, torch.log, torch.log10, torch.log1p, torch.log2, torch.lgamma, torch.exp, torch.expm1, torch.erf, torch.erfc, torch.cos, torch.acos, torch.cosh, torch.sin, torch.asin, torch.tan, torch.atan, torch.sqrt, torch.rsqrt, torch.ceil, torch.floor, torch.round, torch.trunc, torch.frac, torch.reciprocal, torch.relu, torch.sigmoid, torch.tanh, torch.nn.functional.gelu]
+        operations = [torch.neg,
+                      torch.abs,
+                      torch.log,
+                      torch.log10,
+                      torch.log1p,
+                      torch.log2,
+                      torch.lgamma,
+                      torch.exp,
+                      torch.expm1,
+                      torch.erf,
+                      torch.erfc,
+                      torch.cos,
+                      torch.acos,
+                      torch.cosh,
+                      torch.sin,
+                      torch.asin,
+                      torch.tan,
+                      torch.atan,
+                      torch.sqrt,
+                      torch.rsqrt,
+                      torch.ceil,
+                      torch.floor,
+                      torch.round,
+                      torch.trunc,
+                      torch.frac,
+                      torch.reciprocal,
+                      torch.relu,
+                      torch.sigmoid,
+                      torch.tanh,
+                      torch.nn.functional.gelu]
         for op in operations:
             self._unary_test_helper(op)
 
@@ -210,7 +239,20 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
     @skipIfRocm
     def test_binary_ops(self):
-        operations = [torch.div, torch.mul, torch.atan2, torch.max, torch.min, torch.pow, torch.remainder, torch.fmod, torch.eq, torch.ne, torch.ge, torch.gt, torch.le, torch.lt]
+        operations = [torch.div,
+                      torch.mul,
+                      torch.atan2,
+                      torch.max,
+                      torch.min,
+                      torch.pow,
+                      torch.remainder,
+                      torch.fmod,
+                      torch.eq,
+                      torch.ne,
+                      torch.ge,
+                      torch.gt,
+                      torch.le,
+                      torch.lt]
         for op in operations:
             self._binary_test_helper(op)
 
