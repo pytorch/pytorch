@@ -199,8 +199,8 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeToScalarType)
   _(c10::qint32, QInt32)
 
 #define AT_FORALL_COMPLEX_TYPES(_)             \
-  _(c10::complex<float>, ComplexFloat)         \
-  _(c10::complex<double>, ComplexDouble)
+  _(std::complex<float>, ComplexFloat)         \
+  _(std::complex<double>, ComplexDouble)
 
 static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 #define DEFINE_CASE(ctype, name) \
