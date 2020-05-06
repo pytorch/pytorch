@@ -5526,8 +5526,8 @@ class TestNN(NNTestCase):
                     self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data, atol=5e-5)
 
         for module in (nn.RNN, nn.LSTM, nn.GRU):
-            for bias, bidirectional, batch_first, contig, variable_len, lens_as_tensor \
-                    in product((True, False), repeat=6):
+            for bias, bidirectional, type_2, batch_first, contig, variable_len, lens_as_tensor \
+                    in product((True, False), repeat=7):
 
                 num_directions = 2 if bidirectional else 1
                 if batch_first:
@@ -5559,6 +5559,7 @@ class TestNN(NNTestCase):
                              bias=bias,
                              dropout=dropout,
                              bidirectional=bidirectional,
+                             cat_layer_fwd_bwd_states=type_2,
                              batch_first=batch_first).to(dtype)
 
                 outputs_cpu = forward_backward(
@@ -5570,6 +5571,7 @@ class TestNN(NNTestCase):
                                  bias=bias,
                                  dropout=dropout,
                                  bidirectional=bidirectional,
+                                 cat_layer_fwd_bwd_states=type_2,
                                  batch_first=batch_first).to(dtype)
 
                 outputs_gpu = forward_backward(
