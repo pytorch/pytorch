@@ -3174,11 +3174,32 @@ struct to_ir {
           return dim + 1;
         }
       }
-      TypePtr type_hint = OptionalType::ofTensor();
-      if (subscript_expr.kind() == TK_NONE) {
-        type_hint = NoneType::get();
+      Value* index;
+      if (subscript_expr.kind() == TK_LIST_LITERAL) {
+        // Accept list literal as subscript but convert it to a Tensor
+        // since it's equivalent to indexing with Tensor.
+        // Advanced indexing using list:
+        // @torch.jit.script
+        // def f(x):
+        //     return x[[0, 1, 5]]  # or
+        //     return x[[0, 1], [0, 1]]  # or
+        //     return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
+        // Statements above are equivalent to advanced indexing using Tensor:
+        // @torch.jit.script
+        // def f(x):
+        //     return x[torch.tensor([0, 1, 5])]  # or
+        //     return x[torch.tensor([0, 1]), torch.tensor([0, 1])]  # or
+        //     return x[torch.tensor([[0, 1], [0, 1]]), torch.tensor([[0, 1],
+        //     [0, 1]])]
+        auto ll = emitExpr(subscript_expr);
+        index = graph->insert(aten::tensor, {ll});
+      } else {
+        TypePtr type_hint = OptionalType::ofTensor();
+        if (subscript_expr.kind() == TK_NONE) {
+          type_hint = NoneType::get();
+        }
+        index = emitExpr(subscript_expr, type_hint);
       }
-      auto index = emitExpr(subscript_expr, type_hint);
       exprs[expr_idx] = index;
       if (index->type()->isSubtypeOf(NoneType::get())) {
         if (is_reverse) {
