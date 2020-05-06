@@ -783,7 +783,7 @@ void runNondiffOptimization(
   // if `strict_fuser_check` is set to `true`, run TE by default
   // otherwise fallback to the legacy executor and legacy fuser
   if (strict_fuser_check) {
-    fuseTensorExprs(graph);
+    FuseTensorExprs(graph);
   }
   else {
     FuseGraph(graph, strict_fuser_check);
