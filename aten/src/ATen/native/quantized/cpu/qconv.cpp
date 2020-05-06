@@ -552,7 +552,7 @@ class QConvInt8 final {
     auto input_scale = act_nhwc.q_scale();
 
     const bool is_per_channel =
-      pack_data.orig_weight.qscheme() == at::kPerTensorAffine;
+      pack_data.orig_weight.qscheme() == at::kPerChannelAffine;
 
     // Re-quantizing the bias based on input scale and weight scale.
     if (!pack_data.input_scale.has_value() ||
