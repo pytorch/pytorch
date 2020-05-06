@@ -8765,6 +8765,10 @@ for test_params in module_tests + new_module_tests:
             return input_func
 
         def reference_fn(i, p, m):
+            # For bad reasons this would create LongTensors that requires gradients
+            # Remove requires_grad to avoid this
+            for p in m.parameters():
+                p.requires_grad_(False)
             m._apply(lambda t: t.long())
             input = i.long()
             out = m.forward(input)
@@ -8774,8 +8778,9 @@ for test_params in module_tests + new_module_tests:
         test_params['input_fn'] = gen_long_tensor_input(test_params['input_size'])
         test_params['reference_fn'] = reference_fn
         test_params['check_forward_only'] = True
-        # Currently we don't support conv2d/conv3d for LongTensor in CUDA
-        test_params['test_cuda'] = False
+        if fullname and "Conv" in fullname:
+            # Currently we don't support conv2d/conv3d for LongTensor in CUDA
+            test_params['test_cuda'] = False
         test = NewModuleTest(**test_params)
 
         add_test(test, decorator)
