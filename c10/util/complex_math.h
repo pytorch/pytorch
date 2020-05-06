@@ -2,7 +2,7 @@ namespace std {
 
 // Exponential functions
 
-#if CUDA_VERSION < 10000
+#if defined(CUDA_VERSION) && (CUDA_VERSION < 10000)
 #define CUDA92_BUG(x) thrust::complex<T>(x.real(), x.imag())
 #else
 #define CUDA92_BUG(x) x
