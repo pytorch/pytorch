@@ -17,28 +17,23 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size)
 #endif
 
   scalar_t *data;
-  int64_t size_bytes = self->nbytes();
-  int64_t numel = size_bytes / sizeof(scalar_t);
+  int64_t size = THWStorage_(size)(LIBRARY_STATE self);
 #ifndef THC_GENERIC_FILE
   data = THWStorage_(data)(LIBRARY_STATE self);
 #else
-  std::unique_ptr<char[]> cpu_data(new char[size_bytes]);
+  std::unique_ptr<char[]> cpu_data(new char[size * sizeof(scalar_t)]);
   data = (scalar_t*)cpu_data.get();
-  THCudaCheck(cudaMemcpy(
-      data,
-      THWStorage_(data)(LIBRARY_STATE self),
-      size_bytes,
-      cudaMemcpyDeviceToHost));
+  THCudaCheck(cudaMemcpy(data, THWStorage_(data)(LIBRARY_STATE self), size * sizeof(scalar_t), cudaMemcpyDeviceToHost));
 #endif
   if (save_size) {
     if (torch::utils::THP_nativeByteOrder() ==
         torch::utils::THPByteOrder::THP_LITTLE_ENDIAN)
-      doWrite(fd, &numel, sizeof(int64_t));
+      doWrite(fd, &size, sizeof(int64_t));
     else {
       int64_t nsize; // convert big endian cpu to little endian storage
       torch::utils::THP_encodeInt64Buffer(
           (uint8_t*)&nsize,
-          (const int64_t*)&numel,
+          (const int64_t*)&size,
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
           1);
       doWrite(fd, &nsize, sizeof(int64_t));
@@ -48,12 +43,12 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size)
   if (sizeof(scalar_t) == 1 ||
       torch::utils::THP_nativeByteOrder() ==
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN) {
-    doWrite(fd, data, size_bytes);
+    doWrite(fd, data, sizeof(scalar_t) * size);
   } else {
-    int64_t buffer_size = std::min(numel, (int64_t)5000);
+    int64_t buffer_size = std::min(size, (int64_t)5000);
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(scalar_t)]);
-    for (int64_t i = 0; i < numel; i += buffer_size) {
-      size_t to_convert = std::min(numel - i, buffer_size);
+    for (int64_t i = 0; i < size; i += buffer_size) {
+      size_t to_convert = std::min(size - i, buffer_size);
       if (sizeof(scalar_t) == 2) {
         torch::utils::THP_encodeInt16Buffer(
             (uint8_t*)le_buffer.get(),
@@ -105,12 +100,9 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
   if (_storage == nullptr) {
     storage = THWStorage_(newWithSize)(LIBRARY_STATE size);
   } else {
-    int64_t _storage_numel = _storage->nbytes() / sizeof(scalar_t);
-    THPUtils_assert(
-        _storage_numel == size,
+    THPUtils_assert(THWStorage_(size)(LIBRARY_STATE _storage) == size,
         "storage has wrong size: expected %ld got %ld",
-        size,
-        _storage_numel);
+        size, THWStorage_(size)(LIBRARY_STATE _storage));
     storage = _storage;
   }
 
@@ -125,7 +117,7 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
   if (sizeof(scalar_t) == 1 ||
       torch::utils::THP_nativeByteOrder() ==
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN) {
-    doRead(file, data, storage->nbytes());
+    doRead(file, data, sizeof(scalar_t) * THWStorage_(size)(LIBRARY_STATE storage));
   } else {
     int64_t buffer_size = std::min(size, (int64_t)5000);
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(scalar_t)]);

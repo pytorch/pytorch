@@ -158,7 +158,12 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
     for (const auto& list : result) {
       total_elem_num += list.size();
     }
-    std::cerr << "Debug: in state consolidate, event_lists_map_.size(): " << event_lists_map_.size() << ", total_elem_num = " << total_elem_num << std::endl;
+    size_t elem_left = 0;
+    for (auto it = event_lists_map_.begin(); it != event_lists_map_.end(); ++it) {
+      auto & list = it->second;
+      elem_left += list.size();
+    }
+    std::cerr << "Debug(" << RecordFunction::currentThreadId() << "): in state consolidate, &event_lists_map_: " << ((void*)&event_lists_map_) << " , event_lists_map_.size(): " << event_lists_map_.size() << ", total_elem_num[result] = " << total_elem_num << ", elem_left = " << elem_left << std::endl;
     return result;
   }
 
@@ -172,7 +177,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
       cuda_stubs->nvtxMarkA(name.c_str());
     } else {
       auto& list = getEventList();
-      std::cerr << "Debug: in state mark, &list = " << ((void*)&list) << std::endl;
+      std::cerr << "Debug(" << RecordFunction::currentThreadId() << "): in state mark, &list = " << ((void*)&list) << std::endl;
       list.record(
           EventKind::Mark,
           at::StringView(std::move(name)),
@@ -222,7 +227,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
       }
     } else {
       auto& list = getEventList();
-      std::cerr << "Debug: in state pushRange, &list = " << ((void*)&list) << std::endl;
+      std::cerr << "Debug(" << RecordFunction::currentThreadId() << "): in state pushRange, &list = " << ((void*)&list) << std::endl;
       list.record(
           EventKind::PushRange,
           name,
@@ -240,7 +245,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
       cuda_stubs->nvtxRangePop();
     } else {
       auto& list = getEventList(thread_id);
-      std::cerr << "Debug: in state popRange, thread_id = " << thread_id << " , &list = " << ((void*)&list) << std::endl;
+      std::cerr << "Debug(" << RecordFunction::currentThreadId() << "): in state popRange, thread_id = " << thread_id << " , &list = " << ((void*)&list) << std::endl;
       list.record(
           EventKind::PopRange,
           at::StringView(""),
@@ -259,7 +264,8 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
 
  private:
   RangeEventList& getEventList(int64_t thread_id = -1) {
-    std::cerr << "                                                  (1) in getEventList: thread_id = " << thread_id << std::endl;
+    std::cerr << "                                                  (0) in getEventList: this = " << ((void*)this) << " , &event_lists_map_ = " << ((void*)&event_lists_map_) << std::endl;
+    std::cerr << "                                                  (1) in getEventList: thread_id = " << thread_id << ", current: " << RecordFunction::currentThreadId() << std::endl;
     bool is_current_thread = (thread_id < 0) ||
         thread_id == at::RecordFunction::currentThreadId();
     std::cerr << "                                                  (2) in getEventList: is_current_thread = " << is_current_thread << std::endl;

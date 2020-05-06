@@ -17,14 +17,12 @@ inline at::Tensor dummyTensor(c10::DispatchKeySet ks) {
   auto* allocator = c10::GetCPUAllocator();
   int64_t nelements = 1;
   auto dtype = caffe2::TypeMeta::Make<float>();
-  int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<c10::StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
-      dtype,
-      size_bytes,
-      allocator->allocate(size_bytes),
-      allocator,
-      /*resizable=*/true);
+    dtype,
+    nelements,
+    allocator->allocate(nelements * dtype.itemsize()),
+    allocator,
+    /*resizable=*/true);
   return at::detail::make_tensor<c10::TensorImpl>(storage_impl, ks);
 }
 

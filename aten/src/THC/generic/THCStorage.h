@@ -20,6 +20,7 @@
 #define THCudaComplexDoubleStorage          THCStorage
 
 THC_API scalar_t* THCStorage_(data)(THCState *state, const THCStorage*);
+THC_API ptrdiff_t THCStorage_(size)(THCState *state, const THCStorage*);
 THC_API int THCStorage_(elementSize)(THCState *state);
 
 /* slow access -- checks everything */
@@ -43,8 +44,7 @@ THC_API void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const 
 THC_API void THCStorage_(retain)(THCState *state, THCStorage *storage);
 
 THC_API void THCStorage_(free)(THCState *state, THCStorage *storage);
-THC_API void THCStorage_(
-    resizeBytes)(THCState* state, THCStorage* storage, ptrdiff_t size_bytes);
+THC_API void THCStorage_(resize)(THCState *state, THCStorage *storage, ptrdiff_t size);
 THC_API void THCStorage_(fill)(THCState *state, THCStorage *storage, scalar_t value);
 
 THC_API int THCStorage_(getDevice)(THCState* state, const THCStorage* storage);
