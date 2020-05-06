@@ -495,7 +495,7 @@ class IfThenElse : public ExprNode<IfThenElse> {
 
   IfThenElse(const Expr* c, const Expr* t, const Expr* f)
       : ExprNodeBase(t->dtype()), condition_(c), true_(t), false_(f) {
-    if (c->dtype().scalar_type() != ScalarType::Int) {
+    if (!c->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (c->dtype().lanes() != 1) {
