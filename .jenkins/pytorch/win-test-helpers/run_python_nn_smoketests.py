@@ -7,6 +7,10 @@ import os
 
 COMMON_TESTS = [
     (
+        "Checking that torch is available",
+        "import torch",
+    ),
+    (
         "Checking that caffe2.python is available",
         "from caffe2.python import core",
     ),
@@ -43,4 +47,12 @@ if __name__ == "__main__":
         command_args = ["python", "-c", python_commands]
         command_string = " ".join(command_args)
         print("Command:", command_string)
-        subprocess.check_call(command_args)
+        try:
+            subprocess.check_call(command_args)
+        except:
+            command_args = ["C:\\Program Files (x86)\\Windows Kits\\10\\Debuggers\\x64\\cdb.exe",
+                            "-o", "-c", "~*g; q"] + command_args
+            command_string = " ".join(command_args)
+            print("Reruning with traceback enabled")
+            print("Command:", command_string)
+            subprocess.check_call(command_args)
