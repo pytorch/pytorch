@@ -5292,7 +5292,7 @@ class TestNN(NNTestCase):
         correct_encoder_input_shape = (seq_len, bsz, d_model)
         correct_decoder_input_shape = (tgt_len, bsz, d_model)
 
-        def update_shape(shape, dim, new_dim_size)
+        def update_shape(shape, dim, new_dim_size):
             new_shape = list(shape)
             new_shape[dim] = new_dim_size
             return tuple(new_shape)
