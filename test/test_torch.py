@@ -8876,6 +8876,15 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, '{} with out= kwarg'.format(fn_name))
 
+    @largeCUDATensorTest('10GB')
+    def test_reduction_split(self, device):
+        # Test reduction when there is a 32bit-indexing split
+        # https://github.com/pytorch/pytorch/issues/37583
+        input_ = torch.randn(5, 14400, 14400, device=device)
+        result = input_.sum(dim=0)
+        expect = input_[0] + input_[1] + input_[2] + input_[3] + input_[4]
+        self.assertEqual(result, expect)
+
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
     def test_reduction_vectorized_corner(self, device, dtype):
@@ -12290,7 +12299,7 @@ class TestTorchDeviceType(TestCase):
             ("cosh", doubles, True, True, 'cuda'),
             ("digamma", doubles, True, True, 'cpu'),
             ("erf", doubles, True, True, 'cpu'),
-            ("erf", doubles, False, True, 'cuda'),
+            ("erf", doubles, True, True, 'cuda'),
             ("erfc", doubles, True, True, 'cpu'),
             ("erfc", doubles, False, True, 'cuda'),
             ("erfinv", doubles, True, True, 'cpu'),
@@ -17342,18 +17351,18 @@ tensor_op_tests = [
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
     ('addcdiv', '', _small_2d,
         lambda t, d: [_small_2d(t, d),
-                      _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
-        _types, _cpu_types, True,
+                      _small_2d(t, d, has_zeros=False)], 1, 1, 1e-3,
+        _types2, _cpu_types, True,
         [_wrap_maybe_warns("Integer division .+")]),
     ('addcdiv', 'scalar', _small_2d,
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
         _types, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addcdiv_? is deprecated|Integer division .+")]),
-    ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 2e-5, 1e-3),
+    ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 1e-1, 1e-3, _types2),
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
-        1e-5, 1e-5, _types, _cpu_types, True,
+        1e-1, 1e-5, _types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addcmul_? is deprecated")]),
     ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types2),
@@ -17481,7 +17490,7 @@ tensor_op_tests = [
     ('std', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('var', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('var', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
-    ('var', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
+    ('var', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5, _float_types2, _cpu_types, False),
     ('ndimension', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('nelement', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('numel', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -17575,11 +17584,11 @@ tensor_op_tests = [
     ('__lshift__', '',
         lambda t, d: torch.pow(2, torch.arange(1, 5).to(dtype=_convert_t(t, d), device=d)),
         lambda t, d: [2],
-        1e-3, 1e-5, 1e-3, _signed_types_no_half, _cpu_types, False),
+        1e-3, 1e-5, 1e-3, _signed_types, _cpu_types, False),
     ('__rshift__', '',
         lambda t, d: torch.pow(2, torch.arange(3, 7).to(dtype=_convert_t(t, d), device=d)),
         lambda t, d: [2],
-        1e-3, 1e-5, 1e-3, _signed_types_no_half, _cpu_types, False),
+        1e-3, 1e-5, 1e-3, _signed_types, _cpu_types, False),
     # lapack tests
     ('qr', 'square', _small_2d, lambda t, d: [],
         1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
@@ -17593,7 +17602,7 @@ tensor_op_tests = [
         1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
-    ('abs', '', _small_3d, lambda t, d: [], 1e-5, 0, 1e-5, _types, [torch.bfloat16]),
+    ('abs', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types2, [torch.bfloat16]),
     ('sign', '', _small_3d, lambda t, d: []),
     ('log', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('log10', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
@@ -17601,8 +17610,8 @@ tensor_op_tests = [
     ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
     ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('sin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
+    ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
+    ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('acos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('asin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('atan', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
@@ -17616,7 +17625,7 @@ tensor_op_tests = [
     ('expm1', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types),
     ('expm1', 'small', lambda t, d: _small_3d(t, d).clamp(-1, 1),
         lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('reciprocal', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types, [torch.bfloat16]),
+    ('reciprocal', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
     ('floor', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('neg', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
