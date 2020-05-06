@@ -212,7 +212,6 @@ RecordFunctionCallbacks _getTLSCallbacks() {
 }
 
 void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks) {
-  clearThreadLocalCallbacks();
   // keep the original handles
   sorted_tls_callbacks_ = callbacks;
   std::sort(
