@@ -6074,8 +6074,12 @@ a")
         # Misc sequence advanced indexing
         inp = consec((4, 8, 5))
         to_check = [
+            # [[0, 1, 3]]
+            ['[i]', {'i': [0, 1, 3]}],
             # [[0, 2], [1, 3]]
             ['[i, j]', {'i': [0, 2], 'j': [1, 3]}],
+            # [[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
+            ['[i, j]', {'i': [[0, 1], [0, 1]], 'j': [[0, 1], [0, 1]]}],
             # [[0, 2], [1, 3], [1, 1]]
             ['[i, j, k]', {'i': [0, 2], 'j': [1, 3], 'k': [1, 1]}],
             # [[0, 2], 1, [1, 1]]
@@ -6119,6 +6123,22 @@ a")
         for expr, argdict in to_check:
             tensordict = {k: torch.tensor(v) for (k, v) in argdict.items()}
             check_indexing(expr, inp, **tensordict)
+
+    def test_adv_indexing_list(self):
+        # indexing with list is equivalent to indexing with tensor
+        def func1(x):
+            return x[[0, 1, 5]]
+
+        def func2(x):
+            return x[[0, 1], [0, 1]]
+
+        def func3(x):
+            return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
+
+        input = torch.rand((6, 2))
+        self.checkScript(func1, (input,))
+        self.checkScript(func2, (input,))
+        self.checkScript(func3, (input,))
 
     def test_keyword(self):
         @torch.jit.script
