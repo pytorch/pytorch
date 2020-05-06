@@ -264,6 +264,16 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
 
  private:
   RangeEventList& getEventList(int64_t thread_id = -1) {
+    {
+      std::lock_guard<std::mutex> guard(state_mutex_);
+      size_t elem_left = 0;
+      for (auto it = event_lists_map_.begin(); it != event_lists_map_.end(); ++it) {
+        auto & list = it->second;
+        elem_left += list->size();
+      }
+      std::cerr << "                                                  (-1) in getEventList: this = " << ((void*)this) << " , &event_lists_map_ = " << ((void*)&event_lists_map_) << " , event_lists_map_.size() = " << event_lists_map_.size() << " , elem_left = " << elem_left << std::endl;
+    }
+
     std::cerr << "                                                  (0) in getEventList: this = " << ((void*)this) << " , &event_lists_map_ = " << ((void*)&event_lists_map_) << std::endl;
     std::cerr << "                                                  (1) in getEventList: thread_id = " << thread_id << ", current: " << at::RecordFunction::currentThreadId() << std::endl;
     bool is_current_thread = (thread_id < 0) ||
