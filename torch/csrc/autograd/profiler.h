@@ -195,6 +195,11 @@ struct RangeEventList {
     return result;
   }
 
+  size_t size() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return events_.size();
+  }
+
  private:
   // This mutex is used to serialize access when different threads are writing
   // to the same instance of RangeEventList.
