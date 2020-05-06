@@ -7,7 +7,6 @@
 #include <torch/csrc/utils/memory.h>
 
 #include <functional>
-#include <random>
 
 namespace torch { namespace autograd {
 
@@ -83,7 +82,7 @@ struct TORCH_API StringView {
 };
 
 // Soft limit on the number of callbacks to use;
-constexpr std::size_t kSoftLimitCallbacks = 8;
+constexpr std::size_t kSoftLimitCallbacks = 4;
 
 typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> CallbackHandles;
 
@@ -312,12 +311,7 @@ class TORCH_API RecordFunctionCallback {
   double sampling_prob_ = 1.0;
   std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_ = {};
 
-  static double sample_zero_one() {
-    static thread_local auto gen =
-        torch::make_unique<std::mt19937>(std::random_device()());
-    std::uniform_real_distribution<double> dist(0.0, 1.0);
-    return dist(*gen);
-  }
+  static double sample_zero_one();
 };
 
 // Using macro to minimize inputs copies,

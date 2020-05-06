@@ -38,8 +38,7 @@ class CallbackManager {
   }
 
   void removeCallback(CallbackHandle handle) {
-    bool found = false;
-    auto find_and_remove = [handle, &found](RecordFunctionCallbacks& cbs) {
+    auto find_and_remove = [handle](RecordFunctionCallbacks& cbs) {
       auto it = std::find_if(
         cbs.begin(), cbs.end(),
         [handle](
@@ -51,12 +50,13 @@ class CallbackManager {
       if (it != cbs.end()) {
         // keeps it sorted
         cbs.erase(it);
-        found = true;
+        return true;
       }
+      return false;
     };
-    find_and_remove(sorted_tls_callbacks_);
+    auto found = find_and_remove(sorted_tls_callbacks_);
     if (!found) {
-      find_and_remove(sorted_global_callbacks_);
+      found = find_and_remove(sorted_global_callbacks_);
     }
     if (!found) {
       LOG(WARNING) << "Requested callback is not found";
@@ -202,6 +202,14 @@ inline CallbackManager& manager() {
 }
 
 } // namespace
+
+/* static */
+double RecordFunctionCallback::sample_zero_one() {
+  static thread_local auto gen =
+      torch::make_unique<std::mt19937>(std::random_device()());
+  std::uniform_real_distribution<double> dist(0.0, 1.0);
+  return dist(*gen);
+}
 
 bool hasCallbacks() {
   auto& m = manager();
