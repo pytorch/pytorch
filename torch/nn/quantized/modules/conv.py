@@ -44,8 +44,12 @@ class _ConvNd(nn.Module):
         self.groups = groups
         self.padding_mode = padding_mode
         # Initialize as NCHW. set_weight will internally transpose to NHWC.
+        if self.transposed:
+            weight_shape = [in_channels, out_channels // self.groups]
+        else:
+            weight_shape = [out_channels, in_channels // self.groups]
         qweight = torch._empty_affine_quantized(
-            [out_channels, in_channels // self.groups] + list(kernel_size),
+            weight_shape + list(kernel_size),
             scale=1, zero_point=0, dtype=torch.qint8)
         bias_float = (
             torch.zeros(out_channels, dtype=torch.float) if bias else None)
@@ -512,7 +516,7 @@ class Conv3d(_ConvNd):
 # Note: The MRO should make sure that the `super` in the `_ConvNd` will be
 #       called, while the one in the `nn._ConvTransposeNd` it won't.
 
-class _ConvTransposeNd(_ConvNd, nn.modules.conv._ConvTransposeNd):
+class _ConvTransposeNd(_ConvNd):
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
                  groups, bias, padding_mode):
@@ -576,7 +580,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         dilation = _pair(dilation)
         output_padding = _pair(output_padding)
 
-        super(ConvTranspose2d, self).__init__(
+        super(ConvTranspose1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode)
 
@@ -585,9 +589,10 @@ class ConvTranspose1d(_ConvTransposeNd):
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        if w.qscheme != torch.per_tensor_affine:
+        if w.qscheme() != torch.per_tensor_affine:
             raise NotImplementedError(
                 "Only per-tensor quantization is supported.")
+        print("THe weight shape before packing is ", w.shape);
         self._packed_params = torch.ops.quantized.conv_transpose1d_prepack(
             w, b, self.stride, self.padding, self.output_padding, self.dilation,
             self.groups)
@@ -634,7 +639,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                     mod.stride, mod.padding, mod.output_padding, mod.groups,
-                    mod.bias, mod.dilation, mod.padding_mode)
+                    mod.bias is not None, mod.dilation, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
@@ -703,7 +708,7 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        if w.qscheme != torch.per_tensor_affine:
+        if w.qscheme() != torch.per_tensor_affine:
             raise NotImplementedError(
                 "Only per-tensor quantization is supported.")
         self._packed_params = torch.ops.quantized.conv_transpose2d_prepack(
@@ -752,7 +757,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                     mod.stride, mod.padding, mod.output_padding, mod.groups,
-                    mod.bias, mod.dilation, mod.padding_mode)
+                    mod.bias is not None, mod.dilation, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
