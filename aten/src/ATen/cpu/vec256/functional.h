@@ -1,4 +1,8 @@
 #pragma once
+
+// DO NOT DEFINE STATIC DATA IN THIS HEADER!
+// See Note [Do not compile initializers with AVX]
+
 #include <ATen/cpu/vec256/vec256.h>
 
 namespace at { namespace vec256 {
