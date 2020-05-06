@@ -673,8 +673,7 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - arg: THTensor* self
-      broadcast: batch1,batch2 dims:batch1.dim1,batch2.dim2
+    - THTensor* self
     - THTensor* batch1
     - THTensor* batch2
     - real beta

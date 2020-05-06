@@ -20,6 +20,18 @@ Tensor& baddbmm__cuda(Tensor& self, const Tensor& batch1, const Tensor& batch2, 
   return baddbmm_out_cuda(self, self, batch1, batch2, beta, alpha);
 }
 
+Tensor addbmm_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm");
+  return legacy::cuda::_th_addbmm(b_self, batch1, batch2, beta, alpha);
+}
+
+Tensor& addbmm_cuda_out(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out");
+  return legacy::cuda::_th_addbmm_out(result, self, batch1, batch2, beta, alpha);
+}
+
 Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
   return legacy::cuda::_th_bmm(self, mat2);
 }
