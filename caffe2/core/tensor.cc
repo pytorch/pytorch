@@ -97,7 +97,7 @@ GetTensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
   CHECK(tc);
   CHECK(tc->unsafeGetTensorImpl());
   CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImpl());
-  *capacity = tc->storage().nbytes();
+  *capacity = tc->storage().capacity();
   ExtractDeviceOption(device, tc->GetDevice());
   return tc->sizes().vec();
 }

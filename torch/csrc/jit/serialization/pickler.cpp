@@ -289,7 +289,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // location
   pushString(tensor.device().str());
   // size
-  pushInt(tensor.storage().nbytes() / tensor.element_size());
+  pushInt(tensor.storage().size());
 
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::BINPERSID);
@@ -593,24 +593,23 @@ void Pickler::pushTuple(const IValue& ivalue) {
 WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {
   WriteableTensorData result;
   result.tensor_ = tensor;
-  result.size_ = tensor.storage().nbytes();
+  result.size_ = tensor.element_size() * tensor.storage().size();
   // TODO HIP support
   if (tensor.storage().device_type() == at::DeviceType::CUDA) {
     // NB: This new tensor is created to support cuda tensors.
     // Storages can be mutated when converting tensors from cuda to cpu,
     // and we need a cpu tensor to copy data from.
-    result.tensor_ =
-        at::empty({0}, tensor.options())
-            .set_(
-                tensor.storage(),
-                /* storage_offset = */ 0,
-                /* size = */
-                {static_cast<int64_t>(
-                    tensor.storage().nbytes() / tensor.element_size())},
-                /* stride = */ {1})
-            .cpu();
+    result.tensor_ = at::empty({0}, tensor.options())
+                         .set_(
+                             tensor.storage(),
+                             /* storage_offset = */ 0,
+                             /* size = */
+                             {static_cast<int64_t>(tensor.storage().size())},
+                             /* stride = */ {1})
+                         .cpu();
     TORCH_CHECK(
-        result.tensor_.storage().nbytes() == result.size_,
+        result.tensor_.element_size() * result.tensor_.storage().size() ==
+            result.size_,
         "Storage tensor size did not match record size");
   }
   return result;
