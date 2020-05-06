@@ -146,6 +146,8 @@ std::pair<at::Tensor, at::Tensor> make_zero_points_and_scales_tensor(
               weight_contig.q_per_channel_zero_points()[i].item<int32_t>() +
               128);
     }
+  } else {
+    TORCH_INTERNAL_ASSERT("Unsupported quantization scheme.");
   }
   at:: Tensor weight_scales =
     at::empty(
@@ -161,6 +163,8 @@ std::pair<at::Tensor, at::Tensor> make_zero_points_and_scales_tensor(
       weight_scales_data[i] =
         weight_contig.q_per_channel_scales()[i].item<float>();
     }
+  } else {
+    TORCH_INTERNAL_ASSERT("Unsupported quantization scheme.");
   }
   return {weight_zp, weight_scales};
 }
