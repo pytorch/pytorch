@@ -146,8 +146,8 @@ class NaiveShapeTypePropagator {
  protected:
   // TODO: we should comply to codegen type promotion.
   TensorTypePtr binary_broadcast_type(
-      TensorTypePtr const &op0,
-      TensorTypePtr const &op1,
+      TensorTypePtr const& op0,
+      TensorTypePtr const& op1,
       c10::optional<at::ScalarType> scalar_type = c10::nullopt) {
     TORCH_CHECK(
         op0 != nullptr || op1 != nullptr, "no scalar operation supported yet.");

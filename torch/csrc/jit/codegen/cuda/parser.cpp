@@ -19,8 +19,8 @@ typedef Node JitOp;
 namespace fuser {
 namespace cuda {
 
-constexpr auto NUM_UNARY_OPS             = 31;
-constexpr auto NUM_BINARY_OPS            = 24;
+constexpr auto NUM_UNARY_OPS = 31;
+constexpr auto NUM_BINARY_OPS = 24;
 constexpr auto NUM_BINARY_OPS_WITH_ALPHA = 4;
 
 namespace {
