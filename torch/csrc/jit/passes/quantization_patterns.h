@@ -439,23 +439,6 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
          %r = quantized::layer_norm(%a_quant, %normalized_shape, %weight, %bias, %eps, %output_scale, %output_zero_point)
          return (%r) )";
 
-  // ============= General Ops that doesn't require observation =============
-  // aten::avg_pool2d
-  std::string avg_pool2d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::avg_pool2d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
-          %r_scale : float = aten::q_scale(%a_quant)
-          %r_zero_point : int = aten::q_zero_point(%a_quant)
-          %r_dtype : int = prim::dtype(%a_quant)
-          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-          return (%r_quant) )";
-
-  std::string quantized_avg_pool2d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
-          %r = aten::avg_pool2d(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
-          return (%r) )";
-
   return {
       {"quantized::conv2d", conv2d, quantized_conv2d},
       {"quantized::conv2d_relu", conv2d_relu, quantized_conv2d_relu},
@@ -517,7 +500,6 @@ graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad,
       {"quantized::mul_relu", inplace_mul_inplace_relu, quantized_mul_relu},
       {"quantized::hardswish", hardswish, quantized_hardswish},
       {"quantized::layer_norm", layer_norm, quantized_layer_norm},
-      {"aten::avg_pool2d", avg_pool2d, quantized_avg_pool2d},
   };
 }
 
