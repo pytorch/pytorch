@@ -216,12 +216,6 @@ void initJITBindings(PyObject* module) {
           [](Module& module) { return freeze_module(module); },
           py::arg("module"))
       .def("_jit_pass_fuse_linear", &FuseLinear)
-      .def(
-          "_jit_pass_fold_quantize",
-          [](Module& module, const std::string& method_name) {
-            FoldQuantizeCallIntoBuffer(module, method_name);
-          })
-      .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
       .def("_jit_pass_swap_dequantize", &PropagateQuantizationOps)
