@@ -2170,6 +2170,28 @@ class _DistTestBase(object):
         process_group_sync = res50_model_sync.layer1[0].bn1.process_group
         self.assertEqual(process_group_sync, process_group)
 
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    def test_DDP_module_with_no_inputs(self):
+        # gh-37814
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+
+        class Holder(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = torch.nn.Parameter(torch.arange(3).float())
+
+            def forward(self):
+                return self.x
+
+        expected = torch.arange(3).float().cuda()
+        holder = nn.parallel.DistributedDataParallel(Holder().cuda(rank), device_ids=[rank])
+        output = holder()
+        self.assertEqual(expected, output)
+
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
 
