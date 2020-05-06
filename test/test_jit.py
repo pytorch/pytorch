@@ -4555,10 +4555,7 @@ def foo(x):
 
     def _test_lower_graph_impl(self, model, data):
         model.qconfig = torch.quantization.default_qconfig
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
-                         ' with instruction set support avx2 or newer.')
-    def test_lower_graph(self):
+
         class LinearModel(torch.nn.Module):
             def __init__(self):
                 super(LinearModel, self).__init__()
