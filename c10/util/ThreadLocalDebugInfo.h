@@ -32,20 +32,20 @@ class C10_API DebugInfoBase {
 // profiling, etc)
 class C10_API ThreadLocalDebugInfo {
  public:
-  static C10_API std::shared_ptr<DebugInfoBase> get(DebugInfoKind kind);
+  static std::shared_ptr<DebugInfoBase> get(DebugInfoKind kind);
 
   // Get current ThreadLocalDebugInfo
-  static C10_API std::shared_ptr<ThreadLocalDebugInfo> current();
+  static std::shared_ptr<ThreadLocalDebugInfo> current();
 
   // Internal, use DebugInfoGuard/ThreadLocalStateGuard
-  static C10_API void _forceCurrentDebugInfo(
+  static void _forceCurrentDebugInfo(
       const std::shared_ptr<ThreadLocalDebugInfo>& info);
 
   // Push debug info struct of a given kind
-  static C10_API void _push(DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
+  static void _push(DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
   // Pop debug info, throws in case the last pushed
   // debug info is not of a given kind
-  static C10_API std::shared_ptr<DebugInfoBase> _pop(DebugInfoKind kind);
+  static std::shared_ptr<DebugInfoBase> _pop(DebugInfoKind kind);
 
  private:
   std::shared_ptr<DebugInfoBase> debug_info_;
