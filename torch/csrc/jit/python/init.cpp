@@ -224,7 +224,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
-      .def("_jit_pass_swap_dequantize", &SwapDeQuant)
+      .def("_jit_pass_swap_dequantize", &PropagateQuantizationOps)
       .def(
           "_jit_pass_swap_functional_linear",
           [](std::shared_ptr<Graph>& graph) { SwapFunctionalLinear(graph); })
@@ -496,6 +496,9 @@ void initJITBindings(PyObject* module) {
       .def("_jit_set_texpr_fuser_enabled", &setTensorExprFuserEnabled)
       .def("_jit_texpr_fuser_enabled", &tensorExprFuserEnabled)
       .def(
+          "_jit_pass_fuse_tensorexprs",
+          [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
+      .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
@@ -533,7 +536,8 @@ void initJITBindings(PyObject* module) {
              std::map<std::string, IValue>& paramsDict) {
             insertPermutes(graph, paramsDict);
             return paramsDict;
-          })
+          },
+          pybind11::return_value_policy::move)
       .def(
           "_jit_pass_filter_non_tensor_arguments",
           [](std::map<std::string, IValue> params) {
@@ -548,7 +552,12 @@ void initJITBindings(PyObject* module) {
       .def("_jit_decay_packed_param_input_types", [](Graph& g) {
         for (Value* i : g.inputs()) {
           if (i->type() ==
-              getCustomClass(
+                 getCustomClass(
+                      "__torch__.torch.classes.quantized.Conv2dPackedParamsBase") ||
+              i->type() ==
+                  getCustomClass(
+                      "__torch__.torch.classes.quantized.Conv3dPackedParamsBase") ||
+              i->type() == getCustomClass(
                   "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
             // Dummy CompleteTensorType to appease ONNX validator.
             i->setType(TensorType::create(

@@ -40,9 +40,9 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
           });
     }
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
       using dest_t = scalar_t;
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, iter.dtype(1), "copy_", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, iter.dtype(1), "copy_", [&] {
         // Note (@zasdfgbnm):
         //
         // The code below can not be simplified as

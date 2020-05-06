@@ -416,7 +416,7 @@ void IRPrinter::visit(const For* v) {
 void IRPrinter::visit(const Block* v) {
   os() << "{" << std::endl;
   indent_++;
-  for (Stmt* s : v->stmts()) {
+  for (Stmt* s : *v) {
     os() << *s;
   }
   indent_--;
