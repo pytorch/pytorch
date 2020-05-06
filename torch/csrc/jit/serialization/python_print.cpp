@@ -992,9 +992,9 @@ struct PythonPrintImpl {
 
         if (auto selfClass = self->type()->cast<ClassType>()) {
           registerDependency(selfClass);
-          const auto method = selfClass->getMethod(node->s(attr::name));
+          const Function& method = selfClass->getMethod(node->s(attr::name));
           TORCH_INTERNAL_ASSERT(
-              method->qualname() ==
+              method.qualname() ==
               QualifiedName(selfClass->name()->qualifiedName(), methodName));
         } else if (auto selfInterface = self->type()->cast<InterfaceType>()) {
           registerDependency(selfInterface);
