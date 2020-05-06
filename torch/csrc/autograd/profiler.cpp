@@ -341,6 +341,7 @@ void pushProfilingCallbacks() {
   auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
       [](const at::RecordFunction& fn) {
         auto state_ptr = getProfilerTLSState();
+        std::cout << "    in enter callback: state_ptr = " << ((void*)state_ptr) << std::endl;
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
         }
@@ -368,6 +369,7 @@ void pushProfilingCallbacks() {
       },
       [](const at::RecordFunction& fn) {
         auto state_ptr = getProfilerTLSState();
+        std::cout << "    in exit callback: state_ptr = " << ((void*)state_ptr) << std::endl;
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
         }
@@ -404,6 +406,7 @@ void enableProfiler(const ProfilerConfig& new_config) {
   TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
 
   auto state = std::make_shared<ProfilerThreadLocalState>(new_config);
+
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
   pushProfilingCallbacks();
