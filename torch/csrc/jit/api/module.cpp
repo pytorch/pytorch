@@ -268,7 +268,7 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   }
   // Note: following Python, `__init__()` modifies its first parameter in-place
   // and returns nothing.
-  classType->getMethod("__init__")->operator()(std::move(stackWithSelf));
+  classType->getMethod("__init__").operator()(std::move(stackWithSelf));
 
   return obj;
 }

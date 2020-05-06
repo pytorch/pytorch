@@ -196,11 +196,6 @@ NATIVE_DECLARATION = CodeTemplate("""\
 CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
 
-ZERO_DIM_CHECK = CodeTemplate("""\
-if (${check_name}.dim() == 0) {
-    return ${api_name}(${zero_dim_actuals});
-}""")
-
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
 if (${name}.defined()) {
     ${initializer}
