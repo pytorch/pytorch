@@ -33,7 +33,7 @@ using graph_rewrite_helper::getFuncName;
 using graph_rewrite_helper::getIValue;
 using graph_rewrite_helper::getValue;
 using graph_rewrite_helper::PatternInfo;
-using graph_rewrite_helper::replaceConvolutionWithConv2d;
+using graph_rewrite_helper::replaceConvolutionWithAtenConv;
 
 // Map of quantization parameter name and value
 // for example _scale, _zero_point,
@@ -51,6 +51,8 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "conv2d",
     "linear",
     "batch_norm",
+    "hardswish",
+    "layer_norm",
 };
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
@@ -69,6 +71,8 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "lstm",
     "mul",
     "mul_",
+    "hardswish",
+    "layer_norm",
 };
 
 std::vector<std::string> _dynamic_quantizable_aten_funcs = {
@@ -80,7 +84,9 @@ std::vector<std::string> _dynamic_quantizable_aten_funcs = {
 // example: `prim::CallFunction(%dropout, %input_tensor, ...)
 // so we propagate observed property from %input_tensor to the
 // output of the `prim::CallFunction`
-std::vector<std::string> _single_input_general_call_funcs = {
+// Also these ops doesn't do computation on the value of Tensor, the
+// operation only depends on the shape of the Tensor
+std::vector<std::string> _single_input_general_shape_call_funcs = {
     "adaptive_avg_pool1d",
     "adaptive_avg_pool2d",
     "adaptive_avg_pool3d",
@@ -96,14 +102,25 @@ std::vector<std::string> _single_input_general_call_funcs = {
     "upsample_bilinear",
     "upsample_nearest",
     "relu",
+    "relu_",
     "sigmoid",
     "tanh",
+    "hardtanh",
+    "hardtanh_",
+    "elu",
+    "elu_",
+    "hardsigmoid",
+    "hardsigmoid_",
+    "leaky_relu",
+    "leaky_relu_",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
 // require observation and have a single input Tensor
-// e.g. `aten::max_pool2d(%input_tensor, ...)`
-std::vector<std::string> _single_input_general_aten_funcs = {
+// Also these ops doesn't do computation on the value of Tensor, the
+// operation only depends on the shape of the Tensor
+// e.g. `aten::flatten(%input_tensor, ...)`
+std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "max_pool1d",
     "max_pool2d",
     "max_pool3d",
@@ -136,9 +153,29 @@ std::vector<std::string> _single_input_general_aten_funcs = {
     "clamp",
     // "clamp_",  // Enable when quantized `clamp_` is ready
     "relu",
+    "relu_",
     "sigmoid",
     "tanh",
+    "hardtanh",
+    "hardtanh_",
+    "elu",
+    "elu_",
+    "hardsigmoid",
+    "hardsigmoid_",
+    "leaky_relu",
+    "leaky_relu_",
 };
+
+// Theses are prim::CallFunctions for ops that doesn't require observation and
+// have a single input Tensor
+// Also these ops do computation on the value of Tensor
+std::vector<std::string> _single_input_general_value_call_funcs = {};
+
+// Theses are aten functions for ops that doesn't require observation and
+// have a single input Tensor
+// Also these ops do computation on the value of Tensor
+// e.g. `aten::maxpool(%input_tensor, ...)`
+std::vector<std::string> _single_input_general_value_aten_funcs = {};
 
 struct FuncArg {
   std::string func_name;
@@ -233,26 +270,48 @@ bool hasScalarInput(Node* n) {
       n->input(1)->type()->isSubtypeOf(NumberType::get());
 }
 
+bool isSingleInputGeneralCallFunction(Node* n) {
+  static std::vector<std::string> _single_input_general_call_funcs;
+  std::copy(
+      _single_input_general_shape_call_funcs.begin(),
+      _single_input_general_shape_call_funcs.end(),
+      std::back_inserter(_single_input_general_call_funcs));
+  std::copy(
+      _single_input_general_value_call_funcs.begin(),
+      _single_input_general_value_call_funcs.end(),
+      std::back_inserter(_single_input_general_call_funcs));
+  return isFunctionNode(
+      n,
+      /* call_funcs = */ _single_input_general_shape_call_funcs,
+      /* aten_funcs = */ {});
+}
+
+bool isSingleInputGeneralAtenFunction(Node* n) {
+  static std::vector<std::string> _single_input_general_aten_funcs;
+  std::copy(
+      _single_input_general_shape_aten_funcs.begin(),
+      _single_input_general_shape_aten_funcs.end(),
+      std::back_inserter(_single_input_general_aten_funcs));
+  std::copy(
+      _single_input_general_value_aten_funcs.begin(),
+      _single_input_general_value_aten_funcs.end(),
+      std::back_inserter(_single_input_general_aten_funcs));
+  return isFunctionNode(
+      n,
+      /* call_funcs = */ {},
+      /* aten_funcs = */ _single_input_general_aten_funcs);
+}
+
 // For a given value `v`, get the list of values that we need to check
 // if they are observed/quantized or not, if so, we can say the
 // `v` is also observed/quantized, since we can derive
 // the quantization parameters for `v` given the list of values
 std::vector<Value*> getPassThroughInputs(Value* v) {
   Node* n = v->node();
-  if (isFunctionNode(
-          n,
-          // We don't have call functions
-          // after inline
-          /* call_funcs = */ _single_input_general_call_funcs,
-          /* aten_funcs = */ {})) {
+  if (isSingleInputGeneralCallFunction(n)) {
     return {n->input(1)};
   } else if (
-      isFunctionNode(
-          n,
-          // We don't have call functions
-          // after inline
-          /* call_funcs = */ {},
-          /* aten_funcs = */ _single_input_general_aten_funcs) ||
+      isSingleInputGeneralAtenFunction(n) ||
       (n->kind() == Symbol::aten("sort") && v->offset() == 0)) {
     return {n->input(0)};
   } else if (n->kind() == prim::If && n->outputs().size() == 1) {
@@ -296,7 +355,7 @@ bool nodeQuantizable(Node* n, bool is_dynamic = false) {
 // like `linear` because we want to preserve the op boundary
 bool userDefinedCallFunction(Node* n) {
   return n->kind() == prim::CallFunction &&
-      !isFunctionNode(n, _single_input_general_call_funcs, {}) &&
+      !isSingleInputGeneralCallFunction(n) &&
       !isFunctionNode(n, _static_quantizable_call_funcs, {});
 }
 
@@ -925,7 +984,7 @@ void InsertObserversHelper::insertObserverFor(
   if (observed_values_.count(v)) {
     return;
   }
-  Module observer = observer_module.clone_instance();
+  Module observer = observer_module.deepcopy();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.hasattr(observer_name)) {
     observer_name = "_observer_" + c10::to_string(uid_++);
@@ -1083,7 +1142,7 @@ void InsertObserversHelper::preprocess(
   ConstantPooling(graph);
   ConstantPropagation(graph);
   // must do constant propagation first before replacement
-  replaceConvolutionWithConv2d(graph);
+  replaceConvolutionWithAtenConv(graph);
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
 
@@ -1283,7 +1342,7 @@ InsertObserversHelper::insertObserversFor(
     for (const auto& observer_attrs : block_observer_map_.at(block)) {
       const auto& name = std::get<0>(observer_attrs);
       const auto& observer = std::get<1>(observer_attrs);
-      module._ivalue()->setAttr(name, observer.clone_instance()._ivalue());
+      module._ivalue()->setAttr(name, observer.deepcopy()._ivalue());
     }
   }
   // NB: Why do we need to process the graph even if it's visited?
@@ -1529,7 +1588,7 @@ void insertDeQuantForAllUse(
     // in the same block so that quant fusion can happen
     WithInsertPoint ins(user);
     Node* dequant = insertDeQuant(graph, quantized_val, original_val, i);
-    user->replaceInputWith(original_val, dequant->output());
+    user->replaceInput(uses[i].offset, dequant->output());
   }
 }
 
@@ -1672,6 +1731,8 @@ class InsertQuantDeQuantHelper {
     is_dynamic_ = is_dynamic;
   }
 
+  void propagateQuantizationOps(Module& module);
+
  private:
   std::unordered_map<Graph*, std::vector<std::string>>
       observer_modules_to_remove_;
@@ -1806,6 +1867,108 @@ void InsertQuantDeQuantHelper::quantizeTensors(
     insertQuantizationOps(
         module, self, n, isPerChannel(qscheme), qparam_names, is_dynamic_);
   }
+}
+
+void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
+  const PatternInfo& dynamic_quant_pattern = PatternInfo::parse_from_str(R"(
+    graph(%a, %reduce_range, %a_dtype):
+        %a_scale : float, %a_zero_point : int = aten::_choose_qparams_per_tensor(%a, %reduce_range)
+        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
+        %a_dequant = aten::dequantize(%a_quant)
+        return (%a_dequant) )");
+  const Graph& dynamic_quant_graph = *dynamic_quant_pattern.pattern_graph;
+
+  const auto& matches = findPatternMatches(dynamic_quant_graph, *graph);
+  if (matches.size() == 0) {
+    return;
+  }
+
+  const auto& vmap = dynamic_quant_pattern.vmap;
+  Value* dequant_val = vmap.at("a_dequant");
+  Node* pattern_dequant = dequant_val->node();
+  Value* quant_val = vmap.at("a_quant");
+  Node* pattern_quant = quant_val->node();
+  Value* choose_qparam_val = vmap.at("a_scale");
+  Node* pattern_choose_qparam = choose_qparam_val->node();
+
+  std::vector<DynamicQuantOps> nodes_to_rewrite;
+  std::vector<Node*> choose_qparam_nodes_to_rewrite;
+  for (const Match& match : matches) {
+    Node* matched_dequantize = match.nodes_map.at(pattern_dequant);
+    Node* matched_quantize = match.nodes_map.at(pattern_quant);
+    Node* matched_choose_qparam = match.nodes_map.at(pattern_choose_qparam);
+    if (matched_dequantize->output()->uses().size() > 1) {
+      nodes_to_rewrite.emplace_back(std::make_tuple(
+          matched_choose_qparam, matched_quantize, matched_dequantize));
+    }
+  }
+  for (const auto nodes : nodes_to_rewrite) {
+    auto quant_node = std::get<1>(nodes);
+    auto dequant_node = std::get<2>(nodes);
+    // get input of quantize call.
+    Value* original_val = quant_node->inputs()[0];
+    Value* dequant_out = dequant_node->output();
+    Value* dtype = quant_node->inputs()[3];
+    std::vector<Use> uses = dequant_out->uses();
+    for (const Use& use : uses) {
+      auto* user = use.user;
+      WithInsertPoint ins(user);
+      auto quant_ops = insertChooseQParamQuantDequant(
+          graph.get(), original_val, dtype, quant_node->kind());
+      user->replaceInputWith(dequant_out, std::get<2>(quant_ops)->output());
+    }
+  }
+  Node *choose_qparams, *quant, *dequant;
+  for (const auto& n : nodes_to_rewrite) {
+    std::tie(choose_qparams, quant, dequant) = n;
+    dequant->removeAllInputs();
+    quant->removeAllInputs();
+    choose_qparams->removeAllInputs();
+  }
+  for (const auto& n : nodes_to_rewrite) {
+    std::tie(choose_qparams, quant, dequant) = n;
+    dequant->destroy();
+    quant->destroy();
+    choose_qparams->destroy();
+  }
+}
+
+void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
+  const std::string dynamic_quant_ops = R"(
+    graph(%a, %reduce_range, %a_dtype):
+        %a_scale : float, %a_zero_point : int = aten::_choose_qparams_per_tensor(%a, %reduce_range)
+        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
+        %a_dequant = aten::dequantize(%a_quant)
+        return (%a_dequant) )";
+  const std::string dynamic_quant_replacement = R"(
+    graph(%a, %reduce_range, %a_dtype):
+        return (%a) )";
+  auto filter = [&](const Match& match,
+                    const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto dequant_node = match_vmap.at(vmap.at("a_dequant"))->node();
+    Value* dequant_out = dequant_node->output();
+    TORCH_CHECK(
+        dequant_out->uses().size() == 1,
+        "Expect dequant output to have single use");
+    Node* user = dequant_out->uses()[0].user;
+    return !nodeQuantizable(user, /* is_dynamic */ true);
+  };
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(dynamic_quant_ops, dynamic_quant_replacement);
+  rewriter.runOnGraph(graph, filter);
+}
+
+void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
+  SwapFunctionalLinear(module);
+  auto graph = module.get_method("forward").graph();
+  Inline(*graph);
+  ConstantPropagation(graph);
+  ReplicateChooseQParamsQuantDequant(graph);
+  RemoveRedundantQuantizationOps(graph);
+  ReplicateQuant(graph);
+  ReplicateDeQuant(graph);
+  PropagateQuantizationOps(graph);
 }
 
 void checkGetQParamsResult(const IValue& qparams) {
@@ -2022,7 +2185,7 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
 
   std::string conv2d_with_quant_prepack = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
-        %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
@@ -2036,7 +2199,7 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
 
   std::string conv3d_with_quant_prepack = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
-        %packed_params = quantized::conv3d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %packed_params : __torch__.torch.classes.quantized.Conv3dPackedParamsBase = quantized::conv3d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv3d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv3d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
@@ -2168,7 +2331,7 @@ class ModuleUseDeduper {
     while (parent_of_leaf.hasattr(child_name)) {
       child_name = original_name + "_" + c10::to_string(uid++);
     }
-    parent_of_leaf.register_module(child_name, child_module.clone_instance());
+    parent_of_leaf.register_module(child_name, child_module.deepcopy());
     return child_name;
   }
 
@@ -2525,12 +2688,12 @@ void addBiasForConv2dIfNone(Module& module) {
   }
 }
 
-void swapDeQuant(Block* block) {
+void propagateQuantizationOps(Block* block) {
   auto graph = block->owningGraph();
   for (Node* n : block->nodes()) {
     if (n->kind() == prim::If) {
       for (Block* subblock : n->blocks()) {
-        swapDeQuant(subblock);
+        propagateQuantizationOps(subblock);
       }
       if (n->outputs().size() == 0) {
         continue;
@@ -2610,6 +2773,7 @@ Module InsertQuantDeQuant(
   h.setDynamicFlag(is_dynamic);
   h.run(module, method_name);
   h.cleanup(module);
+  h.propagateQuantizationOps(module);
   return module;
 }
 
@@ -2736,75 +2900,11 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
   }
 }
 
-void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
-  const PatternInfo& dynamic_quant_pattern = PatternInfo::parse_from_str(R"(
-    graph(%a, %reduce_range, %a_dtype):
-        %a_scale : float, %a_zero_point : int = aten::_choose_qparams_per_tensor(%a, %reduce_range)
-        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        %a_dequant = aten::dequantize(%a_quant)
-        return (%a_dequant) )");
-  const Graph& dynamic_quant_graph = *dynamic_quant_pattern.pattern_graph;
-
-  const auto& matches = findPatternMatches(dynamic_quant_graph, *graph);
-  if (matches.size() == 0) {
-    return;
-  }
-
-  const auto& vmap = dynamic_quant_pattern.vmap;
-  Value* dequant_val = vmap.at("a_dequant");
-  Node* pattern_dequant = dequant_val->node();
-  Value* quant_val = vmap.at("a_quant");
-  Node* pattern_quant = quant_val->node();
-  Value* choose_qparam_val = vmap.at("a_scale");
-  Node* pattern_choose_qparam = choose_qparam_val->node();
-
-  std::vector<DynamicQuantOps> nodes_to_rewrite;
-  std::vector<Node*> choose_qparam_nodes_to_rewrite;
-  for (const Match& match : matches) {
-    Node* matched_dequantize = match.nodes_map.at(pattern_dequant);
-    Node* matched_quantize = match.nodes_map.at(pattern_quant);
-    Node* matched_choose_qparam = match.nodes_map.at(pattern_choose_qparam);
-    if (matched_dequantize->output()->uses().size() > 1) {
-      nodes_to_rewrite.emplace_back(std::make_tuple(
-          matched_choose_qparam, matched_quantize, matched_dequantize));
-    }
-  }
-  for (const auto nodes : nodes_to_rewrite) {
-    auto quant_node = std::get<1>(nodes);
-    auto dequant_node = std::get<2>(nodes);
-    // get input of quantize call.
-    Value* original_val = quant_node->inputs()[0];
-    Value* dequant_out = dequant_node->output();
-    Value* dtype = quant_node->inputs()[3];
-    std::vector<Use> uses = dequant_out->uses();
-    for (const Use& use : uses) {
-      auto* user = use.user;
-      WithInsertPoint ins(user);
-      auto quant_ops = insertChooseQParamQuantDequant(
-          graph.get(), original_val, dtype, quant_node->kind());
-      user->replaceInputWith(dequant_out, std::get<2>(quant_ops)->output());
-    }
-  }
-  Node *choose_qparams, *quant, *dequant;
-  for (const auto& n : nodes_to_rewrite) {
-    std::tie(choose_qparams, quant, dequant) = n;
-    dequant->removeAllInputs();
-    quant->removeAllInputs();
-    choose_qparams->removeAllInputs();
-  }
-  for (const auto& n : nodes_to_rewrite) {
-    std::tie(choose_qparams, quant, dequant) = n;
-    dequant->destroy();
-    quant->destroy();
-    choose_qparams->destroy();
-  }
-}
-
 // This is the pass to handle ops that does not require observation
 // for example: flatten, average_pool, upsample
 // This is called after inline and before graph execution
-void SwapDeQuant(std::shared_ptr<Graph>& graph) {
-  swapDeQuant(graph->block());
+void PropagateQuantizationOps(std::shared_ptr<Graph>& graph) {
+  propagateQuantizationOps(graph->block());
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph, bool is_dynamic) {
@@ -3102,42 +3202,8 @@ void FoldQuantizedPrepackingOps(Module& module) {
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
 
-void RemoveRedundantQuantizeOps(std::shared_ptr<Graph>& graph) {
-  const std::string dynamic_quant_ops = R"(
-    graph(%a, %reduce_range, %a_dtype):
-        %a_scale : float, %a_zero_point : int = aten::_choose_qparams_per_tensor(%a, %reduce_range)
-        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        %a_dequant = aten::dequantize(%a_quant)
-        return (%a_dequant) )";
-  const std::string dynamic_quant_replacement = R"(
-    graph(%a, %reduce_range, %a_dtype):
-        return (%a) )";
-  auto filter = [&](const Match& match,
-                    const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto dequant_node = match_vmap.at(vmap.at("a_dequant"))->node();
-    Value* dequant_out = dequant_node->output();
-    TORCH_CHECK(
-        dequant_out->uses().size() == 1,
-        "Expect dequant output to have single use");
-    Node* user = dequant_out->uses()[0].user;
-    return !nodeQuantizable(user, /* is_dynamic */ true);
-  };
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(dynamic_quant_ops, dynamic_quant_replacement);
-  rewriter.runOnGraph(graph, filter);
-}
-
-script::Module Finalize(script::Module& module, bool is_dynamic) {
-  SwapFunctionalLinear(module);
+Module Finalize(Module& module, bool is_dynamic) {
   auto graph = module.get_method("forward").graph();
-  Inline(*graph);
-  ConstantPropagation(graph);
-  ReplicateChooseQParamsQuantDequant(graph);
-  RemoveRedundantQuantizeOps(graph);
-  ReplicateQuant(graph);
-  ReplicateDeQuant(graph);
-  SwapDeQuant(graph);
   InsertPrepackUnpack(graph);
   ConstantPropagation(graph);
   QuantFusion(graph, is_dynamic);

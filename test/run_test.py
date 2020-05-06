@@ -100,13 +100,13 @@ ROCM_BLACKLIST = [
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
-    'test_cpp_extensions_aot_ninja',
     'test_determination',
     'test_multiprocessing',
     'test_jit_simple',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
     'test_tensorexpr',
+    'test_type_hints',
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch

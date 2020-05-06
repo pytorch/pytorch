@@ -2446,6 +2446,70 @@ class TestNN(NNTestCase):
         pruned_tensor = p.prune(t, default_mask)
         self.assertEqual(t * expected_mask, pruned_tensor)
 
+    def test_rnn_pruning(self):
+        l = torch.nn.LSTM(32, 32)
+        # This Module has 4 parameters called:
+        # 'weight_ih_l0', 'weight_hh_l0', 'bias_ih_l0', 'bias_hh_l0'
+
+        # Pruning one of them causes one of the weights to become a tensor
+        prune.l1_unstructured(l, 'weight_ih_l0', 0.5)
+        assert (
+            sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights])
+            == 3
+        )
+
+        # Removing the pruning reparametrization restores the Parameter
+        prune.remove(l, 'weight_ih_l0')
+        assert (
+            sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights])
+            == 4
+        )
+
+        # Make sure that, upon removal of the reparametrization, the
+        # `._parameters` and `.named_parameters` contain the right params.
+        # Specifically, the original weight ('weight_ih_l0') should be placed
+        # back in the parameters, while the reparametrization component
+        # ('weight_ih_l0_orig') should be removed.
+        assert 'weight_ih_l0' in l._parameters
+        assert l._parameters['weight_ih_l0'] is not None
+        assert 'weight_ih_l0_orig' not in l._parameters
+        assert 'weight_ih_l0' in dict(l.named_parameters())
+        assert dict(l.named_parameters())['weight_ih_l0'] is not None
+        assert 'weight_ih_l0_orig' not in dict(l.named_parameters())
+
+
+    def test_rnn_weight_norm(self):
+        l = torch.nn.LSTM(32, 32)
+        # This Module has 4 parameters called:
+        # 'weight_ih_l0', 'weight_hh_l0', 'bias_ih_l0', 'bias_hh_l0'
+
+        # Applying weight norm on one of them causes it to become a tensor
+        l = torch.nn.utils.weight_norm(l, name='weight_ih_l0')
+        assert (
+            sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights])
+            == 3
+        )
+
+        # Removing the weight norm reparametrization restores the Parameter
+        l = torch.nn.utils.remove_weight_norm(l, name='weight_ih_l0')
+        assert (
+            sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights])
+            == 4
+        )
+
+        # Make sure that, upon removal of the reparametrization, the
+        # `._parameters` and `.named_parameters` contain the right params.
+        # Specifically, the original weight ('weight_ih_l0') should be placed
+        # back in the parameters, while the reparametrization components
+        # ('weight_ih_l0_v' and 'weight_ih_l0_g') should be removed.
+        assert 'weight_ih_l0' in l._parameters
+        assert l._parameters['weight_ih_l0'] is not None
+        assert 'weight_ih_l0_v' not in l._parameters
+        assert 'weight_ih_l0_g' not in l._parameters
+        assert 'weight_ih_l0' in dict(l.named_parameters())
+        assert dict(l.named_parameters())['weight_ih_l0'] is not None
+        assert 'weight_ih_l0_v' not in dict(l.named_parameters())
+        assert 'weight_ih_l0_g' not in dict(l.named_parameters())
 
     def test_weight_norm(self):
         input = torch.randn(3, 5)
@@ -7199,6 +7263,89 @@ class TestNN(NNTestCase):
 
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
 
+    def test_channel_shuffle(self):
+        #  3D tensor
+        x = torch.tensor(
+            [[[1, 2],
+              [5, 6],
+              [9, 10],
+              [13, 14],
+              ]]
+        )
+        y_ref = torch.tensor(
+            [[[1, 2],
+              [9, 10],
+              [5, 6],
+              [13, 14],
+              ]]
+        )
+        #  ChannelsFirst
+        y = F.channel_shuffle(x, 2)
+        self.assertEqual(y, y_ref)
+        #  ChannelsLast not supported for 3dim
+
+        #  4D tensor
+        x = torch.tensor(
+            [[[[1, 2],
+               [3, 4]],
+              [[5, 6],
+               [7, 8]],
+              [[9, 10],
+               [11, 12]],
+              [[13, 14],
+               [15, 16]],
+              ]]
+        )
+        y_ref = torch.tensor(
+            [[[[1, 2],
+               [3, 4]],
+              [[9, 10],
+               [11, 12]],
+              [[5, 6],
+               [7, 8]],
+              [[13, 14],
+               [15, 16]],
+              ]]
+        )
+        #  ChannelsFirst NCHW
+        y = F.channel_shuffle(x, 2)
+        self.assertEqual(y, y_ref)
+        #  ChannelsLast NHWC
+        y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last), 2)
+        y = y.contiguous(memory_format=torch.contiguous_format)
+        self.assertEqual(y, y_ref)
+
+        #  5D tensor
+        x = torch.tensor(
+            [[[[[1, 2],
+               [3, 4]]],
+              [[[5, 6],
+               [7, 8]]],
+              [[[9, 10],
+               [11, 12]]],
+              [[[13, 14],
+               [15, 16]]],
+              ]]
+        )
+        y_ref = torch.tensor(
+            [[[[[1, 2],
+               [3, 4]]],
+              [[[9, 10],
+               [11, 12]]],
+              [[[5, 6],
+               [7, 8]]],
+              [[[13, 14],
+               [15, 16]]],
+              ]]
+        )
+        #  ChannelsFirst NCHW
+        y = F.channel_shuffle(x, 2)
+        self.assertEqual(y, y_ref)
+        #  ChannelsLast NHWC
+        y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last_3d), 2)
+        y = y.contiguous(memory_format=torch.contiguous_format)
+        self.assertEqual(y, y_ref)
+
     def test_upsamplingNearest1d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2)
@@ -8952,8 +9099,10 @@ class TestNNDeviceType(NNTestCase):
             out_reshaped = output.view(*(unnormalized_shape + [-1]))
             mean = out_reshaped.mean(-1)
             var = out_reshaped.var(-1, unbiased=False)
-            self.assertAlmostEqual(torch.abs(mean.data).mean(), 0, delta=1e-5)
-            self.assertAlmostEqual(torch.abs(var.data).mean(), 1, delta=1e-5)
+
+            delta = 1e-1 if dtype == torch.bfloat16 else 1e-5
+            self.assertAlmostEqual(torch.abs(mean.data).mean(), 0, delta=delta)
+            self.assertAlmostEqual(torch.abs(var.data).mean(), 1, delta=delta)
 
             # test that LN applies weight and bias correctly
             scale, bias = torch.empty(2).uniform_(0.2, 2).tolist()
@@ -8963,8 +9112,8 @@ class TestNNDeviceType(NNTestCase):
             out_reshaped = output.view(*(unnormalized_shape + [-1]))
             mean = out_reshaped.mean(-1)
             var = out_reshaped.var(-1, unbiased=False)
-            self.assertAlmostEqual(torch.abs(mean.data).mean(), bias, delta=1e-5)
-            self.assertAlmostEqual(torch.abs(var.data).mean(), scale ** 2, delta=1e-5)
+            self.assertAlmostEqual(torch.abs(mean.data).mean(), bias, delta=delta)
+            self.assertAlmostEqual(torch.abs(var.data).mean(), scale ** 2, delta=delta)
 
         bad_norm_shape_input_shape = {
             (): (),
@@ -9057,6 +9206,10 @@ class TestNNDeviceType(NNTestCase):
         input = torch.Tensor(1000)
         self._test_dropout(nn.Dropout, device, input)
 
+        if self.device_type == 'cuda' and TEST_WITH_ROCM:
+            input = input.bfloat16()
+            self._test_dropout(nn.Dropout, device, input)
+
     def test_Dropout2d(self, device):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
@@ -9118,6 +9271,9 @@ class TestNNDeviceType(NNTestCase):
 
     def test_LayerNorm_general(self, device):
         self._test_LayerNorm_general(device)
+
+        if self.device_type == 'cuda' and TEST_WITH_ROCM:
+            self._test_LayerNorm_general(device, dtype=torch.bfloat16)
 
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
@@ -9435,14 +9591,16 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(embedding.weight.grad._indices(), tensorTwice)
         self.assertEqual(embedding.weight.grad._values(), onesTwice)
 
-    def test_embedding_padding_idx(self, device):
-        embedding = nn.Embedding(10, 20, padding_idx=0).to(device)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypes(torch.float32)
+    def test_embedding_padding_idx(self, device, dtype):
+        embedding = nn.Embedding(10, 20, padding_idx=0).to(device, dtype)
         input = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.long).to(device)
         output = embedding(input)
         self.assertEqual(output[0][0].sum(), 0)
         self.assertEqual(output[1][2].sum(), 0)
 
-        embedding = nn.Embedding(10, 20, padding_idx=0, sparse=True).to(device)
+        embedding = nn.Embedding(10, 20, padding_idx=0, sparse=True).to(device, dtype)
         input = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.long).to(device)
         output = embedding(input)
         self.assertEqual(output[0][0].sum(), 0)
@@ -9450,13 +9608,13 @@ class TestNNDeviceType(NNTestCase):
 
         # negative indexing check for padding_idx
         # padding_idx=-2, num_embeddings=10 ==> index 8 padded
-        embedding = nn.Embedding(10, 20, padding_idx=-2).to(device)
+        embedding = nn.Embedding(10, 20, padding_idx=-2).to(device, dtype)
         input = torch.tensor([[0, 2, 8, 5], [4, 8, 0, 9]], dtype=torch.long).to(device)
         output = embedding(input)
         self.assertEqual(output[0][2].sum(), 0)
         self.assertEqual(output[1][1].sum(), 0)
 
-        embedding = nn.Embedding(10, 20, padding_idx=-2, sparse=True).to(device)
+        embedding = nn.Embedding(10, 20, padding_idx=-2, sparse=True).to(device, dtype)
         input = torch.tensor([[0, 2, 8, 5], [4, 8, 0, 9]], dtype=torch.long).to(device)
         output = embedding(input)
         self.assertEqual(output[0][2].sum(), 0)
@@ -9466,9 +9624,8 @@ class TestNNDeviceType(NNTestCase):
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=25)
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=-25)
 
-        # test backward when input contains padding_idx
         padding_idx = 0
-        embedding = nn.Embedding(5, 2, padding_idx=padding_idx).to(device)
+        embedding = nn.Embedding(5, 2, padding_idx=padding_idx).to(device, dtype)
         for n in (1, 2, 1000):  # Need large N to trigger all the methods we have implemented
             for other_indices in ([], [1, 3], [2]):
                 indices = torch.tensor(other_indices + [padding_idx] * n, dtype=torch.long).to(device)
@@ -10323,6 +10480,7 @@ class TestNNDeviceType(NNTestCase):
         self._test_EmbeddingBag(device, 'sum', True, dtype=torch.bfloat16, test_backward=True)
         self._test_EmbeddingBag(device, 'mean', True, dtype=torch.bfloat16, test_backward=True)
 
+
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
     def test_multihead_attention_dtype(self, device, dtype):
@@ -11078,7 +11236,7 @@ class TestNNDeviceType(NNTestCase):
     def test_maxpool3d_non_square_backward(self, device):
         # previous CUDA routine of this backward calculates kernel launch grid size
         # with last two dimensions interchanged, so the tailing along the longer dim
-        # get ignored. Here we test whether every potision gets gradient.
+        # get ignored. Here we test whether every position gets gradient.
         for dim in (2, 3, 4):
             shape = tuple(32 if i != dim else 256 for i in range(4))
             x = torch.randn(shape, device=device, requires_grad=True)
