@@ -96,7 +96,7 @@ class QConvPackWeightInt8 final {
           "and Conv2d now.");
       if (kSpatialDim == 1) {
         if (weight.dim() == 3) {
-          weight = weight.unsqueeze(_internal::kConv1dSqueezeDim + 1);
+          weight = weight.unsqueeze(_internal::kConv1dSqueezeDim + 2);
         }
         stride = _internal::MakeArgForConv1d(stride, 1);
         input_padding = _internal::MakeArgForConv1d(input_padding, 0);
