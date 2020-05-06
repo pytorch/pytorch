@@ -1483,7 +1483,7 @@ class TestONNXRuntime(unittest.TestCase):
         class MyModule(torch.nn.Module):
             def forward(self, x, k):
                 # When sorted=False, order of elements in the outout tensors
-                # cannot be expected to match between PyTorch and ORT
+                # are not expected to match between PyTorch and ORT
                 topk_unsorted = torch.topk(x, k, largest=False, sorted=False)
                 topk_sorted = torch.topk(x, k, largest=False, sorted=True)
                 return topk_sorted, torch.sort(topk_unsorted.values).values
