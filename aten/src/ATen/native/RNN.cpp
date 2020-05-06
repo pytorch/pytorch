@@ -28,7 +28,13 @@ Tensor reverse(const Tensor& input) {
   auto step_ref = std::move(step_inputs);
   std::reverse(step_ref.begin(), step_ref.end());
   auto rev_step_inputs = std::move(step_ref);
-  auto rev_input = at::cat(rev_step_inputs, 0);
+  Tensor rev_input;
+  if(rev_step_inputs[0].dim() == 1) {
+    rev_input = at::stack(rev_step_inputs, 0);
+  } else {
+    rev_input = at::cat(rev_step_inputs, 0);
+  }
+
 
   if(rev_input.dim() != input.dim()) {
     rev_input = rev_input.unsqueeze(1);
@@ -1190,14 +1196,16 @@ struct PackedBidirectionalLayer
       // Split the input {fwd, bwd} in order to apply RNN as Type-1.
       // See pytorch/pytorch#4930
       auto input_split = input.data.chunk(2, input.data.dim() - 1);
-      PackedSequence input_fwd {
+      PackedSequence packed_input_fwd {
         input_split[0],
         input.batch_sizes
       };
-      PackedSequence input_bwd {
+      PackedSequence packed_input_bwd {
         input_split[1],
         input.batch_sizes
       };
+      input_fwd = packed_input_fwd;
+      input_bwd = packed_input_bwd;
     }
     auto fw_result = layer_(input_fwd, input_hidden.first, params.first, type_2, layer_num);
     auto rev_result = rev_layer_(input_bwd, input_hidden.second, params.second, type_2, layer_num);
