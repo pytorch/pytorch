@@ -617,8 +617,12 @@ def get_testing_overrides():
         torch.stft: (lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True,
                      pad_mode='reflect', normalized=False, onesided=True: -1),
         torch.stochastic_rounding: lambda input, gen_=None: -1,
-        torch.stochastic_rounding_adam_step: lambda param, grad, exp_avg, exp_avg_sq, max_exp_avg_sq, inv_scale, found_inf, lr, beta1, beta2, weight_decay, eps, step, is_decoupled, is_amsgrad, gen_=None: -1,
-        torch.stochastic_rounding_sgd_step: lambda param, grad, momentum_buffer, inv_scale, found_inf, lr, momentum, weight_decay, dampening, nesterov, first_run, gen_=None: -1,
+        torch.stochastic_rounding_adam_step: (
+            lambda param, grad, exp_avg, exp_avg_sq, max_exp_avg_sq, inv_scale, found_inf,
+            lr, beta1, beta2, weight_decay, eps, step, is_decoupled, is_amsgrad, gen_=None: -1),
+        torch.stochastic_rounding_sgd_step: (
+            lambda param, grad, momentum_buffer, inv_scale, found_inf, lr, momentum, weight_decay,
+            dampening, nesterov, first_run, gen_=None: -1),
         torch.sub: lambda input, other, out=None: -1,
         torch.sum: lambda input: -1,
         torch.svd: lambda input, some=True, compute_uv=True, out=None: -1,
