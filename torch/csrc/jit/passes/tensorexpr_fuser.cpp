@@ -348,6 +348,11 @@ Operation createTensorExprOp(const Node* node) {
       std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
   return [kernel](Stack& stack) {
     RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
+    if (!tensorexpr::fallbackAllowed()) {
+      kernel->run(stack);
+      return 0;
+    }
+
     try {
       kernel->run(stack);
     } catch (const std::runtime_error& e) {
