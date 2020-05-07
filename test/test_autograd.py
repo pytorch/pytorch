@@ -4136,6 +4136,11 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
         test_case.assertEqual(self_variable.type(), self_variable.grad.type())
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
+# white list for complex
+complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as',
+                'zero_', 'clone', 'tril', 'triu', 'fill_', 'eq_', 'ne_',
+                'permute', 'squeeze', 'unsqueeze', 'chunk', 'split',
+                'split_with_sizes', 'resize', 'resize_as']
 
 def add_test(
         name,
@@ -4152,134 +4157,147 @@ def add_test(
     if variant_name != '':
         basic_test_name += '_' + variant_name
 
-    for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
-        test_name = basic_test_name
-        new_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg for i, arg in enumerate(args)]
-        test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
-        new_args = tuple(new_args)
+    for dtype in [torch.double, torch.cdouble]:
+        for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
+            test_name = basic_test_name
+            new_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg for i, arg in enumerate(args)]
+            test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
+            if dtype.is_complex:
+                # TODO: remove this. this is temporary while we ramp up the complex support.
+                if name in complex_list and 'scalar' not in test_name and 'constant' not in test_name:
+                    test_name = test_name + '_complex'
+                else:
+                    continue
+            new_args = tuple(new_args)
 
-        # for-loop bodies don't define scopes, so we have to save the variables
-        # we want to close over in some way
-        def do_test(self, device, name=name, self_size=self_size, args=new_args, test_name=test_name,
-                    output_process_fn=output_process_fn):
-            def check(name):
-                is_magic_method = name[:2] == '__' and name[-2:] == '__'
-                is_inplace = name[-1] == "_" and not is_magic_method
-                self_variable = create_input((self_size,), device=device)[0][0]
-                # FixMe: run grad checks on inplace self
-                if is_inplace:
-                    self_variable.requires_grad = False
-                # need to record this because methods can change the size (e.g. unsqueeze)
-                args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs, device=device)
-                self_tensor = deepcopy(self_variable)
-                args_tensor = deepcopy(unpack_variables(args_variable))
-                if not exclude_tensor_method(name, test_name):
-                    output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
-                    output_tensor = getattr(self_tensor, name)(*args_tensor, **kwargs_variable)
-                    if not isinstance(output_tensor, torch.Tensor) and not istuple(output_tensor):
-                        # TODO: I'm not sure why we insert an outer dimension
-                        # here, seems a bit strange
-                        output_tensor = torch.tensor((output_tensor, ), dtype=torch.float, device=device)
-                    self.assertEqual(unpack_variables(output_variable), output_tensor)
-                    # TODO: check that both have changed after adding all inplace ops
-
-                    def fn(*inputs):
-                        output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
-                        return output_process_fn(output)
-
-                    if not is_inplace and name not in EXCLUDE_GRADCHECK:
-                        run_grad_and_gradgrad_checks(self, name, test_name, fn,
-                                                     output_variable, (self_variable,) + args_variable)
-
-                # functional interface tests
-                if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
-                    def fn(*inputs):
-                        output = getattr(torch, name)(*inputs, **kwargs)
-                        return output_process_fn(output)
-
-                    f_args_variable = (self_variable,) + args_variable
-                    f_args_tensor = (self_tensor,) + args_tensor
-                    # could run the gradchecks again, but skip since we did it for the methods above.
-                    run_gradcheck = exclude_tensor_method(name, test_name) and not is_inplace and name not in EXCLUDE_GRADCHECK
-                    run_functional_checks(self, test_name, name, fn,
-                                          run_gradcheck, f_args_variable, f_args_tensor)
-
-                # check for correct type of input and input.grad
-                if not is_inplace:
-                    self_variable = create_input((self_size,), requires_grad=True)[0][0]
-                    args_variable, kwargs_variable = create_input(args, requires_grad=False, call_kwargs=kwargs)
-                    if hasattr(self_variable, name):
+            # for-loop bodies don't define scopes, so we have to save the variables
+            # we want to close over in some way
+            def do_test(self, device, dtype=dtype, name=name, self_size=self_size, args=new_args, test_name=test_name,
+                        output_process_fn=output_process_fn):
+                def check(name):
+                    is_magic_method = name[:2] == '__' and name[-2:] == '__'
+                    is_inplace = name[-1] == "_" and not is_magic_method
+                    self_variable = create_input((self_size,), dtype=dtype, device=device)[0][0]
+                    # FixMe: run grad checks on inplace self
+                    if is_inplace:
+                        self_variable.requires_grad = False
+                    # need to record this because methods can change the size (e.g. unsqueeze)
+                    args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace,
+                                                                  call_kwargs=kwargs, dtype=dtype, device=device)
+                    self_tensor = deepcopy(self_variable)
+                    args_tensor = deepcopy(unpack_variables(args_variable))
+                    if not exclude_tensor_method(name, test_name):
                         output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
-                    else:
-                        self_and_args_variable = (self_variable,) + args_variable
-                        output_variable = getattr(torch, name)(*self_and_args_variable, **kwargs_variable)
-                    if isinstance(output_variable, torch.autograd.Variable):
-                        if output_variable.is_sparse:
-                            rand = randn_like(output_variable.to_dense()).to_sparse()
+                        output_tensor = getattr(self_tensor, name)(*args_tensor, **kwargs_variable)
+                        if not isinstance(output_tensor, torch.Tensor) and not istuple(output_tensor):
+                            # TODO: I'm not sure why we insert an outer dimension
+                            # here, seems a bit strange
+                            if dtype.is_complex:
+                                output_tensor = torch.tensor((output_tensor, ), dtype=torch.cfloat, device=device)
+                            else:
+                                output_tensor = torch.tensor((output_tensor, ), dtype=torch.float, device=device)
+                        self.assertEqual(unpack_variables(output_variable), output_tensor)
+                        # TODO: check that both have changed after adding all inplace ops
+
+                        def fn(*inputs):
+                            output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
+                            return output_process_fn(output)
+
+                        if not is_inplace and name not in EXCLUDE_GRADCHECK:
+                            run_grad_and_gradgrad_checks(self, name, test_name, fn,
+                                                         output_variable, (self_variable,) + args_variable)
+
+                    # functional interface tests
+                    if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
+                        def fn(*inputs):
+                            output = getattr(torch, name)(*inputs, **kwargs)
+                            return output_process_fn(output)
+
+                        f_args_variable = (self_variable,) + args_variable
+                        f_args_tensor = (self_tensor,) + args_tensor
+                        # could run the gradchecks again, but skip since we did it for the methods above.
+                        run_gradcheck = exclude_tensor_method(name, test_name) and not is_inplace and name not in EXCLUDE_GRADCHECK
+                        run_functional_checks(self, test_name, name, fn,
+                                              run_gradcheck, f_args_variable, f_args_tensor)
+
+                    # check for correct type of input and input.grad
+                    if not is_inplace:
+                        self_variable = create_input((self_size,), requires_grad=True, dtype=dtype)[0][0]
+                        args_variable, kwargs_variable = create_input(args, requires_grad=False, call_kwargs=kwargs, dtype=dtype)
+                        if hasattr(self_variable, name):
+                            output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                         else:
-                            rand = randn_like(output_variable)
-                        output_variable.backward(rand)
-                        self.assertTrue(type(self_variable) == type(self_variable.grad))
-                        self.assertTrue(self_variable.size() == self_variable.grad.size())
+                            self_and_args_variable = (self_variable,) + args_variable
+                            output_variable = getattr(torch, name)(*self_and_args_variable, **kwargs_variable)
+                        if isinstance(output_variable, torch.autograd.Variable):
+                            if output_variable.is_sparse:
+                                rand = randn_like(output_variable.to_dense()).to_sparse()
+                            else:
+                                rand = randn_like(output_variable)
+                            output_variable.backward(rand)
+                            self.assertTrue(type(self_variable) == type(self_variable.grad))
+                            self.assertTrue(self_variable.size() == self_variable.grad.size())
 
-                    # compare grads to inplace grads
-                    inplace_name = name + '_'
-                    # can't broadcast inplace to left hand side
-                    skip_inplace = ('broadcast_lhs' in test_name or
-                                    'broadcast_all' in test_name)
-                    if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
-                        output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
-                        if not isinstance(output_variable, tuple):
-                            output_variable = (output_variable,)
-                        inplace_self_variable = deepcopy(self_variable)
-                        inplace_self_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
-                                                           for i in (inplace_self_variable,))
-                        inplace_args_variable = deepcopy(args_variable)
-                        inplace_args_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
-                                                           for i in inplace_args_variable)
+                        # compare grads to inplace grads
+                        inplace_name = name + '_'
+                        # can't broadcast inplace to left hand side
+                        skip_inplace = ('broadcast_lhs' in test_name or
+                                        'broadcast_all' in test_name)
+                        if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
+                            output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
+                            if not isinstance(output_variable, tuple):
+                                output_variable = (output_variable,)
+                            inplace_self_variable = deepcopy(self_variable)
+                            inplace_self_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
+                                                               for i in (inplace_self_variable,))
+                            inplace_args_variable = deepcopy(args_variable)
+                            inplace_args_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
+                                                               for i in inplace_args_variable)
 
-                        inplace_output_variable = (
-                            getattr(inplace_self_variable_copy[0], inplace_name)(*inplace_args_variable_copy,
-                                                                                 **kwargs_variable))
-                        if not isinstance(inplace_output_variable, tuple):
-                            inplace_output_variable = (inplace_output_variable,)
-                        self.assertEqual(inplace_output_variable, output_variable)
-                        # Check that gradient is the same
-                        for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,
-                                            (self_variable,) + args_variable):
-                            if not isinstance(inp_i, torch.Tensor):
-                                assert not isinstance(i, torch.Tensor)
-                                continue
-                            if inp_i.grad is not None:
-                                with torch.no_grad():
-                                    inp_i.grad.zero_()
-                            if i.grad is not None:
-                                with torch.no_grad():
-                                    i.grad.zero_()
-                        for io, o in zip(inplace_output_variable, output_variable):
-                            grad = randn_like(io).double()
-                            io.backward(grad)
-                            o.backward(grad)
-                        for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,
-                                            (self_variable,) + args_variable):
-                            if not isinstance(inp_i, torch.Tensor):
-                                continue
-                            self.assertEqual(inp_i.grad, i.grad)
+                            inplace_output_variable = (
+                                getattr(inplace_self_variable_copy[0], inplace_name)(*inplace_args_variable_copy,
+                                                                                     **kwargs_variable))
+                            if not isinstance(inplace_output_variable, tuple):
+                                inplace_output_variable = (inplace_output_variable,)
+                            self.assertEqual(inplace_output_variable, output_variable)
+                            # Check that gradient is the same
+                            for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,
+                                                (self_variable,) + args_variable):
+                                if not isinstance(inp_i, torch.Tensor):
+                                    assert not isinstance(i, torch.Tensor)
+                                    continue
+                                if inp_i.grad is not None:
+                                    with torch.no_grad():
+                                        inp_i.grad.zero_()
+                                if i.grad is not None:
+                                    with torch.no_grad():
+                                        i.grad.zero_()
+                            for io, o in zip(inplace_output_variable, output_variable):
+                                if dtype.is_complex:
+                                    grad = randn_like(io).to(torch.cdouble)
+                                else:
+                                    grad = randn_like(io).double()
+                                io.backward(grad)
+                                o.backward(grad)
+                            for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,
+                                                (self_variable,) + args_variable):
+                                if not isinstance(inp_i, torch.Tensor):
+                                    continue
+                                self.assertEqual(inp_i.grad, i.grad)
 
-            check(name)
-            inplace_name = name + '_'
-            # can't broadcast inplace to left hand side
-            broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
-            if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
-                check(inplace_name)
+                check(name)
+                inplace_name = name + '_'
+                # can't broadcast inplace to left hand side
+                broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
+                if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
+                    check(inplace_name)
 
-        assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
+            assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
 
-        for skip in skipTestIf:
-            do_test = skip(do_test)
+            for skip in skipTestIf:
+                do_test = skip(do_test)
 
-        setattr(TestAutogradDeviceType, test_name, do_test)
-
+            setattr(TestAutogradDeviceType, test_name, do_test)
 
 class TestAutogradFunctional(TestCase):
     def _assert_same_struct(self, res, base):
@@ -5333,7 +5351,7 @@ class TestAutogradDeviceType(TestCase):
             x.requires_grad = True
             d = torch.cdist(x, y)
             d.backward(dist_grad)
-            # Check that the backward passs does not contain invalid 
+            # Check that the backward passs does not contain invalid
             # values such as nan or inf
             assert torch.isfinite(x.grad).all()
 
