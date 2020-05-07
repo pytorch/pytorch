@@ -455,7 +455,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_relu(
     const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<false>(input, output_scale, output_zero_point);
+  return apply_impl<true>(input, output_scale, output_zero_point);
 }
 
 template <int kSpatialDim>
