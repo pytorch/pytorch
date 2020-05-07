@@ -20,6 +20,8 @@ namespace rpc {
 constexpr long kToMilliseconds = 1000;
 
 const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
+const std::string kThreadPoolSize = "agent.thread_pool_size";
+const std::string kNumIdleThreads = "agent.num_idle_threads";
 
 //////////////////////////  MetricsTracker  /////////////////////////////////
 
@@ -419,6 +421,25 @@ std::string TensorPipeAgent::createUniqueShmAddr() {
       threadLocalId++);
 }
 #endif
+
+std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
+  std::unordered_map<std::string, std::string> metrics;
+  metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
+  metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
+  if (isGILProfilingEnabled()) {
+    {
+      std::unique_lock<std::mutex> lock(metricsMutex_);
+      // Include the averages for each time series metric. This is just the GIL
+      // Wait Time for now.
+      auto averageGilWaitTime =
+          timeSeriesMetrics_[kGilAverageWaitTime]->computeAverage();
+      lock.unlock();
+      metrics[kGilAverageWaitTime] = c10::to_string(averageGilWaitTime);
+    }
+  }
+
+  return metrics;
+}
 
 void TensorPipeAgent::addGilWaitTime(
     const std::chrono::microseconds gilWaitTime) {
