@@ -1,4 +1,5 @@
 #include <c10/test/util/complex_test_common.h>
+#include <ATen/cuda/CUDABlas.h>
 
 __global__ void test_thrust_kernel() {
   // thrust conversion
