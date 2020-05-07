@@ -40,25 +40,21 @@ class TestFreezing(JitTestCase):
         class M(nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.a = 1                   # folded
-                self.b = 1.2                 # folded
-                self.c = "hello"             # folded
-                self.c2 = "hi\xA1"           # not folded
-                self.d = [1, 1]              # folded
-                self.e = [1.0, 1.1]          # folded
+                self.a = 1         # folded
+                self.b = 1.2       # folded
+                self.c = "hello"   # folded
+                self.d = [1, 1]     # folded
+                self.e = [1.0, 1.1]  # folded
                 self.f = ["hello", "world"]  # folded
-                self.f2 = [(1, "Over \u0e55\u0e57 57")]
                 self.g = ([1, 2], 3.2, "4.4", torch.tensor([5.5], requires_grad=True))     # folded
                 self.h = {"layer" : [torch.tensor([7.7], requires_grad=True)]}
-                self.h2 = {"layer\xB1" : [torch.tensor([7.7], requires_grad=True)]}  # not folded. TODO: inline any string.
                 self.t = torch.tensor([1.2, 2.4], requires_grad=True)  # folded
                 self.ts = [torch.tensor([1.0, 2.0], requires_grad=True), torch.tensor([3.0, 4.0], requires_grad=True)]  # folded
-                self.tt = [[torch.tensor([3.3, 2.3], requires_grad=True), None]]  # not folded. TODO: fold Generic list
+                self.tt = [[torch.tensor([3.3, 2.3], requires_grad=True), None]]
 
             def forward(self, x):
-                return str(self.a) + str(self.b) + self.c + self.c2 + str(self.d) + \
-                    str(self.e) + str(self.f) + str(self.f2) + str(self.g) + \
-                    str(self.h['layer']) + str(self.h2) + str(self.t) + str(self.ts) + str(self.tt)
+                return str(self.a) + str(self.b) + self.c + str(self.d) + \
+                    str(self.e) + str(self.f) + str(self.g) + str(self.h['layer']) + str(self.t) + str(self.ts) + str(self.tt)
 
 
         m = torch.jit.script(M())
@@ -71,9 +67,6 @@ class TestFreezing(JitTestCase):
         # module m {
         #   attributes {
         #     tt = ...
-        #     c2 = ...
-        #     f2 = ...
-        #     h2 = ...
         #   }
         #   ...
         # }
@@ -87,10 +80,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(m._c.hasattr('h'))
         self.assertFalse(m._c.hasattr('t'))
         self.assertFalse(m._c.hasattr('ts'))
-        self.assertTrue(m._c.hasattr('tt'))
-        self.assertTrue(m._c.hasattr('c2'))
-        self.assertTrue(m._c.hasattr('f2'))
-        self.assertTrue(m._c.hasattr('h2'))
+        self.assertFalse(m._c.hasattr('tt'))
         output_f = m.forward(input)
         self.assertEqual(output_s, output_f)
 
@@ -155,6 +145,88 @@ class TestFreezing(JitTestCase):
         self.assertTrue(mf.hasattr('sub2'))
         self.assertTrue(mf.sub2.hasattr('b'))   # verify b is preserved in sub2
         self.assertFalse(mf.sub2.hasattr('a'))  # verify a is removed in sub2
+        output_f = mf.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    def test_freeze_module_with_fork(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = torch.ones(20, 20)
+                self.b = torch.ones(20, 20)
+
+            def forward(self, x):
+                return self.a * self.b + x
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub = SubModule()
+
+            def forward(self, x):
+                fut = torch.jit._fork(self.sub.forward, x)
+                y_hat = self.sub(x)
+                y = torch.jit._wait(fut)
+                return y_hat + y
+
+        m = torch.jit.script(TestModule())
+        m.eval()
+        input = torch.randn(20, 20)
+        output_s = m.forward(input)
+        print(output_s)
+        mf = torch._C._freeze_module(m._c)
+
+        # Check if frozen module looks as below:
+        # module m {
+        #   attributes {
+        #   }
+        #   ...
+        #   submodule {
+        #   }
+        # }
+        self.assertFalse(mf.hasattr('a'))
+        self.assertFalse(mf.hasattr('b'))
+        output_f = mf.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    def test_freeze_module_with_fork2(self):
+        @torch.jit.script
+        def foo(x, y):
+            return x * y
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.a = torch.ones(20, 20)
+                self.b = torch.ones(20, 20)
+
+            def forward(self, x):
+                fut = torch.jit._fork(foo, self.a, self.b)
+                y_hat = foo(self.a, self.b)
+                y = torch.jit._wait(fut)
+                return y_hat + y
+
+        m = torch.jit.script(TestModule())
+        m.eval()
+        input = torch.randn(2, 2)
+        output_s = m.forward(input)
+        mf = torch._C._freeze_module(m._c)
+
+        # Check if frozen module looks as below:
+        # module m {
+        #   attributes {
+        #     self.a = ...
+        #     self.b = ..
+        #   }
+        #   ...
+        #   submodule {
+        #   }
+        # }
+        # TODO:  Although there are no mutation, the alias analysis
+        # conservatively assumes there is a mutation because attributes are
+        # passed to fork subgraph. both 'a' and 'b' are preserved.
+        self.assertTrue(mf.hasattr('a'))
+        self.assertTrue(mf.hasattr('b'))
         output_f = mf.forward(input)
         self.assertEqual(output_s, output_f)
 

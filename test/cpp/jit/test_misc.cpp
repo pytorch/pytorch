@@ -827,8 +827,10 @@ void checkScopeCallbacks() {
 }
 
 void testRecordFunction() {
+  // enable observers
+  c10::impl::IncludeDispatchKeyGuard observer_guard(c10::DispatchKey::Profiler);
   // disabling the inlining of method calls
-  GraphOptimizerEnabledGuard guard(false);
+  GraphOptimizerEnabledGuard opt_guard(false);
 
   // [(fn, [[sizes], [sizes], ...]), ...]
   TracedTestInputs traced_inputs;
@@ -858,9 +860,6 @@ void testRecordFunction() {
 
   TracedTestInputs eager_inputs, jit_inputs;
   {
-    c10::impl::IncludeDispatchKeyGuard profile_guard(
-        c10::DispatchKey::Profiler);
-
     auto t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
     auto t2 = invokeTestRecordFunction(t);
@@ -999,6 +998,9 @@ void checkDebugInfo(at::DebugInfoKind kind, int model_id) {
 }
 
 void testThreadLocalDebugInfo() {
+  // enable observers
+  c10::impl::IncludeDispatchKeyGuard observer_guard(c10::DispatchKey::Profiler);
+
   TORCH_CHECK(
       at::ThreadLocalDebugInfo::get(at::DebugInfoKind::TEST_INFO) == nullptr);
   auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();

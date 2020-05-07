@@ -11,7 +11,7 @@ from torch._C import TensorType, TupleType, FloatType, IntType, \
     DeviceObjType, RRefType, FutureType
 
 from textwrap import dedent
-from torch._six import builtins, PY2
+from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
 
@@ -95,14 +95,7 @@ def is_vararg(the_callable):
         the_callable = the_callable.__call__
 
     if is_function_or_method(the_callable):
-        if PY2:
-            # [inspect args]
-            # `inspect.getfullargspec` is not available in Python 2 but
-            # `inspect.getargspec` is deprecated in Python 3, so we have to
-            # switch over them
-            return inspect.getargspec(the_callable).varargs is not None
-        else:
-            return inspect.getfullargspec(the_callable).varargs is not None
+        return inspect.getfullargspec(the_callable).varargs is not None
     else:
         return False
 
@@ -113,11 +106,7 @@ def get_param_names(fn, n_args):
         fn = fn.__call__
 
     if is_function_or_method(fn):
-        if PY2:
-            # see [inspect args]
-            return inspect.getargspec(fn).args
-        else:
-            return inspect.getfullargspec(fn).args
+        return inspect.getfullargspec(fn).args
     else:
         # The `fn` was not a method or function (maybe a class with a __call__
         # method, so use a default param name list)

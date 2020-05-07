@@ -814,7 +814,7 @@ struct CodeImpl {
         break;
       case prim::CallMethod:
         if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
-          emitCall(class_type->getMethod(node->s(attr::name)), node->inputs());
+          emitCall(&class_type->getMethod(node->s(attr::name)), node->inputs());
         } else {
           emitInterfaceCall(node->s(attr::name), node->inputs());
         }
@@ -1142,14 +1142,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // reduce the number of compilations for too dynamic callers we
             // might miss opportunities where a caller is dynamic but a callee
             // gets stable arguments
-            auto function = peek(stack, 0, inst.N)
-                                .toObject()
-                                ->type()
-                                ->getMethod(af.constants[inst.X].toStringRef());
-            if (!function->isGraphFunction()) {
-              runBuiltinFunction(stack, function, &af);
+            Function& function =
+                peek(stack, 0, inst.N)
+                    .toObject()
+                    ->type()
+                    ->getMethod(af.constants[inst.X].toStringRef());
+            if (!function.isGraphFunction()) {
+              runBuiltinFunction(stack, &function, &af);
             } else {
-              runGraphFunction(stack, function, &af);
+              runGraphFunction(stack, &function, &af);
             }
           } break;
           case RET:
@@ -1246,9 +1247,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             } else {
               auto t = stack.back().toTensor();
               const TypePtr& expected = af.types[inst.X];
-              bool comp = expected->cast<TensorType>()
-                              ->isCompatibleWithInCurrentExecutionContext(t);
-              push(stack, comp);
+              auto pttp = tensorTypeInCurrentExecutionContext(t);
+              push(stack, pttp->isSubtypeOf(expected));
             }
             ++af.pc;
           } break;
@@ -1339,7 +1339,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               drop(stack, 1);
               c10::SourceLocation location{
                   "", range->filename()->c_str(), uint32_t(line)};
-              c10::Warning::warn(location, pop(stack).toStringRef());
+              // Sends the warning to the warning handler with the
+              // "verbatim" flag. This flag ensures the warning handler
+              // will print the exception as configured.
+              c10::Warning::warn(
+                  location, pop(stack).toStringRef(), /*verbatim=*/true);
             } else {
               TORCH_WARN(pop(stack).toStringRef());
             }

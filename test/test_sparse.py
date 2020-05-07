@@ -7,7 +7,6 @@ torch.set_default_dtype(torch.double)
 import itertools
 import functools
 import random
-import sys
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM, IS_WINDOWS
@@ -759,6 +758,17 @@ class TestSparse(TestCase):
         test_shape(2, 20, [3, 17, 19, 5])
         test_shape(2, 20, [3, 17, 19, 0])
 
+    def test_add_sub_nnz(self):
+        # nnz should not grow unbounded (gh-34964)
+        x = torch.randn(10, device=self.device).to_sparse()
+        x.add_(x)
+        x.add_(x)
+        self.assertLessEqual(x._nnz(), 10)
+
+        x.sub_(2 * x)
+        x.sub_(2 * x)
+        self.assertLessEqual(x._nnz(), 10)
+
     def test_cat(self):
         # shapes: list of tuples (sparse_dims, nnz, sizes)
         def test_shapes(shapes, dim, fail_message=None):
@@ -1032,6 +1042,7 @@ class TestSparse(TestCase):
             ab = a.bmm(b)
 
     @cuda_only
+    @skipIfRocm
     @unittest.skipIf(
         (torch.version.cuda
             and [int(x) for x in torch.version.cuda.split(".")] >= [10, 1]),
@@ -1225,7 +1236,7 @@ class TestSparse(TestCase):
         y = y.bfloat16()
         res_bf16 = torch.add(x, y)
         res_bf16 = res_bf16.float()  # to compare with reference
-        self.assertEqual(res_fp32, res_bf16, prec=1e-2)
+        self.assertEqual(res_fp32, res_bf16, atol=1e-2)
 
     def test_norm(self):
         def test_shape(sparse_dims, nnz, with_size):
@@ -2283,10 +2294,7 @@ class TestSparse(TestCase):
         self.assertEqual(list(t.coalesce().values().size()), [1, 3])
 
     def test_pickle(self):
-        if sys.version_info[0] == 2:
-            import cPickle as pickle
-        else:
-            import pickle
+        import pickle
 
         shape_sparse_dim_nnz = [
             ((), 0, 2),

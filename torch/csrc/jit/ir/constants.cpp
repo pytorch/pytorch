@@ -18,23 +18,9 @@ bool insertableTensor(const at::Tensor& ten) {
   return !ten.requires_grad();
 }
 
-// Check that TorchScript can handle inlining string.
-// TODO: support inlining any string (e.g. \x, \u, \U escapes).
-static bool isSupportedStringLiteral(const std::string& str) {
-  const auto maxASCII = 0x7fu;
-  for (auto c : str) {
-    if (c > maxASCII)
-      return false;
-  }
-  return true;
-}
-
 bool insertableIValue(const IValue& ivalue) {
-  if (ivalue.isString()) {
-    return isSupportedStringLiteral(ivalue.toString()->string());
-  }
   if (ivalue.isInt() || ivalue.isNone() || ivalue.isBool() ||
-      ivalue.isDouble() || ivalue.isDevice()) {
+      ivalue.isDouble() || ivalue.isString() || ivalue.isDevice()) {
     return true;
   }
   if (ivalue.isTensor()) {
@@ -101,48 +87,19 @@ c10::optional<Value*> tryInsertConstant(
   } else if (val.isBool()) {
     n->i_(attr::value, val.toBool());
     n->output()->setType(BoolType::get());
-  } else if (val.isBoolList()) {
-    auto bool_list = val.toBoolList();
-    n->is_(
-        attr::value, std::vector<int64_t>(bool_list.begin(), bool_list.end()));
-    n->output()->setType(ListType::ofBools());
-  } else if (val.isIntList()) {
-    n->is_(attr::value, val.toIntVector());
-    n->output()->setType(ListType::ofInts());
-  } else if (val.isTensorList()) {
-    n->ts_(attr::value, fmap(val.toTensorVector(), [](const at::Tensor& t) {
-             AT_ASSERT(!t.requires_grad());
-             return t;
-           }));
-    n->output()->setType(ListType::ofTensors());
-  } else if (val.isDoubleList()) {
-    auto double_list = val.toDoubleList();
-    n->fs_(
-        attr::value,
-        std::vector<double>(double_list.begin(), double_list.end()));
-    n->output()->setType(ListType::ofFloats());
-  } else if (val.isString()) {
-    auto& str = val.toString()->string();
-    if (isSupportedStringLiteral(str)) {
-      n->s_(attr::value, str);
-      n->output()->setType(StringType::get());
+  } else if (val.isList()) {
+    bool fast_path_list =
+        val.isBoolList() || val.isIntList() || val.isDoubleList();
+    if (fast_path_list || insertableIValue(val)) {
+      n->ival_(attr::value, val);
+      n->output()->setType(val.type());
     } else {
       n->destroy();
       return c10::nullopt;
     }
-  } else if (val.type()->isSubtypeOf(ListType::ofStrings())) {
-    std::vector<std::string> ss;
-    auto generic_list = val.toListRef();
-    for (const IValue& ival : generic_list) {
-      if (isSupportedStringLiteral(ival.toStringRef())) {
-        ss.push_back(ival.toStringRef());
-      } else {
-        n->destroy();
-        return c10::nullopt;
-      }
-    }
-    n->ss_(attr::value, ss);
-    n->output()->setType(ListType::create(StringType::get()));
+  } else if (val.isString()) {
+    n->s_(attr::value, val.toString()->string());
+    n->output()->setType(StringType::get());
   } else if (val.isDevice()) {
     std::stringstream ss;
     ss << val.toDevice();
@@ -191,6 +148,12 @@ c10::optional<IValue> toIValue(const Value* v) {
       node->kindOf(attr::value) == AttributeKind::f) {
     return node->f(attr::value);
   } else if (
+      type->cast<ListType>() &&
+      node->kindOf(attr::value) == AttributeKind::ival) {
+    const auto& list = node->ival(attr::value);
+    TORCH_INTERNAL_ASSERT(list.isList());
+    return list;
+  } else if (
       type->cast<DictType>() &&
       node->kindOf(attr::value) == AttributeKind::ival) {
     const auto& dict = node->ival(attr::value);
@@ -202,25 +165,6 @@ c10::optional<IValue> toIValue(const Value* v) {
     const auto& tup = node->ival(attr::value);
     TORCH_INTERNAL_ASSERT(tup.isTuple());
     return tup;
-  } else if (type->isSubtypeOf(ListType::ofInts())) {
-    const auto& is = node->is(attr::value);
-    return is;
-  } else if (type->isSubtypeOf(ListType::ofFloats())) {
-    const auto& fs = node->fs(attr::value);
-    return fs;
-  } else if (type->isSubtypeOf(ListType::ofBools())) {
-    const auto bs = fmap<bool>(node->is(attr::value));
-    return bs;
-  } else if (type->isSubtypeOf(ListType::ofTensors())) {
-    const auto& ts = node->ts(attr::value);
-    return ts;
-  } else if (type->isSubtypeOf(ListType::ofStrings())) {
-    const auto& ss = node->ss(attr::value);
-    auto vals = c10::impl::GenericList(StringType::get());
-    for (const auto& str : ss) {
-      vals.push_back(str);
-    }
-    return vals;
   } else if (type == StringType::get()) {
     const auto& s = node->s(attr::value);
     return s;

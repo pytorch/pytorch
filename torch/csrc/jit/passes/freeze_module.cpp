@@ -18,7 +18,7 @@ class AttributePropagator {
 
   void optimizeSubGraphs(
       std::shared_ptr<Graph>& graph,
-      std::function<void(std::shared_ptr<Graph>&)> func) {
+      void (*func)(std::shared_ptr<Graph>&)) {
     func(graph);
     std::stack<Block*> blocks({graph->block()});
     while (!blocks.empty()) {
@@ -37,12 +37,15 @@ class AttributePropagator {
   }
 
   void run(std::shared_ptr<Graph>& graph) {
-    optimizeSubGraphs(
-        graph, [](std::shared_ptr<Graph>& subgraph) { Inline(*subgraph); });
-    propagateAttributes(graph);
-    optimizeSubGraphs(graph, [](std::shared_ptr<Graph>& subgraph) {
+    auto applyInline = [](std::shared_ptr<Graph>& subgraph) {
+      Inline(*subgraph);
+    };
+    auto applyOptimizations = [](std::shared_ptr<Graph>& subgraph) {
       runOptimization(subgraph, /* unroll? */ false);
-    });
+    };
+    optimizeSubGraphs(graph, applyInline);
+    propagateAttributes(graph);
+    optimizeSubGraphs(graph, applyOptimizations);
     cleanupFrozenModule(graph);
   }
 
@@ -188,8 +191,6 @@ class AttributePropagator {
             insertMutableAttr(name, attr, mptr);
           }
         } else if (n->kind() == prim::fork) {
-          std::cout << "FORK: ";
-          n->dump();
           applyToSubGraph(n, graph, [this](std::shared_ptr<Graph>& subgraph) {
             recordMutableAttrs(subgraph);
           });
@@ -334,19 +335,14 @@ class AttributePropagator {
     TORCH_CHECK(n->kind() == prim::fork);
     auto attrModule = module_;
     auto node = n->inputs()[0]->node();
-    // TODO: Short cut
-    TORCH_INTERNAL_ASSERT(node->kind() == prim::GetAttr);
+    if (node->kind() != prim::GetAttr)
+      return;
     auto name = node->s(attr::name);
     auto input = node->inputs()[0];
     if (!findConstantAttr(input, name, attrModule, graph)) {
       // Module needs to be preserved.
-      std::cout << "WHAT\n";
-      node->dump();
-      attrModule.dump(false, false, false);
       return;
     }
-    std::cout << "GOOD\n";
-    node->dump();
     attrModule = attrModule.attr(name).toModule();
     auto subgraph = n->g(attr::Subgraph);
     std::swap(module_, attrModule);
@@ -395,15 +391,7 @@ class AttributePropagator {
               auto attr = module.attr(name);
               insertMutableAttr(name, attr, mptr);
               if (attr.isModule()) {
-                auto module = attr.toModule();
-                if (modules.count(module._ivalue()) == 0) {
-                  if (moduleEscapes(module, graph)) {
-                    // Preserve all attributes and methods of 'module' type.
-                    auto type = module.type();
-                    attrsToKeep_[type].insert(type->numAttributes());
-                  }
-                  modules.insert(module._ivalue());
-                }
+                modules.insert(attr.toModule()._ivalue());
               }
               break;
             }
@@ -413,14 +401,6 @@ class AttributePropagator {
             recordReferencedAttrs(subgraph);
           });
         }
-
-        /*if (n->kind() == prim::CallMethod) {
-        auto classType = n->inputs().at(0)->type()->cast<ClassType>();
-        TORCH_INTERNAL_ASSERT(classType, "Interface call not supported");
-        // Found a call, Preserve all attributes and methods of this type.
-        std::cout << classType->name()->qualifiedName() << " TYPE \n";
-        attrsToKeep_[classType].insert(classType->numAttributes());
-      }*/
       }
     }
   }
@@ -434,13 +414,9 @@ class AttributePropagator {
   void handleSharedClassType(Module& module, std::shared_ptr<Graph>& graph) {
     auto type = module.type();
     size_t N = type->numAttributes();
-    /*if (moduleEscapes(module, graph)) {
+    if (moduleEscapes(module, graph)) {
       // Perserve all its attributes and methods.
       attrsToKeep_[type].insert(N);
-      return;
-    }*/
-    if (attrsToKeep_[type].count(N)) {
-      // Module escapes. Preserve all its attributes and methods.
       return;
     }
     auto it2 = preservedScalarAttrs_.find(module._ivalue());

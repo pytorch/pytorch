@@ -1,4 +1,4 @@
-#include "interpreter.h"
+#include <torch/csrc/jit/mobile/interpreter.h>
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/operator_name.h>
@@ -54,12 +54,12 @@ bool InterpreterState::run(Stack& stack) {
         ++pc;
       } break;
       case INTERFACE_CALL: {
-        torch::jit::Function* method =
+        torch::jit::Function& method =
             peek(stack, 0, inst.N)
                 .toObject()
                 ->type()
                 ->getMethod(code_->constants_[inst.X].toStringRef());
-        method->run(stack);
+        method.run(stack);
         ++pc;
       } break;
       case LOAD:
