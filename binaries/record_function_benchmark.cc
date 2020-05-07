@@ -22,22 +22,22 @@ using namespace torch::autograd;
 
 void setupCallbacks() {
   // non-sampled callback
-  profiler::pushCallback(
+  profiler::addGlobalCallback(profiler::RecordFunctionCallback(
       [&](const profiler::RecordFunction& fn) {
         return true;
       },
-      [](const profiler::RecordFunction&) {},
-      /* needs_inputs */ true);
+      [](const profiler::RecordFunction&) {})
+    .needsInputs(true));
 
   // sampled
   for (auto idx = 0; idx < kNumSampledCb; ++idx) {
-    profiler::pushCallback(
+    profiler::addGlobalCallback(profiler::RecordFunctionCallback(
         [](const profiler::RecordFunction& fn) {
           return true;
         },
-        [](const profiler::RecordFunction&) {},
-        /* needs_inputs */ true,
-        /* sampling_prob */ kSampingProb
+        [](const profiler::RecordFunction&) {})
+      .needsInputs(true)
+      .samplingProb(kSampingProb)
     );
   }
 }
