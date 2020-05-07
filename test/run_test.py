@@ -48,6 +48,7 @@ TESTS = [
     'test_numba_integration',
     'test_optim',
     'test_mobile_optimizer',
+    'test_xnnpack_integration',
     'test_quantization',
     'test_sparse',
     'test_serialization',

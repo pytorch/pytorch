@@ -889,8 +889,8 @@ void TensorIterator::analyze_memory_format() {
 
       // Keep checking if first input is arbitrary strided (ex. NC111) or can be
       // broadcasted to anything numel == 1
-      auto cl3d_ambiguous = op.tensor.is_contiguous(MemoryFormat::Contiguous) &&
-              op.tensor.is_contiguous(MemoryFormat::ChannelsLast3d) ||
+      auto cl3d_ambiguous = (op.tensor.is_contiguous(MemoryFormat::Contiguous) &&
+              op.tensor.is_contiguous(MemoryFormat::ChannelsLast3d)) ||
           op.tensor.numel() == 1;
       if (first_cl3d_and_cont && !cl3d_ambiguous) {
         first_cl3d_and_cont = false;

@@ -7,8 +7,8 @@ building deep neural networks built on tape-based autograd systems.
 The PyTorch Contribution Process
 --------------------------------
 
-The PyTorch organization is governed by `PyTorch
-Governance </docs/source/community/governance.rst>`__.
+The PyTorch organization is governed by :doc:`PyTorch
+Governance <governance>`.
 
 The PyTorch development process involves a healthy amount of open
 discussions between the core development team and the community.
