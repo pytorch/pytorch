@@ -190,9 +190,9 @@ function file_diff_from_base() {
 
 function get_bazel() {
   # download bazel version
-  wget https://github.com/bazelbuild/bazel/releases/download/2.2.0/bazel-2.2.0-linux-x86_64 -O tools/bazel
+  wget https://github.com/bazelbuild/bazel/releases/download/3.1.0/bazel-3.1.0-linux-x86_64 -O tools/bazel
   # verify content
-  echo 'b2f002ea0e6194a181af6ac84cd94bd8dc797722eb2354690bebac92dda233ff tools/bazel' | sha256sum --quiet -c
+  echo '753434f4fa730266cf5ce21d1fdd425e1e167dd9347ad3e8adc19e8c0d54edca  tools/bazel' | sha256sum --quiet -c
 
   chmod +x tools/bazel
 }
