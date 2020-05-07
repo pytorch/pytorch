@@ -572,6 +572,7 @@ static Tensor & masked_fill_impl(Tensor & self, const Tensor & mask, Scalar valu
   iter.dont_compute_common_dtype();
   iter.dont_resize_outputs();
   iter.add_output(self);
+  iter.add_input(self);
   iter.add_input(mask);
   iter.build();
 

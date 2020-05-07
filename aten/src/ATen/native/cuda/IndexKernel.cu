@@ -136,7 +136,7 @@ void masked_fill_kernel(TensorIterator& iter, Scalar value) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(), "masked_fill_cuda", [&] {
       scalar_t scalar_val = value.to<scalar_t>();
-      auto mask_dtype = iter.input_dtype(0);
+      auto mask_dtype = iter.input_dtype(1);
       if (mask_dtype == at::ScalarType::Bool) {
         gpu_masked_fill_kernel<scalar_t, bool>(iter, scalar_val);
       } else {
