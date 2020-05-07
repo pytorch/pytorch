@@ -1,9 +1,8 @@
 #include <ATen/ATen.h>
+#include <ATen/LegacyTHFunctionsCUDA.h>
 
 namespace at {
 namespace native {
-
-namespace {
 
 std::tuple<Tensor &,Tensor &> thnn_conv_depthwise2d_backward_out(
     Tensor & grad_input,
@@ -25,7 +24,7 @@ std::tuple<Tensor &,Tensor &> thnn_conv_depthwise2d_backward_out(
                                                            kernel_size, stride, padding, dilation);
 }
 
-std::tuple<Tensor, Tensor, Tensor> thnn_conv_depthwise2d_backward(
+std::tuple<Tensor, Tensor> thnn_conv_depthwise2d_backward(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& weight,
