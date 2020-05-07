@@ -133,7 +133,7 @@ void initDispatchBindings(PyObject* module) {
     if (name.empty()) {
       return std::make_unique<c10::Module>(torch::import());
     } else {
-      return std::make_unique<c10::Module>(torch::import(name));
+      return std::make_unique<c10::Module>(c10::_import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD(name));
     }
   });
 

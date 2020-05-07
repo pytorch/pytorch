@@ -157,7 +157,11 @@ PyRRef pyRemoteBuiltin(
         *agent, dst, std::move(*scriptRemoteCall).toMessage(), false, rf);
 
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallback(callback::confirmPendingUser);
+    fm->addCallback([forkId{userRRef->forkId()}](
+                        const rpc::Message& message,
+                        const c10::optional<utils::FutureError>& futErr) {
+      callback::confirmPendingUser(message, futErr, forkId);
+    });
     return PyRRef(userRRef);
   } else {
     auto ownerRRef = ctx.createOwnerRRef(returnType);
@@ -204,7 +208,6 @@ PyRRef pyRemotePythonUdf(
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
   if (ctx.getWorkerId() != dst.id_) {
     auto userRRef = ctx.createUserRRef(dst.id_, PyObjectType::get());
-    ctx.addPendingUser(userRRef->forkId(), userRRef);
     auto fm = sendPythonRemoteCall(
         dst,
         std::move(serializedPyObj),
@@ -212,7 +215,12 @@ PyRRef pyRemotePythonUdf(
         userRRef->forkId().toIValue(),
         rf);
 
-    fm->addCallback(callback::confirmPendingUser);
+    ctx.addPendingUser(userRRef->forkId(), userRRef);
+    fm->addCallback([forkId{userRRef->forkId()}](
+                        const rpc::Message& message,
+                        const c10::optional<utils::FutureError>& futErr) {
+      callback::confirmPendingUser(message, futErr, forkId);
+    });
     return PyRRef(userRRef);
   } else {
     auto ownerRRef = ctx.createOwnerRRef(PyObjectType::get());

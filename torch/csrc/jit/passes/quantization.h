@@ -83,7 +83,8 @@ TORCH_API Module InsertObservers(
 TORCH_API Module InsertQuantDeQuant(
     Module& module,
     const std::string& method_name,
-    bool inplace = false);
+    bool inplace = false,
+    bool is_dynamic = false);
 
 /** Swap functional linear CallFunctions to aten::linear
  *  so that it can survive inline, since quant fusion need to
@@ -123,7 +124,9 @@ TORCH_API void SwapDeQuant(std::shared_ptr<Graph>& graph);
  *
  * \param graph the graph we want to apply fusion
  */
-TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
+TORCH_API void QuantFusion(
+    std::shared_ptr<Graph>& graph,
+    bool is_dynamic = false);
 
 /** \brief Fold Conv2d-BatchNorm2d into Conv2d in forward method of this module
  * and all its submodules.
@@ -192,7 +195,9 @@ TORCH_API void FoldPrepackedWeightIntoModule(
  */
 TORCH_API void DedupModuleUses(Module& module);
 
-TORCH_API script::Module Finalize(script::Module& module);
+TORCH_API script::Module Finalize(
+    script::Module& module,
+    bool is_dynamic = false);
 
 TORCH_API void FoldQuantizedPrepackingOps(Module& module);
 

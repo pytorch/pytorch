@@ -219,7 +219,7 @@ static void polygamma_kernel(TensorIterator& iter, int64_t n) {
 }
 
 static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "clamp_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
     ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
     auto min = min_scalar.to<scalar_t>();
     auto max = max_scalar.to<scalar_t>();
@@ -232,7 +232,7 @@ static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_sca
 }
 
 static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "clamp_max_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
     ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
     auto max = max_scalar.to<scalar_t>();
     auto max_vec = Vec256<scalar_t>(max);
@@ -243,7 +243,7 @@ static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
 }
 
 static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "clamp_min_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
     ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
     auto min = min_scalar.to<scalar_t>();
     auto min_vec = Vec256<scalar_t>(min);
@@ -486,7 +486,7 @@ REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, acos)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, asin)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, atan)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, ceil)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, ceil)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, cos)
 // IMPLEMENT_FLOAT_KERNEL(FLOATING, cosh)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erf)
@@ -494,7 +494,7 @@ IMPLEMENT_FLOAT_KERNEL(FLOATING, erfc)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erfinv)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, exp)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, expm1)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, floor)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, floor)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, log)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, log10)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, log1p)
@@ -505,7 +505,7 @@ IMPLEMENT_COMPLEX_KERNEL(FLOATING, sin)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, sqrt)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, tan)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, tanh)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, trunc)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, trunc)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, lgamma)
 
 }} // namespace at::native

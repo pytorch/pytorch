@@ -24,6 +24,10 @@ caffe2_binary_target("at_launch_benchmark.cc")
 target_include_directories(at_launch_benchmark PUBLIC
   ${CMAKE_BINARY_DIR}/aten/src)
 
+caffe2_binary_target("record_function_benchmark.cc")
+target_include_directories(record_function_benchmark PUBLIC
+  ${CMAKE_BINARY_DIR}/aten/src)
+
 caffe2_binary_target("predictor_verifier.cc")
 caffe2_binary_target("print_registered_core_operators.cc")
 caffe2_binary_target("run_plan.cc")

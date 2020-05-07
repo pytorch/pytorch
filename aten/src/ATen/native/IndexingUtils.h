@@ -11,15 +11,16 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
 
 
 static std::vector<Tensor> expandTensors(const Tensor & self, TensorList indices) {
-  // If indices come in as ByteTensor or BoolTensor (masks), expand them into the equivalent indexing by LongTensors
+  // If indices come in a BoolTensor (masks), expand them into the equivalent
+  // indexing by LongTensors
   std::vector<Tensor> result;
   for (const auto & index : indices) {
-    if (index.scalar_type() == kByte || index.scalar_type() == kBool) {
-      if (index.scalar_type() == kByte) {
-        TORCH_WARN("indexing with dtype torch.uint8 is now deprecated," \
-        " please use a dtype torch.bool instead.");
-      }
-      // The sizes of the ByteTensor mask or bool tensor must match the sizes of the
+    TORCH_CHECK(index.scalar_type() != kByte, 
+        "indexing with dtype torch.uint8 is no longer supported,",
+        " please use dtype torch.bool for a mask or dtype torch.long for",
+        " indices");
+    if (index.scalar_type() == kBool) {
+      // The sizes of the bool tensor mask must match the sizes of the
       // corresponding dimensions in self
       for (int64_t j = 0; j < index.dim(); j++) {
         int64_t srcIdx = result.size() + j;

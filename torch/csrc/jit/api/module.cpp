@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -107,11 +108,13 @@ Module Method::owner() const {
 }
 void Method::run(Stack& stack) {
   stack.insert(stack.begin(), owner()._ivalue());
+  RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   function_->run(stack);
 }
 
 IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
   stack.insert(stack.begin(), owner()._ivalue());
+  RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   return (*function_)(std::move(stack), kwargs);
 }
 

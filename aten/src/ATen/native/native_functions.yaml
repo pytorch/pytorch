@@ -1792,10 +1792,15 @@
 - func: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   supports_named_tensor: True
 
-- func: mkldnn_max_pooling(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode=False) -> Tensor
+- func: mkldnn_max_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode=False) -> Tensor
   requires_tensor: True
   dispatch:
-    MkldnnCPU: mkldnn_max_pooling
+    MkldnnCPU: mkldnn_max_pool2d
+
+- func: mkldnn_max_pool3d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode=False) -> Tensor
+  requires_tensor: True
+  dispatch:
+    MkldnnCPU: mkldnn_max_pool3d
 
 - func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   requires_tensor: True
@@ -3617,11 +3622,17 @@
   dispatch:
     CPU: dense_to_mkldnn
 
-- func: mkldnn_reorder_conv_weight(Tensor self, int[] padding, int[] stride, int[] dilation, int groups=1, int dims=2) -> Tensor
+- func: mkldnn_reorder_conv2d_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1) -> Tensor
   variants: function
   python_module: nn
   dispatch:
-    MkldnnCPU: mkldnn_reorder_conv_weight
+    MkldnnCPU: mkldnn_reorder_conv2d_weight
+
+- func: mkldnn_reorder_conv3d_weight(Tensor self, int[3] padding=0, int[3] stride=1, int[3] dilation=1, int groups=1) -> Tensor
+  variants: function
+  python_module: nn
+  dispatch:
+    MkldnnCPU: mkldnn_reorder_conv3d_weight
 
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
   use_c10_dispatcher: full

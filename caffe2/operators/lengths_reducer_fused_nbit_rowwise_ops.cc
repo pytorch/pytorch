@@ -216,6 +216,41 @@ operating on 2-bit rowwise quantized matrices with fused storage
 NO_GRADIENT(SparseLengthsMeanFused2BitRowwise);
 
 REGISTER_CPU_OPERATOR(
+    SparseLengthsSumSparseLookup,
+    SparseLengthsSumSparseLookupOp);
+OPERATOR_SCHEMA(SparseLengthsSumSparseLookup)
+    .NumInputs(3, 4)
+    .NumOutputs(2, 3)
+    .SetDoc(R"DOC(
+This op converts compressed indices of SparseLengthsSum*Sparse to
+uncompressed indices of SparseLengthsSum*. For compressed indices that maps
+to -1. It means it will correspond to a zero row in the uncompressed data.
+Therefore we will remove this indices and adjust the lengths.
+)DOC")
+    .Input(
+        0,
+        "INDICES",
+        "Integer vector containing compressed indices of the first "
+        "dimension of DATA for the slices that are being aggregated")
+    .Input(
+        1,
+        "LENGTHS",
+        "Vector with the same sum of elements as the first dimension of INDICES")
+    .Input(
+        2,
+        "COMPRESSED_INDICES_MAPPING",
+        "Integer vector mapping uncompressed indices to compressed indices")
+    .Input(
+        3,
+        "WEIGHTS",
+        "Vector of weights to scale rows of DATA with before reduction. Same size as INDICES.")
+    .Output(0, "output_indices", "Uncompressed indices")
+    .Output(1, "output_lengths", "Adjusted lengths")
+    .Output(2, "output_weights", "Adjusted weights")
+    .InheritOnnxSchema();
+NO_GRADIENT(SparseLengthsSumSparseLookup);
+
+REGISTER_CPU_OPERATOR(
     SparseLengthsSum4BitRowwiseSparse,
     SparseLengthsNBitRowwiseSparseOp<4>);
 OPERATOR_SCHEMA(SparseLengthsSum4BitRowwiseSparse)

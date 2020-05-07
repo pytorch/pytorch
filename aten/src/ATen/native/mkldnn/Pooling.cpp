@@ -10,7 +10,7 @@
 namespace at {
 namespace native {
 
-Tensor mkldnn_max_pooling(
+Tensor mkldnn_max_pool2d(
     const Tensor& self,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -18,7 +18,18 @@ Tensor mkldnn_max_pooling(
     IntArrayRef dilation,
     bool ceil_mode) {
   AT_ERROR(
-      "mkldnn_max_pooling: ATen not compiled with MKLDNN support");
+      "mkldnn_max_pool2d: ATen not compiled with MKLDNN support");
+}
+
+Tensor mkldnn_max_pool3d(
+    const Tensor& self,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  AT_ERROR(
+      "mkldnn_max_pool3d: ATen not compiled with MKLDNN support");
 }
 
 Tensor mkldnn_avg_pool2d(
@@ -168,7 +179,24 @@ static Tensor _mkldnn_pooling(
   return new_with_itensor_mkldnn(std::move(y), input.options());
 }
 
-Tensor mkldnn_max_pooling(
+Tensor mkldnn_max_pool2d(
+    const Tensor& input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  return _mkldnn_pooling(
+      input,
+      kernel_size,
+      stride,
+      padding,
+      dilation,
+      ceil_mode,
+      ideep::algorithm::pooling_max);
+}
+
+Tensor mkldnn_max_pool3d(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,

@@ -17,7 +17,8 @@
 namespace caffe2 {
 
 namespace {
-const std::string kRealBatchSizeBlob("real_batch_size");
+const std::string kRealBatchSizeBlob = "real_batch_size";
+const std::string kInitializers = "initializers";
 constexpr size_t kBufferSize = 64;
 
 // Convert ShapeInfo map to TensorShape map
@@ -567,6 +568,84 @@ NetDef buildLoopTestNet(
 
 } // namespace
 
+void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws) {
+  const static std::unordered_map<string, string> slss = {
+      {"SparseLengthsSum4BitRowwiseSparse", "SparseLengthsSumFused4BitRowwise"},
+      {"SparseLengthsWeightedSum4BitRowwiseSparse",
+       "SparseLengthsWeightedSumFused4BitRowwise"},
+      {"SparseLengthsSum8BitRowwiseSparse", "SparseLengthsSum8FusedBitRowwise"},
+      {"SparseLengthsWeightedSum8BitRowwiseSparse",
+       "SparseLengthsWeightedSumFused8BitRowwise"},
+      {"SparseLengthsSum2BitRowwiseSparse", "SparseLengthsSumFused2BitRowwise"},
+      {"SparseLengthsWeightedSum2BitRowwiseSparse",
+       "SparseLengthsWeightedSumFused2BitRowwise"}};
+  NetDef new_net;
+  new_net.CopyFrom(*net);
+  new_net.mutable_op()->Clear();
+  for (const auto& op : net->op()) {
+    const auto it = slss.find(op.type());
+    if (it == slss.end()) {
+      new_net.add_op()->CopyFrom(op);
+    } else {
+      const bool is_weighted =
+          (op.type().find("Weighted") != std::string::npos);
+      const auto& compressed_mapping = op.input(is_weighted ? 4 : 3);
+      const auto* b = ws.GetBlob(compressed_mapping);
+      bool fallback = false;
+      if (b && b->IsType<Tensor>()) {
+        const auto& t = BlobGetTensor(*b, CPU);
+        fallback = ((t.numel() == 1) && (t.template data<int32_t>()[0] == 0));
+      }
+
+      if (fallback) {
+        // If fallback, we just replace the original slss op with a normal sls
+        // op
+        OperatorDef new_op;
+        new_op.CopyFrom(op);
+        new_op.set_type(it->second);
+        new_op.mutable_input()->RemoveLast();
+        new_net.add_op()->CopyFrom(new_op);
+      } else {
+        // Otherwise, we replace slss with slss_lookup followed by a normal sls
+        OperatorDef new_op;
+        new_op.CopyFrom(op);
+        new_op.set_type("SparseLengthsSumSparseLookup");
+        new_op.clear_input();
+        const auto& indices_in = is_weighted ? op.input(2) : op.input(1);
+        const auto& lengths_in = is_weighted ? op.input(3) : op.input(2);
+        const auto& compress_mapping = is_weighted ? op.input(4) : op.input(3);
+        const auto& weights_in = is_weighted ? op.input(1) : "";
+        new_op.add_input(indices_in);
+        new_op.add_input(lengths_in);
+        new_op.add_input(compress_mapping);
+        const auto indices_out = indices_in + "_decomp";
+        const auto lengths_out = lengths_in + "_decomp";
+        const auto weights_out = weights_in + "_decomp";
+        new_op.clear_output();
+        new_op.add_output(indices_out);
+        new_op.add_output(lengths_out);
+        if (is_weighted) {
+          new_op.add_input(weights_in);
+          new_op.add_output(weights_out);
+        }
+        new_net.add_op()->CopyFrom(new_op);
+
+        new_op.CopyFrom(op);
+        new_op.set_type(it->second);
+        new_op.mutable_input()->RemoveLast();
+        *new_op.mutable_input()->Mutable(is_weighted ? 2 : 1) = indices_out;
+        *new_op.mutable_input()->Mutable(is_weighted ? 3 : 2) = lengths_out;
+        if (is_weighted) {
+          *new_op.mutable_input()->Mutable(1) = weights_out;
+        }
+        new_net.add_op()->CopyFrom(new_op);
+      }
+    }
+  }
+
+  new_net.Swap(net);
+}
+
 OnnxifiTransformer::OnnxifiTransformer(const OnnxifiTransformerOptions& opts)
     : BackendTransformerBase(), opts_(opts) {
   lib_ = onnx::initOnnxifiLibrary();
@@ -606,7 +685,7 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
   // Add the names of the initializer blobs that we want to fetch from the
   // workspace later
   auto* initializers_arg = op.add_arg();
-  initializers_arg->set_name("initializers");
+  initializers_arg->set_name(kInitializers);
   for (const auto& s : initialization_list) {
     initializers_arg->add_strings(s);
   }
@@ -804,14 +883,21 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
     onnxifi_net.add_partition_info()->CopyFrom(p);
   }
 
+  // Add initializers (weights) list to the net as an arg
+  auto* w_arg = onnxifi_net.add_arg();
+  w_arg->set_name(kInitializers);
+  for (const auto& i : initialization_list) {
+    w_arg->add_strings(i);
+  }
+
   // Build ONNXIFI Op
+  std::string model_str;
+  onnxifi_net.SerializeToString(&model_str);
   std::vector<std::string> onnxifi_net_inputs(
       onnxifi_net.external_input().begin(), onnxifi_net.external_input().end());
   std::vector<std::string> onnxifi_net_outputs(
       onnxifi_net.external_output().begin(),
       onnxifi_net.external_output().end());
-  std::string model_str;
-  onnxifi_net.SerializeToString(&model_str);
   auto onnxifi_op = buildOnnxifiOp(
       model_str,
       output_shape_hints,
@@ -1060,6 +1146,7 @@ bool OnnxifiTransformer::supportOpOnnx(
 bool OnnxifiTransformer::supportOpC2(
     const caffe2::OperatorDef& op,
     const ShapeInfoMap& shape_hints,
+    const std::unordered_set<std::string>& weights,
     const std::unordered_set<int>& blacklisted_ops,
     onnxBackendID backend_id) const {
   try {
@@ -1131,6 +1218,15 @@ bool OnnxifiTransformer::supportOpC2(
       }
     }
 
+    // Annnote the inputs that are weights
+    auto w_arg = net.add_arg();
+    w_arg->set_name(kInitializers);
+    for (const auto& i : op.input()) {
+      if (weights.count(i)) {
+        w_arg->add_strings(i);
+      }
+    }
+
     std::string c2_model_str;
     net.SerializeToString(&c2_model_str);
     auto ret = lib_->onnxGetBackendCompatibility(
@@ -1151,12 +1247,14 @@ bool OnnxifiTransformer::supportOpC2(
 void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
     const NetDef& net,
     const ShapeInfoMap& shape_hints,
+    const std::unordered_set<std::string>& weights,
     std::unordered_set<int>* blacklisted_ops) const {
   std::unordered_map<std::string, int> output_pos;
   onnx::OnnxExporter exporter(nullptr);
   onnxBackendID backend_id = backend_ids_[idx_];
 
   for (const auto& op : net.op()) {
+    std::string check;
     if (op.type() == "Gather") {
       int pos =
           ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
@@ -1166,19 +1264,24 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
     } else if (StartsWith(op.type(), "SparseLengthsWeighted")) {
       auto supported = opts_.use_onnx
           ? supportOpOnnx(op, &exporter, *blacklisted_ops, backend_id)
-          : supportOpC2(op, shape_hints, *blacklisted_ops, backend_id);
+          : supportOpC2(op, shape_hints, weights, *blacklisted_ops, backend_id);
       if (!supported && op.input_size() > 1) {
-        const auto it = output_pos.find(op.input(1));
-        if (it == output_pos.end()) {
-          continue;
-        }
-        blacklisted_ops->emplace(it->second);
-        // We know that current op is not going to be supported. Might as well
-        // blacklist it too
-        blacklisted_ops->emplace(
-            ArgumentHelper::GetSingleArgument<OperatorDef, int>(
-                op, kNetPos, -1));
+        check = op.input(1);
       }
+    } else if (
+        op.type() == "SparseLengthsSumSparseLookup" && op.input_size() > 3) {
+      check = op.input(3);
+    }
+    if (!check.empty()) {
+      const auto it = output_pos.find(check);
+      if (it == output_pos.end()) {
+        continue;
+      }
+      blacklisted_ops->emplace(it->second);
+      // We know that current op is not going to be supported. Might as well
+      // blacklist it too
+      blacklisted_ops->emplace(
+          ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1));
     }
   }
 }
@@ -1204,8 +1307,10 @@ void OnnxifiTransformer::blacklistCpuPartition(
 void OnnxifiTransformer::applyFilteringRules(
     const NetDef& net,
     const ShapeInfoMap& shape_hints,
+    const std::unordered_set<std::string>& weights,
     std::unordered_set<int>* blacklisted_ops) const {
-  tieGatherAndSparseLengthsWeightedSumOps(net, shape_hints, blacklisted_ops);
+  tieGatherAndSparseLengthsWeightedSumOps(
+      net, shape_hints, weights, blacklisted_ops);
   blacklistCpuPartition(net, blacklisted_ops);
 }
 
@@ -1237,9 +1342,12 @@ NetDef OnnxifiTransformer::TransformViaC2(
     const ShapeInfoMap& shape_hints) {
   onnxBackendID backend_id = backend_ids_[idx_];
 
-  auto c2_supports = [this, &shape_hints, &blacklisted_ops, backend_id](
-                         const caffe2::OperatorDef& op) {
-    return supportOpC2(op, shape_hints, blacklisted_ops, backend_id);
+  auto c2_supports = [this,
+                      &shape_hints,
+                      &blacklisted_ops,
+                      backend_id,
+                      &weights](const caffe2::OperatorDef& op) {
+    return supportOpC2(op, shape_hints, weights, blacklisted_ops, backend_id);
   };
 
   auto c2_converter =
@@ -1346,7 +1454,7 @@ void OnnxifiTransformer::transform(
   // Apply some filtering rules
   std::unordered_set<int> new_blacklisted_ops(
       blacklisted_ops.begin(), blacklisted_ops.end());
-  applyFilteringRules(*pred_net, shape_hints, &new_blacklisted_ops);
+  applyFilteringRules(*pred_net, shape_hints, weights, &new_blacklisted_ops);
 
   // Transform the net
   NetDef net_opt = opts_.use_onnx

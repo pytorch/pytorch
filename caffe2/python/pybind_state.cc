@@ -1733,6 +1733,9 @@ void addGlobalMethods(py::module& m) {
             ParseProtoFromLargeString(
                 pred_net_str.cast<std::string>(), &pred_net),
             "broken pred_net protobuf");
+        Workspace* curr_ws = GetCurrentWorkspace();
+        CAFFE_ENFORCE(curr_ws);
+        splitSparseLengthsSumSparse(&pred_net, *curr_ws);
         ShapeInfoMap shape_map;
         for (const auto& it : shapes) {
           shape_map.emplace(
@@ -1748,7 +1751,6 @@ void addGlobalMethods(py::module& m) {
         opts.merge_fp32_inputs_into_fp16 = merge_fp32_inputs_into_fp16;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);
-        Workspace* curr_ws = GetCurrentWorkspace();
         std::unordered_set<int> blacklist_set(
             black_list.begin(), black_list.end());
         std::vector<std::string> weight_names_overwrite{};
