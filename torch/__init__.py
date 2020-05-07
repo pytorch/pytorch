@@ -75,23 +75,30 @@ if platform.system() == 'Windows':
                 err = ctypes.WinError(ctypes.get_last_error())
                 err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
                 raise err
-        else:
-            dll_paths = [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]
-            dll_paths = list(filter(os.path.exists, dll_paths)) + [os.environ['PATH']]
-
-            os.environ['PATH'] = ';'.join(dll_paths)
 
     import glob
     dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
+    path_patched = False
     for dll in dlls:
+        is_loaded = False
         if with_load_library_flags:
             res = kernel32.LoadLibraryExW(dll, 0, 0x00001100)
+            last_error = ctypes.get_last_error()
+            if res == 0 and last_error != 126:
+                err = ctypes.WinError(last_error)
+                err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
+                raise err
+            elif res != 0:
+                is_loaded = True
+        if not is_loaded:
+            if not path_patched:
+                os.environ['PATH'] = ';'.join(dll_paths + [os.environ['PATH']])
+                path_patched = True
+            res = kernel32.LoadLibraryW(dll)
             if res == 0:
                 err = ctypes.WinError(ctypes.get_last_error())
                 err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
                 raise err
-        else:
-            ctypes.CDLL(dll)
 
 
 # See Note [Global dependencies]
