@@ -198,8 +198,13 @@ struct C10_API InefficientStdFunctionContext {
  *
  *  Also note that this is not thread-safe, and we assume this function will
  *  only be called during initialization.
+ *
+ *  The 'priority' flag is introduced when we want to overwrite the default
+ *  allocator, since the allocators are set statically. The default priority
+ *  is 0, which means the lowest. Only higher or equal priority can overwrite
+ *  existing ones.
  */
-C10_API void SetAllocator(DeviceType t, Allocator* alloc);
+C10_API void SetAllocator(DeviceType t, Allocator* alloc, uint8_t priority = 0);
 C10_API Allocator* GetAllocator(const DeviceType& t);
 
 template <DeviceType t>
