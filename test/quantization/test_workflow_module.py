@@ -15,8 +15,10 @@ from torch.quantization import (
     get_observer_dict,
     prepare,
 )
+import torch.nn as nn
 
 # Standard library
+import copy
 import io
 import unittest
 import math
@@ -27,6 +29,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
+from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
@@ -544,8 +547,12 @@ class TestFakeQuantizePerTensor(TestCase):
         Y = fq_module(X)
         # Fake quant is disabled,output is identical to input
         self.assertEqual(Y, X)
-        scale = fq_module.scale
-        zero_point = fq_module.zero_point
+
+        # Explicit copy at this point in time, because FakeQuant keeps internal
+        # state in mutable buffers.
+        scale = fq_module.scale.clone().detach()
+        zero_point = fq_module.zero_point.clone().detach()
+
         torch.quantization.disable_observer(fq_module)
         torch.quantization.enable_fake_quant(fq_module)
         X = 10.0 * torch.rand(20, 10, dtype=torch.float32) - 5.0
@@ -670,3 +677,102 @@ class TestFakeQuantizePerChannel(TestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
+
+def _get_buffer_ids(module):
+    """
+    Object addresses stay constant if and only if all modifications are in-place
+    """
+    return [id(v) for k, v in module._buffers.items()]
+
+class TestDistributed(QuantizationTestCase):
+
+    def test_observers_preserve_buffers(self):
+        """
+        Tests that observers only modify buffers in place. Note: this is important
+        because nn.DataParallel depends on this assumption to work correctly.
+        However, DataParallel does not expose IDs of the replicas, so we test it
+        without DataParallel in order to easily access the object IDs.
+        """
+        observer_types = [
+            torch.quantization.MinMaxObserver.with_args(dtype=torch.qint8),
+            torch.quantization.MovingAverageMinMaxObserver.with_args(dtype=torch.qint8),
+            torch.quantization.MinMaxDynamicQuantObserver.with_args(dtype=torch.qint8),
+            torch.quantization.PerChannelMinMaxObserver.with_args(dtype=torch.qint8),
+            torch.quantization.MovingAveragePerChannelMinMaxObserver.with_args(dtype=torch.qint8),
+            torch.quantization.HistogramObserver.with_args(dtype=torch.qint8),
+            torch.quantization.RecordingObserver.with_args(dtype=torch.qint8),
+            torch.quantization.NoopObserver.with_args(dtype=torch.float16),
+        ]
+
+        for observer_type in observer_types:
+            observer = observer_type()
+            buffer_ids_before = _get_buffer_ids(observer)
+            for _i in range(5):
+                inputs = torch.rand((4, 4, 4))
+                observer(inputs)
+            buffer_ids_after = _get_buffer_ids(observer)
+            self.assertEqual(
+                buffer_ids_before,
+                buffer_ids_after,
+                "{}: Buffers must be modified in place".format(str(observer)))
+
+    def test_fake_quant_preserves_buffers(self):
+        """
+        Tests that fake quant only modifies buffers in place. Note: this is important
+        because nn.DataParallel depends on this assumption to work correctly.
+        However, DataParallel does not expose IDs of the replicas, so we test it
+        without DataParallel in order to easily access the object IDs.
+        """
+        model = torch.quantization.FakeQuantize()
+        buffer_ids_before = _get_buffer_ids(model)
+        for _i in range(5):
+            inputs = torch.rand((4, 4, 4))
+            model(inputs)
+        buffer_ids_after = _get_buffer_ids(model)
+        self.assertEqual(
+            buffer_ids_before,
+            buffer_ids_after,
+            "FakeQuant: Buffers must be modified in place")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_qat_data_parallel(self):
+        """
+        Tests that doing QAT in nn.DataParallel does not crash.
+        """
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            return
+        with override_quantized_engine('fbgemm'):
+            device = torch.device('cuda')
+
+            model = nn.Sequential(
+                torch.quantization.QuantStub(),
+                nn.Conv2d(3, 1, 1, bias=False),
+                nn.BatchNorm2d(1),
+                nn.ReLU(),
+                nn.Conv2d(1, 2, 3, stride=2, padding=1, bias=False),
+                nn.BatchNorm2d(2),
+                nn.AvgPool2d(14),
+                nn.Sigmoid(),
+                torch.quantization.DeQuantStub(),
+            )
+
+            torch.quantization.fuse_modules(model, [['1', '2', '3'], ['4', '5']], inplace=True)
+
+            model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+            torch.quantization.prepare_qat(model, inplace=True)
+            model = nn.DataParallel(model, device_ids=[0, 1])
+            model.to(device)
+            model.train()
+
+            for epoch in range(3):
+                inputs = torch.rand(2, 3, 28, 28).to(device)
+                model(inputs)
+                if epoch >= 1:
+                    model.apply(torch.quantization.disable_observer)
+                if epoch >= 2:
+                    model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                quant_model = copy.deepcopy(model.module)
+                quant_model = torch.quantization.convert(quant_model.eval().cpu(), inplace=False)
+                with torch.no_grad():
+                    out = quant_model(torch.rand(1, 3, 28, 28))

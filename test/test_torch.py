@@ -8876,6 +8876,15 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, '{} with out= kwarg'.format(fn_name))
 
+    @largeCUDATensorTest('10GB')
+    def test_reduction_split(self, device):
+        # Test reduction when there is a 32bit-indexing split
+        # https://github.com/pytorch/pytorch/issues/37583
+        input_ = torch.randn(5, 14400, 14400, device=device)
+        result = input_.sum(dim=0)
+        expect = input_[0] + input_[1] + input_[2] + input_[3] + input_[4]
+        self.assertEqual(result, expect)
+
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
     def test_reduction_vectorized_corner(self, device, dtype):
@@ -12290,7 +12299,7 @@ class TestTorchDeviceType(TestCase):
             ("cosh", doubles, True, True, 'cuda'),
             ("digamma", doubles, True, True, 'cpu'),
             ("erf", doubles, True, True, 'cpu'),
-            ("erf", doubles, False, True, 'cuda'),
+            ("erf", doubles, True, True, 'cuda'),
             ("erfc", doubles, True, True, 'cpu'),
             ("erfc", doubles, False, True, 'cuda'),
             ("erfinv", doubles, True, True, 'cpu'),
@@ -14953,8 +14962,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             run_test(m, v2, v1, lambda x: x.transpose(0, 1))
 
     @onlyCPU
-    @precisionOverride({torch.bfloat16: 1e-0, torch.float: 1e-4, torch.double: 1e-8})
-    @dtypes(torch.bfloat16, torch.float, torch.double)
+    @precisionOverride({torch.bfloat16: 1e-0, torch.float: 1e-4, torch.double: 1e-8,
+                        torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_addmv(self, device, dtype):
         t = torch.randn(10, device=device).to(dtype)
         m = torch.randn(10, 100, device=device).to(dtype)
@@ -14980,6 +14990,42 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 res2[i] += m[i, j] * v[j]
 
         self.assertEqual(res1, res2, atol=self.precision)
+
+    @dtypesIfCUDA(*([torch.half, torch.float, torch.double]
+                    + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypes(torch.float, torch.double)
+    def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype):
+        # tests (o, s)*(s).  o is output size, s is summed size.
+        o = 5
+        s = 3
+        a_data = torch.arange(1, o * s + 1, device=device, dtype=dtype).view(o, s)
+        x_data = torch.arange(1, s + 1, 1, device=device, dtype=dtype)
+        y_data = torch.ones(o, device=device, dtype=dtype)
+        control = torch.tensor([15., 33., 51., 69., 87.], device=device, dtype=dtype)
+
+        def _test(use_out, row_major, incx, incy, lda_tail):
+            if row_major:
+                a_storage = torch.full((o, s + lda_tail), float('nan'), device=device, dtype=dtype)
+            else:
+                a_storage = torch.full((s, o + lda_tail), float('nan'), device=device, dtype=dtype).permute(1, 0)
+            a = a_storage[:o, :s].copy_(a_data)
+
+            x_storage = torch.full((s, incx), float('nan'), device=device, dtype=dtype)
+            x = x_storage[:, 0].copy_(x_data)
+
+            y_storage = torch.full((o, incy), float('nan'), device=device, dtype=dtype)
+            y = y_storage[:, 0].copy_(y_data)
+
+            if use_out:
+                out = torch.addmv(y, a, x)
+            else:
+                out = torch.empty_like(y)
+                torch.addmv(y, a, x, out=out)
+
+            self.assertEqual(out, control, atol=1.e-4)
+
+        for use_out, row_major, incx, incy, lda_tail in product((False, True), (False, True), (1, 2), (1, 2), (0, 1)):
+            _test(use_out, row_major, incx, incy, lda_tail)
 
     @slowTest
     @onlyCPU
@@ -15867,6 +15913,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             froms = [int64_min_val, min_val - 1, min_val, -42, 0, 42, max_val, max_val + 1]
             tos = [min_val - 1, min_val, -42, 0, 42, max_val, max_val + 1, int64_max_val]
 
+        if dtype == torch.double:
+            fp_limit = 2**53
+        elif dtype == torch.float:
+            fp_limit = 2**24
+        elif dtype == torch.half:
+            fp_limit = 2**11
+        elif dtype == torch.bfloat16:
+            fp_limit = 2**8
+        else:
+            fp_limit = 0
+
         for from_ in froms:
             for to_ in tos:
                 t = torch.empty(size, dtype=dtype, device=device)
@@ -15884,17 +15941,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                             lambda: t.random_(from_, to_)
                         )
                     else:
-                        t.random_(from_, to_)
-                        range_ = to_ - from_
-                        delta = max(1, alpha * range_)
-                        if dtype == torch.bfloat16:
-                            # Less strict checks because of rounding errors
-                            # TODO investigate rounding errors
-                            self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
-                            self.assertTrue((to_ - delta) < t.to(torch.double).max() <= to_)
+                        if dtype.is_floating_point and (
+                                not (-fp_limit <= from_ <= fp_limit) or not (-fp_limit <= (to_ - 1) <= fp_limit)):
+                            if not (-fp_limit <= from_ <= fp_limit):
+                                self.assertWarnsRegex(UserWarning, "from is out of bounds",
+                                                      lambda: t.random_(from_, to_))
+                            if not (-fp_limit <= (to_ - 1) <= fp_limit):
+                                self.assertWarnsRegex(UserWarning, "to - 1 is out of bounds",
+                                                      lambda: t.random_(from_, to_))
                         else:
-                            self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
-                            self.assertTrue((to_ - delta) <= t.to(torch.double).max() < to_)
+                            t.random_(from_, to_)
+                            range_ = to_ - from_
+                            delta = max(1, alpha * range_)
+                            if dtype == torch.bfloat16:
+                                # Less strict checks because of rounding errors
+                                # TODO investigate rounding errors
+                                self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
+                                self.assertTrue((to_ - delta) < t.to(torch.double).max() <= to_)
+                            else:
+                                self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
+                                self.assertTrue((to_ - delta) <= t.to(torch.double).max() < to_)
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,
@@ -16169,7 +16235,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     # dtype's dynamic range. This can (and should) cause undefined behavior
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy has the same behavior.
-    @skipIfRocm
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):
@@ -16179,7 +16244,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # Note: CUDA max float -> integer conversion is divergent on some dtypes
         vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2, max)
         if self.device_type == 'cuda':
-            vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
+            if torch.version.hip:
+                # HIP min float -> int64 conversion is divergent
+                vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
+            else:
+                vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
 
         self._float_to_int_conversion_helper(vals, device, dtype)
 
@@ -17319,18 +17388,18 @@ tensor_op_tests = [
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
     ('addcdiv', '', _small_2d,
         lambda t, d: [_small_2d(t, d),
-                      _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
-        _types, _cpu_types, True,
+                      _small_2d(t, d, has_zeros=False)], 1, 1, 1e-3,
+        _types2, _cpu_types, True,
         [_wrap_maybe_warns("Integer division .+")]),
     ('addcdiv', 'scalar', _small_2d,
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
         _types, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addcdiv_? is deprecated|Integer division .+")]),
-    ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 2e-5, 1e-3),
+    ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 1e-1, 1e-3, _types2),
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
-        1e-5, 1e-5, _types, _cpu_types, True,
+        1e-1, 1e-5, _types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addcmul_? is deprecated")]),
     ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types2),
@@ -17458,7 +17527,7 @@ tensor_op_tests = [
     ('std', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('var', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('var', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
-    ('var', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
+    ('var', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5, _float_types2, _cpu_types, False),
     ('ndimension', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('nelement', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('numel', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -17552,11 +17621,11 @@ tensor_op_tests = [
     ('__lshift__', '',
         lambda t, d: torch.pow(2, torch.arange(1, 5).to(dtype=_convert_t(t, d), device=d)),
         lambda t, d: [2],
-        1e-3, 1e-5, 1e-3, _signed_types_no_half, _cpu_types, False),
+        1e-3, 1e-5, 1e-3, _signed_types, _cpu_types, False),
     ('__rshift__', '',
         lambda t, d: torch.pow(2, torch.arange(3, 7).to(dtype=_convert_t(t, d), device=d)),
         lambda t, d: [2],
-        1e-3, 1e-5, 1e-3, _signed_types_no_half, _cpu_types, False),
+        1e-3, 1e-5, 1e-3, _signed_types, _cpu_types, False),
     # lapack tests
     ('qr', 'square', _small_2d, lambda t, d: [],
         1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
@@ -17570,7 +17639,7 @@ tensor_op_tests = [
         1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
-    ('abs', '', _small_3d, lambda t, d: [], 1e-5, 0, 1e-5, _types, [torch.bfloat16]),
+    ('abs', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types2, [torch.bfloat16]),
     ('sign', '', _small_3d, lambda t, d: []),
     ('log', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('log10', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
@@ -17578,8 +17647,8 @@ tensor_op_tests = [
     ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
     ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('sin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
+    ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
+    ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('acos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('asin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('atan', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
@@ -17593,7 +17662,7 @@ tensor_op_tests = [
     ('expm1', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types),
     ('expm1', 'small', lambda t, d: _small_3d(t, d).clamp(-1, 1),
         lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('reciprocal', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types, [torch.bfloat16]),
+    ('reciprocal', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
     ('floor', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('neg', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),

@@ -779,9 +779,11 @@ void runNondiffOptimization(
   // Fuse the dequant - op - quant patterns into quantized ops
   QuantFusion(graph);
 
-  FuseGraph(graph, strict_fuser_check);
-
-  fuseTensorExprs(graph);
+  if (tensorExprFuserEnabled()) {
+    FuseTensorExprs(graph);
+  } else {
+    FuseGraph(graph, strict_fuser_check);
+  }
 
   // Run custom post-fusion passes
   for (const auto& passPair : getCustomPostPasses()) {

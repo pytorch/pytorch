@@ -53,6 +53,28 @@ value_list sortReverseTopological(
   return result;
 }
 
+bool allShapesAreKnown(Value* v) {
+  if (!v->type()->cast<TensorType>()) {
+    return true;
+  }
+  return v->isCompleteTensor();
+}
+
+bool allShapesAreKnown(Node* node) {
+  // TODO: Relax the checks to support dynamic shapes
+  for (torch::jit::Value* output : node->outputs()) {
+    if (!allShapesAreKnown(output)) {
+      return false;
+    }
+  }
+  for (torch::jit::Value* input : node->inputs()) {
+    if (!allShapesAreKnown(input)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool isSupported(Node* node) {
   // TODO:
   switch (node->kind()) {
@@ -133,6 +155,9 @@ bool canHandle(Node* node, AliasDb& aliasDb) {
   }
   if (node->kind() == prim::Loop) {
     return false; // TODO
+  }
+  if (!allShapesAreKnown(node)) {
+    return false;
   }
   return isSupported(node);
 }
@@ -265,10 +290,7 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   return {++(++iter), false};
 }
 
-void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
-  if (!tensorExprFuserEnabled()) {
-    return;
-  }
+void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Get rid of dead code so that we don't waste effort fusing it.
@@ -326,6 +348,11 @@ Operation createTensorExprOp(const Node* node) {
       std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
   return [kernel](Stack& stack) {
     RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
+    if (!tensorexpr::fallbackAllowed()) {
+      kernel->run(stack);
+      return 0;
+    }
+
     try {
       kernel->run(stack);
     } catch (const std::runtime_error& e) {
