@@ -276,8 +276,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     if (at::globalContext().releaseWeightsWhenPrepacking()) {
       // On mobile, we release the original weight by resetting the intrusive_ptr.
       // Calling unpack after this will throw an assertion.
-      pack_ptr.orig_weight.reset();
-      pack_ptr.bias.reset();
+      orig_weight.reset();
+      bias_.reset();
     }
   }
 
