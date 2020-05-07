@@ -510,7 +510,8 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
       const int ILP = 2;
       dim3 grid(outer_size);
       dim3 block = SoftMax_getBlockSize(ILP, dim_size);
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "host_softmax", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "host_softmax", [&] {
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "host_softmax", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
       if (!half_to_float) {
         if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
@@ -534,13 +535,15 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
         }
       }
       });
+      });
     // This kernel runs in a 2D grid, where each application along y dimension has a fixed
     // outer_size, and runs in parallel over inner_size. Dimension x is parallel over outer_size.
     // Reductions over dim are done in a single-threaded manner.
     } else {
       uint32_t smem_size;
       dim3 grid, block;
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "host_softmax", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "host_softmax", [&] {
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "host_softmax", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
       if (!half_to_float) {
           SpatialSoftMax_getLaunchSizes<accscalar_t>(
@@ -562,8 +565,9 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
       );
       }
       });
+      });
     }
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
   return output;
 }
@@ -594,7 +598,8 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
     const int ILP = 2;
     dim3 grid(outer_size);
     dim3 block = SoftMax_getBlockSize(ILP, dim_size);
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(gI.scalar_type(), "host_softmax_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, gI.scalar_type(), "host_softmax_backward", [&] {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "host_softmax_backward", [&] {
     using accscalar_t = acc_type<scalar_t, true>;
     if (!half_to_float) {
       if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
@@ -618,10 +623,12 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
       }
     }
     });
+    });
   } else {
     uint32_t smem_size;
     dim3 grid, block;
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(gI.scalar_type(), "host_softmax_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, gI.scalar_type(), "host_softmax_backward", [&] {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "host_softmax_backward", [&] {
     using accscalar_t = acc_type<scalar_t, true>;
     if (!half_to_float) {
         SpatialSoftMax_getLaunchSizes<accscalar_t>(
@@ -647,8 +654,9 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
         );
     }
     });
+    });
   }
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return gI;
 }
 }

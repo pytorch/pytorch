@@ -8,16 +8,13 @@ import torch
 import tarfile
 import tempfile
 import warnings
-import copyreg
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
 from torch._utils_internal import get_source_lines_and_file
-if sys.version_info[0] == 2:
-    import cPickle as pickle
-else:
-    import pickle
-    import pathlib
+import copyreg
+import pickle
+import pathlib
 
 DEFAULT_PROTOCOL = 2
 
@@ -194,7 +191,6 @@ def storage_to_tensor_type(storage):
 
 def _is_path(name_or_buffer):
     return isinstance(name_or_buffer, str) or \
-        (sys.version_info[0] == 2 and isinstance(name_or_buffer, unicode)) or \
         (sys.version_info[0] == 3 and isinstance(name_or_buffer, pathlib.Path))
 
 
@@ -370,14 +366,6 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
 
 
 def _legacy_save(obj, f, pickle_module, pickle_protocol):
-    if sys.version_info[0] == 2:
-        import StringIO
-        if isinstance(f, StringIO.StringIO):
-            msg = ('torch.save received unsupported StringIO.StringIO file object, whose '
-                   'write method does not return the number of bytes written. '
-                   'Please use something like io.BytesIO for torch.save instead.')
-            raise RuntimeError(msg)
-
     import torch.nn as nn
     serialized_container_types = {}
     serialized_storages = {}
@@ -577,7 +565,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
     """
     _check_dill_version(pickle_module)
 
-    if sys.version_info >= (3, 0) and 'encoding' not in pickle_load_args.keys():
+    if 'encoding' not in pickle_load_args.keys():
         pickle_load_args['encoding'] = 'utf-8'
 
     with _open_file_like(f, 'rb') as opened_file:

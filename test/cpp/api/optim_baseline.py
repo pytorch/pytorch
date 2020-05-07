@@ -21,6 +21,8 @@ FOOTER = "} // namespace expected_parameters"
 PARAMETERS = "inline std::vector<std::vector<torch::Tensor>> {}() {{"
 
 OPTIMIZERS = {
+    "LBFGS" : lambda p: torch.optim.LBFGS(p, 1.0),
+    "LBFGS_with_line_search" : lambda p: torch.optim.LBFGS(p, 1.0, line_search_fn="strong_wolfe"),
     "Adam": lambda p: torch.optim.Adam(p, 1.0),
     "Adam_with_weight_decay": lambda p: torch.optim.Adam(p, 1.0, weight_decay=1e-2),
     "Adam_with_weight_decay_and_amsgrad": lambda p: torch.optim.Adam(p, 1.0, weight_decay=1e-6, amsgrad=True),
@@ -69,7 +71,9 @@ def run(optimizer_name, iterations, sample_every):
         loss = output.sum()
         loss.backward()
 
-        optimizer.step()
+        def closure():
+            return torch.Tensor([10])
+        optimizer.step(closure)
 
         if i % sample_every == 0:
 

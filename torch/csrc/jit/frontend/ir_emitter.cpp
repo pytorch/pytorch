@@ -1,10 +1,13 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <torch/csrc/jit/testing/hooks_for_testing.h>
-#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
+#include <torch/csrc/jit/frontend/convert_to_ssa.h>
+#include <torch/csrc/jit/frontend/parser.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -13,11 +16,9 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
-#include <torch/csrc/jit/frontend/convert_to_ssa.h>
-#include <torch/csrc/jit/frontend/parser.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
-#include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/testing/hooks_for_testing.h>
 
 #include <torch/csrc/jit/ir/constants.h>
 
@@ -29,7 +30,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using FunctionTable = std::unordered_map<std::string, Function&>;
 using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
@@ -463,6 +463,7 @@ struct Environment {
                "__round__",
                std::make_shared<BuiltinFunction>(aten::round, at::nullopt))},
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
+          {"id", std::make_shared<BuiltinFunction>(prim::id, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
@@ -490,7 +491,7 @@ struct Environment {
     if (!retval) {
       if (auto type = resolver->resolveType(ident, range)) {
         if (auto tuple_type = type->cast<TupleType>()) {
-          retval = std::make_shared<script::NamedTupleConstructor>(tuple_type);
+          retval = std::make_shared<NamedTupleConstructor>(tuple_type);
         }
       }
     }
@@ -502,7 +503,7 @@ struct Environment {
     if (!retval) {
       if (auto type = resolver->resolveType(ident, range)) {
         if (auto class_type = type->cast<ClassType>()) {
-          retval = std::make_shared<script::ClassValue>(class_type);
+          retval = std::make_shared<ClassValue>(class_type);
         }
       }
     }
@@ -699,7 +700,7 @@ struct to_ir {
   // see [setstate type]
   static TypePtr getTypeForSetStateArg(const Def& def, const Self* self) {
     TORCH_CHECK(self, "Expected __setstate__ to have a `self` argument");
-    auto getstate = self->getClassType()->getMethod("__getstate__");
+    auto getstate = self->getClassType()->findMethod("__getstate__");
     if (!getstate) {
       throw ErrorReport(def.range())
           << "`__setstate__` defined but not `__getstate__`. "
@@ -710,7 +711,7 @@ struct to_ir {
     getstate->ensure_defined();
     return self->getClassType()
         ->getMethod("__getstate__")
-        ->getSchema()
+        .getSchema()
         .returns()
         .at(0)
         .type();
@@ -1131,7 +1132,7 @@ struct to_ir {
             }
           }
         }
-        auto expr_out = emitToBool(emitExpr(expr));
+        auto expr_out = emitToBool(expr.range(), emitExpr(expr));
         c10::optional<bool> static_if = c10::nullopt;
         if (expr_out->node()->kind() == aten::is_scripting) {
           static_if = true;
@@ -1184,6 +1185,14 @@ struct to_ir {
       list_value->setType(type_hint);
       type_set = true;
     }
+
+    // comprehension introduces it's own scope. no variable assigned
+    // leaks into the rest of the graph
+    Node* n =
+        graph->insertNode(create(prim::LocalVariableScope, lc.range(), 0));
+    auto* comprehension_block = n->addBlock();
+    pushFrame(comprehension_block);
+    WithInsertPoint guard(comprehension_block);
     auto emit_body = [&]() {
       auto comprehension_out = emitExpr(lc.elt());
       if (!type_set) {
@@ -1195,6 +1204,7 @@ struct to_ir {
       emitBuiltinCall(loc, *graph, aten::append, {input}, {}, self);
     };
     emitFor(targets_list, itrs, loc, emit_body);
+    popFrame();
     return list_value;
   }
 
@@ -1238,13 +1248,19 @@ struct to_ir {
     if (is_or) {
       new_result = emitIfExpr(loc, lhs, get_const_expr, get_continue_expr);
       refinements = lhs.refinements().Or(rhs->refinements());
-      if (lhs.staticIf() && rhs->staticIf()) {
+      if ((lhs.staticIf() && *lhs.staticIf()) ||
+          (rhs->staticIf() && *rhs->staticIf())) {
+        static_if = true;
+      } else if (lhs.staticIf() && rhs->staticIf()) {
         static_if = *lhs.staticIf() || *rhs->staticIf();
       }
     } else {
       new_result = emitIfExpr(loc, lhs, get_continue_expr, get_const_expr);
       refinements = lhs.refinements().And(rhs->refinements());
-      if (lhs.staticIf() && rhs->staticIf()) {
+      if (((lhs.staticIf() && !*lhs.staticIf()) ||
+           (rhs->staticIf() && !*rhs->staticIf()))) {
+        static_if = false;
+      } else if (lhs.staticIf() && rhs->staticIf()) {
         static_if = *lhs.staticIf() && *rhs->staticIf();
       }
     }
@@ -1291,8 +1307,7 @@ struct to_ir {
 
     return expr_value;
   }
-  Value* emitToBool(Value* v) {
-    SourceRange loc = v->node()->sourceRange();
+  Value* emitToBool(const SourceRange& loc, Value* v) {
     Value* out;
     try {
       auto bool_cast = environment_stack->getSugaredVar("bool", loc);
@@ -1481,21 +1496,13 @@ struct to_ir {
   }
 
   CondValue emitHasAttr(const Expr& objExpr, const Expr& attrExpr) {
-    auto obj = emitExpr(objExpr);
-    const auto& type = obj->type();
+    auto obj = emitSugaredExpr(objExpr, 1);
     if (attrExpr.kind() != TK_STRINGLITERAL) {
       throw ErrorReport(attrExpr)
           << "hasattr's second argument must be a string literal";
     }
-    auto cls = type->cast<ClassType>();
-    if (!cls) {
-      throw ErrorReport(objExpr)
-          << "hasattr's first argument must be an object, got "
-          << type->python_str() << " instead";
-    }
-
     const std::string& name = StringLiteral(attrExpr).text();
-    const bool hasAttr = cls->hasAttribute(name);
+    const bool hasAttr = obj->hasAttr(objExpr.range(), method, name);
     return CondValue(*graph, objExpr.range(), hasAttr, {});
   }
 
@@ -1538,9 +1545,9 @@ struct to_ir {
             return false;
           }
           if ((typ->isSubtypeOf(AnyListType::get()) &&
-                  maybeOfKind(ListType::Kind, actual_type)) ||
+               maybeOfKind(ListType::Kind, actual_type)) ||
               (typ->isSubtypeOf(AnyTupleType::get()) &&
-                  maybeOfKind(TupleType::Kind, actual_type))) {
+               maybeOfKind(TupleType::Kind, actual_type))) {
             return false;
           }
         }
@@ -1621,7 +1628,7 @@ struct to_ir {
       Value* out;
       if (cond) {
         WithInsertPoint insert(condition_block);
-        out = emitToBool(emitExpr(cond.value()));
+        out = emitToBool(cond.value().range(), emitExpr(cond.value()));
       } else {
         WithInsertPoint insert(n);
         out = graph->insertConstant(true, range);
@@ -1863,9 +1870,7 @@ struct to_ir {
     environment_stack->setVar(lhs.range(), lhs.name().name(), result);
   }
 
-  Value* emitAugAssignmentHelper(
-      const AugAssign& stmt,
-      Value* lhs) {
+  Value* emitAugAssignmentHelper(const AugAssign& stmt, Value* lhs) {
     if (lhs->type()->kind() == TypeKind::ClassType) {
       // Call `__iadd__` so updates happen in place on class types
       // https://docs.python.org/3/reference/datamodel.html#object.__iadd__
@@ -1879,9 +1884,9 @@ struct to_ir {
       // __iadd__ is not present)
       auto type = lhs->type()->expect<ClassType>();
       std::string magic_method_name;
-      if (type->getMethod(in_place_method_name)) {
+      if (type->findMethod(in_place_method_name)) {
         magic_method_name = in_place_method_name;
-      } else if (type->getMethod(out_of_place_method_name)) {
+      } else if (type->findMethod(out_of_place_method_name)) {
         magic_method_name = out_of_place_method_name;
       } else {
         throw ErrorReport(stmt.range())
@@ -2278,6 +2283,10 @@ struct to_ir {
         return aten::__not__;
       case TK_FLOOR_DIV:
         return aten::floordiv;
+      case TK_LSHIFT:
+        return aten::__lshift__;
+      case TK_RSHIFT:
+        return aten::__rshift__;
       case '&':
         return aten::__and__;
       case '|':
@@ -2329,6 +2338,10 @@ struct to_ir {
         return "__xor__";
       case TK_IN:
         return "__contains__";
+      case TK_LSHIFT:
+        return "__lshift__";
+      case TK_RSHIFT:
+        return "__rshift__";
       default:
         throw std::runtime_error("unknown kind " + c10::to_string(kind));
     }
@@ -2454,6 +2467,9 @@ struct to_ir {
         }
 
         return std::make_shared<SimpleValue>(expr);
+      }
+      case prim::rpc_async: {
+        return emitRpcAsyncExpr(apply);
       }
       case prim::unchecked_cast: {
         checkApplyNumInputs(apply, 2);
@@ -2657,6 +2673,9 @@ struct to_ir {
         auto apply = Apply(tree);
         return emitApplyExpr(apply, n_binders, type_hint);
       } break;
+      case TK_SUBSCRIPT: {
+        return emitSubscript(Subscript(tree));
+      } break;
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
     }
@@ -2727,6 +2746,115 @@ struct to_ir {
     return std::make_shared<SimpleValue>(node_output);
   }
 
+  std::shared_ptr<SugaredValue> emitRpcAsyncExpr(const Apply& apply) {
+    // TODO: This is a temporary apporoach to enable calling user fucntion
+    // through RPC in TorchScript,
+    // Ideally, function value in JIT IR is first-class citizen and
+    // The RPC C++ entry API can take c10::Function directly.
+    if (apply.inputs().size() < 2 || apply.inputs().size() > 4) {
+      throw ErrorReport(apply)
+          << "Possible forms of call to rpc_async(..) are\n"
+          << "rpc_async(dst_worker_name, user_callable, args, kwargs)\n"
+          << "rpc_async(dst_worker_name, user_callable, args)\n"
+          << "rpc_async(dst_worker_name, user_callable)\n"
+          << "Now the number of arguments is " << apply.inputs().size();
+    }
+    if (apply.attributes().size() != 0) {
+      throw ErrorReport(apply)
+          << "rpc_async(dst_worker_name, user_callable, args, kwargs)"
+          << "does not support kwargs yet";
+    }
+    // TODO: Make rpc_async(..) support taking kwargs,
+    // like rpc_async(to="worker1", func=my_func, args=(), kwargs={})
+
+    auto& input_trees = apply.inputs().tree()->trees();
+    Value* dst_worker_name_value = emitExpr(Expr(input_trees[0]));
+    std::shared_ptr<SugaredValue> user_callable_sugared_value =
+        emitSugaredExpr(Expr(input_trees[1]), 1);
+    TORCH_CHECK(
+        user_callable_sugared_value->kind() == "function",
+        "user_callable should be a FunctionValue, it's now a ",
+        user_callable_sugared_value->kind())
+    // NB: This should be done using `std::dynamic_pointer_cast`
+    // and assert `user_callable_function_value != nullptr`. But somehow on
+    // macos std::dynamic_pointer_cast always returns
+    // `user_callable_function_value` as a `nullptr`, even if
+    // `user_callable_sugared_value->kind() == "function"`.
+    std::shared_ptr<FunctionValue> user_callable_function_value =
+        std::static_pointer_cast<FunctionValue>(user_callable_sugared_value);
+    // If `kwargs` is an empty dict, users are allowed to not pass `kwargs`.
+    // If `args` and `kwargs` are an empty tuple and an empty dict,
+    // respectively, users are allowed to not pass `args` and `kwargs`.
+    TreeList args_kwargs_trees(input_trees.begin() + 2, input_trees.end());
+
+    // Get user callable.
+    const auto& callablePtrs = user_callable_function_value->callees();
+    TORCH_INTERNAL_ASSERT(
+        callablePtrs.size() == 1,
+        "User-provided callable size should be 1. Now it's",
+        callablePtrs.size())
+    Function* callablePtr = callablePtrs.at(0);
+
+    const auto& functionSchema = callablePtr->getSchema();
+    const SourceRange& loc = apply.range();
+    auto graphPtr = method.graph();
+
+    // Match FunctionSchema.
+    std::vector<NamedValue> args;
+    std::vector<NamedValue> kwargs;
+    // Get args and kwargs as `NamedValue`s.
+    // Similar to getNamedValues(..) and emitAttributes(..).
+    if (args_kwargs_trees.size() >= 1) {
+      // Unroll args from a Var that is known to be a Tuple.
+      auto& args_tree = args_kwargs_trees[0];
+      auto entry_sugared_values = emitSugaredExpr(Expr(args_tree), 1)
+                                      ->asTuple(args_tree->range(), method);
+      args.reserve(entry_sugared_values.size());
+      for (const auto& entrie_sugared_value : entry_sugared_values) {
+        args.emplace_back(
+            args_tree->range(),
+            entrie_sugared_value->asValue(args_tree->range(), method));
+      }
+      // NB: Can't do schema check on kwargs, given the async RPC API is
+      // rpc_async(to, user_callable, args, kwargs),
+      // users can construct kwargs = {"first" + "_arg" : 1}.
+      // Notice the key is determined at run time.
+      // We can do it at compile time, unless one day the RPC API is
+      // rpc_async(to, user_callable, arg_0, arg_1, kwarg_0="foo",
+      // kwarg_1="bar")
+    }
+    matchSchema(functionSchema, loc, *graphPtr, args, kwargs);
+
+    // Graph insert the QualifiedName as an constant input IR Value.
+    const auto& qualname = callablePtr->qualname();
+    IValue userCallableQualNameIValue(qualname.qualifiedName());
+    Value* userCallableQualNameValue =
+        graphPtr->insertConstant(userCallableQualNameIValue, loc);
+
+    // Graph insert a Node, prim::rpc_async jit::Operator, to the Graph.
+    Node* rpc_async_node =
+        graphPtr->insertNode(graphPtr->create(prim::rpc_async, 1))
+            ->setSourceRange(loc);
+    {
+      WithInsertPoint insert(rpc_async_node);
+      rpc_async_node->addInput(dst_worker_name_value);
+      rpc_async_node->addInput(userCallableQualNameValue);
+
+      for (const auto& tree : args_kwargs_trees) {
+        rpc_async_node->addInput(emitExpr(Expr(tree)));
+      }
+    }
+    Value* rpc_async_node_output = rpc_async_node->output();
+
+    // Set output type from FunctionSchema.
+    const std::vector<Argument>& returns = functionSchema.returns();
+    TORCH_INTERNAL_ASSERT(returns.size() == 1);
+    auto output_type = returns[0].type();
+    rpc_async_node_output->setType(FutureType::create(output_type));
+
+    return std::make_shared<SimpleValue>(rpc_async_node_output);
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree,
       const TypePtr& type_hint = nullptr) {
@@ -2754,7 +2882,9 @@ struct to_ir {
       case '%':
       case '&':
       case '|':
-      case '^': {
+      case '^':
+      case TK_LSHIFT:
+      case TK_RSHIFT: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto overload = getOperatorOverload(tree->kind(), inputs.size());
@@ -2799,9 +2929,6 @@ struct to_ir {
       } break;
       case TK_NONE: {
         return graph->insertConstant(IValue(), tree->range());
-      } break;
-      case TK_SUBSCRIPT: {
-        return emitSubscript(Subscript(tree));
       } break;
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree));
@@ -3047,11 +3174,32 @@ struct to_ir {
           return dim + 1;
         }
       }
-      TypePtr type_hint = OptionalType::ofTensor();
-      if (subscript_expr.kind() == TK_NONE) {
-        type_hint = NoneType::get();
+      Value* index;
+      if (subscript_expr.kind() == TK_LIST_LITERAL) {
+        // Accept list literal as subscript but convert it to a Tensor
+        // since it's equivalent to indexing with Tensor.
+        // Advanced indexing using list:
+        // @torch.jit.script
+        // def f(x):
+        //     return x[[0, 1, 5]]  # or
+        //     return x[[0, 1], [0, 1]]  # or
+        //     return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
+        // Statements above are equivalent to advanced indexing using Tensor:
+        // @torch.jit.script
+        // def f(x):
+        //     return x[torch.tensor([0, 1, 5])]  # or
+        //     return x[torch.tensor([0, 1]), torch.tensor([0, 1])]  # or
+        //     return x[torch.tensor([[0, 1], [0, 1]]), torch.tensor([[0, 1],
+        //     [0, 1]])]
+        auto ll = emitExpr(subscript_expr);
+        index = graph->insert(aten::tensor, {ll});
+      } else {
+        TypePtr type_hint = OptionalType::ofTensor();
+        if (subscript_expr.kind() == TK_NONE) {
+          type_hint = NoneType::get();
+        }
+        index = emitExpr(subscript_expr, type_hint);
       }
-      auto index = emitExpr(subscript_expr, type_hint);
       exprs[expr_idx] = index;
       if (index->type()->isSubtypeOf(NoneType::get())) {
         if (is_reverse) {
@@ -3282,18 +3430,18 @@ struct to_ir {
         ->output();
   }
 
-  Value* emitSubscript(const Subscript& subscript) {
+  std::shared_ptr<SugaredValue> emitSubscript(const Subscript& subscript) {
     const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
     const List<Expr>& subscript_exprs = subscript.subscript_exprs();
     const SourceRange& range = subscript.range();
     const SourceRange& val_range = subscript.value().range();
     if (subscript_exprs.size() != 1) {
-      return emitMultidimSlicing(
-          range, sv->asValue(val_range, method), subscript_exprs);
+      return std::make_shared<SimpleValue>(emitMultidimSlicing(
+          range, sv->asValue(val_range, method), subscript_exprs));
     }
     if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      return emitBasicSlice(
-          range, sv->asValue(val_range, method), subscript_exprs);
+      return std::make_shared<SimpleValue>(emitBasicSlice(
+          range, sv->asValue(val_range, method), subscript_exprs));
     } else {
       // Desugars gather syntactic sugar foo[i]
       Value* idx = emitExpr(subscript_exprs[0]);
@@ -3301,11 +3449,13 @@ struct to_ir {
       AT_ASSERT(subscript_exprs.size() == 1);
 
       if (val->type()->cast<TupleType>()) {
-        return emitTupleIndex(range, sv->asValue(val_range, method), idx);
+        return std::make_shared<SimpleValue>(
+            emitTupleIndex(range, sv->asValue(val_range, method), idx));
       } else if (val->type()->isSubtypeOf(TensorType::get())) {
-        return emitMultidimSlicing(range, val, subscript_exprs);
+        return std::make_shared<SimpleValue>(
+            emitMultidimSlicing(range, val, subscript_exprs));
       } else {
-        return sv->getitem(range, method, idx)->asValue(range, method);
+        return sv->getitem(range, method, idx);
       }
     }
   }
@@ -3342,41 +3492,6 @@ CompilationUnit::CompilationUnit(const std::string& source)
     : CompilationUnit() {
   // calles the define with native resolver to generate the graph for functions
   define(c10::nullopt, source, nativeResolver(), nullptr);
-}
-
-c10::QualifiedName CompilationUnit::mangle(
-    const c10::QualifiedName& name) const {
-  static const std::string manglePrefix = "___torch_mangle_";
-  std::vector<std::string> atoms = name.atoms();
-
-  // Search for an already-existing mangle namespace.
-  // If the name is already mangled, just bump the integer.
-  for (auto& atom : atoms) {
-    auto pos = atom.find(manglePrefix);
-    if (pos != std::string::npos) {
-      auto num = atom.substr(pos + manglePrefix.size());
-      // current mangle index in the name
-      size_t num_i = c10::stoi(num);
-      // bump the mangleIndex_ to num_i + 1
-      mangleIndex_ = std::max(mangleIndex_, num_i + 1);
-      std::string newAtomPrefix;
-      newAtomPrefix.reserve(atom.size());
-      // Append the part of the name up to the end of the prefix
-      newAtomPrefix.append(atom, 0, pos);
-      newAtomPrefix.append(manglePrefix);
-      atom = newAtomPrefix + c10::to_string(mangleIndex_++);
-      // increment mangleIndex_ until the type is not defined
-      while (get_type(QualifiedName(atoms))) {
-        atom = newAtomPrefix + c10::to_string(mangleIndex_++);
-      }
-      return QualifiedName(atoms);
-    }
-  }
-
-  // Otherwise add a mangle namespace right before the basename
-  TORCH_INTERNAL_ASSERT(!atoms.empty());
-  atoms.insert(atoms.end() - 1, manglePrefix + c10::to_string(mangleIndex_++));
-  return QualifiedName(atoms);
 }
 
 std::unique_ptr<Function> CompilationUnit::define(
@@ -3417,7 +3532,7 @@ std::unique_ptr<Function> CompilationUnit::define(
       name = mangle(name);
     }
   }
-  auto fn = torch::make_unique<Function>(
+  auto fn = torch::make_unique<GraphFunction>(
       std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type
@@ -3484,7 +3599,7 @@ std::vector<Function*> CompilationUnit::define(
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   liftClosures(to_clean);
   inlineForkedClosures(to_clean);
-  if (script::getInlineEverythingMode()) {
+  if (getInlineEverythingMode()) {
     Inline(*to_clean);
   }
   // remove any uses of tuples that we inserted that are not needed
@@ -3555,6 +3670,5 @@ void CompilationUnit::define_interface(
   this->register_type(iface);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

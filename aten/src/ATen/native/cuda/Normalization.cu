@@ -127,21 +127,22 @@ Tensor& batch_norm_elemt_cuda_out(Tensor& output, const Tensor& self, const Tens
 std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda(const Tensor& self, const Tensor& mean, const Tensor& invstd, const Tensor& running_mean,
                                                         const Tensor& running_var, double momentum, double epsilon, int64_t count) {
   std::vector<int64_t> counts(mean.size(0), count);
-  return batch_norm_gather_stats_with_counts_cuda(self, mean, invstd, running_mean, running_var, momentum, epsilon, counts);
+  Tensor counts_ = at::from_blob((void*)counts.data(), {(int64_t)counts.size()}, self.options().dtype(at::kLong).device(at::kCPU));
+  counts_ = counts_.to(self.device()).to(running_mean.dtype());
+  return batch_norm_gather_stats_with_counts_cuda(self, mean, invstd, running_mean, running_var, momentum, epsilon, counts_);
 }
 
 
 std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cuda(const Tensor& self, const Tensor& mean, const Tensor& invstd, const Tensor& running_mean,
-                                                        const Tensor& running_var, double momentum, double epsilon, IntArrayRef counts) {
-  Tensor counts_ = at::from_blob((void*)counts.data(), {(int64_t)counts.size()}, self.options().dtype(at::kLong).device(at::kCPU));
-  counts_ = counts_.to(self.device()).to(running_mean.dtype());
+                                                        const Tensor& running_var, double momentum, double epsilon, const Tensor& counts) {
+  
   return AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, running_mean.scalar_type(), "batch_norm_update_stats_cuda", [&] {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "batch_norm_update_stats_cuda", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
       if (cuda::detail::canUse32BitIndexMath(self)) {
-        return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int32_t>(mean, invstd, running_mean, running_var, momentum, epsilon, counts_);
+        return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int32_t>(mean, invstd, running_mean, running_var, momentum, epsilon, counts);
       } else {
-        return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int64_t>(mean, invstd, running_mean, running_var, momentum, epsilon, counts_);
+        return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int64_t>(mean, invstd, running_mean, running_var, momentum, epsilon, counts);
       }
     });
   });

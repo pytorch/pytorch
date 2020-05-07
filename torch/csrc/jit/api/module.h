@@ -1,13 +1,13 @@
 #pragma once
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/runtime/argument_spec.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/api/object.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/named_value.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/api/object.h>
-#include <torch/csrc/jit/frontend/source_range.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
@@ -33,7 +33,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -97,13 +96,13 @@ struct TORCH_API Module : public Object {
   ~Module() {}
 
   void set_optimized(bool o) {
-    AT_WARN(
+    TORCH_WARN(
         "Module::set_optimized() is deprecated and has no effect. "
         "Please use setGraphExecutorOptimize()");
   }
 
   bool is_optimized() const {
-    AT_WARN(
+    TORCH_WARN(
         "Module::is_optimized() is deprecated and always returns true. "
         "Please use getGraphExecutorOptimize()");
     return true;
@@ -221,6 +220,10 @@ struct TORCH_API Module : public Object {
   void _save_for_mobile(
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+
+  Module copy() const;
+
+  Module deepcopy() const;
 
   // Clones both the underlying `ClassType` and the module instance(data), this
   // function creates a new `ClassType` and returns a new instance that has the
@@ -554,6 +557,12 @@ struct NamedPolicy {
 
 TORCH_API bool& getInlineEverythingMode();
 
+namespace script {
+// We once had a `script::` namespace that was deleted. This is for backcompat
+// of the public API; new code should not use this type alias.
+using Module = ::torch::jit::Module;
+using ExtraFilesMap = ::torch::jit::ExtraFilesMap;
 } // namespace script
+
 } // namespace jit
 } // namespace torch

@@ -1,30 +1,161 @@
 #include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/serialization/import_export_helpers.h>
-#include <torch/csrc/jit/serialization/python_print.h>
-#include <torch/csrc/jit/serialization/pickle.h>
-#include <torch/csrc/jit/serialization/source_range_serialization.h>
-#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
+#include <torch/csrc/jit/serialization/import_export_functions.h>
+#include <torch/csrc/jit/serialization/import_export_helpers.h>
+#include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/serialization/source_range_serialization.h>
+#include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
 
+#include <ATen/core/jit_type.h>
+#include <ATen/core/qualified_name.h>
 #include <string>
 #include <vector>
 
 namespace torch {
 namespace jit {
 
-char const * toString(OpCode op);
+char const* toString(OpCode op);
 
 namespace {
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
   return func;
-};
+}
+
+static IValue Tup(std::vector<IValue> ivalues) {
+  return c10::ivalue::Tuple::create(std::move(ivalues));
+}
+
+static IValue Table(
+    const std::vector<std::pair<std::string, IValue>>& entries) {
+  std::vector<IValue> ivalue_entries;
+  for (const auto& e : entries) {
+    ivalue_entries.push_back(Tup({e.first, e.second}));
+  }
+  return Tup(std::move(ivalue_entries));
+}
+
+c10::IValue getFunctionTuple(const Function& func) {
+  auto graph = func.graph()->copy();
+  Inline(*graph);
+  torch::jit::Code code(graph, func.name());
+
+  auto instructions_copy = code.instructions();
+
+  // operator names
+  std::vector<c10::OperatorName> opnames;
+  std::vector<std::string> method_names;
+  for (size_t i = 0; i < instructions_copy.size(); ++i) {
+    Instruction ins = instructions_copy[i];
+    if (ins.op == OP || ins.op == OPN) {
+      auto node = code.instructions_source()[i];
+      opnames.emplace_back(node->schema().operator_name());
+    }
+    // CALL nodes at this point represent built-in (i.e. non-Graph)
+    // functions that were not inlined. Here we convert the CALL
+    // instructions for these functions into INTERFACE_CALL instructions
+    // s.t. at runtime, we will look up the Function* on the Type of the
+    // 0th argument in the stack and call that directly.
+    if (ins.op == CALL) {
+      auto node = code.instructions_source()[i];
+      if (node->kind() == prim::CallMethod) {
+        // NB: replacing instruction
+        auto method_name_idx =
+            code.constant_table().size() + method_names.size();
+        method_names.emplace_back(node->s(attr::name));
+        Instruction new_instr{INTERFACE_CALL,
+                              static_cast<int32_t>(method_name_idx),
+                              static_cast<uint16_t>(node->inputs().size())};
+        instructions_copy[i] = std::move(new_instr);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false, "Unsupported node kind on CALL opcode for mobile");
+      }
+    }
+  }
+
+  // instructions
+  std::vector<IValue> instructions;
+  instructions.reserve(instructions_copy.size());
+  for (Instruction ins : instructions_copy) {
+    instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N}));
+  }
+
+  // operators
+  std::vector<IValue> operators;
+  operators.reserve(opnames.size());
+  for (const auto& opname : opnames) {
+    operators.emplace_back(Tup({opname.name, opname.overload_name}));
+  }
+
+  // constants
+  //
+  // Make a copy of the constants and append the method names
+  // that we emitted for the converted INTERFACE_CALL nodes above.
+  auto constants = code.constant_table();
+  for (auto& method_name : method_names) {
+    constants.emplace_back(std::move(method_name));
+  }
+
+  // types
+  std::vector<IValue> types;
+  types.reserve(code.type_table().size());
+  for (const TypePtr& t : code.type_table()) {
+    types.emplace_back(t->python_str());
+  }
+
+  // since the register location is embedded into the bytecode, pass the
+  // register size
+  auto register_size = static_cast<int>(code.register_size());
+
+  auto table = Table({{"instructions", Tup(instructions)},
+                      {"operators", Tup(operators)},
+                      {"constants", Tup(constants)},
+                      {"types", Tup(types)},
+                      {"register_size", register_size}});
+
+  return Tup({func.qualname().qualifiedName(), table});
+}
+
+void setstateTuple(const IValue& ivalue, std::vector<c10::IValue>& elements) {
+  if (!ivalue.isObject())
+    return;
+  auto obj = ivalue.toObject();
+  auto type = obj->type();
+  if (checkHasValidSetGetState(type)) {
+    Function& setstate = type->getMethod("__setstate__");
+    if (setstate.isGraphFunction()) {
+      elements.push_back(getFunctionTuple(setstate));
+    }
+  } else {
+    for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
+      setstateTuple(obj->getSlot(i), elements);
+    }
+  }
+}
+} // namespace
+
+void moduleMethodsTuple(
+    const Module& module,
+    std::vector<c10::IValue>& elements) {
+  auto methods = module.get_methods();
+  // top level methods
+  for (const auto& method : methods) {
+    elements.push_back(getFunctionTuple(method.function()));
+  }
+
+  // __setstate__ of all components
+  setstateTuple(module._ivalue(), elements);
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
@@ -37,12 +168,12 @@ class ScriptModuleSerializer {
       : writer_(filename) {}
 
   explicit ScriptModuleSerializer(
-      const std::function<size_t(const void *, size_t)>& writer_func)
+      const std::function<size_t(const void*, size_t)>& writer_func)
       : writer_(writer_func) {}
 
   void serialize(
-      const script::Module& module,
-      const script::ExtraFilesMap& extra_files,
+      const Module& module,
+      const ExtraFilesMap& extra_files,
       bool bytecode_format) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
@@ -70,6 +201,9 @@ class ScriptModuleSerializer {
           data.insert(data.end(), buf, buf + size);
         },
         nullptr,
+        [&](const c10::ClassTypePtr& t) {
+          return type_name_uniquer_.getUniqueName(t);
+        },
         &memorizedClassTypes);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
@@ -89,9 +223,7 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeExtraFiles(
-      const script::Module& module,
-      const script::ExtraFilesMap& extra_files) {
+  void writeExtraFiles(const Module& module, const ExtraFilesMap& extra_files) {
     // Write out extra files.
     for (const auto& kv : extra_files) {
       const std::string key = "extra/" + kv.first;
@@ -99,7 +231,7 @@ class ScriptModuleSerializer {
     }
     auto hook = GetExtraFilesHook();
     if (hook) {
-      script::ExtraFilesMap hook_files = hook(module);
+      ExtraFilesMap hook_files = hook(module);
       for (const auto& kv : hook_files) {
         const std::string key = "extra/" + kv.first;
         writer_.writeRecord(key, kv.second.data(), kv.second.size());
@@ -128,14 +260,15 @@ class ScriptModuleSerializer {
       static constexpr size_t kMinToCompress = 200;
 
       writer_.writeRecord(
-          filename, src.c_str(), src.size(),
+          filename,
+          src.c_str(),
+          src.size(),
           src.size() > kMinToCompress /*compress*/);
 
       // Write out the debug information
       std::string debugFilename = filename + ".debug_pkl";
       SourceRangePickler source_range_pickler;
-      auto range_data =
-          source_range_pickler.pickle(item.value().ranges());
+      auto range_data = source_range_pickler.pickle(item.value().ranges());
       writer_.writeRecord(
           debugFilename,
           range_data.data(),
@@ -144,69 +277,11 @@ class ScriptModuleSerializer {
     }
   }
 
-  static IValue Tup(std::vector<IValue> ivalues) {
-    return c10::ivalue::Tuple::create(std::move(ivalues));
-  }
-  static IValue Table(std::vector<std::pair<std::string, IValue>> entries) {
-    std::vector<IValue> ivalue_entries;
-    for (const auto& e : entries) {
-      ivalue_entries.push_back(Tup({e.first, e.second}));
-    }
-    return Tup(std::move(ivalue_entries));
-  }
-
-  void writeByteCode(const script::Module& module) {
-    auto methods = module.get_methods();
+  void writeByteCode(const Module& module) {
     std::vector<c10::IValue> elements;
-    for (const auto& method : methods) {
-      const auto& func = method.function();
-      auto graph = func.graph()->copy();
-      Inline(*graph);
-      torch::jit::Code code(graph, "<mobile interpreter>");
-
-      // operator names
-      std::vector<c10::OperatorName> opnames;
-      for (size_t i = 0; i < code.instructions().size(); ++i) {
-        Instruction ins = code.instructions()[i];
-        if (ins.op == OP || ins.op == OPN) {
-          auto node = code.instructions_source()[i];
-          opnames.emplace_back(node->schema().operator_name());
-        }
-      }
-
-      // instructions
-      std::vector<IValue> instructions;
-      for (Instruction ins : code.instructions()) {
-        instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N}));
-      }
-
-      // operators
-      std::vector<IValue> operators;
-      for (const auto& opname : opnames) {
-        operators.emplace_back(c10::ivalue::Tuple::create({opname.name, opname.overload_name}));
-      }
-
-      // constants
-      auto constants = code.constant_table();
-
-      // types
-      std::vector<IValue> types;
-      for (const TypePtr& t : code.type_table()) {
-        types.push_back(t->python_str());
-      }
-
-      // since the register location is embedded into the bytecode, pass the register size
-      auto register_size = static_cast<int>(code.register_size());
-
-      auto table = Table({{"instructions", Tup(instructions)},
-                          {"operators", Tup(operators)},
-                          {"constants", Tup(constants)},
-                          {"types", Tup(types)},
-                          {"register_size", register_size}});
-
-      elements.push_back(Tup({func.qualname().qualifiedName(), table}));
-    }
-    writeArchive("bytecode", Tup(std::move(elements)));
+    moduleMethodsTuple(module, elements);
+    auto telements = Tup(std::move(elements));
+    writeArchive("bytecode", telements);
   }
 
   void convertNamedType(const c10::NamedTypePtr& class_type) {
@@ -214,13 +289,26 @@ class ScriptModuleSerializer {
       return;
     }
     converted_types_.insert(class_type);
-    std::string qualifier = class_type->name()->prefix();
+    auto qualname = type_name_uniquer_.getUniqueName(class_type);
+    std::string qualifier = qualname.prefix();
     PythonPrint* pp = file_streams_.find(qualifier);
+
+    auto type_printer =
+        [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
+      auto namedType = t->cast<c10::NamedType>();
+      if (namedType && namedType->name()) {
+        return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+      }
+      return c10::nullopt;
+    };
     if (!pp) {
       pp = &file_streams_.insert(
           qualifier,
           PythonPrint(
-              constant_table_, class_deps_, /*enforce_importable=*/true));
+              constant_table_,
+              class_deps_,
+              type_printer,
+              /*enforce_importable=*/true));
     }
     pp->printNamedType(class_type);
   }
@@ -229,6 +317,7 @@ class ScriptModuleSerializer {
   std::vector<at::Tensor> constant_table_;
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   std::vector<c10::NamedTypePtr> class_deps_;
+  TypeNameUniquer type_name_uniquer_;
 
   // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
   // created
@@ -236,34 +325,66 @@ class ScriptModuleSerializer {
 };
 
 void ExportModule(
-    const script::Module& module,
+    const Module& module,
     std::ostream& out,
-    const script::ExtraFilesMap& extra_files,
+    const ExtraFilesMap& extra_files,
     bool bytecode_format) {
   ScriptModuleSerializer serializer(
-    [&](const void* buf, size_t nbytes) -> size_t {
-      out.write(static_cast<const char *>(buf), nbytes);
-      return !out ? 0 : nbytes;
-    });
+      [&](const void* buf, size_t nbytes) -> size_t {
+        out.write(static_cast<const char*>(buf), nbytes);
+        return !out ? 0 : nbytes;
+      });
   serializer.serialize(module, extra_files, bytecode_format);
 }
 
 void ExportModule(
-    const script::Module& module,
+    const Module& module,
     const std::string& filename,
-    const script::ExtraFilesMap& extra_files,
+    const ExtraFilesMap& extra_files,
     bool bytecode_format) {
   ScriptModuleSerializer serializer(filename);
   serializer.serialize(module, extra_files, bytecode_format);
 }
 
 void ExportModule(
-    const script::Module& module,
+    const Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func,
-    const script::ExtraFilesMap& extra_files,
+    const ExtraFilesMap& extra_files,
     bool bytecode_format) {
   ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(module, extra_files, bytecode_format);
+}
+
+namespace {
+void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
+  std::vector<c10::IValue> elements;
+  moduleMethodsTuple(m, elements);
+  for (const auto& element : elements) {
+    auto table = element.toTuple()->elements()[1];
+    auto row =
+        table.toTuple()->elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
+    TORCH_INTERNAL_ASSERT(
+        row->elements().at(0).toStringRef() == "operators",
+        "Expected operators but found ",
+        row->elements().at(0).toStringRef());
+    const auto& ops_list = row->elements().at(1).toTuple()->elements();
+    for (const auto& op : ops_list) {
+      auto op_item = op.toTuple()->elements();
+      TORCH_CHECK(
+          op_item.size() == 2,
+          "There should be two parts in an operator name.");
+      auto opname = op_item[0].toString()->string();
+      auto overload = op_item[1].toString()->string();
+      opnames.emplace(overload.empty() ? opname : opname + "." + overload);
+    }
+  }
+}
+} // namespace
+
+std::vector<std::string> export_opnames(const script::Module& m) {
+  std::set<std::string> names;
+  export_opnames(m, names);
+  return std::vector<std::string>(names.begin(), names.end());
 }
 
 } // namespace jit

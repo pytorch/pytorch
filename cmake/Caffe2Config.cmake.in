@@ -18,9 +18,9 @@ include("${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake")
 
 # Depending on whether Caffe2 uses gflags during compile time or
 # not, invoke gflags.
-if (@USE_GFLAGS@)
+if(@USE_GFLAGS@)
   include("${CMAKE_CURRENT_LIST_DIR}/public/gflags.cmake")
-  if (NOT TARGET gflags)
+  if(NOT TARGET gflags)
     message(FATAL_ERROR
         "Your installed Caffe2 version uses gflags but the gflags library "
         "cannot be found. Did you accidentally remove it, or have you set "
@@ -32,9 +32,9 @@ endif()
 
 # Depending on whether Caffe2 uses glog during compile time or
 # not, invoke glog.
-if (@USE_GLOG@)
+if(@USE_GLOG@)
   include("${CMAKE_CURRENT_LIST_DIR}/public/glog.cmake")
-  if (NOT TARGET glog::glog)
+  if(NOT TARGET glog::glog)
     message(FATAL_ERROR
         "Your installed Caffe2 version uses glog but the glog library "
         "cannot be found. Did you accidentally remove it, or have you set "
@@ -45,8 +45,8 @@ if (@USE_GLOG@)
 endif()
 
 # Protobuf
-if (@CAFFE2_LINK_LOCAL_PROTOBUF@)
-  if (NOT TARGET protobuf::libprotobuf)
+if(@CAFFE2_LINK_LOCAL_PROTOBUF@)
+  if(NOT TARGET protobuf::libprotobuf)
     # Define protobuf::libprotobuf as a dummy target to resolve references to
     # protobuf::libprotobuf in Caffe2Targets.cmake.
     add_library(dummy INTERFACE)
@@ -54,7 +54,7 @@ if (@CAFFE2_LINK_LOCAL_PROTOBUF@)
   endif()
 else()
   include("${CMAKE_CURRENT_LIST_DIR}/public/protobuf.cmake")
-  if (NOT TARGET protobuf::libprotobuf)
+  if(NOT TARGET protobuf::libprotobuf)
     message(FATAL_ERROR
         "Your installed Caffe2 version uses protobuf but the protobuf library "
         "cannot be found. Did you accidentally remove it, or have you set "
@@ -65,8 +65,8 @@ else()
   # If during build time we know the protobuf version, we will also do a sanity
   # check to ensure that the protobuf library that Caffe2 found is consistent
   # with the compiled version.
-  if (@CAFFE2_KNOWN_PROTOBUF_VERSION@)
-    if (NOT (${Protobuf_VERSION} VERSION_EQUAL @Protobuf_VERSION@))
+  if(@CAFFE2_KNOWN_PROTOBUF_VERSION@)
+    if(NOT (${Protobuf_VERSION} VERSION_EQUAL @Protobuf_VERSION@))
       message(FATAL_ERROR
           "Your installed Caffe2 is built with protobuf "
           "@Protobuf_VERSION@"
@@ -78,7 +78,7 @@ else()
   endif()
 endif()
 
-if (@USE_CUDA@)
+if(@USE_CUDA@)
   # The file public/cuda.cmake exclusively uses CAFFE2_USE_*.
   # If Caffe2 was compiled with the libraries below, they must
   # be found again when including the Caffe2 target.
@@ -86,19 +86,19 @@ if (@USE_CUDA@)
   set(CAFFE2_USE_CUDNN @USE_CUDNN@)
   set(CAFFE2_USE_TENSORRT @USE_TENSORRT@)
   include("${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake")
-  if (@CAFFE2_USE_CUDA@ AND NOT CAFFE2_USE_CUDA)
+  if(@CAFFE2_USE_CUDA@ AND NOT CAFFE2_USE_CUDA)
     message(FATAL_ERROR
       "Your installed Caffe2 version uses CUDA but I cannot find the CUDA "
       "libraries. Please set the proper CUDA prefixes and / or install "
       "CUDA.")
   endif()
-  if (@CAFFE2_USE_CUDNN@ AND NOT CAFFE2_USE_CUDNN)
+  if(@CAFFE2_USE_CUDNN@ AND NOT CAFFE2_USE_CUDNN)
     message(FATAL_ERROR
       "Your installed Caffe2 version uses cuDNN but I cannot find the cuDNN "
       "libraries. Please set the proper cuDNN prefixes and / or install "
       "cuDNN.")
   endif()
-  if (@CAFFE2_USE_TENSORRT@ AND NOT CAFFE2_USE_TENSORRT)
+  if(@CAFFE2_USE_TENSORRT@ AND NOT CAFFE2_USE_TENSORRT)
     message(FATAL_ERROR
       "Your installed Caffe2 version uses TensorRT but I cannot find the TensorRT "
       "libraries. Please set the proper TensorRT prefixes and / or install "
@@ -108,7 +108,7 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/public/mkl.cmake")
 
-if (@USE_MKLDNN@)
+if(@USE_MKLDNN@)
   include("${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake")
 endif()
 

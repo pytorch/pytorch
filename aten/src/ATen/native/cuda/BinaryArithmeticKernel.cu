@@ -4,6 +4,7 @@
 #include <ATen/native/cuda/zmath.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <c10/macros/Macros.h>
 
 
 // NOTE: CUDA on Windows requires that the enclosing function
@@ -12,10 +13,9 @@
 namespace at { namespace native {
 
 void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, iter.common_dtype(), "add_cuda/sub_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-    auto alpha = thrust_t(alpha_scalar.to<scalar_t>());
-    gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
+  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(kHalf, kBool, kBFloat16, iter.common_dtype(), "add_cuda/sub_cuda", [&]() {
+    auto alpha = alpha_scalar.to<scalar_t>();
+    gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return a + alpha * b;
     });
   });
@@ -30,7 +30,7 @@ void div_kernel_cuda(TensorIterator& iter) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
     // precision compared to computing the division.
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, iter.common_dtype(), "div_cuda", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
       using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
       auto inv_b = thrust_t(1.0) / thrust_t(iter.scalar_value<scalar_t>(2));
       iter.remove_operand(2);
@@ -39,9 +39,8 @@ void div_kernel_cuda(TensorIterator& iter) {
       });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
-      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
+    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a / b;
       });
     });
@@ -55,11 +54,31 @@ void mul_kernel_cuda(TensorIterator& iter) {
       return a && b;
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
-      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
+    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a * b;
       });
+    });
+  }
+}
+
+void remainder_kernel_cuda(TensorIterator& iter) {
+  if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "remainder_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        scalar_t r = a % b;
+        if ((r != 0) && ((r < 0) != (b < 0))) {
+          r += b;
+        }
+        return r;
+      });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "remainder_cuda", [&]() {
+      gpu_kernel_with_scalars(iter,
+        []GPU_LAMBDA(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+          return a - b * static_cast<scalar_t>(std::floor(a / b));
+        });
     });
   }
 }
@@ -68,5 +87,6 @@ REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
 REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
 REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
+REGISTER_DISPATCH(remainder_stub, &remainder_kernel_cuda);
 
 }} // namespace at::native

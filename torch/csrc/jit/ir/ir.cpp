@@ -1,13 +1,15 @@
 #include <torch/csrc/jit/ir/ir.h>
 
+#include <ATen/core/builtin_function.h>
+#include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/constants.h>
-#include <torch/csrc/jit/api/function.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/serialization/python_print.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
-#include <torch/csrc/jit/frontend/error_report.h>
 
 #include <algorithm>
 #include <iostream>
@@ -430,6 +432,7 @@ void Node::lint() const {
       // longer.
       break;
     case prim::FusionGroup:
+    case prim::CudaFusionGroup:
       checkSameDevice(this);
       // TODO: Typecheck the parameters
       g(attr::Subgraph)->lint();
@@ -716,8 +719,13 @@ void Value::inferTypeFrom(const at::Tensor& output) {
   setType(TensorType::create(output));
 }
 
+void Value::inferTypeFrom(
+    const c10::intrusive_ptr<c10::ivalue::Object>& output) {
+  setType(output->type());
+}
+
 bool Value::mustBeNone() const {
-  return node_->mustBeNone();
+  return type()->cast<NoneType>() || node_->mustBeNone();
 }
 bool Value::mustNotBeNone() const {
   return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
@@ -870,8 +878,8 @@ bool Node::matches(const FunctionSchema& schema) const {
   TypeEnv type_env;
   for (size_t i = 0; i < formals.size(); ++i) {
     auto formal = formals[i].type();
-    const MatchTypeReturn matched_type = matchTypeVariables(
-        formal, actuals[i]->type(), type_env);
+    const MatchTypeReturn matched_type =
+        matchTypeVariables(formal, actuals[i]->type(), type_env);
     if (!matched_type.success()) {
       return false;
     }
@@ -960,7 +968,7 @@ const Operator& Node::getOperator() const {
   if (maybe)
     return *maybe;
 
-  auto er = script::ErrorReport(sourceRange());
+  auto er = ErrorReport(sourceRange());
   er << "Schema not found for node. File a bug report.\n";
   er << "Node: " << *this << "\n";
   er << "Input types:";
@@ -984,9 +992,9 @@ const Operator& Node::getOperator() const {
 }
 
 Operation Node::getOperation() const {
-  // note: some operators require the node to produce a runnable operation, which
-  // is why 'this' is passed here. getOperator() ensures that 'this' matches the schema
-  // of the returned operator.
+  // note: some operators require the node to produce a runnable operation,
+  // which is why 'this' is passed here. getOperator() ensures that 'this'
+  // matches the schema of the returned operator.
   return getOperator().getOperation(this);
 }
 
@@ -1002,6 +1010,7 @@ bool Node::isNondeterministic() const {
       "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
       "aten::poisson(Tensor self, Generator? generator) -> Tensor",
+      "aten::binomial(Tensor count, Tensor prob, Generator? generator=None) -> Tensor",
       "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
@@ -1043,6 +1052,8 @@ bool Node::hasSideEffects() const {
     case prim::profile:
     case prim::BailOut:
     case prim::Guard:
+    case prim::rpc_async: // It represents RPC message sent.
+    case aten::wait: // It can represent RPC message received.
       return true;
   }
 
@@ -1334,7 +1345,11 @@ Node* Node::insertAfter(Node* n) {
   AT_ASSERT(n->owningBlock());
   AT_ASSERTM(
       n->kind() != prim::Return,
-      "Attempting to insert a Node after the Return node or before the Param node");
+      "Attempting to insert a Node after the Return node or before the Param node. Tried to insert",
+      *this,
+      " after ",
+      *n,
+      ".");
   this->owning_block_ = n->owningBlock();
   Node* next = n->next();
   n->next() = this;
@@ -1488,7 +1503,7 @@ Value* Graph::insert(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     const c10::optional<SourceRange>& range) {
-  return script::emitBuiltinCall(
+  return emitBuiltinCall(
       range.value_or(fakeRange()), *this, opname, args, kwargs);
 }
 
@@ -1668,9 +1683,7 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
   return n;
 }
 
-Node* Graph::createIsInstance(
-    Value* v,
-    at::ArrayRef<TypePtr> types) {
+Node* Graph::createIsInstance(Value* v, at::ArrayRef<TypePtr> types) {
   auto n = create(prim::isinstance, {v}, /*num_outputs*/ 1);
   n->tys_(attr::types, types.vec());
   n->output()->setType(BoolType::get());
@@ -1718,7 +1731,7 @@ Value* Graph::insertToList(Value* v, TypePtr type) {
 
 Value* Graph::insertFunctionCall(
     Function* callee,
-    const script::MatchedSchema& matched) {
+    const MatchedSchema& matched) {
   std::string func_name = callee->name();
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->s_(attr::name, func_name)
@@ -1734,7 +1747,7 @@ Value* Graph::insertFunctionCall(
 
 Value* Graph::insertMethodCall(
     std::string method_name,
-    const script::MatchedSchema& matched) {
+    const MatchedSchema& matched) {
   Value* result = insertNode(create(prim::CallMethod, matched.inputs))
                       ->s_(attr::name, std::move(method_name))
                       ->output()
@@ -1818,15 +1831,30 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
+// inline_optimized_graph argument is used in substitute function call for
+// ONNX conversion
+std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    Function* callee,
+    bool inline_optimized_graph /*=true*/) {
   WithInsertPoint guard(to_replace);
+  TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
   std::unordered_map<Value*, Value*> value_map;
-  auto new_outputs = insertGraph(
-      *to_replace->owningGraph(),
-      *(callee->optimized_graph()),
-      to_replace->inputs(),
-      value_map);
+  std::vector<torch::jit::Value*> new_outputs;
 
+  if (inline_optimized_graph) {
+    new_outputs = insertGraph(
+        *to_replace->owningGraph(),
+        *(callee->optimized_graph()),
+        to_replace->inputs(),
+        value_map);
+  } else {
+    new_outputs = insertGraph(
+        *to_replace->owningGraph(),
+        *(callee->graph()),
+        to_replace->inputs(),
+        value_map);
+  }
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 
@@ -1942,14 +1970,12 @@ TypePtr NamedValue::type() const {
 
 constexpr Symbol ProfileOp::Kind;
 
-
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
   for (const char* sig : sig_literals) {
     auto op = getOperatorForLiteral(sig);
     ops[Symbol::fromQualString(op->schema().name())].push_back(op);
   }
 }
-
 
 bool Node::isMemberOf(const OperatorSet& os) const {
   auto it = os.ops.find(kind());
@@ -1963,7 +1989,6 @@ bool Node::isMemberOf(const OperatorSet& os) const {
   }
   return false;
 }
-
 
 } // namespace jit
 } // namespace torch
