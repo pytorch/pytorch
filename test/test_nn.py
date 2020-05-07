@@ -909,6 +909,55 @@ class TestNN(NNTestCase):
         m.register_buffer('buffer_name', buffer3)
         self.assertEqual(m.buffer_name, buffer3)
 
+    def test_buffer_not_persistent(self):
+        m = nn.Module()
+        m.register_buffer('buf', torch.rand(5), persistent=False)
+        self.assertTrue(len(list(m.buffers())) == 1)
+        self.assertTrue(len(m.state_dict()) == 0)
+
+    def test_buffer_not_persistent_del(self):
+        m = nn.Module()
+        m.register_buffer('buf', torch.rand(5), persistent=False)
+        del m.buf
+        self.assertTrue(len(list(m.buffers())) == 0)
+
+    def test_buffer_not_persistent_overwrite(self):
+        m = nn.Module()
+        m.register_buffer('buf', torch.rand(5), persistent=False)
+        m.register_buffer('buf', torch.rand(5))
+
+        # can we overwrite a non-persistent buffer with a persistent one?
+        self.assertTrue(len(list(m.buffers())) == 1)
+        self.assertTrue(len(m.state_dict()) == 1)
+
+        # can we overwrite a persistent buffer with a non-persistent one?
+        m.register_buffer('buf', torch.rand(5), persistent=False)
+        self.assertTrue(len(list(m.buffers())) == 1)
+        self.assertTrue(len(m.state_dict()) == 0)
+
+    def test_buffer_not_persistent_assign(self):
+        m = nn.Module()
+        m.register_buffer('buf', torch.rand(5), persistent=False)
+
+        # Assigning None removes the buffer but if we then assign a new Tensor
+        # to the same property, it should still be marked as a buffer.
+        m.buf = None
+        self.assertTrue(len(list(m.buffers())) == 0)
+        self.assertTrue(len(m.state_dict()) == 0)
+        m.buf = torch.rand(5)
+        self.assertTrue(len(list(m.buffers())) == 1)
+        self.assertTrue(len(m.state_dict()) == 0)
+
+        # Assigning a Parameter removes the buffer.
+        m.buf = nn.Parameter(torch.rand(5))
+        self.assertTrue(len(list(m.buffers())) == 0)
+        self.assertTrue(len(m.state_dict()) == 1)
+
+    def test_buffer_not_persistent_load(self):
+        m = nn.Module()
+        m.register_buffer('buf', torch.rand(5), persistent=False)
+        m.load_state_dict({})
+
     def test_register_parameter_raises_error_if_name_is_not_string(self):
         m = nn.Module()
         expected_error = 'parameter name should be a string. Got '
