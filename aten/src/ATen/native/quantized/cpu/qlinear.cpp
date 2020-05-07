@@ -241,10 +241,10 @@ class QLinearInt8 final {
       auto weight_contig = pack_ptr.orig_weight;
       auto bias_fp32 = pack_ptr.bias;
 
-      std::tie(pack_ptr.w_zero_points, pack_ptr.w_scales) =
-          make_zero_points_and_scales_tensor(weight_contig);
       uint8_t* weight_zp_data = (uint8_t*)pack_ptr.w_zero_points.data_ptr<c10::quint8>();
       float* weight_scales_data = pack_ptr.w_scales.data_ptr<float>();
+      // We calculate requant scale here as the vector holding the requant scale
+      // is owned by this module. The pointer is then passed to qnnpack backend.
       pack_ptr.requantization_scale =
           generate_requantization_scales(
               pack_ptr.w_scales, input_scale, output_scale);
