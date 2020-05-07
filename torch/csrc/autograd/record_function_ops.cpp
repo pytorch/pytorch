@@ -1,12 +1,12 @@
 #include <torch/csrc/autograd/record_function_ops.h>
 #include <ATen/cpp_custom_type_hack.h>
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
 // NOLINTNEXTLINE(bugprone-exception-escape)
-CAFFE_KNOWN_TYPE(torch::autograd::profiler::RecordFunction);
+CAFFE_KNOWN_TYPE(at::RecordFunction);
 } // namespace caffe2
 
 namespace torch {
@@ -16,9 +16,9 @@ namespace profiler {
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
 at::Tensor record_function_enter(const std::string& name) {
-  auto rec = std::make_unique<RecordFunction>(RecordScope::USER_SCOPE);
+  auto rec = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
   if (auto* current = rec->current()) {
-    if (current->name() == StringView("profiler::_record_function_enter")) {
+    if (current->name().str() == std::string("profiler::_record_function_enter")) {
       // RecordFunction requires parent_ to be alive for it's entire lifetime.
       // Since the currently active RecordFunction will only live for the lifetime
       // of this op we need to end it early so the new RecordFunction we create is
@@ -30,8 +30,8 @@ at::Tensor record_function_enter(const std::string& name) {
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
 }
 
-RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle) {
-  auto& rec = at::cpp_custom_type_hack::cast<RecordFunction>(handle);
+at::RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle) {
+  auto& rec = at::cpp_custom_type_hack::cast<at::RecordFunction>(handle);
   return rec;
 }
 
@@ -41,7 +41,7 @@ void record_function_exit(const at::Tensor& handle) {
   // lifetime until now.
   auto& rec = getRecordFunctionFromTensor(handle);
   if (auto* current = rec.current()) {
-    if (current->name() == StringView("profiler::_record_function_exit")) {
+    if (current->name().str() == std::string("profiler::_record_function_exit")) {
       current->_end();
     }
   }

@@ -761,28 +761,28 @@ void checkScopeCallbacks() {
   bool found_function_scope = false;
   bool found_method_scope = false;
   bool found_user_scope = false;
-  profiler::addGlobalCallback(profiler::RecordFunctionCallback(
-      [&](const profiler::RecordFunction& fn) {
-        if (fn.scope() == profiler::RecordScope::FUNCTION &&
+  at::addGlobalCallback(at::RecordFunctionCallback(
+      [&](const at::RecordFunction& fn) {
+        if (fn.scope() == at::RecordScope::FUNCTION &&
             std::string(fn.name().str()) == "test_function") {
           found_function_scope = true;
         }
-        if (fn.scope() == profiler::RecordScope::TORCHSCRIPT_FUNCTION &&
+        if (fn.scope() == at::RecordScope::TORCHSCRIPT_FUNCTION &&
             std::string(fn.name().str()) == "test_method") {
           found_method_scope = true;
         }
-        if (fn.scope() == profiler::RecordScope::USER_SCOPE &&
+        if (fn.scope() == at::RecordScope::USER_SCOPE &&
             std::string(fn.name().str()) == "test_user_scope") {
           found_user_scope = true;
         }
       },
-      [](const profiler::RecordFunction&) {}));
+      [](const at::RecordFunction&) {}));
 
   bool bad_scope = false;
-  auto pushScopedCallback = [&](profiler::RecordScope scope, size_t& cnt) {
-    profiler::addGlobalCallback(
-        profiler::RecordFunctionCallback(
-            [&bad_scope, &cnt, scope](const profiler::RecordFunction& fn) {
+  auto pushScopedCallback = [&](at::RecordScope scope, size_t& cnt) {
+    at::addGlobalCallback(
+        at::RecordFunctionCallback(
+            [&bad_scope, &cnt, scope](const at::RecordFunction& fn) {
               if (fn.scope() == scope) {
                 ++cnt;
               } else {
@@ -790,18 +790,18 @@ void checkScopeCallbacks() {
               }
               return true;
             },
-            [](const profiler::RecordFunction&) {})
+            [](const at::RecordFunction&) {})
             .scopes({scope}));
   };
 
   size_t fun_cnt = 0;
-  pushScopedCallback(profiler::RecordScope::FUNCTION, fun_cnt);
+  pushScopedCallback(at::RecordScope::FUNCTION, fun_cnt);
   size_t ts_fun_cnt = 0;
-  pushScopedCallback(profiler::RecordScope::TORCHSCRIPT_FUNCTION, ts_fun_cnt);
+  pushScopedCallback(at::RecordScope::TORCHSCRIPT_FUNCTION, ts_fun_cnt);
   size_t user_scope_cnt = 0;
-  pushScopedCallback(profiler::RecordScope::USER_SCOPE, user_scope_cnt);
+  pushScopedCallback(at::RecordScope::USER_SCOPE, user_scope_cnt);
 
-  TORCH_CHECK(profiler::hasCallbacks());
+  TORCH_CHECK(at::hasCallbacks());
 
   {
     RECORD_TORCHSCRIPT_FUNCTION("test_method", {});
@@ -874,7 +874,7 @@ void testRecordFunction() {
 
   checkTracedInputs(eager_inputs);
   checkTracedInputs(jit_inputs);
-  profiler::clearCallbacks();
+  at::clearCallbacks();
 
   // test sampled callbacks
   int sampled_cb_ctr = 0;

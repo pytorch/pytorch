@@ -18,7 +18,7 @@
 #include <sys/time.h> // for gettimeofday()
 #endif
 
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 
 typedef struct CUevent_st* CUDAEventStub;
 
@@ -120,7 +120,7 @@ enum class TORCH_API EventKind : uint16_t {
 struct TORCH_API Event final {
   Event(
       EventKind kind,
-      StringView name,
+      at::StringView name,
       uint16_t thread_id,
       bool record_cuda,
       std::vector<std::vector<int64_t>>&& shapes = {})
@@ -162,7 +162,7 @@ struct TORCH_API Event final {
 private:
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
-  StringView name_;
+  at::StringView name_;
   EventKind kind_;
   uint16_t thread_id_;
   std::vector<std::vector<int64_t>> shapes_;
