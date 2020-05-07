@@ -1240,15 +1240,9 @@
 - func: erf_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _erf__cpu
-    CUDA: _erf__cuda
 
 - func: erf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _erf_out_cpu
-    CUDA: _erf_out_cuda
 
 - func: erfc(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2254,6 +2248,9 @@
 - func: cdist(Tensor x1, Tensor x2, float p=2, int? compute_mode=None) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
+
+- func: _euclidean_dist(Tensor x1, Tensor x2) -> Tensor
+  use_c10_dispatcher: full
 
 - func: _cdist_forward(Tensor x1, Tensor x2, float p, int? compute_mode) -> Tensor
   use_c10_dispatcher: full
@@ -3415,8 +3412,8 @@
 
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_addmm_out
-    CUDA: legacy::cuda::_th_addmm_out
+    CPU: addmm_cpu_out
+    CUDA: addmm_cuda_out
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
   supports_named_tensor: True
@@ -3425,8 +3422,8 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    CPU: legacy::cpu::_th_addmm
-    CUDA: legacy::cuda::_th_addmm
+    CPU: addmm_cpu
+    CUDA: addmm_cuda
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
   supports_named_tensor: True
@@ -4538,15 +4535,15 @@
 
 - func: addbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_addbmm_out
-    CUDA: legacy::cuda::_th_addbmm_out
+    CPU: addbmm_cpu_out
+    CUDA: addbmm_cuda_out
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_addbmm
-    CUDA: legacy::cuda::_th_addbmm
+    CPU: addbmm_cpu
+    CUDA: addbmm_cuda
 
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method

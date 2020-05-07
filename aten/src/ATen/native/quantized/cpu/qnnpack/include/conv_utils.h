@@ -29,20 +29,21 @@ static inline size_t compute_output_dimension(
 }  // namespace
 
 struct conv_param_t {
-  const std::array<uint32_t, 2> kernel_dims; // kernel width, height
-  const std::array<uint32_t, 2> stride_dims; // subsampling width, height
-  const std::array<uint32_t, 2> dilation; // dilation width, height
-  const std::array<uint32_t, 4> padding; // input padding top, left, bottom, right
-  const std::array<uint32_t, 2> adjustment_dims; // output adjustment
+  std::array<uint32_t, 2> kernel_dims; // kernel width, height
+  std::array<uint32_t, 2> stride_dims; // subsampling width, height
+  std::array<uint32_t, 2> dilation; // dilation width, height
+  std::array<uint32_t, 4> padding; // input padding top, left, bottom, right
+  std::array<uint32_t, 2> adjustment_dims; // output adjustment
 
-  const uint32_t groups;
-  const size_t input_channels;
-  const size_t output_channels;
-  const uint8_t* kernel_zero_points;
-  const float* requantization_scales;
-  const uint8_t output_min;
-  const uint8_t output_max;
-  const bool transpose;
+  uint32_t groups;
+  size_t input_channels;
+  size_t output_channels;
+  uint8_t* kernel_zero_points{nullptr};
+  float* requantization_scales{nullptr};
+  uint8_t output_min;
+  uint8_t output_max;
+  bool transpose;
+  bool is_initialized;
 
   // The following are derived parameters
   enum pytorch_qnnp_ukernel_type ukernel_type; // kernel type based on input params
@@ -50,24 +51,26 @@ struct conv_param_t {
   size_t group_output_channels;
   bool per_channel;
 
+  conv_param_t() : is_initialized(false) {}
+
   /**
    * @brief Constructor for initializing the convolution/deconvolution
    * parameters.
    */
-  conv_param_t(const std::array<uint32_t, 2> kernel_,
-               const std::array<uint32_t, 2> stride_,
-               const std::array<uint32_t, 2> dilation_,
-               const std::array<uint32_t, 4> padding_,
-               const std::array<uint32_t, 2> adjustment_,
-               const uint32_t groups_,
-               const size_t input_channels_,
-               const size_t output_channels_,
-               const uint8_t* kernel_zp_,
-               const float* scale_,
-               const uint8_t out_min_,
-               const uint8_t out_max_,
-               const bool transpose_,
-               const bool is_per_channel_)
+  conv_param_t(std::array<uint32_t, 2> kernel_,
+               std::array<uint32_t, 2> stride_,
+               std::array<uint32_t, 2> dilation_,
+               std::array<uint32_t, 4> padding_,
+               std::array<uint32_t, 2> adjustment_,
+               uint32_t groups_,
+               size_t input_channels_,
+               size_t output_channels_,
+               uint8_t* kernel_zp_,
+               float* scale_,
+               uint8_t out_min_,
+               uint8_t out_max_,
+               bool transpose_,
+               bool is_per_channel_)
       : kernel_dims(kernel_),
         stride_dims(stride_),
         dilation(dilation_),
@@ -81,6 +84,7 @@ struct conv_param_t {
         output_min(out_min_),
         output_max(out_max_),
         transpose(transpose_),
+        is_initialized(true),
         per_channel(is_per_channel_) {
     const uint32_t kernel_width = kernel_dims[0];
     const uint32_t kernel_height = kernel_dims[1];
