@@ -108,7 +108,7 @@ C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val
  */
 template <typename T>
 C10_HOST_DEVICE inline T geometric(T val, T p) {
-  return static_cast<T>(std::ceil(at::log(val) / at::log(static_cast<T>(1.0) - p)));
+  return static_cast<T>(::ceil(at::log(val) / at::log(static_cast<T>(1.0) - p)));
 }
 
 /**
