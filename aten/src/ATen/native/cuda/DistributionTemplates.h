@@ -474,7 +474,7 @@ void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG gen) {
       // Note that this method is from legacy THCTensorRandom and is likely to give
       // you more 0-s, since, the probability of gettings 1-s is higher than 0-s and
       // by reversing the bounds, we are flipping the probabilities of 1-s and 0-s.
-      auto reverse_bound_rand = rand == static_cast<accscalar_t>(1.0) ? static_cast<accscalar_t>(0.0) : rand;
+      auto reverse_bound_rand = static_cast<accscalar_t>(1) - rand;
       return static_cast<scalar_t>(reverse_bound_rand * range + from);
     };
     UNIFORM_AND_TRANSFORM(scalar_t, accscalar_t, curand4_engine_calls, iter, gen, uniform_func);
@@ -550,7 +550,8 @@ void exponential_kernel(TensorIterator& iter, double lambda_, RNG gen) {
     auto lambda = static_cast<accscalar_t>(lambda_);
     // define lambda for exponential transformation
     auto exponential_func = [lambda] __device__ (accscalar_t rand) {
-      return static_cast<scalar_t>(transformation::exponential<accscalar_t>(rand, lambda));
+      // curand_uniform has (0,1] bounds. Reverse it to exclude 1 which produces `+inf` after applying exponential transformation
+      return static_cast<scalar_t>(transformation::exponential<accscalar_t>(static_cast<accscalar_t>(1) - rand, lambda));
     };
     UNIFORM_AND_TRANSFORM(scalar_t, accscalar_t, curand4_engine_calls, iter, gen, exponential_func);
    });
