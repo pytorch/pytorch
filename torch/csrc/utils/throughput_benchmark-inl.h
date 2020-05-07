@@ -6,6 +6,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
+#include <aten/src/ATen/Parallel.h>
+
 namespace torch {
 namespace throughput_benchmark {
 namespace detail {
@@ -17,6 +19,8 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   TORCH_CHECK(
       config.num_worker_threads == 1,
       "Only parallelization by callers is supported");
+
+  LOG(INFO) << at::get_parallel_info();
 
   // We pre-generate inputs here for each of the threads. This allows us to
   // safely move inputs out for each of the threads independently and thus avoid

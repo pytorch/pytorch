@@ -105,6 +105,9 @@ void onnxifi(
     size_t max_seq_size,
     bool load_model_by_blob,
     bool predictor_net_ssa_rewritten) {
+  // Split SparseLengthsSumSparse so that we can lower the SparseLengthsSum part
+  splitSparseLengthsSumSparse(net, *ws);
+
   // Clean up the external input/output of the net
   net->mutable_external_input()->Clear();
   net->mutable_external_output()->Clear();

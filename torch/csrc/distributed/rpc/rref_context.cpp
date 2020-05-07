@@ -14,11 +14,15 @@ thread_local bool RRefContext::recording = false;
 namespace callback {
 void confirmPendingUser(
     const rpc::Message& message,
-    const c10::optional<utils::FutureError>& futErr) {
+    const c10::optional<utils::FutureError>& futErr,
+    const ForkId& expectedForkId) {
+  if (!futErr) {
+    auto rr = RemoteRet::fromMessage(message);
+    TORCH_INTERNAL_ASSERT(rr->forkId() == expectedForkId);
+  }
+  RRefContext::getInstance().delPendingUser(expectedForkId);
+  // Potentially propagate to the userRRef?
   RRefContext::handleException(futErr);
-  auto rr = RemoteRet::fromMessage(message);
-  auto& ctx = RRefContext::getInstance();
-  ctx.delPendingUser(rr->forkId());
 }
 
 c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(

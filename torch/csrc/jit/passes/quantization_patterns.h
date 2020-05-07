@@ -200,6 +200,32 @@ graph(%a_quant, %b_scalar, %alpha):
          %r = quantized::add_scalar_out(%a_quant, %b_scalar, %a_quant)
          return (%r) )";
 
+  // quanntized::add_scalar_relu
+  std::string add_scalar_relu = R"(
+graph(%a_quant, %b_scalar, %alpha):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r_add = aten::add(%a_dequant, %b_scalar, %alpha)
+         %r = aten::relu(%r_add)
+         return (%r) )";
+
+  std::string quantized_add_scalar_relu = R"(
+graph(%a_quant, %b_scalar, %alpha):
+         %r = quantized::add_scalar_relu(%a_quant, %b_scalar)
+         return (%r) )";
+
+  // quanntized::add_scalar_relu_out
+  std::string add_scalar_relu_out = R"(
+graph(%a_quant, %b_scalar, %alpha):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r_add = aten::add_(%a_dequant, %b_scalar, %alpha)
+         %r = aten::relu(%r_add)
+         return (%r) )";
+
+  std::string quantized_add_scalar_relu_out = R"(
+graph(%a_quant, %b_scalar, %alpha):
+         %r = quantized::add_scalar_relu_out(%a_quant, %b_scalar, %a_quant)
+         return (%r) )";
+
   return {
       {"quantized::conv2d", conv2d, quantized_conv2d},
       {"quantized::conv3d", conv3d, quantized_conv3d},
@@ -210,7 +236,15 @@ graph(%a_quant, %b_scalar, %alpha):
       {"quantized::add_relu", add_inplace_relu, quantized_add_relu, add_filter},
       {"quantized::add", add, quantized_add, add_filter},
       {"quantized::add", inplace_add, quantized_add, add_filter},
-      {"quantized::cat", cat, quantized_cat},
+      // note that this must come before quantized::add_scalar
+      {"quantized::add_scalar_relu",
+       add_scalar_relu,
+       quantized_add_scalar_relu,
+       add_scalar_filter},
+      {"quantized::add_scalar_relu_out",
+       add_scalar_relu_out,
+       quantized_add_scalar_relu_out,
+       add_scalar_filter},
       {"quantized::add_scalar",
        add_scalar,
        quantized_add_scalar,
@@ -219,6 +253,27 @@ graph(%a_quant, %b_scalar, %alpha):
        add_scalar_out,
        quantized_add_scalar_out,
        add_scalar_filter},
+      {"quantized::cat", cat, quantized_cat},
+  };
+}
+
+std::vector<QuantFusionInfo> dynamic_quant_fusion_pattern_and_replacements() {
+  std::string linear_dynamic = R"(
+graph(%packed_params, %a, %reduce_range, %a_dtype):
+        %a_scale : float, %a_zero_point : int = aten::_choose_qparams_per_tensor(%a, %reduce_range)
+        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::linear(%a_dequant, %w_dequant, %b)
+        return (%r) )";
+
+  std::string quantized_linear_dynamic = R"(
+graph(%packed_params, %a, %reduce_range, %a_dtype):
+        %r = quantized::linear_dynamic(%a, %packed_params)
+        return (%r) )";
+  return {
+      {"quantized::linear_dynamic", linear_dynamic, quantized_linear_dynamic},
   };
 }
 

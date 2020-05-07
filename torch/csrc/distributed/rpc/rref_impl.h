@@ -338,22 +338,25 @@ class TORCH_API OwnerRRef final : public RRef {
 
   // Get a constant reference of the real value. This method will block if the
   // value is not ready. This method does not need GIL as it does not create
-  // any new py::object.
+  // any new py::object. It will throw if there is an error.
   const IValue& getValue() const;
 
   // Set the value of this ``OwnerRRef``. This method does not need GIL as it
   // does not create any new py::object.
   void setValue(IValue&& value);
+  // Sets the value of this ``OwnerRRef`` to contain an exception.
+  void setError(const std::string& err);
 
-  // Has a value been set?
+  // Has a value or error been set?
   bool hasValue() const;
-  // Gets a future that is satisfied when the value is set.
+  // Gets a future that is satisfied when the value or error is set.
   std::shared_ptr<FutureMessage> getFuture();
 
  private:
   friend class RRefContext;
 
   c10::optional<IValue> value_;
+  c10::optional<std::string> error_;
   mutable std::mutex mutex_;
   mutable std::condition_variable valueCV_;
   std::shared_ptr<FutureMessage> future_;

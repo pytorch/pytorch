@@ -44,13 +44,12 @@ class MkldnnConv2d(torch.jit.ScriptModule):
         self.dilation = dense_module.dilation
         self.groups = dense_module.groups
 
-        self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv_weight(
+        self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv2d_weight(
             dense_module.weight.to_mkldnn(),
             self.padding,
             self.stride,
             self.dilation,
-            self.groups,
-            2))
+            self.groups))
         if dense_module.bias is not None:
             self.register_buffer('bias', dense_module.bias.to_mkldnn())
         else:
@@ -65,13 +64,12 @@ class MkldnnConv2d(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def __setstate__(self, state):
-        self.weight = torch._C._nn.mkldnn_reorder_conv_weight(
+        self.weight = torch._C._nn.mkldnn_reorder_conv2d_weight(
             state[0].to_mkldnn(),
             self.padding,
             self.stride,
             self.dilation,
-            self.groups,
-            2)
+            self.groups)
         self.bias = state[1].to_mkldnn()
         self.training = state[2]
 
@@ -97,13 +95,12 @@ class MkldnnConv3d(torch.jit.ScriptModule):
         self.dilation = dense_module.dilation
         self.groups = dense_module.groups
 
-        self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv_weight(
+        self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv3d_weight(
             dense_module.weight.to_mkldnn(),
             self.padding,
             self.stride,
             self.dilation,
-            self.groups,
-            3))
+            self.groups))
         if dense_module.bias is not None:
             self.register_buffer('bias', dense_module.bias.to_mkldnn())
         else:
@@ -118,13 +115,12 @@ class MkldnnConv3d(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def __setstate__(self, state):
-        self.weight = torch._C._nn.mkldnn_reorder_conv_weight(
+        self.weight = torch._C._nn.mkldnn_reorder_conv3d_weight(
             state[0].to_mkldnn(),
             self.padding,
             self.stride,
             self.dilation,
-            self.groups,
-            3)
+            self.groups)
         self.bias = state[1].to_mkldnn()
         self.training = state[2]
 

@@ -45,7 +45,10 @@ struct GraphExecutorImplBase;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
   GraphExecutor(std::shared_ptr<Graph> graph, std::string function_name);
+
   void run(Stack& inputs);
+  c10::intrusive_ptr<Future> runAsync(Stack& stack);
+
   // `remaining_bailout_depth` stands for the maximum number of profiled and
   // specialized recompilations allowed for the current `GraphExecutor`. if
   // remaining_bailout_depth is equal to 0, `GraphExecutor` won't perform any

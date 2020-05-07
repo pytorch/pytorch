@@ -41,18 +41,6 @@ case "$image" in
     LLVMDEV=yes
     PROTOBUF=yes
     ;;
-  pytorch-linux-xenial-py2.7.9)
-    TRAVIS_PYTHON_VERSION=2.7.9
-    GCC_VERSION=7
-    # Do not install PROTOBUF, DB, and VISION as a test
-    ;;
-  pytorch-linux-xenial-py2.7)
-    TRAVIS_PYTHON_VERSION=2.7
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
   pytorch-linux-xenial-py3.8)
     # TODO: This is a hack, get rid of this as soon as you get rid of the travis downloads
     TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/16.04/x86_64"
@@ -90,14 +78,6 @@ case "$image" in
   pytorch-linux-xenial-pynightly)
     TRAVIS_PYTHON_VERSION=nightly
     GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
-  pytorch-linux-xenial-cuda9-cudnn7-py2)
-    CUDA_VERSION=9.0
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=2.7
     PROTOBUF=yes
     DB=yes
     VISION=yes

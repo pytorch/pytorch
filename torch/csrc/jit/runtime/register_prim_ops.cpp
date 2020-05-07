@@ -1191,10 +1191,9 @@ void setItem(const c10::List<T>& list, int64_t idx, T&& value) {
   list.set(normalized_idx, std::move(value));
 }
 
-template <typename T>
 int listAppend(Stack& stack) {
-  T el = pop(stack).to<T>();
-  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  IValue el = pop(stack).to<IValue>();
+  c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
   list.push_back(std::move(el));
   push(stack, std::move(list));
@@ -1202,9 +1201,8 @@ int listAppend(Stack& stack) {
   return 0;
 }
 
-template <typename T>
 int listReverse(Stack& stack) {
-  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
   std::reverse(list.begin(), list.end());
 
@@ -1249,10 +1247,9 @@ int maxList(Stack& stack) {
   return 0;
 }
 
-template <typename T>
 int listPopImpl(Stack& stack, const char* empty_message) {
   int64_t idx = pop(stack).to<int64_t>();
-  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
   const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
@@ -1267,31 +1264,27 @@ int listPopImpl(Stack& stack, const char* empty_message) {
   return 0;
 }
 
-template <typename T>
 int listPop(Stack& stack) {
-  return listPopImpl<T>(stack, "pop from empty list");
+  return listPopImpl(stack, "pop from empty list");
 }
 
-template <typename T>
 int listClear(Stack& stack) {
-  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
   list.clear();
   return 0;
 }
 
-template <typename T>
 int listDelete(Stack& stack) {
-  listPopImpl<T>(stack, "pop index out of range");
+  listPopImpl(stack, "pop index out of range");
   pop(stack);
   return 0;
 }
 
-template <typename T>
 int listInsert(Stack& stack) {
-  T elem = pop(stack).to<T>();
+  IValue elem = pop(stack).to<IValue>();
   int64_t idx = pop(stack).to<int64_t>();
-  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
   const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
@@ -1442,10 +1435,9 @@ int listCount<at::Tensor>(Stack& stack) {
   return 0;
 }
 
-template <typename T>
 int listExtend(Stack& stack) {
-  c10::List<T> b = pop(stack).to<c10::List<T>>();
-  c10::List<T> a = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> b = pop(stack).to<c10::List<IValue>>();
+  c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
 
   a.reserve(a.size() + b.size());
   for (size_t i = 0; i < b.size(); ++i) {
@@ -1454,26 +1446,23 @@ int listExtend(Stack& stack) {
   return 0;
 }
 
-template <typename T>
 int listCopy(Stack& stack) {
-  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
   push(stack, list.copy());
   return 0;
 }
 
-template <typename T>
 int listSelect(Stack& stack) {
   int64_t idx = pop(stack).to<int64_t>();
-  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
   auto element = getItem(list, idx);
   push(stack, std::move(element));
   return 0;
 }
 
-template <typename T>
 int listLen(Stack& stack) {
-  c10::List<T> a = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
 
   const int64_t size = a.size();
   push(stack, size);
@@ -1536,9 +1525,8 @@ int listNe<at::Tensor>(Stack& stack) {
   return 0;
 }
 
-template <typename T>
 int listList(Stack& stack) {
-  c10::List<T> a = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
   push(stack, a.copy());
   return 0;
 }
@@ -1557,12 +1545,11 @@ int listContains(Stack& stack) {
   return 0;
 }
 
-template <class T>
 int listAdd(Stack& stack) {
-  c10::List<T> b = pop(stack).to<c10::List<T>>();
-  c10::List<T> a = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> b = pop(stack).to<c10::List<IValue>>();
+  c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
 
-  c10::List<T> ret = make_result_list<T>(a.elementType());
+  c10::List<IValue> ret = make_result_list<IValue>(a.elementType());
 
   if (a.use_count() == 1) {
     ret = std::move(a);
@@ -1576,20 +1563,17 @@ int listAdd(Stack& stack) {
   return 0;
 }
 
-template <class T>
 int listInplaceAdd(Stack& stack) {
-  c10::List<T> b = pop(stack).to<List<T>>();
-  c10::List<T> a = pop(stack).to<List<T>>();
+  c10::List<IValue> b = pop(stack).to<List<IValue>>();
+  c10::List<IValue> a = pop(stack).to<List<IValue>>();
   a.append(std::move(b));
   push(stack, std::move(a));
   return 0;
 }
 
-template <class T>
 int listMulIntLeftInPlace(Stack& stack) {
   int64_t n = pop(stack).to<int64_t>();
-  c10::List<T> list = pop(stack).to<c10::List<T>>();
-
+  c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
   if (n <= 0) {
     list.clear();
   } else if (n > 1) {
@@ -1605,17 +1589,16 @@ int listMulIntLeftInPlace(Stack& stack) {
   return 0;
 }
 
-template <class T>
 int listMulIntLeft(Stack& stack) {
   int64_t n = pop(stack).to<int64_t>();
-  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
-  c10::List<T> ret = make_result_list<T>(list.elementType());
+  c10::List<IValue> ret = make_result_list<IValue>(list.elementType());
   const auto size = list.size() * n;
   ret.reserve(size);
 
   for (auto i = 0; i < n; i++) {
-    for (T e : list) {
+    for (IValue e : list) {
       ret.push_back(std::move(e));
     }
   }
@@ -1624,17 +1607,16 @@ int listMulIntLeft(Stack& stack) {
   return 0;
 }
 
-template <class T>
 int listMulIntRight(Stack& stack) {
-  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
   int64_t n = pop(stack).to<int64_t>();
 
-  c10::List<T> ret = make_result_list<T>(list.elementType());
+  c10::List<IValue> ret = make_result_list<IValue>(list.elementType());
   const auto size = list.size() * n;
   ret.reserve(size);
 
   for (auto i = 0; i < n; i++) {
-    for (T e : list) {
+    for (IValue e : list) {
       ret.push_back(std::move(e));
     }
   }
@@ -1643,12 +1625,11 @@ int listMulIntRight(Stack& stack) {
   return 0;
 }
 
-template <typename T>
 int listSlice(Stack& stack) {
   int64_t step = pop(stack).to<int64_t>();
   int64_t end = pop(stack).to<int64_t>();
   int64_t start = pop(stack).to<int64_t>();
-  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
   const int64_t list_size = list.size();
 
@@ -1658,7 +1639,7 @@ int listSlice(Stack& stack) {
   const auto normalized_end =
       std::min(list_size, normalizeIndex(end, list_size));
 
-  c10::List<T> sliced_list = make_result_list<T>(list.elementType());
+  c10::List<IValue> sliced_list = make_result_list<IValue>(list.elementType());
   if (normalized_end <= normalized_start) {
     // early exit if the slice is trivially empty
     push(stack, std::move(sliced_list));
@@ -1740,11 +1721,10 @@ int listCopyAndSort<at::Tensor>(Stack& stack) {
   return 0;
 }
 
-template <typename T>
 int listSetItem(Stack& stack) {
-  T value = pop(stack).to<T>();
+  IValue value = pop(stack).to<IValue>();
   int64_t idx = pop(stack).to<int64_t>();
-  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
   setItem(list, idx, std::move(value));
 
@@ -2008,105 +1988,85 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
 
-// these ops are generic over the list element type.
-#define CREATE_GENERIC_LIST_OPS(decl_type, value_type)                              \
-  Operator(                                                                         \
-      "aten::select." decl_type "(" decl_type                                       \
-      "[](a) list, int idx) -> " decl_type "(*)",                                   \
-      listSelect<value_type>,                                                       \
-      aliasAnalysisFromSchema()),                                                   \
-      Operator(                                                                     \
-          "aten::__getitem__." decl_type "(" decl_type                              \
-          "[](a) list, int idx) -> " decl_type "(*)",                               \
-          listSelect<value_type>,                                                   \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::append." decl_type "(" decl_type "[](a!) self, " decl_type         \
-          "(c -> *) el) -> " decl_type "[](a!)",                                    \
-          listAppend<value_type>,                                                   \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::reverse." decl_type "(" decl_type "[](a!) self) -> ()",            \
-          listReverse<value_type>,                                                  \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::extend." decl_type "(" decl_type "[](a!) self, " decl_type         \
-          " [] other) -> ()",                                                       \
-          listExtend<value_type>,                                                   \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::copy." decl_type "(" decl_type                                     \
-          "[](a) self)"                                                             \
-          " -> " decl_type "[]",                                                    \
-          listCopy<value_type>,                                                     \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::_set_item." decl_type "(" decl_type                                \
-          "[](a!) l, int idx, " decl_type "(b -> *) el) -> " decl_type              \
-          "[](a!)",                                                                 \
-          listSetItem<value_type>,                                                  \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::clear." decl_type "( " decl_type "[](a!) self) -> ()",             \
-          listClear<value_type>,                                                    \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::Delete." decl_type "( " decl_type                                  \
-          "[](a!) self, int idx) -> ()",                                            \
-          listDelete<value_type>,                                                   \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::insert." decl_type "( " decl_type                                  \
-          "[](a!) self, int idx,                                                    \
-          " decl_type "(b -> *) el) -> ()",                                         \
-          listInsert<value_type>,                                                   \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::pop." decl_type "(" decl_type                                      \
-          "[](a!) self, int idx=-1)                                                 \
-        -> " decl_type "(*)",                                                       \
-          listPop<value_type>,                                                      \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::len." decl_type "(" decl_type "[] a) -> int",                      \
-          listLen<value_type>,                                                      \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::add." decl_type "(" decl_type "[] a, " decl_type                   \
-          "[] b) -> " decl_type "[]",                                               \
-          listAdd<value_type>,                                                      \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::add_." decl_type "(" decl_type "[](a!) self, " decl_type           \
-          "[] b) -> " decl_type "[]",                                               \
-          listInplaceAdd<value_type>,                                               \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::slice." decl_type "(" decl_type                                    \
-          "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
-          "[]",                                                                     \
-          listSlice<value_type>,                                                    \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::list." decl_type "(" decl_type "[] l) -> " decl_type "[]",         \
-          listList<value_type>,                                                     \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::mul.left_" decl_type "(" decl_type                                 \
-          "[] l, int n) -> " decl_type "[]",                                        \
-          listMulIntLeft<value_type>,                                               \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::mul.right_(int n, " decl_type "[] l) -> " decl_type "[]",          \
-          listMulIntRight<value_type>,                                              \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::mul_." decl_type "(" decl_type                                     \
-          "[](a!) l, int n) -> " decl_type "[](a!)",                                \
-          listMulIntLeftInPlace<value_type>,                                        \
-          aliasAnalysisFromSchema())
+    // these ops are generic over the list element type.
+    // CREATING GENERIC_LIST_OPS
+    Operator(
+        "aten::select.t(t[](a) list, int idx) -> t(*)",
+        listSelect,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::__getitem__.t(t[](a) list, int idx) -> t(*)",
+        listSelect,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::append.t(t[](a!) self, t(c -> *) el) -> t[](a!)",
+        listAppend,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::reverse.t(t[](a!) self) -> ()",
+        listReverse,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::extend.t(t[](a!) self, t[] other) -> ()",
+        listExtend,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::copy.t(t[](a) self) -> t[]",
+        listCopy,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::_set_item.t(t [](a!) l, int idx, t(b -> *) el) -> t[](a!)",
+        listSetItem,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::clear.t(t[](a!) self) -> ()",
+        listClear,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::Delete.t(t[](a!) self, int idx) -> ()",
+        listDelete,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::insert.t(t[](a!) self, int idx, t(b -> *) el) -> ()",
+        listInsert,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::pop.t(t[](a!) self, int idx=-1) -> t(*)",
+        listPop,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::add.t(t[] a, t[] b) -> t[]",
+        listAdd,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::add_.t(t[](a!) self, t[] b) -> t[]",
+        listInplaceAdd,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::slice.t(t[] l, int start, int end=9223372036854775807, int step=1) -> t[]",
+        listSlice,
+        aliasAnalysisFromSchema()),
+    Operator("aten::list.t(t[] l) -> t[]", listList, aliasAnalysisFromSchema()),
+    Operator(
+        "aten::mul.left_t(t[] l, int n) -> t[]",
+        listMulIntLeft,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::mul.right_(int n, t[] l) -> t[]",
+        listMulIntRight,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::mul_.t(t[](a!) l, int n) -> t[](a!)",
+        listMulIntLeftInPlace,
+        aliasAnalysisFromSchema()),
 
-    CREATE_GENERIC_LIST_OPS("t", IValue),
+    Operator("aten::len.t(t[] a) -> int", listLen, aliasAnalysisFromSchema()),
+
+    // registered as Any[] so that heterogenous tuples can be called with len()
+    Operator(
+        "aten::len.any(Any[] a) -> int",
+        listLen,
+        aliasAnalysisFromSchema()),
 
 // these ops have a specialized implementation for the list element type
 #define CREATE_SPECIALIZED_LIST_OPS(decl_type, value_type) \
@@ -2157,14 +2117,6 @@ RegisterOperators reg2({
                     CREATE_COMPARATOR_LIST_OPS_SPECIALIZED("int", int64_t)
                         CREATE_COMPARATOR_LIST_OPS_SPECIALIZED("float", double)
                             CREATE_COMPARATOR_LIST_OPS_SPECIALIZED("bool", bool)
-
-    // TODO: remove once tests that rely on
-    // https://github.com/pytorch/pytorch/issues/24856
-    // behavior have been fixed
-    Operator(
-        "aten::append(str[](a!) self, str? el) -> str[](a!)",
-        listAppend<std::string>,
-        aliasAnalysisFromSchema()),
 
 #undef CREATE_GENERIC_LIST_OPS
 #undef CREATE_COMPARATOR_LIST_OPS_SPECIALIZED

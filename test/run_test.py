@@ -48,11 +48,14 @@ TESTS = [
     'test_nn',
     'test_numba_integration',
     'test_optim',
-    'test_qat',
-    'test_quantization',
-    'test_quantized',
-    'test_quantized_tensor',
-    'test_quantized_nn_mods',
+    'quantization/test_fake_quant',
+    'quantization/test_numerics',
+    'quantization/test_qat',
+    'quantization/test_quantization',
+    'quantization/test_quantized',
+    'quantization/test_quantized_tensor',
+    'quantization/test_quantized_nn_mods',
+    'quantization/test_quantize_script',
     'test_sparse',
     'test_serialization',
     'test_torch',
@@ -117,6 +120,9 @@ ROCM_BLACKLIST = [
     'test_cpp_extensions_jit',
     'test_determination',
     'test_multiprocessing',
+    'test_jit_simple',
+    'test_jit_legacy',
+    'test_jit_fuser_legacy',
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch
@@ -126,7 +132,6 @@ SLOW_TESTS = [
     'test_autograd',
     'test_cpp_extensions_jit',
     'test_jit_legacy',
-    'test_quantized',
     'test_dataloader',
     'test_overrides',
     'test_jit_simple',
@@ -147,7 +152,8 @@ SLOW_TESTS = [
     'test_tensorboard',
     'distributed/test_c10d',
     'distributed/test_c10d_spawn',
-    'test_quantization',
+    'quantization/test_quantized',
+    'quantization/test_quantization',
     'test_determination',
 ]
 _DEP_MODULES_CACHE = {}

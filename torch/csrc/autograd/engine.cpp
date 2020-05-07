@@ -796,13 +796,7 @@ auto Engine::execute(const edge_list& roots,
     graph_task->init_to_execute(*graph_root, outputs);
   }
 
-  variable_list results = execute_with_graph_task(graph_task, graph_root)->wait();
-  // If it's owning thread backward call (not reentrant), local_ready_queue must
-  // be empty when we finish Engine::execute
-  if (not_reentrant_backward_call) {
-    TORCH_INTERNAL_ASSERT(local_ready_queue->empty());
-  }
-  return results;
+  return execute_with_graph_task(graph_task, graph_root)->wait();
 }
 
 void Engine::initialize_device_threads_pool() {
