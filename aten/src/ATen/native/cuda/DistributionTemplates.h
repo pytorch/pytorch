@@ -513,11 +513,19 @@ struct LogNormalKernel {
 
 // =================================================== Geometric ======================================================
 
+namespace {
+
+template <typename T>
+struct GeometricType { using type = float; };
+
+template <> struct GeometricType<double> { using type = double; };
+
+}
+
 template<typename RNG>
-void geometric_kernel(TensorIterator& iter, double p_, RNG gen) {
+void geometric_kernel(TensorIterator& iter, double p, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "geometric_cuda", [&] {
-    using accscalar_t = at::acc_type<scalar_t, true>;
-    auto p = static_cast<accscalar_t>(p_);
+    using accscalar_t = GeometricType<scalar_t>::type;
     // define lambda for geometric transformation
     auto geometric_func = [p] __device__ (accscalar_t rand) {
       return static_cast<scalar_t>(transformation::geometric<accscalar_t>(rand, p));

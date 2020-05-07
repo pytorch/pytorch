@@ -296,6 +296,29 @@ Statement* GPULower::mutate(BinaryOp* bop) {
   return new_op;
 }
 
+Statement* GPULower::mutate(TernaryOp* top) {
+  if (!ir_utils::isTVOp(top))
+    return OptOutMutator::mutate(top);
+
+  TensorIndex* out = getConsumerIndex(ir_utils::asTV(top->out()));
+  Val* in1 = top->in1();
+  Val* in2 = top->in2();
+  Val* in3 = top->in3();
+
+  if (ir_utils::isTV(in1))
+    in1 = getProducerIndex(ir_utils::asTV(in1), ir_utils::asTV(top->out()));
+
+  if (ir_utils::isTV(in2))
+    in2 = getProducerIndex(ir_utils::asTV(in2), ir_utils::asTV(top->out()));
+
+  if (ir_utils::isTV(in3))
+    in3 = getProducerIndex(ir_utils::asTV(in3), ir_utils::asTV(top->out()));
+
+  Expr* new_op = new TernaryOp(top->getTernaryOpType(), out, in1, in2, in3);
+
+  return new_op;
+}
+
 // TensorViews are all based on symbolic sizes. When we first initialize them we
 // don't know if they're inputs or outputs which would mean that they have
 // runtime shapes. Intermediate tensors (those not going to global memory) do
@@ -394,6 +417,8 @@ namespace {
 
 // Some pre-compilation checks
 void validate(Fusion* fusion) {
+  FusionGuard fg(fusion);
+  fusion->validateInputs();
   for (Val* val : fusion->vals()) {
     if (ir_utils::isTV(val)) {
       TensorView* tv = ir_utils::asTV(val);
@@ -409,8 +434,30 @@ void validate(Fusion* fusion) {
       }
     } // if ir_utils::isTV
   } // for(Val* val : fusion->vals())
-
 } // validate
+
+// Remove circular computeAt references
+void fixComputeAt(Fusion* fusion) {
+  FusionGuard fg(fusion);
+
+  std::vector<Expr*> exprs = fusion->exprs(true);
+  std::set<TensorView*> visited;
+  for (auto it = exprs.rbegin(); it != exprs.rend(); it++) {
+    Expr* expr = *it;
+    if (!ir_utils::isTVOp(expr))
+      continue;
+
+    TensorView* tv = ir_utils::asTV(expr->output(0));
+    TensorView* ctv = tv->getComputeAtView();
+
+    if (ctv != nullptr && visited.find(ctv) == visited.end()) {
+      ctv->computeAt(tv, static_cast<int>(ctv->getComputeAtAxis()));
+      tv->clearComputeAt();
+    }
+    visited.emplace(tv);
+  }
+}
+
 } // namespace
 
 // Traverse through the fusion and print CUDA code associated with it
@@ -418,6 +465,7 @@ std::vector<Expr*> GPULower::getLoweredExprs() {
   FusionGuard fg(fusion_);
 
   validate(fusion_);
+  fixComputeAt(fusion_);
 
   // Initialize members of the class
   active_view = nullptr;
@@ -427,6 +475,7 @@ std::vector<Expr*> GPULower::getLoweredExprs() {
 
   auto loop_nests = LoopNestGenerator::getLoopNest(fusion_);
   auto unrolled_loops = UnrollPass::runPass(fusion_, loop_nests);
+
   // Run through loop nests and further lower the expressions
   for (auto* expr : unrolled_loops) {
     Statement* mutated_stmt = mutate(expr);

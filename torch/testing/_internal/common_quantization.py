@@ -8,6 +8,7 @@ checking quantization api and properties of resulting modules.
 """
 
 import io
+import functools
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
@@ -17,6 +18,7 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert
 from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
+import unittest
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -111,6 +113,22 @@ def _make_conv_test_input(
             W, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
 
     return (X, X_q, W, W_q, b if use_bias else None)
+
+def skipIfNoFBGEMM(fn):
+    reason = 'Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs with instruction set support AVX2 or newer.'
+    if isinstance(fn, type):
+        fn.__unittest_skip__ = True
+        fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if True:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
