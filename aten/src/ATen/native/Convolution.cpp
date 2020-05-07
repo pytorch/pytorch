@@ -401,6 +401,9 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
 auto ConvParams::use_cudnn_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
   if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
+    if (cudnn_conv_use_channels_last(input, weight)) {
+      return true;
+    }
     long cudnn_version = detail::getCUDAHooks().versionCuDNN();
     bool kernel_cond =  (cudnn_version >= 7600 &&
                          use_cudnn(input, weight) &&
