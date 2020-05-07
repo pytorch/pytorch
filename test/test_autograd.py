@@ -4096,6 +4096,13 @@ for shape in [(1,), ()]:
         foo = MyFn.apply(base, True)
         self.assertEqual(foo.grad_fn.__class__.__name__, "MyFnBackward")
 
+    def test_integer_outputs(self):
+        inp = torch.rand(4, requires_grad=True)
+
+        out = inp.argmax()
+        self.assertFalse(out.dtype.is_floating_point)
+        self.assertFalse(out.requires_grad)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
