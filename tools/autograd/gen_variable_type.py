@@ -345,7 +345,7 @@ PROFILE_DISPATCH_UNBOXED = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"});
 TORCH_INTERNAL_ASSERT(op);
 RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
-return c10::Dispatcher::singleton().callUnboxedRedispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
+return c10::Dispatcher::singleton().callRedispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
 """)
 
 FACTORY_FUNCTION_NAMES = None

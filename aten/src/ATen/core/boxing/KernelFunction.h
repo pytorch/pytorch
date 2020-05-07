@@ -104,9 +104,8 @@ public:
 
   /**
    * Create a KernelFunction from an unboxed functor and prevent creation of an
-   * unboxing-wrapper. This means that you can only call this KernelFunction
-   * using KernelFunction::callUnboxedOnly(), not using KernelFunction::callBoxed()
-   * or KernelFunction::call().
+   * unboxing-wrapper. This means that you cannot call this KernelFunction
+   * using KernelFunction::callBoxed()
    *
    * This is necessary because our unboxing wrappers don't work for all types
    * yet, so if you want to use one of these types as function arguments,
@@ -140,9 +139,8 @@ public:
 
   /**
    * Create a KernelFunction from an unboxed function and prevent creation of an
-   * unboxing-wrapper. This means that you can only call this KernelFunction
-   * using KernelFunction::callUnboxedOnly(), not using KernelFunction::callBoxed()
-   * or KernelFunction::call().
+   * unboxing-wrapper. This means that you cannot call this KernelFunction
+   * using KernelFunction::callBoxed()
    *
    * This is necessary because our unboxing wrappers don't work for all types
    * yet, so if you want to use one of these types as function arguments,

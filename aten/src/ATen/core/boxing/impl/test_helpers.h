@@ -48,7 +48,7 @@ inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
 template<class Result, class... Args>
 inline Result callOpUnboxedWithDispatchKey(const c10::OperatorHandle& op, c10::DispatchKey dispatchKey, Args... args) {
   return c10::Dispatcher::singleton()
-      .template callUnboxedWithDispatchKey<Result, Args...>(op, dispatchKey, std::forward<Args>(args)...);
+      .template callWithDispatchKey<Result, Args...>(op, dispatchKey, std::forward<Args>(args)...);
 }
 
 inline void expectDoesntFindKernel(const char* op_name, c10::DispatchKey dispatch_key) {

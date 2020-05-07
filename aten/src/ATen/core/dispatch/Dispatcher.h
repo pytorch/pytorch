@@ -112,7 +112,7 @@ public:
   // Like call, but override the default DispatchKey calculation code,
   // instead dispatching straight to the provided DispatchKey
   template<class Return, class... Args>
-  Return callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const;
+  Return callWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const;
 
   // Like call, but intended for use in a redispatch: you are currently
   // in some currentDispatchKey, you have finished processing the key and
@@ -120,7 +120,7 @@ public:
   // This will mask out the current key and all previous keys from the
   // eligible set, and redo the calculation.
   template<class Return, class... Args>
-  Return callUnboxedRedispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const;
+  Return callRedispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const;
 
   // Invoke an operator via the boxed calling convention using an IValue stack
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
@@ -263,8 +263,8 @@ public:
   }
 
   template<class Return, class... Args>
-  Return callUnboxedWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
-    return c10::Dispatcher::singleton().callUnboxedWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
+  Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
+    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
   }
 
   void callBoxed(Stack* stack) const {
@@ -284,7 +284,7 @@ template<class... Args> inline void unused_arg_(const Args&...) {}
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const {
+inline Return Dispatcher::callWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
@@ -296,11 +296,11 @@ inline Return Dispatcher::call(const OperatorHandle& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   auto dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(backendsWithoutFallthrough_, DispatchKeySet::FULL, args...);
-  return callUnboxedWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
+  return callWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::callUnboxedRedispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const {
+inline Return Dispatcher::callRedispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   auto dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(
