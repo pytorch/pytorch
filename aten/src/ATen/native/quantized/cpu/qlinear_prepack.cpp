@@ -153,6 +153,10 @@ class QLinearPackWeightInt8 final {
 
     Tensor weight_contig = weight.contiguous();
 
+    at::Tensor w_zero_points, w_scales;
+    std::tie(w_zero_points, w_scales) =
+        make_zero_points_and_scales_tensor(weight_contig);
+
     initQNNPACK();
 
     // We set the pre-packed linear weights to nullptr below as we call pre-pack
@@ -165,8 +169,9 @@ class QLinearPackWeightInt8 final {
         PackedLinearWeightsQnnp{nullptr,
                                 weight_contig, /* int8_t weight */
                                 bias_fp32.contiguous(), /* fp32 bias */
-                                c10::nullopt /* input_scale */
-                                });
+                                c10::nullopt, /* input_scale */
+                                w_scales,
+                                w_zero_points});
     return cpp_custom_type_hack::create(std::move(wt_ptr), weight.options());
   }
 #endif

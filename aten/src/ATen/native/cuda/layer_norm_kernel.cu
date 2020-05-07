@@ -318,10 +318,12 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       X.scalar_type(), "LayerNormKernelImpl", [&]() {
-        LayerNormKernelImplInternal<scalar_t>(
-            X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "LayerNormKernelImpl", [&] {
+          LayerNormKernelImplInternal<scalar_t>(
+              X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
+        });
       });
 }
 
@@ -352,7 +354,7 @@ void LayerNormBackwardKernelImplInternal(
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX_data != nullptr) {
-    const auto kAccType = X.scalar_type() == kHalf ? kFloat : X.scalar_type();
+    const auto kAccType = (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16) ? kFloat : X.scalar_type();
     Tensor ds = at::empty({M}, X.options().dtype(kAccType));
     Tensor db = at::empty({M}, X.options().dtype(kAccType));
     Tensor scale = at::empty({M}, X.options().dtype(kAccType));
@@ -432,10 +434,12 @@ void LayerNormBackwardKernelImpl(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       X.scalar_type(), "LayerNormBackwardKernelImpl", [&]() {
-        LayerNormBackwardKernelImplInternal<scalar_t>(
-            dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "LayerNormBackwardKernelImpl", [&] {
+          LayerNormBackwardKernelImplInternal<scalar_t>(
+              dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+        });
       });
 }
 

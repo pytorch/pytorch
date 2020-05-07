@@ -171,6 +171,10 @@ Tensor& expm1_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor expm1(const Tensor& self) { return unary_op_impl(self, at::expm1_out); }
 Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
 
+Tensor& erf_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erf_stub); }
+Tensor erf(const Tensor& self) { return unary_op_impl(self, at::erf_out); }
+Tensor& erf_(Tensor& self) { return unary_op_impl_(self, at::erf_out); }
+
 Tensor& frac_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, frac_stub); }
 Tensor frac(const Tensor& self) { return unary_op_impl(self, at::frac_out); }
 Tensor& frac_(Tensor& self) { return unary_op_impl_(self, at::frac_out); }
@@ -431,7 +435,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
 IMPLEMENT_UNARY_OP_VEC(atan)
-IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
