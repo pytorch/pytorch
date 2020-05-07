@@ -136,7 +136,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     const ExprHandle& e,
     const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
-    throw malformed_input("type is not tensor in demoteOutput");
+    return e;
   }
 
   auto tt = *v->type()->cast<TensorType>()->scalarType();
@@ -153,7 +153,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
     case at::ScalarType::Bool:
-      return e;
+      return cast<bool>(e);
     default:
       throw unsupported_dtype();
   }
@@ -1304,6 +1304,12 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
     }
     case TypeKind::FloatType: {
       VarHandle v("v" + input->debugName(), kFloat);
+      kernelArgs_.emplace_back(v);
+      scalars_.emplace(input->unique(), v);
+      break;
+    }
+    case TypeKind::BoolType: {
+      VarHandle v("v" + input->debugName(), kBool);
       kernelArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;

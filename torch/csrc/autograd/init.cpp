@@ -8,9 +8,6 @@
 #include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
-#ifdef USE_DISTRIBUTED
-#include <torch/csrc/distributed/rpc/message.h>
-#endif
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;

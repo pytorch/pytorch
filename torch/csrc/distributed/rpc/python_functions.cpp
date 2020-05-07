@@ -106,20 +106,6 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
       true /*forceGradRecording*/);
 }
 
-class PythonAwareJitFuture : public JitFuture {
- public:
-  explicit PythonAwareJitFuture(TypePtr type) : JitFuture(std::move(type)) {}
-
-  void release_resources() override {
-    if (completed() && !hasError() && value().isPyObject()) {
-      py::gil_scoped_acquire acquire;
-      value_ = IValue();
-    } else {
-      value_ = IValue();
-    }
-  }
-};
-
 } // namespace
 
 using namespace torch::distributed::autograd;
@@ -131,7 +117,7 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
     // NB: The custom deleter is necessary because the FutureIValue object
     // holds a py::object and it would require GIL to delete.
     c10::intrusive_ptr<JitFuture> jitFuture =
-        c10::make_intrusive<PythonAwareJitFuture>(PyObjectType::get());
+        c10::make_intrusive<JitFuture>(PyObjectType::get());
 
     futureResponseMessage->addCallback(
         [jitFuture](const FutureMessage& futureResponseMessage) {

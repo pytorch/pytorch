@@ -79,11 +79,19 @@ Tensor fmod_cuda(const Tensor & self, Scalar other) {
 
 Tensor & fmod_cuda_out(Tensor & result, const Tensor & self, const Tensor & other) {
   Tensor b_self, b_other;
+  // optimization that codegen used to do; avoids broadcast.
+  if (other.dim() == 0) {
+    return fmod_cuda_out(result, self, other.item());
+  }
   std::tie(b_self, b_other) = expand_outplace(self, other, "fmod_out");
   return legacy::cuda::_th_fmod_out(result, b_self, b_other);
 }
 
 Tensor fmod_cuda(const Tensor & self, const Tensor & other) {
+  // optimization that codegen used to do; avoids broadcast.
+  if (other.dim() == 0) {
+    return fmod_cuda(self, other.item());
+  }
   Tensor b_self, b_other;
   std::tie(b_self, b_other) = expand_outplace(self, other, "fmod");
   return legacy::cuda::_th_fmod(b_self, b_other);
@@ -94,6 +102,10 @@ Tensor & fmod_cuda_(Tensor & self, Scalar other) {
 }
 
 Tensor & fmod_cuda_(Tensor & self, const Tensor & other) {
+  // optimization that codegen used to do; avoids broadcast.
+  if (other.dim() == 0) {
+    return fmod_cuda_(self, other.item());
+  }
   Tensor b_other;
   std::tie(b_other) = expand_inplace(self, other, "fmod_");
   return legacy::cuda::_th_fmod_(self, b_other);

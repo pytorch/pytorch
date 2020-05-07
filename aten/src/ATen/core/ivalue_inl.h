@@ -219,7 +219,7 @@ struct PyObjectHolder;
 }
 
 // Future
-struct C10_EXPORT ivalue::Future : public c10::intrusive_ptr_target {
+struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
  private:
   c10::intrusive_ptr<Future> intrusive_from_this() {
     c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
@@ -346,7 +346,7 @@ struct C10_EXPORT ivalue::Future : public c10::intrusive_ptr_target {
     return type_;
   }
 
- protected:
+ private:
   mutable std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
@@ -433,7 +433,10 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return type_.cu_;
   }
 
+  c10::intrusive_ptr<Object> copy() const;
+
   c10::intrusive_ptr<Object> deepcopy() const;
+
   c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
 
  private:

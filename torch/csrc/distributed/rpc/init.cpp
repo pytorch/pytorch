@@ -429,7 +429,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
   // Base class: torch.distributed.rpc.RpcBackendOptions.
   py::class_<TensorPipeRpcBackendOptions>(
       module, "TensorPipeRpcBackendOptions", rpcBackendOptions)
-      .def(py::init<>())
+      .def(
+          py::init<std::map<std::string, worker_id_t>, float, std::string>(),
+          py::arg("worker_name_to_id"),
+          py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
+          py::arg("init_method") = kDefaultInitMethod)
       .def_readwrite(
           "worker_name_to_id", &TensorPipeRpcBackendOptions::workerNameToId);
 

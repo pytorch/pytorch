@@ -2360,7 +2360,7 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
 
     # no faulty_messages defined so this fails all retryable messages - see
     # faulty_rpc_agent_test_fixture.py for the list of retryable messages.
-    @dist_init
+    @dist_init(messages_to_delay={})
     def test_check_failed_messages(self):
         if self.rank == 0:
             dst_worker_b = worker_name((self.rank + 1) % self.world_size)
@@ -2381,6 +2381,7 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
         self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
         self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)
+        self.assertEqual(len(self.rpc_backend_options.messages_to_delay), 2)
         self.assertEqual(self.rpc_backend_options.rpc_timeout, rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
 
     @dist_init(faulty_messages=["RREF_FORK_REQUEST", "RREF_CHILD_ACCEPT"])
