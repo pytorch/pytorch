@@ -191,9 +191,10 @@ class AttributePropagator {
             insertMutableAttr(name, attr, mptr);
           }
         } else if (n->kind() == prim::fork) {
-          applyToSubGraph(n, graph, [this](std::shared_ptr<Graph>& subgraph) {
+          auto func = [this](std::shared_ptr<Graph>& subgraph) {
             recordMutableAttrs(subgraph);
-          });
+          };
+          applyToSubGraph(n, graph, func);
         }
       }
     }
@@ -320,9 +321,10 @@ class AttributePropagator {
           n->outputs().at(0)->replaceAllUsesWith(paramConst);
           n->removeAllInputs();
         } else if (n->kind() == prim::fork) {
-          applyToSubGraph(n, graph, [this](std::shared_ptr<Graph>& subgraph) {
+          auto func = [this](std::shared_ptr<Graph>& subgraph) {
             propagateAttributes(subgraph);
-          });
+          };
+          applyToSubGraph(n, graph, func);
         }
       }
     }
@@ -331,7 +333,7 @@ class AttributePropagator {
   void applyToSubGraph(
       Node* n,
       std::shared_ptr<Graph>& graph,
-      std::function<void(std::shared_ptr<Graph>&)> func) {
+      const std::function<void(std::shared_ptr<Graph>&)>& func) {
     TORCH_CHECK(n->kind() == prim::fork);
     auto attrModule = module_;
     auto node = n->inputs()[0]->node();
@@ -397,9 +399,10 @@ class AttributePropagator {
             }
           }
         } else if (n->kind() == prim::fork) {
-          applyToSubGraph(n, graph, [this](std::shared_ptr<Graph>& subgraph) {
+          auto func = [this](std::shared_ptr<Graph>& subgraph) {
             recordReferencedAttrs(subgraph);
-          });
+          };
+          applyToSubGraph(n, graph, func);
         }
       }
     }
