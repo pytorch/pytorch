@@ -148,12 +148,9 @@ def conv2d(input, weight, bias,
     padding = _pair(padding)
     dilation = _pair(dilation)
 
-    prepacked_weight = torch.ops.quantized.conv2d_prepack(
+    packed_params = torch.ops.quantized.conv2d_prepack(
         weight, bias, stride, padding, dilation, groups)
-    return torch.ops.quantized.conv2d(input,
-                                      prepacked_weight,
-                                      stride, padding, dilation,
-                                      groups, scale, zero_point)
+    return torch.ops.quantized.conv2d(input, packed_params, scale, zero_point)
 
 def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
            padding_mode='zeros', scale=1.0, zero_point=0, dtype=torch.quint8):
@@ -211,11 +208,9 @@ def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
     padding = _triple(padding)
     dilation = _triple(dilation)
 
-    prepacked_weight = torch.ops.quantized.conv3d_prepack(
+    packed_params = torch.ops.quantized.conv3d_prepack(
         weight, bias, stride, padding, dilation, groups)
-    return torch.ops.quantized.conv3d(
-        input, prepacked_weight, stride, padding, dilation, groups, scale,
-        zero_point)
+    return torch.ops.quantized.conv3d(input, packed_params, scale, zero_point)
 
 def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
     r"""Down/up samples the input to either the given :attr:`size` or the given

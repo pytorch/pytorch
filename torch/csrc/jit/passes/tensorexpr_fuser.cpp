@@ -53,6 +53,28 @@ value_list sortReverseTopological(
   return result;
 }
 
+bool allShapesAreKnown(Value* v) {
+  if (!v->type()->cast<TensorType>()) {
+    return true;
+  }
+  return v->isCompleteTensor();
+}
+
+bool allShapesAreKnown(Node* node) {
+  // TODO: Relax the checks to support dynamic shapes
+  for (torch::jit::Value* output : node->outputs()) {
+    if (!allShapesAreKnown(output)) {
+      return false;
+    }
+  }
+  for (torch::jit::Value* input : node->inputs()) {
+    if (!allShapesAreKnown(input)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool isSupported(Node* node) {
   // TODO:
   switch (node->kind()) {
@@ -133,6 +155,9 @@ bool canHandle(Node* node, AliasDb& aliasDb) {
   }
   if (node->kind() == prim::Loop) {
     return false; // TODO
+  }
+  if (!allShapesAreKnown(node)) {
+    return false;
   }
   return isSupported(node);
 }

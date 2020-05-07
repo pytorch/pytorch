@@ -190,15 +190,15 @@ class RNNBase(torch.nn.Module):
             mod, 'qconfig'), 'Input float module must have qconfig defined'
 
         if mod.qconfig is not None and mod.qconfig.weight is not None:
-            weight_observer = mod.qconfig.weight()
+            weight_observer_method = mod.qconfig.weight
         else:
             # We have the circular import issues if we import the qconfig in the beginning of this file:
             # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
             # import until we need it.
             from torch.quantization.qconfig import default_dynamic_qconfig
-            weight_observer = default_dynamic_qconfig.weight()
+            weight_observer_method = default_dynamic_qconfig.weight
 
-        dtype = weight_observer.dtype
+        dtype = weight_observer_method().dtype
         supported_scalar_types = [torch.qint8, torch.float16]
         if dtype not in supported_scalar_types:
             raise RuntimeError('Unsupported dtype for dynamic RNN quantization: {}'.format(dtype))
@@ -232,6 +232,7 @@ class RNNBase(torch.nn.Module):
 
                 if dtype == torch.qint8:
                     def quantize_and_pack(w, b):
+                        weight_observer = weight_observer_method()
                         weight_observer(w)
                         wt_scale, wt_zp = weight_observer.calculate_qparams()
                         qweight = torch.quantize_per_tensor(

@@ -42,7 +42,7 @@ TensorPipeAgent::TensorPipeAgent(
 }
 
 TensorPipeAgent::~TensorPipeAgent() {
-  shutdownImpl();
+  shutdown();
 }
 
 void TensorPipeAgent::startImpl() {
@@ -328,8 +328,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
               }
 
               threadPool_.run(
-                  [this,
-                   futureResponseMessage,
+                  [futureResponseMessage,
                    responseMessage{std::move(responseMessage)}]() mutable {
                     if (responseMessage.type() == MessageType::EXCEPTION) {
                       futureResponseMessage->setError(std::string(
@@ -351,7 +350,7 @@ void TensorPipeAgent::sync() {}
 
 // TODO: Remove join()
 void TensorPipeAgent::join() {
-  shutdownImpl();
+  shutdown();
 }
 
 void TensorPipeAgent::shutdownImpl() {
