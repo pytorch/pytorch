@@ -55,7 +55,8 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(ScalarTypeType)         \
   _(AnyListType)            \
   _(AnyTupleType)           \
-  _(AnyClassType)
+  _(AnyClassType)           \
+  _(AttributeType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1606,6 +1607,9 @@ enum ATTRIBUTE_KIND_ENUM {
   REGULAR_ATTRIBUTE
 };
 
+struct AttributeType;
+using AttributeTypePtr = std::shared_ptr<AttributeType>;
+
 struct CAFFE2_API AttributeType : public NamedType {
   public:
   AttributeType(ATTRIBUTE_KIND_ENUM kind,
@@ -1630,6 +1634,10 @@ struct CAFFE2_API AttributeType : public NamedType {
   std::string str() const override {
     return "Attribute";
   };
+
+  TypeKind kind() const {
+    return TypeKind::AttributeType;
+  }
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<AttributeType>()) {
@@ -1659,6 +1667,7 @@ struct CAFFE2_API AttributeType : public NamedType {
     return false;
   }
 
+  static const TypeKind Kind = TypeKind::AttributeType;
 
   private:
   ATTRIBUTE_KIND_ENUM kind_;
@@ -1900,7 +1909,11 @@ struct CAFFE2_API ClassType : public NamedType {
   }
 
   bool is_module() const override {
-    return bool(parameterSlots_);
+    return isModule_;
+  }
+
+  const std::vector<AttributeType>& getAllAttributes() const {
+    return attributes_;
   }
 
   bool is_parameter(size_t slot) const {
@@ -1982,7 +1995,6 @@ struct CAFFE2_API ClassType : public NamedType {
   std::vector<torch::jit::Function*> methods_;
 
   bool isModule_ = false;
-
 };
 
 struct InterfaceType;
