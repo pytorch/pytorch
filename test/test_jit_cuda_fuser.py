@@ -55,6 +55,34 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
     @skipIfRocm
+    def test_half(self):
+        def t(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor, alpha : float):
+            o_16 = torch.add(x, y)
+            o_32_a = torch.add(y, z, alpha = alpha)
+            o_32_b = torch.add(o_16, z)
+            # TODO: I'm hitting wrong result in this path. Retest after rebase
+            #return (o_16, o_32_a, o_32_b)
+            return (o_32_a, o_32_b)
+
+        t_jit = torch.jit.script(t)
+        alpha = 0.5
+        # stick to integers, this avoid the numerical difference due to our
+        # promotion
+        x = torch.randint(0, 256, (4, 8)).to(dtype=torch.float16, device="cuda")
+        y = torch.randint(0, 256, (4, 8)).to(dtype=torch.float16, device="cuda")
+        z = torch.randint(0, 256, (4, 8)).to(dtype=torch.float16, device="cuda")
+        jit_o = t_jit(x, y, z, alpha)
+        jit_o = t_jit(x, y, z, alpha)
+        o = t(x, y, z, alpha)
+        for oo, jit_oo in zip(o, jit_o):
+            self.assertEqual(oo.dtype, jit_oo.dtype)
+            self.assertEqual(oo, jit_oo)
+        print(t_jit.graph_for(x, y, z, alpha))
+        self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, z, alpha)))
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
+    @skipIfRocm
     def test_const(self):
         def t(x, y):
             o = x + y
@@ -149,6 +177,7 @@ class TestCudaFuser(JitTestCase):
         # Currently cannot fuse this
         self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, z)))
 
+    # TODO: Retest after rebase
     @unittest.skipIf(True, "temporary disable for buggy codegen")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")

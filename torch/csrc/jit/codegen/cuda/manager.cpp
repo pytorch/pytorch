@@ -91,7 +91,8 @@ class CudaFusionManager {
       //       maybe we should store it in CudaKernel and compute it later
       runKernel(*cuda_kernel, inputs, outputs);
     } else {
-      // major HACK!
+      // TODO: this should somehow be done after kernel compilation.
+      //       we will want compileKernel to return a heuristic
       auto kernel_arg_req = expandSizeSupport(outputs[0].sizes());
       cuda_kernel =
           kernel_cache_[kernel_id].allocateKernelInCache(kernel_arg_req);

@@ -67,6 +67,14 @@ class IrParser {
     for (auto val : block->inputs()) {
       TORCH_CHECK(registerValue(val, broadcast_dim));
       fusion_->addInput(value_map_[val->unique()]);
+
+      auto opt_dtype = value_map_[val->unique()]->getDataType();
+      // computation promotion, we cast fp16 inputs to fp32 and use promoted
+      // type in the computation.
+      if (opt_dtype.has_value() && opt_dtype.value() == DataType::Half) {
+        Val* promoted_val = castOp(DataType::Float, value_map_[val->unique()]);
+        value_map_[val->unique()] = promoted_val;
+      }
     }
 
     // TODO: disable unroll to ensure rand_like generates identical output as
@@ -84,6 +92,16 @@ class IrParser {
     for (auto jit_output : block->outputs()) {
       TensorView* out =
           static_cast<TensorView*>(value_map_[jit_output->unique()]);
+
+      // demote output dtype to be match PyTorch JIT graph.
+      auto tensor_type = jit_output->type()->cast<TensorType>();
+      TORCH_INTERNAL_ASSERT(tensor_type,
+          "output of fusion group is not TensorType.");
+      if (tensor_type->scalarType() == at::ScalarType::Half) {
+        // No need to update value_map_ after this point.
+        out = static_cast<TensorView*>(castOp(DataType::Half, out));
+      }
+
       fusion_->addOutput(out);
 
       // Merge all dimensions because we're only supporting pointwise
