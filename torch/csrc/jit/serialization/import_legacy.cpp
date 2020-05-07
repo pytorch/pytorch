@@ -197,7 +197,7 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
     } else {
       AT_ERROR(
           "supported devices include CPU and CUDA, however got ",
-          at::DeviceTypeName(device.type(), false));
+          DeviceTypeName(device.type(), false));
     }
   }
   if (storage_it->second.device().type() != device.type() ||
