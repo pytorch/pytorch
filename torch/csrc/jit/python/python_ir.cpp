@@ -1,14 +1,14 @@
 #include <torch/csrc/jit/python/python_ir.h>
 
 #include <pybind11/pybind11.h>
-#include <torch/csrc/jit/runtime/argument_spec.h>
-#include <torch/csrc/jit/serialization/export.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
-#include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -210,15 +210,8 @@ void initPythonIRBindings(PyObject* module_) {
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")
       .def(py::init<>())
-      .def(
-          "__repr__",
-          [](Graph& g) {
-            return g.toString();
-          })
-      .def(
-          "str",
-          &Graph::toString,
-          py::arg("print_source_ranges") = true)
+      .def("__repr__", [](Graph& g) { return g.toString(); })
+      .def("str", &Graph::toString, py::arg("print_source_ranges") = true)
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
@@ -230,7 +223,9 @@ void initPythonIRBindings(PyObject* module_) {
           [](const std::shared_ptr<Graph> g,
              const std::map<std::string, at::Tensor>& initializers,
              int64_t onnx_opset_version,
-             const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
+             const std::unordered_map<
+                 std::string,
+                 std::unordered_map<int64_t, std::string>>& dynamic_axes,
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool strip_doc_string,
@@ -377,6 +372,9 @@ void initPythonIRBindings(PyObject* module_) {
           "createFusionGroup",
           [](Graph& g) { return g.createWithSubgraph(prim::FusionGroup); })
       .def(
+          "createCudaFusionGroup",
+          [](Graph& g) { return g.createWithSubgraph(prim::CudaFusionGroup); })
+      .def(
           "createClone",
           [](Graph& g, Node* n, py::object fn) {
             return g.createClone(
@@ -384,6 +382,9 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .GS(appendNode)
       .GS(prependNode)
+      .def(
+          "insertConstant",
+          [](Graph& g, IValue ival) { return g.insertConstant(ival); })
       .GS(lint)
       .GS(insertNode);
 #undef GS
@@ -399,7 +400,13 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .VS(type)
       .VS(setType)
-      .VS(inferTypeFrom)
+      .def(
+          "inferTypeFrom",
+          py::overload_cast<const at::Tensor&>(&Value::inferTypeFrom))
+      .def(
+          "inferTypeFrom",
+          py::overload_cast<const c10::intrusive_ptr<c10::ivalue::Object>&>(
+              &Value::inferTypeFrom))
       // skip owningGraph because it returns a raw pointer to a otherwise
       // std::shared_ptr stored graph object, and would cause a double free
       .VS(unique)
@@ -466,11 +473,7 @@ void initPythonIRBindings(PyObject* module_) {
             ss << n;
             return ss.str();
           })
-      .def(
-          "sourceRange",
-          [](Node& n) {
-            return n.sourceRange().str();
-          })
+      .def("sourceRange", [](Node& n) { return n.sourceRange().str(); })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
       .NS(kind)
@@ -623,7 +626,9 @@ void initPythonIRBindings(PyObject* module_) {
                 .cast<py::object>();
           })
       .def("cconv", [](Node& n) { return n.expect<ConcretePythonOp>()->cconv; })
-      .def("pyname", [](Node& n) { return n.expect<ConcretePythonOp>()->name(); })
+      .def(
+          "pyname",
+          [](Node& n) { return n.expect<ConcretePythonOp>()->name(); })
       .def("scalar_args", [](Node& n) {
         auto op = n.expect<ConcretePythonOp>();
         auto scalars = py::list();
@@ -663,7 +668,7 @@ void initPythonIRBindings(PyObject* module_) {
             return py::none();
           })
       .def(
-          "sizes",
+          "strides",
           [](Type& t) -> py::object {
             if (auto ptt = t.expect<TensorType>()) {
               if (auto cs = ptt->strides().concrete_sizes()) {
@@ -688,11 +693,17 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "__eq__",
           [](std::shared_ptr<Type>& self, std::shared_ptr<Type>& other) {
+            if (!other) {
+              return false;
+            }
             return *self == *other;
           })
       .def(
           "isSubtypeOf",
           [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
+            if (!other) {
+              return false;
+            }
             return self->isSubtypeOf(other);
           })
       .def("is_interface_type", [](const std::shared_ptr<Type>& self) {
@@ -713,7 +724,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &BoolType::get);
   py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
       .def_static("get", &StringType::get);
-  py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(m, "DeviceObjType")
+  py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(
+      m, "DeviceObjType")
       .def_static("get", &DeviceObjType::get);
   py::class_<PyObjectType, Type, std::shared_ptr<PyObjectType>>(
       m, "PyObjectType")
@@ -735,6 +747,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](TypePtr a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)
       .def_static("ofTensors", &ListType::ofTensors)
+      .def_static("ofFloats", &ListType::ofFloats)
+      .def_static("ofBools", &ListType::ofBools)
       .def("getElementType", &ListType::getElementType);
   py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
       .def(py::init([](TypePtr key, TypePtr value) {
@@ -750,6 +764,10 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<RRefType, Type, std::shared_ptr<RRefType>>(m, "RRefType")
       .def(py::init([](TypePtr a) { return RRefType::create(a); }))
       .def("getElementType", &RRefType::getElementType);
+
+  py::class_<FutureType, Type, std::shared_ptr<FutureType>>(m, "FutureType")
+      .def(py::init([](TypePtr a) { return FutureType::create(a); }))
+      .def("getElementType", &FutureType::getElementType);
 
   py::class_<ClassType, Type, std::shared_ptr<ClassType>>(m, "ClassType")
       .def(py::init([](const std::string& qualified_name) {

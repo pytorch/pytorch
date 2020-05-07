@@ -5,7 +5,7 @@ namespace torch {
 namespace jit {
 
 static ModuleHook emit_module_callback;
-void didFinishEmitModule(script::Module module) {
+void didFinishEmitModule(Module module) {
   if (emit_module_callback) {
     emit_module_callback(module);
   }

@@ -29,7 +29,7 @@ static void adaptive_avg_pool3d_out_frame(
     int64_t istrideT,
     int64_t istrideH,
     int64_t istrideW) {
-  int64_t d;
+  int64_t d = 0;
 #pragma omp parallel for private(d)
   for (d = 0; d < sizeD; d++) {
     /* loop over output */
@@ -172,7 +172,7 @@ static void adaptive_avg_pool3d_backward_out_frame(
     int64_t osizeT,
     int64_t osizeH,
     int64_t osizeW) {
-  int64_t d;
+  int64_t d = 0;
 #pragma omp parallel for private(d)
   for (d = 0; d < sizeD; d++) {
     scalar_t* gradInput_p_d = gradInput_p + d * isizeT * isizeW * isizeH;

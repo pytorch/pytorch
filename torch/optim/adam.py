@@ -108,7 +108,6 @@ class Adam(Optimizer):
 
                 step_size = group['lr'] / bias_correction1
 
-                # Need to avoid version tracking for parameter.
-                p.data.addcdiv_(exp_avg, denom, value=-step_size)
+                p.addcdiv_(exp_avg, denom, value=-step_size)
 
         return loss

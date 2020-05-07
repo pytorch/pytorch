@@ -16,7 +16,7 @@ std::vector<std::string> PrefixStore::joinKeys(
   std::vector<std::string> joinedKeys;
   joinedKeys.reserve(keys.size());
   for (const auto& key : keys) {
-    joinedKeys.push_back(joinKey(key));
+    joinedKeys.emplace_back(joinKey(key));
   }
   return joinedKeys;
 }

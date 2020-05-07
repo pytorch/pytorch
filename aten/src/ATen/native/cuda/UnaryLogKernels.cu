@@ -23,10 +23,12 @@ __host__ __device__ static inline thrust::complex<T> log_wrapper(thrust::complex
 }
 
 void log_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "log_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
-      return log_wrapper(a);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "log_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "log_cuda", [&] {
+      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+      gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+        return log_wrapper(a);
+      });
     });
   });
 }
@@ -43,18 +45,22 @@ __host__ __device__ static inline thrust::complex<T> log10_wrapper(thrust::compl
 }
 
 void log10_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "log10_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
-      return log10_wrapper(a);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "log10_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "log10_cuda", [&] {
+      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+      gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+        return log10_wrapper(a);
+      });
     });
   });
 }
 
 void log1p_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "log1p_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::log1p(a);
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "log1p_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "log1p_cuda", [&] {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return ::log1p(a);
+      });
     });
   });
 }
@@ -72,10 +78,12 @@ __host__ __device__ static inline thrust::complex<T> log2_wrapper(thrust::comple
 }
 
 void log2_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "log2_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
-      return log2_wrapper(a);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "log2_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "log2_cuda", [&] {
+      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+      gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+        return log2_wrapper(a);
+      });
     });
   });
 }

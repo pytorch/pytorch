@@ -28,11 +28,6 @@ static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
   auto n = self.size(-1);
   auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs).sum(-1, /*keepdim=*/false, /*dtype=*/self.scalar_type()).fmod_(2);
   auto u_diagonal = lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
-
-  // We have to manually set the diagonal to 0 due to an issue with MAGMA's getrf_batched routine
-  if (self.dim() > 2 && self.is_cuda()) {
-    u_diagonal.index_put_(infos.nonzero_numpy(), at::zeros({}, self.options()));
-  }
   return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1), u_diagonal);
 }
 
@@ -141,7 +136,9 @@ static void check_1d(const Tensor& t, const char* arg, const char* fn) {
 Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::_addr(self, vec1, vec2, beta, alpha);
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr");
+  return at::_addr(b_self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
@@ -153,7 +150,49 @@ Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta,
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::_addr_out(result, self, vec1, vec2, beta, alpha);
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr_out");
+  return at::_addr_out(result, b_self, vec1, vec2, beta, alpha);
+}
+
+Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
+  check_1d(self, "self", "ger");
+  check_1d(vec2, "vec2", "ger");
+  if (result.dim() != 2 || result.size(0) != self.size(0) || result.size(1) != vec2.size(0)) {
+    result.resize_({ self.size(0), vec2.size(0) });
+  }
+  // resize_ does the "broadcasting", don't need to broadcast again.
+  return at::_addr_out(result, result, self, vec2, Scalar(0), Scalar(1));
+}
+
+Tensor ger(const Tensor& self, const Tensor& vec2) {
+  Tensor result = at::empty({0}, self.options());
+  at::ger_out(result, self, vec2);
+  return result;
+}
+
+Tensor addbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm");
+  return legacy::cpu::_th_addbmm(b_self, batch1, batch2, beta, alpha);
+}
+
+Tensor& addbmm_cpu_out(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out");
+  return legacy::cpu::_th_addbmm_out(result, b_self, batch1, batch2, beta, alpha);
+}
+
+Tensor addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+  return legacy::cpu::_th_addmm(b_self, mat1, mat2, beta, alpha);
+}
+
+Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return legacy::cpu::_th_addmm_out(result, b_self, mat1, mat2, beta, alpha);
 }
 
 template <typename scalar_t, bool is_bmm>
@@ -237,7 +276,11 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   if (self_or_result.numel() == 0) {
     return self_or_result;
   } else if (contraction_size == 0) {
-    return self_or_result.zero_();
+    if (is_bmm_out) {
+      return self_or_result.zero_();
+    } else {
+      return self_or_result.mul_(beta);
+    }
   }
 
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
@@ -514,7 +557,7 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
     return at::norm(self, 2, dim, keepdim, self.scalar_type());
   }
   if (self.is_complex()){
-    return at::sqrt(at::sum((self.conj() * self).real(), dim, keepdim));
+    return at::sqrt(at::sum((self.conj() * self).copy_real(), dim, keepdim));
   } else {
     return at::sqrt(at::sum((self * self), dim, keepdim));
   }
@@ -534,7 +577,7 @@ Tensor &frobenius_norm_out(
     return at::norm_out(result, self, 2, dim, keepdim, self.scalar_type());
   }
   if (self.is_complex()){
-    return at::sqrt_out(result, at::sum((self.conj() * self).real(), dim, keepdim));
+    return at::sqrt_out(result, at::sum((self.conj() * self).copy_real(), dim, keepdim));
   } else {
     return at::sqrt_out(result, at::sum((self * self), dim, keepdim));
   }

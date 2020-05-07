@@ -209,9 +209,7 @@ void fractional_max_pool2d_out_cuda_template(
           poolSizeH, poolSizeW);
        }
      );
-  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-     "fractional_max_pool2d_out_cuda_frame failed with error code ",
-     cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError()); 
 }
 
 void fractional_max_pool2d_backward_out_cuda_template(
@@ -278,9 +276,7 @@ void fractional_max_pool2d_backward_out_cuda_template(
         devGradInput, devGradOutput, devIndices);
       }
     );
-  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-    "fractional_max_pool2d_backward_out_cuda_frame failed with error code ",
-    cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError()); 
 }
 
 }// namespace

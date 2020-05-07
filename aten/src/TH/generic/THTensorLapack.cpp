@@ -296,7 +296,8 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a, bool upper)
 {
   char uplo = upper ? 'U' : 'L';
   if (a == NULL) a = ra_;
-  THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 1, "A should be 2 dimensional");
+  THArgCheck(THTensor_nDimension(a) == 2, 1, "A should be 2 dimensional");
+  THArgCheck(!a->is_empty(), 1, "A should not be empty");
   THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
 
   int n, lda, info;
@@ -304,7 +305,7 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a, bool upper)
 
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  n = THTensor_sizeLegacyNoScalars(ra__, 0);
+  n = THTensor_(size)(ra__, 0);
   lda = n;
 
   /* Run inverse */
@@ -394,12 +395,13 @@ void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
 void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
 {
   if (a == NULL) a = ra_;
-  THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 1, "A should be 2 dimensional");
+  THArgCheck(THTensor_nDimension(a) == 2, 1, "A should be 2 dimensional");
+  THArgCheck(!a->is_empty(), 1, "A should not be empty");
 
   THTensor *ra__ = NULL;
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  int m = THTensor_sizeLegacyNoScalars(ra__, 0);
+  int m = THTensor_(size)(ra__, 0);
   int k = THTensor_sizeLegacyNoScalars(tau, 0);
   int lda = m;
 

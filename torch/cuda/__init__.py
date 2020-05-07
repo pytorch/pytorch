@@ -9,54 +9,25 @@ It is lazily initialized, so you can always import it, and use
 """
 
 import contextlib
-import platform
-import ctypes
 import os
-import sys
 import torch
 import traceback
 import warnings
 import threading
 from torch._six import raise_from
-from subprocess import Popen, PIPE
 from ._utils import _get_device_index
 import torch._C
+
+try:
+    from torch._C import _cudart
+except ImportError:
+    _cudart = None
 
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
 _queued_calls = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
-_cudart = None
-
-
-def find_cuda_windows_lib():
-    # Override the default search process
-    # Fixes https://github.com/pytorch/pytorch/issues/20202
-    # The library selection will be done in these directories one by one
-    # 1. [Package Root]\Lib
-    #    That's where our libraries are in, which should be loaded first.
-    # 2. [Python Root]\Library\bin
-    #    That's where `cudatoolkit` store the cuda libraries.
-    # 3. Default directories
-    #    That is stored in the environment variable `PATH`.
-    test_env = os.environ.copy()
-    old_path = test_env['PATH']
-    py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
-    th_dll_path = os.path.join(os.path.dirname(
-        os.path.dirname(__file__)), 'lib')
-    test_env['PATH'] = ';'.join([th_dll_path, py_dll_path, old_path])
-    proc = Popen(['where', 'cudart64*.dll'], stdout=PIPE,
-                 stderr=PIPE, stdin=PIPE, env=test_env)
-    out, err = proc.communicate()
-    out = out.decode().strip()
-    if len(out) > 0:
-        if out.find('\r\n') != -1:
-            out = out.split('\r\n')[0]
-        cuda_lib = str(out)
-        return ctypes.cdll.LoadLibrary(cuda_lib)
-    else:
-        return None
 
 
 def is_available():
@@ -69,22 +40,6 @@ def is_available():
 
 def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
-
-
-def _load_cudart():
-    # First check the main program for CUDA symbols
-    if platform.system() == 'Windows':
-        lib = find_cuda_windows_lib()
-    else:
-        lib = ctypes.cdll.LoadLibrary(None)
-    if hasattr(lib, 'cudaGetErrorName'):
-        return lib
-
-    raise RuntimeError(
-        "couldn't find libcudart. Make sure CUDA libraries are installed in a "
-        "default location, or that they're in {}."
-        .format('DYLD_LIBRARY_PATH' if platform.system() == 'Darwin' else
-                'LD_LIBRARY_PATH'))
 
 
 def _check_driver():
@@ -122,16 +77,17 @@ def _check_capability():
     The minimum cuda capability that we support is 3.5.
     """
 
-    CUDA_VERSION = torch._C._cuda_getCompiledVersion()
-    for d in range(device_count()):
-        capability = get_device_capability(d)
-        major = capability[0]
-        minor = capability[1]
-        name = get_device_name(d)
-        if capability == (3, 0) or major < 3:
-            warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
-        elif CUDA_VERSION <= 9000 and major >= 7 and minor >= 5:
-            warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
+    if torch.version.cuda is not None:  # on ROCm we don't want this check
+        CUDA_VERSION = torch._C._cuda_getCompiledVersion()
+        for d in range(device_count()):
+            capability = get_device_capability(d)
+            major = capability[0]
+            minor = capability[1]
+            name = get_device_name(d)
+            if capability == (3, 0) or major < 3:
+                warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
+            elif CUDA_VERSION <= 9000 and major >= 7 and minor >= 5:
+                warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
 
 
 def is_initialized():
@@ -167,7 +123,7 @@ def init():
 
 
 def _lazy_init():
-    global _initialized, _cudart, _queued_calls
+    global _initialized, _queued_calls
     if is_initialized() or hasattr(_tls, 'is_initializing'):
         return
     with _initialization_lock:
@@ -192,10 +148,10 @@ def _lazy_init():
             raise RuntimeError(
                 "Cannot re-initialize CUDA in forked subprocess. " + msg)
         _check_driver()
+        if _cudart is None:
+            raise AssertionError(
+                "libcudart functions unavailable. It looks like you have a broken build?")
         torch._C._cuda_init()
-        _cudart = _load_cudart()
-        _cudart.cudaGetErrorName.restype = ctypes.c_char_p
-        _cudart.cudaGetErrorString.restype = ctypes.c_char_p
         # Some of the queued calls may reentrantly call _lazy_init();
         # we need to just return without initializing in that case.
         # However, we must not let any *other* threads in!
@@ -225,12 +181,12 @@ class cudaStatus(object):
 
 class CudaError(RuntimeError):
     def __init__(self, code):
-        msg = cudart().cudaGetErrorString(code).decode('utf-8')
+        msg = _cudart.cudaGetErrorString(code).decode('utf-8')
         super(CudaError, self).__init__('{0} ({1})'.format(msg, code))
 
 
 def check_error(res):
-    if res != cudaStatus.SUCCESS:
+    if res != _cudart.cudaError.success:
         raise CudaError(res)
 
 
@@ -459,7 +415,8 @@ def _dummy_type(name):
 
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     # Define dummy base classes
-    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool', 'BFloat16']:
+    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool', 'BFloat16',
+              'ComplexDouble', 'ComplexFloat']:
         storage_name = 'Cuda{0}StorageBase'.format(t)
         tensor_name = 'Cuda{0}TensorBase'.format(t)
 
@@ -528,6 +485,13 @@ class BoolStorage(_CudaBase, torch._C.CudaBoolStorageBase, _StorageBase):
 class BFloat16Storage(_CudaBase, torch._C.CudaBFloat16StorageBase, _StorageBase):
     pass
 
+class ComplexDoubleStorage(_CudaBase, torch._C.CudaComplexDoubleStorageBase, _StorageBase):
+    pass
+
+
+class ComplexFloatStorage(_CudaBase, torch._C.CudaComplexFloatStorageBase, _StorageBase):
+    pass
+
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)
@@ -538,6 +502,8 @@ torch._storage_classes.add(ByteStorage)
 torch._storage_classes.add(HalfStorage)
 torch._storage_classes.add(BoolStorage)
 torch._storage_classes.add(BFloat16Storage)
+torch._storage_classes.add(ComplexDoubleStorage)
+torch._storage_classes.add(ComplexFloatStorage)
 
 from . import sparse
 from . import profiler

@@ -3,7 +3,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
   auto cu = get_python_cu();
@@ -22,9 +21,9 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
 
   // populate type with info from the concrete type information
   for (const auto& pr : attributes_) {
-    const auto& name = pr.first;
-    const auto& type = pr.second.type_;
-    const auto& isParameter = pr.second.isParam_;
+    const auto& name = pr.key();
+    const auto& type = pr.value().type_;
+    const auto& isParameter = pr.value().isParam_;
 
     cls->addAttribute(name, type, isParameter);
   }
@@ -34,7 +33,12 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
     const auto& val = pr.second.v_;
     auto match = tryToInferType(val);
     if (!match.success()) {
-      TORCH_INTERNAL_ASSERT(false, "We need to infer the type of constant to convert the python value to IValue, but failed to infer type of ", py::str(val), "\n:", match.reason());
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "We need to infer the type of constant to convert the python value to IValue, but failed to infer type of ",
+          py::str(val),
+          "\n:",
+          match.reason());
     }
     // Validation and conversion to make sure `val` is a valid constant
     // is done in python, see `torch/jit/_recursive.py`
@@ -43,7 +47,9 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
 
   for (const auto& moduleInfo : modules_) {
     cls->addAttribute(
-        moduleInfo.name_, moduleInfo.meta_->getJitType(), /*is_parameter=*/false);
+        moduleInfo.name_,
+        moduleInfo.meta_->getJitType(),
+        /*is_parameter=*/false);
   }
 
   return cls;
@@ -52,7 +58,7 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
 std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromJitType(
     TypePtr type) {
   // `type` should either be a module interface or a class type
-  if (auto interface = type->cast<InterfaceType>()){
+  if (auto interface = type->cast<InterfaceType>()) {
     TORCH_INTERNAL_ASSERT(interface->is_module());
   } else {
     TORCH_INTERNAL_ASSERT(type->cast<ClassType>());
@@ -67,7 +73,6 @@ ConcreteModuleType::ConcreteModuleType(ConcreteModuleTypeBuilder data)
     : data_(std::move(data)) {
   jitType_ = data_.createTypeFromThis();
 }
-
 
 bool operator==(
     const ConcreteModuleTypeBuilder::ModuleInfo& lhs,
@@ -171,9 +176,7 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
       [&](const ConcreteModuleTypeBuilder::ModuleInfo& info) {
         return info.name_ == name;
       });
-  if (it == data_.modules_.end()) {
-    return nullptr;
-  }
+  TORCH_INTERNAL_ASSERT(it != data_.modules_.end());
   return it->meta_;
 }
 
@@ -189,7 +192,9 @@ void ConcreteModuleTypeBuilder::setPoisoned() {
   isPoisoned_ = true;
 }
 
-void ConcreteModuleTypeBuilder::addConstant(std::string name, py::object value) {
+void ConcreteModuleTypeBuilder::addConstant(
+    std::string name,
+    py::object value) {
   constants_.emplace(std::move(name), std::move(value));
 }
 
@@ -200,7 +205,7 @@ void ConcreteModuleTypeBuilder::addAttribute(
   TORCH_INTERNAL_ASSERT(type);
   // Function attributes should be handled separately
   TORCH_INTERNAL_ASSERT(type->cast<FunctionType>() == nullptr);
-  attributes_.emplace(
+  attributes_.insert(
       std::move(name),
       ConcreteModuleTypeBuilder::Attribute(unshapedType(type), isParameter));
 }
@@ -213,7 +218,7 @@ void ConcreteModuleTypeBuilder::addFunctionAttribute(
   functionAttributes_.emplace(
       std::move(name),
       ConcreteModuleTypeBuilder::FunctionAttribute{type->expect<FunctionType>(),
-                                                std::move(pyFunction)});
+                                                   std::move(pyFunction)});
 }
 
 void ConcreteModuleTypeBuilder::addBuiltinFunction(
@@ -243,14 +248,15 @@ void ConcreteModuleTypeBuilder::addFailedAttribute(
 }
 
 void ConcreteModuleType::dump() const {
-  std::cout << "ConcreteModuleType for: " << py::getattr(data_.pyClass_, "__name__") << "\n";
+  std::cout << "ConcreteModuleType for: "
+            << py::getattr(data_.pyClass_, "__name__") << "\n";
   std::cout << "Constants: \n";
   for (const auto& pr : data_.constants_) {
     std::cout << "\t" << pr.first << ": " << pr.second.v_ << "\n";
   }
   std::cout << "\nAttributes: \n";
   for (const auto& pr : data_.attributes_) {
-    std::cout << "\t" << pr.first << ": " << pr.second.type_->python_str()
+    std::cout << "\t" << pr.key() << ": " << pr.value().type_->python_str()
               << "\n";
   }
   std::cout << "\nSubmodules: \n";
@@ -287,8 +293,8 @@ std::unordered_map<std::string, std::pair<TypePtr, bool>> ConcreteModuleType::
   std::unordered_map<std::string, std::pair<TypePtr, bool>> ret;
   for (auto& pr : data_.attributes_) {
     ret.emplace(
-        pr.first,
-        std::pair<TypePtr, bool>(pr.second.type_, pr.second.isParam_));
+        pr.key(),
+        std::pair<TypePtr, bool>(pr.value().type_, pr.value().isParam_));
   }
   return ret;
 }
@@ -303,6 +309,5 @@ ConcreteModuleType::getModulesPy() const {
   return ret;
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

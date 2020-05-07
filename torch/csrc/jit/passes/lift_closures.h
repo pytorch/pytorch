@@ -5,10 +5,8 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 TORCH_API void liftClosures(const std::shared_ptr<Graph>& graph);
 
-} // namespace script
 } // namespace jit
 } // namespace torch

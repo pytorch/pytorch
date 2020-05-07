@@ -59,6 +59,21 @@ class TestUtilityOps(serial.SerializedTestCase):
             outputs_with_grads=[0],
         )
 
+    @given(ndims=st.integers(min_value=1, max_value=10), **hu.gcs)
+    def test_resize_like(self, ndims, gc, dc):
+        X = np.zeros((ndims * 2, ))
+        Y = np.zeros((ndims, 2))
+
+        op = core.CreateOperator(
+            "ResizeLike", ["X", "Y"], ["Z"],
+        )
+
+        def resize_like(X, Y):
+            return [X.reshape(Y.shape)]
+
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertReferenceChecks(gc, op, [X, Y], resize_like, ensure_outputs_are_inferred=True)
+
     @serial.given(dtype=st.sampled_from([np.float32, np.int32]),
            ndims=st.integers(min_value=1, max_value=5),
            seed=st.integers(min_value=0, max_value=65536),
