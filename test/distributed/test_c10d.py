@@ -2629,7 +2629,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # Run `forward` function with torch.no_grad()
         with torch.no_grad():
             output = model(input)
-            self.assertTrue(torch.is_tensor(output))
+            self.assertTrue(isinstance(output, torch.Tensor))
 
         # No parameter should have their gradient set.
         check_no_grads()
