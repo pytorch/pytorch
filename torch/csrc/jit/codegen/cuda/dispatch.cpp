@@ -44,8 +44,14 @@ void Val::dispatch(T handler, Val* val) {
   switch (*(val->getValType())) {
     case ValType::Scalar:
       switch (*(val->getDataType())) {
+        case DataType::Bool:
+          ptr(handler)->handle(static_cast<Bool*>(val));
+          return;
         case DataType::Float:
           ptr(handler)->handle(static_cast<Float*>(val));
+          return;
+        case DataType::Half:
+          ptr(handler)->handle(static_cast<Half*>(val));
           return;
         case DataType::Int:
           ptr(handler)->handle(static_cast<Int*>(val));
@@ -92,6 +98,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::BinaryOp:
       ptr(handler)->handle(static_cast<BinaryOp*>(expr));
       return;
+    case ExprType::TernaryOp:
+      ptr(handler)->handle(static_cast<TernaryOp*>(expr));
+      return;
     case ExprType::ForLoop:
       ptr(handler)->handle(static_cast<ForLoop*>(expr));
       return;
@@ -121,8 +130,14 @@ void Val::constDispatch(T handler, const Val* const val) {
   switch (*(val->getValType())) {
     case ValType::Scalar:
       switch (*(val->getDataType())) {
+        case DataType::Bool:
+          ptr(handler)->handle(static_cast<const Bool* const>(val));
+          return;
         case DataType::Float:
           ptr(handler)->handle(static_cast<const Float* const>(val));
+          return;
+        case DataType::Half:
+          ptr(handler)->handle(static_cast<const Half* const>(val));
           return;
         case DataType::Int:
           ptr(handler)->handle(static_cast<const Int* const>(val));
@@ -169,6 +184,9 @@ void Expr::constDispatch(T handler, const Expr* const expr) {
     case ExprType::BinaryOp:
       ptr(handler)->handle(static_cast<const BinaryOp* const>(expr));
       return;
+    case ExprType::TernaryOp:
+      ptr(handler)->handle(static_cast<const TernaryOp* const>(expr));
+      return;
     case ExprType::ForLoop:
       ptr(handler)->handle(static_cast<const ForLoop* const>(expr));
       return;
@@ -209,8 +227,12 @@ Statement* Val::mutatorDispatch(T mutator, Val* val) {
   switch (*(val->getValType())) {
     case ValType::Scalar:
       switch (*(val->getDataType())) {
+        case DataType::Bool:
+          return ptr(mutator)->mutate(static_cast<Bool*>(val));
         case DataType::Float:
           return ptr(mutator)->mutate(static_cast<Float*>(val));
+        case DataType::Half:
+          return ptr(mutator)->mutate(static_cast<Half*>(val));
         case DataType::Int:
           return ptr(mutator)->mutate(static_cast<Int*>(val));
         default:
@@ -245,6 +267,8 @@ Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
       return ptr(mutator)->mutate(static_cast<UnaryOp*>(expr));
     case ExprType::BinaryOp:
       return ptr(mutator)->mutate(static_cast<BinaryOp*>(expr));
+    case ExprType::TernaryOp:
+      return ptr(mutator)->mutate(static_cast<TernaryOp*>(expr));
     case ExprType::ForLoop:
       return ptr(mutator)->mutate(static_cast<ForLoop*>(expr));
     case ExprType::IfThenElse:
