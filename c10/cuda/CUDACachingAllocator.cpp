@@ -199,9 +199,6 @@ class DeviceCachingAllocator {
   // allocated or in use by a stream
   std::unordered_set<Block*> active_blocks;
 
-  // available cuda events
-  std::vector<cudaEvent_t> cuda_event_cache;
-
   // outstanding cuda events
   std::deque<std::pair<cudaEvent_t, Block*>> cuda_events;
 
@@ -681,17 +678,12 @@ class DeviceCachingAllocator {
 
   cudaEvent_t create_event_internal() {
     cudaEvent_t event;
-    if (cuda_event_cache.empty()) {
-      C10_CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
-    } else {
-      event = cuda_event_cache.back();
-      cuda_event_cache.pop_back();
-    }
+    C10_CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
     return event;
   }
 
   void free_event_internal(cudaEvent_t event) {
-    cuda_event_cache.push_back(event);
+    C10_CUDA_CHECK(cudaEventDestroy(event));
   }
 
   void synchronize_and_free_events() {
