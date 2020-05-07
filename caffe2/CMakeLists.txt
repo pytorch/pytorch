@@ -610,36 +610,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/include)
   endif()
 
-  if(USE_CUDA)
-    if(MSVC)
-      if(NOT NVTOOLEXT_HOME)
-        set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
-      endif()
-      if(DEFINED ENV{NVTOOLSEXT_PATH})
-        set(NVTOOLEXT_HOME $ENV{NVTOOLSEXT_PATH})
-        file(TO_CMAKE_PATH ${NVTOOLEXT_HOME} NVTOOLEXT_HOME)
-      endif()
-      set(TORCH_CUDA_LIBRARIES
-        ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
-        ${CUDA_LIBRARIES})
-      target_include_directories(torch_cuda PUBLIC "${NVTOOLEXT_HOME}/include")
-      # -INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
-      # Related issue: https://github.com/pytorch/pytorch/issues/31611
-      target_link_libraries(torch_cuda INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
-
-    elseif(APPLE)
-      set(TORCH_CUDA_LIBRARIES
-        ${CUDA_TOOLKIT_ROOT_DIR}/lib/libcudart.dylib
-        ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvrtc.dylib
-        ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib
-        ${CUDA_LIBRARIES})
-
-    else()
-      find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
-      set(TORCH_CUDA_LIBRARIES
-        ${LIBNVTOOLSEXT}
-        ${CUDA_LIBRARIES})
-    endif()
+  if(USE_CUDA AND MSVC)
+    # -INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
+    # Related issue: https://github.com/pytorch/pytorch/issues/31611
+    target_link_libraries(torch_cuda INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
   endif()
 
 
@@ -1027,9 +1001,7 @@ endif()
 if(USE_CUDA)
 
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
-  target_link_libraries(torch_cuda PUBLIC c10_cuda)
-
-  target_link_libraries(torch_cuda PUBLIC ${TORCH_CUDA_LIBRARIES})
+  target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
 
   target_include_directories(
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1066,9 +1038,8 @@ if(BUILD_SHARED_LIBS)
   # with RTLD_GLOBAL, we'll do the "normal" search process again (and
   # not find them, because they're usually in non-standard locations)
   if(USE_CUDA)
-    target_link_libraries(torch_global_deps ${TORCH_CUDA_LIBRARIES})
     target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
-    target_link_libraries(torch_global_deps torch::cudart)
+    target_link_libraries(torch_global_deps torch::cudart torch::nvtoolsext)
   endif()
 
   install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
