@@ -22,7 +22,7 @@ inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
   // boxing code currently does not support this. Instead, exclude the Profiler
   // dispatch key and go through unboxed dispatch, avoiding boxing altogether
   c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
-  return c10::Dispatcher::singleton().template callUnboxed<Result, Args...>(
+  return c10::Dispatcher::singleton().template call<Result, Args...>(
       op, std::forward<Args>(args)...);
 }
 

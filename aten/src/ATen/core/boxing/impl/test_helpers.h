@@ -42,7 +42,7 @@ inline std::vector<c10::IValue> callOp(const c10::OperatorHandle& op, Args... ar
 template<class Result, class... Args>
 inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
   return c10::Dispatcher::singleton()
-      .template callUnboxed<Result, Args...>(op, std::forward<Args>(args)...);
+      .template call<Result, Args...>(op, std::forward<Args>(args)...);
 }
 
 template<class Result, class... Args>
