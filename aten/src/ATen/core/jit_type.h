@@ -1607,6 +1607,14 @@ enum ATTRIBUTE_KIND_ENUM {
   REGULAR_ATTRIBUTE
 };
 
+static const std::string attribute_name_from_enum(ATTRIBUTE_KIND_ENUM ake) {
+  switch (ake) {
+  case BUFFER: return "BUFFER";
+  case PARAMETER: return "PARAMETER";
+  case REGULAR_ATTRIBUTE: return "REGULAR_ATTRIBUTE";
+  }
+}
+
 struct AttributeType;
 using AttributeTypePtr = std::shared_ptr<AttributeType>;
 
@@ -1632,8 +1640,27 @@ struct CAFFE2_API AttributeType : public NamedType {
   }
 
   std::string str() const override {
-    return "Attribute";
+    return python_str(nullptr);
   };
+
+  std::string python_str(const TypePrinter& printer) const {
+    if (printer) {
+      // the printer can return nullopt to fall through to the default impl
+      if (auto renamed = printer(shared_from_this())) {
+        return *renamed;
+      }
+    }
+    return python_str_impl(printer);
+  }
+
+  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+    std::stringstream ss;
+    ss << "Attribute: ";
+    ss << "Type: [" << getType()->python_str(printer) << "]";
+    ss << "Name: [" << getName() << "]";
+    ss << " Kind: [" << attribute_name_from_enum(getKind()) << "]";
+    return ss.str();
+  }
 
   TypeKind kind() const {
     return TypeKind::AttributeType;
