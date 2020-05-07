@@ -183,6 +183,21 @@ test_aten() {
   fi
 }
 
+test_basic_with_no_avx() {
+  # Force AVX and check that qemu doesn't support it.
+  set +e
+  qemu-x86_64 -E ATEN_CPU_CAPABILITY=avx ./build/bin/basic  --gtest_filter=BasicTest.BasicTestCPU
+  set -e
+  if [ $? -ne 132 ]; then
+    false
+  fi
+
+  # Now that we are sure qemu does not support avx, run the test as normal. This should not crash.
+  qemu-x86_64 -E ATEN_CPU_CAPABILITY=default ./build/bin/basic  --gtest_filter=BasicTest.BasicTestCPU
+
+  assert_git_not_dirty
+}
+
 test_torchvision() {
   pip_install --user git+https://github.com/pytorch/vision.git@43e94b39bcdda519c093ca11d99dfa2568aa7258
 }
@@ -315,6 +330,7 @@ else
   test_python_nn
   test_python_all_except_nn
   test_aten
+  test_basic_with_no_avx
   test_libtorch
   test_custom_script_ops
   test_torch_function_benchmark

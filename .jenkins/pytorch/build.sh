@@ -44,6 +44,10 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
+# TODO: move this to docker
+# We use qemu to test PyTorch without avx. See test_basic_with_no_avx() .jenkins/pytorch/test.sh
+sudo apt-get -qq install qemu
+
 echo "Python version:"
 python --version
 
