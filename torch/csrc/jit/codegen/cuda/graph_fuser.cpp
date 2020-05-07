@@ -22,6 +22,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+constexpr size_t NVRTC_KERNEL_ARG_LIMIT = 128;
+
 namespace {
 
 Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
@@ -47,7 +49,7 @@ struct CudaGraphFuser {
   // limit here.
   // This limit is also applied to other devices in the fuser by default.
   // Change with setInputArgLimit
-  size_t subgraph_arg_limit_ = 128;
+  size_t subgraph_arg_limit_ = NVRTC_KERNEL_ARG_LIMIT;
 
   CudaGraphFuser(Block* block, std::shared_ptr<Graph> graph)
       : block_(block), graph_(std::move(graph)) {}
