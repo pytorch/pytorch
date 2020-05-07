@@ -176,11 +176,6 @@ static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
   Py_RETURN_NONE;
 }
 
-static PyObject * THPModule_initNumThreads(PyObject *self, PyObject */*args*/) {
-  at::init_num_threads();
-  Py_RETURN_NONE;
-}
-
 static PyObject * THPModule_getNumInteropThreads(PyObject *module, PyObject *noargs)
 {
   return PyLong_FromLong(at::get_num_interop_threads());
@@ -553,7 +548,6 @@ static PyMethodDef TorchMethods[] = {
   {"_get_backcompat_keepdim_warn", (PyCFunction)THPModule_getBackcompatKeepdimWarn, METH_NOARGS, nullptr},
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  nullptr},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       nullptr},
-  {"init_num_threads", (PyCFunction)THPModule_initNumThreads,   METH_NOARGS,  nullptr},
   {"get_num_interop_threads", (PyCFunction)THPModule_getNumInteropThreads,     METH_NOARGS,  nullptr},
   {"set_num_interop_threads", (PyCFunction)THPModule_setNumInteropThreads,     METH_O,       nullptr},
   {"_get_cudnn_enabled", (PyCFunction)THPModule_userEnabledCuDNN, METH_NOARGS,     nullptr},
@@ -764,6 +758,18 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
+
+  py_module.def(
+    "init_num_threads",
+    torch::wrap_pybind_function(at::init_num_threads),
+    R"(
+init_num_threads()
+
+Initializes the number of parallel threads used on the current thread.
+
+Call this whenever a new thread is created in order to propagate values from
+:func:`torch.set_num_threads` onto the new thread.
+)");
 
   ASSERT_TRUE(set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
