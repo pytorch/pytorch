@@ -1,24 +1,25 @@
 #version 450 core
 layout(std430) buffer;
 layout(std430) uniform;
-layout(set=0, rgba16f, binding=0) writeonly mediump uniform image3D uOutput;
-layout(set=0, binding=1) uniform mediump sampler3D uInput;
-layout(set=0, binding=2) uniform constBlock{
-    int IW;
-    int IH;
-    int OW;
-    int OH;
-    float scaleX;
-    float scaleY;
-} uConstBlock;
+layout(set = 0, rgba16f, binding = 0) writeonly mediump uniform image3D uOutput;
+layout(set = 0, binding = 1) uniform mediump sampler3D uInput;
+layout(set = 0, binding = 2) uniform constBlock {
+  int IW;
+  int IH;
+  int OW;
+  int OH;
+  float scaleX;
+  float scaleY;
+}
+uConstBlock;
 
-layout (local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
+layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
   ivec3 pos = ivec3(gl_GlobalInvocationID);
   int ow = uConstBlock.OW;
   int oh = uConstBlock.OH;
-  if(pos.x < ow && pos.y < oh) {
+  if (pos.x < ow && pos.y < oh) {
     int iw = uConstBlock.IW;
     int ih = uConstBlock.IH;
     float srcX = float(pos.x) * uConstBlock.scaleX;

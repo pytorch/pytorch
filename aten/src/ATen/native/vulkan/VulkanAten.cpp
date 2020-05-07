@@ -175,12 +175,12 @@ at::Tensor vulkan_convolution(
   auto wsizes = weight.sizes();
   TORCH_INTERNAL_ASSERT(
       wsizes.size() == 4, "vulkan_convolution: Expected 4-dimensional weight");
+  int64_t C = isizes[1];
   TORCH_INTERNAL_ASSERT(
-      groups == 1,
-      "vulkan_convolution: group convolutions are not supported yet");
+      groups == 1 || groups == C,
+      "vulkan_convolution: only nogroup or depthwise convolutions supported");
 
   int64_t N = isizes[0];
-  int64_t C = isizes[1];
   int64_t H = isizes[2];
   int64_t W = isizes[3];
 
