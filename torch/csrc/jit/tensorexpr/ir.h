@@ -155,7 +155,7 @@ class And : public BinaryOpNode<And> {
  public:
   And(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kAnd) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+    if (!lhs->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
@@ -168,7 +168,7 @@ class Or : public BinaryOpNode<Or> {
  public:
   Or(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kOr) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+    if (!lhs->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
@@ -181,7 +181,7 @@ class Xor : public BinaryOpNode<Xor> {
  public:
   Xor(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kXor) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+    if (!lhs->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
