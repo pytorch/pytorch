@@ -9,6 +9,7 @@ namespace at {
 ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
       debug_info_(ThreadLocalDebugInfo::_current()) {
+  callbacks_ = _getTLSCallbacks();
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   keep_grad_mode_ = keep_grad_mode;
   if (keep_grad_mode_) {
@@ -25,6 +26,8 @@ void ThreadLocalState::setThreadLocalState(
     GradMode::set_enabled(state.grad_mode_enabled_);
   }
 #endif
+
+  _setTLSCallbacks(state.callbacks_);
 
   ThreadLocalDebugInfo::_forceCurrentDebugInfo(state.debug_info_);
 

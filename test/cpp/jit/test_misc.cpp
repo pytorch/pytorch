@@ -1035,6 +1035,8 @@ void testRecordFunction() {
   TORCH_CHECK(ids[0] == 1);
   ids.clear();
 
+  clearCallbacks();
+
   // test should_run
 
   bool ran = false;
@@ -1058,6 +1060,26 @@ void testRecordFunction() {
   TORCH_CHECK(ran);
 
   clearCallbacks();
+
+  // test propagation of TLS callbacks
+  std::thread t([]() {
+    RecordFunctionGuard enable_rec_fn;
+    std::string recorded_op;
+    auto handle = addThreadLocalCallback(RecordFunctionCallback(
+        [&recorded_op](const RecordFunction& fn) {
+          recorded_op = fn.name().str();
+        },
+        [](const RecordFunction&) {}));
+    ThreadLocalState state;
+    std::thread t_child([state]() {
+      ThreadLocalStateGuard g_tls(state);
+      RECORD_USER_SCOPE("test_in_thread");
+    });
+    t_child.join();
+    TORCH_CHECK(recorded_op == "test_in_thread");
+    removeCallback(handle);
+  });
+  t.join();
 }
 
 class TestThreadLocalDebugInfo : public at::DebugInfoBase {
