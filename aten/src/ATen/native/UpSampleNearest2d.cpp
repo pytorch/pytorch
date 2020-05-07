@@ -93,7 +93,11 @@ Tensor& upsample_nearest2d_out_cpu(
   return output;
 }
 
-Tensor upsample_nearest2d_cpu(const Tensor& input, IntArrayRef output_size, c10::optional<double> scales_h, c10::optional<double> scales_w) {
+Tensor upsample_nearest2d_cpu(
+    const Tensor& input,
+    IntArrayRef output_size,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   auto output = at::empty({0}, input.options());
   upsample_nearest2d_out_cpu_template(output, input, output_size, scales_h, scales_w);
   return output;

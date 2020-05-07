@@ -168,9 +168,9 @@ void testExprVectorAdd01() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}), kFloat);
-  Buffer b_buf(BufHandle("B", {ExprHandle(kTotalSize)}), kFloat);
-  Buffer c_buf(BufHandle("C", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Buffer b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  Buffer c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
 
   /*
   Build the following:
@@ -218,9 +218,9 @@ void testExprVectorAdd01() {
 void testExprCompareSelectEQ() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}), kInt);
-  Buffer b(BufHandle("B", {N}), kInt);
-  Buffer c(BufHandle("C", {N}), kInt);
+  Buffer a(BufHandle("A", {N}, kInt));
+  Buffer b(BufHandle("B", {N}, kInt));
+  Buffer c(BufHandle("C", {N}, kInt));
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
@@ -389,9 +389,9 @@ void testExprDynamicShapeAdd() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
-    Buffer a(BufHandle("a", {n}), kFloat);
-    Buffer b(BufHandle("b", {n}), kFloat);
-    Buffer c(BufHandle("c", {n}), kFloat);
+    Buffer a(BufHandle("a", {n}, kFloat));
+    Buffer b(BufHandle("b", {n}, kFloat));
+    Buffer c(BufHandle("c", {n}, kFloat));
     VarHandle i("i", kInt);
     Stmt* s = For::make(i, 0, n, Store::make(c, {i}, a(i) + b(i), 1));
     std::vector<float> aData(size, 1.0f);

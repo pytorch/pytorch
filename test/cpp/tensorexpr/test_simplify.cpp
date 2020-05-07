@@ -346,9 +346,9 @@ void testHashDifferenceTypes() {
 void testHashLargeExpression() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}), kInt);
-  Buffer b(BufHandle("B", {N}), kInt);
-  Buffer c(BufHandle("C", {N}), kInt);
+  Buffer a(BufHandle("A", {N}, kInt));
+  Buffer b(BufHandle("B", {N}, kInt));
+  Buffer c(BufHandle("C", {N}, kInt));
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto memcpy_stmt = For::make(
@@ -364,8 +364,8 @@ void testHashLargeExpression() {
               CompareSelectOperation::kEQ),
           mask));
 
-  Buffer d(BufHandle("D", {1}), kInt);
-  Buffer e(BufHandle("E", {1}), kInt);
+  Buffer d(BufHandle("D", {1}, kInt));
+  Buffer e(BufHandle("E", {1}, kInt));
   auto store_ramp_stmt = Store::make(
       e,
       {Ramp::make(0, 1, 4)},
@@ -1553,8 +1553,8 @@ void testSimplifyConstantCond() {
   {
     // If the condition is constant true then take the true_value.
     // 1 ? A[0] = 1 : B[0] = 1 => A[0] = 1
-    Buffer a(BufHandle("A", {1}), kInt);
-    Buffer b(BufHandle("B", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
+    Buffer b(BufHandle("B", {1}, kInt));
     ExprHandle condition(1);
     Stmt* true_val = Store::make(a, {0}, 1, 1);
     Stmt* false_val = Store::make(b, {0}, 1, 1);
@@ -1569,8 +1569,8 @@ void testSimplifyConstantCond() {
   {
     // If the condition is constant false then take the false_value.
     // 0 ? A[0] = 1 : B[0] = 1 => B[0] = 1
-    Buffer a(BufHandle("A", {1}), kInt);
-    Buffer b(BufHandle("B", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
+    Buffer b(BufHandle("B", {1}, kInt));
     ExprHandle condition(0);
     Stmt* true_val = Store::make(a, {0}, 1, 1);
     Stmt* false_val = Store::make(b, {0}, 1, 1);
@@ -1586,8 +1586,8 @@ void testSimplifyConstantCond() {
     // condition is simplified before checking.
     // (x-x) ? A[0] = 1 : B[0] = 1 => B[0] = 1
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {1}), kInt);
-    Buffer b(BufHandle("B", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
+    Buffer b(BufHandle("B", {1}, kInt));
     ExprHandle condition(x - x);
     Stmt* true_val = Store::make(a, {0}, 1, 1);
     Stmt* false_val = Store::make(b, {0}, 1, 1);
@@ -1603,7 +1603,7 @@ void testSimplifyConstantCond() {
     // If both branches are the same then don't do the condition.
     // x ? A[0] = x : A[0] = x => A[0] = x
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
     ExprHandle condition(x - x);
     Stmt* true_val = Store::make(a, {0}, x, 1);
     Stmt* false_val = Store::make(a, {0}, x, 1);
@@ -1619,7 +1619,7 @@ void testSimplifyConstantCond() {
     // If both branches simplify to the same thing it still works.
     // x ? (x + x) : (2 * x) => x
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
     ExprHandle condition(x - x);
     Stmt* true_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
     Stmt* false_val = Store::make(a, {0}, x + x, 1);
@@ -1635,7 +1635,7 @@ void testSimplifyConstantCond() {
     // But not if they dont
     // x ? x : (2 * x) => x ? x : (2 * x)
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
     ExprHandle condition(x);
     Stmt* true_val = Store::make(a, {0}, x, 1);
     Stmt* false_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
@@ -1652,8 +1652,8 @@ void testSimplifyEliminateZeroLengthFor() {
 
   {
     // Will eliminate zero loop For.
-    Buffer a(BufHandle("A", {4}), kInt);
-    Buffer c(BufHandle("C", {4}), kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -1665,8 +1665,8 @@ void testSimplifyEliminateZeroLengthFor() {
 
   {
     // still works if start is not zero.
-    Buffer a(BufHandle("A", {4}), kInt);
-    Buffer c(BufHandle("C", {4}), kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -1679,8 +1679,8 @@ void testSimplifyEliminateZeroLengthFor() {
   {
     // works if both terms are variable.
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {4}), kInt);
-    Buffer c(BufHandle("C", {4}), kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -1693,8 +1693,8 @@ void testSimplifyEliminateZeroLengthFor() {
   {
     // works if one term simplifies down.
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {4}), kInt);
-    Buffer c(BufHandle("C", {4}), kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body = For::make(
@@ -1706,8 +1706,8 @@ void testSimplifyEliminateZeroLengthFor() {
 
   {
     // Sanity check does nothing if the condition is not met.
-    Buffer a(BufHandle("A", {4}), kInt);
-    Buffer c(BufHandle("C", {4}), kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -1722,8 +1722,8 @@ void testSimplifyOneLoopFor() {
 
   {
     // Will remove the loop if the body is run once.
-    Buffer a(BufHandle("A", {4}), kInt);
-    Buffer c(BufHandle("C", {4}), kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -1737,8 +1737,8 @@ void testSimplifyOneLoopFor() {
 
   {
     // still works if start is not zero.
-    Buffer a(BufHandle("A", {4}), kInt);
-    Buffer c(BufHandle("C", {4}), kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -1753,8 +1753,8 @@ void testSimplifyOneLoopFor() {
   {
     // works if both terms are variable.
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {4}), kInt);
-    Buffer c(BufHandle("C", {4}), kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body = For::make(
@@ -1769,8 +1769,8 @@ void testSimplifyOneLoopFor() {
   {
     // works if one term simplifies down.
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {4}), kInt);
-    Buffer c(BufHandle("C", {4}), kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body = For::make(
@@ -1784,8 +1784,8 @@ void testSimplifyOneLoopFor() {
 
   {
     // Sanity check does nothing if the condition is not met.
-    Buffer a(BufHandle("A", {4}), kInt);
-    Buffer c(BufHandle("C", {4}), kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -1800,8 +1800,8 @@ void testSimplifyForWontLoseLoopOptions() {
 
   {
     // Sanity check does nothing if the condition is not met.
-    Buffer a(BufHandle("A", {4}), kInt);
-    Buffer c(BufHandle("C", {4}), kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     LoopOptions options;
@@ -1820,8 +1820,8 @@ void testSimplifyMultilevelFor() {
 
   {
     // Multiple layers of For will be simplified out.
-    Buffer a(BufHandle("A", {4}), kInt);
-    Buffer c(BufHandle("C", {4}), kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
@@ -1837,8 +1837,8 @@ void testSimplifyMultilevelFor() {
 
   {
     // Will maintain an outer loop if the inner loop is eliminated.
-    Buffer a(BufHandle("A", {4}), kInt);
-    Buffer c(BufHandle("C", {4}), kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
@@ -1860,8 +1860,8 @@ void testSimplifyMultilevelFor() {
 
   {
     // Will maintain inner loop if outer loops is eliminated.
-    Buffer a(BufHandle("A", {4}), kInt);
-    Buffer c(BufHandle("C", {4}), kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
@@ -1915,7 +1915,7 @@ void testSimplifyFlattenBlock() {
   {
     // Flatten multiple blocks down to one.
     // { { { stmt1, stmt2 } } } =>  { stmt1, stmt2 }
-    Buffer a(BufHandle("A", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
     Store* store1 = Store::make(a, {0}, 1, 1);
     Store* store2 = Store::make(a, {0}, 0, 1);
 
@@ -1938,7 +1938,7 @@ void testSimplifyFlattenBlock() {
   {
     // Flatten multiple sub blocks containing statements.
     // { { stmt1 }, { stmt2 } } =>  { stmt1, stmt2 }
-    Buffer a(BufHandle("A", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
     Store* store1 = Store::make(a, {0}, 1, 1);
     Store* store2 = Store::make(a, {0}, 0, 1);
 
@@ -1961,7 +1961,7 @@ void testSimplifyFlattenBlock() {
   {
     // Flatten sub blocks with different depths.
     // { stmt1 , { { stmt2 } } } =>  { stmt1, stmt2 }
-    Buffer a(BufHandle("A", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
     Store* store1 = Store::make(a, {0}, 1, 1);
     Store* store2 = Store::make(a, {0}, 0, 1);
 
