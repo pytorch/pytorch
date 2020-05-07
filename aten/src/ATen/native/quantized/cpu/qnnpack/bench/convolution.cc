@@ -19,7 +19,7 @@
 
 #include <benchmark/benchmark.h>
 
-static void convolution_q8(benchmark::State& state, const char* net) {
+static void convolution_q8(benchmark::State& state, const char* net, bool per_channel=false) {
   const size_t batchSize = state.range(0);
   const size_t inputHeight = state.range(1);
   const size_t inputWidth = state.range(2);
@@ -77,7 +77,6 @@ static void convolution_q8(benchmark::State& state, const char* net) {
   std::vector<uint8_t> kernel_zero_points(num_zero_points_padded, 127);
   std::vector<float> requantization_scale(
       num_zero_points_padded, 0.5 * 0.5 / 0.5);
-  bool per_channel{false};
   status = pytorch_qnnp_create_convolution2d_nhwc_q8(
       paddingTop,
       paddingRight,
@@ -1011,6 +1010,15 @@ BENCHMARK_CAPTURE(
     "3x3 DW Convolutions (dilation 2)")
     ->Apply(DWConv3x3d2);
 BENCHMARK_CAPTURE(convolution_q8, dwconv5x5, "5x5 DW Convolutions")
+    ->Apply(DWConv5x5);
+BENCHMARK_CAPTURE(convolution_q8, dwconv3x3_per_channel, "3x3 DW Convolutions", true)
+    ->Apply(DWConv3x3);
+BENCHMARK_CAPTURE(
+    convolution_q8,
+    dwconv3x3d2_per_channel,
+    "3x3 DW Convolutions (dilation 2)", true)
+    ->Apply(DWConv3x3d2);
+BENCHMARK_CAPTURE(convolution_q8, dwconv5x5_per_channel, "5x5 DW Convolutions", true)
     ->Apply(DWConv5x5);
 
 #ifndef PYTORCH_QNNPACK_BENCHMARK_NO_MAIN
