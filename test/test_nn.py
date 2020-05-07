@@ -7202,9 +7202,12 @@ class TestNN(NNTestCase):
     def test_upsamplingNearest1d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2)
+        in_uint8_t = torch.ones(1, 1, 2, dtype=torch.uint8)
         with warnings.catch_warnings(record=True) as w:
             out_t = m(in_t)
+            out_uint8_t = m(in_t)
         self.assertEqual(torch.ones(1, 1, 4), out_t.data)
+        self.assertEqual(torch.ones(1, 1, 4, dtype=torch.uint8), out_uint8_t.data)
 
         input = torch.randn(1, 1, 2, requires_grad=True)
         gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
@@ -7238,9 +7241,12 @@ class TestNN(NNTestCase):
         for memory_format in [torch.contiguous_format, torch.channels_last]:
             m = nn.Upsample(size=4, mode='nearest')
             in_t = torch.ones(1, 1, 2, 2).contiguous(memory_format=memory_format)
+            in_uint8_t = torch.ones(1, 1, 2, 2, dtype=torch.uint8).contiguous(memory_format=memory_format)
             with warnings.catch_warnings(record=True) as w:
                 out_t = m(in_t)
+                out_uint8_t = m(in_uint8_t)
             self.assertEqual(torch.ones(1, 1, 4, 4).contiguous(memory_format=memory_format), out_t.data)
+            self.assertEqual(torch.ones(1, 1, 4, 4, dtype=torch.uint8).contiguous(memory_format=memory_format), out_uint8_t.data)
 
             input = torch.randn(1, 1, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
             self.assertEqual(
@@ -7358,9 +7364,12 @@ class TestNN(NNTestCase):
         for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
             m = nn.Upsample(size=4, mode='nearest')
             in_t = torch.ones(1, 1, 2, 2, 2).contiguous(memory_format=memory_format)
+            in_uint8_t = torch.ones(1, 1, 2, 2, 2, dtype=torch.uint8).contiguous(memory_format=memory_format)
             with warnings.catch_warnings(record=True) as w:
                 out_t = m(in_t)
+                out_uint8_t = m(in_uint8_t)
             self.assertEqual(torch.ones(1, 1, 4, 4, 4).contiguous(memory_format=memory_format), out_t.data)
+            self.assertEqual(torch.ones(1, 1, 4, 4, 4, dtype=torch.uint8).contiguous(memory_format=memory_format), out_uint8_t.data)
 
             input = torch.randn(1, 1, 2, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
             gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
@@ -9306,6 +9315,46 @@ class TestNNDeviceType(NNTestCase):
         test('leaky_relu', 0.2)
         test('threshold', 3, 2)
         test('threshold', 3, 2, inplace=True)
+
+    @onlyCUDA
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    def test_avg_pool2d_nhwc(self, device, dtype):
+        def helper(n, c, h, w, kernel_size, stride=None,
+                   count_include_pad=True, divisor_override=None, padding=0):
+            if stride is None:
+                stride = kernel_size
+            input = torch.randn(n, c, h, w, dtype=dtype, device=device)
+            input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+            grad = torch.randn(n, c, (h - kernel_size) // stride + 1, (w - kernel_size) // stride + 1,
+                               dtype=dtype, device=device)
+            pool = torch.nn.AvgPool2d(kernel_size, stride=stride, count_include_pad=count_include_pad,
+                                      divisor_override=divisor_override).to(device)
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.AvgPool2d(kernel_size, stride=stride, count_include_pad=count_include_pad,
+                                          divisor_override=divisor_override).to(device)
+
+            out = pool(input)
+            out.backward(grad)
+            ref_out = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(torch.allclose(out, ref_out))
+            self.assertTrue(torch.allclose(input.grad, ref_input.grad))
+
+        helper(4, 8, 8, 8, 3)
+        helper(4, 8, 8, 8, 3, count_include_pad=False, padding=1)
+        helper(4, 8, 8, 8, 3, count_include_pad=False, padding=2, stride=2)
+        helper(4, 8, 8, 8, 3, divisor_override=42)
+        helper(4, 8, 8, 8, 7)
+        helper(200, 512, 28, 28, 2)
+        helper(4, 8, 7, 7, 3, stride=1)
+        helper(4, 8, 7, 7, 3, padding=2, stride=1)
+        helper(10, 512, 31, 31, 3, stride=2)
+        helper(1, 129, 8, 8, 3, stride=2)
 
     @onlyCUDA
     @dtypesIfCUDA(torch.half, torch.float, torch.double)

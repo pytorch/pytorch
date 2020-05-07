@@ -634,7 +634,7 @@ Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
 
 struct Vec256i;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
 
 template <class T, typename Op>
 static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b, Op op) {

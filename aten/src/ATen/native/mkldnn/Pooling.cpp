@@ -318,7 +318,7 @@ Tensor& mkldnn_avg_pool2d_out(
 Tensor mkldnn_adaptive_avg_pool2d(
     Tensor const& input,
     IntArrayRef output_size) {
-  AT_ASSERTM(input.dim() == 4, "mkldnn_adaptive_avg_pool2d: Input is expected 2D input");
+  TORCH_CHECK(input.dim() == 4, "mkldnn_adaptive_avg_pool2d: Input is expected 2D input");
 
   auto output_size_vec =
       expand_param_if_needed(output_size, "output_size", input.dim() - 2);
@@ -326,8 +326,8 @@ Tensor mkldnn_adaptive_avg_pool2d(
   for (int64_t i = 2; i < input.dim(); ++i) {
     auto s1 = input.size(i);
     auto s2 = output_size_vec[i - 2];
-    AT_ASSERTM(s2 != 0, "output size can not be zero");
-    AT_ASSERTM(
+    TORCH_CHECK(s2 != 0, "output size can not be zero");
+    TORCH_CHECK(
         s1 % s2 == 0,
         "input size is not divisible by the output size is not supported yet");
     kernel_size[i - 2] = s1 / s2;
@@ -409,7 +409,7 @@ Tensor& mkldnn_avg_pool2d_backward_out(
 Tensor mkldnn_adaptive_avg_pool2d_backward(
     const Tensor& grad_output,
     const Tensor& input) {
-  AT_ASSERTM(input.dim() == 4, "mkldnn_adaptive_avg_pool2d: Input is expected a 4D tenosor");
+  TORCH_CHECK(input.dim() == 4, "mkldnn_adaptive_avg_pool2d: Input is expected a 4D tenosor");
 
   auto output_size_vec = grad_output.sizes();
   std::vector<int64_t> kernel_size(input.dim() - 2);

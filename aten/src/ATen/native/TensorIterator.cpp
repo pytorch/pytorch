@@ -1076,7 +1076,11 @@ void TensorIterator::build() {
   }
 
   // zero out offsets
-  view_offsets_ = DimVector(ndim(), 0);
+  // If the tensor is a scalar, we leave room for it
+  // So index translations in reduction can access
+  // a valid value for the offset
+  int64_t ndim_offsets = (ndim() ? ndim() : 1);
+  view_offsets_ = DimVector(ndim_offsets, 0);
 }
 
 SplitUntil32Bit TensorIterator::with_32bit_indexing() const {
