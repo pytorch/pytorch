@@ -5,6 +5,7 @@
 #include <c10/util/Optional.h>
 #include <iostream>
 #include <limits>
+#include <vector>
 
 namespace at {
 namespace native {
@@ -37,41 +38,36 @@ void upsample_nearest2d(
   ConstBlock cb{IW, IH, OW, OH, scaleW, scaleH};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
-  VkDescriptorSetLayout descrSetLayout{};
-  VkDescriptorSetLayoutBinding bindings[] = {
-      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
-      descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-      descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
-  auto bindingsCount = sizeof(bindings) / sizeof(bindings[0]);
-  createDescriptorSetLayout(device, bindings, bindingsCount, &descrSetLayout);
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
 
-  VkDescriptorPool descrPool{};
-  VkDescriptorPoolSize poolSizes[] = {
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
-      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
-  auto poolSizeCount = sizeof(poolSizes) / sizeof(poolSizes[0]);
-  createDescriptorPool(
-      device, poolSizes, poolSizeCount, 1 /* maxSets */, &descrPool);
-
-  VkDescriptorSet descrSet{};
-  allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
-  output.image().bindStorageImage(descrSet, 0);
-  input.image().bindShaderRead(descrSet, 1);
-  constBuffer.bind(descrSet, 2);
+  output.image().bindStorageImage(descriptorSet, 0);
+  input.image().bindShaderRead(descriptorSet, 1);
+  constBuffer.bind(descriptorSet, 2);
 
   WorkGroupSize workGroupSize{8, 8, 1};
   ComputeUnit computeUnit{
       at::native::vulkan::GLSL_SPV(vulkan_upsampleNearest2d),
-      descrSetLayout,
+      descriptorSetLayout,
       workGroupSize};
-  computeUnit.createCommandBuffer(descrSet);
+  computeUnit.createCommandBuffer(descriptorSet);
   input.image().addImageMemoryBarrierGeneralToShaderRead(
       computeUnit.commandBuffer());
   computeUnit.dispatchCommandBuffer(OW, OH, C, workGroupSize);
   computeUnit.runCommandBuffer();
-  vkDestroyDescriptorPool(device, descrPool, nullptr);
-  vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
 void add(
@@ -104,44 +100,39 @@ void add(
   ConstBlock cb{W, H, C, alpha};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
-  VkDescriptorSetLayout descrSetLayout{};
-  VkDescriptorSetLayoutBinding bindings[] = {
-      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
-      descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-      descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-      descriptorSetLayoutBinding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
-  auto bindingsCount = sizeof(bindings) / sizeof(bindings[0]);
-  createDescriptorSetLayout(device, bindings, bindingsCount, &descrSetLayout);
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
 
-  VkDescriptorPool descrPool{};
-  VkDescriptorPoolSize poolSizes[] = {
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
-      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
-  auto poolSizeCount = sizeof(poolSizes) / sizeof(poolSizes[0]);
-  createDescriptorPool(
-      device, poolSizes, poolSizeCount, 1 /* maxSets */, &descrPool);
-
-  VkDescriptorSet descrSet{};
-  allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
-  output.image().bindStorageImage(descrSet, 0);
-  input0.image().bindShaderRead(descrSet, 1);
-  input1.image().bindShaderRead(descrSet, 2);
-  constBuffer.bind(descrSet, 3);
+  output.image().bindStorageImage(descriptorSet, 0);
+  input0.image().bindShaderRead(descriptorSet, 1);
+  input1.image().bindShaderRead(descriptorSet, 2);
+  constBuffer.bind(descriptorSet, 3);
 
   WorkGroupSize workGroupSize{8, 8, 1};
-  ComputeUnit computeUnit{
-      at::native::vulkan::GLSL_SPV(vulkan_add), descrSetLayout, workGroupSize};
-  computeUnit.createCommandBuffer(descrSet);
+  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(vulkan_add),
+                          descriptorSetLayout,
+                          workGroupSize};
+  computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   output.image().addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
   input0.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
   input1.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
   computeUnit.dispatchCommandBuffer(W, H, C, workGroupSize);
   computeUnit.runCommandBuffer();
-  vkDestroyDescriptorPool(device, descrPool, nullptr);
-  vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
 VBuffer kernelNCHW_OCHW_repack_O4C4HWi4o4(
@@ -204,42 +195,37 @@ VImage conv2d_kernelImage_from_hostCHW(
   ConstBlock cb{KW * KH, C_4};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
-  VkDescriptorSetLayout descrSetLayout{};
-  VkDescriptorSetLayoutBinding bindings[] = {
-      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
-      descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
-      descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
-  auto bindingsCount = sizeof(bindings) / sizeof(bindings[0]);
-  createDescriptorSetLayout(device, bindings, bindingsCount, &descrSetLayout);
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
 
-  VkDescriptorPool descrPool{};
-  VkDescriptorPoolSize poolSizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
-                                      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
-                                      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
-  auto poolSizeCount = sizeof(poolSizes) / sizeof(poolSizes[0]);
-  createDescriptorPool(
-      device, poolSizes, poolSizeCount, 1 /* maxSets */, &descrPool);
-
-  VkDescriptorSet descrSet{};
-  allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
-
-  kernelImage.bindStorageImage(descrSet, 0);
-  kernelBuffer.bind(descrSet, 1);
-  constBuffer.bind(descrSet, 2);
+  kernelImage.bindStorageImage(descriptorSet, 0);
+  kernelBuffer.bind(descriptorSet, 1);
+  constBuffer.bind(descriptorSet, 2);
 
   WorkGroupSize workGroupSize{1, 1, 1};
   ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(vulkan_KO4C4HW_to_image),
-                          descrSetLayout,
+                          descriptorSetLayout,
                           workGroupSize};
-  computeUnit.createCommandBuffer(descrSet);
+  computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   kernelImage.addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
   kernelBuffer.addBufferMemoryBarrier(
       commandBuffer, 0, kernelBuffer.sizeBytes());
   computeUnit.dispatchCommandBuffer(C_4, OC_4, KH * KW, workGroupSize);
   computeUnit.runCommandBuffer();
-  vkDestroyDescriptorPool(device, descrPool, nullptr);
-  vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
   return kernelImage;
 }
 
@@ -299,41 +285,34 @@ void conv2dDepthWise(
   VulkanTensor kernel{std::vector<int64_t>{OC, KH, KW}};
   kernel.setDataFromHost(weight);
 
-  VkDescriptorSetLayout descrSetLayout{};
-  VkDescriptorSetLayoutBinding bindings[] = {
-      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
-      descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-      descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-      descriptorSetLayoutBinding(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
-      descriptorSetLayoutBinding(4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
-  auto bindingsCount = sizeof(bindings) / sizeof(bindings[0]);
-  createDescriptorSetLayout(device, bindings, bindingsCount, &descrSetLayout);
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
 
-  VkDescriptorPool descrPool{};
-  VkDescriptorPoolSize poolSizes[] = {
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
-      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
-      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
-  auto poolSizeCount = sizeof(poolSizes) / sizeof(poolSizes[0]);
-  createDescriptorPool(
-      device, poolSizes, poolSizeCount, 1 /* maxSets */, &descrPool);
-
-  VkDescriptorSet descrSet{};
-  allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
-  output.image().bindStorageImage(descrSet, 0);
-  input.image().bindShaderRead(descrSet, 1);
-  kernel.image().bindShaderRead(descrSet, 2);
-  biasBuffer.bind(descrSet, 3);
-  constBuffer.bind(descrSet, 4);
+  output.image().bindStorageImage(descriptorSet, 0);
+  input.image().bindShaderRead(descriptorSet, 1);
+  kernel.image().bindShaderRead(descriptorSet, 2);
+  biasBuffer.bind(descriptorSet, 3);
+  constBuffer.bind(descriptorSet, 4);
 
   WorkGroupSize workGroupSize{8, 8, 1};
   ComputeUnit computeUnit =
       ComputeUnit{at::native::vulkan::GLSL_SPV(vulkan_convDW_tex),
-                  descrSetLayout,
+                  descriptorSetLayout,
                   workGroupSize};
-  computeUnit.createCommandBuffer(descrSet);
+  computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   output.image().addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
   input.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
@@ -341,8 +320,8 @@ void conv2dDepthWise(
   computeUnit.dispatchCommandBuffer(OW, OH, OC_4, workGroupSize);
   computeUnit.runCommandBuffer();
 
-  vkDestroyDescriptorPool(device, descrPool, nullptr);
-  vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
 void conv2d(
@@ -411,41 +390,37 @@ void conv2d(
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
   VImage kernelImage = conv2d_kernelImage_from_hostCHW(weight, OC, C, KH, KW);
 
-  VkDescriptorSetLayout descrSetLayout{};
-  VkDescriptorSetLayoutBinding bindings[] = {
-      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
-      descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-      descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-      descriptorSetLayoutBinding(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
-      descriptorSetLayoutBinding(4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
-  auto bindingsCount = sizeof(bindings) / sizeof(bindings[0]);
-  createDescriptorSetLayout(device, bindings, bindingsCount, &descrSetLayout);
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
 
-  VkDescriptorPool descrPool{};
-  VkDescriptorPoolSize poolSizes[] = {
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
-      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
-      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
-  auto poolSizeCount = sizeof(poolSizes) / sizeof(poolSizes[0]);
-  createDescriptorPool(
-      device, poolSizes, poolSizeCount, 1 /* maxSets */, &descrPool);
-
-  VkDescriptorSet descrSet{};
-  allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
   output.image().bind(
-      descrSet, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
-  input.image().bindShaderRead(descrSet, 1);
-  kernelImage.bindShaderRead(descrSet, 2);
-  biasBuffer.bind(descrSet, 3);
-  constBuffer.bind(descrSet, 4);
+      descriptorSet,
+      0,
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_IMAGE_LAYOUT_GENERAL);
+  input.image().bindShaderRead(descriptorSet, 1);
+  kernelImage.bindShaderRead(descriptorSet, 2);
+  biasBuffer.bind(descriptorSet, 3);
+  constBuffer.bind(descriptorSet, 4);
 
   WorkGroupSize workGroupSize{1, 1, OC_4};
   ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(vulkan_conv_tex_IKnc4hw),
-                          descrSetLayout,
+                          descriptorSetLayout,
                           workGroupSize};
-  computeUnit.createCommandBuffer(descrSet);
+  computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   output.image().addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
   input.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
@@ -456,8 +431,8 @@ void conv2d(
       UP_DIV(OC_4, workGroupSize.z));
   computeUnit.runCommandBuffer();
 
-  vkDestroyDescriptorPool(device, descrPool, nullptr);
-  vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
 void clamp(
@@ -484,41 +459,30 @@ void clamp(
   ConstBlock cb{W, H, C_4, C, min, max};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
-  VkDescriptorSetLayout descrSetLayout{};
-  VkDescriptorSetLayoutBinding bindings[] = {
-      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
-      descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-      descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
-  auto bindingsCount = sizeof(bindings) / sizeof(bindings[0]);
-  createDescriptorSetLayout(device, bindings, bindingsCount, &descrSetLayout);
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
 
-  VkDescriptorPool descrPool{};
-  VkDescriptorPoolSize poolSizes[] = {
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
-      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
-  auto poolSizeCount = sizeof(poolSizes) / sizeof(poolSizes[0]);
-  createDescriptorPool(
-      device, poolSizes, poolSizeCount, 1 /* maxSets */, &descrPool);
-
-  VkDescriptorSet descrSet{};
-  allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
-  output.image().bindStorageImage(descrSet, 0);
-  input.image().bindShaderRead(descrSet, 1);
-  constBuffer.bind(descrSet, 2);
+  output.image().bindStorageImage(descriptorSet, 0);
+  input.image().bindShaderRead(descriptorSet, 1);
+  constBuffer.bind(descriptorSet, 2);
 
   WorkGroupSize workGroupSize{8, 8, 1};
   ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(vulkan_clamp),
-                          descrSetLayout,
+                          descriptorSetLayout,
                           workGroupSize};
-  computeUnit.createCommandBuffer(descrSet);
+  computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   output.image().addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
   input.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
   computeUnit.dispatchCommandBuffer(W, H, C, workGroupSize);
   computeUnit.runCommandBuffer();
-  vkDestroyDescriptorPool(device, descrPool, nullptr);
-  vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
 void addmm(
@@ -572,40 +536,27 @@ void addmm(
   ConstBlock cb{OW, OH, C_4, C, beta, alpha, K};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
-  VkDescriptorSetLayout descrSetLayout{};
-  VkDescriptorSetLayoutBinding bindings[] = {
-      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
-      descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-      descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-      descriptorSetLayoutBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-      descriptorSetLayoutBinding(4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
-  auto bindingsCount = sizeof(bindings) / sizeof(bindings[0]);
-  createDescriptorSetLayout(device, bindings, bindingsCount, &descrSetLayout);
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
 
-  VkDescriptorPool descrPool{};
-  VkDescriptorPoolSize poolSizes[] = {
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
-      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
-  auto poolSizeCount = sizeof(poolSizes) / sizeof(poolSizes[0]);
-  createDescriptorPool(
-      device, poolSizes, poolSizeCount, 1 /* maxSets */, &descrPool);
-
-  VkDescriptorSet descrSet{};
-  allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
-  output.image().bindStorageImage(descrSet, 0);
-  m1.image().bindShaderRead(descrSet, 1);
-  m2.image().bindShaderRead(descrSet, 2);
-  t.image().bindShaderRead(descrSet, 3);
-  constBuffer.bind(descrSet, 4);
+  output.image().bindStorageImage(descriptorSet, 0);
+  m1.image().bindShaderRead(descriptorSet, 1);
+  m2.image().bindShaderRead(descriptorSet, 2);
+  t.image().bindShaderRead(descriptorSet, 3);
+  constBuffer.bind(descriptorSet, 4);
 
   WorkGroupSize workGroupSize{8, 8, 1};
   ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(vulkan_addmm),
-                          descrSetLayout,
+                          descriptorSetLayout,
                           workGroupSize};
-  computeUnit.createCommandBuffer(descrSet);
+  computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   output.image().addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
   m1.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
@@ -613,8 +564,8 @@ void addmm(
   t.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
   computeUnit.dispatchCommandBuffer(OW, OH, C_4, workGroupSize);
   computeUnit.runCommandBuffer();
-  vkDestroyDescriptorPool(device, descrPool, nullptr);
-  vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
 } // namespace vulkan

@@ -350,6 +350,13 @@ void allocateDescriptorSet(
     const VkDescriptorSetLayout* descriptorSetLayout,
     VkDescriptorSet* descriptorSet);
 
+void createDescriptorSetLayoutSinglePool(
+    VkDevice device,
+    std::vector<VkDescriptorType> descrTypes,
+    VkDescriptorSetLayout* descrSetLayout,
+    VkDescriptorPool* descrPool,
+    VkDescriptorSet* descrSet);
+
 struct WorkGroupSize {
   uint32_t x;
   uint32_t y;

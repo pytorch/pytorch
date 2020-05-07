@@ -654,6 +654,26 @@ void allocateDescriptorSet(
   VK_CHECK(vkAllocateDescriptorSets(device, &allocateInfo, descriptorSet));
 }
 
+void createDescriptorSetLayoutSinglePool(
+    VkDevice device,
+    std::vector<VkDescriptorType> descrTypes,
+    VkDescriptorSetLayout* descrSetLayout,
+    VkDescriptorPool* descrPool,
+    VkDescriptorSet* descrSet) {
+  auto size = descrTypes.size();
+  std::vector<VkDescriptorSetLayoutBinding> bindings;
+  std::vector<VkDescriptorPoolSize> poolSizes;
+  uint32_t i = 0;
+  for (const auto& descrType : descrTypes) {
+    bindings[i] = descriptorSetLayoutBinding(i, descrType);
+    poolSizes[i] = {descrType, 1};
+  }
+  createDescriptorSetLayout(device, bindings.data(), size, descrSetLayout);
+  createDescriptorPool(
+      device, poolSizes.data(), size, 1 /* maxSets */, descrPool);
+  allocateDescriptorSet(device, *descrPool, descrSetLayout, descrSet);
+}
+
 ComputeUnit::~ComputeUnit() {
   vkDestroyShaderModule(context().device(), computeShaderModule_, nullptr);
   vkDestroyPipelineLayout(context().device(), pipelineLayout_, nullptr);
