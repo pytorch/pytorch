@@ -201,7 +201,7 @@ void test_random(const at::Device& device) {
     }
 
     ASSERT_TRUE(0 <= static_cast<int64_t>(exp));
-    ASSERT_TRUE(static_cast<int64_t>(exp) < range);
+    ASSERT_TRUE(static_cast<uint64_t>(exp) < range);
 
     const auto expected = torch::full_like(actual, exp);
     if (std::is_same<T, bool>::value) {

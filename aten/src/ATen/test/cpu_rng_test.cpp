@@ -136,9 +136,9 @@ TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
 }
 
 class RNGTest : public ::testing::Test {
-protected:
-  static constexpr auto MAGIC_NUMBER = 424242424242424242ULL;
 };
+
+static constexpr auto MAGIC_NUMBER = 424242424242424242ULL;
 
 // ==================================================== Random ========================================================
 
