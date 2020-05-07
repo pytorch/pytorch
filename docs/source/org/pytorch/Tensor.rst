@@ -98,8 +98,8 @@ dtypeJniCode
 .. java:method::  int dtypeJniCode()
    :outertype: Tensor
 
-fromBlob
-^^^^^^^^
+fromBlob(byte[], long[])
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static Tensor fromBlob(byte[] data, long[] shape)
    :outertype: Tensor
@@ -109,8 +109,8 @@ fromBlob
    :param data: Tensor elements
    :param shape: Tensor shape
 
-fromBlob
-^^^^^^^^
+fromBlob(int[], long[])
+^^^^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static Tensor fromBlob(int[] data, long[] shape)
    :outertype: Tensor
@@ -120,8 +120,8 @@ fromBlob
    :param data: Tensor elements
    :param shape: Tensor shape
 
-fromBlob
-^^^^^^^^
+fromBlob(float[], long[])
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static Tensor fromBlob(float[] data, long[] shape)
    :outertype: Tensor
@@ -131,8 +131,8 @@ fromBlob
    :param data: Tensor elements
    :param shape: Tensor shape
 
-fromBlob
-^^^^^^^^
+fromBlob(long[], long[])
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static Tensor fromBlob(long[] data, long[] shape)
    :outertype: Tensor
@@ -142,8 +142,8 @@ fromBlob
    :param data: Tensor elements
    :param shape: Tensor shape
 
-fromBlob
-^^^^^^^^
+fromBlob(long[], double[])
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static Tensor fromBlob(long[] shape, double[] data)
    :outertype: Tensor
@@ -153,8 +153,8 @@ fromBlob
    :param shape: Tensor shape
    :param data: Tensor elements
 
-fromBlob
-^^^^^^^^
+fromBlob(ByteBuffer, long[])
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static Tensor fromBlob(ByteBuffer data, long[] shape)
    :outertype: Tensor
@@ -164,8 +164,8 @@ fromBlob
    :param data: Direct buffer with native byte order that contains \ ``Tensor.numel(shape)``\  elements. The buffer is used directly without copying, and changes to its content will change the tensor.
    :param shape: Tensor shape
 
-fromBlob
-^^^^^^^^
+fromBlob(IntBuffer, long[])
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static Tensor fromBlob(IntBuffer data, long[] shape)
    :outertype: Tensor
@@ -175,8 +175,8 @@ fromBlob
    :param data: Direct buffer with native byte order that contains \ ``Tensor.numel(shape)``\  elements. The buffer is used directly without copying, and changes to its content will change the tensor.
    :param shape: Tensor shape
 
-fromBlob
-^^^^^^^^
+fromBlob(FloatBuffer, long[])
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static Tensor fromBlob(FloatBuffer data, long[] shape)
    :outertype: Tensor
@@ -186,8 +186,8 @@ fromBlob
    :param data: Direct buffer with native byte order that contains \ ``Tensor.numel(shape)``\  elements. The buffer is used directly without copying, and changes to its content will change the tensor.
    :param shape: Tensor shape
 
-fromBlob
-^^^^^^^^
+fromBlob(LongBuffer, long[])
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static Tensor fromBlob(LongBuffer data, long[] shape)
    :outertype: Tensor
@@ -197,8 +197,8 @@ fromBlob
    :param data: Direct buffer with native byte order that contains \ ``Tensor.numel(shape)``\  elements. The buffer is used directly without copying, and changes to its content will change the tensor.
    :param shape: Tensor shape
 
-fromBlob
-^^^^^^^^
+fromBlob(DoubleBuffer, long[])
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static Tensor fromBlob(DoubleBuffer data, long[] shape)
    :outertype: Tensor
@@ -208,8 +208,8 @@ fromBlob
    :param data: Direct buffer with native byte order that contains \ ``Tensor.numel(shape)``\  elements. The buffer is used directly without copying, and changes to its content will change the tensor.
    :param shape: Tensor shape
 
-fromBlobUnsigned
-^^^^^^^^^^^^^^^^
+fromBlobUnsigned(byte[], long[])
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static Tensor fromBlobUnsigned(byte[] data, long[] shape)
    :outertype: Tensor
@@ -219,8 +219,8 @@ fromBlobUnsigned
    :param data: Tensor elements
    :param shape: Tensor shape
 
-fromBlobUnsigned
-^^^^^^^^^^^^^^^^
+fromBlobUnsigned(ByteBuffer, long[])
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static Tensor fromBlobUnsigned(ByteBuffer data, long[] shape)
    :outertype: Tensor
@@ -290,16 +290,16 @@ getRawDataBuffer
 .. java:method::  Buffer getRawDataBuffer()
    :outertype: Tensor
 
-numel
-^^^^^
+numel()
+^^^^^^^
 
 .. java:method:: public long numel()
    :outertype: Tensor
 
    Returns the number of elements in this tensor.
 
-numel
-^^^^^
+numel(long[])
+^^^^^^^^^^^^^
 
 .. java:method:: public static long numel(long[] shape)
    :outertype: Tensor
@@ -313,3 +313,6 @@ shape
    :outertype: Tensor
 
    Returns the shape of this tensor. (The array is a fresh copy.)
+
+.. toctree::
+    TensorImageUtils

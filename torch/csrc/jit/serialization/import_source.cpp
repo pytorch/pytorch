@@ -7,6 +7,8 @@
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/custom_class.h>
 
+#include <regex>
+
 namespace torch {
 namespace jit {
 
@@ -260,6 +262,45 @@ struct SourceImporterImpl : public Resolver,
     }
   }
 
+  c10::optional<Assign> qconvAttributeAssignmentSpecialHandlingHack(
+      const QualifiedName& qualified_classname,
+      const Assign& assign) {
+    static std::regex mangle_re("\\.___torch_mangle_\\d+");
+    auto replaced_string =
+        std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
+    auto is_conv2d = [](const std::string& type) {
+      return type == "__torch__.torch.nn.quantized.modules.conv.Conv2d" ||
+          type ==
+          "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d";
+    };
+
+    auto is_conv3d = [](const std::string& type) {
+      return type == "__torch__.torch.nn.quantized.modules.conv.Conv3d" ||
+          type ==
+          "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d";
+    };
+    if (is_conv2d(replaced_string) || is_conv3d(replaced_string)) {
+      auto lhs = Var(assign.lhs());
+      if (!assign.type().present() || assign.type().get().kind() != TK_VAR) {
+        return c10::nullopt;
+      }
+      auto type = Var(assign.type().get());
+      if (lhs.name().name() == "_packed_params" &&
+          type.name().name() == "Tensor") {
+        std::string packed_params_typename = is_conv2d(replaced_string)
+            ? "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"
+            : "__torch__.torch.classes.quantized.Conv3dPackedParamsBase";
+        Parser p(std::make_shared<Source>(std::move(packed_params_typename)));
+        auto typename_expr = p.parseExp();
+        auto maybe_typename =
+            Maybe<Expr>::create(typename_expr.range(), typename_expr);
+        return Assign::create(
+            assign.range(), assign.lhs_list(), assign.rhs(), maybe_typename);
+      }
+    }
+    return c10::nullopt;
+  }
+
   void importClass(
       const QualifiedName& qualified_classname,
       const ClassDef& class_def,
@@ -317,7 +358,10 @@ struct SourceImporterImpl : public Resolver,
                 // This is to initialize the annotations dict, just ignore.
                 continue;
               } else {
-                if (assign.rhs().present()) {
+                if (auto fixed_up = qconvAttributeAssignmentSpecialHandlingHack(
+                        qualified_classname, assign)) {
+                  attributes.push_back(std::move(*fixed_up));
+                } else if (assign.rhs().present()) {
                   // This is a constant assignment, of the form:
                   // foo : Final[int] = 3
                   constants.push_back(assign);

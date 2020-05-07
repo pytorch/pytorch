@@ -31,13 +31,11 @@ from numbers import Number
 import tempfile
 import json
 from urllib.request import urlopen
-
 import __main__
 import errno
 
 from torch.testing._internal import expecttest
-from torch.testing import get_all_dtypes
-from torch.testing import get_all_complex_dtypes
+from torch.testing import _compare_tensors_internal, is_integral
 
 import torch
 import torch.cuda
@@ -59,7 +57,7 @@ class ProfilingMode(Enum):
     PROFILING = 3
 
 @contextmanager
-def enable_profiling_mode():
+def enable_profiling_mode_for_profiling_tests():
     if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
         old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
         old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
@@ -70,6 +68,16 @@ def enable_profiling_mode():
             torch._C._jit_set_profiling_executor(old_prof_exec_state)
             torch._C._jit_set_profiling_mode(old_prof_mode_state)
 
+@contextmanager
+def enable_profiling_mode():
+    old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
+    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_profiling_executor(old_prof_exec_state)
+        torch._C._jit_set_profiling_mode(old_prof_mode_state)
+
 func_call = torch._C.ScriptFunction.__call__
 meth_call = torch._C.ScriptMethod.__call__
 
@@ -77,7 +85,7 @@ def prof_callable(callable, *args, **kwargs):
     if 'profile_and_replay' in kwargs:
         del kwargs['profile_and_replay']
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 callable(*args, **kwargs)
                 return callable(*args, **kwargs)
 
@@ -92,6 +100,15 @@ def prof_meth_call(*args, **kwargs):
 torch._C.ScriptFunction.__call__ = prof_func_call
 torch._C.ScriptMethod.__call__ = prof_meth_call
 
+def _get_test_report_path():
+    # allow users to override the test file location. We need this
+    # because the distributed tests run the same test file multiple
+    # times with different configurations.
+    override = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
+    test_source = override if override is not None else 'python-unittest'
+    return os.path.join('test-reports', test_source)
+
+
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
@@ -100,6 +117,12 @@ parser.add_argument('--accept', action='store_true')
 parser.add_argument('--ge_config', type=str)
 parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test_bailouts', action='store_true')
+parser.add_argument('--save-xml', nargs='?', type=str,
+                    const=_get_test_report_path(),
+                    default=_get_test_report_path() if bool(os.environ.get('IN_CIRCLECI')) else None)
+parser.add_argument('--discover-tests', action='store_true')
+parser.add_argument('--log-suffix', type=str, default="")
+parser.add_argument('--run-parallel', type=int, default=1)
 
 GRAPH_EXECUTOR = ProfilingMode.SIMPLE if IS_SANDCASTLE else ProfilingMode.PROFILING
 args, remaining = parser.parse_known_args()
@@ -110,8 +133,12 @@ elif args.ge_config == 'profiling':
 else:
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 
+LOG_SUFFIX = args.log_suffix
+RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
+TEST_DISCOVER = args.discover_tests
 TEST_IN_SUBPROCESS = args.subprocess
+TEST_SAVE_XML = args.save_xml
 REPEAT_COUNT = args.repeat
 SEED = args.seed
 if not expecttest.ACCEPT:
@@ -119,19 +146,7 @@ if not expecttest.ACCEPT:
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
-
-def shell(command, cwd=None, env=None):
-    sys.stdout.flush()
-    sys.stderr.flush()
-    # The following cool snippet is copied from Py3 core library subprocess.call
-    # only the with
-    #   1. `except KeyboardInterrupt` block added for SIGINT handling.
-    #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do
-    #      `p.wait()` in a `final` block for the code to be portable.
-    #
-    # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
-    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
-    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env)
+def wait_for_process(p):
     try:
         return p.wait()
     except KeyboardInterrupt:
@@ -149,6 +164,20 @@ def shell(command, cwd=None, env=None):
     finally:
         # Always call p.wait() to ensure exit
         p.wait()
+
+def shell(command, cwd=None, env=None):
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # The following cool snippet is copied from Py3 core library subprocess.call
+    # only the with
+    #   1. `except KeyboardInterrupt` block added for SIGINT handling.
+    #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do
+    #      `p.wait()` in a `final` block for the code to be portable.
+    #
+    # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
+    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
+    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env)
+    return wait_for_process(p)
 
 
 # Used to run the same test with different tensor types
@@ -168,25 +197,35 @@ def repeat_test_for_types(dtypes):
 
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
 IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
-IN_CIRCLECI = bool(os.environ.get('IN_CIRCLECI'))
-TEST_REPORT_SOURCE_OVERRIDE = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
 
 PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
 
+def discover_test_cases_recursively(suite_or_case):
+    if isinstance(suite_or_case, unittest.TestCase):
+        return [suite_or_case]
+    rc = []
+    for element in suite_or_case:
+        rc.extend(discover_test_cases_recursively(element))
+    return rc
+
+def get_test_names(test_cases):
+    return ['.'.join(case.id().split('.')[-2:]) for case in test_cases]
+
+def chunk_list(lst, nchunks):
+    return [lst[i::nchunks] for i in range(nchunks)]
+
+
+
 def run_tests(argv=UNITTEST_ARGS):
-    if TEST_IN_SUBPROCESS:
+    if TEST_DISCOVER:
         suite = unittest.TestLoader().loadTestsFromModule(__main__)
-        test_cases = []
-
-        def add_to_test_cases(suite_or_case):
-            if isinstance(suite_or_case, unittest.TestCase):
-                test_cases.append(suite_or_case)
-            else:
-                for element in suite_or_case:
-                    add_to_test_cases(element)
-
-        add_to_test_cases(suite)
+        test_cases = discover_test_cases_recursively(suite)
+        for name in get_test_names(test_cases):
+            print(name)
+    elif TEST_IN_SUBPROCESS:
+        suite = unittest.TestLoader().loadTestsFromModule(__main__)
+        test_cases = discover_test_cases_recursively(suite)
         failed_tests = []
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
@@ -196,30 +235,33 @@ def run_tests(argv=UNITTEST_ARGS):
 
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
+    elif RUN_PARALLEL > 1:
+        suite = unittest.TestLoader().loadTestsFromModule(__main__)
+        test_cases = discover_test_cases_recursively(suite)
+        test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
+        processes = []
+        for i in range(RUN_PARALLEL):
+            command = [sys.executable] + argv + ['--log-suffix=-shard-{}'.format(i + 1)] + test_batches[i]
+            processes.append(subprocess.Popen(command, universal_newlines=True))
+        failed = False
+        for p in processes:
+            failed |= wait_for_process(p) != 0
+        assert not failed, "Some test shards have failed"
+    elif TEST_SAVE_XML is not None:
+        # import here so that non-CI doesn't need xmlrunner installed
+        import xmlrunner
+        test_report_path = TEST_SAVE_XML + LOG_SUFFIX
+        os.makedirs(test_report_path, exist_ok=True)
+        verbose = '--verbose' in argv or '-v' in argv
+        if verbose:
+            print('Test results will be stored in {}'.format(test_report_path))
+        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
+    elif REPEAT_COUNT > 1:
+        for _ in range(REPEAT_COUNT):
+            if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
+                sys.exit(-1)
     else:
-        if IN_CIRCLECI:
-            # import here so that non-CI doesn't need xmlrunner installed
-            import xmlrunner
-            # allow users to override the test file location. We need this
-            # because the distributed tests run the same test file multiple
-            # times with different configurations.
-            if TEST_REPORT_SOURCE_OVERRIDE is not None:
-                test_source = TEST_REPORT_SOURCE_OVERRIDE
-            else:
-                test_source = 'python-unittest'
-
-            test_report_path = os.path.join('test-reports', test_source)
-            os.makedirs(test_report_path, exist_ok=True)
-            verbose = '--verbose' in argv or '-v' in argv
-            if verbose:
-                print('Test results will be stored in {}'.format(test_report_path))
-            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
-        elif REPEAT_COUNT > 1:
-            for _ in range(REPEAT_COUNT):
-                if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
-                    sys.exit(-1)
-        else:
-            unittest.main(argv=argv)
+        unittest.main(argv=argv)
 
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
@@ -647,8 +689,110 @@ def check_disabled(test_name):
             "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
             " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
 
+# Helper that returns the maximum value a dtype can represent
+def _get_width(dtype):
+    if dtype is torch.complex128:
+        return torch.finfo(torch.float64).bits
+    elif dtype is torch.complex64:
+        return torch.finfo(torch.float32).bits
+    elif dtype is torch.bool:
+        return 1
+    elif is_integral(dtype):
+        return torch.iinfo(dtype).bits
+    return torch.finfo(dtype).bits
+
+# Returns a dtype suitable for comparing tensors a and b.
+# NOTE: Dtypes for Comparing Tensors in the Test Framework
+# When two tensors are compared they may be of different dtypes.
+# In PyTorch, the typical type promotion rules are biased towards float
+# types, so tensors with dtypes float16 and int64 produce tensors of
+# dtype float16 when added together.
+# If we used typical PyTorch type promotion to determine the dtype that tensors
+# should be compared in, however, then the test framework would assert
+# that tensors which are actually very different were "equal" to each other.
+# For example, torch.tensor((50000), dtype=torch.long) would be "equal" to
+# torch.tensor(49984., dtype=torch.float16), regardless of the rtol and atol.
+# These cases are admittedly, unlikely, but the test framework is not intended
+# to reflect only "likely" scenarios.
+# To preserve numerical accuracy, instead of following PyTorch's type
+# promotion rules this function follows NumPy's, which are intended to preserve
+# numerics. It special-cases bfloat16 since NumPy doesn't support bfloat16.
+# TODO: if we take a NumPy dependency then this function can be greatly
+# simplified.
+def get_comparison_dtype(a, b):
+    class _TypeMeta:
+        __slots__ = ['rank', 'kind', 'width']
+
+        def __init__(self, rank, kind, width):
+            self.rank = rank
+            self.kind = kind
+            self.width = width
+
+    # Maps torch dtypes to their rank, kind and width
+    type_meta = {
+        torch.complex128 : _TypeMeta(11, 'complex', 64),
+        torch.complex64  : _TypeMeta(10, 'complex', 32),
+        torch.float64    : _TypeMeta(9, 'float', 64),
+        torch.float32    : _TypeMeta(8, 'float', 32),
+        torch.bfloat16   : _TypeMeta(7, 'float', 16),
+        torch.float16    : _TypeMeta(6, 'float', 16),
+        torch.int64      : _TypeMeta(5, 'int', 64),
+        torch.int32      : _TypeMeta(4, 'int', 32),
+        torch.int16      : _TypeMeta(3, 'int', 16),
+        torch.int8       : _TypeMeta(2, 'int', 8),
+        torch.uint8      : _TypeMeta(1, 'uint', 8),
+        torch.bool       : _TypeMeta(0, 'uint', 1),
+    }
+
+    # Acquires common meta and acquires widest width
+    a_meta = type_meta[a.dtype]
+    b_meta = type_meta[b.dtype]
+    high_meta = a_meta if a_meta.rank >= b_meta.rank else b_meta
+    low_meta = b_meta if high_meta is a_meta else a_meta
+
+    # Short-circuits for boolean comparisons
+    if high_meta.rank == 0:
+        return torch.bool
+
+    # Acquires width
+    width = max(high_meta.width, low_meta.width)
+
+    # Adjusts width
+    # Doubles int width when upcasting
+    if ((high_meta.kind == 'float' or high_meta.kind == 'complex') and
+       low_meta.kind == 'int'):
+        width = min(64, max(low_meta.width * 2, high_meta.width))
+
+    # Doubles uint width when upcasting
+    if high_meta.kind != 'uint' and low_meta.kind == 'uint':
+        width = min(64, max(low_meta.width * 2, high_meta.width))
+
+    # Accounts for complex types being represented as double width
+    if high_meta.kind == 'complex':
+        width *= 2
+
+    # Accounts for bfloat16 x float16
+    if high_meta.rank == 7 and low_meta.rank == 6:
+        width = 32
+
+    # Acquires common dtype
+    common_dtype = getattr(torch, high_meta.kind + str(width))
+
+    # TODO: update this when isclose is implemented for CPU/CUDA bfloat16
+    if common_dtype is torch.bfloat16:
+        common_dtype = torch.float32
+
+    # non-CUDA (CPU, for example) float16 -> float32
+    # TODO: update this when isclose is implemented for CPU float16
+    if (common_dtype is torch.float16 and
+        (a.device != b.device or a.device.type != 'cuda' or
+            b.device.type != 'cuda')):
+        common_dtype = torch.float32
+
+    return common_dtype
+
 class TestCase(expecttest.TestCase):
-    # Note: "precision" lets classes and generated tests set minimum
+    # NOTE: "precision" lets classes and generated tests set minimum
     # atol values when comparing tensors.
     # TODO: provide a better mechanism for generated tests to set rtol/atol.
     precision = 0
@@ -804,131 +948,22 @@ class TestCase(expecttest.TestCase):
         torch.complex128 : (1e-7, 1e-7),
     }
 
-    # todo: implement numpy-like issubdtype
-    def is_integral(self, dtype):
-        # Skip complex/quantized types
-        dtypes = [x for x in get_all_dtypes() if x not in get_all_complex_dtypes()]
-        return dtype in dtypes and not dtype.is_floating_point
-
-    # Returns a dtype suitable for comparing tensors a and b.
-    # This closely follows NumPy's type promotion logic, except it includes
-    # bfloat16 and accounts for the current state of PyTorch's bfloat16 and
-    # float16 implementations.
-    # Note: since torch.isclose converts its inputs to floating point values
-    # (it multiplies by rtol, a double) this function takes an optional
-    # allow_ints argument. If false, it only returns bool, float, or complex
-    # tensors. This can prevent a second conversion when comparing tensors.
-    def compare_type(self, a, b, *, allow_ints=True):
-
-        class _TypeMeta:
-            __slots__ = ['rank', 'kind', 'width']
-
-            def __init__(self, rank, kind, width):
-                self.rank = rank
-                self.kind = kind
-                self.width = width
-
-
-        # Maps torch dtypes to their rank, kind and width
-        type_meta = {
-            torch.complex128 : _TypeMeta(11, 'complex', 64),
-            torch.complex64  : _TypeMeta(10, 'complex', 32),
-            torch.float64    : _TypeMeta(9, 'float', 64),
-            torch.float32    : _TypeMeta(8, 'float', 32),
-            torch.bfloat16   : _TypeMeta(7, 'float', 16),
-            torch.float16    : _TypeMeta(6, 'float', 16),
-            torch.int64      : _TypeMeta(5, 'int', 64),
-            torch.int32      : _TypeMeta(4, 'int', 32),
-            torch.int16      : _TypeMeta(3, 'int', 16),
-            torch.int8       : _TypeMeta(2, 'int', 8),
-            torch.uint8      : _TypeMeta(1, 'uint', 8),
-            torch.bool       : _TypeMeta(0, 'uint', 1),
-        }
-
-        # Acquires common meta and acquires widest width
-        a_meta = type_meta[a.dtype]
-        b_meta = type_meta[b.dtype]
-        high_meta = a_meta if a_meta.rank >= b_meta.rank else b_meta
-        low_meta = b_meta if high_meta is a_meta else a_meta
-
-        # Short-circuits for boolean comparisons
-        if high_meta.rank == 0:
-            return torch.bool
-
-        # Upcasts to float, if requested
-        if not allow_ints and (high_meta.kind == 'uint' or high_meta.kind == 'int'):
-            high_meta.kind = 'float'
-            high_meta.width = min(64, high_meta.width * 2)
-
-        # Acquires width
-        width = max(high_meta.width, low_meta.width)
-
-        # Adjusts width
-        # Doubles int width when upcasting
-        if ((high_meta.kind == 'float' or high_meta.kind == 'complex') and
-           low_meta.kind == 'int'):
-            width = min(64, max(low_meta.width * 2, high_meta.width))
-
-        # Doubles uint width when upcasting
-        if high_meta.kind != 'uint' and low_meta.kind == 'uint':
-            width = min(64, max(low_meta.width * 2, high_meta.width))
-
-        # Accounts for complex types being represented as double width
-        if high_meta.kind == 'complex':
-            width *= 2
-
-        # Accounts for bfloat16 x float16
-        if high_meta.rank == 7 and low_meta.rank == 6:
-            width = 32
-
-        # Acquires common dtype
-        common_dtype = getattr(torch, high_meta.kind + str(width))
-
-        # TODO: update this when isclose is implemented for CPU/CUDA bfloat16
-        if common_dtype is torch.bfloat16:
-            common_dtype = torch.float32
-
-        # non-CUDA (CPU, for example) float16 -> float32
-        # TODO: update this when isclose is implemented for CPU float16
-        if (common_dtype is torch.float16 and
-            (a.device != b.device or a.device.type != 'cuda' or
-             b.device.type != 'cuda')):
-            common_dtype = torch.float32
-
-        return common_dtype
-
-    # Helper function that maps a flattened index back into the given shape
-    # TODO: consider adding torch.unravel_index
-    def _unravel_index(self, flat_index, shape):
-        res = []
-
-        # Short-circuits on zero dim tensors
-        if shape == torch.Size([]):
-            return 0
-
-        for size in shape[::-1]:
-            res.append(int(flat_index % size))
-            flat_index = int(flat_index // size)
-
-        if len(res) == 1:
-            return res[0]
-        return tuple(res[::-1])
-
     # Checks if two dense tensors are equal(-ish), returning (True, None)
     # when they are and (False, debug_msg) when they are not, where the
     # debug_msg is a string containing information about why the tensors
     # failed to compare as equal(-ish).
     # If exact_dtype is true both tensors must have the same dtype.
     # If exact_device is true both tensors must be on the same device.
-    # Note: tensors on different devices are moved to the CPU to be compared when
+    # See NOTE Test Framework Tensor "Equality" for more information on
+    # how tensors are compared.
+    # NOTE: tensors on different devices are moved to the CPU to be compared when
     # exact_device is False.
-    # TODO: default exact_device to True.
-    def compareTensors(self, a, b, *, rtol=None, atol=None, equal_nan=True,
-                       exact_dtype=False, exact_device=False):
+    def _compareTensors(self, a, b, *, rtol=None, atol=None, equal_nan=True,
+                        exact_dtype=False, exact_device=False):
         if not isinstance(a, torch.Tensor):
-            return (False, "argument a, {0}, to compareTensors is not a tensor!".format(a))
+            return (False, "argument a, {0}, to _compareTensors is not a tensor!".format(a))
         if not isinstance(b, torch.Tensor):
-            return (False, "argument b, {0}, to compareTensors is not a tensor!".format(b))
+            return (False, "argument b, {0}, to _compareTensors is not a tensor!".format(b))
 
         # Validates tensors are on the same device
         if exact_device and a.device != b.device:
@@ -952,7 +987,7 @@ class TestCase(expecttest.TestCase):
                             "different dtypes. Got dtypes {0} and {1}.").format(a.dtype, b.dtype))
 
         # Acquires atol and rtol
-        # Note: atol can be overriden by a class's precision value. This
+        # NOTE: atol can be overriden by a class's precision value. This
         # legacy behavior allows generated tests to customize their precision.
         rtol = rtol if rtol is not None else max(self.dtype_precisions.get(a.dtype, (0, 0))[0],
                                                  self.dtype_precisions.get(b.dtype, (0, 0))[0])
@@ -960,93 +995,16 @@ class TestCase(expecttest.TestCase):
                                                  self.dtype_precisions.get(b.dtype, (0, 0))[1])
         atol = max(atol, self.precision)
 
-
-        # Special-cases zero rtol and atol less than one since it allows
-        # comparing integer tensors using identity.
-        allow_ints = False
-        if (rtol == 0 and atol < 1):
-            allow_ints = True
-
-        dtype = self.compare_type(a, b, allow_ints=allow_ints)
-
         # Converts to comparison dtype
+        dtype = get_comparison_dtype(a, b)
         a = a.to(dtype)
         b = b.to(dtype)
 
-        # Integer (including bool) comparisons are identity comparisons
-        if self.is_integral(dtype):
-            if (a == b).all().item():
-                return (True, None)
-
-            # Gathers debug info for failed integer comparison
-            identity_mask = a != b
-            a_flat = a.to(torch.long).flatten()
-            b_flat = b.to(torch.long).flatten()
-            count_non_identical = torch.sum(identity_mask, dtype=torch.long)
-            diff = torch.abs(a_flat - b_flat)
-            greatest_diff_index = torch.argmax(diff)
-            debug_msg = ("Found {0} different element(s) (out of {1}), with the greatest "
-                         "difference of {2} ({3} vs. {4}) occuring at index "
-                         "{5}.".format(count_non_identical.item(),
-                                       a.numel(),
-                                       diff[greatest_diff_index],
-                                       a_flat[greatest_diff_index],
-                                       b_flat[greatest_diff_index],
-                                       self._unravel_index(greatest_diff_index, a.shape)))
-            return (False, debug_msg)
-
-        # Compares complex tensors' real and imaginary parts separately.
-        # Note: this is intentionally divergent from complex torch.isclose
-        # which implements a more mathematically natural notion of "closeness"
-        # for complex numbers.
-        if a.is_complex():
-            float_dtype = torch.float32 if a.dtype == torch.complex64 else torch.float64
-            a_real = a.copy_real().to(float_dtype)
-            b_real = b.copy_real().to(float_dtype)
-            real_result, debug_msg = self.compareTensors(a_real, b_real, rtol=rtol, atol=atol,
-                                                         equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                                         exact_device=exact_device)
-
-            if not real_result:
-                debug_msg = "Real parts failed to compare as equal! " + debug_msg
-                return (real_result, debug_msg)
-
-            a_imag = a.copy_imag().to(float_dtype)
-            b_imag = b.copy_imag().to(float_dtype)
-            imag_result, debug_msg = self.compareTensors(a_imag, b_imag, rtol=rtol, atol=atol,
-                                                         equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                                         exact_device=exact_device)
-
-            if not imag_result:
-                debug_msg = "Imaginary parts failed to compare as equal! " + debug_msg
-                return (imag_result, debug_msg)
-
-            return (True, None)
-
-        # All other types use torch.allclose directly
-        if torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan):
-            return (True, None)
-
-        # Gathers debug info for failed float tensor comparison
-        a_flat = a.to(torch.float64).flatten()
-        b_flat = b.to(torch.float64).flatten()
-        diff = torch.abs(a_flat - b_flat)
-        outside_range = diff > (atol + rtol * torch.abs(b_flat))
-        count_outside_range = torch.sum(outside_range, dtype=torch.long)
-        greatest_diff_index = torch.argmax(diff)
-        debug_msg = ("With rtol={0} and atol={1}, found {2} element(s) (out of {3}) whose "
-                     "difference(s) exceeded the margin of error. "
-                     "The greatest difference was {4} ({5} vs. {6}), which "
-                     "occurred at index {7}.".format(rtol, atol, count_outside_range,
-                                                     a.numel(),
-                                                     diff[greatest_diff_index],
-                                                     a_flat[greatest_diff_index],
-                                                     b_flat[greatest_diff_index],
-                                                     self._unravel_index(greatest_diff_index, a.shape)))
-        return (False, debug_msg)
+        return _compare_tensors_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
     # Compares x and y
     # TODO: make message kwarg-only
+    # TODO: default exact_dtype to True
     def assertEqual(self, x, y, message=None, *, atol=None, rtol=None, equal_nan=True,
                     exact_dtype=None, exact_device=False):
         # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
@@ -1080,19 +1038,19 @@ class TestCase(expecttest.TestCase):
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
-                indices_result, debug_msg = self.compareTensors(x._indices(), y._indices(),
-                                                                rtol=rtol, atol=atol,
-                                                                equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                                                exact_device=exact_device)
+                indices_result, debug_msg = self._compareTensors(x._indices(), y._indices(),
+                                                                 rtol=rtol, atol=atol,
+                                                                 equal_nan=equal_nan, exact_dtype=exact_dtype,
+                                                                 exact_device=exact_device)
 
                 if not indices_result and message is None:
                     message = "Sparse tensor indices failed to compare as equal! " + debug_msg
                 self.assertTrue(indices_result, msg=message)
 
-                values_result, debug_msg = self.compareTensors(x._values(), y._values(),
-                                                               rtol=rtol, atol=atol,
-                                                               equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                                               exact_device=exact_device)
+                values_result, debug_msg = self._compareTensors(x._values(), y._values(),
+                                                                rtol=rtol, atol=atol,
+                                                                equal_nan=equal_nan, exact_dtype=exact_dtype,
+                                                                exact_device=exact_device)
 
                 if not values_result and message is None:
                     message = "Sparse tensor values failed to compare as equal! " + debug_msg
@@ -1124,19 +1082,19 @@ class TestCase(expecttest.TestCase):
                 # defaults to True.
                 self.assertTrue(x.dtype is y.dtype, msg=message)
 
-                result, debug_msg = self.compareTensors(x.int_repr().to(torch.int32),
-                                                        y.int_repr().to(torch.int32),
-                                                        atol=atol, rtol=rtol,
-                                                        exact_dtype=exact_dtype,
-                                                        exact_device=exact_device)
+                result, debug_msg = self._compareTensors(x.int_repr().to(torch.int32),
+                                                         y.int_repr().to(torch.int32),
+                                                         atol=atol, rtol=rtol,
+                                                         exact_dtype=exact_dtype,
+                                                         exact_device=exact_device)
 
                 if not result and message is None:
                     message = "Quantized representations failed to compare as equal! " + debug_msg
                 self.assertTrue(result, msg=message)
             else:
-                result, debug_msg = self.compareTensors(x, y, rtol=rtol, atol=atol,
-                                                        equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                                        exact_device=exact_device)
+                result, debug_msg = self._compareTensors(x, y, rtol=rtol, atol=atol,
+                                                         equal_nan=equal_nan, exact_dtype=exact_dtype,
+                                                         exact_device=exact_device)
 
                 if not result and message is None:
                     message = "Tensors failed to compare as equal! " + debug_msg
@@ -1187,7 +1145,7 @@ class TestCase(expecttest.TestCase):
                 self.assertTrue(result, msg=message)
 
             # Acquires rtol and atol based on number type
-            # Note: Complex number comparisons compare the real and imaginary parts
+            # NOTE: Complex number comparisons compare the real and imaginary parts
             # separately, just like complex tensor comparisons.
             if isinstance(x, complex) or isinstance(y, complex):
                 rtol = self.dtype_precisions[torch.complex64][0] if rtol is None else rtol
