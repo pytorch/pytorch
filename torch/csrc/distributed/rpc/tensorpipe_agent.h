@@ -15,6 +15,13 @@ namespace distributed {
 namespace rpc {
 
 struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
+  TensorPipeRpcBackendOptions(
+      std::map<std::string, worker_id_t> worker_name_to_id,
+      float rpc_timeout,
+      std::string init_method)
+      : RpcBackendOptions(rpc_timeout, init_method),
+        workerNameToId(std::move(worker_name_to_id)) {}
+
   std::map<std::string, worker_id_t> workerNameToId;
 };
 

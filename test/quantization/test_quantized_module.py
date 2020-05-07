@@ -11,7 +11,12 @@ from torch.testing._internal.common_quantization import (
     prepare_dynamic,
     _make_conv_test_input,
 )
-from torch.testing._internal.common_quantized import _calculate_dynamic_qparams, override_quantized_engine, supported_qengines
+from torch.testing._internal.common_quantized import (
+    _calculate_dynamic_qparams,
+    override_quantized_engine,
+    supported_qengines,
+    override_qengines,
+)
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
@@ -26,17 +31,6 @@ quantized operator implementations correctly in the user facing APIs, these are
 not correctness test for the underlying quantized operators. For correctness
 test please see `caffe2/test/test_quantized_op.py`.
 '''
-
-# TODO: Update all quantization tests to use this decorator.
-# Currently for some of the tests it seems to have inconsistent params
-# for fbgemm vs qnnpack.
-def override_qengines(qfunction):
-    def test_fn(*args, **kwargs):
-        for qengine in supported_qengines:
-            with override_quantized_engine(qengine):
-                result = qfunction(*args, **kwargs)
-        return result
-    return test_fn
 
 class TestStaticQuantizedModule(QuantizationTestCase):
     def test_relu(self):
@@ -341,8 +335,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # Smoke test extra_repr
         self.assertTrue(module_name in str(converted_qconv_module))
 
-    # TODO: reenable use_fused=True, currently it is set to False
-    # because of the flakiness
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            H=st.integers(4, 16),
@@ -363,7 +355,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
            Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
-           use_fused=st.sampled_from([False]),
+           use_fused=st.booleans(),
            use_channelwise=st.booleans())
     @override_qengines
     def test_conv2d_api(

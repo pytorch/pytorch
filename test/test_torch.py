@@ -9954,20 +9954,22 @@ class TestTorchDeviceType(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.lstsq(torch.randn(0, 0), torch.randn(0, 0)))
         self.assertRaises(RuntimeError, lambda: torch.lstsq(torch.randn(0,), torch.randn(0, 0)))
 
-    def test_roll(self, device):
-        numbers = torch.arange(1, 9, device=device)
+    @skipIfRocm
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_roll(self, device, dtype):
+        numbers = torch.arange(1, 9, device=device).to(dtype)
 
         single_roll = numbers.roll(1, 0)
-        expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device)
+        expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], dtype=dtype, device=device)
         self.assertEqual(single_roll, expected, "{} did not equal expected result".format(single_roll))
 
         roll_backwards = numbers.roll(-2, 0)
-        expected = torch.tensor([3, 4, 5, 6, 7, 8, 1, 2], device=device)
+        expected = torch.tensor([3, 4, 5, 6, 7, 8, 1, 2], dtype=dtype, device=device)
         self.assertEqual(roll_backwards, expected, "{} did not equal expected result".format(roll_backwards))
 
         data = numbers.view(2, 2, 2)
         rolled = data.roll(1, 0)
-        expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], device=device).view(2, 2, 2)
+        expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], dtype=dtype, device=device).view(2, 2, 2)
         self.assertEqual(expected, rolled, "{} did not equal expected result: {}".format(rolled, expected))
 
         data = data.view(2, 4)
@@ -9976,13 +9978,13 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(data, loop_rolled, "{} did not equal the original: {}".format(loop_rolled, data))
         # multiple inverse loops
         self.assertEqual(data, data.roll(-20, 0).roll(-40, 1))
-        self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device), numbers.roll(1, 0))
+        self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], dtype=dtype, device=device), numbers.roll(1, 0))
 
         # test non-contiguous
         # strided equivalent to numbers.as_strided(size=(4, 2), stride=(1, 4))
         strided = numbers.view(2, 4).transpose(0, 1)
         self.assertFalse(strided.is_contiguous(), "this test needs a non-contiguous tensor")
-        expected = torch.tensor([4, 8, 1, 5, 2, 6, 3, 7]).view(4, 2)
+        expected = torch.tensor([4, 8, 1, 5, 2, 6, 3, 7], dtype=dtype, device=device).view(4, 2)
         rolled = strided.roll(1, 0)
         self.assertEqual(expected, rolled,
                          "non contiguous tensor rolled to {} instead of {} ".format(rolled, expected))
@@ -9993,7 +9995,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(expected, data.roll(1, dims=None), "roll with no dims should flatten and roll.")
 
         # test roll over multiple dimensions
-        expected = torch.tensor([[7, 8, 5, 6], [3, 4, 1, 2]], device=device)
+        expected = torch.tensor([[7, 8, 5, 6], [3, 4, 1, 2]], dtype=dtype, device=device)
         double_rolled = data.roll(shifts=(2, -1), dims=(1, 0))
         self.assertEqual(double_rolled, expected,
                          "should be able to roll over two dimensions, got {}".format(double_rolled))
@@ -14962,8 +14964,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             run_test(m, v2, v1, lambda x: x.transpose(0, 1))
 
     @onlyCPU
-    @precisionOverride({torch.bfloat16: 1e-0, torch.float: 1e-4, torch.double: 1e-8})
-    @dtypes(torch.bfloat16, torch.float, torch.double)
+    @precisionOverride({torch.bfloat16: 1e-0, torch.float: 1e-4, torch.double: 1e-8,
+                        torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_addmv(self, device, dtype):
         t = torch.randn(10, device=device).to(dtype)
         m = torch.randn(10, 100, device=device).to(dtype)
@@ -14989,6 +14992,42 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 res2[i] += m[i, j] * v[j]
 
         self.assertEqual(res1, res2, atol=self.precision)
+
+    @dtypesIfCUDA(*([torch.half, torch.float, torch.double]
+                    + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypes(torch.float, torch.double)
+    def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype):
+        # tests (o, s)*(s).  o is output size, s is summed size.
+        o = 5
+        s = 3
+        a_data = torch.arange(1, o * s + 1, device=device, dtype=dtype).view(o, s)
+        x_data = torch.arange(1, s + 1, 1, device=device, dtype=dtype)
+        y_data = torch.ones(o, device=device, dtype=dtype)
+        control = torch.tensor([15., 33., 51., 69., 87.], device=device, dtype=dtype)
+
+        def _test(use_out, row_major, incx, incy, lda_tail):
+            if row_major:
+                a_storage = torch.full((o, s + lda_tail), float('nan'), device=device, dtype=dtype)
+            else:
+                a_storage = torch.full((s, o + lda_tail), float('nan'), device=device, dtype=dtype).permute(1, 0)
+            a = a_storage[:o, :s].copy_(a_data)
+
+            x_storage = torch.full((s, incx), float('nan'), device=device, dtype=dtype)
+            x = x_storage[:, 0].copy_(x_data)
+
+            y_storage = torch.full((o, incy), float('nan'), device=device, dtype=dtype)
+            y = y_storage[:, 0].copy_(y_data)
+
+            if use_out:
+                out = torch.addmv(y, a, x)
+            else:
+                out = torch.empty_like(y)
+                torch.addmv(y, a, x, out=out)
+
+            self.assertEqual(out, control, atol=1.e-4)
+
+        for use_out, row_major, incx, incy, lda_tail in product((False, True), (False, True), (1, 2), (1, 2), (0, 1)):
+            _test(use_out, row_major, incx, incy, lda_tail)
 
     @slowTest
     @onlyCPU
@@ -17162,6 +17201,8 @@ _float_types = [torch.half, torch.float, torch.double]
 
 _float_types_no_half = [torch.float, torch.double]
 
+_complex_types = [torch.cfloat, torch.cdouble]
+
 # _float_types2 adds bfloat16 type to _float_types only on ROCm. Should eventually be unified
 # with _float_types when bfloat16 bringup is complete on all platforms
 _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
@@ -17522,6 +17563,9 @@ tensor_op_tests = [
     ('sum', '', _small_2d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _types2, _cpu_types, False),
     ('sum', 'dim', _small_3d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _types2, _cpu_types, False),
     ('sum', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('sum', 'complex', _small_2d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _complex_types, _cpu_types, False),
+    ('sum', 'complex_dim', _small_3d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _complex_types, _cpu_types, False),
+    ('sum', 'complex_neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5,_complex_types, _cpu_types, False),
     ('renorm', '2_norm', _small_3d, lambda t, d: [2, 1, 1], 1e-3, 1e-5, 1e-5, _float_types),
     ('renorm', '2_norm_neg_dim', _small_3d, lambda t, d: [2, -1, 1], 1e-3, 1e-5, 1e-5, _float_types),
     ('renorm', '1_5_norm', _small_3d, lambda t, d: [1.5, 1, 1], 1e-3, 1e-5, 1e-5, _float_types),
