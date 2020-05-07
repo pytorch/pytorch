@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -778,9 +779,11 @@ void runNondiffOptimization(
   // Fuse the dequant - op - quant patterns into quantized ops
   QuantFusion(graph);
 
-  FuseGraph(graph, strict_fuser_check);
-
-  fuseTensorExprs(graph);
+  if (tensorExprFuserEnabled()) {
+    FuseTensorExprs(graph);
+  } else {
+    FuseGraph(graph, strict_fuser_check);
+  }
 
   // Run custom post-fusion passes
   for (const auto& passPair : getCustomPostPasses()) {
@@ -799,8 +802,14 @@ void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
 
   // Unroll small loops, and eliminate expressions that are the same at every
   // iteration.
-  if (unroll)
+  if (unroll) {
     UnrollLoops(graph);
+    // run again with unrolled loops
+    RemoveListMutation(graph);
+    PeepholeOptimize(graph);
+    ConstantPropagation(graph);
+  }
+
   EliminateCommonSubexpression(graph);
 
   CheckInplace(graph);

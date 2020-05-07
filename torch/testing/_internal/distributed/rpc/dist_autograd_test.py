@@ -189,9 +189,6 @@ class ExecMode(Enum):
     RPC_ASYNC = 4  # Run the operation using rpc_async
 
 
-@unittest.skipIf(
-    not torch._six.PY3, "Pytorch distributed autograd package does not support python2"
-)
 class DistAutogradTest(RpcAgentTestFixture):
     def _exec_func_with_dst(self, dst, exec_mode, method, *args):
         if ExecMode.LOCAL == exec_mode:
@@ -1213,7 +1210,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
     def test_backward_node_failure(self):
-        rpc._set_rpc_timeout(timedelta(milliseconds=5000))
+        rpc._set_rpc_timeout(5)  # 5 seconds
         initialize_pg(self.init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
@@ -1436,7 +1433,7 @@ class DistAutogradTest(RpcAgentTestFixture):
     )
     def test_backward_node_failure_python_udf(self):
         # Set a short timeout to quickly time out failed RPCs.
-        rpc._set_rpc_timeout(timedelta(milliseconds=5000))
+        rpc._set_rpc_timeout(5)  # 5 seconds
         initialize_pg(self.init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
@@ -2104,10 +2101,6 @@ class DistAutogradTest(RpcAgentTestFixture):
             self.assertEqual(1, len(grads))
             self.assertTrue(t in grads)
 
-@unittest.skipIf(
-    not torch._six.PY3,
-    "Pytorch distributed autograd package does not support python2",
-)
 class FaultyAgentDistAutogradTest(FaultyRpcAgentTestFixture):
     # Reusing a simplified helper function from DistAutogradTest to ensure
     # autograd context is successfully cleaned up even when RPCs are failing.

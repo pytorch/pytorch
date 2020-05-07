@@ -8,10 +8,7 @@ import os
 import gc
 from contextlib import contextmanager
 import threading
-if sys.version_info[0] == 3:
-    import queue
-else:
-    import Queue as queue
+import queue
 
 import torch
 import torch.cuda
@@ -24,7 +21,7 @@ from test_torch import _TestTorchMixin
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
-    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
+    IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
     load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
@@ -842,7 +839,6 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
 
     @unittest.skipIf(torch.cuda.device_count() >= 10, "Loading a cuda:9 tensor")
-    @unittest.skipIf(not PY3, "Tensor was serialized with Python 3")
     def test_load_nonexistent_device(self):
         # Setup: create a serialized file object with a 'cuda:9' restore location
         tensor = torch.randn(2, device='cuda')
@@ -1729,9 +1725,6 @@ class TestCuda(TestCase):
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
-    @unittest.skipIf(not PY3,
-                     "spawn start method is not supported in Python 2, \
-                     but we need it for creating another process with CUDA")
     @skipIfRocm
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
@@ -1820,6 +1813,7 @@ class TestCuda(TestCase):
         counted = t.bincount(minlength=65536)
         self.assertEqual(torch.sum(counted), 10)
 
+    @skipIfRocm
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
         a /= 100000000
@@ -2416,7 +2410,6 @@ t2.start()
                 self.assertTrue(torch.allclose(c, s, atol=1e-7))
 
     @skipIfRocm
-    @unittest.skipIf(not PY3, "Barrier is unavailable before Python3")
     def test_cublas_multiple_threads_same_device(self):
         # Note, these parameters should be very carefully tuned
         # Too small number makes it hard for the racing condition
@@ -2469,7 +2462,6 @@ t2.start()
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @skipIfRocm
-    @unittest.skipIf(not PY3, "Barrier is unavailable before Python3")
     def test_cudnn_multiple_threads_same_device(self):
         # This function is intended to test the lazy creation and reuse of per-thread
         # cudnn handles on each device in aten/src/ATen/cudnn/Handles.cpp.
@@ -2523,7 +2515,6 @@ t2.start()
                                      (2048 - test_iters) * (2048 - test_iters))
 
     @skipIfRocm
-    @unittest.skipIf(not PY3, "Barrier is unavailable before Python3")
     def test_cusparse_multiple_threads_same_device(self):
         size = 1024
         num_threads = 2
@@ -2745,13 +2736,6 @@ t2.start()
                     with torch.cuda.amp.autocast(enabled=False):
                         type_no_autocast = torch.norm(a_ignore).dtype
                     self.assertTrue(torch.norm(a_ignore).dtype is type_no_autocast)
-
-                # Tests if CastPolicy::promote ops ignore double and int
-                with self.assertRaises(RuntimeError):
-                    torch.cat((a_ignore, c_16))
-                with torch.cuda.amp.autocast(enabled=False):
-                    type_no_autocast = torch.cat((a_ignore, b_ignore)).dtype
-                self.assertTrue(torch.cat((a_ignore, b_ignore)).dtype is type_no_autocast)
 
     @skipIfRocm
     def test_autocast_custom_enabled(self):

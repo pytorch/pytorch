@@ -1460,7 +1460,14 @@ void OnnxifiTransformer::transform(
   }
 
   if (opts_.debug) {
-    dumpNet(*pred_net, shape_hints, "debug_ssa_net.pb_txt");
+    caffe2::NetDef ssa_net;
+    ssa_net.CopyFrom(*pred_net);
+    auto* w_arg = ssa_net.add_arg();
+    w_arg->set_name(kInitializers);
+    for (const auto& w : weights) {
+      w_arg->add_strings(w);
+    }
+    dumpNet(ssa_net, shape_hints, "debug_ssa_net.pb_txt");
   }
   extractPartitionInfo(*pred_net);
 

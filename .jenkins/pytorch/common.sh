@@ -140,11 +140,14 @@ fi
 
 # Use conda cmake in some CI build. Conda cmake will be newer than our supported
 # min version (3.5 for xenial and 3.10 for bionic),
-# so we only do it in three builds that we know should use conda.
-# Linux bionic cannot find conda mkl with cmake 3.10, so we need a newer cmake from conda.
+# so we only do it in four builds that we know should use conda.
+# Linux bionic cannot find conda mkl with cmake 3.10, so we need a cmake from conda.
+# Alternatively we could point cmake to the right place
+# export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py2* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]]; then
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-bionic* ]]; then
   if ! which conda; then
     echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
     exit 1
@@ -187,9 +190,9 @@ function file_diff_from_base() {
 
 function get_bazel() {
   # download bazel version
-  wget https://github.com/bazelbuild/bazel/releases/download/2.2.0/bazel-2.2.0-linux-x86_64 -O tools/bazel
+  wget https://github.com/bazelbuild/bazel/releases/download/3.1.0/bazel-3.1.0-linux-x86_64 -O tools/bazel
   # verify content
-  echo 'b2f002ea0e6194a181af6ac84cd94bd8dc797722eb2354690bebac92dda233ff tools/bazel' | sha256sum --quiet -c
+  echo '753434f4fa730266cf5ce21d1fdd425e1e167dd9347ad3e8adc19e8c0d54edca  tools/bazel' | sha256sum --quiet -c
 
   chmod +x tools/bazel
 }
