@@ -3,8 +3,6 @@
 namespace at {
 namespace native {
 
-namespace {
-
 std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(
     Tensor& grad_input,
     Tensor& grad_weight,
