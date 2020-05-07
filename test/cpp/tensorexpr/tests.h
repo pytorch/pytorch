@@ -39,6 +39,7 @@ namespace jit {
   _(ExprSimple01)                           \
   _(ExprLower01)                            \
   _(ExprSimple02)                           \
+  _(ExprSplitWithTail)                      \
   _(ExprSplitWithTailNone)                  \
   _(ExprSplitWithMask01)                    \
   _(ScheduleBroadcastAddBuffer)             \

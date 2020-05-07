@@ -44,7 +44,7 @@ from torch.testing._internal import jit_utils
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
-    enable_profiling_mode, TEST_MKL, set_default_dtype
+    enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -144,7 +144,7 @@ torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
 # even though FULL_PROFILER should be our default
 # we haven't tested every single test in this file
 # but we enable FULL_PROFILER for a large subset
-# of the tests with "with enable_profiling_mode"
+# of the tests with "with enable_profiling_mode_for_profiling_tests"
 torch._C._jit_set_profiling_mode(False)
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
@@ -593,6 +593,51 @@ class TestJit(JitTestCase):
         s = str(fn.graph)
         torch._C._jit_pass_peephole(fn.graph)
         self.assertEqual(s, str(fn.graph))
+
+    def test_peephole_list_ops(self):
+        @torch.jit.script
+        def foo(x, y, z):
+            return len([x, y, z])
+
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check("value=3").check_next("return").run(foo.graph)
+
+        @torch.jit.script
+        def foo(x, y, z):
+            li = [x, y, z]
+            for i in range(len(x)):
+                li.append(x)
+            return len([x, y, z])
+
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check_not("aten::len").run(foo.graph)
+
+        @torch.jit.script
+        def foo(x, y, z):
+            li = [x, y, z]
+            return li[1], li[-2]
+
+        FileCheck().check("aten::__getitem__").run(foo.graph)
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check_not("aten::__getitem__").run(foo.graph)
+
+        @torch.jit.script
+        def foo(x, y, z):
+            li = [x, y, z]
+            return li[-7]
+
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check("aten::__getitem__").run(foo.graph)
+
+        @torch.jit.script
+        def foo(x, y, z):
+            li = [x, y, z]
+            for i in range(len(x)):
+                li.append(x)
+            return li[-2]
+
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check("aten::__getitem__").run(foo.graph)
 
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_peephole_cuda(self):
@@ -1757,7 +1802,7 @@ graph(%Ra, %Rb):
     @slowTest
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
     def test_dropout_module_requires_grad(self):
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             class MyModule(torch.nn.Module):
                 def __init__(self, M):
                     super(MyModule, self).__init__()
@@ -1828,7 +1873,7 @@ graph(%Ra, %Rb):
         # which is not included in TestJitGeneratedFunctional
         x = torch.ones(4, 4).cuda().requires_grad_()
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             @torch.jit.script
             def func(x):
                 return torch.nn.functional.dropout(x)
@@ -1961,7 +2006,7 @@ graph(%Ra, %Rb):
 
     def run_ge_tests(self, optimize, use_cuda):
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             with torch.jit.optimized_execution(optimize):
                 def rand(*args):
                     t = torch.rand(*args).float()
@@ -1992,7 +2037,7 @@ graph(%Ra, %Rb):
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
     def test_ge_optimized(self):
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             self.run_ge_tests(True, False)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -3524,7 +3569,7 @@ class TestScript(JitTestCase):
         self.checkScript(fn, (torch.ones(2, 2), ))
 
     def test_request_bailout(self):
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
 
             def fct_loop(x):
                 for i in range(3):
@@ -3548,7 +3593,7 @@ class TestScript(JitTestCase):
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_dominated_bailout(self):
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             # functional dominated guard
             @torch.jit.script
             def foo(x):
@@ -3620,7 +3665,7 @@ class TestScript(JitTestCase):
             else:
                 return 2
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             old_num_runs = torch._C._jit_set_num_profiled_runs(2)
             test_not_const(torch.rand([1, 2]))
             test_not_const(torch.rand([2, 2]))
@@ -3658,7 +3703,7 @@ class TestScript(JitTestCase):
             torch.jit.script(MyModule())
 
     def test_loop_liveness(self):
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             @torch.jit.script
             def f(i):
                 # type: (int) -> Tensor
@@ -3672,7 +3717,7 @@ class TestScript(JitTestCase):
             f(1)
 
     def test_bailout_loop_carried_deps_name_clash(self):
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             NUM_ITERATIONS = 10
             @torch.jit.script
             def fct_loop(z, size):
@@ -3693,7 +3738,7 @@ class TestScript(JitTestCase):
                 self.assertEqual(results[1], expected)
 
     def test_bailout_loop_counter_transition(self):
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             NUM_ITERATIONS = 10
             @torch.jit.script
             def fct_loop(z, size):
@@ -5732,7 +5777,7 @@ a")
     @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
     def test_pow_scalar_backward_cuda(self):
         # see that scalar exponent works with cuda base (#19253)
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             for dtype in [torch.float, torch.double]:
                 @torch.jit.script
                 def func(a, b):
@@ -5806,7 +5851,7 @@ a")
 
     @unittest.skipIf(not RUN_CUDA, 'no CUDA')
     def test_scriptmodule_releases_tensors_cuda(self):
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             @torch.jit.script
             def fn(x, y):
                 return x.sigmoid() * y.tanh()
@@ -6257,7 +6302,7 @@ a")
         g2 = _propagate_shapes(func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
 
     def test_cat(self):
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             @torch.jit.script
             def func(x):
                 return torch.cat((x, x), dim=0)
@@ -6301,7 +6346,7 @@ a")
             FileCheck().check("int =").check("ListConstruct").check("aten::cat").run(str(g))
 
     def test_stack(self):
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             @torch.jit.script
             def func(x):
                 return torch.stack((x, x), dim=1)
@@ -6327,7 +6372,7 @@ a")
                     self.assertEqual(grads, grads_ref)
 
     def test_unbind(self):
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             @torch.jit.script
             def func(x, y):
                 # type: (Tensor, int) -> List[Tensor]
@@ -6351,7 +6396,7 @@ a")
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING,
                      "Profiling executor fails to recognize that tensors in a list require gradients")
     def test_meshgrid(self):
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             @torch.jit.script
             def func(a):
                 # type: (List[Tensor]) -> List[Tensor]
@@ -6409,7 +6454,7 @@ a")
 
         a = torch.rand(2, 3)
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             # check prim::profile are inserted
             profiled_graph_str = str(def_in_one_branch.graph_for(a, True))
             FileCheck().check_count("prim::profile", 4).run(profiled_graph_str)
@@ -6436,7 +6481,7 @@ a")
 
         a = torch.rand(32, 32, 32)
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             my_maxpool(a)
             bailout_graph_str = str(my_maxpool.graph_for(a))
             FileCheck().check_count("prim::BailOut", 1).run(bailout_graph_str)
@@ -6449,7 +6494,7 @@ a")
 
         a = torch.rand(32, 4)
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             my_slice(a)
             bailout_graph_str = str(my_slice.graph_for(a))
             FileCheck().check_count("prim::BailOut", 1).run(bailout_graph_str)
@@ -6462,7 +6507,7 @@ a")
 
         a = torch.rand(32, 4)
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             my_unsqueeze(a)
             bailout_graph_str = str(my_unsqueeze.graph_for(a))
             FileCheck().check_count("prim::BailOut", 2).run(bailout_graph_str)
@@ -12461,7 +12506,7 @@ a")
 
     def test_mm_batching(self):
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             lstm_cell = torch.jit.script(LSTMCellS)
 
             def lstm(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
@@ -17686,7 +17731,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
 
     # test no gradients case
     outputs = self.runAndSaveRNG(reference_func, nograd_inputs, kwargs)
-    with enable_profiling_mode():
+    with enable_profiling_mode_for_profiling_tests():
         outputs_test = self.runAndSaveRNG(func, nograd_inputs, kwargs)
     self.assertEqual(outputs, outputs_test)
 
@@ -17697,7 +17742,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         # skip grad tests
         return
 
-    with enable_profiling_mode():
+    with enable_profiling_mode_for_profiling_tests():
         # test single grad case
         outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
         grads = torch.autograd.grad(allSum(outputs), recording_tensors,
