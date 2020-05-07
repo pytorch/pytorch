@@ -49,7 +49,7 @@ class CAFFE2_API ThreadLocalDebugInfo {
   static std::shared_ptr<DebugInfoBase> _pop(DebugInfoKind kind);
 
  private:
-  std::shared_ptr<DebugInfoBase> debug_info_;
+  std::shared_ptr<DebugInfoBase> info_;
   DebugInfoKind kind_;
   std::shared_ptr<ThreadLocalDebugInfo> parent_info_;
 
