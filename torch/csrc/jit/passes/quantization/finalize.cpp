@@ -1,7 +1,9 @@
-#include <torch/csrc/jit/passes/quantization/finalize.h>
-#include <torch/csrc/jit/passes/quantization/quantization_patterns.h>
+#include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/quantization/finalize.h>
+#include <torch/csrc/jit/passes/quantization/quantization_patterns.h>
+
 
 namespace torch {
 namespace jit {

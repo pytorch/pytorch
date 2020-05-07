@@ -1,5 +1,8 @@
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
+
+#include <stack>
 
 namespace torch {
 namespace jit {

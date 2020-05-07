@@ -775,9 +775,11 @@ void runNondiffOptimization(
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
 
-  FuseGraph(graph, strict_fuser_check);
-
-  FuseTensorExprs(graph);
+  if (tensorExprFuserEnabled()) {
+    FuseTensorExprs(graph);
+  } else {
+    FuseGraph(graph, strict_fuser_check);
+  }
 
   // Run custom post-fusion passes
   for (const auto& passPair : getCustomPostPasses()) {

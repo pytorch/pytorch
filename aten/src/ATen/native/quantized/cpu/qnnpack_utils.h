@@ -13,9 +13,10 @@ struct QnnpackOperatorDeleter {
 };
 
 // PackedWeight struct for QNNPACK stores the original Weight and Bias as
-// QNNPACK currently does not support an unpack function. Possible optimization
-// - For PyTorch Mobile, once the model is scripted and serialized we don't need
-// to call unpack, so we can save some memory by checking for this case.
+// QNNPACK currently does not support an unpack function.
+// For PyTorch Mobile, once the model is scripted and serialized we don't need
+// to call unpack, so we can save some memory by checking for this case and free
+// the original weights after packing.
 // Input scale is set to null in pre-pack step. QNNPACK needs bias quantized
 // with input scale which is available at runtime in pytorch. During runtime if
 // input scale value changes then we requantize bias with the updated scale. For

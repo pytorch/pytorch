@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/csrc/jit/api/module.h>
+
 namespace torch {
 namespace jit {
 

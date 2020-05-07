@@ -1,3 +1,4 @@
+
 # Welcome to the PyTorch setup.py.
 #
 # Environment variables you are probably interested in:
@@ -838,6 +839,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/*.h',
                 'include/torch/csrc/jit/generated/*.h',
                 'include/torch/csrc/jit/passes/*.h',
+                'include/torch/csrc/jit/passes/quantization/*.h',
                 'include/torch/csrc/jit/passes/utils/*.h',
                 'include/torch/csrc/jit/runtime/*.h',
                 'include/torch/csrc/jit/ir/*.h',
