@@ -23,7 +23,6 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/comm.h>
-#include <torch/csrc/distributed/c10d/ddp.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
@@ -668,52 +667,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
           "wait",
           &::c10d::ProcessGroup::Work::wait,
           py::call_guard<py::gil_scoped_release>());
-
-#ifdef USE_CUDA
-  module.def(
-      "_dist_bucket_tensors",
-      &::c10d::bucketTensors,
-      py::arg("tensors"),
-      py::arg("bucket_size"),
-      py::arg("fine_grained"),
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
-      "_dist_broadcast_coalesced",
-      &::c10d::distBroadcastCoalesced,
-      py::arg("process_group"),
-      py::arg("tensors"),
-      py::arg("buffer_size"),
-      py::arg("fine_grained"),
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
-      "_sync_params",
-      &::c10d::syncParams,
-      py::arg("process_group"),
-      py::arg("parameter_data"),
-      py::arg("buffer_data"),
-      py::arg("devices"),
-      py::arg("broadcast_bucket_size"),
-      py::arg("broadcast_buffers"),
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
-      "_queue_reduction",
-      &::c10d::queueReduction,
-      py::arg("process_group"),
-      py::arg("grads_batch"),
-      py::arg("devices"),
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
-      "_sync_reduction",
-      &::c10d::syncReduction,
-      py::arg("reduction_work"),
-      py::arg("grads_batch"),
-      py::arg("grads_batch_coalesced"),
-      py::call_guard<py::gil_scoped_release>());
-#endif
 
   module.def(
       "_compute_bucket_assignment_by_size",
