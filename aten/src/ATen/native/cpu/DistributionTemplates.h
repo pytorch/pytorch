@@ -188,7 +188,7 @@ void normal_kernel(Tensor& self, double mean, double std, RNG generator) {
         auto iter = TensorIterator::nullary_op(self);
         std::lock_guard<std::mutex> lock(generator->mutex_);
         cpu_serial_kernel(iter, [mean, std, generator]() -> scalar_t {
-          at::normal_distribution<scalar_t> normal(static_cast<scalar_t>(mean), static_cast<scalar_t>(std));
+          at::normal_distribution<double> normal(mean, std); // `double` instead of `scalar_t` for compatibility
           return static_cast<scalar_t>(normal(generator));
         });
       }
