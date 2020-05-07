@@ -196,11 +196,6 @@ NATIVE_DECLARATION = CodeTemplate("""\
 CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
 
-ZERO_DIM_CHECK = CodeTemplate("""\
-if (${check_name}.dim() == 0) {
-    return ${api_name}(${zero_dim_actuals});
-}""")
-
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
 if (${name}.defined()) {
     ${initializer}
@@ -322,16 +317,16 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                 '(c10::Storage(scalarTypeToTypeMeta(${ScalarName}), 0, allocator(), true),'
+                 '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(${ScalarName}), 0, allocator(), true),'
                  'DispatchKey::${Backend}).release()',
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
                      'DispatchKey::${Backend}).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
                      'DispatchKey::${Backend}).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
                      'DispatchKey::${Backend}).release()',
 }
 
@@ -754,15 +749,12 @@ def gen_device_init(option, backend_type_env):
     # type: (FunctionOption, Environment) -> List[str]
     # generate a device init statement, if the passed function option is a Tensor factory.
     #
-    if not is_factory(option):
-        return []
-
-    name = option['name']
-    device_type = backend_type_env['DeviceType']
-    assert device_type in ['CPU', 'CUDA'], \
-        "{}: unsupported device type '{}'".format(name, device_type)
-    return ['globalLegacyTypeDispatch().init{}();'.format(device_type)]
-
+    if is_factory(option):
+        name = option['name']
+        device_type = backend_type_env['DeviceType']
+        if device_type == 'CUDA' or device_type == 'HIP':
+            return ['globalContext().lazyInit{}();'.format(device_type)]
+    return []
 
 def create_generic(top_env, declarations):
     # type: (TopEnvironment, List[FunctionOption]) -> Tuple[List[OutputDeclaration], List[OpRegistration]]
