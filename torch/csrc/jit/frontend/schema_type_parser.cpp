@@ -157,8 +157,8 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       L.expect('*');
       num_dims++;
     });
-    ptr = at::TensorType::create(
-        dtype, DeviceType::CPU, num_dims, c10::nullopt);
+    ptr =
+        at::TensorType::create(dtype, DeviceType::CPU, num_dims, c10::nullopt);
   } else {
     std::vector<int64_t> dims;
     bool seen_strides = false;
