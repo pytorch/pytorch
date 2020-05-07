@@ -700,7 +700,7 @@ struct to_ir {
   // see [setstate type]
   static TypePtr getTypeForSetStateArg(const Def& def, const Self* self) {
     TORCH_CHECK(self, "Expected __setstate__ to have a `self` argument");
-    auto getstate = self->getClassType()->getMethod("__getstate__");
+    auto getstate = self->getClassType()->findMethod("__getstate__");
     if (!getstate) {
       throw ErrorReport(def.range())
           << "`__setstate__` defined but not `__getstate__`. "
@@ -711,7 +711,7 @@ struct to_ir {
     getstate->ensure_defined();
     return self->getClassType()
         ->getMethod("__getstate__")
-        ->getSchema()
+        .getSchema()
         .returns()
         .at(0)
         .type();
@@ -1496,21 +1496,13 @@ struct to_ir {
   }
 
   CondValue emitHasAttr(const Expr& objExpr, const Expr& attrExpr) {
-    auto obj = emitExpr(objExpr);
-    const auto& type = obj->type();
+    auto obj = emitSugaredExpr(objExpr, 1);
     if (attrExpr.kind() != TK_STRINGLITERAL) {
       throw ErrorReport(attrExpr)
           << "hasattr's second argument must be a string literal";
     }
-    auto cls = type->cast<ClassType>();
-    if (!cls) {
-      throw ErrorReport(objExpr)
-          << "hasattr's first argument must be an object, got "
-          << type->python_str() << " instead";
-    }
-
     const std::string& name = StringLiteral(attrExpr).text();
-    const bool hasAttr = cls->hasAttribute(name);
+    const bool hasAttr = obj->hasAttr(objExpr.range(), method, name);
     return CondValue(*graph, objExpr.range(), hasAttr, {});
   }
 
@@ -1892,9 +1884,9 @@ struct to_ir {
       // __iadd__ is not present)
       auto type = lhs->type()->expect<ClassType>();
       std::string magic_method_name;
-      if (type->getMethod(in_place_method_name)) {
+      if (type->findMethod(in_place_method_name)) {
         magic_method_name = in_place_method_name;
-      } else if (type->getMethod(out_of_place_method_name)) {
+      } else if (type->findMethod(out_of_place_method_name)) {
         magic_method_name = out_of_place_method_name;
       } else {
         throw ErrorReport(stmt.range())
@@ -3182,11 +3174,32 @@ struct to_ir {
           return dim + 1;
         }
       }
-      TypePtr type_hint = OptionalType::ofTensor();
-      if (subscript_expr.kind() == TK_NONE) {
-        type_hint = NoneType::get();
+      Value* index;
+      if (subscript_expr.kind() == TK_LIST_LITERAL) {
+        // Accept list literal as subscript but convert it to a Tensor
+        // since it's equivalent to indexing with Tensor.
+        // Advanced indexing using list:
+        // @torch.jit.script
+        // def f(x):
+        //     return x[[0, 1, 5]]  # or
+        //     return x[[0, 1], [0, 1]]  # or
+        //     return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
+        // Statements above are equivalent to advanced indexing using Tensor:
+        // @torch.jit.script
+        // def f(x):
+        //     return x[torch.tensor([0, 1, 5])]  # or
+        //     return x[torch.tensor([0, 1]), torch.tensor([0, 1])]  # or
+        //     return x[torch.tensor([[0, 1], [0, 1]]), torch.tensor([[0, 1],
+        //     [0, 1]])]
+        auto ll = emitExpr(subscript_expr);
+        index = graph->insert(aten::tensor, {ll});
+      } else {
+        TypePtr type_hint = OptionalType::ofTensor();
+        if (subscript_expr.kind() == TK_NONE) {
+          type_hint = NoneType::get();
+        }
+        index = emitExpr(subscript_expr, type_hint);
       }
-      auto index = emitExpr(subscript_expr, type_hint);
       exprs[expr_idx] = index;
       if (index->type()->isSubtypeOf(NoneType::get())) {
         if (is_reverse) {

@@ -27,6 +27,14 @@ struct ArgAbstract {
   virtual void* arg() = 0;
 };
 
+struct ULongArg : public ArgAbstract {
+  uint64_t val_;
+  ULongArg(uint64_t _val) : val_(_val){};
+  void* arg() {
+    return &val_;
+  }
+};
+
 struct IntArg : public ArgAbstract {
   int val_;
   IntArg(int _val) : val_(_val){};
@@ -102,6 +110,10 @@ TensorArgAbstract* getTensorArg(c10::ScalarType dtype, int nDims) {
   switch (dtype) {
     case (at::kFloat):
       return getTensorArg<float>(nDims);
+    case (at::kHalf):
+      return getTensorArg<at::Half>(nDims);
+    case (at::kBool):
+      return getTensorArg<bool>(nDims);
     default:
       TORCH_CHECK(
           false,

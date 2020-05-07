@@ -17,6 +17,24 @@ namespace tensorexpr {
 static int te_cuda_pointwise_loop_levels = -1;
 static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
+static bool fallback_allowed = true;
+
+bool setFallbackAllowed(bool value) {
+  bool old_value = fallback_allowed;
+  fallback_allowed = value;
+  return old_value;
+}
+
+bool fallbackAllowed() {
+  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
+  if (!enable_c_str) {
+    return fallback_allowed;
+  }
+  if (std::string(enable_c_str) == "0") {
+    return false;
+  }
+  return true;
+}
 
 int& getTECudaPointwiseLoopLevels() {
   return te_cuda_pointwise_loop_levels;
@@ -38,7 +56,8 @@ static at::ScalarType tensorType(Tensor* t) {
   return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
 }
 
-static std::vector<ExprHandle> texprSizes(const c10::VaryingShape& shape) {
+static std::vector<ExprHandle> texprSizes(
+    const c10::VaryingShape<int64_t>& shape) {
   std::vector<ExprHandle> dims;
   for (size_t i = 0; i < *shape.size(); i++) {
     dims.push_back(IntImm::make(*shape[i]));
@@ -135,7 +154,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     const ExprHandle& e,
     const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
-    throw malformed_input("type is not tensor in demoteOutput");
+    return e;
   }
 
   auto tt = *v->type()->cast<TensorType>()->scalarType();
@@ -152,7 +171,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
     case at::ScalarType::Bool:
-      return e;
+      return cast<bool>(e);
     default:
       throw unsupported_dtype();
   }
@@ -1073,7 +1092,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
         Block* b = blocks.back();
         blocks.pop_back();
 
-        for (Stmt* s : b->stmts()) {
+        for (Stmt* s : *b) {
           if (For* f = dynamic_cast<For*>(s)) {
             worklist.push_back(f);
           } else if (Block* b2 = dynamic_cast<Block*>(s)) {
@@ -1091,7 +1110,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
       bool containsSubLoops = false;
       if (Block* body = dynamic_cast<Block*>(f->body())) {
-        for (Stmt* s2 : body->stmts()) {
+        for (Stmt* s2 : *body) {
           if (For* f2 = dynamic_cast<For*>(s2)) {
             containsSubLoops = true;
             worklist.push_back(f2);
@@ -1167,7 +1186,7 @@ static bool isValidPrimProperty(const c10::optional<T>& a, T b) {
 }
 
 static bool isValidVaryingShape(
-    const c10::VaryingShape& vs,
+    const c10::VaryingShape<int64_t>& vs,
     at::IntArrayRef sz) {
   if (!vs.size().has_value()) {
     // TODO: does it make sense to have kernels with completely unspecified
@@ -1280,11 +1299,11 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
           {0});
       std::vector<DimArg> inputTensorDims;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
-        auto const& size = *tt->sizes()[i];
+        auto const size = *tt->sizes()[i];
         inputTensorDims.emplace_back(
             DimArg(IntImm::make(size), "i" + c10::to_string(i)));
       }
-      auto const& strides = tt->strides();
+      auto const strides = tt->strides();
       tensors_.emplace(
           input->unique(),
           Compute(
@@ -1303,6 +1322,12 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
     }
     case TypeKind::FloatType: {
       VarHandle v("v" + input->debugName(), kFloat);
+      kernelArgs_.emplace_back(v);
+      scalars_.emplace(input->unique(), v);
+      break;
+    }
+    case TypeKind::BoolType: {
+      VarHandle v("v" + input->debugName(), kBool);
       kernelArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
@@ -1359,6 +1384,11 @@ void TensorExprKernel::compile() {
 
 TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
     : graph_(subgraph), code_(subgraph, "") {
+  if (!fallbackAllowed()) {
+    compile();
+    return;
+  }
+
   try {
     compile();
   } catch (...) {
@@ -1367,6 +1397,11 @@ TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
 }
 
 void TensorExprKernel::run(Stack& stack) {
+  if (!fallbackAllowed()) {
+    runKernel(stack);
+    return;
+  }
+
   if (fallback_) {
     fallback(stack);
     return;

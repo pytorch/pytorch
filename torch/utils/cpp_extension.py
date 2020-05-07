@@ -135,7 +135,14 @@ CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # it the below pattern.
 BUILT_FROM_SOURCE_VERSION_PATTERN = re.compile(r'\d+\.\d+\.\d+\w+\+\w+')
 
-COMMON_MSVC_FLAGS = ['/MD', '/wd4819', '/wd4251', '/EHsc']
+COMMON_MSVC_FLAGS = ['/MD', '/wd4819', '/wd4251', '/wd4244', '/wd4267', '/wd4275', '/wd4018', '/wd4190', '/EHsc']
+
+MSVC_IGNORE_CUDAFE_WARNINGS = [
+    'base_class_has_different_dll_interface',
+    'field_without_dll_interface',
+    'dll_interface_conflict_none_assumed',
+    'dll_interface_conflict_dllexport_assumed'
+]
 
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
@@ -317,10 +324,7 @@ class BuildExtension(build_ext, object):
             # Test if we can use ninja. Fallback otherwise.
             msg = ('Attempted to use ninja as the BuildExtension backend but '
                    '{}. Falling back to using the slow distutils backend.')
-            if IS_HIP_EXTENSION:
-                warnings.warn(msg.format('HIP extensions is not supported yet for ninja.'))
-                self.use_ninja = False
-            elif not _is_ninja_available():
+            if not _is_ninja_available():
                 warnings.warn(msg.format('we could not find ninja.'))
                 self.use_ninja = False
 
@@ -428,7 +432,11 @@ class BuildExtension(build_ext, object):
                     cuda_post_cflags = extra_postargs['nvcc']
                 else:
                     cuda_post_cflags = list(extra_postargs)
-                cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
+                if IS_HIP_EXTENSION:
+                    cuda_post_cflags = cuda_post_cflags + _get_rocm_arch_flags(cuda_post_cflags)
+                    cuda_post_cflags = cuda_post_cflags + COMMON_HIPCC_FLAGS
+                else:
+                    cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
                 append_std14_if_no_std_present(cuda_post_cflags)
 
             _write_ninja_file_and_compile_objects(
@@ -496,6 +504,8 @@ class BuildExtension(build_ext, object):
                         cflags = win_cuda_flags(cflags)
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
+                        for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
+                            cflags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cflags
                         cmd = [nvcc, '-c', src, '-o', obj] + include_list + cflags
                     elif isinstance(self.cflags, dict):
                         cflags = COMMON_MSVC_FLAGS + self.cflags['cxx']
@@ -556,6 +566,9 @@ class BuildExtension(build_ext, object):
                 for common_cflag in common_cflags:
                     cuda_cflags.append('-Xcompiler')
                     cuda_cflags.append(common_cflag)
+                for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
+                    cuda_cflags.append('-Xcudafe')
+                    cuda_cflags.append('--diag_suppress=' + ignore_warning)
                 cuda_cflags.extend(pp_opts)
                 if isinstance(extra_postargs, dict):
                     cuda_post_cflags = extra_postargs['nvcc']
@@ -1516,6 +1529,8 @@ def _write_ninja_file_to_build_library(path,
         if IS_WINDOWS:
             for flag in COMMON_MSVC_FLAGS:
                 cuda_flags = ['-Xcompiler', flag] + cuda_flags
+            for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
+                cuda_flags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cuda_flags
             cuda_flags = _nt_quote_args(cuda_flags)
             cuda_flags += _nt_quote_args(extra_cuda_cflags)
         else:

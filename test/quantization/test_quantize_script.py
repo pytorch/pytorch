@@ -724,32 +724,16 @@ graph(%input, %weight):
             m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
-            get_forward(m._c)(data)
+            m(data)
             m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False))
             assert len(m._modules._c.items()) == 1, \
                 'Expected to have single submodule of conv'
-
-            get_forward(m._c)(data)
+            # make sure the quantized model is executable
+            m(data)
             quant_func = "aten::quantize_per_channel" if is_per_channel \
                 else "aten::quantize_per_tensor"
-            # quantizing activations
-            FileCheck().check(quant_func) \
-                       .check("prim::CallMethod[name=\"forward\"]") \
-                       .check(quant_func) \
-                       .check("return") \
-                       .run(str(get_forward_graph(m._c)))
-            # quantizing weight in forward function of conv module
-            FileCheck().check(quant_func) \
-                       .check("prim::CallMethod[name=\"_conv_forward\"]") \
-                       .check_not(quant_func) \
-                       .check("return") \
-                       .run(str(get_forward_graph(m.conv._c)))
-            # we don't have quant/dequant in _conv_foward function
-            FileCheck().check_not(quant_func) \
-                       .check("aten::conv2d") \
-                       .check_not(quant_func) \
-                       .check("return") \
-                       .run(str(get_module_method(m, 'conv', '_conv_forward').graph))
+            FileCheck().check_count(quant_func, 3, exactly=True) \
+                       .run(m.graph)
 
     def test_insert_quant_dequant_shared_class_type(self):
         class M(torch.nn.Module):
@@ -766,10 +750,8 @@ graph(%input, %weight):
             observer = default_per_channel_weight_observer.with_args(ch_axis=1) \
                 if is_per_channel else default_observer
             qconfig = QConfig(activation=observer, weight=observer)
-            qconfig_dict = {
-                '': script_qconfig(qconfig)
-            }
-            m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+            qconfig_dict = {'': qconfig}
+            m = prepare_script(m, qconfig_dict)
             # observers for input, output and value between conv1/conv2
             assert len(attrs_with_prefix(m, '_observer_')) == 3, \
                 'Expected to have 3 obervers'
@@ -796,14 +778,6 @@ graph(%input, %weight):
 
             quant_func = "aten::quantize_per_channel" if is_per_channel \
                 else "aten::quantize_per_tensor"
-            # quantize for activations
-            FileCheck().check(quant_func) \
-                       .check("prim::CallMethod[name=\"forward\"]") \
-                       .check(quant_func) \
-                       .check("prim::CallMethod[name=\"forward\"]") \
-                       .check(quant_func) \
-                       .check("return") \
-                       .run(str(get_forward_graph(m._c)))
             for module in ['conv1', 'conv2']:
                 conv = m._c.getattr(module)
                 # quantize weight
@@ -1124,16 +1098,25 @@ graph(%input, %weight):
             def __init__(self):
                 super(M, self).__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.avgpool = torch.nn.AvgPool2d(3)
 
             def forward(self, x):
-                return self.conv(x)
+                x = self.conv(x)
+                x = self.avgpool(x)
+                return x
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False, debug=True)
         FileCheck().check_not("quantized::conv2d") \
-                   .check("CallMethod") \
+                   .check("aten::conv2d") \
+                   .check("aten::avg_pool2d") \
+                   .check("aten::q_scale") \
+                   .check_next("aten::q_zero_point") \
+                   .check_next("prim::dtype") \
+                   .check_next("aten::quantize_per_tensor") \
+                   .check("aten::dequantize") \
                    .run(model.graph)
 
     def test_module_list(self):
@@ -1168,6 +1151,54 @@ graph(%input, %weight):
         FileCheck().check("quantized::linear") \
                    .check("quantized::linear") \
                    .run(model.graph)
+
+    def test_conv_trace(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1d = torch.nn.Conv1d(3, 3, 3).float()
+                self.conv2d = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv3d = torch.nn.Conv3d(3, 3, 3).float()
+
+            def forward(self, x, y, z):
+                a = self.conv1d(x)
+                b = self.conv2d(y)
+                c = self.conv3d(z)
+                return (a, b, c)
+
+        qconfig_dict = {'': default_qconfig}
+        inputs = (torch.rand((1, 3, 10), dtype=torch.float),
+                  torch.rand((1, 3, 10, 10), dtype=torch.float),
+                  torch.rand((1, 3, 10, 10, 10), dtype=torch.float))
+        model = torch.jit.trace(M(), inputs).eval()
+        m = prepare_script(model, qconfig_dict)
+        FileCheck().check('aten::conv1d') \
+                   .check_not("aten::_convolution") \
+                   .run(str(get_forward_graph(m.conv1d._c)))
+        FileCheck().check('aten::conv2d') \
+                   .check_not("aten::_convolution") \
+                   .run(str(get_forward_graph(m.conv2d._c)))
+        FileCheck().check('aten::conv3d') \
+                   .check_not("aten::_convolution") \
+                   .run(str(get_forward_graph(m.conv3d._c)))
+
+    def test_replicate_dequant_same_value(self):
+        class Mul(torch.nn.Module):
+            def __init__(self):
+                super(Mul, self).__init__()
+
+            def forward(self, x):
+                return x * x
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+
+        qconfig_dict = {'': default_qconfig}
+        model = torch.jit.script(Mul()).eval()
+        m = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data])
+        FileCheck().check("quantized::mul") \
+                   .check_not("aten::mul") \
+                   .run(m.graph)
 
 class TestQuantizeScriptPTSQOps(JitTestCase):
     """ Test graph mode post training static quantization works
@@ -1597,10 +1628,10 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         FileCheck().check_not("aten::layer_norm") \
                    .run(m.graph)
 
-
-    def test_swap_dequantize_all_ops(self):
+    def test_quantize_general_shape_ops(self):
         """ A test that checks dequantize will be swapped for
-        all supported general ops without actually checking for execution of these ops
+        all supported general shape ops like aten::flatten
+        without actually checking for execution of these ops
         """
         class M(torch.nn.Module):
             def __init__(self):
@@ -1621,6 +1652,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.hardtanh = torch.nn.Hardtanh()
                 self.elu = torch.nn.ELU()
                 self.hardsigmoid = torch.nn.Hardsigmoid()
+                self.relu = torch.nn.ReLU()
+                self.relu6 = torch.nn.ReLU6()
+                self.leaky_relu = torch.nn.LeakyReLU()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1669,10 +1703,21 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = torch.tanh(x)
                 x = self.hardtanh(x)
                 x = F.hardtanh(x)
+                x.hardtanh_()
                 x = self.elu(x)
                 x = F.elu(x)
+                x.elu_()
                 x = self.hardsigmoid(x)
                 x = F.hardsigmoid(x)
+                x.hardsigmoid_()
+                x = self.relu(x)
+                x = F.relu(x)
+                x.relu_()
+                x = self.relu6(x)
+                x = F.relu6(x)
+                x = self.leaky_relu(x)
+                x = F.leaky_relu(x)
+                x.leaky_relu_()
                 x = self.conv(x)
                 return x
 
@@ -1695,6 +1740,59 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .check_count("quantized::conv2d", 2, exactly=True) \
                    .check("aten::dequantize") \
                    .run(m.graph)
+
+    def test_quantize_general_value_ops(self):
+        """ A test that checks dequantize will be swapped for \
+        all supported general value ops like aten::avg_pool2d \
+        without actually checking for execution of these ops
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.avgpool2d = torch.nn.AvgPool2d(3)
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.avgpool2d(x)
+                x = F.avg_pool2d(x, 3)
+                x = self.conv(x)
+                return x
+
+        m = torch.jit.script(M())
+        qconfig = script_qconfig(default_qconfig)
+        # dummy data to suppress warning
+        data = torch.rand((1, 3, 10, 10))
+        get_forward(qconfig.activation)(data)
+        get_forward(qconfig.weight)(data)
+
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
+            m._c, 'forward', {'': qconfig}, inplace=False))
+        # Checking the model before fianlize contain unfused patterns
+        # that numerically matches the model after quantize by checking
+        # number of aten::quantize_per_tensor functions
+        # conv has 3 quantize_per_tensor for activations and 1 for weight
+        # and for N general value op between conv we should have
+        # N + 1 quantize_per_tensor between these ops
+        m1 = convert_script(m, debug=True)
+        conv_op_quant = 4
+        # NB: This Needs to be updated when we add more ops to test
+        general_value_op_quant = 2
+        FileCheck().check_count("aten::quantize_per_tensor", conv_op_quant + general_value_op_quant + 1, exactly=True) \
+                   .run(m1.graph)
+
+        # This checks that the dequantize from the output of first conv
+        # is being propagated to the end, so that we don't insert extra
+        # observers and also successfully fused two quantized::conv2d
+        # patterns
+        # one quantize_per_tensor for input
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
+            torch.jit.script(M())._c, 'forward', {'': qconfig}, inplace=False))
+        m2 = convert_script(m, debug=False)
+        FileCheck().check_count("aten::quantize_per_tensor(", 1, exactly=True) \
+                   .check_count("quantized::conv2d(", 2, exactly=True) \
+                   .check("aten::dequantize(") \
+                   .run(m2.graph)
 
 class TestQuantizeDynamicScript(JitTestCase):
     def test_prepare_dynamic(self):
@@ -1784,21 +1882,16 @@ class TestQuantizeDynamicScript(JitTestCase):
 
         # quantizing activations
         FileCheck().check("aten::_choose_qparams_per_tensor") \
-                   .check(quant_func) \
-                   .check("prim::CallMethod[name=\"forward\"]") \
+                   .check_next(quant_func) \
+                   .check_next("aten::dequantize") \
                    .check("aten::_choose_qparams_per_tensor") \
+                   .check_next(quant_func) \
+                   .check_next("aten::dequantize") \
                    .check(quant_func) \
-                   .check("prim::CallMethod[name=\"forward\"]") \
+                   .check_next("aten::dequantize") \
                    .check_not(quant_func) \
                    .check("return") \
-                   .run(str(get_forward_graph(m._c)))
-        # quantizing weight in forward function of fc module, no choose_qparams
-        FileCheck().check_not("aten::_choose_qparams_per_tensor") \
-                   .check(quant_func) \
-                   .check("prim::CallFunction") \
-                   .check_not(quant_func) \
-                   .check("return") \
-                   .run(str(get_forward_graph(m.fc1._c)))
+                   .run(m.graph)
 
     def test_finalize_for_linear_dynamic(self):
         class M(torch.nn.Module):
