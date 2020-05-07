@@ -1131,7 +1131,7 @@ class TestDistributions(TestCase):
 
         # sample check for extreme value of probs
         self.assertEqualIgnoreType(Multinomial(total_count, s).sample(),
-                         torch.tensor([[total_count, 0], [0, total_count]]))
+                                   torch.tensor([[total_count, 0], [0, total_count]]))
 
         # check entropy computation
         self.assertRaises(NotImplementedError, Multinomial(10, p).entropy)
