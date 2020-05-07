@@ -291,9 +291,6 @@ std::pair<graph_node_list::iterator, bool> scanNode(
 }
 
 void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
-  if (!tensorExprFuserEnabled()) {
-    return;
-  }
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Get rid of dead code so that we don't waste effort fusing it.
@@ -351,6 +348,11 @@ Operation createTensorExprOp(const Node* node) {
       std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
   return [kernel](Stack& stack) {
     RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
+    if (!tensorexpr::fallbackAllowed()) {
+      kernel->run(stack);
+      return 0;
+    }
+
     try {
       kernel->run(stack);
     } catch (const std::runtime_error& e) {
