@@ -147,6 +147,9 @@ Operator createOperatorFromC10_withTracingHandledHere(
             throw std::runtime_error(
                 "unsupported ouptut list type: " + elem_type->str());
           }
+        } else if (type->kind() == TypeKind::ClassType) {
+          AT_ASSERT(iter->isObject());
+          tracer::addOutput(node, iter->toObject());
         } else {
           throw std::runtime_error("unsupported output type: " + type->str());
         }
