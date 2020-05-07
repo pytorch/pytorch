@@ -398,7 +398,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_mask(self):
-        self._test_index_generic(lambda input: input[torch.tensor([0, 1, 0], dtype=torch.uint8)])
         self._test_index_generic(lambda input: input[torch.tensor([0, 1, 0], dtype=torch.bool)])
 
     def test_dict(self):

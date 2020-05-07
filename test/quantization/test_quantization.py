@@ -21,7 +21,7 @@ from torch.quantization import default_histogram_observer
 from torch.quantization import default_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
-from torch.quantization._quantize_script import quantize_script
+from torch.quantization._quantize_script import quantize_script, quantize_dynamic_script
 
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_UBSAN, IS_WINDOWS
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
@@ -1080,6 +1080,43 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                 [self.calib_data],
                 inplace=False)
             self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+
+    def test_single_linear_dynamic(self):
+        r"""Compare the result of dynamic quantization of single linear layer in
+        eager mode and graph mode.
+        """
+        # eager mode
+        annotated_linear_model = AnnotatedSingleLayerLinearModel().eval()
+        linear_model = SingleLayerLinearModel().eval()
+        # copy the weight from eager mode so that we can
+        # compare the result of the two quantized models later
+        linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
+        linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
+        qconfig_dict = {'': default_dynamic_qconfig}
+        model_eager = quantize_dynamic(annotated_linear_model, qconfig_dict)
+
+        model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
+        model_script = torch.jit.script(linear_model)
+        result_eager = model_eager(self.calib_data[0][0])
+
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_dynamic_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data])
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+
+            # Check to make sure choose_qparams->quant->dequant->linear is numerically
+            # equivalent to the final quantized model.
+            model_fake_quantized = quantize_dynamic_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                debug=True)
+            self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
+
 
 class FunctionalModuleTest(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out

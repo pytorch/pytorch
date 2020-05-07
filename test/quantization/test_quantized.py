@@ -1455,7 +1455,7 @@ class TestQuantizedOps(TestCase):
             quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, dtype_x)
             self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
 
-    @unittest.skipIf(TEST_WITH_UBSAN, "Takes 20+ min to finish with ASAN")
+    @unittest.skip("Takes 20+ min to finish in many configurations")
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=5,
                                               min_side=1, max_side=32),
                        qparams=hu.qparams()),
@@ -1491,7 +1491,7 @@ class TestQuantizedOps(TestCase):
             quantize_ref = torch.quantize_per_tensor(torch.from_numpy(float_ref_relu), Y_scale, Y_zero_point, dtype_x)
             self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
 
-    @unittest.skipIf(TEST_WITH_UBSAN, "Takes 20+ min to finish with ASAN")
+    @unittest.skip("Takes 20+ min to finish in many configurations")
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
                                               min_side=1, max_side=32),
                        qparams=hu.qparams()),

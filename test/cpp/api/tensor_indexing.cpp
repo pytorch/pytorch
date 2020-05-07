@@ -156,18 +156,8 @@ TEST(TensorIndexingTest, TestBoolIndices) {
   {
     auto v = torch::tensor({true, false, true}, torch::kBool);
     auto boolIndices = torch::tensor({true, false, false}, torch::kBool);
-    auto uint8Indices = torch::tensor({1, 0, 0}, torch::kUInt8);
 
-    {
-      std::stringstream buffer;
-      CerrRedirect cerr_redirect(buffer.rdbuf());
-
-      ASSERT_EQ(v.index({boolIndices}).sizes(), v.index({uint8Indices}).sizes());
-      assert_tensor_equal(v.index({boolIndices}), v.index({uint8Indices}));
-      assert_tensor_equal(v.index({boolIndices}), torch::tensor({true}, torch::kBool));
-
-      ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
-    }
+    assert_tensor_equal(v.index({boolIndices}), torch::tensor({true}, torch::kBool));
   }
 }
 
@@ -187,19 +177,12 @@ TEST(TensorIndexingTest, TestMultipleBoolIndices) {
   ASSERT_EQ(v.index({mask1, Slice(), mask2}).sizes(), torch::IntArrayRef({3, 7}));
 }
 
-TEST(TensorIndexingTest, TestByteMask) {
+TEST(TensorIndexingTest, TestBoolMask) {
   {
     auto v = torch::randn({5, 7, 3});
-    auto mask = torch::tensor({1, 0, 1, 1, 0}, torch::kByte);
-    {
-      std::stringstream buffer;
-      CerrRedirect cerr_redirect(buffer.rdbuf());
-
-      ASSERT_EQ(v.index({mask}).sizes(), torch::IntArrayRef({3, 7, 3}));
-      assert_tensor_equal(v.index({mask}), torch::stack({v[0], v[2], v[3]}));
-
-      ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
-    }
+    auto mask = torch::tensor({1, 0, 1, 1, 0}, torch::kBool);
+    ASSERT_EQ(v.index({mask}).sizes(), torch::IntArrayRef({3, 7, 3}));
+    assert_tensor_equal(v.index({mask}), torch::stack({v[0], v[2], v[3]}));
   }
   {
     auto v = torch::tensor({1.});
@@ -207,33 +190,20 @@ TEST(TensorIndexingTest, TestByteMask) {
   }
 }
 
-TEST(TensorIndexingTest, TestByteMaskAccumulate) {
-  auto mask = torch::zeros({10}, torch::kUInt8);
+TEST(TensorIndexingTest, TestBoolMaskAccumulate) {
+  auto mask = torch::zeros({10}, torch::kBool);
   auto y = torch::ones({10, 10});
-  {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
-
-    y.index_put_({mask}, y.index({mask}), /*accumulate=*/true);
-    assert_tensor_equal(y, torch::ones({10, 10}));
-
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
-  }
+  y.index_put_({mask}, y.index({mask}), /*accumulate=*/true);
+  assert_tensor_equal(y, torch::ones({10, 10}));
 }
 
-TEST(TensorIndexingTest, TestMultipleByteMask) {
+TEST(TensorIndexingTest, TestMultipleBoolMask) {
   auto v = torch::randn({5, 7, 3});
   // note: these broadcast together and are transposed to the first dim
-  auto mask1 = torch::tensor({1, 0, 1, 1, 0}, torch::kByte);
-  auto mask2 = torch::tensor({1, 1, 1}, torch::kByte);
-  {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
+  auto mask1 = torch::tensor({1, 0, 1, 1, 0}, torch::kBool);
+  auto mask2 = torch::tensor({1, 1, 1}, torch::kBool);
 
-    ASSERT_EQ(v.index({mask1, Slice(), mask2}).sizes(), torch::IntArrayRef({3, 7}));
-
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
-  }
+  ASSERT_EQ(v.index({mask1, Slice(), mask2}).sizes(), torch::IntArrayRef({3, 7}));
 }
 
 TEST(TensorIndexingTest, TestByteMask2d) {
@@ -535,17 +505,10 @@ TEST(TensorIndexingTest, TestIntAssignment) {
 
 TEST(TensorIndexingTest, TestByteTensorAssignment) {
   auto x = torch::arange(0., 16).to(torch::kFloat).view({4, 4});
-  auto b = torch::tensor({true, false, true, false}, torch::kByte);
+  auto b = torch::tensor({true, false, true, false}, torch::kBool);
   auto value = torch::tensor({3., 4., 5., 6.});
 
-  {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
-
-    x.index_put_({b}, value);
-
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 1);
-  }
+  x.index_put_({b}, value);
 
   assert_tensor_equal(x.index({0}), value);
   assert_tensor_equal(x.index({1}), torch::arange(4, 8).to(torch::kLong));
@@ -703,17 +666,6 @@ TEST(NumpyTests, TestBooleanShapeMismatch) {
 
   index = torch::tensor({false, false, false, false, false, false});
   ASSERT_THROWS_WITH(arr.index({index}), "mask");
-
-  {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
-
-    index = torch::empty({4, 4}, torch::kByte).zero_();
-    ASSERT_THROWS_WITH(arr.index({index}), "mask");
-    ASSERT_THROWS_WITH(arr.index({Slice(), index}), "mask");
-
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
-  }
 }
 
 TEST(NumpyTests, TestBooleanIndexingOnedim) {

@@ -1609,8 +1609,42 @@ graph(%x : Tensor,
             FileCheck().check_not("aten::add") \
                        .check_not("aten::relu") \
                        .check_not("aten::relu_") \
+                       .check_not("quantized::add") \
+                       .check_not("quantized::relu") \
                        .check("quantized::add_relu") \
                        .run(m.graph_for(data, data))
+
+    def test_quantized_add_scalar_relu(self):
+        class AddScalar(torch.nn.Module):
+            def __init__(self):
+                super(AddScalar, self).__init__()
+
+            def forward(self, x):
+                return F.relu(x + 3)
+
+        class InplaceAddScalar(torch.nn.Module):
+            def __init__(self):
+                super(InplaceAddScalar, self).__init__()
+
+            def forward(self, x):
+                x += 3
+                return F.relu(x)
+
+        for M in [AddScalar, InplaceAddScalar]:
+            m = torch.jit.script(M()).eval()
+            m = prepare_script(m, {'': default_qconfig}, True)
+            # for input tensor
+            assert len(attrs_with_prefix(m, '_observer')) == 1
+            data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+            m(data)
+            m = convert_script(m, True)
+            FileCheck().check_not("aten::add") \
+                       .check_not("aten::add_") \
+                       .check_not("aten::relu") \
+                       .check_not("quantized::add_scalar") \
+                       .check_not("quantized::relu") \
+                       .check("quantized::add_scalar_relu") \
+                       .run(m.graph_for(data))
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
@@ -2190,8 +2224,7 @@ graph(%input, %weight):
                 x, y = torch.chunk(x, 2)
                 x = F.dropout(x)
                 x = self.dropout(x)
-                # TODO: uncomment when sort is supported
-                # x, _ = torch.sort(x)
+                x, _ = torch.sort(x)
                 x = F.interpolate(x, 4, mode='nearest')
                 x = F.upsample(x, (32, 32))
                 x = F.upsample_bilinear(x, (32, 32))
@@ -15097,6 +15130,13 @@ a")
             def g2(x):
                 print((x, x, x).__doc__)
                 return x
+
+    def test_tuple_len(self):
+        @torch.jit.script
+        def foo():
+            return len((1, "str", None))
+
+        self.assertEqual(foo(), 3)
 
     def test_tuple_slicing(self):
         def tuple_slice(a):

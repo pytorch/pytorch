@@ -30,12 +30,15 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indice,
   if (0 == result.numel()) {
     result.resize_(self_sizes);
   } else {
-    result = result.reshape(self_sizes);
+    //error out if result cannot be viewed as desired size
+    auto result_view = result.view(self_sizes);
+    result.set_(result_view);
   }
   if (0 == indice.numel()) {
     indice.resize_(self_sizes);
   } else {
-    indice = indice.reshape(self_sizes);
+    auto indices_view = indice.view(self_sizes);
+    indice.set_(indices_view);
   }
 
   Tensor self_restrided = restride_dim(self, dim, self_sizes);

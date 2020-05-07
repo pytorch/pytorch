@@ -226,8 +226,8 @@ function(print_target_properties tgt)
 
   # Get a list of all cmake properties TODO cache this lazily somehow
   execute_process(COMMAND cmake --help-property-list OUTPUT_VARIABLE CMAKE_PROPERTY_LIST)
-  STRING(REGEX REPLACE ";" "\\\\;" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
-  STRING(REGEX REPLACE "\n" ";" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
+  string(REGEX REPLACE ";" "\\\\;" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
+  string(REGEX REPLACE "\n" ";" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
 
   foreach(prop ${CMAKE_PROPERTY_LIST})
     string(REPLACE "<CONFIG>" "${CMAKE_BUILD_TYPE}" prop ${prop})
