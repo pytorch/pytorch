@@ -9886,7 +9886,7 @@ class TestTorchDeviceType(TestCase):
             alias_table, prob_table = torch._multinomial_alias_setup(probs)
             alias_samples = torch._multinomial_alias_draw(prob_table, alias_table, MAX_SAMPLES)
             alias_dist = torch.unique(alias_samples, return_counts=True)[1].to(dtype=probs.dtype) / MAX_SAMPLES
-            self.assertTrue(torch.allclose(alias_dist, probs, rtol=0.02, atol=0.0),
+            self.assertTrue(torch.allclose(alias_dist, probs, rtol=0.03, atol=0.0),
                             "Actual: {}\nExpected: {}".format(alias_dist, probs))
 
         for probs in [torch.tensor([0.2501, 0.25, 0.2499, 0.25], device=device),
