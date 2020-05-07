@@ -136,7 +136,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     const ExprHandle& e,
     const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
-    throw malformed_input("type is not tensor in demoteOutput");
+    return e;
   }
 
   auto tt = *v->type()->cast<TensorType>()->scalarType();
