@@ -84,12 +84,13 @@ std::vector<std::string> _dynamic_quantizable_aten_funcs = {
 // example: `prim::CallFunction(%dropout, %input_tensor, ...)
 // so we propagate observed property from %input_tensor to the
 // output of the `prim::CallFunction`
-std::vector<std::string> _single_input_general_call_funcs = {
+// Also these ops doesn't do computation on the value of Tensor, the
+// operation only depends on the shape of the Tensor
+std::vector<std::string> _single_input_general_shape_call_funcs = {
     "adaptive_avg_pool1d",
     "adaptive_avg_pool2d",
     "adaptive_avg_pool3d",
     "avg_pool1d",
-    "avg_pool2d",
     "avg_pool3d",
     "_max_pool1d",
     "_max_pool2d",
@@ -100,22 +101,29 @@ std::vector<std::string> _single_input_general_call_funcs = {
     "upsample_bilinear",
     "upsample_nearest",
     "relu",
+    "relu_",
     "sigmoid",
     "tanh",
     "hardtanh",
+    "hardtanh_",
     "elu",
+    "elu_",
     "hardsigmoid",
+    "hardsigmoid_",
+    "leaky_relu",
+    "leaky_relu_",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
 // require observation and have a single input Tensor
-// e.g. `aten::max_pool2d(%input_tensor, ...)`
-std::vector<std::string> _single_input_general_aten_funcs = {
+// Also these ops doesn't do computation on the value of Tensor, the
+// operation only depends on the shape of the Tensor
+// e.g. `aten::flatten(%input_tensor, ...)`
+std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "max_pool1d",
     "max_pool2d",
     "max_pool3d",
     "avg_pool1d",
-    "avg_pool2d",
     "avg_pool3d",
     "flatten",
     "max",
@@ -143,11 +151,32 @@ std::vector<std::string> _single_input_general_aten_funcs = {
     "clamp",
     // "clamp_",  // Enable when quantized `clamp_` is ready
     "relu",
+    "relu_",
     "sigmoid",
     "tanh",
     "hardtanh",
+    "hardtanh_",
     "elu",
+    "elu_",
     "hardsigmoid",
+    "hardsigmoid_",
+    "leaky_relu",
+    "leaky_relu_",
+};
+
+// Theses are prim::CallFunctions for ops that doesn't require observation and
+// have a single input Tensor
+// Also these ops do computation on the value of Tensor
+std::vector<std::string> _single_input_general_value_call_funcs = {
+    "avg_pool2d",
+};
+
+// Theses are aten functions for ops that doesn't require observation and
+// have a single input Tensor
+// Also these ops do computation on the value of Tensor
+// e.g. `aten::avg_pool2d(%input_tensor, ...)`
+std::vector<std::string> _single_input_general_value_aten_funcs = {
+    "avg_pool2d",
 };
 
 struct FuncArg {
@@ -243,26 +272,55 @@ bool hasScalarInput(Node* n) {
       n->input(1)->type()->isSubtypeOf(NumberType::get());
 }
 
+bool isSingleInputGeneralValueAtenFunction(Node* n) {
+  return isFunctionNode(
+      n,
+      /* call_funcs = */ {},
+      /* aten_funcs = */ _single_input_general_value_aten_funcs);
+}
+
+bool isSingleInputGeneralCallFunction(Node* n) {
+  static std::vector<std::string> _single_input_general_call_funcs;
+  std::copy(
+      _single_input_general_shape_call_funcs.begin(),
+      _single_input_general_shape_call_funcs.end(),
+      std::back_inserter(_single_input_general_call_funcs));
+  std::copy(
+      _single_input_general_value_call_funcs.begin(),
+      _single_input_general_value_call_funcs.end(),
+      std::back_inserter(_single_input_general_call_funcs));
+  return isFunctionNode(
+      n,
+      /* call_funcs = */ _single_input_general_shape_call_funcs,
+      /* aten_funcs = */ {});
+}
+
+bool isSingleInputGeneralAtenFunction(Node* n) {
+  static std::vector<std::string> _single_input_general_aten_funcs;
+  std::copy(
+      _single_input_general_shape_aten_funcs.begin(),
+      _single_input_general_shape_aten_funcs.end(),
+      std::back_inserter(_single_input_general_aten_funcs));
+  std::copy(
+      _single_input_general_value_aten_funcs.begin(),
+      _single_input_general_value_aten_funcs.end(),
+      std::back_inserter(_single_input_general_aten_funcs));
+  return isFunctionNode(
+      n,
+      /* call_funcs = */ {},
+      /* aten_funcs = */ _single_input_general_aten_funcs);
+}
+
 // For a given value `v`, get the list of values that we need to check
 // if they are observed/quantized or not, if so, we can say the
 // `v` is also observed/quantized, since we can derive
 // the quantization parameters for `v` given the list of values
 std::vector<Value*> getPassThroughInputs(Value* v) {
   Node* n = v->node();
-  if (isFunctionNode(
-          n,
-          // We don't have call functions
-          // after inline
-          /* call_funcs = */ _single_input_general_call_funcs,
-          /* aten_funcs = */ {})) {
+  if (isSingleInputGeneralCallFunction(n)) {
     return {n->input(1)};
   } else if (
-      isFunctionNode(
-          n,
-          // We don't have call functions
-          // after inline
-          /* call_funcs = */ {},
-          /* aten_funcs = */ _single_input_general_aten_funcs) ||
+      isSingleInputGeneralAtenFunction(n) ||
       (n->kind() == Symbol::aten("sort") && v->offset() == 0)) {
     return {n->input(0)};
   } else if (n->kind() == prim::If && n->outputs().size() == 1) {
@@ -306,7 +364,7 @@ bool nodeQuantizable(Node* n, bool is_dynamic = false) {
 // like `linear` because we want to preserve the op boundary
 bool userDefinedCallFunction(Node* n) {
   return n->kind() == prim::CallFunction &&
-      !isFunctionNode(n, _single_input_general_call_funcs, {}) &&
+      !isSingleInputGeneralCallFunction(n) &&
       !isFunctionNode(n, _static_quantizable_call_funcs, {});
 }
 
@@ -1602,6 +1660,7 @@ void insertQuantizationOps(
   }
   observer_out->replaceAllUsesWith(original_val);
   std::vector<Use> uses = original_val->uses();
+  // TODO: use replaceAllUsesAfterNodeWith?
   for (const auto& use : uses) {
     auto* user = use.user;
     if (user != quant && user != observer && user != choose_qparams) {
@@ -1682,7 +1741,10 @@ class InsertQuantDeQuantHelper {
     is_dynamic_ = is_dynamic;
   }
 
-  void quantizeGeneralOps(Module& module);
+  // In order to propagate quantization ops through the ops that doesn't
+  // require observation, we'll first inline the graph, and call the
+  // PropgateQuantizationOps pass
+  void propagateQuantizationOps(Module& module);
 
  private:
   std::unordered_map<Graph*, std::vector<std::string>>
@@ -1910,7 +1972,7 @@ void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
   rewriter.runOnGraph(graph, filter);
 }
 
-void InsertQuantDeQuantHelper::quantizeGeneralOps(Module& module) {
+void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
   SwapFunctionalLinear(module);
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
@@ -1919,7 +1981,7 @@ void InsertQuantDeQuantHelper::quantizeGeneralOps(Module& module) {
   RemoveRedundantQuantizationOps(graph);
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
-  SwapDeQuant(graph);
+  PropagateQuantizationOps(graph);
 }
 
 void checkGetQParamsResult(const IValue& qparams) {
@@ -2136,7 +2198,7 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
 
   std::string conv2d_with_quant_prepack = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
-        %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
@@ -2150,7 +2212,7 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
 
   std::string conv3d_with_quant_prepack = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
-        %packed_params = quantized::conv3d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %packed_params : __torch__.torch.classes.quantized.Conv3dPackedParamsBase = quantized::conv3d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv3d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv3d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
@@ -2639,12 +2701,26 @@ void addBiasForConv2dIfNone(Module& module) {
   }
 }
 
-void swapDeQuant(Block* block) {
+Node* insertQParam(
+    Graph* graph,
+    Value* quantized_input,
+    NodeKind node_kind,
+    const TypePtr& output_type,
+    const std::string& param_name) {
+  Node* qparam = graph->create(node_kind, {quantized_input});
+  qparam->output()
+      ->setDebugName(quantized_input->debugName() + "." + param_name)
+      ->setType(output_type);
+  graph->insertNode(qparam);
+  return qparam;
+}
+
+void propagateQuantizationOps(Block* block) {
   auto graph = block->owningGraph();
   for (Node* n : block->nodes()) {
     if (n->kind() == prim::If) {
       for (Block* subblock : n->blocks()) {
-        swapDeQuant(subblock);
+        propagateQuantizationOps(subblock);
       }
       if (n->outputs().size() == 0) {
         continue;
@@ -2669,22 +2745,69 @@ void swapDeQuant(Block* block) {
         if (!is_dequantized) {
           continue;
         }
-        // Delete dequantize node, we have one dequantize
-        // for each use of the value
-        for (auto* dequantized_val : inputs) {
-          auto* dequantize_node = dequantized_val->node();
+        if (isSingleInputGeneralValueAtenFunction(n)) {
+          // for ops like average pool, we'll insert quant dequant after the op
+          // We'll assume the tensor is a PerTensorAffine quantized Tensor for
+          // now, and may generalize later if this becomes an issue
           TORCH_INTERNAL_ASSERT(
-              dequantized_val->uses().size() == 1,
-              "Expect to have one dequantize node for each use");
-          // Replace useses of dequantized_val with the input of
-          // dequantize node
-          dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
-          dequantize_node->removeAllInputs();
-          dequantize_node->destroy();
+              inputs.size() == 1,
+              "Expecting single input for the aten function");
+          // input of the dequantize node
+          Value* quantized_input = inputs[0]->node()->input(0);
+          // insert ops after the general op
+          WithInsertPoint ins(n->next());
+          // get quantization parameters from previous quantized op
+          Node* scale = insertQParam(
+              graph,
+              quantized_input,
+              at::Symbol::aten("q_scale"),
+              FloatType::get(),
+              "q_scale");
+          Node* zero_point = insertQParam(
+              graph,
+              quantized_input,
+              at::Symbol::aten("q_zero_point"),
+              IntType::get(),
+              "q_zero_point");
+          Node* dtype = insertQParam(
+              graph, quantized_input, prim::dtype, IntType::get(), "dtype");
+          Value* original_output = n->output();
+          std::vector<Value*> quant_inputs = {original_output,
+                                              scale->output(),
+                                              zero_point->output(),
+                                              dtype->output()};
+          auto quant_kind = at::Symbol::aten("quantize_per_tensor");
+          Node* quant = insertQuant(
+              graph,
+              quant_inputs,
+              quant_kind,
+              original_output->debugName() + ".quant");
+          Value* quantized_output = quant->output();
+          // replace uses of original output of the general op with quantized
+          // output
+          original_output->replaceAllUsesAfterNodeWith(quant, quantized_output);
+          std::vector<Use> quantized_uses = quantized_output->uses();
+          GRAPH_DEBUG("quantized uses: ", quantized_uses.size());
+          insertDeQuantForAllUse(
+              graph, quantized_output, quantized_output, quantized_uses);
+        } else {
+          // Delete dequantize node, we have one dequantize
+          // for each use of the value
+          for (auto* dequantized_val : inputs) {
+            auto* dequantize_node = dequantized_val->node();
+            TORCH_INTERNAL_ASSERT(
+                dequantized_val->uses().size() == 1,
+                "Expect to have one dequantize node for each use");
+            // Replace useses of dequantized_val with the input of
+            // dequantize node
+            dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
+            dequantize_node->removeAllInputs();
+            dequantize_node->destroy();
+          }
+          std::vector<Use> uses = output->uses();
+          // Insert new dequantize node for each use of the output
+          insertDeQuantForAllUse(graph, output, output, uses);
         }
-        std::vector<Use> uses = output->uses();
-        // Insert new dequantize node for each use of the output
-        insertDeQuantForAllUse(graph, output, output, uses);
       }
     }
   }
@@ -2724,7 +2847,7 @@ Module InsertQuantDeQuant(
   h.setDynamicFlag(is_dynamic);
   h.run(module, method_name);
   h.cleanup(module);
-  h.quantizeGeneralOps(module);
+  h.propagateQuantizationOps(module);
   return module;
 }
 
@@ -2854,8 +2977,8 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
 // This is the pass to handle ops that does not require observation
 // for example: flatten, average_pool, upsample
 // This is called after inline and before graph execution
-void SwapDeQuant(std::shared_ptr<Graph>& graph) {
-  swapDeQuant(graph->block());
+void PropagateQuantizationOps(std::shared_ptr<Graph>& graph) {
+  propagateQuantizationOps(graph->block());
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph, bool is_dynamic) {

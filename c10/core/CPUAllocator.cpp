@@ -209,8 +209,8 @@ at::Allocator* GetCPUAllocator() {
   return GetAllocator(DeviceType::CPU);
 }
 
-void SetCPUAllocator(at::Allocator* alloc) {
-  SetAllocator(DeviceType::CPU, alloc);
+void SetCPUAllocator(at::Allocator* alloc, uint8_t priority) {
+  SetAllocator(DeviceType::CPU, alloc, priority);
 }
 
 // The Mobile CPU allocator must always be present even on non-mobile builds

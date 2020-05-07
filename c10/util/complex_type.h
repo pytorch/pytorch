@@ -123,6 +123,8 @@ struct complex;
 
 template<typename T>
 struct alignas(sizeof(T) * 2) complex_common {
+  using value_type = T;
+
   T storage[2];
 
   constexpr complex_common(): storage{T(), T()} {}
@@ -446,10 +448,18 @@ C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
   return max * std::sqrt(1 + rr * rr);
 }
 
+#ifdef __HIP_PLATFORM_HCC__
+#define ROCm_Bug(x)
+#else
+#define ROCm_Bug(x) x
+#endif
+
 template<typename T>
 C10_HOST_DEVICE T arg(const c10::complex<T>& z) {
-  return std::atan2(std::imag(z), std::real(z));
+  return ROCm_Bug(std)::atan2(std::imag(z), std::real(z));
 }
+
+#undef ROCm_Bug
 
 template<typename T>
 constexpr T norm(const c10::complex<T>& z) {
@@ -492,3 +502,5 @@ C10_HOST_DEVICE c10::complex<T> polar(const T& r, const T& theta = T()) {
 
 // math functions are included in a separate file
 #include <c10/util/complex_math.h>
+// utilities for complex types
+#include <c10/util/complex_utils.h>
