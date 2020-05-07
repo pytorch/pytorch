@@ -602,22 +602,6 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       output_zero_point,
       c10::nullopt);
 
-  qnnpack::conv_param_t conv_p(
-      {kernel_w, kernel_h},
-      {stride_w, stride_h},
-      {dilation_w, dilation_h},
-      {pad_h, pad_w, pad_h, pad_w},
-      /*adjustment=*/{0, 0},
-      groups_,
-      C,
-      M,
-      (uint8_t*)w_zero_points.data_ptr<c10::quint8>(),
-      requantization_scale.data(),
-      output_min,
-      output_max,
-      /*transpose=*/false,
-      is_per_channel);
-
   const pytorch_qnnp_status run_status = qnnpack::qnnpackConv(
       conv_p,
       pack_w->getPackedWeights(),
