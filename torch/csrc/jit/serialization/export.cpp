@@ -232,7 +232,9 @@ class EncoderBase {
   void AddAttribute(
       onnx::NodeProto* node_proto,
       const jit::Node* node,
-      const jit::Symbol name);
+      const jit::Symbol name,
+      const bool use_external_data_format = false,
+      const std::string& onnx_file_path = std::string());
 
   onnx::ModelProto model_proto_;
   size_t num_blocks_;
@@ -448,7 +450,7 @@ void EncoderBase::EncodeBlock(
       num_op_nodes_++;
     }
     for (auto attr_name : node->attributeNames()) {
-      AddAttribute(p_n, node, attr_name);
+      AddAttribute(p_n, node, attr_name, use_external_data_format, onnx_file_path);
     }
     if (is_raw_export && node->blocks().size() > 0) {
       auto blocks = p_n->add_attribute();
@@ -466,7 +468,7 @@ void EncoderBase::EncodeBlock(
       body->set_name("body");
       body->set_type(onnx::AttributeProto_AttributeType_GRAPH);
       auto g = body->mutable_g();
-      EncodeBlock(g, node->blocks()[0]);
+      EncodeBlock(g, node->blocks()[0], {}, {}, true, true, use_external_data_format, onnx_file_path);
     }
     if (node->kind() == ::c10::onnx::If) {
       AT_ASSERT(node->blocks().size() == 2);
@@ -475,13 +477,13 @@ void EncoderBase::EncodeBlock(
       true_branch->set_name("then_branch");
       true_branch->set_type(onnx::AttributeProto_AttributeType_GRAPH);
       auto true_g = true_branch->mutable_g();
-      EncodeBlock(true_g, node->blocks()[0]);
+      EncodeBlock(true_g, node->blocks()[0], {}, {}, true, true, use_external_data_format, onnx_file_path);
 
       auto false_branch = p_n->add_attribute();
       false_branch->set_name("else_branch");
       false_branch->set_type(onnx::AttributeProto_AttributeType_GRAPH);
       auto false_g = false_branch->mutable_g();
-      EncodeBlock(false_g, node->blocks()[1]);
+      EncodeBlock(false_g, node->blocks()[1], {}, {}, true, true, use_external_data_format, onnx_file_path);
     }
   }
   AT_ASSERT(block->inputs().size() >= initializers.size());
@@ -500,7 +502,9 @@ void EncoderBase::EncodeBlock(
 void EncoderBase::AddAttribute(
     onnx::NodeProto* node_proto,
     const jit::Node* node,
-    const jit::Symbol name) {
+    const jit::Symbol name,
+    const bool use_external_data_format,
+    const std::string& onnx_file_path) {
   auto attr = node_proto->add_attribute();
   AT_ASSERT(name.is_attr());
   attr->set_name(name.toUnqualString());
@@ -535,25 +539,28 @@ void EncoderBase::AddAttribute(
     case AttributeKind::t: {
       attr->set_type(onnx::AttributeProto_AttributeType_TENSOR);
       auto t = attr->mutable_t();
-      EncodeTensor(t, node->t(name));
+      TORCH_INTERNAL_ASSERT(node_proto->has_name());
+      auto tensor_name = node_proto->name() + "_" + name.toDisplayString();
+      t->set_name(tensor_name);
+      EncodeTensor(t, node->t(name), tensor_name, use_external_data_format, onnx_file_path);
     } break;
     case AttributeKind::ts:
       attr->set_type(onnx::AttributeProto_AttributeType_TENSORS);
       for (auto& v : node->ts(name)) {
         auto t = attr->add_tensors();
-        EncodeTensor(t, v);
+        EncodeTensor(t, v, t->name(), use_external_data_format, onnx_file_path);
       }
       break;
     case AttributeKind::g: {
       attr->set_type(onnx::AttributeProto_AttributeType_GRAPH);
       auto g = attr->mutable_g();
-      EncodeGraph(g, node->g(name));
+      EncodeGraph(g, node->g(name), {}, {}, true, true, use_external_data_format, onnx_file_path);
     } break;
     case AttributeKind::gs:
       attr->set_type(onnx::AttributeProto_AttributeType_GRAPHS);
       for (auto& v : node->gs(name)) {
         auto g = attr->add_graphs();
-        EncodeGraph(g, v);
+        EncodeGraph(g, v, {}, {}, true, true, use_external_data_format, onnx_file_path);
       }
       break;
     default:
