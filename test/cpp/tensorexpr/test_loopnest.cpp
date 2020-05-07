@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/tensorexpr/function.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/testing/file_check.h>
@@ -120,6 +121,52 @@ void testExprSimple02() {
 
     ExpectAllNear(f_v, f_ref, 1e-5);
   }
+}
+
+void testExprSplitWithTail() {
+  KernelScope kernel_scope;
+  auto func = [](const ExprHandle& x) {
+    return ExprHandle(1.0f) + cast<float>(x);
+  };
+  Tensor* tensor = Compute("f", {{199, "x"}}, func);
+  LoopNest l({tensor});
+  For* x_outer;
+  For* x_inner;
+  For* x_tail;
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+  l.splitWithTail(loops[0], 17, &x_outer, &x_inner, &x_tail);
+
+  For* a;
+  For* b;
+  For* c;
+  l.splitWithTail(x_outer, 7, &a, &b, &c);
+
+  Stmt* stmt = l.root_stmt();
+  Stmt* simplified = IRSimplifier::simplify(stmt);
+  Block* body = dynamic_cast<Block*>(simplified);
+  ASSERT_EQ(body->nstmts(), 3);
+  auto biter = body->begin();
+
+  // Verify that the split loops are ordered correctly.
+  For* loop = dynamic_cast<For*>(*biter);
+  ++biter;
+  ASSERT_NE(loop, nullptr);
+  const IntImm* bound = dynamic_cast<const IntImm*>(loop->stop());
+  ASSERT_NE(bound, nullptr);
+  ASSERT_EQ(bound->value(), 7);
+
+  loop = dynamic_cast<For*>(*biter);
+  ++biter;
+  ASSERT_NE(loop, nullptr);
+  bound = dynamic_cast<const IntImm*>(loop->stop());
+  ASSERT_NE(bound, nullptr);
+  ASSERT_EQ(bound->value(), 4);
+
+  loop = dynamic_cast<For*>(*biter);
+  ASSERT_NE(loop, nullptr);
+  bound = dynamic_cast<const IntImm*>(loop->stop());
+  ASSERT_NE(bound, nullptr);
+  ASSERT_EQ(bound->value(), 12);
 }
 
 void testExprSplitWithTailNone() {
@@ -1141,7 +1188,7 @@ void testLoopNestReorderAxis1() {
   cg.call({stmt1_output});
 
   auto loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[0], loops[1]);
+  l.reorderAxis(loops[0], loops[1]);
   Stmt* stmt2 = Stmt::clone(l.root_stmt());
 
   ASSERT_NE(stmt1, stmt2);
@@ -1162,7 +1209,7 @@ void testLoopNestReorderAxis1() {
 
   // Reorder them back.
   loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[0], loops[1]);
+  l.reorderAxis(loops[0], loops[1]);
   Stmt* stmt3 = l.root_stmt();
 
   std::string order3 = loopOrderHelper.getOrder(stmt3);
@@ -1196,7 +1243,7 @@ void testLoopNestReorderPartialAxes() {
   cg.call({stmt1_output});
 
   auto loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[0], loops[1]);
+  l.reorderAxis(loops[0], loops[1]);
   ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "y,x,z,");
 
   Stmt* stmt2 = Stmt::clone(l.root_stmt());
@@ -1210,7 +1257,7 @@ void testLoopNestReorderPartialAxes() {
   }
 
   loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[1], loops[2]);
+  l.reorderAxis(loops[1], loops[2]);
   ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "y,z,x,");
 
   Stmt* stmt3 = Stmt::clone(l.root_stmt());
@@ -1247,7 +1294,7 @@ void testLoopNestReorderInternalAxis() {
   cg.call({stmt1_output});
 
   auto loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[2], loops[1]);
+  l.reorderAxis(loops[2], loops[1]);
   ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "w,y,x,z,");
 
   Stmt* stmt2 = l.root_stmt();
@@ -1283,7 +1330,7 @@ void testLoopNestReorderEnclosingAxis() {
   cg.call({stmt1_output});
 
   auto loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[0], loops[3]);
+  l.reorderAxis(loops[0], loops[3]);
   ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "z,x,y,w,");
 
   Stmt* stmt2 = l.root_stmt();
@@ -1307,7 +1354,7 @@ void testLoopNestReorderSameAxis() {
   Stmt* stmt1 = Stmt::clone(l.root_stmt());
 
   auto loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[1], loops[1]);
+  l.reorderAxis(loops[1], loops[1]);
   Stmt* stmt2 = Stmt::clone(l.root_stmt());
 
   std::ostringstream oss, oss2;
@@ -1376,7 +1423,7 @@ void testLoopNestReorderExtraStatements() {
    *
    */
 
-  l.reorderAxis(tensor, loops[1], loops[2]);
+  l.reorderAxis(loops[1], loops[2]);
   Stmt* stmt2 = Stmt::clone(l.root_stmt());
 
   std::ostringstream oss;
@@ -1429,7 +1476,7 @@ void testLoopNestReorderExtraStatements() {
    *
    */
   loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[0], loops[2]);
+  l.reorderAxis(loops[0], loops[2]);
   Stmt* stmt3 = Stmt::clone(l.root_stmt());
 
   std::ostringstream oss2;
@@ -1520,7 +1567,7 @@ void LoopNestReorderTestHelper(
   }
 
   loops = l.getLoopStmtsFor(c);
-  l.reorderAxis(c, loops[index1], loops[index2]);
+  l.reorderAxis(loops[index1], loops[index2]);
   Stmt* stmt2 = Stmt::clone(l.root_stmt());
 
   std::ostringstream oss, oss2;

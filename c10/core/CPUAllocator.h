@@ -41,7 +41,7 @@ C10_API void free_cpu(void* data);
 C10_API at::Allocator* GetCPUAllocator();
 // Sets the CPU allocator to the given allocator: the caller gives away the
 // ownership of the pointer.
-C10_API void SetCPUAllocator(at::Allocator* alloc);
+C10_API void SetCPUAllocator(at::Allocator* alloc, uint8_t priority = 0);
 
 // Get the Default CPU Allocator
 C10_API at::Allocator* GetDefaultCPUAllocator();
