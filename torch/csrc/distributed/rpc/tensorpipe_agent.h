@@ -63,7 +63,7 @@ class TensorPipeAgent : public RpcAgent {
     return metrics;
   }
 
-  void addGilWaitTime(const std::chrono::microseconds /* unused */) override {}
+  void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
 
  private:
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
