@@ -4,7 +4,7 @@ import torch
 class AutocastTestLists(object):
     # Supplies ops and arguments for test_autocast_* in test/test_cuda.py
     def __init__(self, dev):
-        super(AutocastTestLists, self).__init__()
+        super().__init__()
         n = 8
         # Utility arguments, created as one-element tuples
         pointwise0_fp16 = (torch.randn(n, dtype=torch.float16, device=dev),)

@@ -20,14 +20,23 @@ def num_profiled_runs(num_runs):
 
 class BaseTestClass(unittest.TestCase):
     def setUp(self):
-        # TODO: read the old value and restore it rather than always set to True
-        # on exit
+        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
+        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+
+        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
+        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
+        torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)
+        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         torch._C._jit_set_texpr_fuser_enabled(True)
 
     def tearDown(self):
-        torch._C._jit_set_texpr_fuser_enabled(False)
-        torch._C._jit_override_can_fuse_on_gpu(True)
+        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
+        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+
+        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
+        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
 
 class TestTensorExprFuser(BaseTestClass):
     def test_easy(self):
@@ -1010,7 +1019,8 @@ class TestTensorExprFuser(BaseTestClass):
             r = test(x, y, z, a, b)
             xn, yn, zn = [t.numpy() for t in (x, y, z)]
             np.testing.assert_allclose(r.numpy(), xn + yn * a + zn * b)
-            assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
+            # FIXME: interp.elapsed_value() also increments due to simplifier
+            assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 # FIXME: Blocked on profiling executor changes
 # def test_loop():
@@ -1028,7 +1038,7 @@ class TestTensorExprFuser(BaseTestClass):
 #    x, y, z = (torch.zeros(32, 32), torch.ones(32, 32), 4)
 #    test(x, y, z)
 #    r = test(x, y, z)
-#    assert llvm.elapsed_value == 1 or interp.elapsed_value() == 1
+#    assert llvm.elapsed_value == 1 or interp.elapsed_value() > 1
 
     def test_slice(self):
         def easy(x, y):
@@ -1046,7 +1056,8 @@ class TestTensorExprFuser(BaseTestClass):
         npr = a[0:512:2]
         npr = npr + npr
         np.testing.assert_allclose(npr.numpy(), x.numpy())
-        assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
+        # FIXME: interp.elapsed_value() also increments due to simplifier
+        assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 
     def test_unsqueeze(self):
@@ -1065,7 +1076,8 @@ class TestTensorExprFuser(BaseTestClass):
         npr = np.expand_dims(a, 0)
         npr = npr + npr
         np.testing.assert_allclose(npr, x.numpy())
-        assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
+        # FIXME: interp.elapsed_value() also increments due to simplifier
+        assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 
     def test_transpose(self):
@@ -1080,7 +1092,8 @@ class TestTensorExprFuser(BaseTestClass):
         ref = test(x, y, z)
         res = test(x, y, z)
         np.testing.assert_allclose(ref.numpy(), res.numpy())
-        assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
+        # FIXME: interp.elapsed_value() also increments due to simplifier
+        assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 
     def test_sliced_stride(self):
@@ -1095,7 +1108,8 @@ class TestTensorExprFuser(BaseTestClass):
         ref = test(x, y, z)
         res = test(x, y, z)
         np.testing.assert_allclose(ref.numpy(), res.numpy())
-        assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
+        # FIXME: interp.elapsed_value() also increments due to simplifier
+        assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")

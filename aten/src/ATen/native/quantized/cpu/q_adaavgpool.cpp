@@ -9,6 +9,8 @@
 #include <limits>
 #include <vector>
 
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+
 namespace at {
 namespace native {
 
@@ -227,11 +229,64 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
     return output;
   }
 }
+
+#ifdef USE_PYTORCH_QNNPACK
+Tensor qnnpack_adaptive_avg_pool2d(
+    const at::Tensor& input,
+    IntArrayRef output_size) {
+  std::array<int64_t, 2> kernel_size;
+  std::array<int64_t, 2> stride;
+  std::array<int64_t, 2> padding{0, 0};
+  bool ceil_mode{false};
+  bool count_include_pad{false};
+
+  const auto output_shape = get_output_shape(input, output_size);
+  auto output_height = output_shape[output_shape.size() - 2];
+  auto output_width = output_shape[output_shape.size() - 1];
+  auto input_height = input.sizes()[input.dim() - 2];
+  auto input_width = input.sizes()[input.dim() - 1];
+  stride[0] = input_height / output_height;
+  stride[1] = input_width / output_width;
+  // Given the constraint that input_height/width % output_height/width == 0
+  // stride and kernel size are same.
+  kernel_size[0] = stride[0];
+  kernel_size[1] = stride[1];
+
+  return at::native::qnnp_avgpool_helper::qnnpack_avg_pool2d(
+      input,
+      kernel_size,
+      stride,
+      padding,
+      ceil_mode,
+      count_include_pad,
+      c10::nullopt);
+}
+
+bool enable_qnnpack_for_ada_avgpool(
+    const at::Tensor& input,
+    IntArrayRef output_size) {
+  const auto output_shape = get_output_shape(input, output_size);
+  auto output_height = output_shape[output_shape.size() - 2];
+  auto output_width = output_shape[output_shape.size() - 1];
+  auto input_height = input.sizes()[input.dim() - 2];
+  auto input_width = input.sizes()[input.dim() - 1];
+
+  return !(input_width == output_width && input_height == output_height) &&
+      (input_height % output_height == 0) && (input_width % output_width == 0);
+}
+#endif
 } // namespace
 
 Tensor quantized_adaptive_avg_pool2d(
     const at::Tensor& input,
     IntArrayRef output_size) {
+#ifdef USE_PYTORCH_QNNPACK
+  if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
+      input.scalar_type() == kQUInt8 &&
+      enable_qnnpack_for_ada_avgpool(input, output_size)) {
+    return qnnpack_adaptive_avg_pool2d(input, output_size);
+  }
+#endif
   Tensor output;
   AT_DISPATCH_QINT_TYPES(
       input.scalar_type(), "quantized_adaptive_avg_pool2d", [&]() {

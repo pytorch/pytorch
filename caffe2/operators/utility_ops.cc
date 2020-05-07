@@ -345,6 +345,12 @@ OPERATOR_SCHEMA(ScatterAssign)
     .NumInputs(3)
     .NumOutputs(1)
     .EnforceInplace({{0, 0}})
+    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      out[0] = in[0];
+      return out;
+    })
     .SetDoc(R"DOC(
 Update slices of the tensor in-place by overriding current value.
 
@@ -1062,3 +1068,8 @@ OPERATOR_SCHEMA(Fail).NumInputs(0).NumOutputs(0);
 SHOULD_NOT_DO_GRADIENT(Fail);
 
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    GatherRanges,
+    "_caffe2::GatherRanges(Tensor data, Tensor ranges) -> (Tensor, Tensor)",
+    caffe2::GatherRangesOp<caffe2::CPUContext>)

@@ -29,15 +29,15 @@ struct TestCPUGenerator : public c10::GeneratorImpl {
   uint64_t value_;
 };
 
-Tensor& random_(Tensor& self, Generator generator) {
+Tensor& random_(Tensor& self, c10::optional<Generator> generator) {
   return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator>(self, generator);
 }
 
-Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, Generator generator) {
+Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> generator) {
   return at::native::templates::random_from_to_impl<native::templates::cpu::RandomFromToKernel, TestCPUGenerator>(self, from, to, generator);
 }
 
-Tensor& random_to(Tensor& self, int64_t to, Generator generator) {
+Tensor& random_to(Tensor& self, int64_t to, c10::optional<Generator> generator) {
   return random_from_to(self, 0, to, generator);
 }
 
@@ -53,7 +53,8 @@ size_t getInstanceCount() {
   return instance_count;
 }
 
-static auto registry = torch::RegisterOperators()
+void registerOps() {
+  static auto registry = torch::RegisterOperators()
       .op(torch::RegisterOperators::options()
         .schema("aten::random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(random_from_to), &random_from_to>(DispatchKey::CustomRNGKeyId))
@@ -63,8 +64,10 @@ static auto registry = torch::RegisterOperators()
       .op(torch::RegisterOperators::options()
         .schema("aten::random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(random_), &random_>(DispatchKey::CustomRNGKeyId));
+}
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  m.def("registerOps", &registerOps);
   m.def("createTestCPUGenerator", &createTestCPUGenerator);
   m.def("getInstanceCount", &getInstanceCount);
   m.def("identity", &identity);

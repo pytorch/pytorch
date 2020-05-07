@@ -26,7 +26,7 @@ bool test_optimizer_xor(Options options) {
       Linear(8, 1),
       Functional(torch::sigmoid));
 
-  const int64_t kBatchSize = 50;
+  const int64_t kBatchSize = 200;
   const int64_t kMaximumNumberOfEpochs = 3000;
 
   OptimizerClass optimizer(model->parameters(), options);
@@ -174,18 +174,15 @@ TEST(OptimTest, OptimizerAccessors) {
   optimizer_.state();
 }
 
-#define OLD_INTERFACE_WARNING_CHECK(func) \
-{ \
-  std::stringstream buffer;\
-  torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());\
-  func;\
-  ASSERT_EQ(\
-    torch::test::count_substr_occurrences(\
-      buffer.str(),\
-      "will be removed"\
-    ),\
-  1);\
-}
+#define OLD_INTERFACE_WARNING_CHECK(func)       \
+  {                                             \
+    torch::test::WarningCapture warnings;       \
+    func;                                       \
+    ASSERT_EQ(                                  \
+        torch::test::count_substr_occurrences(  \
+            warnings.str(), "will be removed"), \
+        1);                                     \
+  }
 
 struct MyOptimizerOptions : public OptimizerCloneableOptions<MyOptimizerOptions> {
   MyOptimizerOptions(double lr = 1.0) : lr_(lr) {};

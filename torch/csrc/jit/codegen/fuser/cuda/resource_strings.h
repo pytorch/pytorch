@@ -40,6 +40,7 @@ typedef unsigned char uint8_t;
 typedef signed char int8_t;
 typedef short int  int16_t;
 typedef long long int int64_t;
+typedef unsigned long long int uint64_t;
 ${HalfHeader}
 ${RandHeader}
 
@@ -171,14 +172,35 @@ ${type_declarations}
 extern "C" __global__
 void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
   ${RandInit}
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-        linearIndex < totalElements;
-        linearIndex += gridDim.x * blockDim.x) {
+  // check whether do vectorized load/store and allocate buffer
+  bool flag_vec4 = true;
+  ${tensorChecks}
+  if (flag_vec4) {
+    for (IndexType linearIndex = 4 * (blockIdx.x * blockDim.x + threadIdx.x);
+         linearIndex < totalElements;
+         linearIndex += 4 * gridDim.x * blockDim.x) {
+      // Convert `linearIndex` into an offset of tensor as it is:
+      ${tensorOffsets}
+      // load 4 at a time
+      ${kernelLoad}
+      #pragma unroll 4
+      for (int i=0; i<4; i++) {
+        // calculate the results
+        ${kernelBody_vec4}
+      }
+      // store 4 at a time
+      ${kernelStore}
+    }
+  } else {
+    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+         linearIndex < totalElements;
+         linearIndex += gridDim.x * blockDim.x) {
       // Convert `linearIndex` into an offset of tensor:
       ${tensorOffsets}
       // calculate the results
       ${kernelBody}
     }
+  }
 }
 )");
 

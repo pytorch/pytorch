@@ -81,15 +81,12 @@ class SparseLengthsFused4BitRowwiseFakeFP16Op final : public Operator<Context> {
     std::vector<float> rowTempSums[2];
     rowTempSums[0].resize(output_block_size);
     rowTempSums[1].resize(output_block_size);
-    std::vector<float> sumWeightedOffsets(2);
 
     const auto scale_bias_offset = 2 * sizeof(at::Half);
     const int64_t input_fused_block_size = input_block_size + scale_bias_offset;
     int64_t current = 0;
     for (int m = 0; m < output_size; ++m) {
       if (!use_fp16_for_embedding_only) {
-        sumWeightedOffsets[0] = 0.0;
-        sumWeightedOffsets[1] = 0.0;
         memset(rowTempSums[0].data(), 0, sizeof(float) * output_block_size);
         memset(rowTempSums[1].data(), 0, sizeof(float) * output_block_size);
       }
@@ -104,10 +101,9 @@ class SparseLengthsFused4BitRowwiseFakeFP16Op final : public Operator<Context> {
         int64_t idx = indices_data[current];
 
         int accIdx = 0;
-        // TODO: Perhaps there is a fix to use double buffer accumulation
-        // if (output_block_size % 2 == 0 && output_block_size <= 96) {
-        //          accIdx = i % 2;
-        //}
+        if (output_block_size % 2 == 0 && output_block_size <= 96) {
+          accIdx = i % 2;
+        }
 
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -174,13 +170,20 @@ class SparseLengthsFused4BitRowwiseFakeFP16Op final : public Operator<Context> {
         } else {
           std::vector<float> product(output_block_size);
           std::vector<float> scalev(output_block_size, scale);
+          std::vector<float> mBias(output_block_size, bias);
+          std::vector<float> mWeight(output_block_size, weight);
+
+          fake_fp16::fma_fp16(
+              output_block_size,
+              mBias.data(),
+              mWeight.data(),
+              rowTempSums[accIdx].data());
+
           fake_fp16::fma_fp16(
               output_block_size,
               scalev.data(),
               input_rounded.data(),
               rowTempSums[accIdx].data());
-
-          fake_fp16::fma_fp16(1, &weight, &bias, &sumWeightedOffsets[accIdx]);
         }
         ++current;
       }
@@ -192,27 +195,6 @@ class SparseLengthsFused4BitRowwiseFakeFP16Op final : public Operator<Context> {
         fbgemm::RoundToFloat16(
             reinterpret_cast<const float*>(out),
             out,
-            output_block_size,
-            FLAGS_caffe2_fbgemm_fake_fp16_clamp);
-
-        for (int j = 0; j < output_block_size; j++) {
-          out[j] += sumWeightedOffsets[0];
-        }
-
-        fbgemm::RoundToFloat16(
-            reinterpret_cast<const float*>(out),
-            reinterpret_cast<float*>(out),
-            output_block_size,
-            FLAGS_caffe2_fbgemm_fake_fp16_clamp);
-
-        // Fake fp16 rounding of out
-        for (int j = 0; j < output_block_size; j++) {
-          out[j] += sumWeightedOffsets[1];
-        }
-
-        fbgemm::RoundToFloat16(
-            reinterpret_cast<const float*>(out),
-            reinterpret_cast<float*>(out),
             output_block_size,
             FLAGS_caffe2_fbgemm_fake_fp16_clamp);
       }

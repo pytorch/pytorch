@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -28,6 +29,7 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
@@ -381,7 +383,7 @@ struct DifferentiableGraphOp {
     if (!t.defined()) {
       return t;
     }
-    return autograd::as_variable_ref(t).detach();
+    return t.detach();
   }
 
   void detach(IValue& v) const {
@@ -495,14 +497,12 @@ c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(Stack& stack) {
 
   struct Frame {
     explicit Frame(ExecutionPlan eplan)
-      : plan(std::move(eplan)),
-        state(plan.code) {
-    }
+        : plan(std::move(eplan)), state(plan.code) {}
     ExecutionPlan plan;
     InterpreterState state;
   };
   auto frame = std::make_shared<Frame>(
-    getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()));
+      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()));
   auto res = frame->state.runAsync(stack);
   last_executed_optimized_graph = frame->plan.graph;
   if (!res->completed()) {
@@ -659,7 +659,7 @@ GraphExecutor::GraphExecutor(
     std::shared_ptr<Graph> graph,
     std::string function_name)
     : pImpl(
-          getExecutorMode()
+          IsNewExecutorEnabled()
               ? dynamic_cast<GraphExecutorImplBase*>(
                     new ProfilingGraphExecutorImpl(
                         graph,
@@ -691,6 +691,13 @@ std::shared_ptr<Graph> GraphExecutor::graph() const {
 
 GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
+}
+
+TORCH_API bool IsNewExecutorEnabled() {
+  static const auto disable_new_executor =
+      std::getenv("TORCH_JIT_DISABLE_NEW_EXECUTOR");
+  return getExecutorMode() && FLAGS_torch_jit_enable_new_executor &&
+      !disable_new_executor;
 }
 
 void runRequiredPasses(const std::shared_ptr<Graph>& g) {
@@ -752,8 +759,8 @@ void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check) {
   // Run custom passes that different backends can register.
-  for (const auto& pass : getCustomPreFusionPasses()) {
-    pass(graph);
+  for (const auto& passPair : getCustomPrePasses()) {
+    passPair.first(graph);
   }
 
   // decomposition pass, decompose certain ops that will be used in the
@@ -774,9 +781,11 @@ void runNondiffOptimization(
 
   FuseGraph(graph, strict_fuser_check);
 
+  FuseTensorExprs(graph);
+
   // Run custom post-fusion passes
-  for (const auto& pass : getCustomPostFusionPasses()) {
-    pass(graph);
+  for (const auto& passPair : getCustomPostPasses()) {
+    passPair.first(graph);
   }
 }
 
@@ -791,8 +800,14 @@ void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
 
   // Unroll small loops, and eliminate expressions that are the same at every
   // iteration.
-  if (unroll)
+  if (unroll) {
     UnrollLoops(graph);
+    // run again with unrolled loops
+    RemoveListMutation(graph);
+    PeepholeOptimize(graph);
+    ConstantPropagation(graph);
+  }
+
   EliminateCommonSubexpression(graph);
 
   CheckInplace(graph);

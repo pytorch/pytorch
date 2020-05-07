@@ -16,7 +16,7 @@
 #include <TH/TH.h> // for USE_LAPACK
 
 #ifdef USE_FBGEMM
-#include "fbgemm/Fbgemm.h"
+#include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
 
 namespace at {
@@ -156,19 +156,5 @@ bool Context::setFlushDenormal(bool on) {
 Allocator* getCPUAllocator() {
   return getTHDefaultAllocator();
 }
-
-struct LegacyDeviceTypeInit : public LegacyDeviceTypeInitInterface {
-  LegacyDeviceTypeInit(LegacyDeviceTypeInitArgs) {}
-  void initCPU() const override {
-    globalContext();
-  }
-  void initCUDA() const override {
-    globalContext().lazyInitCUDA();
-  }
-  void initHIP() const override {
-    globalContext().lazyInitHIP();
-  }
-};
-REGISTER_LEGACY_TYPE_INIT(LegacyDeviceTypeInit);
 
 } // namespace at

@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/variable_tensor_list.h>
 
+C10_DECLARE_bool(torch_jit_enable_new_executor);
+
 namespace torch {
 namespace jit {
 struct GraphExecutorState;
@@ -62,6 +64,9 @@ struct TORCH_API GraphExecutor {
   explicit operator bool() const {
     return pImpl != nullptr;
   }
+  void reset() {
+    pImpl.reset();
+  }
   std::shared_ptr<Graph> graph() const;
   GraphExecutorState getDebugState();
 
@@ -82,6 +87,7 @@ TORCH_API std::atomic<bool>& getProfilingMode();
 TORCH_API std::atomic<bool>& getExecutorMode();
 TORCH_API std::atomic<size_t>& getNumProfiledRuns();
 TORCH_API std::atomic<size_t>& getBailoutDepth();
+TORCH_API bool IsNewExecutorEnabled();
 
 struct TORCH_API GraphOptimizerEnabledGuard {
   GraphOptimizerEnabledGuard(bool state)

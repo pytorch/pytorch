@@ -346,8 +346,8 @@ sampleMultinomialOnce(int64_t* dest,
   }
 }
 
-void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n_sample, const bool with_replacement, Generator generator) {
-  auto gen = get_generator_or_default<CUDAGenerator>(generator, cuda::detail::getDefaultCUDAGenerator());
+void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n_sample, const bool with_replacement, c10::optional<Generator> generator) {
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(generator, cuda::detail::getDefaultCUDAGenerator());
 
   int inputSize = self.dim();
   int64_t numDist =
@@ -376,7 +376,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
       // Uniform random samples in a separate kernel launch, into
       // temporarily allocated memory. The device RNG is thread-limited
       Tensor sampled = native::empty_cuda({numDist, n_sample}, self_v.options());
-      at::native::uniform_cuda_(sampled, 0.0, 1.0, generator);
+      at::native::uniform_(sampled, 0.0, 1.0, generator);
 
       dim3 block(numCategories < maxThreads ? numCategories : maxThreads);
       dim3 grid(numDist < numSM * 4 ? numDist : numSM * 4);
