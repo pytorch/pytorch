@@ -57,9 +57,9 @@ struct uniform_int_from_to_distribution {
       std::is_same<T, float>::value ||
       std::is_same<T, at::BFloat16>::value) && range_ >= 1ULL << 32)
     {
-      return uniform_int_from_to_transformation<T>(generator->random64(), range_, base_);
+      return transformation::uniform_int_from_to<T>(generator->random64(), range_, base_);
     } else {
-      return uniform_int_from_to_transformation<T>(generator->random(), range_, base_);
+      return transformation::uniform_int_from_to<T>(generator->random(), range_, base_);
     }
   }
 
@@ -76,7 +76,7 @@ struct uniform_int_full_range_distribution {
 
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
-    return uniform_int_full_range_transformation<T>(generator->random64());
+    return transformation::uniform_int_full_range<T>(generator->random64());
   }
 
 };
@@ -91,9 +91,9 @@ struct uniform_int_distribution {
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
     if (std::is_same<T, double>::value || std::is_same<T, int64_t>::value) {
-      return uniform_int_transformation<T>(generator->random64());
+      return transformation::uniform_int<T>(generator->random64());
     } else {
-      return uniform_int_transformation<T>(generator->random());
+      return transformation::uniform_int<T>(generator->random());
     }
   }
 
@@ -115,9 +115,9 @@ struct uniform_real_distribution {
   template <typename RNG>
   C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator){
     if(std::is_same<T, double>::value) {
-      return uniform_real_transformation<T>(generator->random64(), from_, to_);
+      return transformation::uniform_real<T>(generator->random64(), from_, to_);
     } else {
-      return uniform_real_transformation<T>(generator->random(), from_, to_);
+      return transformation::uniform_real<T>(generator->random(), from_, to_);
     }
   }
 
@@ -135,14 +135,14 @@ struct uniform_real_distribution {
 template <typename T>
 struct normal_distribution {
 
-  inline normal_distribution(T mean_in, T stdv_in) {
+  C10_HOST_DEVICE inline normal_distribution(T mean_in, T stdv_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in > 0);
     mean = mean_in;
     stdv = stdv_in;
   }
 
   template <typename RNG>
-  inline dist_acctype<T> operator()(RNG generator){
+  C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator){
     dist_acctype<T> ret;
 #if !defined(__CUDACC__) && !defined(__HIPCC__)
     // return cached values if available
@@ -213,16 +213,15 @@ struct bernoulli_distribution {
 template <typename T>
 struct geometric_distribution {
 
-  inline geometric_distribution(T p_in) {
-    TORCH_CHECK(p_in > 0 && p_in < 1);
+  C10_HOST_DEVICE inline geometric_distribution(T p_in) {
+    TORCH_CHECK_IF_NOT_ON_CUDA(p_in > 0 && p_in < 1);
     p = p_in;
   }
 
   template <typename RNG>
-  inline int operator()(RNG generator) {
+  C10_HOST_DEVICE inline T operator()(RNG generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
-    dist_acctype<T> sample = uniform(generator);
-    return static_cast<int>(::log(static_cast<T>(1.0)-sample) / ::log(p)) + 1;
+    return transformation::geometric<T>(uniform(generator), p);
   }
 
   private:
@@ -235,15 +234,14 @@ struct geometric_distribution {
 template <typename T>
 struct exponential_distribution {
 
-  inline exponential_distribution(T lambda_in) {
+  C10_HOST_DEVICE inline exponential_distribution(T lambda_in) {
     lambda = lambda_in;
   }
 
   template <typename RNG>
-  __ubsan_ignore_float_divide_by_zero__ inline T operator()(RNG generator) {
+  C10_HOST_DEVICE inline T operator()(RNG generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
-    dist_acctype<T> sample = uniform(generator);
-    return static_cast<T>(-1.0) / lambda * ::log(static_cast<T>(1.0)-sample);
+    return transformation::exponential<T>(uniform(generator), lambda);
   }
 
   private:
@@ -256,15 +254,15 @@ struct exponential_distribution {
 template <typename T>
 struct cauchy_distribution {
 
-  inline cauchy_distribution(T median_in, T sigma_in) {
+  C10_HOST_DEVICE inline cauchy_distribution(T median_in, T sigma_in) {
     median = median_in;
     sigma = sigma_in;
   }
 
   template <typename RNG>
-  inline T operator()(RNG generator) {
+  C10_HOST_DEVICE inline T operator()(RNG generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
-    return median + sigma * ::tan(static_cast<T>(M_PI) * (uniform(generator)-static_cast<T>(0.5)));
+    return transformation::cauchy<T>(uniform(generator), median, sigma);
   }
 
   private:
@@ -280,16 +278,16 @@ struct cauchy_distribution {
 template <typename T>
 struct lognormal_distribution {
 
-  inline lognormal_distribution(T mean_in, T stdv_in) {
-    TORCH_CHECK(stdv_in > 0);
+  C10_HOST_DEVICE inline lognormal_distribution(T mean_in, T stdv_in) {
+    TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in > 0);
     mean = mean_in;
     stdv = stdv_in;
   }
 
   template<typename RNG>
-  inline T operator()(RNG generator){
-    normal_distribution<T> normal(mean, stdv);
-    return ::exp(normal(generator));
+  C10_HOST_DEVICE inline T operator()(RNG generator){
+    normal_distribution<T> normal(0.0, 1.0);
+    return transformation::log_normal<T>(normal(generator), mean, stdv);
   }
 
   private:

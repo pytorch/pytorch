@@ -51,5 +51,56 @@ inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
   return at::_isnan(float(val));
 }
 
+template <typename T,
+          typename std::enable_if<std::is_same<T, double>::value, int>::type = 0>
+C10_HOST_DEVICE inline T exp(T x) {
+  return ::exp(x);
+}
+
+template <typename T,
+          typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
+C10_HOST_DEVICE inline T exp(T x) {
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  // use __expf fast approximation for peak bandwidth
+  return __expf(x);
+#else
+  return ::exp(x);
+#endif
+}
+
+template <typename T,
+          typename std::enable_if<std::is_same<T, double>::value, int>::type = 0>
+C10_HOST_DEVICE inline T log(T x) {
+  return ::log(x);
+}
+
+template <typename T,
+          typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
+C10_HOST_DEVICE inline T log(T x) {
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  // use __logf fast approximation for peak bandwidth
+  return __logf(x);
+#else
+  return ::log(x);
+#endif
+}
+
+template <typename T,
+          typename std::enable_if<std::is_same<T, double>::value, int>::type = 0>
+C10_HOST_DEVICE inline T tan(T x) {
+  return ::tan(x);
+}
+
+template <typename T,
+          typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
+C10_HOST_DEVICE inline T tan(T x) {
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  // use __tanf fast approximation for peak bandwidth
+  return __tanf(x);
+#else
+  return ::tan(x);
+#endif
+}
+
 } // namespace at
 

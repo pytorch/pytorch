@@ -10254,6 +10254,83 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaises(RuntimeError):
             torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
 
+    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
+    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_uniform_kstest(self, device, dtype):
+        from scipy import stats
+        size = 1000
+        for from_ in [-42, 0, 4.2]:
+            for to_ in [-4.2, 0, 42]:
+                if to_ > from_:
+                    t = torch.empty(size, dtype=dtype, device=device).uniform_(from_, to_)
+                    res = stats.kstest(t.cpu().to(torch.double), 'uniform', args=(from_, (to_ - from_)))
+                    self.assertTrue(res.statistic < 0.1)
+
+    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
+    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_normal_kstest(self, device, dtype):
+        from scipy import stats
+        size = 1000
+        for mean in [-10, 0, 50]:
+            for std in [1, 5, 10]:
+                t = torch.empty(size, dtype=dtype, device=device).normal_(mean=mean, std=std)
+                res = stats.kstest(t.cpu().to(torch.double), 'norm', args=(mean, std))
+                self.assertTrue(res.statistic < 0.1)
+
+    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
+    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_lognormal_kstest(self, device, dtype):
+        from scipy import stats
+        size = 1000
+        for mean in [-3, 0, 7]:
+            for std in [1, 5, 7]:
+                t = torch.empty(size, dtype=dtype, device=device).log_normal_(mean=mean, std=std)
+                res = stats.kstest(t.cpu().to(torch.double), 'lognorm', args=(std, 0, math.exp(mean)))
+                if dtype == torch.half:
+                    self.assertTrue(res.statistic < 0.3)
+                else:
+                    self.assertTrue(res.statistic < 0.1)
+
+    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
+    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_exponential_kstest(self, device, dtype):
+        from scipy import stats
+        size = 1000
+        for lambd in [0.5, 1.0, 5.0]:
+            t = torch.empty(size, dtype=dtype, device=device).exponential_(lambd=lambd)
+            res = stats.kstest(t.cpu().to(torch.double), 'expon', args=(0, 1 / lambd,))
+            self.assertTrue(res.statistic < 0.1)
+
+    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
+    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_cauchy_kstest(self, device, dtype):
+        from scipy import stats
+        size = 1000
+        for median in [-10, 0, 50]:
+            for sigma in [0.5, 1.0, 10.0]:
+                t = torch.empty(size, dtype=dtype, device=device).cauchy_(median=median, sigma=sigma)
+                res = stats.kstest(t.cpu().to(torch.double), 'cauchy', args=(median, sigma))
+                self.assertTrue(res.statistic < 0.1)
+
+    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_geometric_kstest(self, device, dtype):
+        from scipy import stats
+        size = 1000
+        for p in [0.2, 0.5, 0.8]:
+            t = torch.empty(size, dtype=dtype, device=device).geometric_(p=p)
+            actual = np.histogram(t.cpu().to(torch.double), np.arange(1, 100))[0]
+            expected = stats.geom(p).pmf(np.arange(1, 99)) * size
+            res = stats.chisquare(actual, expected)
+            self.assertEqual(res.pvalue, 1.0, 0.1)
+
     def test_empty_strided(self, device):
         for shape in [(2, 3, 4), (0, 2, 0)]:
             # some of these cases are pretty strange, just verifying that if as_strided
