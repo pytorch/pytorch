@@ -108,23 +108,23 @@ def hparams(hparam_dict=None, metric_dict=None):
             continue
         if isinstance(v, int) or isinstance(v, float):
             ssi.hparams[k].number_value = v
-            hps.append(HParamInfo(name=k, type=DataType.DATA_TYPE_FLOAT64))
+            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_FLOAT64")))
             continue
 
         if isinstance(v, string_types):
             ssi.hparams[k].string_value = v
-            hps.append(HParamInfo(name=k, type=DataType.DATA_TYPE_STRING))
+            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_STRING")))
             continue
 
         if isinstance(v, bool):
             ssi.hparams[k].bool_value = v
-            hps.append(HParamInfo(name=k, type=DataType.DATA_TYPE_BOOL))
+            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_BOOL")))
             continue
 
         if isinstance(v, torch.Tensor):
             v = make_np(v)[0]
             ssi.hparams[k].number_value = v
-            hps.append(HParamInfo(name=k, type=DataType.DATA_TYPE_FLOAT64))
+            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_FLOAT64")))
             continue
         raise ValueError('value should be one of int, float, str, bool, or torch.Tensor')
 
