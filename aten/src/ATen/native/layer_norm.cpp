@@ -165,7 +165,60 @@ Tensor quantized_layer_norm_impl(
     X.suggest_memory_format());
 
   if (M > 0) {
-    quantized_layer_norm_stub(kCPU, X, gamma, beta, M, N, eps, &Y);
+    bool affine_per_channel = false;
+    int num_channels = 1; // not relevant for LayerNorm
+    int num_groups = 1; // not relevant for LayerNorm
+    quantized_normalize_stub(kCPU, X, gamma, beta, affine_per_channel,
+        num_channels, num_groups, M, N, eps, &Y);
+  }
+  return Y;
+}
+
+Tensor quantized_group_norm_impl(
+    const Tensor& qx,
+    int64_t num_groups,
+    const Tensor& weight, // optional
+    const Tensor& bias, // optional
+    double eps,
+    double output_scale,
+    int64_t output_zero_point) {
+
+  const auto input_ndim = qx.dim();
+  TORCH_CHECK(
+      input_ndim >= 3,
+      "Expected normalized_shape to be at least 3-dimensional");
+  TORCH_CHECK(num_groups > 0, "Expected num_groups to be positive");
+
+  const auto input_shape = qx.sizes();
+  TORCH_CHECK(input_shape[1] % num_groups == 0,
+      "Expected channels to be divisible by groups");
+
+  const int64_t batches = input_shape[0];
+  const int64_t num_channels = input_shape[1];
+  const int64_t elements_per_batch = std::accumulate(
+      input_shape.cbegin() + 1,
+      input_shape.cend(),
+      1LL,
+      std::multiplies<int64_t>());
+
+  const int64_t M = batches * num_groups;
+  const int64_t N = elements_per_batch / num_groups;
+
+  const auto& qx_contig = qx.is_contiguous() ? qx : qx.contiguous();
+  const auto& weight_contig = weight.is_contiguous() ? weight : weight.contiguous();
+  const auto& bias_contig = bias.is_contiguous() ? bias : bias.contiguous();
+
+  Tensor Y = at::_empty_affine_quantized(
+    qx.sizes(),
+    qx.scalar_type(),
+    output_scale,
+    output_zero_point,
+    qx.suggest_memory_format());
+
+  if (M > 0) {
+    bool affine_per_channel = true;
+    quantized_normalize_stub(kCPU, qx_contig, weight_contig, bias_contig,
+        affine_per_channel, num_channels, num_groups, M, N, eps, &Y);
   }
   return Y;
 }
@@ -182,11 +235,22 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
     int64_t output_zero_point) {
       return quantized_layer_norm_impl(input, normalized_shape, weight, bias, eps, output_scale, output_zero_point);
   });
+  m.impl("group_norm", [](
+      Tensor qx,
+      int64_t num_groups,
+      Tensor weight,
+      Tensor bias,
+      double eps,
+      double output_scale,
+      int64_t output_zero_point) {
+    return quantized_group_norm_impl(
+        qx, num_groups, weight, bias, eps, output_scale, output_zero_point);
+  });
 }
 
 DEFINE_DISPATCH(LayerNormKernel);
 DEFINE_DISPATCH(LayerNormBackwardKernel);
-DEFINE_DISPATCH(quantized_layer_norm_stub);
+DEFINE_DISPATCH(quantized_normalize_stub);
 
 } // namespace native
 } // namespace at
