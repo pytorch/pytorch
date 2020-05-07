@@ -65,7 +65,6 @@ Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const T
   }
 
   if (result.numel() != 0) {
-    auto device_type = self_.device().type();
     at::_addmv_impl_(result, self_, mat, vec, beta, alpha);
   }
 
