@@ -100,25 +100,25 @@ class VulkanTensor final : public c10::intrusive_ptr_target {
   VulkanTensor(const VulkanTensor&) = default;
   VulkanTensor& operator=(const VulkanTensor&) = default;
 
-  inline std::vector<int64_t> sizes() const;
-  inline int64_t dim() const;
-  inline int64_t numel() const;
+  std::vector<int64_t> sizes() const;
+  int64_t dim() const;
+  int64_t numel() const;
 
-  inline bool hasStorage() const;
-  inline void allocateStorage();
-  inline void setDataFromHost(const float* inputData);
-  inline void copyDataToHost(float* outputData);
+  bool hasStorage() const;
+  void allocateStorage();
+  void setDataFromHost(const float* inputData);
+  void copyDataToHost(float* outputData);
 
-  inline bool hasBuffer() const;
-  inline VBuffer& buffer();
-  inline bool canBeImage() const;
-  inline bool hasImage() const;
-  inline VImage& image() const;
-  inline VImage& image();
+  bool hasBuffer() const;
+  VBuffer& buffer();
+  bool canBeImage() const;
+  bool hasImage() const;
+  VImage& image();
+  VImage& image() const;
 
  private:
-  inline std::shared_ptr<Impl> impl();
-  inline std::shared_ptr<const Impl> impl() const;
+  std::shared_ptr<Impl> impl();
+  std::shared_ptr<const Impl> impl() const;
   std::shared_ptr<Impl> pImpl;
 };
 

@@ -466,6 +466,12 @@ void clamp(
       VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
 
   output.image().bindStorageImage(descriptorSet, 0);
   input.image().bindShaderRead(descriptorSet, 1);
@@ -545,6 +551,12 @@ void addmm(
       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
 
   output.image().bindStorageImage(descriptorSet, 0);
   m1.image().bindShaderRead(descriptorSet, 1);

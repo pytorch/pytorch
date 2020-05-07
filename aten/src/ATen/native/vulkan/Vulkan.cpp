@@ -665,8 +665,9 @@ void createDescriptorSetLayoutSinglePool(
   std::vector<VkDescriptorPoolSize> poolSizes;
   uint32_t i = 0;
   for (const auto& descrType : descrTypes) {
-    bindings[i] = descriptorSetLayoutBinding(i, descrType);
-    poolSizes[i] = {descrType, 1};
+    bindings.push_back(descriptorSetLayoutBinding(i, descrType));
+    poolSizes.push_back(VkDescriptorPoolSize{descrType, 1});
+    i++;
   }
   createDescriptorSetLayout(device, bindings.data(), size, descrSetLayout);
   createDescriptorPool(
@@ -1034,6 +1035,10 @@ class VulkanTensor::Impl {
     return *(image_.get());
   }
 
+  VImage& image() const {
+    return const_cast<VulkanTensor::Impl*>(this)->image();
+  }
+
   void allocateStorage() {
     auto bufferSize = sizeof(float) * numel_;
     const auto d = dim();
@@ -1124,6 +1129,15 @@ bool VulkanTensor::canBeImage() const {
 bool VulkanTensor::hasImage() const {
   return impl()->hasImage();
 }
+
+VImage& VulkanTensor::image() const {
+  return impl()->image();
+}
+
+VImage& VulkanTensor::image() {
+  return impl()->image();
+}
+
 VulkanTensor::VulkanTensor(std::vector<int64_t> sizes)
     : pImpl(std::make_shared<Impl>(std::move(sizes))) {
   TORCH_CHECK(
