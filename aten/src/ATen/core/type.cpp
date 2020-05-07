@@ -952,9 +952,9 @@ void ClassType::unsafeRemoveMethod(const std::string& name) {
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   auto ptr = ClassType::create(name(), compilation_unit_);
   AT_ASSERT(numAttributes() == refined_slots.size());
-  for (size_t i = 0; i < attributeNames_.size(); ++i) {
-    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
-    ptr->addAttribute(attributeNames_[i], refined_slots[i]);
+  for (size_t i = 0; i < attributes_.size(); ++i) {
+    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributes_[i].getType()));
+    ptr->addAttribute(attributes_[i].getName(), refined_slots[i]);
   }
   // Copy methods over
   for (const auto& method : methods()) {
@@ -1086,11 +1086,8 @@ ClassType::ClassType(
     std::weak_ptr<CompilationUnit> cu,
     bool is_module)
     : NamedType(TypeKind::ClassType, std::move(name)),
-      compilation_unit_(std::move(cu)) {
-  if (is_module) {
-    parameterSlots_ = std::make_shared<std::vector<bool>>();
-    bufferWrittenSlots_ = std::make_shared<std::vector<bool>>();
-  }
+      compilation_unit_(std::move(cu)),
+      isModule_(is_module) {
 }
 
 const std::vector<torch::jit::Function*>& ClassType::methods() const {
@@ -1113,9 +1110,9 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
   }
 
   // Check no overlap with existing attributes
-  for (size_t i = 0; i < attributeNames_.size(); ++i) {
+  for (size_t i = 0; i < attributes_.size(); ++i) {
     TORCH_CHECK(
-        name != attributeNames_[i],
+        name != attributes_[i].getName(),
         "attempting to add ",
         what,
         " '",
@@ -1123,7 +1120,7 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
         "' to ",
         python_str(),
         " but an attribute field of the same name already exists with type ",
-        attributeTypes_[i]->python_str());
+        attributes_[i].getType()->python_str());
   }
 }
 
@@ -1132,15 +1129,26 @@ size_t ClassType::addAttribute(
     const TypePtr& type,
     bool is_parameter,
     bool was_registered_as_buffer) {
+
   std::string what = is_parameter ? "parameter" : "attribute";
   what += (was_registered_as_buffer? "buffer" : "not buffer");
 
   checkNotExist(name, what);
   checkNoAny(*this, what.c_str(), name, type);
 
-  size_t slot = attributeNames_.size();
-  attributeNames_.push_back(name);
-  attributeTypes_.push_back(type);
+  size_t slot = attributes_.size();
+
+  ATTRIBUTE_KIND_ENUM kind = ATTRIBUTE_KIND_ENUM::REGULAR_ATTRIBUTE;
+  if (is_parameter) {
+    kind = ATTRIBUTE_KIND_ENUM::PARAMETER;
+  } else if (was_registered_as_buffer) {
+    kind = ATTRIBUTE_KIND_ENUM::BUFFER;
+  }
+
+  AttributeType attributeType(kind, type, name);
+
+  attributes_.push_back(attributeType);
+
   if (is_parameter) {
     TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter to a non module");
     TORCH_CHECK(
@@ -1155,22 +1163,15 @@ size_t ClassType::addAttribute(
   if (was_registered_as_buffer) {
       // TODO: Check is_module
       // TODO: check type is tensor
+      // TODO: Check is not also parameter
   }
-  if (is_module()) {
-    parameterSlots_->push_back(is_parameter);
-    bufferWrittenSlots_->push_back(was_registered_as_buffer);
-  }
+
   return slot;
 }
 
 void ClassType::unsafeRemoveAttribute(const std::string& name) {
   auto slot = getAttributeSlot(name);
-  attributeNames_.erase(attributeNames_.begin() + slot);
-  attributeTypes_.erase(attributeTypes_.begin() + slot);
-  if (is_module()) {
-    parameterSlots_->erase(parameterSlots_->begin() + slot);
-    bufferWrittenSlots_->erase(bufferWrittenSlots_->begin() + slot);
-  }
+  attributes_.erase(attributes_.begin() + slot);
 }
 
 size_t ClassType::addConstant(const std::string& name, const IValue& value) {

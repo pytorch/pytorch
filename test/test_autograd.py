@@ -5266,6 +5266,13 @@ class TestAutogradFunctional(TestCase):
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
 
+    def test_min_max_median_backprops_to_single_value(self, device):
+        for f in [torch.min, torch.max, torch.median]:
+            x = torch.tensor([1., 0., 1., 0., 1., 0.], device=device, requires_grad=True)
+            y = f(x)
+            y.backward()
+            self.assertEqual(x.grad.sum(), 1.)
+
     # skip this test if running on rocm, because in cdist
     # we use __shfl_down_sync on CUDA for fast reduction
     # and it gives incorrect results on rocm platform
@@ -5300,7 +5307,6 @@ class TestAutogradDeviceType(TestCase):
             x = x - (((x - y) < eps).float() * 2 * eps)
             x.requires_grad = True
             y.requires_grad = True
-            f_args_variable = (x, y)
             dist = torch.cdist(x, y, p=2)
             # Do a backward pass to check that it is valid for large
             # matrices
@@ -5315,6 +5321,21 @@ class TestAutogradDeviceType(TestCase):
         _test_cdist_for_size((1, 1), (S, 1))
         _test_euclidean_large_cdist((2000, 5))
 
+    def test_cdist_same_inputs(self, device):
+        # Test to detect issues in cdist gradient calculation
+        # When the distances are 0
+        sizex = (1, 27, 32)
+        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+            x = torch.randn(sizex, device=device, dtype=torch.float)
+            dist_grad = torch.randn((1, 27, 27), device=device, dtype=torch.float)
+            y = x.clone()
+            eps = 1e-6
+            x.requires_grad = True
+            d = torch.cdist(x, y)
+            d.backward(dist_grad)
+            # Check that the backward passs does not contain invalid 
+            # values such as nan or inf
+            assert torch.isfinite(x.grad).all()
 
     def test_parameter_resize(self, device):
         asd = torch.nn.Parameter(torch.ones(16, device=device))

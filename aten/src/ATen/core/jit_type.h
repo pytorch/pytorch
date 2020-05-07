@@ -55,7 +55,8 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(ScalarTypeType)         \
   _(AnyListType)            \
   _(AnyTupleType)           \
-  _(AnyClassType)
+  _(AnyClassType)           \
+  _(AttributeType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1600,6 +1601,109 @@ CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
 CAFFE2_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type);
 
+enum ATTRIBUTE_KIND_ENUM {
+  BUFFER,
+  PARAMETER,
+  REGULAR_ATTRIBUTE
+};
+
+static const std::string attribute_name_from_enum(ATTRIBUTE_KIND_ENUM ake) {
+  switch (ake) {
+  case BUFFER: return "BUFFER";
+  case PARAMETER: return "PARAMETER";
+  case REGULAR_ATTRIBUTE: return "REGULAR_ATTRIBUTE";
+  }
+  TORCH_CHECK(false, "Unexpeted attribute kind");
+  return std::string();
+}
+
+struct AttributeType;
+using AttributeTypePtr = std::shared_ptr<AttributeType>;
+
+struct CAFFE2_API AttributeType : public NamedType {
+  public:
+  AttributeType(ATTRIBUTE_KIND_ENUM kind,
+  TypePtr attributeType,
+  std::string attributeName) : NamedType(TypeKind::ClassType, attributeName),
+    kind_(kind),
+    attributeType_(std::move(attributeType)),
+    attributeName_(std::move(attributeName)) {}
+
+  ATTRIBUTE_KIND_ENUM getKind() const {
+    return kind_;
+  }
+
+  TypePtr getType() const {
+    return attributeType_;
+  }
+
+  std::string getName() const {
+    return attributeName_;
+  }
+
+  std::string str() const override {
+    return python_str(nullptr);
+  };
+
+  std::string python_str(const TypePrinter& printer) const {
+    if (printer) {
+      // the printer can return nullopt to fall through to the default impl
+      if (auto renamed = printer(shared_from_this())) {
+        return *renamed;
+      }
+    }
+    return python_str_impl(printer);
+  }
+
+  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+    std::stringstream ss;
+    ss << "Attribute: ";
+    ss << "Type: [" << getType()->python_str(printer) << "]";
+    ss << "Name: [" << getName() << "]";
+    ss << " Kind: [" << attribute_name_from_enum(getKind()) << "]";
+    return ss.str();
+  }
+
+  TypeKind kind() const {
+    return TypeKind::AttributeType;
+  }
+
+  bool operator==(const Type& rhs) const override {
+    if (auto user_rhs = rhs.cast<AttributeType>()) {
+      const auto& lhs_name = getName();
+      const auto& rhs_name = user_rhs->getName();
+
+      if (lhs_name != rhs_name) {
+        return false;
+      }
+
+      const auto& lhs_type = getType();
+      const auto& rhs_type = user_rhs->getType();
+
+      if (lhs_type != rhs_type) {
+        return false;
+      }
+
+      const auto& lhs_kind = getKind();
+      const auto& rhs_kind = user_rhs->getKind();
+
+      if (lhs_kind != rhs_kind) {
+        return false;
+      }
+
+      return true;
+    }
+    return false;
+  }
+
+  static const TypeKind Kind = TypeKind::AttributeType;
+
+  private:
+  ATTRIBUTE_KIND_ENUM kind_;
+  TypePtr attributeType_;
+  std::string attributeName_;
+};
+
 /**
  * User Defined Types
  */
@@ -1634,19 +1738,18 @@ struct CAFFE2_API ClassType : public NamedType {
   const std::vector<torch::jit::Function*>& methods() const;
 
   TypePtr findAttribute(const std::string& name) const {
-    TORCH_INTERNAL_ASSERT(attributeNames_.size() == attributeTypes_.size());
     size_t pos = 0;
-    for (const auto& attr : attributeNames_) {
-      if (name == attr) {
+    for (const auto& attr : attributes_) {
+      if (name == attr.getName()) {
         break;
       }
       ++pos;
     }
 
-    if (pos >= attributeNames_.size()) {
+    if (pos >= attributes_.size()) {
       return nullptr;
     }
-    return attributeTypes_[pos];
+    return attributes_[pos].getType();
   }
 
   TypePtr getAttribute(const std::string& name) const {
@@ -1661,20 +1764,17 @@ struct CAFFE2_API ClassType : public NamedType {
   }
 
   size_t numAttributes() const {
-    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
-    return attributeNames_.size();
+    return attributes_.size();
   }
 
-  const TypePtr& getAttribute(size_t slot) const {
-    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
-    AT_ASSERT(slot < attributeTypes_.size());
-    return attributeTypes_[slot];
+  const TypePtr getAttribute(size_t slot) const {
+    AT_ASSERT(slot < attributes_.size());
+    return attributes_.at(slot).getType();
   }
 
-  const std::string& getAttributeName(size_t slot) const {
-    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
-    AT_ASSERT(slot < attributeTypes_.size());
-    return attributeNames_[slot];
+  const std::string getAttributeName(size_t slot) const {
+    AT_ASSERT(slot < attributes_.size());
+    return attributes_[slot].getName();
   }
 
   void checkNotExist(const std::string& name, const std::string& what) const;
@@ -1683,10 +1783,9 @@ struct CAFFE2_API ClassType : public NamedType {
   // When emitting instructions we specify the slot so that attribute access is
   // a constant lookup
   c10::optional<size_t> findAttributeSlot(const std::string& name) const {
-    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     size_t slot = 0;
-    for (const auto& attr : attributeNames_) {
-      if (name == attr) {
+    for (const auto& attr : attributes_) {
+      if (name == attr.getName()) {
         return slot;
       }
       slot++;
@@ -1707,10 +1806,10 @@ struct CAFFE2_API ClassType : public NamedType {
 
   bool hasAttribute(const std::string& name) const {
     return std::find_if(
-               attributeNames_.cbegin(),
-               attributeNames_.cend(),
-               [&](const std::string& attr) { return attr == name; }) !=
-        attributeNames_.cend();
+               attributes_.cbegin(),
+               attributes_.cend(),
+               [&](const AttributeType& attr) { return attr.getName() == name; }) !=
+        attributes_.cend();
   }
 
   size_t addAttribute(
@@ -1754,14 +1853,6 @@ struct CAFFE2_API ClassType : public NamedType {
       name,
       "'");
     return *slot_idx;
-  }
-
-  at::ArrayRef<std::string> attributeNames() const {
-    return attributeNames_;
-  }
-
-  at::ArrayRef<TypePtr> containedTypes() const override {
-    return attributeTypes_;
   }
 
   bool hasConstant(const std::string& name) const {
@@ -1835,9 +1926,9 @@ struct CAFFE2_API ClassType : public NamedType {
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     auto ptr = ClassType::create(name(), compilation_unit_);
     AT_ASSERT(numAttributes() == contained_types.size());
-    for(size_t i = 0; i < attributeNames_.size(); ++i) {
-      AT_ASSERT(attributeTypes_[i]->isSubtypeOf(contained_types[i]));
-      ptr->addAttribute(attributeNames_[i], contained_types[i]);
+    for(size_t i = 0; i < attributes_.size(); ++i) {
+      AT_ASSERT(attributes_[i].getType()->isSubtypeOf(contained_types[i]));
+      ptr->addAttribute(attributes_[i].getName(), contained_types[i]);
     }
     // Copy methods over
     for (const auto& method : methods()) {
@@ -1847,19 +1938,23 @@ struct CAFFE2_API ClassType : public NamedType {
   }
 
   bool is_module() const override {
-    return bool(parameterSlots_);
+    return isModule_;
+  }
+
+  const std::vector<AttributeType>& getAllAttributes() const {
+    return attributes_;
   }
 
   bool is_parameter(size_t slot) const {
     TORCH_INTERNAL_ASSERT(
         is_module(), "asking for parameterSlots of non-Module");
-    return parameterSlots_->at(slot);
+    return attributes_.at(slot).getKind() == ATTRIBUTE_KIND_ENUM::PARAMETER;
   }
 
   bool is_buffer_written_attribute(size_t slot) const {
     TORCH_INTERNAL_ASSERT(
         is_module(), "asking for bufferWrittenSlots of non-Module");
-    return bufferWrittenSlots_->at(slot);
+    return attributes_.at(slot).getKind() == ATTRIBUTE_KIND_ENUM::BUFFER;
   }
 
   void addMethod(torch::jit::Function* method);
@@ -1907,8 +2002,10 @@ struct CAFFE2_API ClassType : public NamedType {
   // anymore.
   // TODO: This is better represented as an OrderedDict, but alas it is not yet
   // available from c10
-  std::vector<std::string> attributeNames_;
-  std::vector<TypePtr> attributeTypes_;
+
+  // std::vector<std::string> attributeNames_;
+  // std::vector<TypePtr> attributeTypes_;
+
   // Mapping of constant names -> their value.
   std::vector<std::string> constantNames_;
   std::vector<IValue> constantValues_;
@@ -1917,13 +2014,16 @@ struct CAFFE2_API ClassType : public NamedType {
 
   // if present, this class inherits from torch.nn.Module
   // and these are the indices of the attributes which are parameters
-  std::shared_ptr<std::vector<bool>> parameterSlots_;
+  // std::shared_ptr<std::vector<bool>> parameterSlots_;
   // TODO - a comment
-  std::shared_ptr<std::vector<bool>> bufferWrittenSlots_;
+  // std::shared_ptr<std::vector<bool>> bufferWrittenSlots_;
+
+  std::vector<AttributeType> attributes_;
 
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;
 
+  bool isModule_ = false;
 };
 
 struct InterfaceType;

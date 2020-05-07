@@ -153,7 +153,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
     case at::ScalarType::Bool:
-      return e;
+      return cast<bool>(e);
     default:
       throw unsupported_dtype();
   }
