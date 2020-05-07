@@ -765,10 +765,10 @@ class TestDistributions(TestCase):
             expected = torch.tensor(expected)
             d = dist(**params)
             actual = d.enumerate_support(expand=False)
-            self.assertEqual(actual, expected)
+            self.assertEqualIgnoreType(actual, expected)
             actual = d.enumerate_support(expand=True)
             expected_with_expand = expected.expand((-1,) + d.batch_shape + d.event_shape)
-            self.assertEqual(actual, expected_with_expand)
+            self.assertEqualIgnoreType(actual, expected_with_expand)
 
     def test_repr(self):
         for Dist, params in EXAMPLES:
@@ -1052,7 +1052,7 @@ class TestDistributions(TestCase):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         total_count = torch.tensor([[4, 7], [3, 8]])
         bin0 = Binomial(total_count, torch.tensor(1.))
-        self.assertEqual(bin0.sample(), total_count)
+        self.assertEqualIgnoreType(bin0.sample(), total_count)
         bin1 = Binomial(total_count, torch.tensor(0.5))
         samples = bin1.sample(torch.Size((100000,)))
         self.assertTrue((samples <= total_count.type_as(samples)).all())
@@ -1130,7 +1130,7 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
 
         # sample check for extreme value of probs
-        self.assertEqual(Multinomial(total_count, s).sample(),
+        self.assertEqualIgnoreType(Multinomial(total_count, s).sample(),
                          torch.tensor([[total_count, 0], [0, total_count]]))
 
         # check entropy computation
