@@ -1,5 +1,8 @@
 #pragma once
 
+// DO NOT DEFINE STATIC DATA IN THIS HEADER!
+// See Note [Do not compile initializers with AVX]
+
 #include <c10/util/complex_type.h>
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
@@ -17,7 +20,6 @@ namespace {
 template <> class Vec256<c10::complex<double>> {
 private:
   __m256d values;
-  static const Vec256<c10::complex<double>> ones;
 public:
   using value_type = c10::complex<double>;
   static constexpr int size() {
@@ -439,14 +441,12 @@ Vec256<c10::complex<double>> inline operator^(const Vec256<c10::complex<double>>
   return _mm256_xor_pd(a, b);
 }
 
-const Vec256<c10::complex<double>> Vec256<c10::complex<double>>::ones(_mm256_set1_pd(1.0));
-
 Vec256<c10::complex<double>> Vec256<c10::complex<double>>::eq(const Vec256<c10::complex<double>>& other) const {
-  return (*this == other) & Vec256<c10::complex<double>>::ones;
+  return (*this == other) & Vec256<c10::complex<double>>(_mm256_set1_pd(1.0));
 }
 
 Vec256<c10::complex<double>> Vec256<c10::complex<double>>::ne(const Vec256<c10::complex<double>>& other) const {
-  return (*this != other) & Vec256<c10::complex<double>>::ones;
+  return (*this != other) & Vec256<c10::complex<double>>(_mm256_set1_pd(1.0));
 }
 
 #endif
