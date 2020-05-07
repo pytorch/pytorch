@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/python/python_custom_class.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 
+#include <fmt/format.h>
+
 namespace torch {
 namespace jit {
 
@@ -9,7 +11,7 @@ struct CustomObjectProxy;
 
 py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
   auto instance =
-      script::Object(at::ivalue::Object::create(class_type_, /*numSlots=*/1));
+      Object(at::ivalue::Object::create(class_type_, /*numSlots=*/1));
   return invokeScriptMethodFromPython(
       instance, "__init__", std::move(args), std::move(kwargs));
 }
@@ -28,19 +30,23 @@ void initPythonCustomClassBindings(PyObject* module) {
   // code object in turn calls __init__. Rather than calling __init__
   // directly, we need a wrapper that at least returns the instance
   // rather than the None return value from __init__
-  m.def("_get_custom_class_python_wrapper", [](const std::string& qualname) {
-    auto cu = classCU();
-    std::string full_qualname = "__torch__.torch.classes." + qualname;
-    c10::NamedTypePtr named_type = cu->get_type(full_qualname);
-    if (!named_type || !named_type->cast<ClassType>()) {
-      std::stringstream err;
-      err << "Class " << qualname << " not registered!";
-      throw std::runtime_error(err.str());
-    }
-    c10::ClassTypePtr class_type = named_type->cast<ClassType>();
-    return ScriptClass(
-        c10::StrongTypePtr(std::move(cu), std::move(class_type)));
-  });
+  m.def(
+      "_get_custom_class_python_wrapper",
+      [](const std::string& ns, const std::string& qualname) {
+        std::string full_qualname =
+            "__torch__.torch.classes." + ns + "." + qualname;
+        auto named_type = getCustomClass(full_qualname);
+        TORCH_CHECK(
+            named_type,
+            fmt::format(
+                "Tried to instantiate class '{}.{}', but it does not exist! "
+                "Ensure that it is registered via torch::jit::class_",
+                ns,
+                qualname));
+        c10::ClassTypePtr class_type = named_type->cast<ClassType>();
+        return ScriptClass(c10::StrongTypePtr(
+            std::shared_ptr<CompilationUnit>(), std::move(class_type)));
+      });
 }
 
 } // namespace jit

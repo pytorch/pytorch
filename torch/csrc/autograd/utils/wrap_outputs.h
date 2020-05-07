@@ -49,12 +49,16 @@ inline PyObject* wrap(THPDtype *dtype) {
 }
 
 inline PyObject* wrap(at::ScalarType scalarType) {
-  return wrap(getDtype(scalarType));
+  return wrap(getTHPDtype(scalarType));
 }
 
 inline PyObject* wrap(THPLayout *layout) {
   Py_INCREF(layout);
   return (PyObject*)layout;
+}
+
+inline PyObject* wrap(at::Layout layout) {
+  return wrap(getTHPLayout(layout));
 }
 
 inline PyObject* wrap(at::Tensor tensor) {
@@ -185,4 +189,13 @@ inline PyObject* wrap(at::IntArrayRef list) {
   }
   return r.release();
 }
+
+inline PyObject* wrap(std::tuple<float, int64_t> tensors) {
+  auto r = THPObjectPtr{PyTuple_New(2)};
+  if (!r) throw python_error();
+  PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 1, wrap(std::move(std::get<1>(tensors))));
+  return r.release();
+}
+
 }}} // namespace torch::autograd::utils

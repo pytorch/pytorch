@@ -1,13 +1,13 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <torch/library.h>
 
 #include <algorithm>
 
@@ -142,8 +142,10 @@ Tensor quantized_relu6_(Tensor& qx) {
     using Vec = Vec256<scalar_t>;
     auto iter = TensorIterator::unary_op(qx, qx);
     auto zero_point_vec = Vec(scalar_t(zero_point));
-    scalar_t six = at::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(),
-                                              /*value=*/6.0);
+    scalar_t six = at::native::quantize_val<scalar_t>(
+        qx.q_scale(),
+        qx.q_zero_point(),
+        /*value=*/6.0);
     auto six_vec = Vec(six);
     cpu_kernel_vec(
         iter,
@@ -157,9 +159,9 @@ Tensor quantized_relu6_(Tensor& qx) {
   return qx;
 }
 
-class QRelu6 final : public c10::OperatorKernel {
+class QRelu6 final {
  public:
-  Tensor operator()(Tensor qx, bool inplace) {
+  static Tensor run(Tensor qx, bool inplace) {
     if (inplace) {
       return quantized_relu6_(qx);
     } else {
@@ -168,9 +170,10 @@ class QRelu6 final : public c10::OperatorKernel {
   }
 };
 
-static auto registry = c10::RegisterOperators()
-.op("quantized::relu6(Tensor qx, bool inplace=False) -> Tensor",
-    c10::RegisterOperators::options().kernel<QRelu6>(DispatchKey::QuantizedCPUTensorId));
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("relu6", QRelu6::run);
+}
+
 } // namespace
 
 }}  // namespace at::native

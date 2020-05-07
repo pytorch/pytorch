@@ -286,11 +286,15 @@ void TensorIterator::allocate_outputs() {
     if (!op.tensor.defined()) {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
       int element_size = elementSize(op.target_dtype);
-      if (requires_channels_last_output_ && ndim() == 4) {
+      if ((requires_channels_last_output_ && ndim() == 4) ||
+          (requires_channels_last_3d_output_ && ndim() == 5)) {
         auto tensor_shape = invert_perm(shape_);
         op.tensor = at::empty(tensor_shape, op.options());
-        op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(
-            MemoryFormat::ChannelsLast);
+        if (requires_channels_last_output_) {
+          op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
+        } else {
+          op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast3d);
+        }
         // As we are allocating output after permutations is done, we need to
         // make sure that operand's strides are matching element size and
         // dimensions permutations which are stored in _perm
@@ -522,18 +526,18 @@ int TensorIterator::num_reduce_dims() const {
     }                                                                     \
   }
 
-void TensorIterator::for_each(loop_t loop) {
-  for_each(LOOP_WRAPPER(ntensors(), loop));
+void TensorIterator::for_each(loop_t loop, int64_t grain_size) {
+  for_each(LOOP_WRAPPER(ntensors(), loop), grain_size);
 }
 
-void TensorIterator::for_each(loop2d_t loop) {
+void TensorIterator::for_each(loop2d_t loop, int64_t grain_size) {
   int64_t numel = this->numel();
   if (numel == 0) {
     return;
   } else if (numel < internal::GRAIN_SIZE || at::get_num_threads() == 1) {
     return serial_for_each(loop, {0, numel});
   } else {
-    at::parallel_for(0, numel, internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
+    at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
       serial_for_each(loop, {begin, end});
     });
   }
@@ -634,7 +638,7 @@ void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
   for (auto& op : operands_) {
     op.data = ((char*)op.data) + op.stride_bytes[dim] * start;
   }
-  if (size == 1) {
+  if (size == 1 && !is_reduction_) {
     coalesce_dimensions();
   }
 }
@@ -764,6 +768,8 @@ void TensorIterator::check_mem_overlaps() {
 }
 
 void TensorIterator::compute_shape() {
+  if (static_shape_) return;
+
   all_ops_same_shape_ = true;
   bool has_scalars = false;
   bool has_tensors = false;
@@ -803,8 +809,11 @@ void TensorIterator::compute_shape() {
         tensor.resize_(shape_);
         if (requires_channels_last_output_ && tensor.dim() == 4) {
           // Temporary stick to 4d tensor, will update with arbitrary batched later on
-          tensor.unsafeGetTensorImpl()->empty_tensor_restride(
-              MemoryFormat::ChannelsLast);
+          tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
+        }
+        else if (requires_channels_last_3d_output_ && tensor.dim() == 5) {
+          // Temporary stick to 5d tensor, will update with arbitrary batched later on
+          tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast3d);
         }
         continue;
       }
@@ -817,7 +826,7 @@ void TensorIterator::compute_shape() {
 void TensorIterator::compute_strides() {
   for (auto& op : operands_) {
     if (op.tensor.defined()) {
-      auto original_shape = op.tensor.sizes();
+      IntArrayRef original_shape = static_shape_ ? shape_ : op.tensor.sizes();
       auto original_stride = op.tensor.strides();
       auto element_size_in_bytes = op.tensor.element_size();
       auto offset = ndim() - original_shape.size();
@@ -838,9 +847,15 @@ void TensorIterator::compute_strides() {
 
 void TensorIterator::analyze_memory_format() {
   for (auto& op : operands_) {
-    if (op.tensor.defined() &&
-        op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
-      requires_channels_last_output_ = true;
+    if (op.tensor.defined()) {
+      if (!requires_channels_last_output_ &&
+          op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
+        requires_channels_last_output_ = true;
+      }
+      else if (!requires_channels_last_3d_output_ &&
+          op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast3d) {
+        requires_channels_last_3d_output_ = true;
+      }
     }
   }
 }
@@ -961,7 +976,7 @@ bool TensorIterator::fast_set_up() {
         break;
       }
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unsupported fast setup type", std::to_string((int)setup_type));
+      TORCH_INTERNAL_ASSERT(false, "Unsupported fast setup type", c10::to_string((int)setup_type));
   }
   //coalescing dimensions consists of collapsing dimensions to 1 (we are limited to contiguous no-broadcast cases here)
   if (ndim() > 1){
@@ -1061,7 +1076,11 @@ void TensorIterator::build() {
   }
 
   // zero out offsets
-  view_offsets_ = DimVector(ndim(), 0);
+  // If the tensor is a scalar, we leave room for it
+  // So index translations in reduction can access
+  // a valid value for the offset
+  int64_t ndim_offsets = (ndim() ? ndim() : 1);
+  view_offsets_ = DimVector(ndim_offsets, 0);
 }
 
 SplitUntil32Bit TensorIterator::with_32bit_indexing() const {

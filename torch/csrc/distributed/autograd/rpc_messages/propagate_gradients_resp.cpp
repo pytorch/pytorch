@@ -4,7 +4,7 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
-rpc::Message PropagateGradientsResp::toMessage() && {
+rpc::Message PropagateGradientsResp::toMessageImpl() && {
   return rpc::Message({}, {}, rpc::MessageType::BACKWARD_AUTOGRAD_RESP);
 }
 
