@@ -42,7 +42,7 @@ class Unpickler {
       TypeResolver type_resolver,
       ObjLoader obj_loader,
       std::function<at::DataPtr(const std::string&)> read_record,
-      c10::optional<at::Device> device)
+      c10::optional<Device> device)
       : reader_(reader),
         tensor_table_(nullptr),
         type_resolver_(std::move(type_resolver)),
@@ -137,7 +137,7 @@ class Unpickler {
   IValue empty_tuple_;
 
   std::function<at::DataPtr(const std::string&)> read_record_;
-  c10::optional<at::Device> device_;
+  c10::optional<Device> device_;
 
   // See [type tag serialization]
   uint64_t version_;

@@ -162,15 +162,15 @@ class TORCH_API TensorExprKernel {
 
   std::string getCodegenName(BackendType backendType);
   void codegenRun(
-      at::Device device,
+      Device device,
       const std::vector<CodeGen::CallArg>& runArgs);
 
   std::vector<CodeGen::CallArg> prepareRunArgs(
       const at::ArrayRef<IValue>& inputs,
       std::vector<at::Tensor>& outputs,
-      at::Device device);
-  BackendType inferBackendTypeFromDevice(at::Device device);
-  at::Device pickDeviceType(const at::ArrayRef<IValue>& inputs);
+      Device device);
+  BackendType inferBackendTypeFromDevice(Device device);
+  Device pickDeviceType(const at::ArrayRef<IValue>& inputs);
 
   void bindInput(const torch::jit::Value* input);
 

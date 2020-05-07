@@ -1243,7 +1243,7 @@ static void checkInputs(
   }
 }
 
-at::Device TensorExprKernel::pickDeviceType(
+Device TensorExprKernel::pickDeviceType(
     const at::ArrayRef<IValue>& inputs) {
   for (auto const& input : inputs) {
     if (input.isTensor()) {
@@ -1254,7 +1254,7 @@ at::Device TensorExprKernel::pickDeviceType(
 }
 
 TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
-    at::Device device) {
+    Device device) {
   BackendType backendType = BackendType::kUninitialized;
   if (device.type() == at::kCUDA) {
     backendType = kCudaCodeGen;
@@ -1389,7 +1389,7 @@ void TensorExprKernel::run(Stack& stack) {
 std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs,
-    at::Device device) {
+    Device device) {
   std::map<const Expr*, int32_t> varToSize;
 
   std::vector<CodeGen::CallArg> runArgs;
@@ -1439,7 +1439,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
 void TensorExprKernel::lowerToBackend(const at::ArrayRef<IValue>& inputs) {
   checkInputs(inputs, inputTypes_);
 
-  at::Device device = pickDeviceType(inputs);
+  Device device = pickDeviceType(inputs);
   if (!codegenCache_.count(torch::get_hash(device))) {
     BackendType backendType = inferBackendTypeFromDevice(device);
     Stmt* stmt = generateStmt(backendType);
@@ -1455,14 +1455,14 @@ void TensorExprKernel::lowerToBackend(const at::ArrayRef<IValue>& inputs) {
 }
 
 void TensorExprKernel::codegenRun(
-    at::Device device,
+    Device device,
     const std::vector<CodeGen::CallArg>& runArgs) {
   codegenCache_.at(torch::get_hash(device))->call(runArgs);
 }
 
 Stmt* TensorExprKernel::getStmtForInputs(const at::ArrayRef<IValue>& inputs) {
   lowerToBackend(inputs);
-  at::Device device = pickDeviceType(inputs);
+  Device device = pickDeviceType(inputs);
   return codegenCache_.at(torch::get_hash(device))->stmt();
 }
 
@@ -1473,7 +1473,7 @@ void TensorExprKernel::runKernel(Stack& stack) {
 
   lowerToBackend(inputs);
 
-  at::Device device = pickDeviceType(inputs);
+  Device device = pickDeviceType(inputs);
 
   std::vector<at::Tensor> outputs;
   std::vector<CodeGen::CallArg> runArgs =

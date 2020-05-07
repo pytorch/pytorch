@@ -17,7 +17,7 @@
 namespace torch {
 namespace autograd {
 Scatter::Scatter(
-    std::vector<at::Device> devices,
+    std::vector<Device> devices,
     const c10::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
     const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams,
@@ -41,7 +41,7 @@ variable_list Scatter::apply(variable_list&& inputs) {
     grad_fn->set_next_edges(collect_next_edges(input));
   }
 
-  auto device_indices = fmap(devices_, [](const at::Device& device) -> int64_t {
+  auto device_indices = fmap(devices_, [](const Device& device) -> int64_t {
     return device.index();
   });
   auto tensors = torch::cuda::scatter(
@@ -66,7 +66,7 @@ variable_list Scatter::apply(variable_list&& inputs) {
   return variables;
 }
 
-Gather::Gather(const at::Device& destination_device, int64_t dim)
+Gather::Gather(const Device& destination_device, int64_t dim)
     : destination_device_(destination_device), dim_(dim) {}
 
 Gather::~Gather() {}
@@ -103,7 +103,7 @@ variable_list Gather::apply(variable_list&& inputs) {
 
   std::shared_ptr<Node> grad_fn;
   if (compute_requires_grad(inputs)) {
-    std::vector<at::Device> source_devices;
+    std::vector<Device> source_devices;
     std::vector<int64_t> input_sizes;
     for (auto& input : inputs) {
       source_devices.push_back(input.device());

@@ -31,7 +31,6 @@
 #include <utility>
 
 using at::Tensor;
-using at::Device;
 using at::Layout;
 using at::Scalar;
 using at::ScalarType;

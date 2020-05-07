@@ -130,3 +130,7 @@ struct hash<c10::Device> {
   }
 };
 } // namespace std
+
+namespace torch {
+  using c10::Device;
+} // namespace torch

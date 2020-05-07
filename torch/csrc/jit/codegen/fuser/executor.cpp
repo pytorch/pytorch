@@ -190,7 +190,7 @@ static void compressContiguous(
 // Output pointers are stored in outputs (to be put on the stack later).
 void launchFusion(
     const FusedKernel& fusion,
-    const at::Device device,
+    const Device device,
     const at::ArrayRef<at::Tensor>& inputs,
     const at::ArrayRef<IValue>& all_inputs,
     std::vector<at::Tensor>& outputs) {
@@ -346,7 +346,7 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   }
 
   // Determines device to dispatch to.
-  at::Device device = inputs.at(0).device();
+  Device device = inputs.at(0).device();
   // If there's a device mismatch in the inputs or if one of the input is a
   // sparse tensor, we use the fallback (which should give a nice error
   // message).

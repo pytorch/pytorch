@@ -27,7 +27,7 @@ TORCH_API std::shared_ptr<FusedKernel> compileKernel(
     const KernelSpec& spec,
     const ArgSpec& arg_spec,
     const std::vector<int64_t>& map_size,
-    const at::Device device);
+    const Device device);
 
 TORCH_API size_t nCompiledKernels();
 
@@ -44,12 +44,12 @@ using FusedKernelConstructor = std::function<std::shared_ptr<FusedKernel>(
     bool has_random)>;
 
 TORCH_API void registerFusionBackend(
-    at::Device::Type backend_type,
+    Device::Type backend_type,
     FusedKernelConstructor ctor);
-TORCH_API bool hasFusionBackend(at::Device::Type backend_type);
+TORCH_API bool hasFusionBackend(Device::Type backend_type);
 struct TORCH_API RegisterFusionBackend {
   RegisterFusionBackend(
-      at::Device::Type backend_type,
+      Device::Type backend_type,
       FusedKernelConstructor ctor) {
     registerFusionBackend(backend_type, std::move(ctor));
   }

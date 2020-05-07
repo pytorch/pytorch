@@ -148,8 +148,8 @@ class ShapePropagator {
 
   // TODO: Would be better to make JIT not assume that CUDA devices
   // are the only thing that exist.
-  static at::Device jitDeviceIndexToDevice(int device) {
-    return device == -1 ? at::kCPU : at::Device(at::kCUDA, device);
+  static Device jitDeviceIndexToDevice(int device) {
+    return device == -1 ? at::kCPU : Device(at::kCUDA, device);
   }
 
   IValue representativeValue(Value* v) {
@@ -515,7 +515,7 @@ class ShapePropagator {
       }
     }
 
-    at::Device default_device = at::kCPU;
+    Device default_device = at::kCPU;
     if (auto device_index = node->schema().argumentIndexWithName("device")) {
       auto inp = toIValue(node->inputs().at(*device_index));
       if (inp == c10::nullopt) {

@@ -27,7 +27,6 @@
 #include <vector>
 
 using at::Backend;
-using at::Device;
 using at::IntArrayRef;
 using at::kCPU;
 using at::kCUDA;
@@ -253,7 +252,7 @@ Tensor internal_new_from_data(
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
     const auto& inferred_scalar_type = type_inference ? var.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(computeDeviceType(dispatch_key)));
+    auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : Device(computeDeviceType(dispatch_key)));
     pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return var.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
@@ -264,7 +263,7 @@ Tensor internal_new_from_data(
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from __cuda_array_interface__");
     auto tensor = tensor_from_cuda_array_interface(data);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(dispatch_key));
+    auto device = device_opt.has_value() ? *device_opt : Device(computeDeviceType(dispatch_key));
     pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
@@ -274,7 +273,7 @@ Tensor internal_new_from_data(
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
     auto tensor = tensor_from_numpy(data);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(dispatch_key));
+    auto device = device_opt.has_value() ? *device_opt : Device(computeDeviceType(dispatch_key));
     pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
@@ -294,7 +293,7 @@ Tensor internal_new_from_data(
         (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
         inferred_scalar_type, tensor.dtype().itemsize(), data);
   }
-  auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(dispatch_key));
+  auto device = device_opt.has_value() ? *device_opt : Device(computeDeviceType(dispatch_key));
   pybind11::gil_scoped_release no_gil;
   maybe_initialize_cuda(device);
   // However, it is VERY important that we trace the to() call here (even

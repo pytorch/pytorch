@@ -166,9 +166,9 @@ struct PythonArgs {
   inline at::Layout layout(int i);
   inline at::Layout layoutWithDefault(int i, at::Layout default_layout);
   inline c10::optional<at::Layout> layoutOptional(int i);
-  inline at::Device device(int i);
-  inline at::Device deviceWithDefault(int i, const at::Device& default_device);
-  inline c10::optional<at::Device> deviceOptional(int i);
+  inline Device device(int i);
+  inline Device deviceWithDefault(int i, const Device& default_device);
+  inline c10::optional<Device> deviceOptional(int i);
   inline at::Dimname dimname(int i);
   inline std::vector<at::Dimname> dimnamelist(int i);
   inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
@@ -386,9 +386,9 @@ inline c10::optional<at::Layout> PythonArgs::layoutOptional(int i) {
   return layout(i);
 }
 
-inline at::Device PythonArgs::device(int i) {
+inline Device PythonArgs::device(int i) {
   if (!args[i]) {
-    return at::Device(backendToDeviceType(dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
+    return Device(backendToDeviceType(dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
   }
   if (THPDevice_Check(args[i])) {
     const auto device = reinterpret_cast<THPDevice*>(args[i]);
@@ -397,18 +397,18 @@ inline at::Device PythonArgs::device(int i) {
   if (THPUtils_checkLong(args[i])) {
     const auto device_index = THPUtils_unpackLong(args[i]);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(DeviceType::CUDA, device_index);
+    return Device(DeviceType::CUDA, device_index);
   }
   const std::string &device_str = THPUtils_unpackString(args[i]);
-  return at::Device(device_str);
+  return Device(device_str);
 }
 
-inline at::Device PythonArgs::deviceWithDefault(int i, const at::Device& default_device) {
+inline Device PythonArgs::deviceWithDefault(int i, const Device& default_device) {
   if (!args[i]) return default_device;
   return device(i);
 }
 
-inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
+inline c10::optional<Device> PythonArgs::deviceOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return device(i);

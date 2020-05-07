@@ -565,7 +565,7 @@ void set_device(int device) {
     for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
       auto* impl = c10::impl::device_guard_impl_registry[i].load();
       if (impl && device < impl->deviceCount()) {
-        impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
+        impl->setDevice(Device(static_cast<c10::DeviceType>(i), device));
       }
     }
   }
@@ -989,7 +989,7 @@ void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
   }
 }
 
-size_t Engine::ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at::Device device) {
+size_t Engine::ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, Device device) {
   if (device_ready_queues_.empty()) {
     // The vector device_ready_queues_ is initialized in start_device_threads, but this method
     // can be called before start_device_threads. Adding this check to avoid index
@@ -1000,7 +1000,7 @@ size_t Engine::ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at
 }
 
 // CPU ready queue is per GraphTask, but CUDA device ready queues are shared across all graph tasks
-auto Engine::ready_queue(std::shared_ptr<ReadyQueue> cpu_ready_queue, at::Device device) -> std::shared_ptr<ReadyQueue>{
+auto Engine::ready_queue(std::shared_ptr<ReadyQueue> cpu_ready_queue, Device device) -> std::shared_ptr<ReadyQueue>{
   if (device.type() == at::kCPU) {
     // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
@@ -1013,7 +1013,7 @@ auto Engine::ready_queue(std::shared_ptr<ReadyQueue> cpu_ready_queue, at::Device
 
 auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, int device_index) -> std::shared_ptr<ReadyQueue> {
   if (device_index == CPU_DEVICE) {
-    // return the cpu ready queue passed in 
+    // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {

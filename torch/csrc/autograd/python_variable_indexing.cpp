@@ -75,7 +75,7 @@ static inline Variable sequenceToVariable(c10::DispatchKey dispatch_key, PyObjec
   return torch::utils::indexing_tensor_from_data(dispatch_key, kLong, c10::nullopt, seq);
 }
 
-static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value, const at::Device& device) {
+static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value, const Device& device) {
   if (THPVariable_Check(value)) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
@@ -123,7 +123,7 @@ static inline Variable applySlicing(
     PyObject* index,
     variable_list& outIndices,
     bool is_tracing,
-    const at::Device& self_device,
+    const Device& self_device,
     const IntArrayRef& self_sizes) {
   int64_t size = PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
   int64_t dim = 0;
@@ -332,11 +332,11 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
 
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  at::Device self_device = self_.device();
+  Device self_device = self_.device();
   Variable value;
   // TODO: This qint special case looks very suspicious...
   if (isQIntType(self_.scalar_type())) {
-    value = valueToTensor(device(kCPU).dtype(kFloat), py_value, at::Device(kCPU));
+    value = valueToTensor(device(kCPU).dtype(kFloat), py_value, Device(kCPU));
   } else {
     value = valueToTensor(self_.options(), py_value, self_device);
   }
