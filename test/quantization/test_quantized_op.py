@@ -152,11 +152,11 @@ def _get_random_tensor_and_q_params(shapes, rand_scale, torch_type):
     min_val = torch.min(X)
     max_val = torch.max(X)
     if torch_type == torch.qint32:
-        X_zero_point = 0
+        X_zero_point = int(torch.randint(-1 * (2 ** 31), 2 ** 31 - 1, (1,)))
         num_bins = 2 ** 32
         X_scale = float(max_val - min_val) / num_bins
     elif torch_type == torch.qint8:
-        X_zero_point = 0
+        X_zero_point = int(torch.randint(-128, 127, (1,)))
         num_bins = 2 ** 8
         X_scale = float(max_val - min_val) / num_bins
     else:  # torch.quint8
@@ -327,105 +327,89 @@ class TestQuantizedOps(TestCase):
 
 
     """Tests the correctness of the quantized::qlayer_norm op."""
-    @given(shapes=hu.array_shapes(3, 5, 1, 32),
-           torch_type=st.sampled_from((torch.qint8, torch.quint8, torch.qint32)),
-           X_rand_scale=st.floats(0.01, 1e3),
-           Y_scale=st.floats(0.2, 2.6),
-           Y_zero_point=st.integers(0, 5))
-    def test_qlayer_norm(self, shapes, torch_type, X_rand_scale, Y_scale, Y_zero_point):
+    def test_qlayer_norm(self):
         if "fbgemm" not in torch.backends.quantized.supported_engines:
             return
 
+        # hypothesis is flaky for this test, create test cases manually
+        max_sides = (4, 5)
+        side_lens = (1, 8, 11)
+        torch_types = (torch.qint8, torch.quint8)
+        y_scales = (0.1, 4.23)
+        y_zero_points = (0, 1)
+        combined = [max_sides, side_lens, torch_types, y_scales, y_zero_points]
+        test_cases = itertools.product(*combined)
+
         with override_quantized_engine("fbgemm"):
+            for test_case in test_cases:
 
-            # In the FP kernel, mean and variance are calculated in floating point.
-            # In the quantized kernel, they are calculated in integer arithmetic.
-            # Because of this, the numerics do not always match exactly which is
-            # expected and acceptable. We do two things to whitelist this failure
-            # in this test:
-            # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
-            #    favors homogeneous inputs in its search strategies which isn't
-            #    representative of the inputs we care about, and tends to maximize
-            #    this particular numerics difference.
-            # 2. whitelist a small % of off by Y_scale errors.  Even when the
-            #    variance of the input is high, there can be off by one errors
-            #    in the result if the input value happens to fall exactly on
-            #    the bin boundary of the output scale.
-            #
-            # If we want the numerics to match we could switch to calculating
-            # mean+var in floating point in the future, at the cost of speed.
+                max_side, side_len, torch_type, Y_scale, Y_zero_point = test_case
+                shapes = [side_len] * max_side
 
-            X = (np.random.rand(*shapes).astype(np.float32) - 0.5) * X_rand_scale
+                # In the FP kernel, mean and variance are calculated in floating point.
+                # In the quantized kernel, they are calculated in integer arithmetic.
+                # Because of this, the numerics do not always match exactly which is
+                # expected and acceptable. We do two things to whitelist this failure
+                # in this test:
+                # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
+                #    favors homogeneous inputs in its search strategies which isn't
+                #    representative of the inputs we care about, and tends to maximize
+                #    this particular numerics difference.
+                # 2. whitelist a small % of off by Y_scale errors.  Even when the
+                #    variance of the input is high, there can be off by one errors
+                #    in the result if the input value happens to fall exactly on
+                #    the bin boundary of the output scale.
+                #
+                # If we want the numerics to match we could switch to calculating
+                # mean+var in floating point in the future, at the cost of speed.
+                X, X_scale, X_zero_point = \
+                    _get_random_tensor_and_q_params(shapes, 1.0, torch_type)
 
-            # Calculate reasonable quantization params
-            min_val = np.min(X)
-            max_val = np.max(X)
-            if torch_type == torch.qint32:
-                X_zero_point = 0
-                num_bins = 2 ** 32
-                X_scale = float(max_val - min_val) / num_bins
-            elif torch_type == torch.qint8:
-                X_zero_point = 0
-                num_bins = 2 ** 8
-                X_scale = float(max_val - min_val) / num_bins
-            else:  # torch.quint8
-                X_zero_point = 127
-                num_bins = 2 ** 8
-                X_scale = float(max_val - min_val) / num_bins
-            if X_scale == 0:
-                X_scale = 1e-10
+                qX = torch.quantize_per_tensor(X, scale=X_scale,
+                                               zero_point=X_zero_point,
+                                               dtype=torch_type)
+                dqX = qX.dequantize()
 
-            X = torch.from_numpy(X)
-            qX = torch.quantize_per_tensor(X, scale=X_scale,
-                                           zero_point=X_zero_point,
-                                           dtype=torch_type)
-            dqX = qX.dequantize()
+                # Enforce non-homogeneous inputs
+                enough_unique_vals_in_each_layer = sum(
+                    1 if (
+                        dqX[i].shape[0] < 5 or
+                        float(torch.unique(dqX[i]).shape[0]) / dqX[i].shape[0] > 0.01
+                    ) else 0
+                    for i in range(dqX.shape[0])
+                ) == dqX.shape[0]
+                assume(enough_unique_vals_in_each_layer)
 
-            # Enforce non-homogeneous inputs
-            enough_unique_vals_in_each_layer = sum(
-                1 if (
-                    dqX[i].shape[0] < 5 or
-                    float(torch.unique(dqX[i]).shape[0]) / dqX[i].shape[0] > 0.01
-                ) else 0
-                for i in range(dqX.shape[0])
-            ) == dqX.shape[0]
-            assume(enough_unique_vals_in_each_layer)
+                # Initialize the weights non-randomly for reproducibility, to avoid
+                # flaky tests
+                weight = torch.ones(*qX.size()[1:], dtype=torch.float) * 0.5
+                bias = torch.ones(*qX.size()[1:], dtype=torch.float) * 1
+                epsilon = 1e-5
 
-            # Initialize the weights non-randomly for reproducibility, to avoid
-            # flaky tests
-            weight = torch.ones(*qX.size()[1:], dtype=torch.float) * 0.5
-            bias = torch.ones(*qX.size()[1:], dtype=torch.float) * 1
-            epsilon = 1e-5
+                qY = torch.ops.quantized.layer_norm(
+                    qX, qX.size()[1:], weight=weight, bias=bias, eps=epsilon,
+                    output_scale=Y_scale, output_zero_point=Y_zero_point)
 
-            qY = torch.ops.quantized.layer_norm(
-                qX, qX.size()[1:], weight=weight, bias=bias, eps=epsilon,
-                output_scale=Y_scale, output_zero_point=Y_zero_point)
+                Y_hat = F.layer_norm(
+                    dqX, dqX.size()[1:], weight=weight, bias=bias, eps=epsilon)
+                qY_hat = torch.quantize_per_tensor(
+                    Y_hat, scale=Y_scale, zero_point=Y_zero_point, dtype=torch_type)
 
-            Y_hat = F.layer_norm(
-                dqX, dqX.size()[1:], weight=weight, bias=bias, eps=epsilon)
-            qY_hat = torch.quantize_per_tensor(
-                Y_hat, scale=Y_scale, zero_point=Y_zero_point, dtype=torch_type)
+                # Due to the numerics difference mentioned above between calculating
+                # the variance in float vs int, the results can still be slightly
+                # different.
+                dqY = qY.dequantize()
+                dqY_hat = qY_hat.dequantize()
+                diff = dqY - dqY_hat
 
-            # Due to the numerics difference mentioned above between calculating
-            # the variance in float vs int, the results can still be slightly
-            # different.
-            dqY = qY.dequantize()
-            dqY_hat = qY_hat.dequantize()
-            diff = dqY - dqY_hat
+                # off-by-one errors are magnitude of Y_scale
+                num_diff = torch.sum(diff > Y_scale * 1.0001)
+                pct_diff = float(num_diff) / (diff.numel() + 1e-5)
+                num_diff_off_by_one = torch.sum((diff > 0) * (diff <= Y_scale))
+                pct_diff_off_by_one = float(num_diff_off_by_one) / (diff.numel() + 1e-5)
 
-            # off-by-one errors are magnitude of Y_scale
-            num_diff = torch.sum(diff > Y_scale * 1.0001)
-            pct_diff = float(num_diff) / (diff.numel() + 1e-5)
-            num_diff_off_by_one = torch.sum((diff > 0) * (diff <= Y_scale))
-            pct_diff_off_by_one = float(num_diff_off_by_one) / (diff.numel() + 1e-5)
-
-            note("LayerNorm failed:\n {} input vs\n {} actual vs \n{} expected"
-                 .format(X, qY, qY_hat))
-            note("Pct diff: {}".format(pct_diff))
-            note("Pct diff off by one: {}".format(pct_diff_off_by_one))
-
-            self.assertTrue(pct_diff < 1e-6)
-            self.assertTrue(pct_diff_off_by_one < 0.01)
+                self.assertTrue(pct_diff < 1e-6)
+                self.assertTrue(pct_diff_off_by_one < 0.01)
 
 
     """Tests the correctness of the quantized::qnnpack_tanh op."""
@@ -1594,7 +1578,7 @@ class TestQuantizedOps(TestCase):
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=32),
-                       qparams=hu.qparams()),
+                       qparams=hu.qparams(dtypes=(torch.quint8, torch.qint8))),
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
     def test_batch_norm2d(self, X, Y_scale, Y_zero_point):
@@ -1620,6 +1604,172 @@ class TestQuantizedOps(TestCase):
             quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, dtype_x)
             self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
 
+    def test_group_norm(self):
+        if "fbgemm" not in torch.backends.quantized.supported_engines:
+            return
+
+        # hypothesis is flaky for this test, create test cases manually
+        batches_list = (1, 7)
+        num_groups_list = (1, 2)
+        channels_per_groups = (1, 2)
+        elements_per_channels = (8, 17)
+        torch_types = (torch.qint8, torch.quint8)
+        y_scales = (0.1, 4.23)
+        y_zero_points = (0, 1)
+        combined = [batches_list, num_groups_list, channels_per_groups, elements_per_channels,
+                    torch_types, y_scales, y_zero_points]
+        test_cases = itertools.product(*combined)
+
+        with override_quantized_engine("fbgemm"):
+            for test_case in test_cases:
+
+                batches, num_groups, channels_per_group, elements_per_channel, \
+                    torch_type, Y_scale, Y_zero_point = test_case
+                num_channels = num_groups * channels_per_group
+                shapes = (batches, num_channels, elements_per_channel)
+
+                # In the FP kernel, sums and sums of squares are calculated in floating point.
+                # In the int8 and uint8 versions of the quantized kernel, they are
+                # calculated in integer arithmetic (which is exact).
+                # Because of this, the numerics do not always match exactly which is
+                # expected and acceptable. We do the following to whitelist this failure
+                # in this test:
+                # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
+                #    favors homogeneous inputs in its search strategies which isn't
+                #    representative of the inputs we care about, and tends to maximize
+                #    this particular numerics difference.
+                # 2. whitelist a small % of off by Y_scale errors.  Even when the
+                #    variance of the input is high, there can be off by one errors
+                #    in the result if the input value happens to fall exactly on
+                #    the bin boundary of the output scale.
+                #
+                # If we want the numerics to match we could switch to calculating
+                # mean+var in floating point in the future, at the cost of speed.
+                X, X_scale, X_zero_point = \
+                    _get_random_tensor_and_q_params(shapes, 1.0, torch_type)
+
+                # Initialize the weights non-randomly for reproducibility
+                weight = torch.ones(num_channels).float() * 0.5
+                bias = torch.ones(num_channels).float()
+                for i in range(num_channels):
+                    weight[i] *= i
+                    bias[i] *= i
+
+                eps = 0.001
+
+                qX = torch.quantize_per_tensor(X, X_scale, X_zero_point, torch_type)
+                dqX = qX.dequantize()
+
+                # Enforce non-homogeneous inputs
+                for batch_idx in range(batches):
+                    for group_idx in range(num_groups):
+                        ch_start = group_idx * channels_per_group
+                        ch_end = ch_start + channels_per_group
+                        group_vals = dqX[batch_idx][ch_start:ch_end]
+                        assume(
+                            float(torch.unique(group_vals).shape[0]) / group_vals.numel() > 0.01
+                            or group_vals.numel() < 5)
+
+                qY = torch.ops.quantized.group_norm(qX, num_groups, weight, bias, eps, Y_scale, Y_zero_point)
+
+                dqY_hat = F.group_norm(dqX, num_groups=num_groups, weight=weight, bias=bias, eps=eps)
+                qY_hat = torch.quantize_per_tensor(dqY_hat, Y_scale, Y_zero_point, torch_type)
+
+                # Due to the numerics difference mentioned above between calculating
+                # the variance in float vs int, the results can still be slightly
+                # different.
+                dqY = qY.dequantize()
+                dqY_hat = qY_hat.dequantize()
+                diff = dqY - dqY_hat
+
+                # off-by-one errors are magnitude of Y_scale
+                num_diff = torch.sum(diff > Y_scale * 1.0001)
+                pct_diff = float(num_diff) / (diff.numel() + 1e-5)
+                num_diff_off_by_one = torch.sum((diff > 0) * (diff <= Y_scale))
+                pct_diff_off_by_one = float(num_diff_off_by_one) / (diff.numel() + 1e-5)
+
+                self.assertTrue(pct_diff < 1e-6)
+                self.assertTrue(pct_diff_off_by_one < 0.01)
+
+    def test_instance_norm(self):
+        if "fbgemm" not in torch.backends.quantized.supported_engines:
+            return
+
+        max_sides = (4, 5)
+        side_lens = (2, 8, 11)
+        torch_types = (torch.qint8, torch.quint8)
+        y_scales = (0.1, 4.23)
+        y_zero_points = (0, 1)
+        combined = [max_sides, side_lens, torch_types, y_scales, y_zero_points]
+        test_cases = itertools.product(*combined)
+
+        with override_quantized_engine("fbgemm"):
+            for test_case in test_cases:
+
+                max_side, side_len, torch_type, Y_scale, Y_zero_point = test_case
+                shapes = [side_len] * max_side
+
+                # In the FP kernel, sums and sums of squares are calculated in floating point.
+                # In the int8 and uint8 versions of the quantized kernel, they are
+                # calculated in integer arithmetic (which is exact).
+                # Because of this, the numerics do not always match exactly which is
+                # expected and acceptable. We do the following to whitelist this failure
+                # in this test:
+                # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
+                #    favors homogeneous inputs in its search strategies which isn't
+                #    representative of the inputs we care about, and tends to maximize
+                #    this particular numerics difference.
+                # 2. whitelist a small % of off by Y_scale errors.  Even when the
+                #    variance of the input is high, there can be off by one errors
+                #    in the result if the input value happens to fall exactly on
+                #    the bin boundary of the output scale.
+                #
+                # If we want the numerics to match we could switch to calculating
+                # mean+var in floating point in the future, at the cost of speed.
+                X, X_scale, X_zero_point = \
+                    _get_random_tensor_and_q_params(shapes, 1.0, torch_type)
+
+                num_channels = shapes[1]
+                weight = torch.rand(num_channels).float() * 0.5
+                bias = torch.rand(num_channels).float()
+                for i in range(num_channels):
+                    weight[i] *= i
+                    bias[i] *= i
+                eps = 0.001
+
+                qX = torch.quantize_per_tensor(X, X_scale, X_zero_point, torch_type)
+                dqX = qX.dequantize()
+
+                # Enforce non-homogeneous inputs
+                batches = shapes[0]
+                for batch_idx in range(batches):
+                    for ch_idx in range(num_channels):
+                        ch_vals = dqX[batch_idx][ch_idx]
+                        assume(
+                            float(torch.unique(ch_vals).shape[0]) / ch_vals.numel() > 0.01
+                            or group_vals.numel() < 5)
+
+                qY = torch.ops.quantized.instance_norm(qX, weight, bias, eps, Y_scale, Y_zero_point)
+
+                dqY_hat = F.instance_norm(dqX, weight=weight, bias=bias, eps=eps)
+                qY_hat = torch.quantize_per_tensor(dqY_hat, Y_scale, Y_zero_point, torch_type)
+
+                # Due to the numerics difference mentioned above between calculating
+                # the variance in float vs int, the results can still be slightly
+                # different.
+                dqY = qY.dequantize()
+                dqY_hat = qY_hat.dequantize()
+                diff = dqY - dqY_hat
+
+                # off-by-one errors are magnitude of Y_scale
+                num_diff = torch.sum(diff > Y_scale * 1.0001)
+                pct_diff = float(num_diff) / (diff.numel() + 1e-5)
+                num_diff_off_by_one = torch.sum((diff > 0) * (diff <= Y_scale))
+                pct_diff_off_by_one = float(num_diff_off_by_one) / (diff.numel() + 1e-5)
+
+                self.assertTrue(pct_diff < 1e-6)
+                self.assertTrue(pct_diff_off_by_one < 0.01)
+
     def test_batch_norm2d_relu(self):
         if "fbgemm" not in torch.backends.quantized.supported_engines:
             return
@@ -1627,7 +1777,7 @@ class TestQuantizedOps(TestCase):
         # hypothesis too slow for this test, create test cases manually
         max_sides = (4, 5)
         side_lens = (1, 8, 11)
-        torch_types = (torch.qint8, torch.quint8, torch.qint32)
+        torch_types = (torch.qint8, torch.quint8)
         combined = [max_sides, side_lens, torch_types]
         test_cases = itertools.product(*combined)
 
@@ -1676,7 +1826,7 @@ class TestQuantizedOps(TestCase):
 
         # hypothesis too slow for this test, create test cases manually
         side_lens = (1, 8, 11)
-        torch_types = (torch.qint8, torch.quint8, torch.qint32)
+        torch_types = (torch.qint8, torch.quint8)
         combined = [side_lens, torch_types]
         test_cases = itertools.product(*combined)
 
@@ -2241,10 +2391,6 @@ class TestQuantizedConv(unittest.TestCase):
         Y_q = qconv_fn(
             X_q,
             W_prepack,
-            strides,
-            pads,
-            dilations,
-            groups,
             Y_scale,
             Y_zero_point,
         )
@@ -2285,10 +2431,10 @@ class TestQuantizedConv(unittest.TestCase):
            Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
-           use_relu=st.booleans(),
+           use_relu=st.sampled_from([False]),
            use_channelwise=st.booleans(),
            qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_qconv(
+    def test_qconv2d(
             self,
             batch_size,
             input_channels_per_group,
@@ -3045,7 +3191,6 @@ class TestComparatorOps(TestCase):
             self.assertEqual(result_ref, result,
                              "'tensor.{}(tensor)'' failed".format(op))
 
-    @unittest.skip("FIXME: Failing due to overflow error without width option")
     @given(A=hu.tensor(shapes=((3, 4, 5),),
                        qparams=hu.qparams()),
            b=hu.floats(allow_infinity=False, allow_nan=False))
@@ -3064,16 +3209,22 @@ class TestComparatorOps(TestCase):
         for op in ops_under_test_reversible:
             result_ref = getattr(dqA, op)(b)
             result = getattr(qA, op)(b)
+            note("result_ref 1: {}".format(result_ref))
+            note("result 1: {}".format(result))
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
             # Reversed broadcasting.
             result_ref = getattr(b, op)(dqA)
             result = getattr(b, op)(qA)
+            note("result_ref 2: {}".format(result_ref))
+            note("result 2: {}".format(result))
             self.assertEqual(result_ref, result,
                              "'scalar.{}(tensor)'' failed".format(op))
 
         for op in ops_under_test_nonreversible:
             result_ref = getattr(dqA, op)(b)
             result = getattr(qA, op)(b)
+            note("result_ref 3: {}".format(result_ref))
+            note("result 3: {}".format(result))
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
