@@ -13,4 +13,5 @@ namespace jit {
  */
 TORCH_API Module FoldConvBatchNorm2d(const Module& module);
 
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch

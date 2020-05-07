@@ -48,4 +48,5 @@ TORCH_API Module InsertQuantDeQuant(
     bool inplace = false,
     bool is_dynamic = false);
 
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch

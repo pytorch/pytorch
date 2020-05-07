@@ -49,5 +49,5 @@ TORCH_API script::Module Finalize(
 
 TORCH_API void FoldQuantizedPrepackingOps(Module& module);
 
-
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch

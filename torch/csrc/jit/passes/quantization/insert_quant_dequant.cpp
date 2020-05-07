@@ -1,12 +1,12 @@
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
-#include <torch/csrc/jit/passes/quantization/helper.h>
-#include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
-#include <torch/csrc/jit/passes/subgraph_rewrite.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <c10/core/QScheme.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/quantization/helper.h>
+#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 #include <stack>
 
@@ -936,4 +936,5 @@ Module InsertQuantDeQuant(
   return module;
 }
 
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch

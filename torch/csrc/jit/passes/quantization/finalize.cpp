@@ -1,9 +1,8 @@
-#include <torch/csrc/jit/passes/prepack_folding.h>
+#include <torch/csrc/jit/passes/quantization/finalize.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
-#include <torch/csrc/jit/passes/quantization/finalize.h>
+#include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/quantization/quantization_patterns.h>
-
 
 namespace torch {
 namespace jit {
@@ -121,4 +120,5 @@ Module Finalize(Module& module, bool is_dynamic) {
   return frozen;
 }
 
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch

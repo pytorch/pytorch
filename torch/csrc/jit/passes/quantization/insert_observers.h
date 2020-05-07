@@ -13,7 +13,6 @@ struct hash<torch::jit::Module> {
 
 } // namespace std
 
-
 namespace torch {
 namespace jit {
 
@@ -42,4 +41,5 @@ TORCH_API Module InsertObservers(
     bool inplace = false,
     bool is_dynamic = false);
 
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch

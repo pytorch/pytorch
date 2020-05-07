@@ -57,15 +57,17 @@ TORCH_API bool alwaysRaisesException(Block* block);
 
 // =========== helper functions for Graph ==========
 // TODO: remove
-TORCH_API std::vector<std::string> getModuleAccessPath(Value* instance, Value* self);
+TORCH_API std::vector<std::string> getModuleAccessPath(
+    Value* instance,
+    Value* self);
 // TODO: remove
-TORCH_API Module findChildModule(
-    const Module& module,
-    const std::vector<std::string>& path);
+TORCH_API Module
+findChildModule(const Module& module, const std::vector<std::string>& path);
 
 // Given an CallMethod node, get the module instance corresponding
 // to the instance Value
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 // =========== helper functions for Module  ==========
 
-}} // torch::jit
+} // namespace jit
+} // namespace torch

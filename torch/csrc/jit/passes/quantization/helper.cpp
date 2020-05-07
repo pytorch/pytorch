@@ -439,4 +439,5 @@ Module getInvokedModule(Module& module, Node* n, Value* self) {
   return findChildModule(module, path);
 }
 
-}} // torch::jit
+} // namespace jit
+} // namespace torch

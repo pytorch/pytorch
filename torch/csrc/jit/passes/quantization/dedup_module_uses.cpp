@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 
 #include <stack>
@@ -124,4 +124,5 @@ void DedupModuleUses(Module& module) {
   d.dedup();
 }
 
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch

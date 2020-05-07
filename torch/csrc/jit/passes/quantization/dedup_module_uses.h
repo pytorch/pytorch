@@ -13,5 +13,5 @@ namespace jit {
  */
 TORCH_API void DedupModuleUses(Module& module);
 
-
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch
