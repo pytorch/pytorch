@@ -14,6 +14,12 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
     return c10::make_intrusive<ConcretePyObjectHolder>(std::move(py_obj));
   }
 
+  static c10::intrusive_ptr<PyObjectHolder> create(const py::handle& handle) {
+    py::gil_scoped_acquire ag;
+    return c10::make_intrusive<ConcretePyObjectHolder>(
+        handle.cast<py::object>());
+  }
+
   PyObject* getPyObject() override {
     return py_obj_.ptr();
   }
