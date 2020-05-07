@@ -34,12 +34,9 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&top_desc_));
     MIOPEN_ENFORCE(miopenCreatePoolingDescriptor(&pooling_desc_));
 
-    if ((operator_def.type().substr(0, 7) == "MaxPool") ||
-        (operator_def.type().substr(0, 15) == "MaxPoolGradient")) {
+    if (operator_def.type().substr(0, 7) == "MaxPool") {
       mode_ = miopenPoolingMax;
-    } else if (
-        (operator_def.type().substr(0, 11) == "AveragePool") ||
-        (operator_def.type().substr(0, 19) == "AveragePoolGradient")) {
+    } else if (operator_def.type().substr(0, 11) == "AveragePool") {
       mode_ = miopenPoolingAverage;
     } else {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
