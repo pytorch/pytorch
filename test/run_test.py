@@ -679,7 +679,8 @@ def main():
                 # return code -N, where N is the signal number.
                 signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
                 message += ' Received signal: {}'.format(signal_name)
-            raise RuntimeError(message)
+            print(message, file=sys.stderr)
+            #raise RuntimeError(message)
     if options.coverage:
         shell(['coverage', 'combine'])
         shell(['coverage', 'html'])
