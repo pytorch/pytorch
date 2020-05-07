@@ -30,12 +30,12 @@ void runFusion(const int64_t key, Stack& stack) {
 }
 
 bool canFuseOnCPU() {
-  return fuser::hasFusionBackend(at::DeviceType::CPU) &&
+  return fuser::hasFusionBackend(DeviceType::CPU) &&
       detail::cpu_fuser_enabled;
 }
 
 bool canFuseOnGPU() {
-  return fuser::hasFusionBackend(at::DeviceType::CUDA) &&
+  return fuser::hasFusionBackend(DeviceType::CUDA) &&
       detail::gpu_fuser_enabled;
 }
 
