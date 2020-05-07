@@ -72,10 +72,7 @@ class TensorPipeAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(worker_id_t workerId) const override;
   std::vector<WorkerInfo> getWorkerInfos() const override;
 
-  std::unordered_map<std::string, std::string> getMetrics() override {
-    std::unordered_map<std::string, std::string> metrics;
-    return metrics;
-  }
+  std::unordered_map<std::string, std::string> getMetrics() override;
 
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
 
