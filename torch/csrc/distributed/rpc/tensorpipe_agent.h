@@ -25,6 +25,20 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
   std::map<std::string, worker_id_t> workerNameToId;
 };
 
+// Struct to track the network source metrics
+struct NetworkSourceInfo {
+  worker_id_t srcRank;
+  std::vector<uint8_t> srcMachineAddr;
+};
+
+// Struct to track aggregated network metrics
+struct AggregatedNetworkData {
+  uint64_t numCalls{0};
+  uint64_t totalSentBytes{0};
+  uint64_t totalRecvBytes{0};
+  uint64_t totalErrors{0};
+};
+
 // TensorPipeAgent leverages tensorpipe (https://github.com/pytorch/tensorpipe)
 // to move tensors and payload through fatested transport and channel
 // transparently. We can see it as a hybrid RPC transport, providing
@@ -65,6 +79,12 @@ class TensorPipeAgent : public RpcAgent {
 
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
 
+  using NetworkDataDict =
+      std::unordered_map<std::string, AggregatedNetworkData>;
+
+  NetworkDataDict getNetworkData();
+  NetworkSourceInfo getNetworkSourceInfo();
+
  private:
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
 
@@ -97,6 +117,17 @@ class TensorPipeAgent : public RpcAgent {
       std::shared_ptr<tensorpipe::Pipe>& pipe,
       std::shared_ptr<FutureMessage>& futureResponseMessage,
       uint64_t messageId);
+
+  // Collects metrics from successful RPC calls
+  void trackNetworkData(
+      uint64_t requestSize,
+      uint64_t responseSize,
+      const std::string& destWorkerName);
+
+  // Collects metrics from failed RPC calls
+  void trackNetworkError(
+      uint64_t requestSize,
+      const std::string& destWorkerName);
 
   // State per client pipe to keep tracking of pending response message
   // and error sate. pendingResponseMessage_ should be protected by
@@ -155,6 +186,11 @@ class TensorPipeAgent : public RpcAgent {
       timeSeriesMetrics_;
   // Mutex to guard timeSeriesMetrics_
   std::mutex metricsMutex_;
+
+  // Map to Track Network Data
+  NetworkDataDict networkData_;
+  // Mutex to guarg networkData_
+  std::mutex networkDataMutex_;
 };
 
 } // namespace rpc
