@@ -335,9 +335,9 @@ Examples::
 
 
     # Example 2: Applying a per-channel-scale
-    def scale_channels(input, scale):
-        scale = scale.refine_names('C')
-        return input * scale.align_as(input)
+    >>> def scale_channels(input, scale):
+    >>>    scale = scale.refine_names('C')
+    >>>    return input * scale.align_as(input)
 
     >>> num_channels = 3
     >>> scale = torch.randn(num_channels, names=('C',))
