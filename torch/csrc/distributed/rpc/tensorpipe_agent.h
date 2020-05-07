@@ -15,14 +15,8 @@ namespace distributed {
 namespace rpc {
 
 struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
-  TensorPipeRpcBackendOptions(
-      std::map<std::string, worker_id_t> worker_name_to_id,
-      float rpc_timeout,
-      std::string init_method)
-      : RpcBackendOptions(rpc_timeout, init_method),
-        workerNameToId(std::move(worker_name_to_id)) {}
-
-  std::map<std::string, worker_id_t> workerNameToId;
+  TensorPipeRpcBackendOptions(float rpc_timeout, std::string init_method)
+      : RpcBackendOptions(rpc_timeout, init_method) {}
 };
 
 // TensorPipeAgent leverages tensorpipe (https://github.com/pytorch/tensorpipe)
@@ -32,9 +26,10 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
 class TensorPipeAgent : public RpcAgent {
  public:
   TensorPipeAgent(
-      worker_id_t selfId,
-      std::string selfName,
       std::shared_ptr<::c10d::Store> addressStore,
+      std::string selfName,
+      worker_id_t selfId,
+      worker_id_t worldSize,
       TensorPipeRpcBackendOptions opts);
 
   TensorPipeAgent(const TensorPipeAgent&) = delete;
@@ -66,6 +61,8 @@ class TensorPipeAgent : public RpcAgent {
   void addGilWaitTime(const std::chrono::microseconds /* unused */) override {}
 
  private:
+  void collectNames();
+
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
 
 #ifdef TP_ENABLE_SHM
@@ -123,6 +120,7 @@ class TensorPipeAgent : public RpcAgent {
   std::unordered_map<std::string, std::string> workerNameToURL_;
 
   const std::shared_ptr<::c10d::Store> addressStore_;
+  const worker_id_t worldSize_;
   const TensorPipeRpcBackendOptions opts_;
 
   mutable std::mutex mutex_;
