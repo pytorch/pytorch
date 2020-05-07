@@ -27,6 +27,10 @@
 
 namespace c10d {
 
+// Default timeout for operations against ProcessGroupGloo (30 mins)
+constexpr std::chrono::milliseconds kProcessGroupGlooDefaultTimeoutMillis =
+    std::chrono::milliseconds(1000 * 60 * 30);
+
 // ProcessGroupGloo implements Gloo bindings for c10d.
 //
 // All functions on this class are expected to be called in the same

@@ -622,7 +622,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("timeout") = std::chrono::milliseconds(10 * 1000));
+          py::arg("timeout") = std::chrono::milliseconds(
+              ::c10d::kProcessGroupGlooDefaultTimeoutMillis));
 #endif
 
 #ifdef USE_C10D_NCCL
