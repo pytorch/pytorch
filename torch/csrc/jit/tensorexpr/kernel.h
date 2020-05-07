@@ -162,15 +162,15 @@ class TORCH_API TensorExprKernel {
 
   std::string getCodegenName(BackendType backendType);
   void codegenRun(
-      Device device,
+      at::Device device,
       const std::vector<CodeGen::CallArg>& runArgs);
 
   std::vector<CodeGen::CallArg> prepareRunArgs(
       const at::ArrayRef<IValue>& inputs,
       std::vector<at::Tensor>& outputs,
-      Device device);
-  BackendType inferBackendTypeFromDevice(Device device);
-  Device pickDeviceType(const at::ArrayRef<IValue>& inputs);
+      at::Device device);
+  BackendType inferBackendTypeFromDevice(at::Device device);
+  at::Device pickDeviceType(const at::ArrayRef<IValue>& inputs);
 
   void bindInput(const torch::jit::Value* input);
 
@@ -228,6 +228,8 @@ class TORCH_API TensorExprKernel {
 TORCH_API int& getTECudaPointwiseLoopLevels();
 TORCH_API int& getTECudaPointwiseBlockCount();
 TORCH_API int& getTECudaPointwiseBlockSize();
+TORCH_API bool fallbackAllowed();
+TORCH_API bool setFallbackAllowed(bool value);
 
 } // namespace tensorexpr
 } // namespace jit

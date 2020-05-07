@@ -20,7 +20,7 @@ namespace torch { namespace autograd {
 struct InputMetadata {
   InputMetadata() = default;
 
-  InputMetadata(const at::TensorOptions options, at::IntArrayRef shape, at::Device device)
+  InputMetadata(const at::TensorOptions options, at::IntArrayRef shape, Device device)
   : options_{options}, shape_{shape}, device_{device} {
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
   }
@@ -36,7 +36,7 @@ struct InputMetadata {
     return shape_;
   }
 
-  at::Device device() const {
+  Device device() const {
     return device_;
   }
 
@@ -51,7 +51,7 @@ struct InputMetadata {
 private:
   const at::TensorOptions options_;
   at::DimVector shape_;
-  at::Device device_ = at::kCPU;
+  Device device_ = at::kCPU;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device_);
 };
 

@@ -62,7 +62,7 @@ bool& getInlineEverythingMode() {
   return inline_everything;
 }
 
-void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
+void Module::to(Device device, at::ScalarType dtype, bool non_blocking) {
   to_impl(device, dtype, non_blocking);
 }
 
@@ -70,13 +70,13 @@ void Module::to(at::ScalarType dtype, bool non_blocking) {
   to_impl(/*device=*/c10::nullopt, dtype, non_blocking);
 }
 
-void Module::to(at::Device device, bool non_blocking) {
+void Module::to(Device device, bool non_blocking) {
   to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
 }
 
 void module_state_to(
     autograd::Variable variable,
-    const c10::optional<at::Device>& device,
+    const c10::optional<Device>& device,
     const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   // Need to access the `at::Tensor` as a `Variable` here.
@@ -89,7 +89,7 @@ void module_state_to(
 }
 
 void Module::to_impl(
-    const c10::optional<at::Device>& device,
+    const c10::optional<Device>& device,
     const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   for (at::Tensor e : parameters()) {

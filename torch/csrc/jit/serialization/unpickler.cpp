@@ -404,7 +404,7 @@ PickleOpCode Unpickler::readInstruction() {
           args.at(0).toStringRef());
       at::ScalarType type = args.at(1).toScalarType();
       const std::string& key = args.at(2).toStringRef();
-      at::Device device(args.at(3).toStringRef());
+      Device device(args.at(3).toStringRef());
       if (device_) {
         device = *device_;
       }

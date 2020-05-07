@@ -17,6 +17,24 @@ namespace tensorexpr {
 static int te_cuda_pointwise_loop_levels = -1;
 static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
+static bool fallback_allowed = true;
+
+bool setFallbackAllowed(bool value) {
+  bool old_value = fallback_allowed;
+  fallback_allowed = value;
+  return old_value;
+}
+
+bool fallbackAllowed() {
+  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
+  if (!enable_c_str) {
+    return fallback_allowed;
+  }
+  if (std::string(enable_c_str) == "0") {
+    return false;
+  }
+  return true;
+}
 
 int& getTECudaPointwiseLoopLevels() {
   return te_cuda_pointwise_loop_levels;
@@ -136,7 +154,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     const ExprHandle& e,
     const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
-    throw malformed_input("type is not tensor in demoteOutput");
+    return e;
   }
 
   auto tt = *v->type()->cast<TensorType>()->scalarType();
@@ -1243,7 +1261,7 @@ static void checkInputs(
   }
 }
 
-Device TensorExprKernel::pickDeviceType(
+at::Device TensorExprKernel::pickDeviceType(
     const at::ArrayRef<IValue>& inputs) {
   for (auto const& input : inputs) {
     if (input.isTensor()) {
@@ -1254,7 +1272,7 @@ Device TensorExprKernel::pickDeviceType(
 }
 
 TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
-    Device device) {
+    at::Device device) {
   BackendType backendType = BackendType::kUninitialized;
   if (device.type() == at::kCUDA) {
     backendType = kCudaCodeGen;
@@ -1366,6 +1384,11 @@ void TensorExprKernel::compile() {
 
 TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
     : graph_(subgraph), code_(subgraph, "") {
+  if (!fallbackAllowed()) {
+    compile();
+    return;
+  }
+
   try {
     compile();
   } catch (...) {
@@ -1374,6 +1397,11 @@ TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
 }
 
 void TensorExprKernel::run(Stack& stack) {
+  if (!fallbackAllowed()) {
+    runKernel(stack);
+    return;
+  }
+
   if (fallback_) {
     fallback(stack);
     return;
@@ -1389,7 +1417,7 @@ void TensorExprKernel::run(Stack& stack) {
 std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs,
-    Device device) {
+    at::Device device) {
   std::map<const Expr*, int32_t> varToSize;
 
   std::vector<CodeGen::CallArg> runArgs;
@@ -1439,7 +1467,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
 void TensorExprKernel::lowerToBackend(const at::ArrayRef<IValue>& inputs) {
   checkInputs(inputs, inputTypes_);
 
-  Device device = pickDeviceType(inputs);
+  at::Device device = pickDeviceType(inputs);
   if (!codegenCache_.count(torch::get_hash(device))) {
     BackendType backendType = inferBackendTypeFromDevice(device);
     Stmt* stmt = generateStmt(backendType);
@@ -1455,14 +1483,14 @@ void TensorExprKernel::lowerToBackend(const at::ArrayRef<IValue>& inputs) {
 }
 
 void TensorExprKernel::codegenRun(
-    Device device,
+    at::Device device,
     const std::vector<CodeGen::CallArg>& runArgs) {
   codegenCache_.at(torch::get_hash(device))->call(runArgs);
 }
 
 Stmt* TensorExprKernel::getStmtForInputs(const at::ArrayRef<IValue>& inputs) {
   lowerToBackend(inputs);
-  Device device = pickDeviceType(inputs);
+  at::Device device = pickDeviceType(inputs);
   return codegenCache_.at(torch::get_hash(device))->stmt();
 }
 
@@ -1473,7 +1501,7 @@ void TensorExprKernel::runKernel(Stack& stack) {
 
   lowerToBackend(inputs);
 
-  Device device = pickDeviceType(inputs);
+  at::Device device = pickDeviceType(inputs);
 
   std::vector<at::Tensor> outputs;
   std::vector<CodeGen::CallArg> runArgs =

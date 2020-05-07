@@ -69,7 +69,7 @@ TORCH_API IValue readArchiveAndTensors(
     const std::string& archive_name,
     c10::optional<TypeResolver> type_resolver,
     c10::optional<ObjLoader> obj_loader,
-    c10::optional<at::Device> device,
+    c10::optional<Device> device,
     caffe2::serialize::PyTorchStreamReader& stream_reader);
 
 } // namespace jit

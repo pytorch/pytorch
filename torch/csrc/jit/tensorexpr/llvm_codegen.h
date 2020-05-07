@@ -21,7 +21,7 @@ class TORCH_API LLVMCodeGen : public CodeGen {
   explicit LLVMCodeGen(
       Stmt* stmt,
       const std::vector<BufferArg>& args,
-      at::Device device = at::kCPU,
+      Device device = at::kCPU,
       Dtype dtype = kInt);
   explicit LLVMCodeGen(Stmt* stmt);
 

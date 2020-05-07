@@ -138,7 +138,7 @@ struct TORCH_API VariableInfo {
   Variable zeros(at::OptionalDeviceGuard& device_guard) const;
 
   at::Layout layout = at::Layout::Strided;
-  at::Device device = at::kCPU;
+  Device device = at::kCPU;
   at::ScalarType scalar_type = at::kFloat;
   std::vector<int64_t> size;
   bool requires_grad;
