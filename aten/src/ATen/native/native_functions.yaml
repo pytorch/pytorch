@@ -774,15 +774,9 @@
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _clamp__cpu
-    CUDA: _clamp__cuda
 
 - func: clamp.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _clamp_out_cpu
-    CUDA: _clamp_out_cuda
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
   use_c10_dispatcher: full
@@ -792,15 +786,9 @@
 - func: clamp_max_(Tensor(a!) self, Scalar max) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _clamp_max__cpu
-    CUDA: _clamp_max__cuda
 
 - func: clamp_max.out(Tensor self, Scalar max, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _clamp_max_out_cpu
-    CUDA: _clamp_max_out_cuda
 
 - func: clamp_min(Tensor self, Scalar min) -> Tensor
   use_c10_dispatcher: full
@@ -810,15 +798,9 @@
 - func: clamp_min_(Tensor(a!) self, Scalar min) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _clamp_min__cpu
-    CUDA: _clamp_min__cuda
 
 - func: clamp_min.out(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _clamp_min_out_cpu
-    CUDA: _clamp_min_out_cuda
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
   use_c10_dispatcher: full
@@ -1258,15 +1240,9 @@
 - func: erf_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _erf__cpu
-    CUDA: _erf__cuda
 
 - func: erf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _erf_out_cpu
-    CUDA: _erf_out_cuda
 
 - func: erfc(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -1507,6 +1483,11 @@
 
 - func: group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor
 
+- func: quantized_group_norm(Tensor input, int num_groups, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor
+  requires_tensor: True
+  dispatch:
+    QuantizedCPU: quantized_group_norm_impl
+
 # FFT
 
 - func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
@@ -1580,6 +1561,11 @@
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
   variants: function
+
+- func: quantized_instance_norm(Tensor input, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor
+  requires_tensor: True
+  dispatch:
+    QuantizedCPU: quantized_instance_norm_impl
 
 - func: inverse(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2272,6 +2258,9 @@
 - func: cdist(Tensor x1, Tensor x2, float p=2, int? compute_mode=None) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
+
+- func: _euclidean_dist(Tensor x1, Tensor x2) -> Tensor
+  use_c10_dispatcher: full
 
 - func: _cdist_forward(Tensor x1, Tensor x2, float p, int? compute_mode) -> Tensor
   use_c10_dispatcher: full
@@ -3433,8 +3422,8 @@
 
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_addmm_out
-    CUDA: legacy::cuda::_th_addmm_out
+    CPU: addmm_cpu_out
+    CUDA: addmm_cuda_out
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
   supports_named_tensor: True
@@ -3443,8 +3432,8 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    CPU: legacy::cpu::_th_addmm
-    CUDA: legacy::cuda::_th_addmm
+    CPU: addmm_cpu
+    CUDA: addmm_cuda
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
   supports_named_tensor: True
@@ -4528,13 +4517,13 @@
   variants: method
   dispatch:
     CPU: fmod_
-    CUDA: legacy::cuda::_th_fmod_
+    CUDA: fmod_cuda_
 
 - func: fmod_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: fmod_
-    CUDA: legacy::cuda::_th_fmod_
+    CUDA: fmod_cuda_
 
 - func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
@@ -4556,15 +4545,15 @@
 
 - func: addbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_addbmm_out
-    CUDA: legacy::cuda::_th_addbmm_out
+    CPU: addbmm_cpu_out
+    CUDA: addbmm_cuda_out
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_addbmm
-    CUDA: legacy::cuda::_th_addbmm
+    CPU: addbmm_cpu
+    CUDA: addbmm_cuda
 
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method
@@ -5283,26 +5272,26 @@
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: fmod_out
-    CUDA: legacy::cuda::_th_fmod_out
+    CUDA: fmod_cuda_out
 
 - func: fmod.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: fmod
-    CUDA: legacy::cuda::_th_fmod
+    CUDA: fmod_cuda
 
 - func: fmod.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: fmod_out
-    CUDA: legacy::cuda::_th_fmod_out
+    CUDA: fmod_cuda_out
 
 - func: fmod.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: fmod
-    CUDA: legacy::cuda::_th_fmod
+    CUDA: fmod_cuda
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
