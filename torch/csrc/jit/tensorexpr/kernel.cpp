@@ -17,7 +17,7 @@ namespace tensorexpr {
 static int te_cuda_pointwise_loop_levels = -1;
 static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
-static bool fallback_allowed = true;
+static bool fallback_allowed = false;
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
