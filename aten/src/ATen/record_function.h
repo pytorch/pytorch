@@ -3,16 +3,12 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/ThreadLocalState.h>
 #include <c10/util/SmallVector.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/utils/memory.h>
+#include <c10/macros/Export.h>
+#include <memory>
 
 #include <functional>
 
-namespace torch { namespace autograd {
-
-struct Node;
-
-namespace profiler {
+namespace at {
 
 // Kind of record function scope;
 // workaround for the older GCC versions:
@@ -33,23 +29,19 @@ enum class TORCH_API RecordScope : uint8_t {
 #  pragma GCC diagnostic pop
 #endif
 
-} // namespace profiler
-} // namespace autograd
-} // namespace torch
+} // namespace at
 
 namespace std {
 template <>
-struct hash<torch::autograd::profiler::RecordScope> {
+struct hash<at::RecordScope> {
   inline size_t operator()(
-      const torch::autograd::profiler::RecordScope& sc) const {
+      const at::RecordScope& sc) const {
     return static_cast<std::size_t>(sc);
   }
 };
 } // namespace std
 
-namespace torch {
-namespace autograd {
-namespace profiler {
+namespace at {
 
 struct TORCH_API StringView {
   StringView() : StringView(nullptr) {}
@@ -98,10 +90,6 @@ struct TORCH_API RecordFunction {
   RecordFunction(const RecordFunction&) = delete;
   RecordFunction& operator=(const RecordFunction&) = delete;
 
-  inline Node* func() const {
-    return fn_;
-  }
-
   inline const StringView& name() const {
     return name_;
   }
@@ -138,7 +126,6 @@ struct TORCH_API RecordFunction {
   // start callbacks
   void _before(const char* name, int64_t sequence_nr = -1);
   void _before(std::string name, int64_t sequence_nr = -1);
-  void _before(Node* fn, int64_t sequence_nr = -1);
 
   template<typename F>
   void _before(
@@ -181,7 +168,6 @@ struct TORCH_API RecordFunction {
   bool needs_inputs_ = false;
 
  private:
-  Node* fn_ = nullptr;
   StringView name_;
   int64_t sequence_nr_ = -1;
   std::vector<c10::IValue> inputs_;
@@ -317,7 +303,7 @@ class TORCH_API RecordFunctionCallback {
 // Using macro to minimize inputs copies,
 // optional argument - function's seq_no
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
-  torch::autograd::profiler::RecordFunction guard(scope); \
+  at::RecordFunction guard(scope); \
   if (guard.active_) { \
     guard._setCurrent(); \
     if (guard.needs_inputs_) { \
@@ -329,17 +315,17 @@ class TORCH_API RecordFunctionCallback {
 
 #define RECORD_FUNCTION(fn, inputs, ...) \
   RECORD_FUNCTION_WITH_SCOPE( \
-    torch::autograd::profiler::RecordScope::FUNCTION, \
+    at::RecordScope::FUNCTION, \
     fn, inputs, ##__VA_ARGS__)
 
 #define RECORD_TORCHSCRIPT_FUNCTION(mn, inputs) \
   RECORD_FUNCTION_WITH_SCOPE( \
-    torch::autograd::profiler::RecordScope::TORCHSCRIPT_FUNCTION, mn, inputs)
+    at::RecordScope::TORCHSCRIPT_FUNCTION, mn, inputs)
 
 // Custom user scopes in C++; similar to Python's 'with record_function("..."):'
 #define RECORD_USER_SCOPE(fn) \
   RECORD_FUNCTION_WITH_SCOPE( \
-    torch::autograd::profiler::RecordScope::USER_SCOPE, fn, {})
+    at::RecordScope::USER_SCOPE, fn, {})
 
 // Notes:
 //  - two types of callbacks are provided: thread local and global
@@ -455,6 +441,4 @@ class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
   virtual ~DisableRecordFunctionGuard() {}
 };
 
-} // namespace profiler
-} // namespace autograd
-} // namespace torch
+} // namespace at

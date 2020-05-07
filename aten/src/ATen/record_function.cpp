@@ -1,13 +1,9 @@
+#include <ATen/record_function.h>
 #include <algorithm>
-#include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/profiler.h>
 #include <cstdlib>
 #include <random>
 
-namespace torch {
-namespace autograd {
-namespace profiler {
+namespace at {
 
 namespace {
 
@@ -206,7 +202,7 @@ inline CallbackManager& manager() {
 /* static */
 double RecordFunctionCallback::sample_zero_one() {
   static thread_local auto gen =
-      torch::make_unique<std::mt19937>(std::random_device()());
+      std::make_unique<std::mt19937>(std::random_device()());
   std::uniform_real_distribution<double> dist(0.0, 1.0);
   return dist(*gen);
 }
@@ -303,18 +299,6 @@ void RecordFunction::_before(std::string name, int64_t sequence_nr) {
   manager().runStartCallbacks(*this);
 }
 
-void RecordFunction::_before(Node* fn, int64_t sequence_nr) {
-  if (!active_) {
-    return;
-  }
-  fn_ = fn;
-  name_ = StringView(fn->name());
-  sequence_nr_ = (sequence_nr >= 0) ? sequence_nr : fn->sequence_nr();
-  thread_id_ = currentThreadId();
-
-  manager().runStartCallbacks(*this);
-}
-
 RecordFunction::~RecordFunction() {
   _end();
 }
@@ -335,6 +319,4 @@ RecordFunction* RecordFunction::current() {
   return current_record_func_;
 }
 
-} // namespace profiler
-} // namespace autograd
-} // namespace torch
+} // namespace at

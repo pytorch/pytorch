@@ -1,5 +1,5 @@
 #pragma once
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/utils/future.h>
 
 namespace torch {
@@ -10,7 +10,7 @@ namespace profiler {
 // RecordFunction. This is a temporary workaround until RecordFunction is
 // registered as a custom C++ class
 // (https://github.com/pytorch/pytorch/issues/35026).
-TORCH_API RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle);
+TORCH_API at::RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle);
 
 // Schedules RecordFunction's end callbacks to be run on completion of a future.
 template <typename T>
