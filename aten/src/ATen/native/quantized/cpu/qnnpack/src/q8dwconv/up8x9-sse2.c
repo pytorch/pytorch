@@ -174,102 +174,26 @@ void pytorch_q8dwconv_ukernel_up8x9__sse2(
 
       w = (void*)((uintptr_t)w + 104);
 
-      const __m128i vmultiplier =
-          _mm_load_si128((const __m128i*)quantization_params->sse2.multiplier);
-      const __m128i vrounding =
-          _mm_load_si128((const __m128i*)quantization_params->sse2.rounding);
+      const __m128 vmultiplier =
+          _mm_loadu_ps(quantization_params->sse2.requantization_scale);
 
-      const __m128i vnmask_lo0123 =
-          _mm_cmpgt_epi32(_mm_setzero_si128(), vacc_lo);
-      const __m128i vnmask_hi0123 =
-          _mm_cmpgt_epi32(_mm_setzero_si128(), vacc_hi);
-
-      const __m128i vabsacc_lo0123 =
-          _mm_sub_epi32(_mm_xor_si128(vacc_lo, vnmask_lo0123), vnmask_lo0123);
-      const __m128i vabsacc_hi0123 =
-          _mm_sub_epi32(_mm_xor_si128(vacc_hi, vnmask_hi0123), vnmask_hi0123);
-
-      const __m128i vabsacc_lo1032 =
-          _mm_shuffle_epi32(vabsacc_lo0123, _MM_SHUFFLE(2, 3, 0, 1));
-      const __m128i vabsacc_hi1032 =
-          _mm_shuffle_epi32(vabsacc_hi0123, _MM_SHUFFLE(2, 3, 0, 1));
-
-      const __m128i vabsprod_lo02 = _mm_mul_epu32(vabsacc_lo0123, vmultiplier);
-      const __m128i vabsprod_hi02 = _mm_mul_epu32(vabsacc_hi0123, vmultiplier);
-
-      const __m128i vnmask_lo02 =
-          _mm_shuffle_epi32(vnmask_lo0123, _MM_SHUFFLE(2, 2, 0, 0));
-      const __m128i vnmask_hi02 =
-          _mm_shuffle_epi32(vnmask_hi0123, _MM_SHUFFLE(2, 2, 0, 0));
-
-      const __m128i vprod_lo02 =
-          _mm_sub_epi64(_mm_xor_si128(vabsprod_lo02, vnmask_lo02), vnmask_lo02);
-      const __m128i vprod_hi02 =
-          _mm_sub_epi64(_mm_xor_si128(vabsprod_hi02, vnmask_hi02), vnmask_hi02);
-
-      const __m128i vq31prod_lo02 =
-          _mm_srli_epi64(_mm_add_epi64(vprod_lo02, vrounding), 31);
-      const __m128i vq31prod_hi02 =
-          _mm_srli_epi64(_mm_add_epi64(vprod_hi02, vrounding), 31);
-
-      const __m128i vabsprod_lo13 = _mm_mul_epu32(vabsacc_lo1032, vmultiplier);
-      const __m128i vabsprod_hi13 = _mm_mul_epu32(vabsacc_hi1032, vmultiplier);
-
-      const __m128i vnmask_lo13 =
-          _mm_shuffle_epi32(vnmask_lo0123, _MM_SHUFFLE(3, 3, 1, 1));
-      const __m128i vnmask_hi13 =
-          _mm_shuffle_epi32(vnmask_hi0123, _MM_SHUFFLE(3, 3, 1, 1));
-
-      const __m128i vprod_lo13 =
-          _mm_sub_epi64(_mm_xor_si128(vabsprod_lo13, vnmask_lo13), vnmask_lo13);
-      const __m128i vprod_hi13 =
-          _mm_sub_epi64(_mm_xor_si128(vabsprod_hi13, vnmask_hi13), vnmask_hi13);
-
-      const __m128i vq31prod_lo13 =
-          _mm_srli_epi64(_mm_add_epi64(vprod_lo13, vrounding), 31);
-      const __m128i vq31prod_hi13 =
-          _mm_srli_epi64(_mm_add_epi64(vprod_hi13, vrounding), 31);
-
-      const __m128i vq31prod_lo0213 = _mm_castps_si128(_mm_shuffle_ps(
-          _mm_castsi128_ps(vq31prod_lo02),
-          _mm_castsi128_ps(vq31prod_lo13),
-          _MM_SHUFFLE(2, 0, 2, 0)));
-      const __m128i vq31prod_hi0213 = _mm_castps_si128(_mm_shuffle_ps(
-          _mm_castsi128_ps(vq31prod_hi02),
-          _mm_castsi128_ps(vq31prod_hi13),
-          _MM_SHUFFLE(2, 0, 2, 0)));
-
-      const __m128i vq31prod_lo0123 =
-          _mm_shuffle_epi32(vq31prod_lo0213, _MM_SHUFFLE(3, 1, 2, 0));
-      const __m128i vq31prod_hi0123 =
-          _mm_shuffle_epi32(vq31prod_hi0213, _MM_SHUFFLE(3, 1, 2, 0));
-
-      const __m128i vremainder_mask = _mm_load_si128(
-          (const __m128i*)quantization_params->sse2.remainder_mask);
-
-      const __m128i vrem_lo0123 = _mm_add_epi32(
-          _mm_and_si128(vq31prod_lo0123, vremainder_mask),
-          _mm_cmpgt_epi32(_mm_setzero_si128(), vq31prod_lo0123));
-      const __m128i vrem_hi0123 = _mm_add_epi32(
-          _mm_and_si128(vq31prod_hi0123, vremainder_mask),
-          _mm_cmpgt_epi32(_mm_setzero_si128(), vq31prod_hi0123));
-
-      const __m128i vremainder_threshold = _mm_load_si128(
-          (const __m128i*)quantization_params->sse2.remainder_threshold);
-      const __m128i vshift =
-          _mm_load_si128((const __m128i*)quantization_params->sse2.shift);
-
-      const __m128i vout_lo = _mm_sub_epi32(
-          _mm_sra_epi32(vq31prod_lo0123, vshift),
-          _mm_cmpgt_epi32(vrem_lo0123, vremainder_threshold));
-      const __m128i vout_hi = _mm_sub_epi32(
-          _mm_sra_epi32(vq31prod_hi0123, vshift),
-          _mm_cmpgt_epi32(vrem_hi0123, vremainder_threshold));
+      vacc_lo = _mm_cvtps_epi32(
+                    _mm_mul_ps(
+                      _mm_cvtepi32_ps(vacc_lo),
+                      vmultiplier
+                      )
+                    );
+      vacc_hi = _mm_cvtps_epi32(
+                    _mm_mul_ps(
+                      _mm_cvtepi32_ps(vacc_hi),
+                      vmultiplier
+                      )
+                    );
 
       const __m128i voutput_zero_point = _mm_load_si128(
           (const __m128i*)quantization_params->sse2.output_zero_point);
       __m128i vout =
-          _mm_adds_epi16(_mm_packs_epi32(vout_lo, vout_hi), voutput_zero_point);
+          _mm_adds_epi16(_mm_packs_epi32(vacc_lo, vacc_hi), voutput_zero_point);
       vout = _mm_packus_epi16(vout, vout);
       vout = _mm_min_epu8(
           vout,
@@ -423,102 +347,26 @@ void pytorch_q8dwconv_ukernel_up8x9__sse2(
       vacc_hi =
           _mm_add_epi32(vacc_hi, _mm_unpackhi_epi16(vprod8_odd, vprod8_even));
 
-      const __m128i vmultiplier =
-          _mm_load_si128((const __m128i*)quantization_params->sse2.multiplier);
-      const __m128i vrounding =
-          _mm_load_si128((const __m128i*)quantization_params->sse2.rounding);
+      const __m128 vmultiplier =
+          _mm_loadu_ps(quantization_params->sse2.requantization_scale);
 
-      const __m128i vnmask_lo0123 =
-          _mm_cmpgt_epi32(_mm_setzero_si128(), vacc_lo);
-      const __m128i vnmask_hi0123 =
-          _mm_cmpgt_epi32(_mm_setzero_si128(), vacc_hi);
-
-      const __m128i vabsacc_lo0123 =
-          _mm_sub_epi32(_mm_xor_si128(vacc_lo, vnmask_lo0123), vnmask_lo0123);
-      const __m128i vabsacc_hi0123 =
-          _mm_sub_epi32(_mm_xor_si128(vacc_hi, vnmask_hi0123), vnmask_hi0123);
-
-      const __m128i vabsacc_lo1032 =
-          _mm_shuffle_epi32(vabsacc_lo0123, _MM_SHUFFLE(2, 3, 0, 1));
-      const __m128i vabsacc_hi1032 =
-          _mm_shuffle_epi32(vabsacc_hi0123, _MM_SHUFFLE(2, 3, 0, 1));
-
-      const __m128i vabsprod_lo02 = _mm_mul_epu32(vabsacc_lo0123, vmultiplier);
-      const __m128i vabsprod_hi02 = _mm_mul_epu32(vabsacc_hi0123, vmultiplier);
-
-      const __m128i vnmask_lo02 =
-          _mm_shuffle_epi32(vnmask_lo0123, _MM_SHUFFLE(2, 2, 0, 0));
-      const __m128i vnmask_hi02 =
-          _mm_shuffle_epi32(vnmask_hi0123, _MM_SHUFFLE(2, 2, 0, 0));
-
-      const __m128i vprod_lo02 =
-          _mm_sub_epi64(_mm_xor_si128(vabsprod_lo02, vnmask_lo02), vnmask_lo02);
-      const __m128i vprod_hi02 =
-          _mm_sub_epi64(_mm_xor_si128(vabsprod_hi02, vnmask_hi02), vnmask_hi02);
-
-      const __m128i vq31prod_lo02 =
-          _mm_srli_epi64(_mm_add_epi64(vprod_lo02, vrounding), 31);
-      const __m128i vq31prod_hi02 =
-          _mm_srli_epi64(_mm_add_epi64(vprod_hi02, vrounding), 31);
-
-      const __m128i vabsprod_lo13 = _mm_mul_epu32(vabsacc_lo1032, vmultiplier);
-      const __m128i vabsprod_hi13 = _mm_mul_epu32(vabsacc_hi1032, vmultiplier);
-
-      const __m128i vnmask_lo13 =
-          _mm_shuffle_epi32(vnmask_lo0123, _MM_SHUFFLE(3, 3, 1, 1));
-      const __m128i vnmask_hi13 =
-          _mm_shuffle_epi32(vnmask_hi0123, _MM_SHUFFLE(3, 3, 1, 1));
-
-      const __m128i vprod_lo13 =
-          _mm_sub_epi64(_mm_xor_si128(vabsprod_lo13, vnmask_lo13), vnmask_lo13);
-      const __m128i vprod_hi13 =
-          _mm_sub_epi64(_mm_xor_si128(vabsprod_hi13, vnmask_hi13), vnmask_hi13);
-
-      const __m128i vq31prod_lo13 =
-          _mm_srli_epi64(_mm_add_epi64(vprod_lo13, vrounding), 31);
-      const __m128i vq31prod_hi13 =
-          _mm_srli_epi64(_mm_add_epi64(vprod_hi13, vrounding), 31);
-
-      const __m128i vq31prod_lo0213 = _mm_castps_si128(_mm_shuffle_ps(
-          _mm_castsi128_ps(vq31prod_lo02),
-          _mm_castsi128_ps(vq31prod_lo13),
-          _MM_SHUFFLE(2, 0, 2, 0)));
-      const __m128i vq31prod_hi0213 = _mm_castps_si128(_mm_shuffle_ps(
-          _mm_castsi128_ps(vq31prod_hi02),
-          _mm_castsi128_ps(vq31prod_hi13),
-          _MM_SHUFFLE(2, 0, 2, 0)));
-
-      const __m128i vq31prod_lo0123 =
-          _mm_shuffle_epi32(vq31prod_lo0213, _MM_SHUFFLE(3, 1, 2, 0));
-      const __m128i vq31prod_hi0123 =
-          _mm_shuffle_epi32(vq31prod_hi0213, _MM_SHUFFLE(3, 1, 2, 0));
-
-      const __m128i vremainder_mask = _mm_load_si128(
-          (const __m128i*)quantization_params->sse2.remainder_mask);
-
-      const __m128i vrem_lo0123 = _mm_add_epi32(
-          _mm_and_si128(vq31prod_lo0123, vremainder_mask),
-          _mm_cmpgt_epi32(_mm_setzero_si128(), vq31prod_lo0123));
-      const __m128i vrem_hi0123 = _mm_add_epi32(
-          _mm_and_si128(vq31prod_hi0123, vremainder_mask),
-          _mm_cmpgt_epi32(_mm_setzero_si128(), vq31prod_hi0123));
-
-      const __m128i vremainder_threshold = _mm_load_si128(
-          (const __m128i*)quantization_params->sse2.remainder_threshold);
-      const __m128i vshift =
-          _mm_load_si128((const __m128i*)quantization_params->sse2.shift);
-
-      const __m128i vout_lo = _mm_sub_epi32(
-          _mm_sra_epi32(vq31prod_lo0123, vshift),
-          _mm_cmpgt_epi32(vrem_lo0123, vremainder_threshold));
-      const __m128i vout_hi = _mm_sub_epi32(
-          _mm_sra_epi32(vq31prod_hi0123, vshift),
-          _mm_cmpgt_epi32(vrem_hi0123, vremainder_threshold));
+      vacc_lo = _mm_cvtps_epi32(
+                    _mm_mul_ps(
+                      _mm_cvtepi32_ps(vacc_lo),
+                      vmultiplier
+                      )
+                    );
+      vacc_hi = _mm_cvtps_epi32(
+                    _mm_mul_ps(
+                      _mm_cvtepi32_ps(vacc_hi),
+                      vmultiplier
+                      )
+                    );
 
       const __m128i voutput_zero_point = _mm_load_si128(
           (const __m128i*)quantization_params->sse2.output_zero_point);
       __m128i vout =
-          _mm_adds_epi16(_mm_packs_epi32(vout_lo, vout_hi), voutput_zero_point);
+          _mm_adds_epi16(_mm_packs_epi32(vacc_lo, vacc_hi), voutput_zero_point);
       vout = _mm_packus_epi16(vout, vout);
       vout = _mm_min_epu8(
           vout,

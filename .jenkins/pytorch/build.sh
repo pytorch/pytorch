@@ -61,6 +61,10 @@ fi
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
 
+# Enable LLVM dependency for TensorExpr testing
+export USE_LLVM=/opt/llvm
+export LLVM_DIR=/opt/llvm/lib/cmake/llvm
+
 # TODO: Don't install this here
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
@@ -165,76 +169,83 @@ if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   export TORCH_CUDA_ARCH_LIST="6.0"
 fi
 
+if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
+  export CC=clang
+  export CXX=clang++
+fi
+
 # Patch required to build xla
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   git clone --recursive https://github.com/pytorch/xla.git
   ./xla/scripts/apply_patches.sh
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
-  export CC=clang
-  export CXX=clang++
-fi
+if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
+  set -e
 
+  get_bazel
 
-# check that setup.py would fail with bad arguments
-echo "The next three invocations are expected to fail with invalid command error messages."
-( ! get_exit_code python setup.py bad_argument )
-( ! get_exit_code python setup.py clean] )
-( ! get_exit_code python setup.py clean bad_argument )
-
-if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
-
-  # ppc64le build fails when WERROR=1
-  # set only when building other architectures
-  # only use for "python setup.py install" line
-  if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
-    WERROR=1 python setup.py install
-  else
-    python setup.py install
-  fi
-
-  # TODO: I'm not sure why, but somehow we lose verbose commands
-  set -x
-
-  if which sccache > /dev/null; then
-    echo 'PyTorch Build Statistics'
-    sccache --show-stats
-  fi
-
-  assert_git_not_dirty
-
-  # Build custom operator tests.
-  CUSTOM_OP_BUILD="$PWD/../custom-op-build"
-  CUSTOM_OP_TEST="$PWD/test/custom_operator"
-  python --version
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  mkdir "$CUSTOM_OP_BUILD"
-  pushd "$CUSTOM_OP_BUILD"
-  cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-  make VERBOSE=1
-  popd
-  assert_git_not_dirty
+  tools/bazel build :torch
 else
-  # Test standalone c10 build
-  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda10.1-cudnn7-py3* ]]; then
-    mkdir -p c10/build
-    pushd c10/build
-    cmake ..
-    make -j
+  # check that setup.py would fail with bad arguments
+  echo "The next three invocations are expected to fail with invalid command error messages."
+  ( ! get_exit_code python setup.py bad_argument )
+  ( ! get_exit_code python setup.py clean] )
+  ( ! get_exit_code python setup.py clean bad_argument )
+
+  if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
+
+    # ppc64le build fails when WERROR=1
+    # set only when building other architectures
+    # only use for "python setup.py install" line
+    if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+      WERROR=1 python setup.py install
+    else
+      python setup.py install
+    fi
+
+    # TODO: I'm not sure why, but somehow we lose verbose commands
+    set -x
+
+    if which sccache > /dev/null; then
+      echo 'PyTorch Build Statistics'
+      sccache --show-stats
+    fi
+
+    assert_git_not_dirty
+
+    # Build custom operator tests.
+    CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+    CUSTOM_OP_TEST="$PWD/test/custom_operator"
+    python --version
+    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    mkdir "$CUSTOM_OP_BUILD"
+    pushd "$CUSTOM_OP_BUILD"
+    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    make VERBOSE=1
     popd
     assert_git_not_dirty
-  fi
+  else
+    # Test standalone c10 build
+    if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda10.1-cudnn7-py3* ]]; then
+      mkdir -p c10/build
+      pushd c10/build
+      cmake ..
+      make -j
+      popd
+      assert_git_not_dirty
+    fi
 
-  # Test no-Python build
-  echo "Building libtorch"
-  # NB: Install outside of source directory (at the same level as the root
-  # pytorch folder) so that it doesn't get cleaned away prior to docker push.
-  BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
-  mkdir -p ../cpp-build/caffe2
-  pushd ../cpp-build/caffe2
-  WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
-  popd
+    # Test no-Python build
+    echo "Building libtorch"
+    # NB: Install outside of source directory (at the same level as the root
+    # pytorch folder) so that it doesn't get cleaned away prior to docker push.
+    BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
+    mkdir -p ../cpp-build/caffe2
+    pushd ../cpp-build/caffe2
+    WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
+    popd
+  fi
 fi
 
 # Test XLA build
@@ -243,18 +254,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
 
   pip_install lark-parser
 
-  # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
-  sudo add-apt-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-8 main"
-  wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
   sudo apt-get -qq update
-
-  # Install clang-8 clang++-8 for xla
-  sudo apt-get -qq install clang-8 clang++-8
-
-  sudo apt-get -qq install npm
-  npm config set strict-ssl false
-  curl -sL --retry 3 https://deb.nodesource.com/setup_6.x | sudo -E bash -
-  sudo apt-get install -qq nodejs
+  sudo apt-get -qq install npm nodejs
 
   # XLA build requires Bazel
   # We use bazelisk to avoid updating Bazel version manually.
@@ -271,7 +272,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
 
   bazels3cache --bucket=${XLA_CLANG_CACHE_S3_BUCKET_NAME} --maxEntrySizeBytes=0
   pushd xla
-  export CC=clang-8 CXX=clang++-8
+  export CC=clang-9 CXX=clang++-9
   # Use cloud cache to build when available.
   sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
 

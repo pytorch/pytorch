@@ -8,7 +8,7 @@ import torch.distributed as dist
 
 
 def is_available():
-    return sys.version_info >= (3, 0) and hasattr(torch._C, "_rpc_init")
+    return hasattr(torch._C, "_rpc_init")
 
 
 if is_available() and not torch._C._rpc_init():
@@ -33,8 +33,8 @@ if is_available():
 
         Initializes the local RPC agent which immediately makes the current
         process ready to send and receive RPCs. This method also properly
-        initializes a default process group backend that uses gloo for
-        collective communication.
+        initializes a default process group backend that uses Gloo for
+        communication.
 
         Arguments:
             backend (Enum): type of RPC backend implementation. Currently,

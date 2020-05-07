@@ -40,10 +40,10 @@ void testLiteInterpreterAdd() {
   m.register_parameter("foo", torch::ones({}), false);
   // TODO: support default param val, which was pushed in
   // function schema's checkAndNormalizeInputs()
-//  m.define(R"(
-//    def add_it(self, x, b : int = 4):
-//      return self.foo + x + b
-//  )");
+  //  m.define(R"(
+  //    def add_it(self, x, b : int = 4):
+  //      return self.foo + x + b
+  //  )");
   m.define(R"(
     def add_it(self, x):
       b = 4
@@ -97,7 +97,8 @@ void testLiteInterpreterConv() {
   }
   auto output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
+  AT_ASSERT(
+      outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
 void testLiteInterpreterInline() {
@@ -136,6 +137,24 @@ void testLiteInterpreterTuple() {
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.run_method("forward", inputs);
   AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
+}
+
+void testLiteInterpreterDict() {
+  Module m("m");
+  m.define(R"JIT(
+  def foo(self, x):
+      return {"result": x + 1}
+
+  def forward(self, x):
+      d = self.foo(x)
+      return d
+  )JIT");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs({torch::ones({})});
+  auto output = bc.run_method("forward", inputs);
+  AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 }
 
 void testLiteInterpreterPrimOverload() {
@@ -232,16 +251,15 @@ void testLiteInterpreterParams() {
   std::stringstream ms;
   m.save(ms);
   auto mm = load(ms);
-//  mm.train();
+  //  mm.train();
   std::vector<::at::Tensor> parameters;
   for (auto parameter : mm.parameters()) {
     parameters.emplace_back(parameter);
   }
   ::torch::optim::SGD optimizer(
-      parameters,
-      ::torch::optim::SGDOptions(learning_rate).momentum(momentum));
+      parameters, ::torch::optim::SGDOptions(learning_rate).momentum(momentum));
   for (int epoc = 0; epoc < n_epoc; ++epoc) {
-    for (auto &data : trainData) {
+    for (auto& data : trainData) {
       auto source = data.first, targets = data.second;
       optimizer.zero_grad();
       std::vector<IValue> train_inputs{source};
@@ -259,7 +277,7 @@ void testLiteInterpreterParams() {
       bc_parameters,
       ::torch::optim::SGDOptions(learning_rate).momentum(momentum));
   for (int epoc = 0; epoc < n_epoc; ++epoc) {
-    for (auto &data : trainData) {
+    for (auto& data : trainData) {
       auto source = data.first, targets = data.second;
       bc_optimizer.zero_grad();
       std::vector<IValue> train_inputs{source};
@@ -343,7 +361,8 @@ void testLiteInterpreterBuiltinFunction() {
 namespace {
 static auto reg =
     torch::jit::class_<TorchBindLiteInterpreterTestStruct>(
-        "_TorchScriptTesting_LiteInterpreterTest")
+        "_TorchScriptTesting",
+        "_LiteInterpreterTest")
         .def("get", &TorchBindLiteInterpreterTestStruct::get)
         .def_pickle(
             // __getattr__

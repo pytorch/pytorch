@@ -2,6 +2,7 @@
 
 #include <torch/nn/functional/activation.h>
 #include <torch/nn/options/pooling.h>
+#include <torch/nn/modules/utils.h>
 
 namespace torch {
 namespace nn {
@@ -373,9 +374,29 @@ inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(const Tensor& input, c
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
+inline std::tuple<Tensor, Tensor> adaptive_max_pool1d_with_indices(
+    const Tensor& input, ExpandingArray<1> output_size) {
+  return torch::adaptive_max_pool1d(input, output_size);
+}
+} // namespace detail
+
+/// See the documentation for `torch::nn::functional::AdaptiveMaxPool1dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_max_pool1d_with_indices(x, F::AdaptiveMaxPool1dFuncOptions(3));
+/// ```
+inline std::tuple<Tensor, Tensor> adaptive_max_pool1d_with_indices(
+    const Tensor& input, const AdaptiveMaxPool1dFuncOptions& options) {
+  return detail::adaptive_max_pool1d_with_indices(input, options.output_size());
+}
+
+namespace detail {
 inline Tensor adaptive_max_pool1d(const Tensor& input,
-  ExpandingArray<1> output_size) {
-   return std::get<0>(torch::adaptive_max_pool1d(input, output_size));
+    ExpandingArray<1> output_size) {
+  return std::get<0>(adaptive_max_pool1d_with_indices(input, output_size));
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -392,37 +413,38 @@ inline Tensor adaptive_max_pool1d(const Tensor& input,
 /// F::adaptive_max_pool1d(x, F::AdaptiveMaxPool1dFuncOptions(3));
 /// ```
 inline Tensor adaptive_max_pool1d(const Tensor& input,
-  const AdaptiveMaxPool1dFuncOptions& options) {
-   return detail::adaptive_max_pool1d(input, options.output_size());
+    const AdaptiveMaxPool1dFuncOptions& options) {
+  return detail::adaptive_max_pool1d(input, options.output_size());
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline std::tuple<Tensor, Tensor> adaptive_max_pool1d_with_indices(
-  const Tensor& input, ExpandingArray<1> output_size) {
-   return torch::adaptive_max_pool1d(input, output_size);
+inline std::tuple<Tensor, Tensor> adaptive_max_pool2d_with_indices(
+    const Tensor& input, ExpandingArrayWithOptionalElem<2> output_size) {
+  auto output_size_ = torch::nn::modules::utils::_list_with_default(output_size, input.sizes());
+  return torch::adaptive_max_pool2d(input, output_size_);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See the documentation for `torch::nn::functional::AdaptiveMaxPool1dFuncOptions` class to learn what
+/// See the documentation for `torch::nn::functional::AdaptiveMaxPool2dFuncOptions` class to learn what
 /// optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::adaptive_max_pool1d_with_indices(x, F::AdaptiveMaxPool1dFuncOptions(3));
+/// F::adaptive_max_pool2d_with_indices(x, F::AdaptiveMaxPool2dFuncOptions(3));
 /// ```
-inline std::tuple<Tensor, Tensor> adaptive_max_pool1d_with_indices(
-  const Tensor& input, const AdaptiveMaxPool1dFuncOptions& options) {
-   return detail::adaptive_max_pool1d_with_indices(input, options.output_size());
+inline std::tuple<Tensor, Tensor> adaptive_max_pool2d_with_indices(
+    const Tensor& input, const AdaptiveMaxPool2dFuncOptions& options) {
+  return detail::adaptive_max_pool2d_with_indices(input, options.output_size());
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor adaptive_max_pool2d(const Tensor& input,
-  ExpandingArray<2> output_size) {
-   return std::get<0>(torch::adaptive_max_pool2d(input, output_size));
+    ExpandingArrayWithOptionalElem<2> output_size) {
+  return std::get<0>(adaptive_max_pool2d_with_indices(input, output_size));
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -439,37 +461,38 @@ inline Tensor adaptive_max_pool2d(const Tensor& input,
 /// F::adaptive_max_pool2d(x, F::AdaptiveMaxPool2dFuncOptions(3));
 /// ```
 inline Tensor adaptive_max_pool2d(const Tensor& input,
-  const AdaptiveMaxPool2dFuncOptions& options) {
-   return detail::adaptive_max_pool2d(input, options.output_size());
+    const AdaptiveMaxPool2dFuncOptions& options) {
+  return detail::adaptive_max_pool2d(input, options.output_size());
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline std::tuple<Tensor, Tensor> adaptive_max_pool2d_with_indices(
-  const Tensor& input, ExpandingArray<2> output_size) {
-   return torch::adaptive_max_pool2d(input, output_size);
+inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
+    const Tensor& input, ExpandingArrayWithOptionalElem<3> output_size) {
+  auto output_size_ = torch::nn::modules::utils::_list_with_default(output_size, input.sizes());
+  return torch::adaptive_max_pool3d(input, output_size_);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See the documentation for `torch::nn::functional::AdaptiveMaxPool2dFuncOptions` class to learn what
+/// See the documentation for `torch::nn::functional::AdaptiveMaxPool3dFuncOptions` class to learn what
 /// optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::adaptive_max_pool2d_with_indices(x, F::AdaptiveMaxPool2dFuncOptions(3));
+/// F::adaptive_max_pool3d_with_indices(x, F::AdaptiveMaxPool3dFuncOptions(3));
 /// ```
-inline std::tuple<Tensor, Tensor> adaptive_max_pool2d_with_indices(
-  const Tensor& input, const AdaptiveMaxPool2dFuncOptions& options) {
-   return detail::adaptive_max_pool2d_with_indices(input, options.output_size());
+inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
+    const Tensor& input, const AdaptiveMaxPool3dFuncOptions& options) {
+  return detail::adaptive_max_pool3d_with_indices(input, options.output_size());
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor adaptive_max_pool3d(const Tensor& input,
-  ExpandingArray<3> output_size) {
-   return std::get<0>(torch::adaptive_max_pool3d(input, output_size));
+    ExpandingArrayWithOptionalElem<3> output_size) {
+  return std::get<0>(adaptive_max_pool3d_with_indices(input, output_size));
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -490,35 +513,13 @@ inline Tensor adaptive_max_pool3d(const Tensor& input,
    return detail::adaptive_max_pool3d(input, options.output_size());
 }
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-namespace detail {
-inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
-  const Tensor& input, ExpandingArray<3> output_size) {
-   return torch::adaptive_max_pool3d(input, output_size);
-}
-} // namespace detail
-#endif /* DOXYGEN_SHOULD_SKIP_THIS */
-
-/// See the documentation for `torch::nn::functional::AdaptiveMaxPool3dFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
-///
-/// Example:
-/// ```
-/// namespace F = torch::nn::functional;
-/// F::adaptive_max_pool3d_with_indices(x, F::AdaptiveMaxPool3dFuncOptions(3));
-/// ```
-inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
-  const Tensor& input, const AdaptiveMaxPool3dFuncOptions& options) {
-   return detail::adaptive_max_pool3d_with_indices(input, options.output_size());
-}
-
 // ============================================================================
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor adaptive_avg_pool1d(const Tensor& input,
-  ExpandingArray<1> output_size) {
-   return torch::adaptive_avg_pool1d(input, output_size);
+    ExpandingArray<1> output_size) {
+  return torch::adaptive_avg_pool1d(input, output_size);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -535,15 +536,16 @@ inline Tensor adaptive_avg_pool1d(const Tensor& input,
 /// F::adaptive_avg_pool1d(x, F::AdaptiveAvgPool1dFuncOptions(3));
 /// ```
 inline Tensor adaptive_avg_pool1d(const Tensor& input,
-  const AdaptiveAvgPool1dFuncOptions& options) {
-   return detail::adaptive_avg_pool1d(input, options.output_size());
+    const AdaptiveAvgPool1dFuncOptions& options) {
+  return detail::adaptive_avg_pool1d(input, options.output_size());
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor adaptive_avg_pool2d(const Tensor& input,
-  ExpandingArray<2> output_size) {
-   return torch::adaptive_avg_pool2d(input, output_size);
+    ExpandingArrayWithOptionalElem<2> output_size) {
+  auto output_size_ = torch::nn::modules::utils::_list_with_default(output_size, input.sizes());
+  return torch::adaptive_avg_pool2d(input, output_size_);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -560,15 +562,16 @@ inline Tensor adaptive_avg_pool2d(const Tensor& input,
 /// F::adaptive_avg_pool2d(x, F::AdaptiveAvgPool2dFuncOptions(3));
 /// ```
 inline Tensor adaptive_avg_pool2d(const Tensor& input,
-  const AdaptiveAvgPool2dFuncOptions& options) {
-   return detail::adaptive_avg_pool2d(input, options.output_size());
+    const AdaptiveAvgPool2dFuncOptions& options) {
+  return detail::adaptive_avg_pool2d(input, options.output_size());
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor adaptive_avg_pool3d(const Tensor& input,
-  ExpandingArray<3> output_size) {
-   return torch::adaptive_avg_pool3d(input, output_size);
+    ExpandingArrayWithOptionalElem<3> output_size) {
+  auto output_size_ = torch::nn::modules::utils::_list_with_default(output_size, input.sizes());
+  return torch::adaptive_avg_pool3d(input, output_size_);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -585,8 +588,8 @@ inline Tensor adaptive_avg_pool3d(const Tensor& input,
 /// F::adaptive_avg_pool3d(x, F::AdaptiveAvgPool3dFuncOptions(3));
 /// ```
 inline Tensor adaptive_avg_pool3d(const Tensor& input,
-  const AdaptiveAvgPool3dFuncOptions& options) {
-   return detail::adaptive_avg_pool3d(input, options.output_size());
+    const AdaptiveAvgPool3dFuncOptions& options) {
+  return detail::adaptive_avg_pool3d(input, options.output_size());
 }
 
 // ============================================================================
@@ -854,7 +857,7 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(
   if (!_random_samples_.defined()) {
     _random_samples_ = torch::rand({input.size(0), input.size(1), 3}, torch::TensorOptions().dtype(input.dtype()).device(input.device()));
   }
-  return torch::fractional_max_pool3d(input, kernel_size, *output_size, _random_samples_);
+  return torch::fractional_max_pool3d(input, kernel_size, *output_size_, _random_samples_);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */

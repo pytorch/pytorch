@@ -30,6 +30,7 @@ dist/
 docs/src/**/*
 docs/cpp/build
 docs/cpp/source/api
+docs/source/generated/
 log
 test/.coverage
 test/.hypothesis/
@@ -252,3 +253,9 @@ TAGS
 
 # clang-format storage location used by apply_clang_format.py
 .clang-format-bin
+
+# clangd background index
+.clangd/
+
+# bazel symlinks
+bazel-*

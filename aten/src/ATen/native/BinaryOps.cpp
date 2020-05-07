@@ -59,6 +59,13 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  if (isIntegralType(result.scalar_type(), /*includeBool=*/ true)) {
+    TORCH_WARN_ONCE(
+      "Integer division of tensors using div or / is deprecated, ",
+      "and in a future release div will perform true division as in Python 3. ",
+      "Use true_divide or floor_divide (// in Python) instead.");
+  }
+
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_mem_overlap=*/true);
   div_stub(iter.device_type(), iter);
@@ -66,6 +73,13 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor div(const Tensor& self, const Tensor& other) {
+  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
+      && isIntegralType(other.scalar_type(), /*includeBool=*/ true)) {
+    TORCH_WARN_ONCE(
+      "Integer division of tensors using div or / is deprecated, ",
+      "and in a future release div will perform true division as in Python 3. ",
+      "Use true_divide or floor_divide (// in Python) instead.");
+  }
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   div_stub(iter.device_type(), iter);
@@ -92,13 +106,6 @@ Tensor remainder(const Tensor& self, const Tensor& other) {
 
 Tensor& remainder_(Tensor& self, const Tensor& other) {
   return native::remainder_out(self, self, other);
-}
-
-Tensor truncate(const Tensor& tensor) {
-  if (tensor.is_floating_point()) {
-    return tensor.trunc();
-  }
-  return tensor;
 }
 
 Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
@@ -131,14 +138,38 @@ Tensor true_divide(const Tensor& self, const Tensor& divisor) {
   return iter.output();
 }
 
-Tensor floor_divide(const Tensor& input, const Tensor& other) {
-  Tensor out = input / other;
-  return truncate(out);
+Tensor& true_divide_(Tensor& self, const Tensor& divisor) {
+  return native::true_divide_out(self, self, divisor);
 }
 
-Tensor floor_divide(const Tensor& input, Scalar other) {
-  Tensor out = input / other;
-  return truncate(out);
+Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
+  div_stub(iter.device_type(), iter);
+
+  if (result.is_floating_point()) {
+    result.trunc_();
+  }
+
+  return result;
+}
+
+Tensor floor_divide(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+
+  div_stub(iter.device_type(), iter);
+
+  auto out = iter.output();
+  if (out.is_floating_point()) {
+    out.trunc_();
+  }
+
+  return out;
+}
+
+Tensor& floor_divide_(Tensor& self, const Tensor& other) {
+  return native::floor_divide_out(self, self, other);
 }
 
 Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -239,7 +270,7 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
 
 static void check_convert(Scalar scalar, ScalarType scalarType) {
   // Validate that is possible to convert scalar to tensor dtype without overflow
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, scalarType, "check_convert", [&]{
+  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, scalarType, "check_convert", [&]{
     scalar.to<scalar_t>();
   });
 }
@@ -628,6 +659,8 @@ Tensor logical_xor(const Tensor& self, Scalar other) { return comparison_op(self
 Tensor& logical_xor_(Tensor& self, Scalar other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 
 Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
+  TORCH_CHECK(!other.is_complex(), "max is not yet implemented for complex tensors.");
   auto iter = TensorIterator::binary_op(result, self, other,
                                         /*check_mem_overlap=*/true);
   TORCH_CHECK(self.dtype() == other.dtype(),
@@ -638,6 +671,8 @@ Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor max(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
+  TORCH_CHECK(!other.is_complex(), "max is not yet implemented for complex tensors.");
   Tensor result = at::empty(0, self.options());
   return at::max_out(result, self, other);
 }
@@ -645,6 +680,8 @@ Tensor max(const Tensor& self, const Tensor& other) {
 Tensor& max_(Tensor& self, const Tensor& other) { return at::max_out(self, self, other); }
 
 Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
+  TORCH_CHECK(!other.is_complex(), "min is not yet implemented for complex tensors.");
   auto iter = TensorIterator::binary_op(result, self, other,
                                         /*check_mem_overlap=*/true);
   TORCH_CHECK(self.dtype() == other.dtype(),
@@ -655,11 +692,21 @@ Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor min(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
+  TORCH_CHECK(!other.is_complex(), "min is not yet implemented for complex tensors.");
   Tensor result = at::empty(0, self.options());
   return at::min_out(result, self, other);
 }
 
 Tensor& min_(Tensor& self, const Tensor& other) { return at::min_out(self, self, other); }
+
+Tensor floor_divide(const Tensor& self, Scalar other) {
+  return at::floor_divide(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& floor_divide_(Tensor& self, Scalar other) {
+  return at::floor_divide_out(self, self, wrapped_scalar_tensor(other));
+}
 
 Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other,
@@ -696,8 +743,18 @@ Tensor& fmod_(Tensor& self, Scalar other) {
 }
 
 Tensor true_divide(const Tensor& self, Scalar divisor) {
-  return at::true_divide(self, wrapped_scalar_tensor(divisor)); // redispatch!
+  return self.true_divide(wrapped_scalar_tensor(divisor)); // redispatch!
 }
 
+Tensor& true_divide_(Tensor& self, Scalar divisor) {
+  return self.true_divide_(wrapped_scalar_tensor(divisor)); // redispatch!
 }
-}  // namespace at
+
+// Note: this function is only for testing.
+// It is undocumented and should not be used outside of tests.
+Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, Scalar alpha) {
+  return self - (other * alpha);
+}
+
+
+}}  // at::native

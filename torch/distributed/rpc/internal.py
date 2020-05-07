@@ -7,12 +7,12 @@ import threading
 import traceback
 
 import torch
+import torch.distributed as dist
 
 
 # Thread local tensor tables to store tensors while pickling torch.Tensor
 # objects
 _thread_local_tensor_tables = threading.local()
-
 
 class RPCExecMode(Enum):
     SYNC = "sync"
@@ -31,23 +31,27 @@ class _InternalRPCPickler:
     """
 
     def __init__(self):
-        # python2 does not have dispatch_table, add "if torch._six.PY3" condition,
-        # as _InternalRPCPickler still got build in python2 even
-        # we skipped python 2 tests for rpc_test
-        if torch._six.PY3:
-            self._dispatch_table = copyreg.dispatch_table.copy()
-            self._dispatch_table[torch.Tensor] = self._tensor_reducer
+        self._dispatch_table = copyreg.dispatch_table.copy()
+        self._dispatch_table[torch.Tensor] = self._tensor_reducer
 
     @classmethod
     def _tensor_receiver(cls, tensor_index):
         global _thread_local_tensor_tables
         return _thread_local_tensor_tables.recv_tables[tensor_index]
 
-    def _tensor_reducer(self, obj):
+    def _tensor_reducer(self, tensor):
         global _thread_local_tensor_tables
-        _thread_local_tensor_tables.send_tables.append(obj)
+        _thread_local_tensor_tables.send_tables.append(tensor)
         tensor_index = len(_thread_local_tensor_tables.send_tables) - 1
         return (_InternalRPCPickler._tensor_receiver, (tensor_index,))
+
+    @classmethod
+    def _rref_receiver(cls, rref_fork_data):
+        return dist.rpc.RRef._deserialize(rref_fork_data)
+
+    def _rref_reducer(self, rref):
+        rref_fork_data = rref._serialize()
+        return (_InternalRPCPickler._rref_receiver, (rref_fork_data, ))
 
     def serialize(self, obj):
         r"""
@@ -57,6 +61,14 @@ class _InternalRPCPickler:
         f = io.BytesIO()
         p = pickle.Pickler(f)
         p.dispatch_table = self._dispatch_table
+
+        # rpc api could accept user picklers inheriting from _InternalRPCPickler to serialize rref,
+        # user picklers could have different initialization function from _InternalRPCPickler,
+        # but all the user picklers should call serialize() and use _rref_reducer to pickle rref
+        # in python. also, when _internal_rpc_pickler is imported to rpc/api.py, rpc.RRef is not
+        # compiled yet, it is not good place to acces rpc.RRef inside _InternalRPCPickler constructor,
+        # so puting rref's dispatch table here
+        p.dispatch_table[dist.rpc.RRef] = self._rref_reducer
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call
         global _thread_local_tensor_tables
@@ -144,6 +156,28 @@ def _run_function(python_udf):
 def _handle_exception(result):
     if isinstance(result, RemoteException):
         raise result.exception_type(result.msg)
+
+def _build_rpc_profiling_key(exec_type, func_name, current_worker_name, dst_worker_name):
+    """
+    Builds the key that RPC calls are profiled with using the autograd profiler.
+    This will be the name of the corresponding Event recorded in the profiler.
+
+    Arguments:
+        exec_type (RPCExecMode): Type of RPC/RRef call
+        func_name (str): Name of function being profiled.
+        current_worker_name (str): Name of current worker.
+        dst_worker_name (str): Name of the destination worker.
+
+    Returns:
+        String representing profiling key
+    """
+    profile_key = "rpc_{rpc_type}#{func_name}({current_worker} -> {dst_worker})".format(
+        rpc_type=exec_type.value,
+        func_name=func_name,
+        current_worker=current_worker_name,
+        dst_worker=dst_worker_name,
+    )
+    return profile_key
 
 
 def _start_record_function(exec_type, func_name, current_worker_name, dest_worker_name):

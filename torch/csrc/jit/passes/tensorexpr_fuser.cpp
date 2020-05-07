@@ -13,9 +13,20 @@
 namespace torch {
 namespace jit {
 
-static bool texpr_fuser_enabled = true;
+static bool texpr_fuser_enabled_ = false;
 void setTensorExprFuserEnabled(bool val) {
-  texpr_fuser_enabled = val;
+  texpr_fuser_enabled_ = val;
+}
+
+bool tensorExprFuserEnabled() {
+  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR");
+  if (!enable_c_str) {
+    return texpr_fuser_enabled_;
+  }
+  if (std::string(enable_c_str) == "0") {
+    return false;
+  }
+  return true;
 }
 
 const Symbol& getTensorExprSymbol() {
@@ -40,6 +51,28 @@ value_list sortReverseTopological(
         return a->node()->isAfter(b->node());
       });
   return result;
+}
+
+bool allShapesAreKnown(Value* v) {
+  if (!v->type()->cast<TensorType>()) {
+    return true;
+  }
+  return v->isCompleteTensor();
+}
+
+bool allShapesAreKnown(Node* node) {
+  // TODO: Relax the checks to support dynamic shapes
+  for (torch::jit::Value* output : node->outputs()) {
+    if (!allShapesAreKnown(output)) {
+      return false;
+    }
+  }
+  for (torch::jit::Value* input : node->inputs()) {
+    if (!allShapesAreKnown(input)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool isSupported(Node* node) {
@@ -122,6 +155,9 @@ bool canHandle(Node* node, AliasDb& aliasDb) {
   }
   if (node->kind() == prim::Loop) {
     return false; // TODO
+  }
+  if (!allShapesAreKnown(node)) {
+    return false;
   }
   return isSupported(node);
 }
@@ -254,8 +290,8 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   return {++(++iter), false};
 }
 
-void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
-  if (!texpr_fuser_enabled) {
+void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
+  if (!tensorExprFuserEnabled()) {
     return;
   }
   GRAPH_DUMP("Before TExprFuser: ", graph);
@@ -331,12 +367,5 @@ RegisterOperators TensorExprOps({
         AliasAnalysisKind::PURE_FUNCTION),
 });
 
-void registerTensorExprFuser() {
-  static bool already_registered = false;
-  if (!already_registered) {
-    RegisterPass pass(fuseTensorExprs);
-    already_registered = true;
-  }
-}
 } // namespace jit
 } // namespace torch

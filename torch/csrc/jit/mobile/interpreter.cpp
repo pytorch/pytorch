@@ -1,4 +1,4 @@
-#include "interpreter.h"
+#include <torch/csrc/jit/mobile/interpreter.h>
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/operator_name.h>
@@ -10,12 +10,13 @@
 #include <torch/csrc/jit/mobile/observer.h>
 #endif
 
-namespace torch{
-namespace jit{
-char const * toString(OpCode op);
+namespace torch {
+namespace jit {
+char const* toString(OpCode op);
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
-InterpreterState::InterpreterState(std::shared_ptr<Code> code) : code_(std::move(code)) {
+InterpreterState::InterpreterState(std::shared_ptr<Code> code)
+    : code_(std::move(code)) {
   registers_.resize(code_->register_size_);
 }
 
@@ -24,25 +25,21 @@ bool InterpreterState::run(Stack& stack) {
   while (true) {
     Instruction inst = code_->instructions_[pc];
 
-  //  std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
-  //  if (inst.op == OP) {
-  //    std::cout << ", " << code_->op_names_[inst.X].name << "." <<
-  //      code_->op_names_[inst.X].overload_name;
-  //  }
-  //  std::cout << std::endl;
-  //  for (auto val : stack) {
-  //    if (val.isTensor()) {
-  //      std::cout << val.toTensor().sizes() << std::endl;
-  //    } else {
-  //      std::cout << val << std::endl;
-  //    }
-  //  }
+    //    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
+    //    if (inst.op == OP) {
+    //      std::cout << ", " << code_->op_names_[inst.X].name;
+    //      if (!code_->op_names_[inst.X].overload_name.empty()) {
+    //        std::cout << "." << code_->op_names_[inst.X].overload_name;
+    //      }
+    //    }
+    //    std::cout << std::endl;
     switch (inst.op) {
       case OP: {
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
-        if (auto debug_info = at::getThreadLocalDebugInfo()) {
-          if (auto* mobile_debug_info = dynamic_cast<MobileDebugInfo*>(
-            debug_info.get())) {
+        if (auto debug_info = at::ThreadLocalDebugInfo::get(
+                at::DebugInfoKind::MOBILE_RUNTIME_INFO)) {
+          if (auto* mobile_debug_info =
+                  dynamic_cast<MobileDebugInfo*>(debug_info.get())) {
             mobile_debug_info->setOpIdx(pc);
           }
         }
@@ -57,12 +54,12 @@ bool InterpreterState::run(Stack& stack) {
         ++pc;
       } break;
       case INTERFACE_CALL: {
-        torch::jit::Function* method =
+        torch::jit::Function& method =
             peek(stack, 0, inst.N)
                 .toObject()
                 ->type()
                 ->getMethod(code_->constants_[inst.X].toStringRef());
-        method->run(stack);
+        method.run(stack);
         ++pc;
       } break;
       case LOAD:
@@ -104,8 +101,8 @@ bool InterpreterState::run(Stack& stack) {
       case SET_ATTR: {
         auto v = pop(stack);
         auto userObj = pop(stack).toObject();
-        // Mobile only: since the number of slots is not known, resize the numAttributes
-        // before setSlot.
+        // Mobile only: since the number of slots is not known, resize the
+        // numAttributes before setSlot.
         while (userObj->type()->numAttributes() <= inst.X) {
           std::stringstream ss;
           ss << userObj->type()->numAttributes();
@@ -146,8 +143,26 @@ bool InterpreterState::run(Stack& stack) {
         listConstruct(stack, type, inst.N);
         ++pc;
       } break;
+      case LIST_UNPACK: {
+        listUnpack(stack, inst.X);
+        ++pc;
+      } break;
       case TUPLE_CONSTRUCT: {
         tupleConstruct(stack, inst.X);
+        ++pc;
+      } break;
+      case TUPLE_SLICE: {
+        tupleSlice(stack, inst.X, inst.X + inst.N);
+        ++pc;
+      } break;
+      case DICT_CONSTRUCT: {
+        auto type = code_->types_[inst.X]->expect<at::DictType>();
+        dictConstruct(stack, type, inst.N);
+        ++pc;
+      } break;
+      case NAMED_TUPLE_CONSTRUCT: {
+        auto type = code_->types_[inst.X]->expect<at::TupleType>();
+        namedTupleConstruct(stack, type, inst.N);
         ++pc;
       } break;
       case WARN: {
@@ -158,6 +173,13 @@ bool InterpreterState::run(Stack& stack) {
       default:
         AT_ERROR(toString(inst.op), " is invalid.");
     }
+    //  for (auto val : stack) {
+    //    if (val.isTensor()) {
+    //      std::cout << val.toTensor().sizes() << std::endl;
+    //    } else {
+    //      std::cout << val << std::endl;
+    //    }
+    //  }
   }
   return false;
 }
@@ -167,5 +189,5 @@ IValue& InterpreterState::reg(size_t reg) {
 }
 
 } // namespace mobile
-} // namespace torch
 } // namespace jit
+} // namespace torch

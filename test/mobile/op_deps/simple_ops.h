@@ -6,42 +6,42 @@ namespace at {
 
 static inline Tensor call_AA_op(const Tensor& self) {
   static c10::OperatorHandle op = c10::Dispatcher::singleton()
-      .findSchema({"aten::AA", ""}).value();
+      .findSchema({"_test::AA", ""}).value();
   return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor&>(
       op, self, self);
 }
 
 static inline Tensor call_BB_op(const Tensor& self) {
   static c10::OperatorHandle op = c10::Dispatcher::singleton()
-      .findSchema({"aten::BB", ""}).value();
+      .findSchema({"_test::BB", ""}).value();
   return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor&>(
       op, self, self);
 }
 
 static inline Tensor call_CC_op(const Tensor& self) {
   static c10::OperatorHandle op = c10::Dispatcher::singleton()
-      .findSchema({"aten::CC", ""}).value();
+      .findSchema({"_test::CC", ""}).value();
   return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor&>(
       op, self, self);
 }
 
 static inline Tensor call_DD_op(const Tensor& self) {
   static c10::OperatorHandle op = c10::Dispatcher::singleton()
-      .findSchema({"aten::DD", ""}).value();
+      .findSchema({"_test::DD", ""}).value();
   return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor&>(
       op, self, self);
 }
 
 static inline Tensor call_EE_op(const Tensor& self) {
   static c10::OperatorHandle op = c10::Dispatcher::singleton()
-      .findSchema({"aten::EE", ""}).value();
+      .findSchema({"_test::EE", ""}).value();
   return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor&>(
       op, self, self);
 }
 
 static inline Tensor call_FF_op(const Tensor& self) {
   static c10::OperatorHandle op = c10::Dispatcher::singleton()
-      .findSchema({"aten::FF", ""}).value();
+      .findSchema({"_test::FF", ""}).value();
   return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor&>(
       op, self, self);
 }

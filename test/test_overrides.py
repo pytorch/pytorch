@@ -127,7 +127,7 @@ class DiagonalTensor(object):
     def tensor(self):
         return self._i * torch.eye(self._N)
 
-    def __torch_function__(self, func, args=(), kwargs=None):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
         if func not in self.handled_functions:
@@ -202,7 +202,7 @@ class SubTensor(torch.Tensor):
     This is useful for testing that the semantics for overriding torch
     functions are working correctly.
     """
-    def __torch_function__(self, func, args=(), kwargs=None):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
 
@@ -312,7 +312,7 @@ class TensorLike(object):
     This class is used to explicitly test that the full torch.tensor API
     can be overriden with a class that defines __torch_function__.
     """
-    def __torch_function__(self, func, args=(), kwargs=None):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
 
@@ -463,10 +463,7 @@ class TestTorchFunctionOverride(TestCase):
 
 def generate_tensor_like_override_tests(cls):
     def test_generator(func, override):
-        if torch._six.PY3:
-            args = inspect.getfullargspec(override)
-        else:
-            args = inspect.getargspec(override)
+        args = inspect.getfullargspec(override)
         nargs = len(args.args)
         if args.defaults is not None:
             nargs -= len(args.defaults)

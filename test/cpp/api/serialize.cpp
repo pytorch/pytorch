@@ -64,7 +64,7 @@ void is_optimizer_state_equal(
 }
 
 template <typename OptimizerClass, typename DerivedOptimizerOptions, typename DerivedOptimizerParamState>
-void test_serialize_optimizer(DerivedOptimizerOptions options) {
+void test_serialize_optimizer(DerivedOptimizerOptions options, bool only_has_global_state = false) {
   auto model1 = Linear(5, 2);
   auto model2 = Linear(5, 2);
   auto model3 = Linear(5, 2);
@@ -125,9 +125,11 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
   auto& optim3_2_state = optim3_2.state();
   auto& optim3_state = optim3.state();
 
-  // optim3_2 and optim1 should have param_groups and state of size 1 and 2 respectively
+  // optim3_2 and optim1 should have param_groups and state of size 1 and state_size respectively
   ASSERT_TRUE(optim3_2_param_groups.size() == 1);
-  ASSERT_TRUE(optim3_2_state.size() == 2);
+  // state_size = 2 for all optimizers except LBFGS as LBFGS only maintains one global state
+  int state_size = only_has_global_state ? 1 : 2;
+  ASSERT_TRUE(optim3_2_state.size() == state_size);
 
   // optim3_2 and optim1 should have param_groups and state of same size
   ASSERT_TRUE(optim3_2_param_groups.size() == optim3_param_groups.size());
@@ -191,17 +193,12 @@ void write_step_buffers(
 }
 
 #define OLD_SERIALIZATION_LOGIC_WARNING_CHECK(funcname, optimizer, filename) \
-{ \
-  std::stringstream buffer;\
-  CerrRedirect cerr_redirect(buffer.rdbuf());\
-  funcname(optimizer, filename);\
-  ASSERT_EQ(\
-    count_substr_occurrences(\
-      buffer.str(),\
-      "old serialization"\
-    ),\
-  1);\
-}
+  {                                                                          \
+    WarningCapture warnings;                                                 \
+    funcname(optimizer, filename);                                           \
+    ASSERT_EQ(                                                               \
+        count_substr_occurrences(warnings.str(), "old serialization"), 1);   \
+  }
 
 TEST(SerializeTest, KeysFunc) {
   auto tempfile = c10::make_tempfile();
@@ -665,6 +662,67 @@ TEST(SerializeTest, Optim_RMSprop) {
     }
   }
   is_optimizer_state_equal<RMSpropParamState>(optim1.state(), optim1_2.state());
+}
+
+TEST(SerializeTest, Optim_LBFGS) {
+  test_serialize_optimizer<LBFGS, LBFGSOptions, LBFGSParamState>(LBFGSOptions(), true);
+  // bc compatibility check
+  auto model1 = Linear(5, 2);
+  auto model1_params = model1->parameters();
+  // added a tensor for lazy init check - when all params do not have entry in buffers
+  model1_params.emplace_back(torch::randn({2,3}));
+  auto optim1 = torch::optim::LBFGS(model1_params, torch::optim::LBFGSOptions());
+
+  auto x = torch::ones({10, 5});
+  auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
+    optimizer.zero_grad();
+    auto y = model->forward(x).sum();
+    y.backward();
+    auto closure = []() { return torch::tensor({10}); };
+    optimizer.step(closure);
+  };
+
+  step(optim1, model1);
+
+  at::Tensor d, t, H_diag, prev_flat_grad, prev_loss;
+  std::deque<at::Tensor> old_dirs, old_stps;
+
+  const auto& params_ = optim1.param_groups()[0].params();
+  auto key_ = c10::guts::to_string(params_[0].unsafeGetTensorImpl());
+  const auto& optim1_state = static_cast<const LBFGSParamState&>(*(optim1.state().at(key_).get()));
+  d = optim1_state.d();
+  t = at::tensor(optim1_state.t());
+  H_diag = optim1_state.H_diag();
+  prev_flat_grad = optim1_state.prev_flat_grad();
+  prev_loss = at::tensor(optim1_state.prev_loss());
+  old_dirs = optim1_state.old_dirs();
+
+  // write buffers to the file
+  auto optim_tempfile_old_format = c10::make_tempfile();
+  torch::serialize::OutputArchive output_archive;
+  output_archive.write("d", d, /*is_buffer=*/true);
+  output_archive.write("t", t, /*is_buffer=*/true);
+  output_archive.write("H_diag", H_diag, /*is_buffer=*/true);
+  output_archive.write("prev_flat_grad", prev_flat_grad, /*is_buffer=*/true);
+  output_archive.write("prev_loss", prev_loss, /*is_buffer=*/true);
+  write_tensors_to_archive(output_archive, "old_dirs", old_dirs);
+  write_tensors_to_archive(output_archive, "old_stps", old_stps);
+  output_archive.save_to(optim_tempfile_old_format.name);
+
+  auto optim1_2 = LBFGS(model1_params, torch::optim::LBFGSOptions());
+  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
+
+  const auto& params1_2_ = optim1_2.param_groups()[0].params();
+  auto param_key = c10::guts::to_string(params1_2_[0].unsafeGetTensorImpl());
+  auto& optim1_2_state = static_cast<LBFGSParamState&>(*(optim1_2.state().at(param_key).get()));
+
+  // old LBFGS didn't track func_evals, n_iter, ro, al values
+  optim1_2_state.func_evals(optim1_state.func_evals());
+  optim1_2_state.n_iter(optim1_state.n_iter());
+  optim1_2_state.ro(optim1_state.ro());
+  optim1_2_state.al(optim1_state.al());
+
+  is_optimizer_state_equal<LBFGSParamState>(optim1.state(), optim1_2.state());
 }
 
 TEST(SerializeTest, XOR_CUDA) {

@@ -13,6 +13,9 @@ https://github.com/pytorch/pytorch/issues/24015 and
 https://www.numpy.org/neps/nep-0018-array-function-protocol.html
 )
 
+If changing this file in a way that can affect ``__torch_function__`` overhead,
+please report the benchmarks in ``benchmarks/overrides_benchmark``. See the
+instructions in the ``README.md`` in that directory.
 """
 
 import __future__
@@ -116,6 +119,7 @@ def get_ignored_functions():
         torch.randperm,
         torch.range,
         torch.sparse_coo_tensor,
+        torch.vander,
         torch.zeros,
         torch.nn.functional.assert_int_or_pair,
         torch.nn.functional.boolean_dispatch,
@@ -128,6 +132,12 @@ def get_ignored_functions():
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
         torch.nn.functional.tanh,
+        torch.set_autocast_enabled,
+        torch.is_autocast_enabled,
+        torch.clear_autocast_cache,
+        torch.autocast_increment_nesting,
+        torch.autocast_decrement_nesting,
+        torch.nn.functional.hardswish,
     )
 
 def get_testing_overrides():
@@ -150,6 +160,7 @@ def get_testing_overrides():
     # See Issue #28233.
     return {
         torch.abs: lambda input, out=None: -1,
+        torch.absolute: lambda input, out=None: -1,
         torch.adaptive_avg_pool1d: lambda input, output_size: -1,
         torch.adaptive_max_pool1d: lambda inputs, output_size: -1,
         torch.acos: lambda input, out=None: -1,
@@ -187,18 +198,22 @@ def get_testing_overrides():
         torch.binary_cross_entropy_with_logits: (lambda input, target, weight=None, size_average=None, reduce=None,
                                                  reduction='mean', pos_weight=None: -1),
         torch.bincount: lambda input, weights=None, minlength=0: -1,
+        torch.binomial: lambda count, prob, generator=None: -1,
         torch.bitwise_and: lambda input, other, out=None: -1,
         torch.bitwise_not: lambda input, out=None: -1,
         torch.bitwise_or: lambda input, other, out=None: -1,
         torch.bitwise_xor: lambda input, other, out=None: -1,
+        torch.block_diag: lambda *tensors: -1,
         torch.bmm: lambda input, mat2, out=None: -1,
         torch.broadcast_tensors: lambda *tensors: -1,
+        torch.bucketize: lambda input, boundaries, out_int32=False, right=False, out=None: -1,
         torch.cartesian_prod: lambda *tensors: -1,
         torch.cat: lambda tensors, dim=0, out=None: -1,
         torch.cdist: lambda x1, c2, p=2, compute_mode=None: -1,
         torch.ceil: lambda input, out=None: -1,
         torch.celu: lambda input, alhpa=1., inplace=False: -1,
         torch.chain_matmul: lambda *matrices: -1,
+        torch.channel_shuffle: lambda input, groups : -1,
         torch.cholesky: lambda input, upper=False, out=None: -1,
         torch.cholesky_inverse: lambda input, upper=False, out=None: -1,
         torch.cholesky_solve: lambda input1, input2, upper=False, out=None: -1,
@@ -296,6 +311,7 @@ def get_testing_overrides():
         torch.histc: lambda input, bins=100, min=0, max=0, out=None: -1,
         torch.hspmm: lambda mat1, mat2, out=None: -1,
         torch.ifft: lambda input, signal_ndim, normalized=False: -1,
+        torch.copy_imag: lambda input, out=None: -1,
         torch.imag: lambda input, out=None: -1,
         torch.index_add: lambda input, dim, index, source: -1,
         torch.index_copy: lambda input, dim, index, source: -1,
@@ -317,7 +333,9 @@ def get_testing_overrides():
         torch.is_signed: lambda input: -1,
         torch.isclose: lambda input, other, rtol=1e-05, atol=1e-08, equal_nan=False: -1,
         torch.isnan: lambda input: -1,
-        torch.kl_div: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,
+        torch.istft: (lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True,
+                      normalized=False, onesided=True, length=None: -1),
+        torch.kl_div: lambda input, target, size_average=None, reduce=None, reduction='mean', log_target=False: -1,
         torch.kthvalue: lambda input, k, dim=None, keepdim=False, out=None: -1,
         torch.layer_norm: lambda input, normalized_shape, weight=None, bias=None, esp=1e-05, cudnn_enabled=True: -1,
         torch.le: lambda input, other, out=None: -1,
@@ -442,7 +460,7 @@ def get_testing_overrides():
                                             use_input_stats=True, momentum=0.1, eps=1e-05: -1),
         torch.nn.functional.interpolate: (lambda input, size=None, scale_factor=None, mode='nearest', align_corners=None,
                                           recompute_scale_factor=None: -1),
-        torch.nn.functional.kl_div: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,
+        torch.nn.functional.kl_div: lambda input, target, size_average=None, reduce=None, reduction='mean', log_target=False: -1,
         torch.nn.functional.l1_loss: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,
         torch.nn.functional.layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1,
         torch.nn.functional.leaky_relu: lambda input, negative_slope=0.01, inplace=False: -1,
@@ -535,11 +553,11 @@ def get_testing_overrides():
         torch.quantize_per_channel: lambda input, scales, zero_points, axis, dtype: -1,
         torch.quantize_per_tensor: lambda input, scale, zero_point, dtype: -1,
         torch.quantized_batch_norm: lambda input, weight, bias, mean, var, eps, output_scale, output_zero_point: -1,
-        torch.quantized_gru: lambda data, batch_sizes, hx, params, has_biases, num_layers, dropout, train, bidirectional: -1,
+        torch.quantized_layer_norm: lambda input, normalized_shape, weight, bias, eps, output_scale, output_zero_point: -1,
+
         torch.quantized_gru_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
                                    col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
-        torch.quantized_lstm: (lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional,
-                               batch_first, dtype=None, use_dynamic=False: -1),
+
         torch.quantized_lstm_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
                                     col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
         torch.quantized_max_pool2d: lambda input, kernel_size, stride, padding, dilation, ceil_mode=False: -1,
@@ -551,6 +569,7 @@ def get_testing_overrides():
         torch.randint_like: lambda input, low, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
         torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.real: lambda input, out=None: -1,
+        torch.copy_real: lambda input, out=None: -1,
         torch.reciprocal: lambda input, out=None: -1,
         torch.relu: lambda input, inplace=False: -1,
         torch.remainder: lambda input, other, out=None: -1,
@@ -573,6 +592,7 @@ def get_testing_overrides():
         torch.scalar_tensor: lambda s, dtype=None, layour=None, device=None, pin_memory=None: -1,
         torch.scatter: lambda input, dim, index, src: -1,
         torch.scatter_add: lambda input, dim, index, src: -1,
+        torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
         torch.select: lambda input, dim, index: -1,
         torch.selu: lambda input, inplace=False: -1,
         torch.sigmoid: lambda input, out=None: -1,
@@ -725,12 +745,14 @@ def handle_torch_function(
     """
     # Check for __torch_function__ methods.
     overloaded_args = _get_overloaded_args(relevant_args)
+    # overloaded_args already have unique types.
+    types = tuple(map(type, overloaded_args))
 
     # Call overrides
     for overloaded_arg in overloaded_args:
         # Use `public_api` instead of `implementation` so __torch_function__
         # implementations can do equality/identity comparisons.
-        result = overloaded_arg.__torch_function__(public_api, args, kwargs)
+        result = overloaded_arg.__torch_function__(public_api, types, args, kwargs)
 
         if result is not NotImplemented:
             return result

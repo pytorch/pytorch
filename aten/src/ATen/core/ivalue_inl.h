@@ -17,6 +17,7 @@ namespace jit {
 struct Function;
 struct CompilationUnit;
 } // namespace jit
+TORCH_API bool isCustomClass(const c10::IValue& v);
 } // namespace torch
 namespace c10 {
 struct IValue;
@@ -26,7 +27,7 @@ struct TupleType;
 // For custom class __init__ registration, we need to pass in a function
 // that looks like this: [](IValue x, args...)
 
-// However, kernel_functor.h automatically sets the input types of the function
+// However, make_boxed_from_unboxed_functor.h automatically sets the input types of the function
 // by introspecting the types of the functor (which is IValue in this case).
 // However, we need the type it binds to be Foo.
 
@@ -126,8 +127,18 @@ inline c10::intrusive_ptr<torch::CustomClassHolder> IValue::toCapsule() const & 
   TORCH_INTERNAL_ASSERT(isCapsule());
   return toIntrusivePtr<torch::CustomClassHolder>();
 }
+inline at::Generator IValue::toGenerator() && {
+  AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
+  return at::Generator(moveToIntrusivePtr<at::GeneratorImpl>());
+}
+inline at::Generator IValue::toGenerator() const & {
+  AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
+  return at::Generator(toIntrusivePtr<at::GeneratorImpl>());
+}
 
 namespace ivalue {
+
+void CAFFE2_API checkCustomClassType(TypePtr expected_type, TypePtr actual_type);
 
 template <typename T>
 using Shared = c10::intrusive_ptr<T>;
@@ -194,6 +205,8 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
   }
   std::shared_ptr<TupleType> type() const;
 
+  friend bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs);
+
  private:
   Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
     : elements_(std::move(elements)), type_(std::move(type)) {}
@@ -219,7 +232,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
  public:
   Future(TypePtr type) : type_(type) {}
   struct CAFFE2_API FutureError final : public std::exception {
-    FutureError(std::string&& error_msg_)
+    explicit FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
 
     FutureError() = default;
@@ -232,8 +245,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   };
 
   /**
-  * Wait on the future until it completes.
-  */
+   * Wait on the future until it completes.
+   */
   void wait() {
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
@@ -264,11 +277,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     markCompleted(IValue {});
   }
 
-  void markCompleted(FutureError&& error) {
+  void setError(std::string err) {
+    setError(FutureError(std::move(err)));
+  }
+
+  void setError(FutureError&& error) {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(!completed());
     completed_ = true;
-    has_error_ = true;
     error_ = std::move(error);
 
     std::vector<std::function<void(void)>> cbs;
@@ -285,8 +301,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
-    if (has_error_) {
-      throw error_;
+    if (error_) {
+      throw *error_;
     }
     return value_;
   }
@@ -304,12 +320,22 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       callback();
       return;
     }
-    callbacks_.push_back(callback);
+    callbacks_.emplace_back(std::move(callback));
   }
 
   // Check if the current future has completed
   bool completed() const{
     return completed_;
+  }
+
+  bool hasError() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return error_ ? true : false;
+  }
+
+  c10::optional<FutureError> error() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return error_;
   }
 
   CAFFE2_API friend std::ostream& operator<<(
@@ -321,15 +347,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  private:
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
 
   IValue value_; // when finished the value
   TypePtr type_;
   std::vector<std::function<void(void)>> callbacks_;
-  bool has_error_ = false;
-  FutureError error_;
+  c10::optional<FutureError> error_;
 };
 
 // User-defined object.
@@ -408,6 +433,12 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return type_.cu_;
   }
 
+  c10::intrusive_ptr<Object> copy() const;
+
+  c10::intrusive_ptr<Object> deepcopy() const;
+
+  c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
+
  private:
   void resizeObject(size_t slot);
   StrongTypePtr type_;
@@ -422,8 +453,6 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
   virtual PyObject* getPyObject() = 0;
   virtual ~PyObjectHolder() {};
 };
-
-std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict);
 
 #undef TORCH_FORALL_TAGS
 
@@ -491,6 +520,7 @@ DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 DEFINE_TO(at::QScheme, toQScheme)
+DEFINE_TO(at::Generator, toGenerator)
 
 template <class T>
 struct _fake_type {};
@@ -522,13 +552,41 @@ std::vector<Elem> generic_to(
 }
 
 template <typename T>
+c10::intrusive_ptr<T> IValue::toCustomClass() && {
+  static_assert(std::is_base_of<torch::CustomClassHolder, T>::value == true,
+    "toCustomClass requires that template parameter T must inherit "
+    "from torch::CustomClassHolder");
+  auto obj = toObject();
+  TORCH_CHECK(obj->slots().size() == 1,
+              "Tried to cast IValue to custom class but it did "
+              "not contain a custom class!");
+  auto expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
+  ivalue::checkCustomClassType(expected_type, type());
+  auto userObj = c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
+  return userObj;
+}
+
+template <typename T>
+c10::intrusive_ptr<T> IValue::toCustomClass() const & {
+  static_assert(std::is_base_of<torch::CustomClassHolder, T>::value == true,
+    "toCustomClass requires that template parameter T must inherit "
+    "from torch::CustomClassHolder");
+  auto obj = toObject();
+  TORCH_CHECK(obj->slots().size() == 1,
+              "Tried to cast IValue to custom class but it did "
+              "not contain a custom class!");
+  auto expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
+  ivalue::checkCustomClassType(expected_type, type());
+  auto userObj = c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
+  return userObj;
+}
+
+template <typename T>
 T generic_to(
     IValue ivalue,
     _fake_type<T>) {
     using ElemType = typename std::remove_pointer<T>::type::element_type;
-    auto obj = std::move(ivalue).toObject();
-    auto capsule = obj->getSlot(0);
-    return c10::static_intrusive_pointer_cast<ElemType>(capsule.toCapsule());
+    return std::move(ivalue).toCustomClass<ElemType>();
 }
 
 template <typename T>
@@ -543,6 +601,28 @@ c10::List<Elem> generic_to(
     IValue ivalue,
     _fake_type<c10::List<Elem>>) {
   return impl::toTypedList<Elem>(std::move(ivalue).toList());
+}
+
+namespace detail {
+template <typename Elem, size_t... I>
+std::array<Elem, sizeof...(I)> generic_to_array(
+    IValue ivalue,
+    _fake_type<std::array<Elem, sizeof...(I)>>,
+    std::index_sequence<I...>) {
+  // We need to do a deep copy of the array because there might be other
+  // references to this same IValue that also use the list. We can't just
+  // move the elements out.
+  auto list = std::move(ivalue).to<List<Elem>>();
+  TORCH_CHECK(list.size() == sizeof...(I), "Tried to convert a List with ", list.size()," elements to a fixed-size array of size ", sizeof...(I));
+  return {list[I]...};
+}
+}
+
+template <typename Elem, size_t N>
+std::array<Elem, N> generic_to(
+    IValue ivalue,
+    _fake_type<std::array<Elem, N>> ft) {
+  return detail::generic_to_array(ivalue, ft, std::make_index_sequence<N>());
 }
 
 template <typename Key, typename Value>
@@ -722,22 +802,31 @@ inline IValue::IValue(c10::impl::GenericList v)
   payload.as_intrusive_ptr = v.impl_.release();
 }
 
-template<class T> inline IValue::IValue(c10::List<T> v)
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(c10::List<T> v)
 : IValue(impl::toList<T>(std::move(v))) {}
-template<class T> inline IValue::IValue(at::ArrayRef<T> v)
-: IValue(c10::List<T>()) {
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
   for (const auto& e : v) {
     list.push_back(e);
   }
 }
-template<class T> inline IValue::IValue(const std::vector<T>& v)
-: IValue(c10::List<T>()) {
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
   for (const auto& e : v) {
     list.push_back(e);
+  }
+}
+template<class T, size_t N> inline IValue::IValue(std::array<T, N> v)
+: IValue(c10::List<T>()) {
+  auto list = to<c10::List<T>>();
+  list.reserve(v.size());
+  for (auto& e : v) {
+    list.push_back(std::move(e));
   }
 }
 
@@ -758,7 +847,8 @@ template<class Key, class Value> inline IValue::IValue(std::unordered_map<Key, V
   }
 }
 
-template<class T> inline IValue::IValue(c10::optional<T> v): IValue() {
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(c10::optional<T> v) : IValue() {
   if (v.has_value()) {
     *this = IValue(std::move(*v));
   }
@@ -774,10 +864,30 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v)
 : tag(Tag::PyObject), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(c10::intrusive_ptr<torch::CustomClassHolder> v)
-: tag(Tag::Capsule), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+inline IValue IValue::make_capsule(intrusive_ptr<torch::CustomClassHolder> blob) {
+  IValue iv;
+  iv.tag = Tag::Capsule;
+  iv.is_intrusive_ptr = true;
+  iv.payload.as_intrusive_ptr = blob.release();
+  return iv;
 }
+
+template <typename T, std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
+IValue::IValue(c10::intrusive_ptr<T> custom_class) {
+  if (!c10::isCustomClassRegistered<c10::intrusive_ptr<T>>()) {
+    throw c10::Error(
+        "Trying to instantiate a class that isn't a registered custom class.",
+        "");
+  }
+  auto classType = c10::getCustomClassType<c10::intrusive_ptr<T>>();
+  auto ivalue_obj = c10::ivalue::Object::create(
+      c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
+  ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
+  payload.as_intrusive_ptr = ivalue_obj.release();
+  tag = Tag::Object;
+  is_intrusive_ptr = true;
+}
+
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
 : tag(Tag::Future), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
@@ -800,6 +910,10 @@ inline optional<T> IValue::toOptional() {
     return nullopt;
   }
   return this->to<T>();
+}
+
+inline bool IValue::isCustomClass() const {
+  return torch::isCustomClass(*this);
 }
 
 inline bool IValue::isSameIdentity(const IValue& rhs) const {
@@ -863,17 +977,7 @@ IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
   if (!isCustomClassRegistered<inputType>()) {
     throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
   }
-  auto res = getCustomClassType<inputType>();
-  auto retObject = ivalue::Object::create(
-    StrongTypePtr(
-      std::shared_ptr<torch::jit::CompilationUnit>(),
-      std::move(res)),
-    1);
-  auto objPtr = c10::static_intrusive_pointer_cast<torch::CustomClassHolder>(std::move(x));
-
-  retObject->setSlot(0, IValue(std::move(objPtr)));
-  auto resIVal = IValue(std::move(retObject));
-  return resIVal;
+  return IValue(x);
 }
 template <typename T>
 IValue from_(T x, std::false_type) {
