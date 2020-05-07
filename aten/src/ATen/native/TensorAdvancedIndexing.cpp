@@ -561,7 +561,7 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
   return _self.clone(at::MemoryFormat::Contiguous).masked_scatter_(_mask, source);
 }
 
-static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, Scalar value) {
+static Tensor & masked_fill_impl(Tensor & self, const Tensor & mask, Scalar value) {
   NoNamesGuard guard;
   if (mask.dtype() == ScalarType::Byte) {
     TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
@@ -582,7 +582,15 @@ static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, Scalar 
 Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, Scalar value) {
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
 
-  masked_fill_impl_cpu(self, mask, value);
+  masked_fill_impl(self, mask, value);
+  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
+  return self;
+}
+
+Tensor & masked_fill__cuda(Tensor& self, const Tensor& mask, Scalar value) {
+  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+
+  masked_fill_impl(self, mask, value);
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
@@ -592,7 +600,17 @@ Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, const Tensor & valu
   TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
       "with ", value.dim(), " dimension(s).");
 
-  masked_fill_impl_cpu(self, mask, value.item());
+  masked_fill_impl(self, mask, value.item());
+  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
+  return self;
+}
+
+Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & value) {
+  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+  TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
+      "with ", value.dim(), " dimension(s).");
+
+  masked_fill_impl(self, mask, value.item());
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }

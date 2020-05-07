@@ -121,7 +121,32 @@ Tensor & masked_select_out_cuda(Tensor & result, const Tensor & self, const Tens
   return masked_select_out_cuda_impl(result, self, mask);
 }
 
+template <typename scalar_t, typename mask_t>
+void gpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
+  constexpr bool is_mask_bool = std::is_same<mask_t, bool>::value;
+  gpu_kernel(iter, [=] GPU_LAMBDA (scalar_t input, mask_t mask_value) -> scalar_t {
+      if (!is_mask_bool) {
+        CUDA_KERNEL_ASSERT(mask_value == 0 || mask_value == 1);
+      }
+      return mask_value ? value : input;
+  });
+}
+
+void masked_fill_kernel(TensorIterator& iter, Scalar value) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16,
+    iter.dtype(), "masked_fill_cuda", [&] {
+      scalar_t scalar_val = value.to<scalar_t>();
+      auto mask_dtype = iter.input_dtype(0);
+      if (mask_dtype == at::ScalarType::Bool) {
+        gpu_masked_fill_kernel<scalar_t, bool>(iter, scalar_val);
+      } else {
+        gpu_masked_fill_kernel<scalar_t, unsigned char>(iter, scalar_val);
+      }
+    });
+}
+
 REGISTER_DISPATCH(index_stub, &index_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
+REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
 
 }} // namespace at::native
