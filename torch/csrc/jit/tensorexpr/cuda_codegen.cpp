@@ -107,6 +107,8 @@ void CudaPrinter::maybe_insert_sync() {
 
 std::string cudaDtypeCppString(const Dtype& dtype) {
   switch (dtype.scalar_type()) {
+    case ScalarType::Bool:
+      return "bool";
     case ScalarType::Half:
       return "half";
     case ScalarType::Char:
