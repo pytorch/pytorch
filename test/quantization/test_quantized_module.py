@@ -357,6 +357,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
            use_bias=st.booleans(),
            use_fused=st.booleans(),
            use_channelwise=st.booleans())
+    @override_qengines
     def test_conv2d_api(
         self, batch_size, in_channels_per_group, H, W, out_channels_per_group,
         groups, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w, dilation,
