@@ -7,9 +7,6 @@ import functools
 import torch
 from torch import Tensor
 import torch.nn.functional as F
-from multiprocessing.reduction import ForkingPickler
-import pickle
-import io
 import sys
 import warnings
 
@@ -290,22 +287,6 @@ class TestNamedTensor(TestCase):
             check_tuple_return(F.max_pool2d_with_indices, [named_tensor_2d, [2, 2]], named_tensor_2d.names)
             check_tuple_return(F.max_pool3d_with_indices, [named_tensor_3d, [2, 2, 2]], named_tensor_3d.names)
 
-    def test_no_save_support(self):
-        named_tensor = torch.zeros(2, 3, names=('N', 'C'))
-        buf = io.BytesIO()
-        with self.assertRaisesRegex(RuntimeError, "NYI"):
-            torch.save(named_tensor, buf)
-
-    def test_no_pickle_support(self):
-        named_tensor = torch.zeros(2, 3, names=('N', 'C'))
-        with self.assertRaisesRegex(RuntimeError, "NYI"):
-            serialized = pickle.dumps(named_tensor)
-
-    def test_no_multiprocessing_support(self):
-        named_tensor = torch.zeros(2, 3, names=('N', 'C'))
-        buf = io.BytesIO()
-        with self.assertRaisesRegex(RuntimeError, "NYI"):
-            ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(named_tensor)
 
     def test_big_tensor_repr_has_names(self):
         def check_repr(named_tensor):
