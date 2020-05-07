@@ -18144,18 +18144,19 @@ class TestRPATH(TestCase):
         """
         libdir = os.path.join(os.path.dirname(torch._C.__file__), 'lib')
         caffe2_nvrtc = os.path.join(libdir, 'libcaffe2_nvrtc.so')
-        output = subprocess.check_output(['objdump', '-x', caffe2_nvrtc])
-        nRPATHfound = 0
-        for line in output.split(b'\n'):
-            if b'RPATH' in line or b'RUNPATH' in line:
-                # If CMake adds a path, it will be after $ORIGIN
-                # The before-$origin paths are ones added via -L linkpaths
-                # in $CFLAGS
-                segments = line.split(b'$ORIGIN')
-                if len(segments) > 1:
-                    self.assertFalse(b'cuda' in segments[-1])
-                nRPATHfound += 1
-        self.assertNotEqual(nRPATHfound, 0)
+        if os.path.exists(caffe2_nvrtc):
+            output = subprocess.check_output(['objdump', '-x', caffe2_nvrtc])
+            nRPATHfound = 0
+            for line in output.split(b'\n'):
+                if b'RPATH' in line or b'RUNPATH' in line:
+                    # If CMake adds a path, it will be after $ORIGIN
+                    # The before-$origin paths are ones added via -L linkpaths
+                    # in $CFLAGS
+                    segments = line.split(b'$ORIGIN')
+                    if len(segments) > 1:
+                        self.assertFalse(b'cuda' in segments[-1])
+                    nRPATHfound += 1
+            self.assertNotEqual(nRPATHfound, 0)
 
 
 # Generates tests
