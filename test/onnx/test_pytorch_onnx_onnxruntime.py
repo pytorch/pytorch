@@ -15,7 +15,7 @@ import copy
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, enableScriptTest, 
+from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, enableScriptTest,
                                  skipIfUnsupportedOpsetVersion, skipIfNoLapack)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
@@ -1514,6 +1514,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)
         self.run_test(MyModuleDynamic(), [x, k])
+
+    @skipIfUnsupportedOpsetVersion([7, 12])
+    def test_normalize(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.normalize(x)
+
+        x = torch.randn(3, 3)
+        self.run_test(Model(), x)
 
     @skipIfUnsupportedOpsetVersion([12])
     def test_layer_norm(self):
@@ -3147,7 +3156,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x + shape
 
         x = torch.randn(2, 5)
-        self.run_test(ShapeModule(), (x,), rtol=1e-3, atol=1e-5) 
+        self.run_test(ShapeModule(), (x,), rtol=1e-3, atol=1e-5)
 
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):
