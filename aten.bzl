@@ -1,6 +1,12 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
 CPU_CAPABILITY_NAMES = ["DEFAULT", "AVX", "AVX2"]
+CAPABILITY_COMPILER_FLAGS = {
+    "AVX2": ["-mavx2", "-mfma"],
+    "AVX": ["-mavx"],
+    "DEFAULT": [],
+}
+
 PREFIX = "aten/src/ATen/native/"
 
 def intern_build_aten_ops(copts, deps):
@@ -27,11 +33,12 @@ def intern_build_aten_ops(copts, deps):
             copts = copts + [
                 "-DCPU_CAPABILITY=" + cpu_capability,
                 "-DCPU_CAPABILITY_" + cpu_capability,
-            ],
+            ] + CAPABILITY_COMPILER_FLAGS[cpu_capability],
             deps = deps,
+            linkstatic = 1,
         )
     cc_library(
         name = "ATen_CPU",
-        srcs = ["ATen_CPU_" + cpu_capability for cpu_capability in CPU_CAPABILITY_NAMES],
+        deps = [":ATen_CPU_" + cpu_capability for cpu_capability in CPU_CAPABILITY_NAMES],
         linkstatic = 1,
     )

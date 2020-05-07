@@ -99,6 +99,11 @@ if "%USE_CUDA%"=="1" (
   set RANDOMTEMP_BASEDIR=%TMP_DIR_WIN%\bin
 )
 
+@echo off
+echo @echo off >> %TMP_DIR_WIN%\bin\pytorch_env_restore.bat
+for /f "usebackq tokens=*" %%i in (`set`) do echo set "%%i" >> %TMP_DIR_WIN%\bin\pytorch_env_restore.bat
+@echo on
+
 python setup.py install --cmake && sccache --show-stats && (
   if "%BUILD_ENVIRONMENT%"=="" (
     echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.

@@ -109,7 +109,7 @@ class TestMkldnn(TestCase):
             N = torch.randint(3, 10, (1,)).item()
             C = torch.randint(1, 3, (1,)).item() * groups
             M = torch.randint(1, 3, (1,)).item() * groups
-            x = torch.randn(N, C, 224, 224, dtype=torch.float32) * 10
+            x = torch.randn(N, C, 224, 224, dtype=torch.float32)
             for train in [True, False]:
                 for bias in [True, False]:
                     conv2d = torch.nn.Conv2d(in_channels=C,
@@ -140,7 +140,7 @@ class TestMkldnn(TestCase):
                     loss2 = y_mkldnn.sum()
                     loss2.backward()
 
-                self.assertEqual(y_aten, y_mkldnn, atol=1e-5, rtol=1e-5)
+                self.assertEqual(y_aten, y_mkldnn)
                 if train:
                     self.assertEqual(x1.grad, x2.grad.to_dense())
                     self.assertEqual(conv2d.weight.grad,
