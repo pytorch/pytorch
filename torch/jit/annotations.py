@@ -275,7 +275,9 @@ def try_ann_to_type(ann, loc):
         return AnyType.get()
     elif ann is type(None):
         return NoneType.get()
-    elif inspect.isclass(ann) and hasattr(ann, "__torch_script_class__"):
+    elif inspect.isclass(ann) and not issubclass(ann, torch.nn.Module) and not issubclass(ann, tuple):
+        if not hasattr(ann, "__torch_script_class__"):
+            torch.jit.script(ann)
         return ClassType(_qualified_name(ann))
     elif inspect.isclass(ann) and hasattr(ann, "__torch_script_interface__"):
         return InterfaceType(_qualified_name(ann))
