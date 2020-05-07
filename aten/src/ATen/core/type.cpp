@@ -952,9 +952,9 @@ void ClassType::unsafeRemoveMethod(const std::string& name) {
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   auto ptr = ClassType::create(name(), compilation_unit_);
   AT_ASSERT(numAttributes() == refined_slots.size());
-  for (size_t i = 0; i < attributeNames_.size(); ++i) {
-    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
-    ptr->addAttribute(attributeNames_[i], refined_slots[i]);
+  for (size_t i = 0; i < attributes_.size(); ++i) {
+    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributes_[i].getType()));
+    ptr->addAttribute(attributes_[i].getName(), refined_slots[i]);
   }
   // Copy methods over
   for (const auto& method : methods()) {
@@ -1162,22 +1162,15 @@ size_t ClassType::addAttribute(
   if (was_registered_as_buffer) {
       // TODO: Check is_module
       // TODO: check type is tensor
+      // TODO: Check is not also parameter
   }
-  if (is_module()) {
-    parameterSlots_->push_back(is_parameter);
-    bufferWrittenSlots_->push_back(was_registered_as_buffer);
-  }
+
   return slot;
 }
 
 void ClassType::unsafeRemoveAttribute(const std::string& name) {
   auto slot = getAttributeSlot(name);
-  attributeNames_.erase(attributeNames_.begin() + slot);
-  attributeTypes_.erase(attributeTypes_.begin() + slot);
-  if (is_module()) {
-    parameterSlots_->erase(parameterSlots_->begin() + slot);
-    bufferWrittenSlots_->erase(bufferWrittenSlots_->begin() + slot);
-  }
+  attributes_.erase(attributes_.begin() + slot);
 }
 
 size_t ClassType::addConstant(const std::string& name, const IValue& value) {
