@@ -362,6 +362,7 @@ struct alignas(2) Half {
 // end up deciding to use for half-precision complex numbers.
 template<>
 struct alignas(4) complex<Half> {
+  using value_type = Half;
   Half real_;
   Half imag_;
   complex() = default;

@@ -123,6 +123,8 @@ struct complex;
 
 template<typename T>
 struct alignas(sizeof(T) * 2) complex_common {
+  using value_type = T;
+
   T storage[2];
 
   constexpr complex_common(): storage{T(), T()} {}
