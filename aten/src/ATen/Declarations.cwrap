@@ -181,27 +181,6 @@
       - real value
 ]]
 [[
-  name: _th_scatter_
-  return: argument 0
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants: function
-  options:
-    - cname: scatter
-      arguments:
-        - THTensor* self
-        - long dim
-        - THIndexTensor* index
-        - THTensor* src
-    - cname: scatterFill
-      arguments:
-        - THTensor* self
-        - long dim
-        - THIndexTensor* index
-        - real value
-]]
-[[
   name: _th_scatter_add_
   return: argument 0
   cname: scatterAdd
