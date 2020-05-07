@@ -12,7 +12,7 @@ std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::get(
   auto cur = debug_info;
   while (cur) {
     if (cur->kind_ == kind) {
-      return cur->debug_info_;
+      return cur->info_;
     }
     cur = cur->parent_info_;
   }
@@ -38,7 +38,7 @@ void ThreadLocalDebugInfo::_push(
   debug_info = std::make_shared<ThreadLocalDebugInfo>();
   debug_info->parent_info_ = prev_info;
   debug_info->kind_ = kind;
-  debug_info->debug_info_ = info;
+  debug_info->info_ = info;
 }
 
 /* static */
@@ -48,7 +48,7 @@ std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_pop(DebugInfoKind kind) {
       "Expected debug info of type ", (size_t)kind);
   auto res = debug_info;
   debug_info = debug_info->parent_info_;
-  return res->debug_info_;
+  return res->info_;
 }
 
 
