@@ -136,8 +136,8 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
   thread_event_lists consolidate() {
     std::lock_guard<std::mutex> g(state_mutex_);
     thread_event_lists result;
-    for (auto it = event_lists_map_.begin(); it != event_lists_map_.end(); ++it) {
-      auto & list = it->second;
+    for (auto& kv : event_lists_map_) {
+      auto& list = kv.second;
       result.emplace_back(list->consolidate());
     }
     return result;
@@ -169,36 +169,8 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
       return;
     }
     if (config_.state == ProfilerState::NVTX) {
-      if (sequence_nr >= 0 || shapes.size() > 0) {
-        std::stringstream s;
-        if (sequence_nr >= 0) {
-          s << name.str() << msg << sequence_nr;
-        }
-        if (shapes.size() > 0) {
-          s << ", sizes = [";
-          for (int i = 0; i < shapes.size(); i++) {
-            if (shapes[i].size() > 0) {
-              s << "[";
-              for (int dim = 0; dim < shapes[i].size(); dim++) {
-                s << shapes[i][dim];
-                if (dim < shapes[i].size() - 1) {
-                  s << ", ";
-                }
-              }
-              s << "]";
-            } else {
-              s << "[]";
-            }
-            if (i < shapes.size() - 1) {
-              s << ", ";
-            }
-          }
-          s << "]";
-        }
-        cuda_stubs->nvtxRangePushA(s.str().c_str());
-      } else {
-        cuda_stubs->nvtxRangePushA(name.str());
-      }
+      cuda_stubs->nvtxRangePushA(getNvtxStr(
+          name, msg, sequence_nr, shapes).c_str());
     } else {
       getEventList().record(
           EventKind::PushRange,
@@ -233,6 +205,43 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
   }
 
  private:
+  std::string getNvtxStr(
+      const at::StringView& name,
+      const char* msg,
+      int64_t sequence_nr,
+      const std::vector<std::vector<int64_t>>& shapes) const {
+    if (sequence_nr >= 0 || shapes.size() > 0) {
+      std::stringstream s;
+      if (sequence_nr >= 0) {
+        s << name.str() << msg << sequence_nr;
+      }
+      if (shapes.size() > 0) {
+        s << ", sizes = [";
+        for (size_t idx = 0; idx < shapes.size(); ++idx) {
+          if (shapes[idx].size() > 0) {
+            s << "[";
+            for (size_t dim = 0; dim < shapes[idx].size(); ++dim) {
+              s << shapes[idx][dim];
+              if (dim < shapes[idx].size() - 1) {
+                s << ", ";
+              }
+            }
+            s << "]";
+          } else {
+            s << "[]";
+          }
+          if (idx < shapes.size() - 1) {
+            s << ", ";
+          }
+        }
+        s << "]";
+      }
+      return s.str();
+    } else {
+      return name.str();
+    }
+  }
+
   RangeEventList& getEventList(int64_t thread_id = -1) {
     if (thread_id < 0) {
       thread_id = at::RecordFunction::currentThreadId();
