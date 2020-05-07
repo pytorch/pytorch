@@ -206,10 +206,12 @@ struct NormalKernel {
 // ==================================================== Uniform =======================================================
 
 template<typename RNG>
-void uniform_kernel(TensorIterator& iter, double from, double to, RNG generator) {
+void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG generator) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "uniform_kernel_cpu", [&]() {
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    at::uniform_real_distribution<scalar_t> uniform(static_cast<scalar_t>(from), static_cast<scalar_t>(to));
+    auto from = static_cast<scalar_t>(from_);
+    auto to = static_cast<scalar_t>(to_);
+    at::uniform_real_distribution<scalar_t> uniform(from, to);
     cpu_serial_kernel(iter, [&uniform, generator]() -> scalar_t {
       return static_cast<scalar_t>(uniform(generator));
     });

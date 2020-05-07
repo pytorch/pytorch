@@ -1,5 +1,9 @@
 #pragma once
 
+// DO NOT DEFINE STATIC DATA IN THIS HEADER!
+// See Note [Do not compile initializers with AVX]
+
+#include <c10/util/complex_type.h>
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
 #if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
@@ -13,24 +17,23 @@ namespace {
 
 #if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 
-template <> class Vec256<std::complex<double>> {
+template <> class Vec256<c10::complex<double>> {
 private:
   __m256d values;
-  static const Vec256<std::complex<double>> ones;
 public:
-  using value_type = std::complex<double>;
+  using value_type = c10::complex<double>;
   static constexpr int size() {
     return 2;
   }
   Vec256() {}
   Vec256(__m256d v) : values(v) {}
-  Vec256(std::complex<double> val) {
+  Vec256(c10::complex<double> val) {
     double real_value = val.real();
     double imag_value = val.imag();
     values = _mm256_setr_pd(real_value, imag_value,
                             real_value, imag_value);
   }
-  Vec256(std::complex<double> val1, std::complex<double> val2) {
+  Vec256(c10::complex<double> val1, c10::complex<double> val2) {
     values = _mm256_setr_pd(val1.real(), val1.imag(),
                             val2.real(), val2.imag());
   }
@@ -38,8 +41,8 @@ public:
     return values;
   }
   template <int64_t mask>
-  static Vec256<std::complex<double>> blend(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b) {
-     // convert std::complex<V> index mask to V index mask: xy -> xxyy
+  static Vec256<c10::complex<double>> blend(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& b) {
+     // convert c10::complex<V> index mask to V index mask: xy -> xxyy
     switch (mask) {
       case 0:
         return a;
@@ -50,19 +53,19 @@ public:
     }
     return b;
   }
-  static Vec256<std::complex<double>> blendv(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b,
-                               const Vec256<std::complex<double>>& mask) {
-    // convert std::complex<V> index mask to V index mask: xy -> xxyy
+  static Vec256<c10::complex<double>> blendv(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& b,
+                               const Vec256<c10::complex<double>>& mask) {
+    // convert c10::complex<V> index mask to V index mask: xy -> xxyy
     auto mask_ = _mm256_unpacklo_pd(mask.values, mask.values);
     return _mm256_blendv_pd(a.values, b.values, mask_);
 
   }
   template<typename step_t>
-  static Vec256<std::complex<double>> arange(std::complex<double> base = 0., step_t step = static_cast<step_t>(1)) {
-    return Vec256<std::complex<double>>(base,
+  static Vec256<c10::complex<double>> arange(c10::complex<double> base = 0., step_t step = static_cast<step_t>(1)) {
+    return Vec256<c10::complex<double>>(base,
                                         base + step);
   }
-  static Vec256<std::complex<double>> set(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b,
+  static Vec256<c10::complex<double>> set(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& b,
                             int64_t count = size()) {
     switch (count) {
       case 0:
@@ -72,7 +75,7 @@ public:
     }
     return b;
   }
-  static Vec256<std::complex<double>> loadu(const void* ptr, int64_t count = size()) {
+  static Vec256<c10::complex<double>> loadu(const void* ptr, int64_t count = size()) {
     if (count == size())
       return _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
 
@@ -86,7 +89,7 @@ public:
     std::memcpy(
         tmp_values,
         reinterpret_cast<const double*>(ptr),
-        count * sizeof(std::complex<double>));
+        count * sizeof(c10::complex<double>));
     return _mm256_load_pd(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -95,13 +98,13 @@ public:
     } else if (count > 0) {
       double tmp_values[2*size()];
       _mm256_storeu_pd(reinterpret_cast<double*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(std::complex<double>));
+      std::memcpy(ptr, tmp_values, count * sizeof(c10::complex<double>));
     }
   }
-  const std::complex<double>& operator[](int idx) const  = delete;
-  std::complex<double>& operator[](int idx) = delete;
-  Vec256<std::complex<double>> map(std::complex<double> (*f)(const std::complex<double> &)) const {
-    __at_align32__ std::complex<double> tmp[size()];
+  const c10::complex<double>& operator[](int idx) const  = delete;
+  c10::complex<double>& operator[](int idx) = delete;
+  Vec256<c10::complex<double>> map(c10::complex<double> (*f)(const c10::complex<double> &)) const {
+    __at_align32__ c10::complex<double> tmp[size()];
     store(tmp);
     for (int i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
@@ -115,7 +118,7 @@ public:
   __m256d abs_() const {
     return _mm256_sqrt_pd(abs_2_());                // abs     abs
   }
-  Vec256<std::complex<double>> abs() const {
+  Vec256<c10::complex<double>> abs() const {
     const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
                                                                      0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
     return _mm256_and_pd(abs_(), real_mask);        // abs     0
@@ -125,7 +128,7 @@ public:
     auto b_a = _mm256_permute_pd(values, 0x05);     // b        a
     return Sleef_atan2d4_u10(values, b_a);          // 90-angle angle
   }
-  Vec256<std::complex<double>> angle() const {
+  Vec256<c10::complex<double>> angle() const {
     const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
                                                                      0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
     auto angle = _mm256_permute_pd(angle_(), 0x05); // angle    90-angle
@@ -136,7 +139,7 @@ public:
                                                                      0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
     return _mm256_and_pd(values, real_mask);
   }
-  Vec256<std::complex<double>> real() const {
+  Vec256<c10::complex<double>> real() const {
     return real_();
   }
   __m256d imag_() const {
@@ -144,32 +147,32 @@ public:
                                                                      0x0000000000000000, 0xFFFFFFFFFFFFFFFF));
     return _mm256_and_pd(values, imag_mask);
   }
-  Vec256<std::complex<double>> imag() const {
+  Vec256<c10::complex<double>> imag() const {
     return _mm256_permute_pd(imag_(), 0x05);           //b        a
   }
   __m256d conj_() const {
     const __m256d sign_mask = _mm256_setr_pd(0.0, -0.0, 0.0, -0.0);
     return _mm256_xor_pd(values, sign_mask);           // a       -b
   }
-  Vec256<std::complex<double>> conj() const {
+  Vec256<c10::complex<double>> conj() const {
     return conj_();
   }
-  Vec256<std::complex<double>> log() const {
+  Vec256<c10::complex<double>> log() const {
     // Most trigonomic ops use the log() op to improve complex number performance.
     return map(std::log);
   }
-  Vec256<std::complex<double>> log2() const {
+  Vec256<c10::complex<double>> log2() const {
     const __m256d log2_ = _mm256_set1_pd(std::log(2));
     return _mm256_div_pd(log(), log2_);
   }
-  Vec256<std::complex<double>> log10() const {
+  Vec256<c10::complex<double>> log10() const {
     const __m256d log10_ = _mm256_set1_pd(std::log(10));
     return _mm256_div_pd(log(), log10_);
   }
-  Vec256<std::complex<double>> log1p() const {
+  Vec256<c10::complex<double>> log1p() const {
     AT_ERROR("not supported for complex numbers");
   }
-  Vec256<std::complex<double>> asin() const {
+  Vec256<c10::complex<double>> asin() const {
     // asin(x)
     // = -i*ln(iz + sqrt(1 -z^2))
     // = -i*ln((ai - b) + sqrt(1 - (a + bi)*(a + bi)))
@@ -189,22 +192,22 @@ public:
     auto ln = Vec256(_mm256_add_pd(b_a, root)).log();                 //ln(iz + sqrt())
     return Vec256(_mm256_permute_pd(ln.values, 0x05)).conj();         //-i*ln()
   }
-  Vec256<std::complex<double>> acos() const {
+  Vec256<c10::complex<double>> acos() const {
     // acos(x) = pi/2 - asin(x)
     const __m256d pi_2 = _mm256_setr_pd(M_PI/2, 0.0, M_PI/2, 0.0);
     return _mm256_sub_pd(pi_2, asin());
   }
-  Vec256<std::complex<double>> atan() const;
-  Vec256<std::complex<double>> atan2(const Vec256<std::complex<double>> &b) const {
+  Vec256<c10::complex<double>> atan() const;
+  Vec256<c10::complex<double>> atan2(const Vec256<c10::complex<double>> &b) const {
     AT_ERROR("not supported for complex numbers");
   }
-  Vec256<std::complex<double>> erf() const {
+  Vec256<c10::complex<double>> erf() const {
     AT_ERROR("not supported for complex numbers");
   }
-  Vec256<std::complex<double>> erfc() const {
+  Vec256<c10::complex<double>> erfc() const {
     AT_ERROR("not supported for complex numbers");
   }
-  Vec256<std::complex<double>> exp() const {
+  Vec256<c10::complex<double>> exp() const {
     //exp(a + bi)
     // = exp(a)*(cos(b) + sin(b)i)
     auto exp = Sleef_expd4_u10(values);                               //exp(a)           exp(b)
@@ -215,44 +218,44 @@ public:
                                    sin_cos.x, 0x0A);                  //cos(b)           sin(b)
     return _mm256_mul_pd(exp, cos_sin);
   }
-  Vec256<std::complex<double>> expm1() const {
+  Vec256<c10::complex<double>> expm1() const {
     AT_ERROR("not supported for complex numbers");
   }
-  Vec256<std::complex<double>> sin() const {
+  Vec256<c10::complex<double>> sin() const {
     return map(std::sin);
   }
-  Vec256<std::complex<double>> sinh() const {
+  Vec256<c10::complex<double>> sinh() const {
     return map(std::sinh);
   }
-  Vec256<std::complex<double>> cos() const {
+  Vec256<c10::complex<double>> cos() const {
     return map(std::cos);
   }
-  Vec256<std::complex<double>> cosh() const {
+  Vec256<c10::complex<double>> cosh() const {
     return map(std::cosh);
   }
-  Vec256<std::complex<double>> ceil() const {
+  Vec256<c10::complex<double>> ceil() const {
     return _mm256_ceil_pd(values);
   }
-  Vec256<std::complex<double>> floor() const {
+  Vec256<c10::complex<double>> floor() const {
     return _mm256_floor_pd(values);
   }
-  Vec256<std::complex<double>> neg() const {
+  Vec256<c10::complex<double>> neg() const {
     auto zero = _mm256_setzero_pd();
     return _mm256_sub_pd(zero, values);
   }
-  Vec256<std::complex<double>> round() const {
+  Vec256<c10::complex<double>> round() const {
     return _mm256_round_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }
-  Vec256<std::complex<double>> tan() const {
+  Vec256<c10::complex<double>> tan() const {
     return map(std::tan);
   }
-  Vec256<std::complex<double>> tanh() const {
+  Vec256<c10::complex<double>> tanh() const {
     return map(std::tanh);
   }
-  Vec256<std::complex<double>> trunc() const {
+  Vec256<c10::complex<double>> trunc() const {
     return _mm256_round_pd(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
   }
-  Vec256<std::complex<double>> sqrt() const {
+  Vec256<c10::complex<double>> sqrt() const {
     //   sqrt(a + bi)
     // = sqrt(2)/2 * [sqrt(sqrt(a**2 + b**2) + a) + sgn(b)*sqrt(sqrt(a**2 + b**2) - a)i]
     // = sqrt(2)/2 * [sqrt(abs() + a) + sgn(b)*sqrt(abs() - a)i]
@@ -266,13 +269,13 @@ public:
     auto res_re_im = _mm256_sqrt_pd(_mm256_add_pd(abs_(), a_a));       // sqrt(abs + a) sqrt(abs - a)
     return _mm256_mul_pd(factor, res_re_im);
   }
-  Vec256<std::complex<double>> reciprocal() const;
-  Vec256<std::complex<double>> rsqrt() const {
+  Vec256<c10::complex<double>> reciprocal() const;
+  Vec256<c10::complex<double>> rsqrt() const {
     return sqrt().reciprocal();
   }
-  Vec256<std::complex<double>> pow(const Vec256<std::complex<double>> &exp) const {
-    __at_align32__ std::complex<double> x_tmp[size()];
-    __at_align32__ std::complex<double> y_tmp[size()];
+  Vec256<c10::complex<double>> pow(const Vec256<c10::complex<double>> &exp) const {
+    __at_align32__ c10::complex<double> x_tmp[size()];
+    __at_align32__ c10::complex<double> y_tmp[size()];
     store(x_tmp);
     exp.store(y_tmp);
     for (int i = 0; i < size(); i++) {
@@ -283,50 +286,50 @@ public:
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN
-  Vec256<std::complex<double>> operator==(const Vec256<std::complex<double>>& other) const {
+  Vec256<c10::complex<double>> operator==(const Vec256<c10::complex<double>>& other) const {
     return _mm256_cmp_pd(values, other.values, _CMP_EQ_OQ);
   }
-  Vec256<std::complex<double>> operator!=(const Vec256<std::complex<double>>& other) const {
+  Vec256<c10::complex<double>> operator!=(const Vec256<c10::complex<double>>& other) const {
     return _mm256_cmp_pd(values, other.values, _CMP_NEQ_OQ);
   }
-  Vec256<std::complex<double>> operator<(const Vec256<std::complex<double>>& other) const {
+  Vec256<c10::complex<double>> operator<(const Vec256<c10::complex<double>>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vec256<std::complex<double>> operator<=(const Vec256<std::complex<double>>& other) const {
+  Vec256<c10::complex<double>> operator<=(const Vec256<c10::complex<double>>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vec256<std::complex<double>> operator>(const Vec256<std::complex<double>>& other) const {
+  Vec256<c10::complex<double>> operator>(const Vec256<c10::complex<double>>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vec256<std::complex<double>> operator>=(const Vec256<std::complex<double>>& other) const {
+  Vec256<c10::complex<double>> operator>=(const Vec256<c10::complex<double>>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 
-  Vec256<std::complex<double>> eq(const Vec256<std::complex<double>>& other) const;
-  Vec256<std::complex<double>> ne(const Vec256<std::complex<double>>& other) const;
-  Vec256<std::complex<double>> lt(const Vec256<std::complex<double>>& other) const {
+  Vec256<c10::complex<double>> eq(const Vec256<c10::complex<double>>& other) const;
+  Vec256<c10::complex<double>> ne(const Vec256<c10::complex<double>>& other) const;
+  Vec256<c10::complex<double>> lt(const Vec256<c10::complex<double>>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vec256<std::complex<double>> le(const Vec256<std::complex<double>>& other) const {
+  Vec256<c10::complex<double>> le(const Vec256<c10::complex<double>>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vec256<std::complex<double>> gt(const Vec256<std::complex<double>>& other) const {
+  Vec256<c10::complex<double>> gt(const Vec256<c10::complex<double>>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vec256<std::complex<double>> ge(const Vec256<std::complex<double>>& other) const {
+  Vec256<c10::complex<double>> ge(const Vec256<c10::complex<double>>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 };
 
-template <> Vec256<std::complex<double>> inline operator+(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
+template <> Vec256<c10::complex<double>> inline operator+(const Vec256<c10::complex<double>> &a, const Vec256<c10::complex<double>> &b) {
   return _mm256_add_pd(a, b);
 }
 
-template <> Vec256<std::complex<double>> inline operator-(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
+template <> Vec256<c10::complex<double>> inline operator-(const Vec256<c10::complex<double>> &a, const Vec256<c10::complex<double>> &b) {
   return _mm256_sub_pd(a, b);
 }
 
-template <> Vec256<std::complex<double>> inline operator*(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
+template <> Vec256<c10::complex<double>> inline operator*(const Vec256<c10::complex<double>> &a, const Vec256<c10::complex<double>> &b) {
   //(a + bi)  * (c + di) = (ac - bd) + (ad + bc)i
   const __m256d sign_mask = _mm256_setr_pd(0.0, -0.0, 0.0, -0.0);
   auto ac_bd = _mm256_mul_pd(a, b);         //ac       bd
@@ -339,7 +342,7 @@ template <> Vec256<std::complex<double>> inline operator*(const Vec256<std::comp
   return ret;
 }
 
-template <> Vec256<std::complex<double>> inline operator/(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
+template <> Vec256<c10::complex<double>> inline operator/(const Vec256<c10::complex<double>> &a, const Vec256<c10::complex<double>> &b) {
   //re + im*i = (a + bi)  / (c + di)
   //re = (ac + bd)/abs_2()
   //im = (bc - ad)/abs_2()
@@ -355,7 +358,7 @@ template <> Vec256<std::complex<double>> inline operator/(const Vec256<std::comp
 }
 
 // reciprocal. Implement this here so we can use multiplication.
-Vec256<std::complex<double>> Vec256<std::complex<double>>::reciprocal() const{
+Vec256<c10::complex<double>> Vec256<c10::complex<double>>::reciprocal() const{
   //re + im*i = (a + bi)  / (c + di)
   //re = (ac + bd)/abs_2() = c/abs_2()
   //im = (bc - ad)/abs_2() = d/abs_2()
@@ -364,7 +367,7 @@ Vec256<std::complex<double>> Vec256<std::complex<double>>::reciprocal() const{
   return _mm256_div_pd(c_d, abs_2_());
 }
 
-Vec256<std::complex<double>> Vec256<std::complex<double>>::atan() const {
+Vec256<c10::complex<double>> Vec256<c10::complex<double>>::atan() const {
   // atan(x) = i/2 * ln((i + z)/(i - z))
   const __m256d i = _mm256_setr_pd(0.0, 1.0, 0.0, 1.0);
   const Vec256 i_half = _mm256_setr_pd(0.0, 0.5, 0.0, 0.5);
@@ -376,7 +379,7 @@ Vec256<std::complex<double>> Vec256<std::complex<double>>::atan() const {
 }
 
 template <>
-Vec256<std::complex<double>> inline maximum(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b) {
+Vec256<c10::complex<double>> inline maximum(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& b) {
   auto abs_a = a.abs_2_();
   auto abs_b = b.abs_2_();
   auto mask = _mm256_cmp_pd(abs_a, abs_b, _CMP_LT_OQ);
@@ -387,7 +390,7 @@ Vec256<std::complex<double>> inline maximum(const Vec256<std::complex<double>>& 
 }
 
 template <>
-Vec256<std::complex<double>> inline minimum(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b) {
+Vec256<c10::complex<double>> inline minimum(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& b) {
   auto abs_a = a.abs_2_();
   auto abs_b = b.abs_2_();
   auto mask = _mm256_cmp_pd(abs_a, abs_b, _CMP_GT_OQ);
@@ -398,7 +401,7 @@ Vec256<std::complex<double>> inline minimum(const Vec256<std::complex<double>>& 
 }
 
 template <>
-Vec256<std::complex<double>> inline clamp(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& min, const Vec256<std::complex<double>>& max) {
+Vec256<c10::complex<double>> inline clamp(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& min, const Vec256<c10::complex<double>>& max) {
   auto abs_a = a.abs_2_();
   auto abs_min = min.abs_2_();
   auto max_mask = _mm256_cmp_pd(abs_a, abs_min, _CMP_LT_OQ);
@@ -408,7 +411,7 @@ Vec256<std::complex<double>> inline clamp(const Vec256<std::complex<double>>& a,
 }
 
 template <>
-Vec256<std::complex<double>> inline clamp_min(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& min) {
+Vec256<c10::complex<double>> inline clamp_min(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& min) {
   auto abs_a = a.abs_2_();
   auto abs_min = min.abs_2_();
   auto max_mask = _mm256_cmp_pd(abs_a, abs_min, _CMP_LT_OQ);
@@ -416,7 +419,7 @@ Vec256<std::complex<double>> inline clamp_min(const Vec256<std::complex<double>>
 }
 
 template <>
-Vec256<std::complex<double>> inline clamp_max(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& max) {
+Vec256<c10::complex<double>> inline clamp_max(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& max) {
   auto abs_a = a.abs_2_();
   auto abs_max = max.abs_2_();
   auto min_mask = _mm256_cmp_pd(abs_a, abs_max, _CMP_GT_OQ);
@@ -424,28 +427,26 @@ Vec256<std::complex<double>> inline clamp_max(const Vec256<std::complex<double>>
 }
 
 template <>
-Vec256<std::complex<double>> inline operator&(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b) {
+Vec256<c10::complex<double>> inline operator&(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& b) {
   return _mm256_and_pd(a, b);
 }
 
 template <>
-Vec256<std::complex<double>> inline operator|(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b) {
+Vec256<c10::complex<double>> inline operator|(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& b) {
   return _mm256_or_pd(a, b);
 }
 
 template <>
-Vec256<std::complex<double>> inline operator^(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b) {
+Vec256<c10::complex<double>> inline operator^(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& b) {
   return _mm256_xor_pd(a, b);
 }
 
-const Vec256<std::complex<double>> Vec256<std::complex<double>>::ones(_mm256_set1_pd(1.0));
-
-Vec256<std::complex<double>> Vec256<std::complex<double>>::eq(const Vec256<std::complex<double>>& other) const {
-  return (*this == other) & Vec256<std::complex<double>>::ones;
+Vec256<c10::complex<double>> Vec256<c10::complex<double>>::eq(const Vec256<c10::complex<double>>& other) const {
+  return (*this == other) & Vec256<c10::complex<double>>(_mm256_set1_pd(1.0));
 }
 
-Vec256<std::complex<double>> Vec256<std::complex<double>>::ne(const Vec256<std::complex<double>>& other) const {
-  return (*this != other) & Vec256<std::complex<double>>::ones;
+Vec256<c10::complex<double>> Vec256<c10::complex<double>>::ne(const Vec256<c10::complex<double>>& other) const {
+  return (*this != other) & Vec256<c10::complex<double>>(_mm256_set1_pd(1.0));
 }
 
 #endif
