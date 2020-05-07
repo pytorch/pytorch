@@ -120,26 +120,13 @@ static CUDAStubs* cuda_stubs = default_stubs_addr;
 //  - save profiling events into the profiling state
 //
 
-// Internal optimization:
-// threads use the map <ProfilerThreadLocalState id> -> <RangeEventList ptr>
-// as a cache to avoid taking a per state lock every time they write into the list;
-// Notes:
-//  - to avoid indefinite growth of this TLS cache, we set its max size and flush
-//    it every time it reaches the max size
-//  - RangeEventList already synchronizes reads (consolidate) and writes using
-//    an internal lock
-thread_local std::unordered_map<uint64_t, RangeEventList*> tls_lists_cache_;
-static constexpr size_t kMaxTLSCacheSize = 32;
-std::atomic<uint64_t> profiler_state_counter {0};
-
 // Profiler state
 struct ProfilerThreadLocalState
     : public at::DebugInfoBase
       public c10::MemoryUsageReporter {
   explicit ProfilerThreadLocalState(
       const ProfilerConfig& config)
-    : cache_id_(++profiler_state_counter),
-      config_(config) {}
+    : config_(config) {}
   ~ProfilerThreadLocalState() {}
 
   inline const ProfilerConfig& config() const {
@@ -265,45 +252,22 @@ struct ProfilerThreadLocalState
 
  private:
   RangeEventList& getEventList(int64_t thread_id = -1) {
-    bool is_current_thread = (thread_id < 0) ||
-        thread_id == at::RecordFunction::currentThreadId();
-
-    if (is_current_thread) {
-      // check if we can get a list without taking a state's lock
-      auto it = tls_lists_cache_.find(cache_id_);
-      if (it != tls_lists_cache_.end()) {
-        return *(it->second);
-      }
-    }
-
-    // otherwise, take state's lock and remember the pointer
-    // in the thread local cache
     if (thread_id < 0) {
       thread_id = at::RecordFunction::currentThreadId();
     }
     RangeEventList* list_ptr = nullptr;
-    {
-      std::lock_guard<std::mutex> guard(state_mutex_);
-      auto it = event_lists_map_.find(thread_id);
-      if (it != event_lists_map_.end()) {
-        list_ptr = it->second.get();
-      } else {
-        auto event_list = std::make_shared<RangeEventList>();
-        event_lists_map_[thread_id] = event_list;
-        list_ptr = event_list.get();
-      }
-    }
-
-    if (is_current_thread) {
-      if (tls_lists_cache_.size() >= kMaxTLSCacheSize) {
-        tls_lists_cache_.clear();
-      }
-      tls_lists_cache_[cache_id_] = list_ptr;
+    std::lock_guard<std::mutex> guard(state_mutex_);
+    auto it = event_lists_map_.find(thread_id);
+    if (it != event_lists_map_.end()) {
+      list_ptr = it->second.get();
+    } else {
+      auto event_list = std::make_shared<RangeEventList>();
+      event_lists_map_[thread_id] = event_list;
+      list_ptr = event_list.get();
     }
     return *list_ptr;
   }
 
-  uint64_t cache_id_ = 0;
   std::mutex state_mutex_;
   std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
       event_lists_map_;
