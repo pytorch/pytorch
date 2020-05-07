@@ -69,9 +69,9 @@ if __name__ == '__main__':
                 workload = run_profiler_benchmark_parallel
 
             runtimes = timeit.repeat(workload, repeat=N, number=1)
-            runtimes = [r * 1000.0 for r in runtimes]
-            avg_time = statistics.mean(runtimes)
-            stddev_time = statistics.stdev(runtimes)
-            print(("\tavg. time: {:.3f} ms, stddev: {:.3f} ms ;  " +
-                    "time per iteration: {:.3f} ms\n").format(
-                    avg_time, stddev_time, (avg_time / INTERNAL_ITER)))
+            avg_time = statistics.mean(runtimes) * 1000.0
+            stddev_time = statistics.stdev(runtimes) * 1000.0
+            print("\tavg. time: {:.3f} ms, stddev: {:.3f} ms".format(
+                avg_time, stddev_time))
+            print("\ttime per iteration: {:.3f} ms\n".format(
+                avg_time / INTERNAL_ITER))
