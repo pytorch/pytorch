@@ -136,7 +136,7 @@ void test_random_from_to(const at::Device& device) {
               range = static_cast<uint64_t>(*to) - static_cast<uint64_t>(from);
               from_to_case_covered = true;
             } else {
-              range = static_cast<uint64_t>(max_val) - static_cast<uint64_t>(from) + 1;
+              range = static_cast<uint64_t>(max_to) - static_cast<uint64_t>(from) + 1;
               from_case_covered = true;
             }
             if (range < (1ULL << 32)) {
