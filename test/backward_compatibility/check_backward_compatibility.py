@@ -74,6 +74,8 @@ white_list = [
     ('aten::as_tensor', datetime.date(2020, 6, 30)),
 ]
 
+white_list.append(("aten::list_with_default", datetime.date(2020, 6, 30)))
+
 
 # The nightly will fail to parse newly added syntax to schema declarations
 # Add new schemas that will fail the nightly here
