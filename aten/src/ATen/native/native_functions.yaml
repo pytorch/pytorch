@@ -1562,6 +1562,11 @@
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
   variants: function
 
+- func: quantized_instance_norm(Tensor input, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor
+  requires_tensor: True
+  dispatch:
+    QuantizedCPU: quantized_instance_norm_impl
+
 - func: inverse(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method

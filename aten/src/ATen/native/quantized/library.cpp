@@ -56,6 +56,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def("conv3d_groups(__torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weights) -> int");
   m.def("hardswish(Tensor input, float output_scale, int output_zero_point) -> Tensor");
   m.def("group_norm(Tensor input, int num_groups, Tensor weight, Tensor bias, float eps, float output_scale, int output_zero_point) -> Tensor");
+  m.def("instance_norm(Tensor input, Tensor weight, Tensor bias, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("layer_norm(Tensor input, int[] normalized_shape, Tensor weight, Tensor bias, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("linear(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
   m.def("linear_relu(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
