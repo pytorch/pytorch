@@ -12,7 +12,7 @@
 namespace helpers {
 template <typename Predicate>
 void check_all_parameters(
-    const torch::jit::script::Module& module,
+    const torch::jit::Module& module,
     Predicate predicate) {
   for (at::Tensor parameter : module.parameters()) {
     AT_ASSERT(predicate(parameter));
@@ -53,9 +53,10 @@ void get_operator_from_registry_and_execute() {
 void get_autograd_operator_from_registry_and_execute() {
   torch::Tensor x = torch::randn({5,5}, torch::requires_grad());
   torch::Tensor y = torch::randn({5,5}, torch::requires_grad());
+  torch::Tensor z = torch::randn({5,5}, torch::requires_grad());
 
   torch::Tensor output =
-    helpers::get_operator_from_registry_and_execute<torch::Tensor>("custom::op_with_autograd", x, 2, y);
+    helpers::get_operator_from_registry_and_execute<torch::Tensor>("custom::op_with_autograd", x, 2, y, c10::optional<torch::Tensor>());
 
   TORCH_INTERNAL_ASSERT(output.allclose(x + 2*y + x*y));
   auto go = torch::ones({}, torch::requires_grad());
@@ -63,6 +64,20 @@ void get_autograd_operator_from_registry_and_execute() {
 
   TORCH_INTERNAL_ASSERT(torch::allclose(x.grad(), y + torch::ones({5,5})));
   TORCH_INTERNAL_ASSERT(torch::allclose(y.grad(), x + torch::ones({5,5})*2));
+
+  // Test with optional argument.
+  at::zero_(x.grad());
+  at::zero_(y.grad());
+  output = helpers::get_operator_from_registry_and_execute<torch::Tensor>(
+      "custom::op_with_autograd", x, 2, y, z);
+
+  TORCH_INTERNAL_ASSERT(output.allclose(x + 2*y + x*y + z));
+  go = torch::ones({}, torch::requires_grad());
+  output.sum().backward(go, false, true);
+
+  TORCH_INTERNAL_ASSERT(torch::allclose(x.grad(), y + torch::ones({5,5})));
+  TORCH_INTERNAL_ASSERT(torch::allclose(y.grad(), x + torch::ones({5,5})*2));
+  TORCH_INTERNAL_ASSERT(torch::allclose(z.grad(), torch::ones({5,5})));
 }
 
 void get_autograd_operator_from_registry_and_execute_in_nograd_mode() {
@@ -72,14 +87,14 @@ void get_autograd_operator_from_registry_and_execute_in_nograd_mode() {
   torch::Tensor y = torch::randn({5,5}, torch::requires_grad());
 
   torch::Tensor output =
-    helpers::get_operator_from_registry_and_execute<torch::Tensor>("custom::op_with_autograd", x, 2, y);
+    helpers::get_operator_from_registry_and_execute<torch::Tensor>("custom::op_with_autograd", x, 2, y, c10::optional<torch::Tensor>());
 
   TORCH_INTERNAL_ASSERT(output.allclose(x + 2*y + x*y));
 }
 
 void load_serialized_module_with_custom_op_and_execute(
     const std::string& path_to_exported_script_module) {
-  torch::jit::script::Module module =
+  torch::jit::Module module =
       torch::jit::load(path_to_exported_script_module);
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back(torch::ones(5));
@@ -90,7 +105,7 @@ void load_serialized_module_with_custom_op_and_execute(
 
 void test_argument_checking_for_serialized_modules(
     const std::string& path_to_exported_script_module) {
-  torch::jit::script::Module module =
+  torch::jit::Module module =
       torch::jit::load(path_to_exported_script_module);
 
   try {
@@ -124,7 +139,7 @@ void test_argument_checking_for_serialized_modules(
 }
 
 void test_move_to_device(const std::string& path_to_exported_script_module) {
-  torch::jit::script::Module module =
+  torch::jit::Module module =
       torch::jit::load(path_to_exported_script_module);
 
   helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
@@ -145,7 +160,7 @@ void test_move_to_device(const std::string& path_to_exported_script_module) {
 }
 
 void test_move_to_dtype(const std::string& path_to_exported_script_module) {
-  torch::jit::script::Module module =
+  torch::jit::Module module =
       torch::jit::load(path_to_exported_script_module);
 
   module.to(torch::kInt);

@@ -64,7 +64,7 @@ std::string operator()(const enumtype::k##name& v) const { \
 // However, it throws the following error instead:
 //
 // ```
-// error: could not convert ‘torch::kNone’ from ‘const torch::enumtype::kNone’ to ‘torch::nn::SomeOptions’
+// error: could not convert `torch::kNone` from `const torch::enumtype::kNone` to `torch::nn::SomeOptions`
 // ```
 //
 // To get around this problem, we explicitly provide the following constructors for `SomeOptions`:
@@ -122,6 +122,10 @@ TORCH_ENUM_DECLARE(BatchMean)
 TORCH_ENUM_DECLARE(Zeros)
 TORCH_ENUM_DECLARE(Border)
 TORCH_ENUM_DECLARE(Reflection)
+TORCH_ENUM_DECLARE(RNN_TANH)
+TORCH_ENUM_DECLARE(RNN_RELU)
+TORCH_ENUM_DECLARE(LSTM)
+TORCH_ENUM_DECLARE(GRU)
 
 namespace torch {
 namespace enumtype {
@@ -157,6 +161,10 @@ struct _compute_enum_name {
   TORCH_ENUM_PRETTY_PRINT(Zeros)
   TORCH_ENUM_PRETTY_PRINT(Border)
   TORCH_ENUM_PRETTY_PRINT(Reflection)
+  TORCH_ENUM_PRETTY_PRINT(RNN_TANH)
+  TORCH_ENUM_PRETTY_PRINT(RNN_RELU)
+  TORCH_ENUM_PRETTY_PRINT(LSTM)
+  TORCH_ENUM_PRETTY_PRINT(GRU)
 };
 
 template <typename V>

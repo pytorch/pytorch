@@ -450,7 +450,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(ncclUniqueId* ncclID) {
     store_->set(storeKey, vec);
   } else {
     auto vec = store_->get(storeKey);
-    AT_CHECK(vec.size() == NCCL_UNIQUE_ID_BYTES);
+    TORCH_CHECK(vec.size() == NCCL_UNIQUE_ID_BYTES);
     std::memcpy(ncclID, vec.data(), vec.size());
   }
 }

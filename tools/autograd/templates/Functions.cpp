@@ -7,7 +7,7 @@
 #include <cmath>
 #endif
 
-#include "Functions.h"
+#include "torch/csrc/autograd/generated/Functions.h"
 #include <ATen/Utils.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/WrapDimUtils.h>
@@ -88,6 +88,15 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
     size *= sizes[d];
   }
   return size;
+}
+
+std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const Tensor & x1, const Tensor & x2, const Tensor & res) {
+  // handle case at 0 where we return a subgradient containing 0
+  Tensor ratio = grad / res;
+  ratio.masked_fill_(res == 0, 0);
+  return std::tuple<Tensor, Tensor>{
+            x1 * ratio.sum(-1, true) - ratio.matmul(x2),
+            x2 * ratio.sum(-2, false).unsqueeze(-1) - ratio.transpose(-2, -1).matmul(x1)};
 }
 
 Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Scalar> & p_, const Tensor & norm) {
@@ -642,9 +651,19 @@ Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
   }
 }
 
-Tensor select_equals_backward(Tensor grad, const Tensor & input, const Tensor & value) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  grad_input.masked_fill_(input == value, grad);
+Tensor select_first_equal_backward(Tensor grad, const Tensor & input, const Tensor & value) {
+  auto grad_input = at::zeros_like(input);
+
+  // find indices of the first element for which input[idx] == value
+  auto first_value_idx = (input == value).nonzero().select(0, 0);
+
+  if (grad_input.dim() == 0) {
+    grad_input.copy_(grad);
+  }
+  else {
+    grad_input.index_put_(at::chunk(first_value_idx, grad_input.dim()), grad);
+  }
+
   return grad_input;
 }
 
@@ -879,8 +898,8 @@ Tensor infinitely_differentiable_gelu_backward(
   return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
 }
 
-Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
-  auto result = kl_div_backward(grad, input, target, at::Reduction::None);
+Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, bool log_target) {
+  auto result = kl_div_backward(grad, input, target, at::Reduction::None, log_target);
   if (reduction == at::Reduction::Mean) {
     return result.mean();
   } else if (reduction == at::Reduction::Sum) {
@@ -890,15 +909,20 @@ Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & in
 }
 
 // Compute derivatives for targets.
-// Assume targets are given as probabilities (i.e. without taking the logarithm).
-Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction) {
-  if (reduction == at::Reduction::None) {
-    return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
+Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction, bool log_target) {
+  Tensor grad_target;
+  if (!log_target) {
+    grad_target = grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
   }
+  else {
+    grad_target = grad_output.mul(target.add(1).sub_(self).mul_(target.exp()));
+  }
+
   if (reduction == at::Reduction::Mean) {
-    return grad_output.mul(target.log().add_(1).sub_(self)).div_(target.numel()).masked_fill_(target == 0, 0.);
+    grad_target.div_(target.numel());
   }
-  return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
+
+  return grad_target;
 }
 
 Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_output, const Tensor& self, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {

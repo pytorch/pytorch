@@ -93,12 +93,10 @@ class Adagrad(Optimizer):
                     state['sum'].add_(make_sparse(grad_values.pow(2)))
                     std = state['sum'].sparse_mask(grad)
                     std_values = std._values().sqrt_().add_(group['eps'])
-                    # Need to avoid version tracking for parameter.
-                    p.data.add_(make_sparse(grad_values / std_values), alpha=-clr)
+                    p.add_(make_sparse(grad_values / std_values), alpha=-clr)
                 else:
                     state['sum'].addcmul_(grad, grad, value=1)
                     std = state['sum'].sqrt().add_(group['eps'])
-                    # Need to avoid version tracking for parameter.
-                    p.data.addcdiv_(grad, std, value=-clr)
+                    p.addcdiv_(grad, std, value=-clr)
 
         return loss

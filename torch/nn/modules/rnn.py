@@ -1,8 +1,10 @@
 import math
-import torch
 import warnings
 import numbers
+from typing import Tuple, Optional, overload
 
+import torch
+from torch import Tensor
 from .module import Module
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
@@ -134,10 +136,11 @@ class RNNBase(Module):
             # Note: no_grad() is necessary since _cudnn_rnn_flatten_weight is
             # an inplace operation on self._flat_weights
             with torch.no_grad():
-                torch._cudnn_rnn_flatten_weight(
-                    self._flat_weights, (4 if self.bias else 2),
-                    self.input_size, rnn.get_cudnn_mode(self.mode), self.hidden_size, self.num_layers,
-                    self.batch_first, bool(self.bidirectional))
+                if torch._use_cudnn_rnn_flatten_weight():
+                    torch._cudnn_rnn_flatten_weight(
+                        self._flat_weights, (4 if self.bias else 2),
+                        self.input_size, rnn.get_cudnn_mode(self.mode), self.hidden_size, self.num_layers,
+                        self.batch_first, bool(self.bidirectional))
 
     def _apply(self, fn):
         ret = super(RNNBase, self)._apply(fn)
@@ -373,7 +376,7 @@ class RNN(RNNBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
-    .. include:: cudnn_persistent_rnn.rst
+    .. include:: ../cudnn_persistent_rnn.rst
 
     Examples::
 
@@ -500,7 +503,7 @@ class LSTM(RNNBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
-    .. include:: cudnn_persistent_rnn.rst
+    .. include:: ../cudnn_persistent_rnn.rst
 
     Examples::
 
@@ -529,11 +532,13 @@ class LSTM(RNNBase):
             return hx
         return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
 
+    @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(self, input, hx=None):  # noqa: F811
         # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
         pass
 
+    @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(self, input, hx=None):  # noqa: F811
         # type: (PackedSequence, Optional[Tuple[Tensor, Tensor]]) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]  # noqa
@@ -675,7 +680,7 @@ class GRU(RNNBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
-    .. include:: cudnn_persistent_rnn.rst
+    .. include:: ../cudnn_persistent_rnn.rst
 
     Examples::
 
@@ -687,11 +692,13 @@ class GRU(RNNBase):
     def __init__(self, *args, **kwargs):
         super(GRU, self).__init__('GRU', *args, **kwargs)
 
+    @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(self, input, hx=None):  # noqa: F811
         # type: (Tensor, Optional[Tensor]) -> Tuple[Tensor, Tensor]
         pass
 
+    @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(self, input, hx=None):  # noqa: F811
         # type: (PackedSequence, Optional[Tensor]) -> Tuple[PackedSequence, Tensor]

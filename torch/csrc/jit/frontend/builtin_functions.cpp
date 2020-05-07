@@ -1,11 +1,10 @@
+#include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/frontend/code_template.h>
-#include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 
 namespace torch {
 namespace jit {
-namespace script {
 
 auto scalar_operators_source = CodeTemplate(
     R"SCRIPT(
@@ -49,11 +48,32 @@ def ndim(a : Tensor) -> int:
   return a.dim()
 def T(a : Tensor) -> Tensor:
   return a.numpy_T()
+def shape(a : Tensor) -> List[int]:
+  return a.size()
+)SCRIPT";
+
+// _assert_int_or_pair is only here for backwards-compatibility with the
+// aten::_assert_int_or_pair op which was removed once we were able to compile
+// torch.nn.functional.assert_int_or_pair
+// list_with_default also needs to be here for BC
+auto aten_ops =
+    R"SCRIPT(
+def _assert_int_or_pair(vals: List[int], name: str, message: str):
+  pass
+def list_with_default(out_size: List[int], defaults: List[int]):
+  assert len(defaults) > len(out_size)
+  return out_size
+)SCRIPT";
+
+// Implementations of historic symbol behaviors are defined here
+// See note [Versioned Symbols]
+auto _test_serialization_subcmul = R"SCRIPT(
+def _test_serialization_subcmul_0_2(self: Tensor, other:Tensor, alpha: number=2) -> Tensor:
+  return other - (self * alpha)
 )SCRIPT";
 
 struct BuiltinFunctionRegistry {
-  const std::vector<Function*>& getAllBuiltinFunctionsFor(
-      Symbol name) {
+  const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
     const static std::vector<Function*> empty;
     // when initializing the builtin function library, we will re-enter
     // getAllBuiltinFunctionsFor since it is called in the compiler to
@@ -80,14 +100,14 @@ struct BuiltinFunctionRegistry {
   void loadSource(const std::string& source, const std::string& the_namespace) {
     std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
     modules.emplace_back(cu);
-    cu->define(
-        c10::nullopt, source, script::nativeResolver(), /*self=*/nullptr);
+    cu->define(c10::nullopt, source, nativeResolver(), /*self=*/nullptr);
     for (auto& method : cu->get_functions()) {
       builtins_by_name_[Symbol::fromQualString(
                             the_namespace + "::" + method->name())]
           .push_back(method);
     }
   }
+
   void loadBuiltinFunctions() {
     for (auto scalar : {"float", "int"}) {
       TemplateEnv env;
@@ -117,6 +137,13 @@ struct BuiltinFunctionRegistry {
       loadSource(floordiv.format(env), "aten");
     }
 
+    loadSource(aten_ops, "aten");
+
+    // Loads functions implementing historic behavior, see note [Versioned
+    // Symbols]
+    // Note: these functions go into the "upgraders" namespace
+    loadSource(_test_serialization_subcmul, "upgraders");
+
     // These are under `prim` instead of `aten` since they exist to bind certain
     // tensor property getters to correpsonding methods
     loadSource(tensor_properties, "prim");
@@ -124,16 +151,13 @@ struct BuiltinFunctionRegistry {
   enum { UNINITIALIZED, INTIIALIZING, INITIALIZED } state = UNINITIALIZED;
   std::recursive_mutex mutex;
   std::vector<std::shared_ptr<CompilationUnit>> modules;
-  std::unordered_map<Symbol, std::vector<Function*>>
-      builtins_by_name_;
+  std::unordered_map<Symbol, std::vector<Function*>> builtins_by_name_;
 };
 
-const std::vector<Function*>& getAllBuiltinFunctionsFor(
-    Symbol name) {
+const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
   static BuiltinFunctionRegistry registry;
   return registry.getAllBuiltinFunctionsFor(name);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch
