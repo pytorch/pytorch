@@ -38,7 +38,7 @@ __device__ __forceinline__ float get_delta_fp16(float x) {
   frexpf(x, &exponent);
   exponent -= 1;
   if (exponent >= -14)
-    return TWO_10 * std::pow(2, exponent);
+    return TWO_10 * powf(2, exponent);
   else
     return TWO_24;
 }
