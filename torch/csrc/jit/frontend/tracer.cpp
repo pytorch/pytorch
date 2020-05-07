@@ -656,10 +656,7 @@ void addInputs(
     n->addInput(none);
   }
 }
-void addInputs(
-    Node* n,
-    const char* name,
-    const c10::optional<Device>& value) {
+void addInputs(Node* n, const char* name, const c10::optional<Device>& value) {
   if (value.has_value()) {
     detail::genericAddInput(n, value);
   } else {

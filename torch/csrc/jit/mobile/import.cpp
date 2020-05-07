@@ -173,8 +173,7 @@ BytecodeDeserializer::BytecodeDeserializer(
     : compilation_unit_(std::make_shared<CompilationUnit>()),
       reader_(std::move(reader)) {}
 
-mobile::Module BytecodeDeserializer::deserialize(
-    c10::optional<Device> device) {
+mobile::Module BytecodeDeserializer::deserialize(c10::optional<Device> device) {
   device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
   auto bvals = readArchive("bytecode", mcu).toTuple()->elements();

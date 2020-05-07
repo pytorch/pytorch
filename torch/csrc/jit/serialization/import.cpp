@@ -119,9 +119,7 @@ class ScriptModuleDeserializer final {
             },
             reader_->version()) {}
 
-  Module deserialize(
-      c10::optional<Device> device,
-      ExtraFilesMap& extra_files);
+  Module deserialize(c10::optional<Device> device, ExtraFilesMap& extra_files);
 
  private:
   IValue readArchive(const std::string& archive_name);
