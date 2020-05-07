@@ -204,7 +204,7 @@ thread_local bool tls_record_function_enabled_ = true;
 /* static */
 double RecordFunctionCallback::sample_zero_one() {
   static thread_local auto gen =
-      torch::make_unique<std::mt19937>(std::random_device()());
+      std::make_unique<std::mt19937>(std::random_device()());
   std::uniform_real_distribution<double> dist(0.0, 1.0);
   return dist(*gen);
 }
