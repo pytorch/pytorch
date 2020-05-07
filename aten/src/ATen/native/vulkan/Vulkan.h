@@ -293,6 +293,8 @@ class VImage final {
       uint32_t binding,
       VkDescriptorType descriptorType,
       VkImageLayout imageLayout) const;
+  void bindShaderRead(VkDescriptorSet descriptorSet, uint32_t binding) const;
+  void bindStorageImage(VkDescriptorSet descriptorSet, uint32_t binding) const;
   inline VkDeviceSize sizeBytes() const {
     return sizeof(float) * W_ * H_ * C_;
   }
@@ -305,6 +307,8 @@ class VImage final {
       VkCommandBuffer commandBuffer,
       VkImageLayout oldLayout,
       VkImageLayout newLayout);
+  void addImageMemoryBarrierUndefinedToGeneral(VkCommandBuffer commandBuffer);
+  void addImageMemoryBarrierGeneralToShaderRead(VkCommandBuffer commandBuffer);
 
  private:
   uint32_t W_;
@@ -323,7 +327,6 @@ void copyFromBufferToImage(VBuffer& buffer, VImage& image);
 
 void copyFromImageToBuffer(VImage& image, VBuffer& buffer);
 
-namespace vkutil {
 VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(
     uint32_t binding,
     VkDescriptorType descriptorType);
@@ -346,7 +349,6 @@ void allocateDescriptorSet(
     VkDescriptorPool descriptorPool,
     const VkDescriptorSetLayout* descriptorSetLayout,
     VkDescriptorSet* descriptorSet);
-} // namespace vkutil
 
 struct WorkGroupSize {
   uint32_t x;
@@ -402,6 +404,11 @@ class ComputeUnit final {
       uint32_t groupCountX,
       uint32_t groupCountY,
       uint32_t groupCountZ);
+  void dispatchCommandBuffer(
+      uint32_t gridX,
+      uint32_t gridY,
+      uint32_t gridZ,
+      WorkGroupSize workGroupSize);
   void runCommandBuffer();
   inline VkCommandBuffer commandBuffer() {
     return commandBuffer_;
