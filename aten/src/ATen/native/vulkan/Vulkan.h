@@ -34,10 +34,88 @@ namespace details {
 namespace vulkan {
 
 static constexpr bool kEnableValidationLayers = true;
-class VContext;
-
 bool is_available();
+
+class VContext;
 const VContext& context();
+
+// VulkanTensor is a handle that holds shared pointer to VulkanTensor:Impl,
+// that owns Tensor representation on GPU.
+//  VulkanTensor is copyable and moveable (copying and moving pointer to Impl).
+//
+// VulkanTensor::Impl is moveable only, owns Vulkan device memory for Tensor
+// data. Tensor can be represented in several formats.
+//
+// 0. VBuffer - (wrapper on  vulkan VkBuffer), supports all tensor dimensions,
+// data is in  Contiguous format (NCHW), in plan to preserve at::Tensor memory
+// format (3d or 4d tensors can be in NHWC ChannelsLast format). It is located
+// in host visible memory that can be memory mapped to CPU memory.
+//
+// 1. VImage(TexC4) - (wrapper on vulkan VkImage), optional representation of
+// tensors with dimension <= 4 as VkImage, sed in shaders as texture or storage
+// image. It is 3-dimensional image (x, y, z) with 4 component * 16 bit for each
+// triple (x, y, z).
+// For NCHW, NHWC: 
+// For dim==4: image.x - W sizes[3]; image.y -  H sizes[2]; image.z - (N sizes[0] * C sizes[1]) / 4
+// For dim==3: image.x - W sizes[2]; image.y - H sizes[1]; image.z - (C sizes[0]) / 4
+// For dim==2: image.x - W sizes[1]; image.y - H sizes[0]; image.z : 1
+// For dim==1: image.x - W sizes[0]; image.y : 1; image.z : 1
+//
+//
+// 2. VImage (other format) - Currently not added, but for some operations
+// another texture
+//  packing format can be beneficial for performance.
+//
+// Contract about synchronization between representations:
+// 1.VImage(TexC4) representation is allocated lazily with calling image(),
+// fails for dimensions > 4.
+//
+// Tensor data can be in 0.VBuffer and/or 1.VImage(TexC4),
+// If Tensor can be represented as image - VulkanTensor::Impl::canBeImage()
+// returns true. Image representation created lazily by call
+// VulkanTensor::Impl::image(), if it is called on Tensor with !canBeImage() -
+// it fails.
+//
+// If image allocated - image data has priority.
+// VulkanTensor::copyDataToHost checks if image allocated -
+// copyFromImageToBuffer first.
+class VBuffer;
+class VImage;
+class VulkanTensor final : public c10::intrusive_ptr_target {
+  class Impl;
+
+ public:
+  VulkanTensor(std::vector<int64_t> sizes);
+  ~VulkanTensor() = default;
+
+  VulkanTensor(VulkanTensor&&) = default;
+  VulkanTensor& operator=(VulkanTensor&&) = default;
+
+  VulkanTensor(const VulkanTensor&) = default;
+  VulkanTensor& operator=(const VulkanTensor&) = default;
+
+  inline std::vector<int64_t> sizes() const;
+  inline int64_t dim() const;
+  inline int64_t numel() const;
+
+  inline bool hasStorage() const;
+  inline void allocateStorage();
+  inline void setDataFromHost(const float* inputData);
+  inline void copyDataToHost(float* outputData);
+
+  inline bool hasBuffer();
+  inline VBuffer& buffer();
+  inline bool canBeImage();
+  inline bool hasImage();
+  inline VImage& image() const;
+  inline VImage& image();
+
+ private:
+  inline std::shared_ptr<Impl> impl();
+  inline std::shared_ptr<Impl> impl() const;
+  std::shared_ptr<Impl> pImpl;
+};
+
 class VContext final {
  public:
   VContext(bool enableValidationLayers);
@@ -237,135 +315,6 @@ void copyFromBufferToImage(VBuffer& buffer, VImage& image);
 
 void copyFromImageToBuffer(VImage& image, VBuffer& buffer);
 
-// VulkanTensor is a handle that holds shared pointer to VulkanTensor:Impl,
-// that owns Tensor representation on GPU.
-//  VulkanTensor is copyable and moveable (copying and moving pointer to Impl).
-//
-// VulkanTensor::Impl is moveable only, owns Vulkan device memory for Tensor
-// data. Tensor can be represented in several formats. 
-//
-// 0. VBuffer - (wrapper on  vulkan VkBuffer), supports all tensor dimensions, 
-// data is in  Contiguous format (NCHW), in plan to preserve at::Tensor memory format
-// (3d or 4d tensors can be in NHWC ChannelsLast format). It is located in
-// host visible memory that can be memory mapped to CPU memory.
-//
-// 1. VImage(TexC4) - (wrapper on vulkan VkImage), optional representation of 
-// tensors with dimension <= 4 as VkImage, sed in shaders as texture or storage image.
-// It is 3-dimensional image (x, y, z) with 4 component * 16 bit for each triple (x, y, z). 
-// For NCHW, NHWC: 
-// For dim==4: image.x - W sizes[3]; image.y - H sizes[2]; image.z - (N sizes[0] * C sizes[1]) / 4
-// For dim==3: image.x - W sizes[2]; image.y - H sizes[1]; image.z - (C sizes[0]) / 4
-// For dim==2: image.x - W sizes[1]; image.y - H sizes[0]; image.z : 1
-// For dim==1: image.x - W sizes[0]; image.y : 1; image.z : 1
-//
-//
-// 2. VImage (other format) - Currently not added, but for some operations
-// another texture
-//  packing format can be beneficial for performance.
-//
-// Contract about synchronization between representations:
-// 1.VImage(TexC4) representation is allocated lazily with calling image(),
-// fails for dimensions > 4.
-//
-// Tensor data can be in 0.VBuffer and/or 1.VImage(TexC4),
-// If Tensor can be represented as image - VulkanTensor::Impl::canBeImage() returns true.
-// Image representation created lazily by call VulkanTensor::Impl::image(),
-// if it is called on Tensor with !canBeImage() - it fails.
-//
-// If image allocated - image data has priority.
-// VulkanTensor::copyDataToHost checks if image allocated - copyFromImageToBuffer first.
-class VulkanTensor final : public c10::intrusive_ptr_target {
-  class Impl {
-   public:
-    Impl(std::vector<int64_t> sizes) : sizes_(std::move(sizes)) {
-      numel_ = std::accumulate(
-          std::begin(sizes_), std::end(sizes_), 1, std::multiplies<int64_t>());
-    }
-
-    std::vector<int64_t> sizes() const {
-      return sizes_;
-    }
-
-    inline int64_t dim() const {
-      return sizes_.size();
-    }
-
-    inline int64_t numel() const {
-      return numel_;
-    }
-
-    inline bool hasBuffer() {
-      return static_cast<bool>(buffer_);
-    }
-
-    inline VBuffer& buffer() {
-      return *(buffer_.get());
-    }
-
-    inline bool canBeImage() {
-      return dim() <= 4;
-    }
-
-    inline bool hasImage() {
-      return static_cast<bool>(image_);
-    }
-
-    inline bool hasStorage() {
-      return hasBuffer();
-    }
-
-    VImage& image();
-    void allocateStorage();
-    void setDataFromHost(const float* inputData);
-    void copyDataToHost(float* outputData);
-
-   private:
-    std::vector<int64_t> sizes_;
-    int64_t numel_;
-    std::unique_ptr<VBuffer> buffer_;
-    std::unique_ptr<VImage> image_;
-  };
-
- public:
-  VulkanTensor(std::vector<int64_t> sizes);
-  ~VulkanTensor() = default;
-
-  VulkanTensor(VulkanTensor&&) = default;
-  VulkanTensor& operator=(VulkanTensor&&) = default;
-
-  VulkanTensor(const VulkanTensor&) = default;
-  VulkanTensor& operator=(const VulkanTensor&) = default;
-
-  inline std::shared_ptr<Impl> impl() {
-    return pImpl;
-  }
-  inline std::shared_ptr<Impl> impl() const {
-    return pImpl;
-  }
-
-  std::vector<int64_t> sizes() const {
-    return impl()->sizes();
-  }
-
-  bool hasStorage() const {
-    return impl()->hasBuffer();
-  }
-
-  void allocateStorage() {
-    impl()->allocateStorage();
-  }
-
-  void setDataFromHost(const float* inputData) {
-    impl()->setDataFromHost(inputData);
-  }
-
-  void copyDataToHost(float* outputData) {
-    impl()->copyDataToHost(outputData);
-  }
-
- private:
-  std::shared_ptr<Impl> pImpl;
-};
 
 namespace vkutil {
 VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(

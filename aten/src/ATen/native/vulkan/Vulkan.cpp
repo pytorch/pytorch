@@ -902,70 +902,167 @@ void copyFromImageToBuffer(VImage& image, VBuffer& buffer) {
 
 // VulkanTensor
 
-VImage& VulkanTensor::Impl::image() {
-  auto d = dim();
-  TORCH_INTERNAL_ASSERT(
-      d <= 4,
-      "Vulkan: Only Tensors with dim <= 4 can be represented as Vulkam Image");
-  if (!image_ && buffer_) {
-    auto W = 0;
-    auto H = 0;
-    auto C = 0;
-    if (d == 4) {
-      W = sizes_[3];
-      H = sizes_[2];
-      C = sizes_[1] * sizes_[0];
-    } else if (d == 3) {
-      W = sizes_[2];
-      H = sizes_[1];
-      C = sizes_[0];
-    } else if (d == 2) {
-      W = sizes_[1];
-      H = sizes_[0];
-      C = 1;
-    } else if (d == 1) {
-      W = sizes_[0];
-      H = 1;
-      C = 1;
+class VulkanTensor::Impl {
+ public:
+  Impl(std::vector<int64_t> sizes) : sizes_(std::move(sizes)) {
+    numel_ = std::accumulate(
+        std::begin(sizes_), std::end(sizes_), 1, std::multiplies<int64_t>());
+  }
+
+  std::vector<int64_t> sizes() const {
+    return sizes_;
+  }
+
+  inline int64_t dim() const {
+    return sizes_.size();
+  }
+
+  inline int64_t numel() const {
+    return numel_;
+  }
+
+  inline bool hasBuffer() {
+    return static_cast<bool>(buffer_);
+  }
+
+  inline VBuffer& buffer() {
+    return *(buffer_.get());
+  }
+
+  inline bool canBeImage() {
+    return dim() <= 4;
+  }
+
+  inline bool hasImage() {
+    return static_cast<bool>(image_);
+  }
+
+  inline bool hasStorage() {
+    return hasBuffer();
+  }
+
+  VImage& image() {
+    auto d = dim();
+    TORCH_INTERNAL_ASSERT(
+        d <= 4,
+        "Vulkan: Only Tensors with dim <= 4 can be represented as Vulkam Image");
+    if (!image_ && buffer_) {
+      auto W = 0;
+      auto H = 0;
+      auto C = 0;
+      if (d == 4) {
+        W = sizes_[3];
+        H = sizes_[2];
+        C = sizes_[1] * sizes_[0];
+      } else if (d == 3) {
+        W = sizes_[2];
+        H = sizes_[1];
+        C = sizes_[0];
+      } else if (d == 2) {
+        W = sizes_[1];
+        H = sizes_[0];
+        C = 1;
+      } else if (d == 1) {
+        W = sizes_[0];
+        H = 1;
+        C = 1;
+      }
+      image_ = std::make_unique<VImage>(W, H, C);
+      copyFromBufferToImage(*buffer_, *image_);
     }
-    image_ = std::make_unique<VImage>(W, H, C);
-    copyFromBufferToImage(*buffer_, *image_);
+    return *(image_.get());
   }
-  return *(image_.get());
+
+  void allocateStorage() {
+    auto bufferSize = sizeof(float) * numel_;
+    const auto d = dim();
+    if (d == 4) {
+      bufferSize = sizeof(float) * ALIGN_UP4(sizes_[0] * sizes_[1]) *
+          sizes_[2] * sizes_[3];
+    } else if (d == 3) {
+      bufferSize = sizeof(float) * ALIGN_UP4(sizes_[0]) * sizes_[1] * sizes_[2];
+    } else if (d == 2) {
+      bufferSize = sizeof(float) * 4 * sizes_[0] * sizes_[1];
+    } else if (d == 1) {
+      bufferSize = sizeof(float) * 4 * sizes_[0];
+    }
+    const auto bufferSizeAligned = ROUND_UP(
+        bufferSize, context().limits().minStorageBufferOffsetAlignment);
+    buffer_ = std::make_unique<VBuffer>(bufferSizeAligned);
+  }
+
+  void setDataFromHost(const float* inputData) {
+    if (!hasStorage()) {
+      allocateStorage();
+    }
+    buffer_->copyFromHostToDevice((void*)inputData, sizeof(float) * numel_);
+  }
+
+  void copyDataToHost(float* outputData) {
+    if (hasImage()) {
+      copyFromImageToBuffer(image(), buffer());
+    }
+    buffer_->copyFromDeviceToHost(outputData, sizeof(float) * numel_);
+  }
+
+ private:
+  std::vector<int64_t> sizes_;
+  int64_t numel_;
+  std::unique_ptr<VBuffer> buffer_;
+  std::unique_ptr<VImage> image_;
+};
+
+std::shared_ptr<VulkanTensor::Impl> VulkanTensor::impl() {
+  return pImpl;
 }
 
-void VulkanTensor::Impl::allocateStorage() {
-  auto bufferSize = sizeof(float) * numel_;
-  const auto d = dim();
-  if (d == 4) {
-    bufferSize = sizeof(float) * ALIGN_UP4(sizes_[0] * sizes_[1]) * sizes_[2] *
-        sizes_[3];
-  } else if (d == 3) {
-    bufferSize = sizeof(float) * ALIGN_UP4(sizes_[0]) * sizes_[1] * sizes_[2];
-  } else if (d == 2) {
-    bufferSize = sizeof(float) * 4 * sizes_[0] * sizes_[1];
-  } else if (d == 1) {
-    bufferSize = sizeof(float) * 4 * sizes_[0];
-  }
-  const auto bufferSizeAligned =
-      ROUND_UP(bufferSize, context().limits().minStorageBufferOffsetAlignment);
-  buffer_ = std::make_unique<VBuffer>(bufferSizeAligned);
+std::shared_ptr<VulkanTensor::Impl> VulkanTensor::impl() const {
+  return pImpl;
 }
 
-void VulkanTensor::Impl::setDataFromHost(const float* inputData) {
-  if (!hasStorage()) {
-    allocateStorage();
-  }
-  buffer_->copyFromHostToDevice((void*)inputData, sizeof(float) * numel_);
+std::vector<int64_t> VulkanTensor::sizes() const {
+  return impl()->sizes();
 }
 
-void VulkanTensor::Impl::copyDataToHost(float* outputData) {
-  if (hasImage()) {
-    copyFromImageToBuffer(image(), buffer());
-  }
-  buffer_->copyFromDeviceToHost(outputData, sizeof(float) * numel_);
+int64_t VulkanTensor::dim() const {
+  return impl()->dim();
 }
 
+int64_t VulkanTensor::numel() const {
+  return impl()->numel();
+}
+
+bool VulkanTensor::hasStorage() const {
+  return impl()->hasBuffer();
+}
+
+void VulkanTensor::allocateStorage() {
+  impl()->allocateStorage();
+}
+
+void VulkanTensor::setDataFromHost(const float* inputData) {
+  impl()->setDataFromHost(inputData);
+}
+
+void VulkanTensor::copyDataToHost(float* outputData) {
+  impl()->copyDataToHost(outputData);
+}
+
+bool VulkanTensor::hasBuffer() {
+  return impl()->hasBuffer();
+}
+
+VBuffer& VulkanTensor::buffer() {
+  return impl()->buffer();
+}
+
+bool VulkanTensor::canBeImage() {
+  return impl()->canBeImage();
+}
+
+bool VulkanTensor::hasImage() {
+  return impl()->hasImage();
+}
 VulkanTensor::VulkanTensor(std::vector<int64_t> sizes)
     : pImpl(std::make_shared<Impl>(std::move(sizes))) {
   TORCH_CHECK(

@@ -57,9 +57,9 @@ void upsample_nearest2d(
 
   VkDescriptorSet descrSet{};
   vkutil::allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
-  output.impl()->image().bind(
+  output.image().bind(
       descrSet, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
-  input.impl()->image().bind(
+  input.image().bind(
       descrSet,
       1,
       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -72,7 +72,7 @@ void upsample_nearest2d(
       descrSetLayout,
       workGroupSize};
   computeUnit.createCommandBuffer(descrSet);
-  input.impl()->image().addImageMemoryBarrier(
+  input.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_GENERAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -91,15 +91,15 @@ void add(
     const VulkanTensor& input1,
     float alpha) {
   TORCH_INTERNAL_ASSERT(
-      output.impl()->dim() == 4,
+      output.dim() == 4,
       "Vulkan add is implemented for 4-dim tensors, output is not 4-dim");
   TORCH_INTERNAL_ASSERT(
-      input0.impl()->dim() == 4,
+      input0.dim() == 4,
       "Vulkan add is implemented for 4-dim tensors, input0 is not 4-dim");
   TORCH_INTERNAL_ASSERT(
-      input1.impl()->dim() == 4,
+      input1.dim() == 4,
       "Vulkan add is implemented for 4-dim tensors, input1 is not 4-dim");
-  auto sizes = output.impl()->sizes();
+  auto sizes = output.sizes();
   auto C = sizes[0] * sizes[1];
   auto H = sizes[2];
   auto W = sizes[3];
@@ -138,14 +138,14 @@ void add(
 
   VkDescriptorSet descrSet{};
   vkutil::allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
-  output.impl()->image().bind(
+  output.image().bind(
       descrSet, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
-  input0.impl()->image().bind(
+  input0.image().bind(
       descrSet,
       1,
       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-  input1.impl()->image().bind(
+  input1.image().bind(
       descrSet,
       2,
       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -156,15 +156,15 @@ void add(
   ComputeUnit computeUnit{
       at::native::vulkan::GLSL_SPV(vulkan_add), descrSetLayout, workGroupSize};
   computeUnit.createCommandBuffer(descrSet);
-  output.impl()->image().addImageMemoryBarrier(
+  output.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_UNDEFINED,
       VK_IMAGE_LAYOUT_GENERAL);
-  input0.impl()->image().addImageMemoryBarrier(
+  input0.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_GENERAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-  input1.impl()->image().addImageMemoryBarrier(
+  input1.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_GENERAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -363,14 +363,14 @@ void conv2dDepthWise(
 
   VkDescriptorSet descrSet{};
   vkutil::allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
-  output.impl()->image().bind(
+  output.image().bind(
       descrSet, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
-  input.impl()->image().bind(
+  input.image().bind(
       descrSet,
       1,
       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-  kernel.impl()->image().bind(
+  kernel.image().bind(
       descrSet,
       2,
       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -384,15 +384,15 @@ void conv2dDepthWise(
                   descrSetLayout,
                   workGroupSize};
   computeUnit.createCommandBuffer(descrSet);
-  output.impl()->image().addImageMemoryBarrier(
+  output.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_UNDEFINED,
       VK_IMAGE_LAYOUT_GENERAL);
-  input.impl()->image().addImageMemoryBarrier(
+  input.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_GENERAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-  kernel.impl()->image().addImageMemoryBarrier(
+  kernel.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_GENERAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -497,9 +497,9 @@ void conv2d(
 
   VkDescriptorSet descrSet{};
   vkutil::allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
-  output.impl()->image().bind(
+  output.image().bind(
       descrSet, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
-  input.impl()->image().bind(
+  input.image().bind(
       descrSet,
       1,
       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -517,11 +517,11 @@ void conv2d(
                           descrSetLayout,
                           workGroupSize};
   computeUnit.createCommandBuffer(descrSet);
-  output.impl()->image().addImageMemoryBarrier(
+  output.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_UNDEFINED,
       VK_IMAGE_LAYOUT_GENERAL);
-  input.impl()->image().addImageMemoryBarrier(
+  input.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_GENERAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -544,7 +544,7 @@ void clamp(
     const VulkanTensor& input,
     float min,
     float max) {
-  auto sizes = output.impl()->sizes();
+  auto sizes = output.sizes();
   auto C = sizes[0] * sizes[1];
   auto H = sizes[2];
   auto W = sizes[3];
@@ -583,9 +583,9 @@ void clamp(
 
   VkDescriptorSet descrSet{};
   vkutil::allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
-  output.impl()->image().bind(
+  output.image().bind(
       descrSet, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
-  input.impl()->image().bind(
+  input.image().bind(
       descrSet,
       1,
       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -597,11 +597,11 @@ void clamp(
                           descrSetLayout,
                           workGroupSize};
   computeUnit.createCommandBuffer(descrSet);
-  output.impl()->image().addImageMemoryBarrier(
+  output.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_UNDEFINED,
       VK_IMAGE_LAYOUT_GENERAL);
-  input.impl()->image().addImageMemoryBarrier(
+  input.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_GENERAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -621,8 +621,8 @@ void addmm(
     const VulkanTensor& m2,
     float beta,
     float alpha) {
-  auto m1Sizes = m1.impl()->sizes();
-  auto m2Sizes = m2.impl()->sizes();
+  auto m1Sizes = m1.sizes();
+  auto m2Sizes = m2.sizes();
   TORCH_INTERNAL_ASSERT(m1Sizes.size() == 2);
   TORCH_INTERNAL_ASSERT(m2Sizes.size() == 2);
   uint32_t m1H = m1Sizes[0];
@@ -645,7 +645,7 @@ void addmm(
   uint32_t C_4 = UP_DIV(C, 4);
   uint32_t K = m1W;
 
-  auto tSizes = t.impl()->sizes();
+  auto tSizes = t.sizes();
   uint32_t TH = tSizes[0];
   uint32_t TW = tSizes[1];
   uint32_t TC = 1;
@@ -691,19 +691,19 @@ void addmm(
 
   VkDescriptorSet descrSet{};
   vkutil::allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
-  output.impl()->image().bind(
+  output.image().bind(
       descrSet, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
-  m1.impl()->image().bind(
+  m1.image().bind(
       descrSet,
       1,
       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-  m2.impl()->image().bind(
+  m2.image().bind(
       descrSet,
       2,
       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-  t.impl()->image().bind(
+  t.image().bind(
       descrSet,
       3,
       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -715,19 +715,19 @@ void addmm(
                           descrSetLayout,
                           workGroupSize};
   computeUnit.createCommandBuffer(descrSet);
-  output.impl()->image().addImageMemoryBarrier(
+  output.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_UNDEFINED,
       VK_IMAGE_LAYOUT_GENERAL);
-  m1.impl()->image().addImageMemoryBarrier(
+  m1.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_GENERAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-  m2.impl()->image().addImageMemoryBarrier(
+  m2.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_GENERAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-  t.impl()->image().addImageMemoryBarrier(
+  t.image().addImageMemoryBarrier(
       computeUnit.commandBuffer(),
       VK_IMAGE_LAYOUT_GENERAL,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
