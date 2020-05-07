@@ -605,13 +605,7 @@ inline IValue toIValue(
 #endif
     } break;
     case TypeKind::PyObjectType: {
-      // convert a py::handle to the IValue that holds the py::object
-      py::object py_obj;
-      {
-        py::gil_scoped_acquire ag;
-        py_obj = obj.cast<py::object>();
-      }
-      return c10::ivalue::ConcretePyObjectHolder::create(std::move(py_obj));
+      return c10::ivalue::ConcretePyObjectHolder::create(obj);
     }
     case TypeKind::CapsuleType: {
       return IValue::make_capsule(
