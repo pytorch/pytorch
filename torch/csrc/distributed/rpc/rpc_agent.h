@@ -11,7 +11,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 // Default RPC timeout
-constexpr auto kDefaultRpcTimeout = std::chrono::seconds(60);
+constexpr float kDefaultRpcTimeoutSeconds = 60;
 // Unset RPC timeout. This is the value agent::send() will have if user does not
 // pass in a specific timeout, and indicates that we must use the default
 // timeout for RPCs.
@@ -28,14 +28,13 @@ using TypeResolver =
 
 struct RpcBackendOptions {
   RpcBackendOptions()
-      : RpcBackendOptions(kDefaultRpcTimeout, kDefaultInitMethod) {}
+      : RpcBackendOptions(kDefaultRpcTimeoutSeconds, kDefaultInitMethod) {}
 
-  RpcBackendOptions(
-      std::chrono::milliseconds rpcTimeout,
-      std::string initMethod)
-      : rpcTimeout(rpcTimeout), initMethod(initMethod) {}
+  RpcBackendOptions(float rpcTimeoutSeconds, std::string initMethod)
+      : rpcTimeoutSeconds(rpcTimeoutSeconds),
+        initMethod(std::move(initMethod)) {}
 
-  std::chrono::milliseconds rpcTimeout;
+  float rpcTimeoutSeconds;
   std::string initMethod;
 };
 

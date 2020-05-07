@@ -21,7 +21,6 @@ echo "Analyze: ${INPUT}"
   -torch_library_init_pattern="^.*TORCH_LIBRARY_init_([^(]+)(\(.*)?$" \
   -torch_library_init_pattern="^.*TORCH_LIBRARY_FRAGMENT_init_([^(]+)(\(.*)?$" \
   -torch_library_init_pattern="^.*TORCH_LIBRARY_IMPL_init_([^(]+)_([^_]+)(\(.*)?$" \
-  -format="${FORMAT}" \
   ${EXTRA_ANALYZER_FLAGS} \
   "${INPUT}" \
   > "${OUTPUT}"

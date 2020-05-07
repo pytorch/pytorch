@@ -75,8 +75,13 @@ Tensor mkldnn_linear(
 
 Tensor mkldnn_linear_backward_input(
     IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight){
+  TORCH_CHECK(grad_output.is_mkldnn(),
+      "mkldnn_linear_backward: grad_output needs to be mkldnn layout");
+  TORCH_CHECK(weight.type().backend() == at::Backend::CPU && weight.scalar_type() == kFloat,
+      "mkldnn_linear_backward: weight needs to be a dense tensor");
   auto grad_output_reshaped = grad_output.dim() > 2 ?
     grad_output.reshape({-1, grad_output.size(grad_output.dim() - 1)}) : grad_output;
+
   ideep::tensor& grady = itensor_from_mkldnn(grad_output_reshaped);
   // weight always dense tensor for training.
   const ideep::tensor w = itensor_view_from_dense(weight);
@@ -97,6 +102,11 @@ Tensor mkldnn_linear_backward_input(
 
 std::tuple<Tensor, Tensor> mkldnn_linear_backward_weights(
     const Tensor& grad_output, const Tensor& input, const Tensor& weight, bool bias_defined) {
+  TORCH_CHECK(grad_output.is_mkldnn() && input.is_mkldnn(),
+      "mkldnn_linear_backward: grad_output and input needs to be mkldnn layout");
+  TORCH_CHECK(weight.type().backend() == at::Backend::CPU && weight.scalar_type() == kFloat,
+      "mkldnn_linear_backward: weight needs to be a dense tensor");
+
   auto grad_output_reshaped = grad_output.dim() > 2 ?
     grad_output.reshape({-1, grad_output.size(grad_output.dim() - 1)}) : grad_output;
   auto input_reshaped = input.dim() > 2 ? input.reshape({-1, input.size(input.dim() - 1)}) : input;

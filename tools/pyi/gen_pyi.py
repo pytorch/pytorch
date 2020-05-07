@@ -67,8 +67,12 @@ blacklist = [
     'triplet_margin_loss',
     # Somehow, these are defined in both _C and in functional. Ick!
     'broadcast_tensors',
-    # type hints for named tensors are broken: https://github.com/pytorch/pytorch/issues/27846
+    # Manually define named tensor type stubs in __init__.pyi.in
+    'rename',
+    'refine_names',
+    'align_to',
     'align_tensors',
+    'unflatten',
     'meshgrid',
     'cartesian_prod',
     'block_diag',
@@ -136,8 +140,8 @@ def type_to_python(typename, size=None):
         'void*': '_int',    # data_ptr
         'void': 'None',
         'std::string': 'str',
-        'Dimname': 'Union[str, None]',
-        'DimnameList': 'List[Union[str, None]]',
+        'Dimname': 'Union[str, ellipsis, None]',
+        'DimnameList': 'Sequence[Union[str, ellipsis, None]]',
         'QScheme': '_qscheme',
     }[typename]
 
