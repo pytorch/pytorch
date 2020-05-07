@@ -109,7 +109,9 @@ DONT_REQUIRE_DERIVATIVE = {
     # This is an unsafe method that is meant to be out of reach of autograd.
     '_coalesced_',
     # Quantize functions should not record gradients
-    'quantize_per_tensor', 'quantize_per_channel'
+    'quantize_per_tensor', 'quantize_per_channel',
+    # Functions that return integers should not have output that require gradients
+    'argmax', 'argmin', 'argsort',
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
