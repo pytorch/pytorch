@@ -1066,14 +1066,13 @@ void testRecordFunction() {
   std::thread t([]() {
     RecordFunctionGuard enable_rec_fn;
     std::string recorded_op;
-    auto handle = addThreadLocalCallback(
-        RecordFunctionCallback(
-            [&recorded_op](const RecordFunction& fn) {
-                recorded_op = fn.name().str();
-            },
-            [](const RecordFunction&) {}));
+    auto handle = addThreadLocalCallback(RecordFunctionCallback(
+        [&recorded_op](const RecordFunction& fn) {
+          recorded_op = fn.name().str();
+        },
+        [](const RecordFunction&) {}));
     ThreadLocalState state;
-    std::thread t_child([state](){
+    std::thread t_child([state]() {
       ThreadLocalStateGuard g_tls(state);
       RECORD_USER_SCOPE("test_in_thread");
     });
