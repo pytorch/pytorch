@@ -11,12 +11,14 @@ namespace at { namespace native {
 
 
 void lshift_kernel_cuda(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "lshift_cuda", [&]() {
+  if (iter.dtype() == ScalarType::Float ||
+      iter.dtype() == ScalarType::Double ||
+      iter.dtype() == ScalarType::Half) {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "lshift_cuda", [&]() {
       gpu_kernel_with_scalars(
         iter,
         []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-          return a * std::pow((scalar_t)(2), b);
+          return a * std::pow(static_cast<scalar_t>(2), b);
       });
     });
   } else {
@@ -30,12 +32,14 @@ void lshift_kernel_cuda(TensorIterator& iter) {
 }
 
 void rshift_kernel_cuda(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rshift_cuda", [&]() {
+  if (iter.dtype() == ScalarType::Float ||
+      iter.dtype() == ScalarType::Double ||
+      iter.dtype() == ScalarType::Half) {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "rshift_cuda", [&]() {
       gpu_kernel_with_scalars(
         iter,
         []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-          return a / std::pow((scalar_t)(2), b);
+          return a / std::pow(static_cast<scalar_t>(2), b);
       });
     });
   } else {
