@@ -901,7 +901,7 @@ def method_tests():
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
     ]
 
-def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, device=None):
+def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
     if not isinstance(call_args, tuple):
         call_args = (call_args,)
 
@@ -912,11 +912,12 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
         if isinstance(arg, torch.Size) or isinstance(arg, dont_convert):
             return arg
         elif isinstance(arg, tuple) and len(arg) == 0:
-            var = torch.randn((), dtype=torch.double, device=device)
+            var = torch.randn((), dtype=dtype, device=device)
             var.requires_grad = requires_grad
             return var
         elif isinstance(arg, tuple) and not isinstance(arg[0], torch.Tensor):
-            return Variable(maybe_non_contig(torch.randn(*arg, dtype=torch.double, device=device)), requires_grad=requires_grad)
+            return Variable(maybe_non_contig(torch.randn(*arg, dtype=dtype, device=device)), requires_grad=requires_grad)
+        # double check casting
         elif isinstance(arg, non_differentiable):
             if isinstance(arg.tensor, torch.Tensor):
                 return maybe_non_contig(arg.tensor.to(device=device))
@@ -924,9 +925,14 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
         elif isinstance(arg, torch.Tensor):
             if arg.dtype == torch.float:
                 arg = arg.double()
+            if arg.dtype == torch.cfloat:
+                arg = arg.to(torch.cdouble)
+            if arg.is_complex() != dtype.is_complex:
+                raise RuntimeError("User provided tensor is real for a test that runs with complex dtype, ",
+                                   "which is not supported for now")
             # NOTE: We do clone() after detach() here because we need to be able to change size/storage of v afterwards
             v = maybe_non_contig(arg).detach().to(device=device).clone()
-            v.requires_grad = requires_grad and v.is_floating_point()
+            v.requires_grad = requires_grad and (v.is_floating_point() or v.is_complex())
             return v
         elif callable(arg):
             return map_arg(arg())
