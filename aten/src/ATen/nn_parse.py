@@ -295,10 +295,10 @@ def backward_declaration(base, thnn_functions, backend_types):
         arg['is_nullable'] = True
 
         # grad_weight and grad_bias need to be resized and zeroed
-        if arg['name'] == 'grad_weight':
+        if arg['name'] == 'grad_weight' and base['name'] != '_thnn_conv2d':
             arg['resize'] = 'weight'
             arg['zero'] = True
-        if arg['name'] == 'grad_bias':
+        if arg['name'] == 'grad_bias' and base['name'] != '_thnn_conv2d':
             dim = 1 if 'transpose' in name else 0
             arg['resize'] = [('weight', dim)]
             arg['zero'] = True
