@@ -19,6 +19,8 @@ namespace rpc {
 
 constexpr long kToMilliseconds = 1000;
 
+const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
+
 //////////////////////////  MetricsTracker  /////////////////////////////////
 
 TensorPipeAgent::TimeSeriesMetricsTracker::TimeSeriesMetricsTracker(
@@ -57,6 +59,10 @@ TensorPipeAgent::TensorPipeAgent(
     workerIdToInfo_.emplace(workerId, WorkerInfo(workerName, workerId));
     workerNameToInfo_.emplace(workerName, WorkerInfo(workerName, workerId));
   }
+
+  // Initialize the time-series metrics tracking map
+  timeSeriesMetrics_[kGilAverageWaitTime] =
+      std::make_unique<TimeSeriesMetricsTracker>();
 }
 
 TensorPipeAgent::~TensorPipeAgent() {
@@ -413,6 +419,12 @@ std::string TensorPipeAgent::createUniqueShmAddr() {
       threadLocalId++);
 }
 #endif
+
+void TensorPipeAgent::addGilWaitTime(
+    const std::chrono::microseconds gilWaitTime) {
+  std::lock_guard<std::mutex> lock(metricsMutex_);
+  timeSeriesMetrics_[kGilAverageWaitTime]->addData(gilWaitTime.count());
+}
 
 } // namespace rpc
 } // namespace distributed
