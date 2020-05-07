@@ -36,10 +36,10 @@ namespace jit {
 // TODO: keep the else clause for trial runs
 #if defined(FBCODE_CAFFE2) || defined(C10_MOBILE)
 static std::atomic<bool> executor_mode{true};
-static std::atomic<bool> profiling_mode{false};
+static std::atomic<bool> profiling_mode{true};
 #else
 static std::atomic<bool> executor_mode{true};
-static std::atomic<bool> profiling_mode{false};
+static std::atomic<bool> profiling_mode{true};
 #endif
 
 static std::atomic<size_t> num_profiled_runs{1};
