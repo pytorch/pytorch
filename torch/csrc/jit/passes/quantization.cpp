@@ -30,7 +30,6 @@ using OptionalModuleVector = std::vector<c10::optional<Module>>;
 using ModuleMethodVector = std::vector<std::pair<Module, std::string>>;
 using NameModuleVector = std::vector<std::pair<std::string, Module>>;
 using graph_rewrite_helper::getFuncName;
-using graph_rewrite_helper::getIValue;
 using graph_rewrite_helper::getValue;
 using graph_rewrite_helper::PatternInfo;
 using graph_rewrite_helper::replaceConvolutionWithAtenConv;
@@ -2222,26 +2221,6 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
   }
 }
 
-c10::optional<IValue> toTwoElementIntList(Value* v) {
-  auto* n = v->node();
-  if (n->kind() == prim::Constant) {
-    auto iv = toIValue(v);
-    if (iv && iv.value().isIntList() && iv.value().toIntList().size() == 2) {
-      return iv;
-    }
-  }
-
-  if (n->kind() == prim::ListConstruct && n->inputs().size() == 2) {
-    auto e0 = toIValue(n->inputs()[0]);
-    auto e1 = toIValue(n->inputs()[1]);
-    if (!e0 || !e1 || !e0.value().isInt() || !e1.value().isInt()) {
-      return c10::nullopt;
-    }
-    return IValue(c10::List<int64_t>({e0.value().toInt(), e1.value().toInt()}));
-  }
-  return c10::nullopt;
-}
-
 // A helper class to make uses of module unique
 class ModuleUseDeduper {
  public:
@@ -2841,10 +2820,6 @@ Module InsertQuantDeQuant(
   h.cleanup(module);
   h.propagateQuantizationOps(module);
   return module;
-}
-
-void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
-  throw std::runtime_error("Pass not implemented yet!");
 }
 
 void SwapFunctionalLinear(Module& module) {

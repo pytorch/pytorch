@@ -40,13 +40,6 @@ struct OptionalQConfigHash {
 using QConfigTypePtrMap =
     std::unordered_map<c10::optional<QConfig>, TypePtr, OptionalQConfigHash>;
 
-/** \brief Quantize model's inputs and outputs.
- *
- * This pass folds quant/dequant ops into the input/output tensors, essentially
- * quantizing these tensors. It's done to reduce model's memory footprint.
- */
-TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
-
 /** \brief Insert observer module and observer function call for
  *  the Tensors that needs to be observed.
  *
