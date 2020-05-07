@@ -515,7 +515,7 @@ Tensor batch_norm(
     if (bias.defined()) out = out + bias[0];
     return out;
   }
-  auto result = at::_batch_norm_impl_index(
+  return std::get<0>(at::_batch_norm_impl_index(
       input,
       weight,
       bias,
@@ -524,9 +524,7 @@ Tensor batch_norm(
       training,
       momentum,
       eps,
-      cudnn_enabled);
-
-  return std::get<0>(result);
+      cudnn_enabled));
 }
 
 Tensor instance_norm(
