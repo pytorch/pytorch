@@ -302,9 +302,10 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
         concrete_type_builder.set_poisoned()
         concrete_type = concrete_type_builder.build()
 
-    return create_script_module_impl(nn_module, concrete_type, stubs_fn)
+    memo = {}
+    return create_script_module_impl(nn_module, concrete_type, stubs_fn, memo)
 
-def create_script_module_impl(nn_module, concrete_type, stubs_fn):
+def create_script_module_impl(nn_module, concrete_type, stubs_fn, memo, _nil=[]):  # noqaB006
     """
     Convert an nn.Module to a RecursiveScriptModule.
 
@@ -312,6 +313,10 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
         concrete_type:  The fully initialized ConcreteType of the module.
         stubs_fn:  Lambda that takes an nn.Module and generates a list of ScriptMethodStubs to compile.
+        memo: table of id() => obj that helps us correctly re-use modules if they appear more than
+            once in the module hierarchy. Example:
+                self.submod1 = my_module
+                self.submod2 = my_module  # <- we should reuse the scripted `self.submod1` here
     """
     cpp_module = torch._C._create_module_with_type(concrete_type.jit_type)
     stubs = stubs_fn(nn_module)
@@ -329,6 +334,14 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         for name, sub_concrete_type in concrete_type.get_modules():
             orig_value = getattr(nn_module, name)
             assert isinstance(orig_value, Module), "Expected Module but got {}".format(type(orig_value))
+
+            d = id(orig_value)
+            attr = memo.get(d, _nil)
+            if attr is not _nil:
+                cpp_module.setattr(name, attr)
+                script_module._modules[name] = attr
+                continue
+
             module_type = sub_concrete_type.jit_type
             if isinstance(module_type, torch._C.InterfaceType):
                 # use the interface inference rule to compile the module
@@ -337,9 +350,11 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 scripted = orig_value
             else:
                 # use the default recursive rule to compile the module
-                scripted = create_script_module_impl(orig_value, sub_concrete_type, infer_methods_to_compile)
+                scripted = create_script_module_impl(orig_value, sub_concrete_type, infer_methods_to_compile, memo)
+
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
+            memo[d] = scripted
 
         # 3. Copy @ignored/@unused methods from the original `nn_module` to the new ScriptModule.
         #    This ensures we can access these Python methods on the ScriptModule.
