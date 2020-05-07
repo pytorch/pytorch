@@ -30,8 +30,8 @@ struct RNGValues {
   __device__ RNGValues(uint64_t* vals) {
     memcpy(&vals_, vals, size * sizeof(uint64_t));
   }
-  uint32_t __device__ random() { return static_cast<uint32_t>(vals_[index]); index++; }
-  uint64_t __device__ random64() { return vals_[index]; index++; }
+  uint32_t __device__ random() { auto res = static_cast<uint32_t>(vals_[index]); index++; return res; }
+  uint64_t __device__ random64() { auto res = vals_[index]; index++; return res; }
 private:
   uint64_t vals_[size];
   int index = 0;

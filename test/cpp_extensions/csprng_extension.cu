@@ -21,7 +21,7 @@ struct CUDA_CSPRNG_GeneratorImpl : public CPUGeneratorImpl {
   }
 };
 
-// ===========================================================================================================================
+// ====================================================================================================================
 
 // Applies AES in CTR mode with the `key` for passed TensorIterator iter.
 // `scalar_t`       is a scalar type equivalent of target tensor dtype
@@ -46,7 +46,7 @@ void aes_helper(TensorIterator& iter, const uint8_t* key, transform_t transform_
   );
 }
 
-// ===========================================================================================================================
+// ====================================================================================================================
 
 // A mapping between scalar type and corresponding unsigned integer type of random state sub-block.
 // uint64_t for double and long, uint32_t for the rest
@@ -62,7 +62,7 @@ template <> struct UIntType<int8_t> { using type = uint32_t; };
 template <> struct UIntType<uint8_t> { using type = uint32_t; };
 template <> struct UIntType<bool> { using type = uint32_t; };
 
-// ===========================================================================================================================
+// ==================================================== Random ========================================================
 
 template<typename RNG>
 struct RandomKernel {
@@ -147,7 +147,7 @@ Tensor& random_to(Tensor& self, int64_t to, c10::optional<Generator> generator) 
   return random_from_to(self, 0, to, generator);
 }
 
-// ===========================================================================================================================
+// ==================================================== Uniform =======================================================
 
 template<typename RNG>
 struct UniformKernel {
@@ -169,7 +169,7 @@ Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> 
   return uniform_impl_<UniformKernel, CUDA_CSPRNG_GeneratorImpl>(self, from, to, generator);
 }
 
-// ===========================================================================================================================
+// ==================================================== Normal ========================================================
 
 template<typename RNG>
 struct NormalKernel {
@@ -179,9 +179,9 @@ struct NormalKernel {
     const auto key = key_t.data_ptr<uint8_t>();
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "normal_kernel_cuda", [&] {
       aes_helper<scalar_t, UIntType<scalar_t>::type, 2>(iter, key,
-        [mean, std] __device__ (RNGValues<2>* generator) -> scalar_t {
+        [mean, std] __device__ (RNGValues<2>* gen) -> scalar_t {
           normal_distribution<scalar_t> normal(mean, std);
-          return normal(generator);
+          return normal(gen);
         }
       );
     });
@@ -216,7 +216,95 @@ Tensor normal_Tensor_Tensor(const Tensor& mean, const Tensor& std, c10::optional
   return normal_impl<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(mean, std, gen);
 }
 
-// ===========================================================================================================================
+// ==================================================== Cauchy ========================================================
+
+template<typename RNG>
+struct CauchyKernel {
+  void operator()(TensorIterator& iter, double median, double sigma, c10::optional<Generator> generator) {
+    const auto key_t = key_tensor(generator, aes::block_t_size, iter.device());
+    const auto key = key_t.data_ptr<uint8_t>();
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "cauchy_kernel_cuda", [&] {
+      aes_helper<scalar_t, UIntType<scalar_t>::type, 1>(iter, key,
+        [median, sigma] __device__ (RNGValues<1>* gen) -> scalar_t {
+          cauchy_distribution<scalar_t> cauchy(median, sigma);
+          return cauchy(gen);
+        }
+      );
+    });
+  }
+};
+
+Tensor& cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> generator) {
+  return cauchy_impl_<CauchyKernel, CUDA_CSPRNG_GeneratorImpl>(self, median, sigma, generator);
+}
+
+// ================================================== LogNormal =======================================================
+
+template<typename RNG>
+struct LogNormalKernel {
+  void operator()(TensorIterator& iter, double mean, double std, c10::optional<Generator> generator) {
+    const auto key_t = key_tensor(generator, aes::block_t_size, iter.device());
+    const auto key = key_t.data_ptr<uint8_t>();
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_normal_cuda", [&] {
+      aes_helper<scalar_t, UIntType<scalar_t>::type, 2>(iter, key,
+        [mean, std] __device__ (RNGValues<2>* gen) -> scalar_t {
+          lognormal_distribution<scalar_t> logNormal(mean, std);
+          return logNormal(gen);
+        }
+      );
+    });
+  }
+};
+
+Tensor& log_normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  return log_normal_impl_<LogNormalKernel, CUDA_CSPRNG_GeneratorImpl>(self, mean, std, gen);
+}
+
+// ================================================== Geometric =======================================================
+
+template<typename RNG>
+struct GeometricKernel {
+  void operator()(TensorIterator& iter, double p, c10::optional<Generator> generator) {
+    const auto key_t = key_tensor(generator, aes::block_t_size, iter.device());
+    const auto key = key_t.data_ptr<uint8_t>();
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "geometric_kernel_cuda", [&] {
+      aes_helper<scalar_t, UIntType<scalar_t>::type, 1>(iter, key,
+        [p] __device__ (RNGValues<1>* gen) -> scalar_t {
+          geometric_distribution<scalar_t> geometric(p);
+          return geometric(gen);
+        }
+      );
+    });
+  }
+};
+
+Tensor& geometric_(Tensor& self, double p, c10::optional<Generator> gen) {
+  return geometric_impl_<GeometricKernel, CUDA_CSPRNG_GeneratorImpl>(self, p, gen);
+}
+
+// ================================================== Exponential =====================================================
+
+template<typename RNG>
+struct ExponentialKernel {
+  void operator()(TensorIterator& iter, double lambda, c10::optional<Generator> generator) {
+    const auto key_t = key_tensor(generator, aes::block_t_size, iter.device());
+    const auto key = key_t.data_ptr<uint8_t>();
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "exponential_kernel_cuda", [&] {
+      aes_helper<scalar_t, UIntType<scalar_t>::type, 1>(iter, key,
+        [lambda] __device__ (RNGValues<1>* gen) -> scalar_t {
+          exponential_distribution<scalar_t> exponential(lambda);
+          return exponential(gen);
+        }
+      );
+    });
+  }
+};
+
+Tensor& exponential_(Tensor& self, double lambda, c10::optional<Generator> gen) {
+  return exponential_impl_<ExponentialKernel, CUDA_CSPRNG_GeneratorImpl>(self, lambda, gen);
+}
+
+// ====================================================================================================================
 
 Generator create_CUDA_CSPRNG_Generator() {
   return make_generator<CUDA_CSPRNG_GeneratorImpl>();
@@ -261,6 +349,22 @@ void registerOps() {
     .op(torch::RegisterOperators::options()
       .schema("aten::normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor")
       .impl_unboxedOnlyKernel<decltype(normal_Tensor_Tensor), &normal_Tensor_Tensor>(DispatchKey::CustomRNGKeyId))
+    // Cauchy
+    .op(torch::RegisterOperators::options()
+      .schema("aten::cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)")
+      .impl_unboxedOnlyKernel<decltype(cauchy_), &cauchy_>(DispatchKey::CustomRNGKeyId))
+    // LogNormal
+    .op(torch::RegisterOperators::options()
+      .schema("aten::log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)")
+      .impl_unboxedOnlyKernel<decltype(log_normal_), &log_normal_>(DispatchKey::CustomRNGKeyId))
+    // Geometric
+    .op(torch::RegisterOperators::options()
+      .schema("aten::geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)")
+      .impl_unboxedOnlyKernel<decltype(geometric_), &geometric_>(DispatchKey::CustomRNGKeyId))
+    // Exponential
+    .op(torch::RegisterOperators::options()
+      .schema("aten::exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)")
+      .impl_unboxedOnlyKernel<decltype(exponential_), &exponential_>(DispatchKey::CustomRNGKeyId))
   ;
 }
 
