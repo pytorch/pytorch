@@ -29,16 +29,24 @@ blacklist = [
     "dump_patches",
 ]
 
-def make_stub(func):
+def make_stub(func, name_override=None):
     rcb = _jit_internal.createResolutionCallbackFromClosure(func)
-    ast = torch.jit.get_jit_def(func, self_name="RecursiveScriptModule")
+    ast = torch.jit.get_jit_def(func, self_name="RecursiveScriptModule", def_name_override=name_override)
     return ScriptMethodStub(rcb, ast, func)
 
-def make_stub_from_method(nn_module, method):
-    func = get_function_from_type(type(nn_module), method)
+def make_stub_from_method(nn_module, method_name):
+    func = get_function_from_type(type(nn_module), method_name)
     if isinstance(func, ScriptMethodStub):
         return func
-    return make_stub(func)
+    # Make sure the name present in the resulting AST will match the name
+    # requested here. The only time they don't match is if you do something
+    # like:
+    #   def _forward(self):
+    #       pass
+    #   forward = _forward
+    # In this case, the actual function object will have the name `_forward`,
+    # even though we requested a stub for `forward`.
+    return make_stub(func, name_override=method_name)
 
 # base types that can be constants
 # in addition, tuples and lists of these base types are also considered constants

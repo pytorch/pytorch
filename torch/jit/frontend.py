@@ -145,7 +145,7 @@ def get_jit_class_def(cls, self_name):
     return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
 
 
-def get_jit_def(fn, self_name=None):
+def get_jit_def(fn, self_name=None, def_name_override=None):
     sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C.ErrorReport.call_stack())
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
@@ -155,7 +155,7 @@ def get_jit_def(fn, self_name=None):
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
-    return build_def(ctx, py_ast.body[0], type_line, self_name)
+    return build_def(ctx, py_ast.body[0], type_line, self_name, def_name_override)
 
 
 class Builder(object):
@@ -172,7 +172,7 @@ def build_class_def(ctx, py_def, methods, self_name):
     return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods])
 
 
-def build_def(ctx, py_def, type_line, self_name=None):
+def build_def(ctx, py_def, type_line, self_name=None, def_name_override=None):
     body = py_def.body
     r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
                        py_def.col_offset,
@@ -186,7 +186,12 @@ def build_def(ctx, py_def, type_line, self_name=None):
     if type_line is not None:
         type_comment_decl = torch._C.parse_type_comment(type_line)
         decl = torch._C.merge_type_from_type_comment(decl, type_comment_decl, is_method)
-    return Def(Ident(r, py_def.name),
+
+    if def_name_override is not None:
+        def_name = def_name_override
+    else:
+        def_name = py_def.name
+    return Def(Ident(r, def_name),
                decl,
                build_stmts(ctx, body))
 
