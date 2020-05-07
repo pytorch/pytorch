@@ -117,10 +117,10 @@ public:
   // Like call, but intended for use in a redispatch: you are currently
   // in some currentDispatchKey, you have finished processing the key and
   // you now want to redispatch to the next dispatch key in the chain.
-  // This will mask out the current key and all previous keys from the
-  // eligible set, and redo the calculation.
+  // This will mask out the current key *and all previous keys* from the
+  // eligible set, and reinvoke the dispatcher.
   template<class Return, class... Args>
-  Return callRedispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const;
+  Return redispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const;
 
   // Invoke an operator via the boxed calling convention using an IValue stack
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
@@ -300,7 +300,7 @@ inline Return Dispatcher::call(const OperatorHandle& op, Args... args) const {
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::callRedispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const {
+inline Return Dispatcher::redispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   auto dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(
