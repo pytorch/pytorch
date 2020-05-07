@@ -11182,6 +11182,30 @@ class TestNNDeviceType(NNTestCase):
             out = model(input)
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
 
+    def test_batch_norm_updates_var_mean_inplace(self, device):
+
+        def inplace_non_contig(a):
+            size = a.shape[0]
+            a.resize_(size*2)
+            a.as_strided_((size,), (2,))
+
+        bn = torch.nn.BatchNorm2d(3).double().to(device=device)
+        x = torch.randn(2, 3, 1, 1, device=device).double().requires_grad_()
+
+        with torch.no_grad():
+            inplace_non_contig(bn.running_mean)
+            bn.running_mean.data.fill_(0)
+            old_running_mean = bn.running_mean.data.clone()
+
+            inplace_non_contig(bn.running_var)
+            bn.running_var.data.fill_(1)
+            old_running_var = bn.running_var.data.clone()
+
+        unused = bn(x)
+
+        self.assertNotEqual(old_running_mean, bn.running_mean.data)
+        self.assertNotEqual(old_running_var, bn.running_var.data)
+
     def test_nll_loss_mismatched_batch(self, device):
         x = torch.randn((10, 3), requires_grad=True, device=device)
         # t should have size (10,)
