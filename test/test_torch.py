@@ -5332,6 +5332,7 @@ class TestTorchDeviceType(TestCase):
                         numpy_to_torch_dtype_dict[np_compare_dtype])
 
     # Checks that compareTensors provides the correct debug info
+    @onlyOnCPUAndCUDA
     def test__comparetensors_debug(self, device):
         # Acquires atol that will be used
         atol = max(1e-05, self.precision)
