@@ -158,7 +158,7 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
 
     if (operator_def.type().substr(0, 7) == "MaxPool") {
       mode_ = miopenPoolingMax;
-    } else if ((operator_def.type().substr(0, 11) == "AveragePool") {
+    } else if (operator_def.type().substr(0, 11) == "AveragePool") {
       mode_ = miopenPoolingAverage;
     } else {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
