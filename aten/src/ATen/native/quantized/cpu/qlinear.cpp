@@ -255,7 +255,7 @@ class QLinearInt8 final {
         qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
       }
       // Original bias was float, so we requantize it here.
-      auto bias = at::quantize_per_tensor(
+      auto qbias = at::quantize_per_tensor(
           bias_fp32, kernel_scale * input_scale, 0, kQInt32);
       // Update the input scale to not pack again.
       pack_ptr.input_scale = input_scale;
@@ -266,8 +266,14 @@ class QLinearInt8 final {
           kernel_zp,
           kernel_scale,
           (uint8_t*)qnnp_w_data,
-          (int32_t*)bias.data_ptr<c10::qint32>());
+          (int32_t*)qbias.data_ptr<c10::qint32>());
       packB = pack_ptr.w.get();
+      if (at::globalContext().releaseWeightsWhenPrepacking()) {
+        // On mobile, we release the original weight by resetting the intrusive_ptr.
+        // Calling unpack after this will throw an assertion.
+        pack_ptr.orig_weight.reset();
+        pack_ptr.bias.reset();
+      }
     }
 
     size_t rows_input = 1;
