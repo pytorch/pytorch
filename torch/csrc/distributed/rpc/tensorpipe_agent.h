@@ -127,6 +127,34 @@ class TensorPipeAgent : public RpcAgent {
 
   mutable std::mutex mutex_;
   uint64_t nextMessageID_{0};
+
+  // This is a generic struct for capturing Time-Series Metrics. It keeps a
+  // running sum and count of data points (observations), and can return an
+  // average of the data points seen so far. This is currently only used for
+  // tracking the GIL Wait Time in RPC Agents, but can be used for other metrics
+  // as well.
+  struct TimeSeriesMetricsTracker {
+    // Running sum of the data points seen so far
+    uint64_t currentSum_;
+    // Running count of the data points seen so far
+    uint64_t currentCount_;
+
+    explicit TimeSeriesMetricsTracker(
+        uint64_t currentSum = 0,
+        uint64_t currentCount = 0);
+
+    // Adds a data point (which is basically one observation for the metric
+    // being tracked) to the running sum and count.
+    void addData(uint64_t dataPoint);
+    // Returns the average of all the data points seen so far.
+    float computeAverage() const;
+  };
+
+  // Map of Time-Series metrics tracked by the RPC Agent
+  std::unordered_map<std::string, std::unique_ptr<TimeSeriesMetricsTracker>>
+      timeSeriesMetrics_;
+  // Mutex to guard timeSeriesMetrics_
+  std::mutex metricsMutex_;
 };
 
 } // namespace rpc
