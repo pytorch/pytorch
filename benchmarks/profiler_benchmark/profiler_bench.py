@@ -73,5 +73,5 @@ if __name__ == '__main__':
             avg_time = statistics.mean(runtimes)
             stddev_time = statistics.stdev(runtimes)
             print(("\tavg. time: {:.3f} ms, stddev: {:.3f} ms ;  " +
-                "time per iteration: {:.3f} ms\n").format(
-                    avg_time, stddev_time, avg_time/INTERNAL_ITER))
+                    "time per iteration: {:.3f} ms\n").format(
+                    avg_time, stddev_time, (avg_time / INTERNAL_ITER)))
