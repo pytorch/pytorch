@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
-#include <torch/csrc/jit/passes/quantization.h>
+#include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 
