@@ -119,9 +119,9 @@ std::string cudaDtypeCppString(const Dtype& dtype) {
       return "short";
     case ScalarType::Long:
       return "long";
-    default:; /* nothing */
+    default:
+      throw unsupported_dtype();
   }
-  return dtype.ToCppString();
 }
 
 static void print_flat_alloc(std::ostream& os, const Allocate* alloc) {
