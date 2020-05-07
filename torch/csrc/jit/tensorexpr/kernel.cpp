@@ -17,11 +17,18 @@ namespace tensorexpr {
 static int te_cuda_pointwise_loop_levels = -1;
 static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
+static bool fallback_allowed = true;
+
+bool setFallbackAllowed(bool value) {
+  bool old_value = fallback_allowed;
+  fallback_allowed = value;
+  return old_value;
+}
 
 bool fallbackAllowed() {
   static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
   if (!enable_c_str) {
-    return true;
+    return fallback_allowed;
   }
   if (std::string(enable_c_str) == "0") {
     return false;
