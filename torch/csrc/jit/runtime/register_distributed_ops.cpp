@@ -130,11 +130,12 @@ RegisterOperators reg_rpc_ops(
              auto& kwargsDictIValue =
                  num_inputs >= 4 ? *stackIter++ : emptyDict;
 
-            // IValue corresponding to placeholder for RPC timeout. Used if no
+             // IValue corresponding to placeholder for RPC timeout. Used if no
              // rpc timeout is specified by user.
              IValue noTimeout(torch::distributed::rpc::kUnsetRpcTimeout);
              const auto rpcMaxInputs = 5;
-             auto& timeoutIValue = num_inputs >= rpcMaxInputs ? *stackIter++ : noTimeout;
+             auto& timeoutIValue =
+                 num_inputs >= rpcMaxInputs ? *stackIter++ : noTimeout;
              TORCH_INTERNAL_ASSERT(
                  dstWorkerIValue.isString() ||
                  c10::getCustomClassType<
