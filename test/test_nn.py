@@ -11186,7 +11186,7 @@ class TestNNDeviceType(NNTestCase):
 
         def inplace_non_contig(a):
             size = a.shape[0]
-            a.resize_(size*2)
+            a.resize_(size * 2)
             a.as_strided_((size,), (2,))
 
         bn = torch.nn.BatchNorm2d(3).double().to(device=device)
