@@ -1,11 +1,13 @@
 #pragma once
 
+#include <cstdint>
+#include <functional>
+
 #include <ATen/core/Dict.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <cstdint>
 
 namespace torch {
 namespace distributed {
@@ -17,6 +19,8 @@ class RecvRpcBackward;
 // autograd pass on a worker.
 class TORCH_API DistAutogradContext {
  public:
+  using GradCallback = std::function<bool(torch::Tensor&)>;
+
   explicit DistAutogradContext(int64_t contextId);
 
   // Retrieves the autograd context id for this context.
@@ -52,6 +56,13 @@ class TORCH_API DistAutogradContext {
 
   // Returns all gradients.
   const c10::Dict<torch::Tensor, torch::Tensor> getGradients() const;
+
+  // This function gives a mutable grad reference to the callback.
+  // If the callback returns true, it means the grad in the context
+  // needs to be updated.
+  void runGradCallbackForVariable(
+      const torch::autograd::Variable& variable,
+      GradCallback&& cb);
 
   DistAutogradContext(const DistAutogradContext&) = delete;
   DistAutogradContext& operator=(const DistAutogradContext&) = delete;
@@ -130,6 +141,20 @@ class TORCH_API DistAutogradContext {
 };
 
 using ContextPtr = std::shared_ptr<DistAutogradContext>;
+using ContextWeakPtr = std::weak_ptr<DistAutogradContext>;
+
+// This class stores a weak_ptr to the current dist_autograd context in a thread
+// local variable so that a reader can retrieve the context.
+class TORCH_API ThreadLocalDistAutogradContext {
+ public:
+  explicit ThreadLocalDistAutogradContext(ContextWeakPtr&& new_context_wp);
+  ~ThreadLocalDistAutogradContext();
+
+  static ContextWeakPtr getContextWeakPtr();
+
+ private:
+  ContextWeakPtr prev_context_weak_ptr_;
+};
 
 } // namespace autograd
 } // namespace distributed
