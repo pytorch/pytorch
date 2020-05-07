@@ -2676,6 +2676,48 @@ class TestAutograd(TestCase):
         self.assertEqual(len(prof.function_events), 1)
         self.assertEqual(prof.function_events[0].name, '_TorchScriptTesting::take_an_instance')
 
+    def test_profiler_propagation(self):
+        def foo(x):
+            with record_function("in_foo") as rf:
+                return x * 2
+
+        x = torch.rand(3, 4)
+        traced_foo = torch.jit.trace(foo, x)
+
+        def bar(x):
+            with record_function("in_bar") as rf:
+                # we expect that profiler will be able
+                # propagate across fork
+                fut = torch.jit._fork(traced_foo, x)
+                y = torch.jit._wait(fut)
+                # note: continuation (and rf's end) can
+                # be executed in a different thread
+                with record_function("in_bar_after_wait") as rf2:
+                    y = y * 2
+                return y
+
+        traced_bar = torch.jit.trace(bar, x)
+
+        with profile() as p:
+            traced_bar(x)
+
+        found_foo = False
+        found_bar = False
+        found_bar_after_wait = False
+        for info in p.function_events:
+            if info.name == "in_foo":
+                self.assertFalse(found_foo)
+                found_foo = True
+            elif info.name == "in_bar":
+                self.assertFalse(found_bar)
+                found_bar = True
+            elif info.name == "in_bar_after_wait":
+                self.assertFalse(found_bar_after_wait)
+                found_bar_after_wait = True
+        self.assertTrue(found_foo)
+        self.assertTrue(found_bar)
+        self.assertTrue(found_bar_after_wait)
+
     def test_record_function_callbacks(self):
         x = torch.randn(10, 10)
         with profile() as p:
