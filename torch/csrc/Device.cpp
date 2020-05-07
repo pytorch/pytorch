@@ -15,7 +15,7 @@
 #include <structmember.h>
 #include <sstream>
 
-PyObject *THPDevice_New(const Device& device)
+PyObject *THPDevice_New(const at::Device& device)
 {
   auto type = (PyTypeObject*)&THPDeviceType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
@@ -69,7 +69,7 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
       // Python.
       TORCH_CHECK(device_index >= 0, "Device index must not be negative");
     }
-    Device device(as_device.type(), device_index);
+    at::Device device(as_device.type(), device_index);
     return THPDevice_New(device);
   }
   Py_RETURN_NONE;
@@ -100,7 +100,7 @@ PyObject *THPDevice_index(THPDevice *self, PyObject *noargs)
 static Py_ssize_t THPDevice_hash(THPDevice *self)
 {
   HANDLE_TH_ERRORS
-  return static_cast<Py_ssize_t>(std::hash<Device>{}(self->device) % std::numeric_limits<Py_ssize_t>::max());
+  return static_cast<Py_ssize_t>(std::hash<at::Device>{}(self->device) % std::numeric_limits<Py_ssize_t>::max());
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 

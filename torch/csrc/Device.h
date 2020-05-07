@@ -8,7 +8,7 @@
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TORCH_API THPDevice {
   PyObject_HEAD
-  Device device;
+  at::Device device;
 };
 
 TORCH_API extern PyTypeObject THPDeviceType;
@@ -17,6 +17,6 @@ inline bool THPDevice_Check(PyObject *obj) {
   return Py_TYPE(obj) == &THPDeviceType;
 }
 
-PyObject * THPDevice_New(const Device& device);
+PyObject * THPDevice_New(const at::Device& device);
 
 void THPDevice_init(PyObject *module);
