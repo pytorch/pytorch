@@ -118,7 +118,7 @@ def register_quantized_ops(domain, version):
 
     def upsample_nearest2d(g, input, output_size, align_corners=None, scales_h=None, scales_w=None):
         if input not in sym_help._quantized_ops:
-            upsample_nearest2d_impl = torch.onnx.symbolic_registry.get_registered_op('upsample_nearest2d', '', version)
+            upsample_nearest2d_impl = sym_registry.get_registered_op('upsample_nearest2d', '', version)
             return upsample_nearest2d_impl(g, input, output_size, align_corners)
 
         output_size = sym_help._parse_arg(output_size, 'is')
@@ -136,7 +136,7 @@ def register_quantized_ops(domain, version):
     @parse_args('v', 'is', 'is', 'is', 'is', 'i')
     def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if input not in sym_help._quantized_ops:
-            max_pool2d = torch.onnx.symbolic_registry.get_registered_op('max_pool2d', '', version)
+            max_pool2d = sym_registry.get_registered_op('max_pool2d', '', version)
             return max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode)
         kwargs = {
             "strides_i": stride,
@@ -155,7 +155,7 @@ def register_quantized_ops(domain, version):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         if input not in sym_help._quantized_ops:
-            avg_pool2d = torch.onnx.symbolic_registry.get_registered_op('avg_pool2d', '', version)
+            avg_pool2d = sym_registry.get_registered_op('avg_pool2d', '', version)
             return avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
         kwargs = {
             "strides_i": stride,
@@ -173,7 +173,7 @@ def register_quantized_ops(domain, version):
 
     def reshape(g, input, shape):
         if input not in sym_help._quantized_ops:
-            reshape = torch.onnx.symbolic_registry.get_registered_op('reshape', '', version)
+            reshape = sym_registry.get_registered_op('reshape', '', version)
             return reshape(g, input, shape)
 
         kwargs = {
@@ -187,7 +187,7 @@ def register_quantized_ops(domain, version):
     @parse_args('v', 'v', 'v', 'v', 'i')
     def slice(g, input, dim, start, end, step):
         if input not in sym_help._quantized_ops:
-            slice = torch.onnx.symbolic_registry.get_registered_op('slice', '', version)
+            slice = sym_registry.get_registered_op('slice', '', version)
             return slice(g, input, dim, start, end, step)
 
         if step != 1:
@@ -210,7 +210,7 @@ def register_quantized_ops(domain, version):
     @parse_args('v')
     def sigmoid(g, input):
         if input not in sym_help._quantized_ops:
-            sigmoid = torch.onnx.symbolic_registry.get_registered_op('sigmoid', '', version)
+            sigmoid = sym_registry.get_registered_op('sigmoid', '', version)
             return sigmoid(g, input)
         # Caffe2 expects the output scale to be 1/2^8
         # and output zero_point to be 0 (quint8 type)
@@ -227,7 +227,7 @@ def register_quantized_ops(domain, version):
     @parse_args('v')
     def relu(g, input):
         if input not in sym_help._quantized_ops:
-            relu = torch.onnx.symbolic_registry.get_registered_op('relu', '', version)
+            relu = sym_registry.get_registered_op('relu', '', version)
             return relu(g, input)
         kwargs = {
             "Y_scale_f": input.node()["Y_scale"],
@@ -241,7 +241,7 @@ def register_quantized_ops(domain, version):
         tensors = sym_help._unpack_list(tensor_list)
         input = tensors[0]
         if input not in sym_help._quantized_ops:
-            cat = torch.onnx.symbolic_registry.get_registered_op('cat', '', version)
+            cat = sym_registry.get_registered_op('cat', '', version)
             return cat(g, tensor_list, dim)
 
         dim = sym_help._parse_arg(dim, 'i')
