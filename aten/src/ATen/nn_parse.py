@@ -27,8 +27,8 @@ def argument_to_declaration(param, func=None):
         arg['type'] = 'THIndexTensor*'
     elif arg['type'] == 'Scalar':
         arg['type'] = 'accreal'
-    elif arg['type'] == 'Generator*':
-        arg['type'] = 'THGenerator*'
+    elif arg['type'] == 'Generator':
+        arg['type'] = 'c10::optional<at::Generator>'
 
     match = re.match(r'IntArrayRef\[(\d+)\]', arg['type'])
     if match:
@@ -295,10 +295,10 @@ def backward_declaration(base, thnn_functions, backend_types):
         arg['is_nullable'] = True
 
         # grad_weight and grad_bias need to be resized and zeroed
-        if arg['name'] == 'grad_weight':
+        if arg['name'] == 'grad_weight' and base['name'] != '_thnn_conv2d' and base['name'] != '_thnn_conv_depthwise2d':
             arg['resize'] = 'weight'
             arg['zero'] = True
-        if arg['name'] == 'grad_bias':
+        if arg['name'] == 'grad_bias' and base['name'] != '_thnn_conv2d' and base['name'] != '_thnn_conv_depthwise2d':
             dim = 1 if 'transpose' in name else 0
             arg['resize'] = [('weight', dim)]
             arg['zero'] = True

@@ -7,7 +7,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 // try to match a list if inputs and keyword 'attributes' to this schema,
 // if it works return the flat list of positional inputs to the call
@@ -60,6 +59,5 @@ TORCH_API Value* tryConvertToType(
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions);
-} // namespace script
 } // namespace jit
 } // namespace torch

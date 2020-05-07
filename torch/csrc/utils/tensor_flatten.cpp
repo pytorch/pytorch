@@ -54,7 +54,7 @@ std::vector<TensorGroup> take_tensors(
   // End case. Look for any remaining groups and return them.
   for (auto& entry : groups) {
     auto& group = entry.second;
-    if (!fine_grained && group.size == 0) {
+    if (group.tensors.empty()) {
       continue;
     }
     results.emplace_back(std::move(group));

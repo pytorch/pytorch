@@ -6,8 +6,10 @@
 
 #include <torch/csrc/jit/python/pybind_utils.h>
 
-#include <vector>
+#include <iostream>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace py = pybind11;
 
@@ -22,6 +24,8 @@ struct BenchmarkExecutionStats {
   float latency_avg_ms{-1};
   int64_t num_iters{-1};
 };
+
+std::ostream& operator<<(std::ostream& os, const BenchmarkExecutionStats& value);
 
 /**
  * Use this struct in order to configure a throughput benchmark run.
@@ -49,6 +53,10 @@ struct BenchmarkConfig {
   // Number of iterations the benchmark should run with. This number is separate
   // from the warmup iterations
   int64_t num_iters{100};
+  // If set autograd profiler will be enabled. I.e. this variable would be created
+  // before the main benchmark loop (but after the warmup):
+  // RecordProfile guard(profiler_output_path);
+  std::string profiler_output_path{""};
 };
 
 namespace detail {
@@ -72,6 +80,7 @@ public:
   // Aggregate input in the format Model expects in order to avoid further
   // conversions at the benchmark time
   void addInput(py::args&&, py::kwargs&&);
+  void addInput(Input&&);
   BenchmarkExecutionStats benchmark(const BenchmarkConfig& config) const;
 
   bool initialized() const { return initialized_; }
@@ -106,11 +115,11 @@ Input cloneInput(const Input& input);
 typedef BenchmarkHelper<
     ScriptModuleInput,
     at::IValue,
-    jit::script::Module>
+    jit::Module>
     ScriptModuleBenchmark;
 template <>
-inline BenchmarkHelper<ScriptModuleInput, at::IValue, jit::script::Module>::BenchmarkHelper()
-  : model_("Module", std::make_shared<jit::script::CompilationUnit>()),
+inline BenchmarkHelper<ScriptModuleInput, at::IValue, jit::Module>::BenchmarkHelper()
+  : model_("Module", std::make_shared<jit::CompilationUnit>()),
     initialized_(false) {}
 typedef BenchmarkHelper<ModuleInput, py::object, py::object> ModuleBenchmark;
 template <>
@@ -135,6 +144,9 @@ ModuleOutput ModuleBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs)
 
 template <>
 void ScriptModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs);
+template <>
+void ScriptModuleBenchmark::addInput(ScriptModuleInput&& input);
+
 
 template <>
 void ModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs);
@@ -157,7 +169,7 @@ void ModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs);
  */
 class C10_HIDDEN ThroughputBenchmark {
  public:
-  explicit ThroughputBenchmark(jit::script::Module module);
+  explicit ThroughputBenchmark(jit::Module module);
   explicit ThroughputBenchmark(py::object module);
 
   // Add one more input example. This input example should be in the exact

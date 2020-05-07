@@ -30,6 +30,9 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
            THCTensor *istarget,
            int64_t reduction)
 {
+  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
+  TORCH_CHECK(false, "MultiLabelMarginCriterion_updateOutput not suppported with BFloat16");
+  #else
   THNN_(MultiLabelMarginCriterion_shapeCheck)(state, input, target);
   input = THCTensor_(newContiguous)(state, input);
   target = THCIndexTensor_(newContiguous)(state, target);
@@ -104,6 +107,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   THCTensor_(free)(state, input);
   THCIndexTensor_(free)(state, target);
   THCTensor_(free)(state, istarget);
+  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 void THNN_(MultiLabelMarginCriterion_updateGradInput)(
@@ -115,6 +119,9 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
             THCTensor *istarget,
             int64_t reduction)
 {
+  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
+  TORCH_CHECK(false, "MultiLabelMarginCriterion_updateGradInput not suppported with BFloat16");
+  #else
   input = THCTensor_(newContiguous)(state, input);
   target = THCIndexTensor_(newContiguous)(state, target);
   istarget = THCTensor_(newContiguous)(state, istarget);
@@ -175,6 +182,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   THCIndexTensor_(free)(state, target);
   THCTensor_(free)(state, istarget);
   THCTensor_(free)(state, gradOutput);
+  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 #endif
