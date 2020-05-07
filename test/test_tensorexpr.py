@@ -1234,19 +1234,5 @@ class TestTensorExprFuser(BaseTestClass):
         assert torch.allclose(scripted(a), 2 * a)
         assert cx.elapsed_value() == 1
 
-    def test_eig_argument(self):
-        a = torch.ones((2))
-        with self.assertRaisesRegex(RuntimeError, 'A should be 2 dimensional'):
-            a.eig()
-        a = torch.ones((2, 3))
-        with self.assertRaisesRegex(RuntimeError, 'A should be square'):
-            a.eig()
-        a = np.inf * torch.ones((2, 2))
-        with self.assertRaisesRegex(RuntimeError, 'A should not contain infs or NaNs'):
-            a.eig()
-        a = np.nan * torch.ones((2, 2))
-        with self.assertRaisesRegex(RuntimeError, 'A should not contain infs or NaNs'):
-            a.eig()
-
 if __name__ == '__main__':
     unittest.main()
