@@ -258,7 +258,8 @@ def reduce_tensor(tensor):
                  event_sync_required, tensor.names))
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
-    metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad, tensor.names if tensor.has_names() else None)
+    metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad,
+                tensor.names if tensor.has_names() else None)
     return (rebuild_tensor, (type(tensor), storage, metadata))
 
 

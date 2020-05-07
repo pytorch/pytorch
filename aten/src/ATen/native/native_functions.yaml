@@ -1573,6 +1573,7 @@
 - func: isclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  supports_named_tensor: True
 
 - func: isnan(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2119,9 +2120,11 @@
 - func: mul.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  supports_named_tensor: True
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  supports_named_tensor: True
 
 - func: mv(Tensor self, Tensor vec) -> Tensor
   use_c10_dispatcher: full
@@ -4270,12 +4273,14 @@
 
 - func: bitwise_and.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
+  supports_named_tensor: True
   dispatch:
     CPU: bitwise_and_out
     CUDA: bitwise_and_out
 
 - func: bitwise_and.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
+  supports_named_tensor: True
   dispatch:
     CPU: bitwise_and_out
     CUDA: bitwise_and_out
@@ -4283,39 +4288,49 @@
 - func: bitwise_and.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
+  supports_named_tensor: True
 
 - func: bitwise_and.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
+  supports_named_tensor: True
 
 - func: bitwise_and_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  supports_named_tensor: True
 
 - func: bitwise_and_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  supports_named_tensor: True
 
 - func: __and__.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
+  supports_named_tensor: True
 
 - func: __and__.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
+  supports_named_tensor: True
 
 - func: __iand__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  supports_named_tensor: True
 
 - func: __iand__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  supports_named_tensor: True
 
 - func: bitwise_or.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
+  supports_named_tensor: True
   dispatch:
     CPU: bitwise_or_out
     CUDA: bitwise_or_out
 
 - func: bitwise_or.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
+  supports_named_tensor: True
   dispatch:
     CPU: bitwise_or_out
     CUDA: bitwise_or_out
@@ -4323,30 +4338,38 @@
 - func: bitwise_or.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
+  supports_named_tensor: True
 
 - func: bitwise_or.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
+  supports_named_tensor: True
 
 - func: bitwise_or_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  supports_named_tensor: True
 
 - func: bitwise_or_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  supports_named_tensor: True
 
 - func: __or__.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
   variants: method, function
 
 - func: __or__.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
   variants: method, function
 
 - func: __ior__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  supports_named_tensor: True
 
 - func: __ior__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  supports_named_tensor: True
 
 - func: bitwise_xor.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   variants: function

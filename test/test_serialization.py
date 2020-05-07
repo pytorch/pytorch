@@ -82,6 +82,7 @@ class SerializationMixin(object):
         t2 = torch.FloatTensor().set_(a[0].reshape(-1)[1:4].clone().storage(), 0, (3,), (1,))
         b += [(t1.storage(), t1.storage(), t2.storage())]  # 7
         b += [a[0].reshape(-1)[0:2].storage()]  # 8
+        b += [torch.rand(1).rename('test')]  # 9 -- test named tensors
         return b
 
     def _test_serialization_assert(self, b, c):
