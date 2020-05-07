@@ -3,14 +3,14 @@
 #include <memory>
 #include <string>
 
-#include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/versioned_symbols.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 
@@ -35,6 +35,13 @@ struct TORCH_API SugaredValue
 
   // select an attribute on it, e.g. `this.field`
   virtual std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) {
+    throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
+  }
+
+  virtual bool hasAttr(
       const SourceRange& loc,
       Function& m,
       const std::string& field) {
@@ -155,6 +162,9 @@ struct TORCH_API SimpleValue : public SugaredValue {
       Function& m,
       const std::string& field) override;
 
+  bool hasAttr(const SourceRange& loc, Function& m, const std::string& field)
+      override;
+
   void setAttr(
       const SourceRange& loc,
       Function& m,
@@ -237,16 +247,17 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
 
   SugaredValuePtr getitem(const SourceRange& loc, Function& m, Value* idx)
       override {
-    TORCH_INTERNAL_ASSERT(
-        idx->type()->cast<IntType>() && toIValue(idx),
-        loc,
-        "Expected integer literal for Sugared Tuple");
+    if (!(idx->type()->cast<IntType>() && toIValue(idx))) {
+      throw ErrorReport(loc) << "Expected integer literal for index";
+    }
     auto index = toIValue(idx)->toInt();
-    TORCH_INTERNAL_ASSERT(
-        index >= 0 && index < static_cast<int64_t>(tup_.size()),
-        loc,
-        "Index out of range of Sugared Tuple");
-    return tup_.at(index);
+    int64_t adj_index =
+        (index < 0) ? index + static_cast<int64_t>(tup_.size()) : index;
+    if (!(adj_index >= 0 && adj_index < static_cast<int64_t>(tup_.size()))) {
+      throw ErrorReport(loc)
+          << "Index " << index << " out of range of length " << tup_.size();
+    }
+    return tup_.at(adj_index);
   }
 
   // This function is called when a SugaredValue is used to convert a
@@ -284,8 +295,15 @@ struct TORCH_API BuiltinModule : public SugaredValue {
       // methods under its module.
       return std::make_shared<BuiltinModule>("aten", version);
     }
-    return std::make_shared<BuiltinFunction>(
-        Symbol::fromQualString(name + "::" + field), c10::nullopt);
+
+    auto sym = Symbol::fromQualString(name + "::" + field);
+    if (version.has_value()) {
+      // Possibly replaces symbol with another that implements its
+      // historic behavior.
+      // See note [Versioned Symbols]
+      sym = get_symbol_for_version(sym, *version);
+    }
+    return std::make_shared<BuiltinFunction>(sym, c10::nullopt);
   }
 
  private:
@@ -365,7 +383,7 @@ struct FunctionValue : public SugaredValue {
       try {
         callee->ensure_defined();
       } catch (const RecursiveMethodCallError&) {
-        throw script::ErrorReport(loc)
+        throw ErrorReport(loc)
             << " function '" << callee->name() << "' is called recursively. "
             << "Recursive calls are not supported";
       }
@@ -376,6 +394,10 @@ struct FunctionValue : public SugaredValue {
         f.graph()->insertFunctionCall(callees_[match.first], match.second);
     output->node()->setSourceRange(loc);
     return std::make_shared<SimpleValue>(output);
+  }
+
+  const std::vector<Function*>& callees() {
+    return callees_;
   }
 
  private:
@@ -419,16 +441,15 @@ struct MethodValue : public SugaredValue {
     std::vector<const FunctionSchema*> schemas;
     for (const std::string& method_name : method_names_) {
       if (auto class_type = self_->type()->cast<ClassType>()) {
-        auto method = class_type->getMethod(method_name);
-        TORCH_INTERNAL_ASSERT(method);
+        Function& method = class_type->getMethod(method_name);
         try {
-          method->ensure_defined();
+          method.ensure_defined();
         } catch (const RecursiveMethodCallError&) {
-          throw script::ErrorReport(loc)
-              << " method '" << method->name() << "' is called recursively. "
+          throw ErrorReport(loc)
+              << " method '" << method.name() << "' is called recursively. "
               << "Recursive calls are not supported";
         }
-        schemas.push_back(&method->getSchema());
+        schemas.push_back(&method.getSchema());
       } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
         schemas.push_back(interface_type->getMethod(method_name));
       } else {
@@ -648,6 +669,5 @@ struct SimpleSelf : public Self {
  private:
   ClassTypePtr classType_;
 };
-} // namespace script
 } // namespace jit
 } // namespace torch

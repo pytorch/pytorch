@@ -7,13 +7,13 @@ namespace jit {
 
 void testTrivial1() {
   Graph graph, pattern;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%0):
   %a = a::aaa(%0)
   return (%a))IR",
       &graph);
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%0):
   %x = a::aaa(%0)
@@ -25,13 +25,14 @@ graph(%0):
 void testTrivial2() {
   Graph graph;
   auto* g_in = graph.addInput();
-  auto* g_tanh = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/ 1));
+  auto* g_tanh = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/1));
   g_tanh->addInput(g_in);
   graph.registerOutput(g_tanh->output());
 
   Graph pattern;
   auto* p_in = pattern.addInput();
-  auto* p_tanh = pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/ 1));
+  auto* p_tanh =
+      pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/1));
   p_tanh->addInput(p_in);
   pattern.registerOutput(p_tanh->output());
 
@@ -46,7 +47,7 @@ void testTrivial2() {
 
 void testTrivial3() {
   Graph graph, pattern;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%0):
   %a = a::a(%0)
@@ -54,7 +55,7 @@ graph(%0):
   %c = a::c(%a, %b)
   return (%c))IR",
       &graph);
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%a, %b):
   %c = a::c(%a, %b)
@@ -67,7 +68,7 @@ void testTrivial4() {
   Graph graph;
   auto* g_in0 = graph.addInput();
   auto* g_in1 = graph.addInput();
-  auto* g_mul = graph.insertNode(graph.create(aten::mul, /*num_outputs =*/ 1));
+  auto* g_mul = graph.insertNode(graph.create(aten::mul, /*num_outputs =*/1));
   g_mul->addInput(g_in0);
   g_mul->addInput(g_in1);
   graph.registerOutput(g_mul->output());
@@ -75,7 +76,8 @@ void testTrivial4() {
   Graph pattern;
   auto* p_in0 = pattern.addInput();
   auto* p_in1 = pattern.addInput();
-  auto* p_mul = pattern.insertNode(pattern.create(aten::mul, /*num_outputs =*/ 1));
+  auto* p_mul =
+      pattern.insertNode(pattern.create(aten::mul, /*num_outputs =*/1));
   p_mul->addInput(p_in0);
   p_mul->addInput(p_in1);
   pattern.registerOutput(p_mul->output());
@@ -92,7 +94,7 @@ void testTrivial4() {
 
 void testLinear1() {
   Graph graph, pattern;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%0):
   %a = a::aaa(%0)
@@ -102,7 +104,7 @@ graph(%0):
   %a = a::aaa(%0)
   return (%d))IR",
       &graph);
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%0):
   %x = b::bbb(%0)
@@ -116,10 +118,11 @@ void testLinear2() {
   Graph graph;
   auto* g_in = graph.addInput();
 
-  auto* g_tanh = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/ 1));
+  auto* g_tanh = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/1));
   g_tanh->addInput(g_in);
 
-  auto* g_tanh2 = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/ 1));
+  auto* g_tanh2 =
+      graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/1));
   g_tanh2->addInput(g_tanh->output());
 
   graph.registerOutput(g_tanh2->output());
@@ -127,10 +130,12 @@ void testLinear2() {
   Graph pattern;
   auto* p_in = pattern.addInput();
 
-  auto* p_tanh = pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/ 1));
+  auto* p_tanh =
+      pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/1));
   p_tanh->addInput(p_in);
 
-  auto* p_tanh2 = pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/ 1));
+  auto* p_tanh2 =
+      pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/1));
   p_tanh2->addInput(p_tanh->output());
 
   pattern.registerOutput(p_tanh2->output());
@@ -161,7 +166,7 @@ void testLinear2() {
  */
 void testDiamond1() {
   Graph graph, pattern1, pattern2;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%0):
   %o = o::ooo(%0)
@@ -173,7 +178,7 @@ graph(%0):
   return (%e))IR",
       &graph);
 
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%0):
   %a = a::aaa(%0)
@@ -185,7 +190,7 @@ graph(%0):
   AT_ASSERT(!findPatternMatches(pattern1, graph).empty());
 
   // Check that order of nodes inside the diamond does not affect the result
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%0):
   %a = a::aaa(%0)
@@ -214,22 +219,25 @@ void testDiamond2() {
   Graph graph;
   auto* g_in = graph.addInput();
 
-  auto* g_chunk = graph.insertNode(graph.create(prim::ConstantChunk, /*num_outputs =*/ 2));
+  auto* g_chunk =
+      graph.insertNode(graph.create(prim::ConstantChunk, /*num_outputs =*/2));
   g_chunk->i_(attr::chunks, 2)->i_(attr::dim, 0);
   g_chunk->addInput(g_in);
 
-  auto* g_mul = graph.insertNode(graph.create(aten::mul, /*num_outputs =*/ 1));
+  auto* g_mul = graph.insertNode(graph.create(aten::mul, /*num_outputs =*/1));
   g_mul->addInput(g_chunk->outputs()[0]);
   g_mul->addInput(g_chunk->outputs()[1]);
   graph.registerOutput(g_mul->output());
 
   Graph pattern;
   auto* p_in = pattern.addInput();
-  auto* p_chunk = pattern.insertNode(pattern.create(prim::ConstantChunk, /*num_outputs =*/ 2));
+  auto* p_chunk = pattern.insertNode(
+      pattern.create(prim::ConstantChunk, /*num_outputs =*/2));
   p_chunk->i_(attr::chunks, 2)->i_(attr::dim, 0);
   p_chunk->addInput(p_in);
 
-  auto* p_mul = pattern.insertNode(pattern.create(aten::mul, /*num_outputs =*/ 1));
+  auto* p_mul =
+      pattern.insertNode(pattern.create(aten::mul, /*num_outputs =*/1));
   p_mul->addInput(p_chunk->outputs()[0]);
   p_mul->addInput(p_chunk->outputs()[1]);
   pattern.registerOutput(p_mul->output());
@@ -247,7 +255,7 @@ void testDiamond2() {
 
 void testXPattern() {
   Graph graph, pattern;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%0, %1):
   %b = b::bbb(%0)
@@ -258,7 +266,7 @@ graph(%0, %1):
   %g = g::ggg(%e, %f)
   return (%g))IR",
       &graph);
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%0, %1):
   %b = b::bbb(%0)
@@ -274,7 +282,7 @@ graph(%0, %1):
 
 void testMultipleMatches() {
   Graph graph, pattern;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%t0):
   %t1 = a::aaa(%t0)
@@ -283,7 +291,7 @@ graph(%t0):
   %t4 = a::aaa(%t3)
   return (%t4))IR",
       &graph);
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%t0):
   %t1 = a::aaa(%t0)
@@ -295,7 +303,7 @@ graph(%t0):
 
 void testOverlappingMatches() {
   Graph graph, pattern;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%t0):
   %t1 = a::aaa(%t0)
@@ -304,7 +312,7 @@ graph(%t0):
   %t4 = a::aaa(%t3)
   return (%t4))IR",
       &graph);
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%t0):
   %t1 = a::aaa(%t0)
@@ -317,7 +325,7 @@ graph(%t0):
 
 void testMatchInBasicBlocks1() {
   Graph graph;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%a, %b, %c):
   %d = aten::mul(%a, %b)
@@ -333,7 +341,7 @@ graph(%a, %b, %c):
 
   // Ensure the matches don't cross basic block boundaries
   Graph pattern0;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%x, %y):
   %z = aten::mul(%x, %y)
@@ -342,7 +350,7 @@ graph(%x, %y):
   AT_ASSERT(findPatternMatches(pattern0, graph).size() == 3);
 
   Graph pattern1;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%x, %y):
   %z1 = aten::mul(%x, %y)
@@ -354,7 +362,7 @@ graph(%x, %y):
 
 void testMatchInBasicBlocks2() {
   Graph graph;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%a, %b):
   %x = my::mul(%a, %b)
@@ -367,7 +375,7 @@ graph(%a, %b):
 
   // Check that we can match both mul ops
   Graph pattern0;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%x, %y):
   %z = my::mul(%x, %y)
@@ -377,7 +385,7 @@ graph(%x, %y):
 
   // Ensure the matches don't cross basic block boundaries
   Graph pattern1;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%x, %y):
   %u = my::mul(%x, %y)
@@ -389,7 +397,7 @@ graph(%x, %y):
 
 void testMatchesAttributes() {
   Graph graph;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%0):
   %a = a::a[isattr=[1,2]](%0)
@@ -400,7 +408,7 @@ graph(%0):
 
   {
     Graph pattern;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%a, %b):
   %c = a::c[myattr="qqq"](%a, %b)
@@ -410,7 +418,7 @@ graph(%a, %b):
   }
   {
     Graph pattern;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%a, %b):
   %c = a::c[myattr="zzz"](%a, %b)
@@ -420,7 +428,7 @@ graph(%a, %b):
   }
   {
     Graph pattern;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%0):
   %b = a::b[extraattr=10](%0)
@@ -430,7 +438,7 @@ graph(%0):
   }
   {
     Graph pattern;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%0):
   %b = a::b[intattr=10, floatattr=3.14](%0)
@@ -440,7 +448,7 @@ graph(%0):
   }
   {
     Graph pattern;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%0):
   %b = a::b[intattr=10, floatattr=3.14, strattr="rrr"](%0)
@@ -450,7 +458,7 @@ graph(%0):
   }
   {
     Graph pattern;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%0):
   %a = a::a[isattr=[1,2]](%0)
@@ -463,14 +471,14 @@ graph(%0):
 
 void testBadPattern() {
   Graph graph, pattern1, pattern2;
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%0):
   %a = a::aaa(%0)
   return (%a))IR",
       &graph);
 
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%x):
   %y = my::node_with_subblock()
@@ -481,7 +489,7 @@ graph(%x):
       &pattern1);
   ASSERT_ANY_THROW(findPatternMatches(pattern1, graph));
 
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%x):
   %y = my::op1(%x)

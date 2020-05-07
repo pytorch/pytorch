@@ -269,6 +269,7 @@ The following operators are supported:
 * MaxPool3d
 * RNN
 * abs
+* absolute
 * acos
 * adaptive_avg_pool1d
 * adaptive_avg_pool2d
@@ -404,6 +405,7 @@ The following operators are supported:
 * to
 * topk
 * transpose
+* true_divide
 * type_as
 * unbind
 * unfold (experimental support with ATen-Caffe2 integration)
@@ -729,5 +731,5 @@ Functions
 .. autofunction:: export
 .. autofunction:: register_custom_op_symbolic
 .. autofunction:: torch.onnx.operators.shape_as_tensor
-.. autofunction:: set_training
+.. autofunction:: select_model_mode_for_export
 .. autofunction:: is_in_onnx_export

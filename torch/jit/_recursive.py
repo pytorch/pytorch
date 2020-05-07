@@ -341,6 +341,17 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 
+        # 3. Copy @ignored/@unused methods from the original `nn_module` to the new ScriptModule.
+        #    This ensures we can access these Python methods on the ScriptModule.
+        for name in dir(nn_module):
+            item = getattr(nn_module, name, None)
+            if not inspect.ismethod(item):
+                continue
+            if _jit_internal.is_ignored_fn(item):
+                unbound_function = getattr(type(nn_module), name)
+                bound_method = unbound_function.__get__(script_module)
+                setattr(script_module, name, bound_method)
+
         # For convenience, attach the concrete type to the new ScriptModule
         script_module._concrete_type = concrete_type
 

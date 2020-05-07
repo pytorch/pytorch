@@ -306,20 +306,30 @@ to overlap data transfers with computation.
 You can make the :class:`~torch.utils.data.DataLoader` return batches placed in
 pinned memory by passing ``pin_memory=True`` to its constructor.
 
-.. _cuda-nn-dataparallel-instead:
+.. _cuda-nn-ddp-instead:
 
-Use nn.DataParallel instead of multiprocessing
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Use nn.parallel.DistributedDataParallel instead of multiprocessing or nn.DataParallel
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Most use cases involving batched inputs and multiple GPUs should default to
-using :class:`~torch.nn.DataParallel` to utilize more than one GPU. Even with
-the GIL, a single Python process can saturate multiple GPUs.
-
-As of version 0.1.9, large numbers of GPUs (8+) might not be fully utilized.
-However, this is a known issue that is under active development. As always,
-test your use case.
+using :class:`~torch.nn.parallel.DistributedDataParallel` to utilize more
+than one GPU.
 
 There are significant caveats to using CUDA models with
 :mod:`~torch.multiprocessing`; unless care is taken to meet the data handling
 requirements exactly, it is likely that your program will have incorrect or
 undefined behavior.
+
+It is recommended to use :class:`~torch.nn.parallel.DistributedDataParallel`,
+instead of :class:`~torch.nn.DataParallel` to do multi-GPU training, even if
+there is only a single node.
+
+The difference between :class:`~torch.nn.parallel.DistributedDataParallel` and
+:class:`~torch.nn.DataParallel` is: :class:`~torch.nn.parallel.DistributedDataParallel`
+uses multiprocessing where a process is created for each GPU, while
+:class:`~torch.nn.DataParallel` uses multithreading. By using multiprocessing,
+each GPU has its dedicated process, this avoids the performance overhead caused
+by GIL of Python interpreter. 
+
+If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use 
+`torch.distributed.launch` utility to launch your program, see :ref:`distributed-launch`.

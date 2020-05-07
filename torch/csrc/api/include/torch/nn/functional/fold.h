@@ -6,6 +6,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor fold(const Tensor& input,
                    ExpandingArray<2> output_size,
@@ -29,7 +30,19 @@ inline Tensor fold(const Tensor& input,
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.fold
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::FoldFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::fold(input, F::FoldFuncOptions({3, 2}, {2, 2}));
+/// ```
 inline Tensor fold(const Tensor& input, const FoldFuncOptions& options) {
   return detail::fold(
     input,
@@ -42,6 +55,7 @@ inline Tensor fold(const Tensor& input, const FoldFuncOptions& options) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor unfold(const Tensor& input,
                      ExpandingArray<2> kernel_size,
@@ -63,7 +77,19 @@ inline Tensor unfold(const Tensor& input,
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.unfold
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::UnfoldFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::unfold(input, F::UnfoldFuncOptions({2, 2}).padding(1).stride(2));
+/// ```
 inline Tensor unfold(const Tensor& input, const UnfoldFuncOptions& options) {
   return detail::unfold(input, options.kernel_size(), options.dilation(), options.padding(), options.stride());
 }
