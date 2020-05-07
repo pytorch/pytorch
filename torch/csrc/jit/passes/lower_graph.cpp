@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/passes/lower_graph.h>
+#include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/custom_class.h>
 #include <unordered_map>
 
 namespace torch {
@@ -113,16 +115,34 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
-static std::vector<at::Tensor> loadTensors(const std::vector<Slot>& slots) {
-  std::vector<at::Tensor> result;
+static std::vector<IValue> loadTensors(const std::vector<Slot>& slots) {
+  std::vector<IValue> result;
   result.reserve(slots.size());
   for (const Slot& slot : slots) {
-    result.emplace_back(slot.obj->getSlot(slot.offset).toTensor());
+    auto obj = slot.obj->getSlot(slot.offset);
+    if (obj.isTensor()) {
+      result.emplace_back(obj.toTensor());
+    } else {
+      // Unpack quantization packed tensor
+      auto type = obj.type();
+      TORCH_CHECK(
+          (type ==
+           getCustomClass(
+               "__torch__.torch.classes.quantized.Conv2dPackedParamsBase")) ||
+              (type ==
+               getCustomClass(
+                   "__torch__.torch.classes.quantized.Conv3dPackedParamsBase")),
+          "Unknown type ",
+          type->python_str(),
+          " encountered in graph lowering. This type is not supported in ONNX export.");
+      result.emplace_back(
+          script::Object(obj.toObject()).run_method("__getstate__"));
+    }
   }
   return result;
 }
 
-std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> LowerGraph(
+std::pair<std::shared_ptr<Graph>, std::vector<IValue>> LowerGraph(
     Graph& graph,
     const ModulePtr& self) {
   auto result = lower_graph(self, graph);
