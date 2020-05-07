@@ -495,6 +495,8 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_set_texpr_fuser_enabled", &setTensorExprFuserEnabled)
       .def("_jit_texpr_fuser_enabled", &tensorExprFuserEnabled)
+      .def("_jit_texpr_fallback_allowed", &tensorexpr::fallbackAllowed)
+      .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
       .def(
           "_jit_pass_fuse_tensorexprs",
           [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })

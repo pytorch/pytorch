@@ -18,8 +18,16 @@ struct ScalarCheck : OptInDispatch {
   Val* v2_;
   bool same = false;
 
+  void handle(Bool* b) override {
+    same = static_cast<Bool*>(v1_)->sameAs(static_cast<Bool*>(v2_));
+  }
+
   void handle(Float* f) override {
     same = static_cast<Float*>(v1_)->sameAs(static_cast<Float*>(v2_));
+  }
+
+  void handle(Half* h) override {
+    same = static_cast<Half*>(v1_)->sameAs(static_cast<Half*>(v2_));
   }
 
   void handle(Int* i) override {
@@ -52,7 +60,19 @@ struct ScalarCheck : OptInDispatch {
 };
 } // namespace
 
+bool Bool::sameAs(const Bool* const other) const {
+  if (isConst() && other->isConst())
+    return *value() == *(other->value());
+  return this == other;
+}
+
 bool Float::sameAs(const Float* const other) const {
+  if (isConst() && other->isConst())
+    return *value() == *(other->value());
+  return this == other;
+}
+
+bool Half::sameAs(const Half* const other) const {
   if (isConst() && other->isConst())
     return *value() == *(other->value());
   return this == other;
@@ -69,6 +89,8 @@ UnaryOp::UnaryOp(UnaryOpType _type, Val* _out, Val* _in)
   addOutput(_out);
   addInput(_in);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  if (this->getUnaryOpType() == UnaryOpType::RandLike)
+    FusionGuard::getCurFusion()->setRandom(true);
 }
 
 bool UnaryOp::sameAs(const UnaryOp* const other) const {
@@ -93,6 +115,34 @@ bool BinaryOp::sameAs(const BinaryOp* other) const {
   if (getBinaryOpType() != other->getBinaryOpType())
     return false;
   if (!(lhs()->sameAs(other->lhs()) && rhs()->sameAs(other->rhs())))
+    return false;
+  return true;
+}
+
+TernaryOp::TernaryOp(
+    TernaryOpType _type,
+    Val* _out,
+    Val* _in1,
+    Val* _in2,
+    Val* _in3)
+    : Expr(ExprType::TernaryOp),
+      ternary_op_type_{_type},
+      out_{_out},
+      in1_{_in1},
+      in2_{_in2},
+      in3_{_in3} {
+  addOutput(_out);
+  addInput(_in1);
+  addInput(_in2);
+  addInput(_in3);
+  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+bool TernaryOp::sameAs(const TernaryOp* other) const {
+  if (getTernaryOpType() != other->getTernaryOpType())
+    return false;
+  if (!(in1()->sameAs(other->in1()) && in2()->sameAs(other->in2()) &&
+        in3()->sameAs(other->in3())))
     return false;
   return true;
 }
