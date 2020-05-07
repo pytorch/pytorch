@@ -452,7 +452,7 @@ NetworkSourceInfo TensorPipeAgent::getNetworkSourceInfo() {
 void TensorPipeAgent::trackNetworkData(
     uint64_t requestSize,
     uint64_t responseSize,
-    std::string destWorkerName) {
+    const std::string& destWorkerName) {
   std::lock_guard<std::mutex> lock(networkDataMutex_);
   networkData_[destWorkerName].numCalls++;
   networkData_[destWorkerName].totalSentBytes += requestSize;
@@ -461,7 +461,7 @@ void TensorPipeAgent::trackNetworkData(
 
 void TensorPipeAgent::trackNetworkError(
     uint64_t requestSize,
-    std::string destWorkerName) {
+    const std::string& destWorkerName) {
   std::lock_guard<std::mutex> lock(networkDataMutex_);
   networkData_[destWorkerName].numCalls++;
   networkData_[destWorkerName].totalSentBytes += requestSize;
