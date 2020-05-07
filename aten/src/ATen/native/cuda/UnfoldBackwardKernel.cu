@@ -39,10 +39,6 @@ static void _launch_unfold_backward_kernel(int total_n_elems, func_t f) {
     total_n_elems >= 0 && total_n_elems <= std::numeric_limits<int32_t>::max()
   );
 
-  if (total_n_elems == 0) {
-    return;
-  }
-
   dim3 block(n_threads);
   constexpr int total_work_block = n_threads * n_elems_per_thread;
   dim3 grid((total_n_elems + total_work_block - 1) / total_work_block);
