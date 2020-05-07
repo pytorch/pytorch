@@ -59,7 +59,7 @@ class ProfilingMode(Enum):
     PROFILING = 3
 
 @contextmanager
-def enable_profiling_mode():
+def enable_profiling_mode_for_profiling_tests():
     if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
         old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
         old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
@@ -70,6 +70,16 @@ def enable_profiling_mode():
             torch._C._jit_set_profiling_executor(old_prof_exec_state)
             torch._C._jit_set_profiling_mode(old_prof_mode_state)
 
+@contextmanager
+def enable_profiling_mode():
+    old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
+    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_profiling_executor(old_prof_exec_state)
+        torch._C._jit_set_profiling_mode(old_prof_mode_state)
+
 func_call = torch._C.ScriptFunction.__call__
 meth_call = torch._C.ScriptMethod.__call__
 
@@ -77,7 +87,7 @@ def prof_callable(callable, *args, **kwargs):
     if 'profile_and_replay' in kwargs:
         del kwargs['profile_and_replay']
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 callable(*args, **kwargs)
                 return callable(*args, **kwargs)
 

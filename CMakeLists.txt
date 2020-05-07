@@ -52,6 +52,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 #    endif()
 set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
 
+# Googletest's cmake files are going to set it on once they are processed. Let's
+# set it at the very beginning so that the entire build is deterministic.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+
 if(NOT DEFINED BLAS_SET_BY_USER)
   if(DEFINED BLAS)
     set(BLAS_SET_BY_USER TRUE)

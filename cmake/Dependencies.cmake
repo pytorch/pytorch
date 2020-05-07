@@ -295,11 +295,11 @@ endif()
 if(NOT USE_SYSTEM_PTHREADPOOL)
   # Opt for custom Caffe2 implementation whenever BUILD_CAFFE2_OPS is enabled
   if(BUILD_CAFFE2_OPS)
-    set(USE_INTERNAL_PTHREADPOOL_IMPL ON)
+    set(USE_INTERNAL_PTHREADPOOL_IMPL ON CACHE BOOL "" FORCE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
 
     # XNNPACK cannot link against a custom implementation of pthreadpool
-    set(USE_XNNPACK OFF)
+    caffe2_update_option(USE_XNNPACK OFF)
 
   # But try using the open source implementation if, and only if:
   elseif(
@@ -310,7 +310,7 @@ if(NOT USE_SYSTEM_PTHREADPOOL)
     # NNPACK or family are requested.
     (USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR (USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK))
   )
-    set(USE_INTERNAL_PTHREADPOOL_IMPL OFF)
+    set(USE_INTERNAL_PTHREADPOOL_IMPL OFF CACHE BOOL "" FORCE)
 
     if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
       set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
@@ -888,9 +888,11 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-find_package(pybind11 CONFIG)
-if(NOT pybind11_FOUND)
-  find_package(pybind11)
+if(NOT ${pybind11_PREFER_third_party})
+  find_package(pybind11 CONFIG)
+  if(NOT pybind11_FOUND)
+    find_package(pybind11)
+  endif()
 endif()
 
 if(pybind11_FOUND)
@@ -901,6 +903,9 @@ else()
     install(DIRECTORY ${pybind11_INCLUDE_DIRS}
             DESTINATION ${CMAKE_INSTALL_PREFIX}
             FILES_MATCHING PATTERN "*.h")
+    set(pybind11_PREFER_third_party ON CACHE BOOL
+        "Use the third_party/pybind11 submodule, instead of looking for system
+        installation of pybind11")
 endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
@@ -1132,7 +1137,12 @@ if(USE_ROCM)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
+endif()
 
+# ---[ ROCm
+if(USE_ROCM)
+  # We check again for USE_ROCM because it might have been set to OFF
+  # in the if above
   include_directories(SYSTEM ${HIP_PATH}/include)
   include_directories(SYSTEM ${ROCBLAS_PATH}/include)
   include_directories(SYSTEM ${ROCFFT_PATH}/include)
