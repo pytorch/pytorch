@@ -1,17 +1,17 @@
 #include <torch/csrc/jit/api/module.h>
+#include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
 namespace jit {
-namespace script {
 
 static ObjectPtr create_module_object(
     c10::QualifiedName class_name,
@@ -108,11 +108,13 @@ Module Method::owner() const {
 }
 void Method::run(Stack& stack) {
   stack.insert(stack.begin(), owner()._ivalue());
+  RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   function_->run(stack);
 }
 
 IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
   stack.insert(stack.begin(), owner()._ivalue());
+  RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   return (*function_)(std::move(stack), kwargs);
 }
 
@@ -161,6 +163,14 @@ void Module::clone_method(const Module& orig, const std::string& name) {
   return clone_method(orig, orig.get_method(name).function(), type_remap);
 }
 
+Module Module::copy() const {
+  return Module(_ivalue()->copy());
+}
+
+Module Module::deepcopy() const {
+  return Module(_ivalue()->deepcopy());
+}
+
 Module Module::clone() const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
   return clone_impl(type_remap);
@@ -177,7 +187,8 @@ Module Module::clone_impl(
   Module r;
   if (type_already_cloned) {
     // if we cloned the class type before, we'll reuse it
-    Module new_module(_ivalue()->compilation_unit(), type_remap[type()]->cast<ClassType>());
+    Module new_module(
+        _ivalue()->compilation_unit(), type_remap[type()]->cast<ClassType>());
     r = new_module;
   } else {
     Module new_module(*type()->name(), _ivalue()->compilation_unit(), true);
@@ -195,9 +206,9 @@ Module Module::clone_impl(
       type_remap[orig.type()] = cloned.type();
       r.register_module(type()->getAttributeName(i), cloned);
     } else {
-      // this adds new slot and creates a new attribute for the underlying type if
-      // the type is not already cloned, otherwise it will only
-      // add a new slot and typecheck
+      // this adds new slot and creates a new attribute for the underlying type
+      // if the type is not already cloned, otherwise it will only add a new
+      // slot and typecheck
       r.register_attribute(
           type()->getAttributeName(i),
           type()->getAttribute(i),
@@ -221,22 +232,7 @@ Module Module::clone_impl(
 }
 
 Module Module::clone_instance() const {
-  Module r(_ivalue()->compilation_unit(), type());
-
-  // Copy slots. If a slot is a module - recursively clone it.
-  size_t N = type()->numAttributes();
-  for (size_t i = 0; i < N; ++i) {
-    IValue s = _ivalue()->getSlot(i);
-    if (type()->getAttribute(i)->is_module()) {
-      const Module& orig = Module(s.toObject());
-      Module cloned = orig.clone_instance();
-      r._ivalue()->setAttr(type()->getAttributeName(i), cloned._ivalue());
-    } else {
-      r._ivalue()->setAttr(type()->getAttributeName(i), s);
-    }
-  }
-
-  return r;
+  return Module(_ivalue()->copy());
 }
 
 void Module::train(bool on) {
@@ -272,7 +268,7 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   }
   // Note: following Python, `__init__()` modifies its first parameter in-place
   // and returns nothing.
-  classType->getMethod("__init__")->operator()(std::move(stackWithSelf));
+  classType->getMethod("__init__").operator()(std::move(stackWithSelf));
 
   return obj;
 }
@@ -389,14 +385,13 @@ void Module::dump(
             << std::endl;
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch
 
 namespace c10 {
 
-torch::jit::script::Module IValue::toModule() const {
-  return torch::jit::script::Module(toObject());
+torch::jit::Module IValue::toModule() const {
+  return torch::jit::Module(toObject());
 }
 bool IValue::isModule() const {
   return isObject() && toObjectRef().type()->is_module();

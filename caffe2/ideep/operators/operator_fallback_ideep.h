@@ -94,7 +94,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         dtensor->Resize(input.get_dims());
         // If fallback from INT8, the public format of original input is nhwc.
         // While the required format is nchw, need to reorder to nchw.
-        if (input.get_public_format() == iformat::nhwc) {
+        if (input.get_desc().is_nhwc()) {
           itensor temp_ten ({input.get_dims(), idtype::f32, iformat::nchw},
               dtensor->template mutable_data<float>());
           temp_ten.feed_from(input);

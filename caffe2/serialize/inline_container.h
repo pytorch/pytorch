@@ -91,8 +91,13 @@ namespace caffe2 {
 namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0x2L;
-constexpr uint64_t kProducedFileFormatVersion = 0x2L;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0x3L;
+
+// Versions (i.e. why was the version number bumped?)
+// 1. Initial version
+// 2. Removed op_version_set version numbers
+// 3. Added type tags to pickle serialization of container types
+constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 
 // Writer-specific constants
 constexpr uint64_t kFieldAlignment = 64;

@@ -49,8 +49,10 @@ For reference, here’s a full list of view ops in PyTorch:
 
 - Basic slicing and indexing op, e.g. ``tensor[0, 2:, 1:7:2]`` returns a view of base ``tensor``, see note below.
 - :meth:`~torch.Tensor.as_strided`
+- :meth:`~torch.Tensor.detach`
 - :meth:`~torch.Tensor.diagonal`
 - :meth:`~torch.Tensor.expand`
+- :meth:`~torch.Tensor.expand_as`
 - :meth:`~torch.Tensor.narrow`
 - :meth:`~torch.Tensor.permute`
 - :meth:`~torch.Tensor.select`

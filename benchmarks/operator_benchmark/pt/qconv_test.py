@@ -11,8 +11,10 @@ Microbenchmarks for qConv2d operators.
 
 # Configs for qconv2d
 qconv_2d_configs = op_bench.config_list(
-    # Resnext101 - 32x8d shapes
     attrs=[
+        # Shape matching the floating point short benchmark
+        [1, 256, 256, 16, 16, 1, 3, 1, 0],
+        # Resnext101 - 32x8d shapes
         [1, 64, 128, 56, 56, 1, 1, 1, 0],
         [1, 256, 256, 56, 56, 32, 3, 1, 1],
         [1, 256, 256, 56, 56, 1, 1, 1, 0],
@@ -21,6 +23,7 @@ qconv_2d_configs = op_bench.config_list(
     attr_names=["N", "IC", "OC", "H", "W", "G", "kernel", "stride", "pad"],
     tags=["short"],
 )
+
 
 # Configs for convolution shapes from Resnext-101 32x4d
 resnext_32_4d_shape_configs = op_bench.config_list(
@@ -58,6 +61,7 @@ resnext_32_4d_shape_configs = op_bench.config_list(
 
 class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, N, IC, OC, H, W, G, kernel, stride, pad):
+
         scale = 1.0 / 255
         zero_point = 0
         X = torch.randn(N, IC, H, W, dtype=torch.float32)

@@ -100,10 +100,10 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size,
     auto max_idx = index.max().item<int64_t>();
     auto min_idx = index.min().item<int64_t>();
     if (max_idx >= dim_size) {
-      AT_INDEX_ERROR("index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+      TORCH_CHECK_INDEX(false, "index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
     }
     if (min_idx < -dim_size) {
-      AT_INDEX_ERROR("index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+      TORCH_CHECK_INDEX(false, "index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
     }
   }
   return index.remainder(dim_size);
@@ -181,7 +181,7 @@ static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t
 namespace {
 void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & value, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
-    AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+    TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
   auto value_ = value.contiguous();
   Tensor linearIndex, expandedValue, src;
@@ -192,13 +192,13 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
       auto src_ = permuted ? src.contiguous() : src;
-      linearIndex = linearIndex.view(-1);
+      linearIndex = linearIndex.reshape(-1);
       auto sorted_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       auto orig_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       using device_ptr = thrust::device_ptr<int64_t>;
       const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-      linearIndex.div_(sliceSize);
+      linearIndex.floor_divide_(sliceSize);
       {
       sorted_indices.copy_(linearIndex);
       auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
@@ -225,8 +225,9 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(C10_WARP_SIZE, indices_per_block);
 
-      AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool,
+      AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
       value_.scalar_type(), "indexing_backward", [&] {
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "indexing_backward", [&] {
       indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
         sorted_indices.data_ptr<int64_t>(),
         orig_indices.data_ptr<int64_t>(),
@@ -237,7 +238,8 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
         strideBefore,
         nElemBefore);
       });
-      THCudaCheck(cudaGetLastError());
+      });
+      AT_CUDA_CHECK(cudaGetLastError());
       if (permuted)
           self.copy_(src_.permute(inversePerm));
   }
@@ -487,72 +489,76 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   if (cuda::detail::canUse32BitIndexMath(self) &&
       cuda::detail::canUse32BitIndexMath(source) &&
       cuda::detail::canUse32BitIndexMath(index)) {
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "index_add", [&] {
-      cuda::detail::TensorInfo<scalar_t, unsigned int> selfInfo =
-          cuda::detail::getTensorInfo<scalar_t, unsigned int>(self_);
-      int selfAddDim = selfInfo.collapseDims(dim);
-      selfInfo.reduceDim(selfAddDim);
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "index_add", [&] {
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "index_add", [&] {
+        cuda::detail::TensorInfo<scalar_t, unsigned int> selfInfo =
+            cuda::detail::getTensorInfo<scalar_t, unsigned int>(self_);
+        int selfAddDim = selfInfo.collapseDims(dim);
+        selfInfo.reduceDim(selfAddDim);
 
-      auto sourceInfo =
-        cuda::detail::getTensorInfo<scalar_t, unsigned int>(source_);
-      int sourceAddDim = sourceInfo.collapseDims(dim);
-      sourceInfo.reduceDim(sourceAddDim);
+        auto sourceInfo =
+          cuda::detail::getTensorInfo<scalar_t, unsigned int>(source_);
+        int sourceAddDim = sourceInfo.collapseDims(dim);
+        sourceInfo.reduceDim(sourceAddDim);
 
-      auto indexInfo =
-       cuda::detail::getTensorInfo<int64_t, unsigned int>(index);
-      indexInfo.collapseDims();
+        auto indexInfo =
+         cuda::detail::getTensorInfo<int64_t, unsigned int>(index);
+        indexInfo.collapseDims();
 
-      // A reasonable choice for when to have each thread iterate over
-      // index to choose
-      if (numIndex <= 16) {
-        if (selfInfo.dims == 1 && sourceInfo.dims == 1 && indContig) {
-          SMALL_INDEX(scalar_t, unsigned int, 1, 1, -2);
-        } else if (selfInfo.dims == 2 && sourceInfo.dims == 2 && indContig) {
-          SMALL_INDEX(scalar_t, unsigned int, 2, 2, -2);
-        } else if (selfInfo.dims == 3 && sourceInfo.dims == 3 && indContig) {
-          SMALL_INDEX(scalar_t, unsigned int, 3, 3, -2);
-        } else {
-          SMALL_INDEX(scalar_t, unsigned int, -1, -1, -1);
-        }
-      } else {
-        bool indexIsMajor = indexShouldBeMajor(selfInfo, selfAddDim);
-
-        if (selfInfo.dims == 1 && sourceInfo.dims == 1 && indContig) {
-          LARGE_INDEX(scalar_t, unsigned int, 1, 1, -2, true);
-        } else if (selfInfo.dims == 2 && sourceInfo.dims == 2 && indContig) {
-          if (indexIsMajor) {
-            LARGE_INDEX(scalar_t, unsigned int, 2, 2, -2, true);
+        // A reasonable choice for when to have each thread iterate over
+        // index to choose
+        if (numIndex <= 16) {
+          if (selfInfo.dims == 1 && sourceInfo.dims == 1 && indContig) {
+            SMALL_INDEX(scalar_t, unsigned int, 1, 1, -2);
+          } else if (selfInfo.dims == 2 && sourceInfo.dims == 2 && indContig) {
+            SMALL_INDEX(scalar_t, unsigned int, 2, 2, -2);
+          } else if (selfInfo.dims == 3 && sourceInfo.dims == 3 && indContig) {
+            SMALL_INDEX(scalar_t, unsigned int, 3, 3, -2);
           } else {
-            LARGE_INDEX(scalar_t, unsigned int, 2, 2, -2, false);
-          }
-        } else if (selfInfo.dims == 3 && sourceInfo.dims == 3 && indContig) {
-          if (indexIsMajor) {
-            LARGE_INDEX(scalar_t, unsigned int, 3, 3, -2, true);
-          } else {
-            LARGE_INDEX(scalar_t, unsigned int, 3, 3, -2, false);
+            SMALL_INDEX(scalar_t, unsigned int, -1, -1, -1);
           }
         } else {
-          LARGE_INDEX(scalar_t, unsigned int, -1, -1, -1, true);
+          bool indexIsMajor = indexShouldBeMajor(selfInfo, selfAddDim);
+
+          if (selfInfo.dims == 1 && sourceInfo.dims == 1 && indContig) {
+            LARGE_INDEX(scalar_t, unsigned int, 1, 1, -2, true);
+          } else if (selfInfo.dims == 2 && sourceInfo.dims == 2 && indContig) {
+            if (indexIsMajor) {
+              LARGE_INDEX(scalar_t, unsigned int, 2, 2, -2, true);
+            } else {
+              LARGE_INDEX(scalar_t, unsigned int, 2, 2, -2, false);
+            }
+          } else if (selfInfo.dims == 3 && sourceInfo.dims == 3 && indContig) {
+            if (indexIsMajor) {
+              LARGE_INDEX(scalar_t, unsigned int, 3, 3, -2, true);
+            } else {
+              LARGE_INDEX(scalar_t, unsigned int, 3, 3, -2, false);
+            }
+          } else {
+            LARGE_INDEX(scalar_t, unsigned int, -1, -1, -1, true);
+          }
         }
-      }
+      });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "index_add", [&] {
-      cuda::detail::TensorInfo<scalar_t, uint64_t> selfInfo =
-        cuda::detail::getTensorInfo<scalar_t, uint64_t>(self_);
-      int selfAddDim = selfInfo.collapseDims(dim);
-      selfInfo.reduceDim(selfAddDim);
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "index_add", [&] {
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "index_add", [&] {
+        cuda::detail::TensorInfo<scalar_t, uint64_t> selfInfo =
+          cuda::detail::getTensorInfo<scalar_t, uint64_t>(self_);
+        int selfAddDim = selfInfo.collapseDims(dim);
+        selfInfo.reduceDim(selfAddDim);
 
-      cuda::detail::TensorInfo<scalar_t, uint64_t> sourceInfo =
-        cuda::detail::getTensorInfo<scalar_t, uint64_t>(source_);
-      int sourceAddDim = sourceInfo.collapseDims(dim);
-      sourceInfo.reduceDim(sourceAddDim);
+        cuda::detail::TensorInfo<scalar_t, uint64_t> sourceInfo =
+          cuda::detail::getTensorInfo<scalar_t, uint64_t>(source_);
+        int sourceAddDim = sourceInfo.collapseDims(dim);
+        sourceInfo.reduceDim(sourceAddDim);
 
-      cuda::detail::TensorInfo<int64_t, uint64_t> indexInfo =
-        cuda::detail::getTensorInfo<int64_t, uint64_t>(index);
-      indexInfo.collapseDims();
+        cuda::detail::TensorInfo<int64_t, uint64_t> indexInfo =
+          cuda::detail::getTensorInfo<int64_t, uint64_t>(index);
+        indexInfo.collapseDims();
 
-      LARGE_INDEX(scalar_t, uint64_t, -1, -1, -1, true);
+        LARGE_INDEX(scalar_t, uint64_t, -1, -1, -1, true);
+      });
     });
   }
 
