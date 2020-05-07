@@ -8,41 +8,9 @@
 // c10 dispatcher.
 // TODO: Clean up what remains here
 
-#include <c10/core/Backend.h>
-#include <c10/core/ScalarType.h>
-#include <c10/util/Exception.h>
-#include <ATen/core/LegacyDeviceTypeInit.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
-#include <c10/core/TensorImpl.h>
-#include <ATen/core/TensorBody.h>
 
 namespace at {
-
-class CAFFE2_API LegacyTypeDispatch {
- public:
-  void initCPU() {
-    static std::once_flag cpu_once;
-    std::call_once(cpu_once, [] {
-      getLegacyDeviceTypeInit().initCPU();
-    });
-  }
-
-  void initCUDA() {
-    static std::once_flag cuda_once;
-    std::call_once(cuda_once, [] {
-      getLegacyDeviceTypeInit().initCUDA();
-    });
-  }
-
-  void initHIP() {
-    static std::once_flag hip_once;
-    std::call_once(hip_once, [] {
-      getLegacyDeviceTypeInit().initHIP();
-    });
-  }
-};
-
-CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
 
 // A RAII, thread local (!) guard that will disable dispatch to variable
 // handler.
