@@ -48,6 +48,10 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeight::unpack() {
 #ifdef USE_PYTORCH_QNNPACK
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsQnnp::
     unpack() {
+  TORCH_CHECK(
+      orig_weight.defined(),
+      "Cannot unpack weights. "
+      "Call at::globalContext()::setReleaseOriginalWeights(false) before packing or loading to enable unpacking.");
   return std::tuple<at::Tensor, c10::optional<at::Tensor>>(orig_weight, bias_);
 }
 #endif // USE_PYTORCH_QNNPACK

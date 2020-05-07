@@ -277,6 +277,11 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
         (uint8_t*)qnnp_w_data,
         nullptr);
     packB = w.get();
+    if (at::globalContext().releaseWeightsWhenPrepacking()) {
+      // On mobile, we release the original weight by resetting the intrusive_ptr.
+      // Calling unpack after this will throw an assertion.
+      pack_ptr.orig_weight.reset();
+    }
   }
 
   // Quantize input
