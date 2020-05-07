@@ -63,7 +63,7 @@ Tensor mkldnn_reorder_conv2d_weight(
   // dimension when groups > 1, having dimension [g, o/g, i, h, w] instead of
   // [o, i, h, w]. Ideally we should reorder the weight back in serialization.
   // For backward compatibility, we squash the first two dims (g * o/g) back to
-  // its original form. for conv3d, it always 5-d
+  // its original form.
   if (w.ndims() == 5) {
     auto wdims = w.get_dims();
     w.reshape({wdims[0] * wdims[1], wdims[2], wdims[3], wdims[4]});
@@ -131,8 +131,7 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups,
-    int64_t dims) {
+    int64_t groups) {
   TORCH_CHECK(false, "mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
 }
 
@@ -141,8 +140,7 @@ Tensor mkldnn_reorder_conv3d_weight(
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups,
-    int64_t dims) {
+    int64_t groups) {
   TORCH_CHECK(false, "mkldnn_reorder_conv3d_weight: MKL-DNN build is disabled");
 }
 

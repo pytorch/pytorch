@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
@@ -8,10 +8,10 @@ namespace at {
 namespace native {
 namespace {
 
-class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
+class QLinearUnpackWeightInt8 final {
  public:
 #ifdef USE_FBGEMM
-  std::tuple<at::Tensor, c10::optional<Tensor>> fbgemm_linear_unpack(
+  static std::tuple<at::Tensor, c10::optional<Tensor>> fbgemm_linear_unpack(
       at::Tensor packed_weight) {
     // Pull out the PackBMatrix instance from the owning tensor.
     auto& pack_ptr =
@@ -56,7 +56,7 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
   }
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
-  std::tuple<at::Tensor, c10::optional<Tensor>> qnnpack_linear_unpack(
+  static std::tuple<at::Tensor, c10::optional<Tensor>> qnnpack_linear_unpack(
       at::Tensor packed_weight) {
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
@@ -64,7 +64,7 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
         pack_ptr.orig_weight, pack_ptr.bias);
   }
 #endif // USE_PYTORCH_QNNPACK
-  std::tuple<at::Tensor, c10::optional<Tensor>> operator()(
+  static std::tuple<at::Tensor, c10::optional<Tensor>> run(
       at::Tensor packed_weight) {
     auto& ctx = at::globalContext();
 
@@ -85,10 +85,10 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
   }
 };
 
-class QLinearUnpackWeightFp16 final : public c10::OperatorKernel {
+class QLinearUnpackWeightFp16 final {
  public:
 #ifdef USE_FBGEMM
-  std::tuple<at::Tensor, c10::optional<Tensor>> fbgemm_linear_unpack(
+  static std::tuple<at::Tensor, c10::optional<Tensor>> fbgemm_linear_unpack(
       at::Tensor packed_weight) {
     // Pull out the PackBMatrix instance from the owning tensor.
     auto& packed_struct =
@@ -109,7 +109,7 @@ class QLinearUnpackWeightFp16 final : public c10::OperatorKernel {
   }
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
-  std::tuple<at::Tensor, c10::optional<Tensor>> qnnpack_linear_unpack(
+  static std::tuple<at::Tensor, c10::optional<Tensor>> qnnpack_linear_unpack(
       at::Tensor packed_weight) {
     TORCH_CHECK(
         false,
@@ -117,7 +117,7 @@ class QLinearUnpackWeightFp16 final : public c10::OperatorKernel {
         "not supported by QNNPACK");
   }
 #endif // USE_PYTORCH_QNNPACK
-  std::tuple<at::Tensor, c10::optional<Tensor>> operator()(
+  static std::tuple<at::Tensor, c10::optional<Tensor>> run(
       at::Tensor packed_weight) {
     auto& ctx = at::globalContext();
 
@@ -138,14 +138,10 @@ class QLinearUnpackWeightFp16 final : public c10::OperatorKernel {
   }
 };
 
-static auto registry =
-    c10::RegisterOperators()
-        .op("quantized::linear_unpack(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
-            c10::RegisterOperators::options().kernel<QLinearUnpackWeightInt8>(
-                DispatchKey::CPUTensorId))
-        .op("quantized::linear_unpack_fp16(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
-            c10::RegisterOperators::options().kernel<QLinearUnpackWeightFp16>(
-                DispatchKey::CPUTensorId));
+TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+  m.impl("linear_unpack", QLinearUnpackWeightInt8::run);
+  m.impl("linear_unpack_fp16", QLinearUnpackWeightFp16::run);
+}
 
 } // namespace
 } // namespace native

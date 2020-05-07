@@ -48,6 +48,8 @@ struct TORCH_API Function {
 
   virtual std::shared_ptr<Graph> optimized_graph() const = 0;
 
+  virtual void clear_execution_info() = 0;
+
   virtual GraphExecutor& get_executor() = 0;
 
   virtual const c10::FunctionSchema& getSchema() const = 0;

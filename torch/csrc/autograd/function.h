@@ -36,54 +36,54 @@ using IndexRange = std::pair<size_t, size_t>;
 // Custom deleter to prevent stack overflows.
 TORCH_API void deleteNode(Node* function);
 
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-///                               Node
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// A `Node` is an abstract class that represents an operation taking zero
-/// or more input `Variable`s and producing zero or more output `Variable`s. All
-/// functions in PyTorch's autograd machinery derive from this class and
-/// override its `apply` method. Instances of such subclasses will then be
-/// invokeable via the call operator.
-///
-///                    Nodes in the Autograd Graph
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// When viewing the autograd system as a graph, `Node`s are the vertices or
-/// nodes, connected to each other via (directed) `Edge`s, which themselves are
-/// represented via (`Node`, input_nr) pairs. `Variable`s are the outputs to
-/// and inputs of `Node`s, and travel between these edges during execution
-/// of the graph. When two or more `Edge`s (from different sources) point at the
-/// same input to a `Node`, the values produced along all of these edges are
-/// implicitly summed prior to being forwarded to the target `Node`.
-///
-///                              Hierarchy
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// Subclasses usually represent differentiable functions as well as their
-/// gradient operators. Note, however, that due to the very general definition
-/// of a `Node` taking *zero* or more inputs and producing *zero* or more
-/// outputs, uses of `Node`s are flexible and extend beyond purely
-/// mathematical operations. For example, the `AccumulateGrad` function is a
-/// *sink*: it takes one input, but produces no outputs, instead accumulating
-/// the input as a side effect. At the other extreme, the `GraphRoot` function
-/// receives no inputs from other functions, but produces multiple outputs.
-///
-///                              Interface
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// The most important method on `Node` is the call operator, which takes in
-/// a list of variables and produces a list of variables. The precise size of
-/// these lists can be determined with `num_inputs()` and `num_outputs()`.
-/// `Node`s are stitched together via their `next_edge` interface, which let
-/// you manipulate the set of outgoing edges of a `Node`. You can add an
-/// edge with `add_next_edge()`, retrieve an edge with `next_edge(index)` and
-/// iterate over them via the `next_edges()` method. Other methods exist for
-/// integration with the JIT and other parts of PyTorch. Every `Node` has a
-/// *sequence number* that increases monotonically in the order of `Node`
-/// construction. It can be retrieved via the `sequence_nr()` method. Note that
-/// this sequence number is *thread local*. This means that when `Node`s
-/// `A`, `B` and `C` are created consecutively in the same thread, their
-/// sequence numbers will be ordered `A` < `B` < `C`. If, however, `A` and `B`
-/// are created in one thread and `C` is created in a new thread, there are *no
-/// guarantees* w.r.t. the ordering of `C` relative to `A` or `B`.
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//                               Node
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// A `Node` is an abstract class that represents an operation taking zero
+// or more input `Variable`s and producing zero or more output `Variable`s. All
+// functions in PyTorch's autograd machinery derive from this class and
+// override its `apply` method. Instances of such subclasses will then be
+// invokeable via the call operator.
+//
+//                    Nodes in the Autograd Graph
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// When viewing the autograd system as a graph, `Node`s are the vertices or
+// nodes, connected to each other via (directed) `Edge`s, which themselves are
+// represented via (`Node`, input_nr) pairs. `Variable`s are the outputs to
+// and inputs of `Node`s, and travel between these edges during execution
+// of the graph. When two or more `Edge`s (from different sources) point at the
+// same input to a `Node`, the values produced along all of these edges are
+// implicitly summed prior to being forwarded to the target `Node`.
+//
+//                              Hierarchy
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Subclasses usually represent differentiable functions as well as their
+// gradient operators. Note, however, that due to the very general definition
+// of a `Node` taking *zero* or more inputs and producing *zero* or more
+// outputs, uses of `Node`s are flexible and extend beyond purely
+// mathematical operations. For example, the `AccumulateGrad` function is a
+// *sink*: it takes one input, but produces no outputs, instead accumulating
+// the input as a side effect. At the other extreme, the `GraphRoot` function
+// receives no inputs from other functions, but produces multiple outputs.
+//
+//                              Interface
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// The most important method on `Node` is the call operator, which takes in
+// a list of variables and produces a list of variables. The precise size of
+// these lists can be determined with `num_inputs()` and `num_outputs()`.
+// `Node`s are stitched together via their `next_edge` interface, which let
+// you manipulate the set of outgoing edges of a `Node`. You can add an
+// edge with `add_next_edge()`, retrieve an edge with `next_edge(index)` and
+// iterate over them via the `next_edges()` method. Other methods exist for
+// integration with the JIT and other parts of PyTorch. Every `Node` has a
+// *sequence number* that increases monotonically in the order of `Node`
+// construction. It can be retrieved via the `sequence_nr()` method. Note that
+// this sequence number is *thread local*. This means that when `Node`s
+// `A`, `B` and `C` are created consecutively in the same thread, their
+// sequence numbers will be ordered `A` < `B` < `C`. If, however, `A` and `B`
+// are created in one thread and `C` is created in a new thread, there are *no
+// guarantees* w.r.t. the ordering of `C` relative to `A` or `B`.
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 struct TORCH_API Node : std::enable_shared_from_this<Node> {
  public:
   /// Construct a new `Node` with the given `next_edges`. `sequence_nr` is

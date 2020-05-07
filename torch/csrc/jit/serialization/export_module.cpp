@@ -1,17 +1,23 @@
 #include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
+#include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
 
+#include <ATen/core/jit_type.h>
+#include <ATen/core/qualified_name.h>
 #include <string>
 #include <vector>
 
@@ -127,9 +133,9 @@ void setstateTuple(const IValue& ivalue, std::vector<c10::IValue>& elements) {
   auto obj = ivalue.toObject();
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
-    Function* setstate = type->getMethod("__setstate__");
-    if (setstate->isGraphFunction()) {
-      elements.push_back(getFunctionTuple(*setstate));
+    Function& setstate = type->getMethod("__setstate__");
+    if (setstate.isGraphFunction()) {
+      elements.push_back(getFunctionTuple(setstate));
     }
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
@@ -195,6 +201,9 @@ class ScriptModuleSerializer {
           data.insert(data.end(), buf, buf + size);
         },
         nullptr,
+        [&](const c10::ClassTypePtr& t) {
+          return type_name_uniquer_.getUniqueName(t);
+        },
         &memorizedClassTypes);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
@@ -280,13 +289,26 @@ class ScriptModuleSerializer {
       return;
     }
     converted_types_.insert(class_type);
-    std::string qualifier = class_type->name()->prefix();
+    auto qualname = type_name_uniquer_.getUniqueName(class_type);
+    std::string qualifier = qualname.prefix();
     PythonPrint* pp = file_streams_.find(qualifier);
+
+    auto type_printer =
+        [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
+      auto namedType = t->cast<c10::NamedType>();
+      if (namedType && namedType->name()) {
+        return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+      }
+      return c10::nullopt;
+    };
     if (!pp) {
       pp = &file_streams_.insert(
           qualifier,
           PythonPrint(
-              constant_table_, class_deps_, /*enforce_importable=*/true));
+              constant_table_,
+              class_deps_,
+              type_printer,
+              /*enforce_importable=*/true));
     }
     pp->printNamedType(class_type);
   }
@@ -295,6 +317,7 @@ class ScriptModuleSerializer {
   std::vector<at::Tensor> constant_table_;
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   std::vector<c10::NamedTypePtr> class_deps_;
+  TypeNameUniquer type_name_uniquer_;
 
   // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
   // created
@@ -330,6 +353,38 @@ void ExportModule(
     bool bytecode_format) {
   ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(module, extra_files, bytecode_format);
+}
+
+namespace {
+void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
+  std::vector<c10::IValue> elements;
+  moduleMethodsTuple(m, elements);
+  for (const auto& element : elements) {
+    auto table = element.toTuple()->elements()[1];
+    auto row =
+        table.toTuple()->elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
+    TORCH_INTERNAL_ASSERT(
+        row->elements().at(0).toStringRef() == "operators",
+        "Expected operators but found ",
+        row->elements().at(0).toStringRef());
+    const auto& ops_list = row->elements().at(1).toTuple()->elements();
+    for (const auto& op : ops_list) {
+      auto op_item = op.toTuple()->elements();
+      TORCH_CHECK(
+          op_item.size() == 2,
+          "There should be two parts in an operator name.");
+      auto opname = op_item[0].toString()->string();
+      auto overload = op_item[1].toString()->string();
+      opnames.emplace(overload.empty() ? opname : opname + "." + overload);
+    }
+  }
+}
+} // namespace
+
+std::vector<std::string> export_opnames(const script::Module& m) {
+  std::set<std::string> names;
+  export_opnames(m, names);
+  return std::vector<std::string>(names.begin(), names.end());
 }
 
 } // namespace jit

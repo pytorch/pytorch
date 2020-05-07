@@ -270,7 +270,7 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
 
 static void check_convert(Scalar scalar, ScalarType scalarType) {
   // Validate that is possible to convert scalar to tensor dtype without overflow
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, scalarType, "check_convert", [&]{
+  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, scalarType, "check_convert", [&]{
     scalar.to<scalar_t>();
   });
 }
@@ -659,6 +659,8 @@ Tensor logical_xor(const Tensor& self, Scalar other) { return comparison_op(self
 Tensor& logical_xor_(Tensor& self, Scalar other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 
 Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
+  TORCH_CHECK(!other.is_complex(), "max is not yet implemented for complex tensors.");
   auto iter = TensorIterator::binary_op(result, self, other,
                                         /*check_mem_overlap=*/true);
   TORCH_CHECK(self.dtype() == other.dtype(),
@@ -669,6 +671,8 @@ Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor max(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
+  TORCH_CHECK(!other.is_complex(), "max is not yet implemented for complex tensors.");
   Tensor result = at::empty(0, self.options());
   return at::max_out(result, self, other);
 }
@@ -676,6 +680,8 @@ Tensor max(const Tensor& self, const Tensor& other) {
 Tensor& max_(Tensor& self, const Tensor& other) { return at::max_out(self, self, other); }
 
 Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
+  TORCH_CHECK(!other.is_complex(), "min is not yet implemented for complex tensors.");
   auto iter = TensorIterator::binary_op(result, self, other,
                                         /*check_mem_overlap=*/true);
   TORCH_CHECK(self.dtype() == other.dtype(),
@@ -686,6 +692,8 @@ Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor min(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
+  TORCH_CHECK(!other.is_complex(), "min is not yet implemented for complex tensors.");
   Tensor result = at::empty(0, self.options());
   return at::min_out(result, self, other);
 }
@@ -741,5 +749,12 @@ Tensor true_divide(const Tensor& self, Scalar divisor) {
 Tensor& true_divide_(Tensor& self, Scalar divisor) {
   return self.true_divide_(wrapped_scalar_tensor(divisor)); // redispatch!
 }
+
+// Note: this function is only for testing.
+// It is undocumented and should not be used outside of tests.
+Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, Scalar alpha) {
+  return self - (other * alpha);
+}
+
 
 }}  // at::native

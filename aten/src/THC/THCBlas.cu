@@ -7,6 +7,10 @@
 #include <algorithm>
 #include <mutex>
 
+#ifdef __HIP_PLATFORM_HCC__
+#include <hip/hip_version.h>
+#endif
+
 float THCudaBlas_Sdot(THCState *state, int64_t n, float *x, int64_t incx, float *y, int64_t incy)
 {
   if (n == 1) {
@@ -73,6 +77,20 @@ at::Half THCudaBlas_Hdot(THCState *state, int64_t n, at::Half *x, int64_t incx, 
   THError("Cublas_Hdot only supports n, incx and incy "
           "up to signed integer limits: %d", INT_MAX);
   return 0.0;
+#elif HIP_VERSION >= 210
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+
+  at::Half result;
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasSetStream(handle, at::cuda::getCurrentCUDAStream().stream());
+  THCublasCheck(rocblas_hdot(handle, n,
+                             reinterpret_cast<rocblas_half*>(x), incx,
+                             reinterpret_cast<rocblas_half*>(y), incy,
+                             reinterpret_cast<rocblas_half*>(&result)));
+  return result;
 #else
   THError("Cublas_Hdot requires CUDA 8.0+");
   return 0.0;
@@ -88,16 +106,6 @@ void adjustLdLevel2(int64_t m, int64_t n, int64_t *lda)
   // TODO: why does Level3 check trans but this doesn't?
   if (n <= 1)
     *lda = std::max<int64_t>(m, 1);
-}
-
-void THCudaBlas_Sgemv(THCState *state, char trans, int64_t m, int64_t n, float alpha, float *a, int64_t lda, float *x, int64_t incx, float beta, float *y, int64_t incy)
-{
-  at::cuda::blas::gemv<float>(trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
-}
-
-void THCudaBlas_Dgemv(THCState *state, char trans, int64_t m, int64_t n, double alpha, double *a, int64_t lda, double *x, int64_t incx, double beta, double *y, int64_t incy)
-{
-  at::cuda::blas::gemv<double>(trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
 void THCudaBlas_Sger(THCState *state, int64_t m, int64_t n, float alpha, float *x, int64_t incx, float *y, int64_t incy, float *a, int64_t lda)
