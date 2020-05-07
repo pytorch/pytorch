@@ -55,10 +55,16 @@ const VContext& context();
 // tensors with dimension <= 4 as VkImage, sed in shaders as texture or storage
 // image. It is 3-dimensional image (x, y, z) with 4 component * 16 bit for each
 // triple (x, y, z).
-// For NCHW, NHWC: 
-// For dim==4: image.x - W sizes[3]; image.y -  H sizes[2]; image.z - (N sizes[0] * C sizes[1]) / 4
-// For dim==3: image.x - W sizes[2]; image.y - H sizes[1]; image.z - (C sizes[0]) / 4
-// For dim==2: image.x - W sizes[1]; image.y - H sizes[0]; image.z : 1
+// For NCHW, NHWC:
+//
+// For dim==4: image.x - W sizes[3]; image.y -  H sizes[2]; image.z - (N
+// sizes[0] * C sizes[1]) / 4;
+//
+// For dim==3: image.x - W sizes[2]; image.y - H sizes[1]; image.z - (C
+// sizes[0]) / 4
+//
+// For dim==2: image.x - W sizes[1];  image.y - H sizes[0]; image.z : 1
+//
 // For dim==1: image.x - W sizes[0]; image.y : 1; image.z : 1
 //
 //
@@ -103,16 +109,16 @@ class VulkanTensor final : public c10::intrusive_ptr_target {
   inline void setDataFromHost(const float* inputData);
   inline void copyDataToHost(float* outputData);
 
-  inline bool hasBuffer();
+  inline bool hasBuffer() const;
   inline VBuffer& buffer();
-  inline bool canBeImage();
-  inline bool hasImage();
+  inline bool canBeImage() const;
+  inline bool hasImage() const;
   inline VImage& image() const;
   inline VImage& image();
 
  private:
   inline std::shared_ptr<Impl> impl();
-  inline std::shared_ptr<Impl> impl() const;
+  inline std::shared_ptr<const Impl> impl() const;
   std::shared_ptr<Impl> pImpl;
 };
 
@@ -242,6 +248,16 @@ VBuffer makeUniformConstBuffer(void* ptr, VkDeviceSize size);
 
 class VImage final {
  public:
+  static constexpr VkImageType kImageType = VK_IMAGE_TYPE_3D;
+  static constexpr VkFilter kFilter = VK_FILTER_NEAREST;
+  static constexpr VkFormat kFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+  static constexpr VkImageLayout kImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+  static constexpr VkImageLayout kImageLayoutInitial =
+      VK_IMAGE_LAYOUT_UNDEFINED;
+  static constexpr VkSamplerAddressMode kSamplerAddressMode =
+      VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+  static constexpr VkImageViewType kImageViewType = VK_IMAGE_VIEW_TYPE_3D;
+
   explicit VImage(uint32_t W, uint32_t H, uint32_t C);
 
   ~VImage() noexcept;
@@ -250,32 +266,33 @@ class VImage final {
   VImage(VImage&&) = default;
   VImage& operator=(VImage&&) = default;
 
-  inline auto W() {
+  inline auto W() const {
     return W_;
   }
-  inline auto H() {
+  inline auto H() const {
     return H_;
   }
-  inline auto C() {
+  inline auto C() const {
     return C_;
   }
-  inline auto D() {
+  inline auto D() const {
     return D_;
   }
 
-  VkImageViewCreateInfo makeImageViewCreateInfo();
-  VkSamplerCreateInfo makeSamplerCreateInfo();
-  VkDescriptorImageInfo makeDescriptorImageInfo(VkImageLayout imageLayout);
+  VkImageViewCreateInfo makeImageViewCreateInfo() const;
+  VkSamplerCreateInfo makeSamplerCreateInfo() const;
+  VkDescriptorImageInfo makeDescriptorImageInfo(
+      VkImageLayout imageLayout) const;
   VkWriteDescriptorSet makeWriteDescriptorSet(
       VkDescriptorSet descriptorSet,
       uint32_t binding,
       VkDescriptorType descriptorType,
-      const VkDescriptorImageInfo* imageInfo);
+      const VkDescriptorImageInfo* imageInfo) const;
   void bind(
       VkDescriptorSet descriptorSet,
       uint32_t binding,
       VkDescriptorType descriptorType,
-      VkImageLayout imageLayout);
+      VkImageLayout imageLayout) const;
   inline VkDeviceSize sizeBytes() const {
     return sizeof(float) * W_ * H_ * C_;
   }
@@ -300,21 +317,11 @@ class VImage final {
   VkImageView imageView_;
   VkSampler sampler_;
 
-  // configuration
-  VkImageType imageType_ = VK_IMAGE_TYPE_3D;
-  VkFilter filter_ = VK_FILTER_NEAREST;
-  VkFormat format_ = VK_FORMAT_R16G16B16A16_SFLOAT;
-  VkImageLayout imageLayout_ = VK_IMAGE_LAYOUT_GENERAL;
-  VkImageLayout imageLayoutInitial_ = VK_IMAGE_LAYOUT_UNDEFINED;
-  VkSamplerAddressMode samplerAddressMode_ =
-      VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-  VkImageViewType viewType_ = VK_IMAGE_VIEW_TYPE_3D;
 }; // class VImage
 
 void copyFromBufferToImage(VBuffer& buffer, VImage& image);
 
 void copyFromImageToBuffer(VImage& image, VBuffer& buffer);
-
 
 namespace vkutil {
 VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(

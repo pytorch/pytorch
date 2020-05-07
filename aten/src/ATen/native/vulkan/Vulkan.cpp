@@ -405,16 +405,16 @@ VImage::VImage(uint32_t W, uint32_t H, uint32_t C)
 
   VkImageCreateInfo imageInfo{};
   imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-  imageInfo.imageType = imageType_;
+  imageInfo.imageType = kImageType;
   imageInfo.extent.width = W_;
   imageInfo.extent.height = H_;
   imageInfo.extent.depth = D_;
 
   imageInfo.mipLevels = 1;
   imageInfo.arrayLayers = 1;
-  imageInfo.format = format_;
+  imageInfo.format = kFormat;
   imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-  imageInfo.initialLayout = imageLayoutInitial_;
+  imageInfo.initialLayout = kImageLayoutInitial;
   imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -450,12 +450,12 @@ VImage::~VImage() noexcept {
   vkDestroyImage(context().device(), image_, nullptr);
 }
 
-VkImageViewCreateInfo VImage::makeImageViewCreateInfo() {
+VkImageViewCreateInfo VImage::makeImageViewCreateInfo() const {
   VkImageViewCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   info.image = image_;
-  info.viewType = viewType_;
-  info.format = format_;
+  info.viewType = kImageViewType;
+  info.format = kFormat;
   info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   info.subresourceRange.baseMipLevel = 0;
   info.subresourceRange.levelCount = 1;
@@ -464,14 +464,14 @@ VkImageViewCreateInfo VImage::makeImageViewCreateInfo() {
   return info;
 }
 
-VkSamplerCreateInfo VImage::makeSamplerCreateInfo() {
+VkSamplerCreateInfo VImage::makeSamplerCreateInfo() const {
   VkSamplerCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-  info.magFilter = filter_;
-  info.minFilter = filter_;
-  info.addressModeU = samplerAddressMode_;
-  info.addressModeV = samplerAddressMode_;
-  info.addressModeW = samplerAddressMode_;
+  info.magFilter = kFilter;
+  info.minFilter = kFilter;
+  info.addressModeU = kSamplerAddressMode;
+  info.addressModeV = kSamplerAddressMode;
+  info.addressModeW = kSamplerAddressMode;
   info.anisotropyEnable = VK_FALSE;
   info.maxAnisotropy = 1.0f;
   info.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
@@ -484,7 +484,7 @@ VkSamplerCreateInfo VImage::makeSamplerCreateInfo() {
 }
 
 VkDescriptorImageInfo VImage::makeDescriptorImageInfo(
-    VkImageLayout imageLayout) {
+    VkImageLayout imageLayout) const {
   VkDescriptorImageInfo info{};
   info.sampler = sampler_;
   info.imageView = imageView_;
@@ -496,7 +496,7 @@ VkWriteDescriptorSet VImage::makeWriteDescriptorSet(
     VkDescriptorSet descriptorSet,
     uint32_t binding,
     VkDescriptorType descriptorType,
-    const VkDescriptorImageInfo* imageInfo) {
+    const VkDescriptorImageInfo* imageInfo) const {
   VkWriteDescriptorSet writeSet{};
   writeSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   writeSet.pNext = nullptr;
@@ -514,7 +514,7 @@ void VImage::bind(
     VkDescriptorSet descriptorSet,
     uint32_t binding,
     VkDescriptorType descriptorType,
-    VkImageLayout imageLayout) {
+    VkImageLayout imageLayout) const {
   auto descrImageInfo = makeDescriptorImageInfo(imageLayout);
   auto writeDescrSet = makeWriteDescriptorSet(
       descriptorSet, binding, descriptorType, &descrImageInfo);
@@ -921,7 +921,7 @@ class VulkanTensor::Impl {
     return numel_;
   }
 
-  inline bool hasBuffer() {
+  inline bool hasBuffer() const {
     return static_cast<bool>(buffer_);
   }
 
@@ -929,11 +929,11 @@ class VulkanTensor::Impl {
     return *(buffer_.get());
   }
 
-  inline bool canBeImage() {
+  inline bool canBeImage() const {
     return dim() <= 4;
   }
 
-  inline bool hasImage() {
+  inline bool hasImage() const {
     return static_cast<bool>(image_);
   }
 
@@ -1016,7 +1016,7 @@ std::shared_ptr<VulkanTensor::Impl> VulkanTensor::impl() {
   return pImpl;
 }
 
-std::shared_ptr<VulkanTensor::Impl> VulkanTensor::impl() const {
+std::shared_ptr<const VulkanTensor::Impl> VulkanTensor::impl() const {
   return pImpl;
 }
 
@@ -1048,7 +1048,7 @@ void VulkanTensor::copyDataToHost(float* outputData) {
   impl()->copyDataToHost(outputData);
 }
 
-bool VulkanTensor::hasBuffer() {
+bool VulkanTensor::hasBuffer() const {
   return impl()->hasBuffer();
 }
 
@@ -1056,11 +1056,11 @@ VBuffer& VulkanTensor::buffer() {
   return impl()->buffer();
 }
 
-bool VulkanTensor::canBeImage() {
+bool VulkanTensor::canBeImage() const {
   return impl()->canBeImage();
 }
 
-bool VulkanTensor::hasImage() {
+bool VulkanTensor::hasImage() const {
   return impl()->hasImage();
 }
 VulkanTensor::VulkanTensor(std::vector<int64_t> sizes)
