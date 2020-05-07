@@ -113,3 +113,14 @@ def override_quantized_engine(qengine):
         yield
     finally:
         torch.backends.quantized.engine = previous
+
+# TODO: Update all quantization tests to use this decorator.
+# Currently for some of the tests it seems to have inconsistent params
+# for fbgemm vs qnnpack.
+def override_qengines(qfunction):
+    def test_fn(*args, **kwargs):
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                # qfunction should not return anything.
+                qfunction(*args, **kwargs)
+    return test_fn
