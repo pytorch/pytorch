@@ -1046,6 +1046,12 @@ class TestCase(expecttest.TestCase):
                 pass
             super().assertNotEqual(x, y, message)
 
+    def assertEqualTypeString(self, x, y):
+        # This API is used simulate deprecated x.type() == y.type()
+        self.assertEqual(x.device, y.device)
+        self.assertEqual(x.dtype, y.dtype)
+        self.assertEqual(x.is_sparse, y.is_sparse)
+
     def assertObjectIn(self, obj, iterable):
         for elem in iterable:
             if id(obj) == id(elem):
