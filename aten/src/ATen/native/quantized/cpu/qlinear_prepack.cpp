@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
@@ -24,14 +24,14 @@ namespace at {
 namespace native {
 namespace {
 
-class QLinearPackWeightInt8 final : public c10::OperatorKernel {
+class QLinearPackWeightInt8 final {
  public:
 #ifdef USE_FBGEMM
   // Calculate the column offsets.
   // Note this includes the sum of the columns as well as the scalar term
   // B_zero_point * K, whereas the row_offsets created by
   // PackAWithQuantRowOffset is only the sum of the A rows.
-  void calc_col_offsets_transpose(
+  static void calc_col_offsets_transpose(
       int K,
       int N,
       const int8_t* Bint8,
@@ -50,7 +50,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
       }
     }
   }
-  at::Tensor fbgemm_linear_prepack(
+  static at::Tensor fbgemm_linear_prepack(
       at::Tensor weight,
       c10::optional<Tensor> bias) {
     TORCH_CHECK(
@@ -126,7 +126,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
   }
 #endif
 #ifdef USE_PYTORCH_QNNPACK
-  at::Tensor qnnpack_linear_prepack(
+  static at::Tensor qnnpack_linear_prepack(
       at::Tensor weight,
       c10::optional<Tensor> bias_in) {
     TORCH_CHECK(
@@ -173,7 +173,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     return cpp_custom_type_hack::create(std::move(wt_ptr), weight.options());
   }
 #endif
-  at::Tensor operator()(at::Tensor weight, c10::optional<Tensor> bias) {
+  static at::Tensor run(at::Tensor weight, c10::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
@@ -193,10 +193,10 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
   }
 };
 
-class QLinearPackWeightFp16 final : public c10::OperatorKernel {
- public:
+class QLinearPackWeightFp16 final {
+public:
 #ifdef USE_FBGEMM
-  at::Tensor fbgemm_linear_prepack_fp16(
+  static at::Tensor fbgemm_linear_prepack_fp16(
       at::Tensor weight,
       c10::optional<Tensor> bias) {
     const int64_t K = weight.size(1);
@@ -220,7 +220,7 @@ class QLinearPackWeightFp16 final : public c10::OperatorKernel {
   }
 #endif
 #ifdef USE_PYTORCH_QNNPACK
-  at::Tensor qnnpack_linear_prepack_fp16(
+  static at::Tensor qnnpack_linear_prepack_fp16(
       at::Tensor weight,
       c10::optional<Tensor> bias_in) {
     TORCH_CHECK(
@@ -229,7 +229,7 @@ class QLinearPackWeightFp16 final : public c10::OperatorKernel {
         "not supported by QNNPACK");
   }
 #endif // USE_PYTORCH_QNNPACK
-  at::Tensor operator()(at::Tensor weight, c10::optional<Tensor> bias) {
+  static at::Tensor run(at::Tensor weight, c10::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
@@ -249,7 +249,7 @@ class QLinearPackWeightFp16 final : public c10::OperatorKernel {
 
  private:
 #ifdef USE_FBGEMM
-  float RawUint16ToFp16(unsigned short value) {
+  static float RawUint16ToFp16(unsigned short value) {
     // Convert raw 16 bits half precision floating point number
     // to single precision floating point number.
     const unsigned short sign_bits = value >> 15;
@@ -265,7 +265,7 @@ class QLinearPackWeightFp16 final : public c10::OperatorKernel {
   }
 
   template <typename T>
-  bool CheckAndSaturate(T max_val, T* element) {
+  static bool CheckAndSaturate(T max_val, T* element) {
     if (*element > max_val) {
       *element = max_val;
       return true;
@@ -280,7 +280,7 @@ class QLinearPackWeightFp16 final : public c10::OperatorKernel {
   // The range for using FP16 quantization of weights requires that the elements
   // should be in the range of [5.96e-8, 65504]. If it is out of range, then the
   // number will be saturated to max or min representable values by FP16.
-  void HandleWeightsSaturation(int64_t N, float* weight) {
+  static void HandleWeightsSaturation(int64_t N, float* weight) {
     const float kFp16Max = RawUint16ToFp16(0x7BFF);
     bool found_out_of_range = false;
     for (int64_t i = 0; i < N; ++i) {
@@ -295,24 +295,21 @@ class QLinearPackWeightFp16 final : public c10::OperatorKernel {
 #endif // USE_FBGEMM
 };
 
-static auto registry =
-    c10::RegisterOperators()
-        .op("quantized::linear_prepack(Tensor W, Tensor? B=None) -> Tensor W_prepack",
-            c10::RegisterOperators::options()
-            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-            .kernel<QLinearPackWeightInt8>(DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::linear_prepack_fp16(Tensor W, Tensor? B=None) -> Tensor W_prepack",
-            c10::RegisterOperators::options()
-            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-            .kernel<QLinearPackWeightFp16>(DispatchKey::CPUTensorId))
-        .op("_quantized::linear_prepack(Tensor W, Tensor? B=None) -> Tensor W_prepack",
-            c10::RegisterOperators::options()
-            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-            .kernel<QLinearPackWeightInt8>(DispatchKey::QuantizedCPUTensorId))
-        .op("_quantized::linear_prepack_fp16(Tensor W, Tensor? B=None) -> Tensor W_prepack",
-            c10::RegisterOperators::options()
-            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-            .kernel<QLinearPackWeightFp16>(DispatchKey::CPUTensorId));
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("linear_prepack", QLinearPackWeightInt8::run);
+}
+
+TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+  m.impl("linear_prepack_fp16", QLinearPackWeightFp16::run);
+}
+
+TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
+  m.impl("linear_prepack", QLinearPackWeightInt8::run);
+}
+
+TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
+  m.impl("linear_prepack_fp16", QLinearPackWeightFp16::run);
+}
 
 } // namespace
 } // namespace native

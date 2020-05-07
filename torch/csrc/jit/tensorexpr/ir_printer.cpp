@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/reduction.h>
 
 namespace torch {
 namespace jit {
@@ -90,7 +91,7 @@ void IRPrinter::visit(const Mod* v) {
   if (v->dtype().is_integral()) {
     visitBinaryOp(v, "%", this);
   } else if (v->dtype().is_floating_point()) {
-    os() << "mod(" << v->lhs() << ", " << v->rhs() << ")";
+    os() << "mod(" << *v->lhs() << ", " << *v->rhs() << ")";
   } else {
     throw std::runtime_error("invalid dtype: " + std::to_string(v->dtype()));
   }
@@ -249,13 +250,6 @@ void IRPrinter::visit(const Let* v) {
   }
 }
 
-void IRPrinter::visit(const LetStmt* v) {
-  const Var* var = v->var();
-  os() << var->dtype().ToCppString() << " " << *var << " = " << *v->value()
-       << "; " << std::endl;
-  v->body()->accept(this);
-}
-
 void IRPrinter::visit(const Ramp* v) {
   os() << "Ramp(" << *v->base() << ", " << *v->stride() << ", " << v->lanes()
        << ")";
@@ -263,41 +257,18 @@ void IRPrinter::visit(const Ramp* v) {
 
 void IRPrinter::visit(const Load* v) {
   // TODO: support the mask case
-  os() << *v->base_handle() << "[" << *v->index() << "]";
-}
-
-void IRPrinter::visit(const For* v) {
-  const Var* var = v->var();
-  VarHandle vv(var);
-  emitIndent();
-  os() << "for (" << var->dtype().ToCppString() << " " << vv << " = "
-       << ExprHandle(v->start()) << "; " << vv << " < " << ExprHandle(v->stop())
-       << "; " << vv << "++) {";
-  std::string loop_options_str = v->loop_options().ToString();
-  if (!loop_options_str.empty()) {
-    os() << " // " << loop_options_str;
+  os() << *v->base_handle() << "[";
+  size_t i = 0;
+  for (const Expr* ind : v->indices()) {
+    if (i++) {
+      os() << ", ";
+    }
+    ind->accept(this);
   }
-  os() << std::endl;
-  if (v->body()) {
-    indent_++;
-    os() << *v->body();
-    indent_--;
+  if (v->indices().empty()) {
+    os() << "0";
   }
-  emitIndent();
-  os() << "}";
-}
-
-void IRPrinter::visit(const Block* v) {
-  for (Stmt* s : v->stmts()) {
-    os() << *s << std::endl;
-  }
-}
-
-void IRPrinter::visit(const Store* v) {
-  // TODO: handle the mask
-  emitIndent();
-  os() << *v->base_handle() << "[" << *v->index() << "] = " << *v->value()
-       << ";";
+  os() << "]";
 }
 
 void IRPrinter::visit(const Broadcast* v) {
@@ -318,56 +289,6 @@ void IRPrinter::visit(const BaseCallNode* v) {
     os() << *v->param(i);
   }
   os() << ")";
-}
-
-void IRPrinter::visit(const Allocate* v) {
-  emitIndent();
-  os() << "Allocate(" << *v->buffer_var() << ", " << v->dtype();
-  os() << ", {";
-  const std::vector<const Expr*>& dims = v->dims();
-  for (size_t i = 0; i < dims.size(); i++) {
-    if (i != 0) {
-      os() << ", ";
-    }
-    os() << *dims[i];
-  }
-  os() << "});";
-}
-
-void IRPrinter::visit(const Free* v) {
-  emitIndent();
-  os() << "Free(" << *v->buffer_var() << ");";
-}
-
-void IRPrinter::visit(const Cond* v) {
-  const Expr* cond = v->condition();
-  Stmt* true_stmt = v->true_stmt();
-  Stmt* false_stmt = v->false_stmt();
-  if (!true_stmt) {
-    emitIndent();
-    os() << "if (!" << *cond << ") {" << std::endl;
-    indent_++;
-    os() << *false_stmt << std::endl;
-    indent_--;
-    emitIndent();
-    os() << "}";
-  } else {
-    emitIndent();
-    os() << "if (" << *cond << ") {" << std::endl;
-    indent_++;
-    os() << *true_stmt << std::endl;
-    indent_--;
-    emitIndent();
-    os() << "}";
-    if (false_stmt) {
-      os() << " else {" << std::endl;
-      indent_++;
-      os() << *false_stmt << std::endl;
-      indent_--;
-      emitIndent();
-      os() << "}";
-    }
-  }
 }
 
 void IRPrinter::visit(const Term* v) {
@@ -397,6 +318,166 @@ void IRPrinter::visit(const Polynomial* v) {
   }
   v->scalar()->accept(this);
   os() << ")";
+}
+
+void IRPrinter::visit(const RoundOff* v) {
+  os() << "RoundOff(";
+  v->lhs()->accept(this);
+  os() << ", ";
+  v->rhs()->accept(this);
+  os() << ")";
+}
+
+void IRPrinter::visit(const ReduceOp* v) {
+  os() << "ReduceOp(";
+  os() << *v->accumulator() << ", ";
+  os() << *v->initializer() << ", ";
+  os() << v->complete() << ", ";
+
+  bool first = true;
+  os() << "out_args={";
+  for (auto* d : v->output_args()) {
+    if (!first) {
+      os() << ", ";
+    }
+    os() << *d;
+    first = false;
+  }
+  os() << "}, ";
+
+  first = true;
+  os() << "reduce_args={";
+  for (auto* d : v->reduce_args()) {
+    if (!first) {
+      os() << ", ";
+    }
+    os() << d->name_hint();
+    first = false;
+  }
+  os() << "})";
+}
+
+// === Stmt visitors below ===
+// Some invariants to keep in mind when changing printer visitors for statement:
+//  1) every statement first outputs the indendation with emitIndent
+//  2) every statement ends with a new line
+//
+// Block is an exception here as we want to allow it to be printed in the same
+// line as its parent stmt. Thus, block does not outputs the indentation in the
+// beginning and does not output a new line in the end - this should be done in
+// the parent stmt.
+
+void IRPrinter::visit(const Store* v) {
+  // TODO: handle the mask
+  emitIndent();
+  os() << *v->base_handle() << "[";
+  size_t i = 0;
+  for (const Expr* ind : v->indices()) {
+    if (i++) {
+      os() << ", ";
+    }
+    ind->accept(this);
+  }
+  if (v->indices().empty()) {
+    os() << "0";
+  }
+  os() << "] = " << *v->value() << ";";
+  os() << std::endl;
+}
+
+void IRPrinter::visit(const LetStmt* v) {
+  emitIndent();
+  const Var* var = v->var();
+  os() << var->dtype().ToCppString() << " " << *var << " = " << *v->value()
+       << "; " << std::endl;
+  v->body()->accept(this);
+  os() << std::endl;
+}
+
+void IRPrinter::visit(const For* v) {
+  const Var* var = v->var();
+  VarHandle vv(var);
+  emitIndent();
+  os() << "for (" << var->dtype().ToCppString() << " " << vv << " = "
+       << ExprHandle(v->start()) << "; " << vv << " < " << ExprHandle(v->stop())
+       << "; " << vv << "++) ";
+  std::string loop_options_str = v->loop_options().ToString();
+  if (!loop_options_str.empty()) {
+    os() << " /* " << loop_options_str << " */";
+  }
+  if (v->body()) {
+    os() << *v->body();
+  } else {
+    os() << "{}";
+  }
+  os() << std::endl;
+}
+
+void IRPrinter::visit(const Block* v) {
+  os() << "{" << std::endl;
+  indent_++;
+  for (Stmt* s : *v) {
+    os() << *s;
+  }
+  indent_--;
+  emitIndent();
+  os() << "}";
+}
+
+void IRPrinter::visit(const Allocate* v) {
+  emitIndent();
+  os() << "Allocate(" << *v->buffer_var() << ", " << v->dtype();
+  os() << ", {";
+  const std::vector<const Expr*>& dims = v->dims();
+  for (size_t i = 0; i < dims.size(); i++) {
+    if (i != 0) {
+      os() << ", ";
+    }
+    os() << *dims[i];
+  }
+  os() << "});" << std::endl;
+}
+
+void IRPrinter::visit(const Free* v) {
+  emitIndent();
+  os() << "Free(" << *v->buffer_var() << ");" << std::endl;
+}
+
+void IRPrinter::visit(const Cond* v) {
+  const Expr* cond = v->condition();
+  Stmt* true_stmt = v->true_stmt();
+  Stmt* false_stmt = v->false_stmt();
+  if (!true_stmt) {
+    emitIndent();
+    os() << "if (!" << *cond << ") ";
+    os() << *false_stmt << std::endl;
+  } else {
+    emitIndent();
+    os() << "if (" << *cond << ") ";
+    os() << *true_stmt;
+    if (false_stmt) {
+      os() << " else ";
+      os() << *false_stmt;
+    }
+    os() << std::endl;
+  }
+}
+
+void IRPrinter::visit(const AtomicAdd* v) {
+  emitIndent();
+  os() << "atomicAdd(&" << *v->base_handle() << "[";
+  size_t i = 0;
+  for (const Expr* ind : v->indices()) {
+    if (i++) {
+      os() << ", ";
+    }
+    ind->accept(this);
+  }
+  if (v->indices().empty()) {
+    os() << "0";
+  }
+  os() << "], " << *v->value() << ");";
+  os() << std::endl;
 }
 
 void IRPrinter::emitIndent() {

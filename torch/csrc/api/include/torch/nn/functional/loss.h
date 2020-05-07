@@ -47,7 +47,8 @@ namespace detail {
 inline Tensor kl_div(
     const Tensor& input,
     const Tensor& target,
-    KLDivFuncOptions::reduction_t reduction) {
+    KLDivFuncOptions::reduction_t reduction,
+    bool log_target = false) {
   torch::Reduction::Reduction reduction_enum;
 
   if (c10::get_if<enumtype::kMean>(&reduction)) {
@@ -63,7 +64,7 @@ inline Tensor kl_div(
     reduction_enum = enumtype::reduction_get_enum(reduction);
   }
 
-  auto reduced = torch::kl_div(input, target, reduction_enum);
+  auto reduced = torch::kl_div(input, target, reduction_enum, log_target);
 
   if (c10::get_if<enumtype::kBatchMean>(&reduction) && input.dim() != 0) {
     reduced = reduced / input.sizes()[0];
@@ -83,13 +84,13 @@ inline Tensor kl_div(
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::kl_div(input, target, F::KLDivFuncOptions(torch::kNone));
+/// F::kl_div(input, target, F::KLDivFuncOptions.reduction(torch::kNone).log_target(false));
 /// ```
 inline Tensor kl_div(
     const Tensor& input,
     const Tensor& target,
     const KLDivFuncOptions& options = {}) {
-  return detail::kl_div(input, target, options.reduction());
+  return detail::kl_div(input, target, options.reduction(), options.log_target());
 }
 
 // ============================================================================

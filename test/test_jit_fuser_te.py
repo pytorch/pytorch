@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode, skipIfRocm
+    enable_profiling_mode_for_profiling_tests, skipIfRocm
 
 from textwrap import dedent
 from itertools import product, permutations
@@ -20,6 +20,9 @@ from test_jit import JitTestCase, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell, _inline_everything
 
 from te_utils import CudaCodeGenExecuted
+
+torch._C._jit_set_profiling_executor(True)
+torch._C._jit_set_profiling_mode(True)
 
 FUSION_GROUP = 'tensorexpr::Group'
 
@@ -53,22 +56,24 @@ class TestFuser(JitTestCase):
     def setUp(self):
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
+
         torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)
-        torch._C._jit_set_texpr_fuser_enabled(True)
 
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
-        if GRAPH_EXECUTOR != ProfilingMode.PROFILING:
-            torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-            torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+
+        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
+        torch._C._jit_set_texpr_fuser_enabled(True)
 
     def tearDown(self):
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
-        torch._C._jit_set_texpr_fuser_enabled(False)
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
         torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+
+        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
+        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
+
+        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
 
     def assertAllFused(self, graph, except_for=()):
 
@@ -336,7 +341,7 @@ class TestFuser(JitTestCase):
             s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})
             c = s(inp1, inp2)
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 warmup_backward(c.sum())
             graph = backward_graph(s)
             self.assertAllFused(graph, except_for={'aten::Float', 'aten::_grad_sum_to_size'})
@@ -639,7 +644,7 @@ class TestFuser(JitTestCase):
         self.assertAllFused(s.graph_for(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2),
                             except_for={'aten::size', 'prim::BroadcastSizes', 'aten::_size_if_not_equal'})
 
-        with enable_profiling_mode(True):
+        with enable_profiling_mode_for_profiling_tests(True):
             c = s(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2)
             warmup_backward(c.sum(), [b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2])
             graph = backward_graph(s)
@@ -719,7 +724,7 @@ class TestFuser(JitTestCase):
         FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
             .check_next("return").run(str(forward_graph))
 
-        with enable_profiling_mode(True):
+        with enable_profiling_mode_for_profiling_tests(True):
             hy, cy = module(*inputs)
             warmup_backward((hy + cy).sum())
             backward = backward_graph(module)

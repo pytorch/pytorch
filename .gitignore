@@ -30,6 +30,7 @@ dist/
 docs/src/**/*
 docs/cpp/build
 docs/cpp/source/api
+docs/source/generated/
 log
 test/.coverage
 test/.hypothesis/
@@ -255,3 +256,6 @@ TAGS
 
 # clangd background index
 .clangd/
+
+# bazel symlinks
+bazel-*

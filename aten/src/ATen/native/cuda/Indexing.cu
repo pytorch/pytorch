@@ -157,7 +157,7 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
 
 static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, TensorList orig, bool check_range) {
   checkIndexTensorTypes(orig);
-  // first expand BoolTensor (masks) into 1 or more LongTensors
+  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together
   indices = expand_outplace(indices);
@@ -192,13 +192,13 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
       auto src_ = permuted ? src.contiguous() : src;
-      linearIndex = linearIndex.view(-1);
+      linearIndex = linearIndex.reshape(-1);
       auto sorted_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       auto orig_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       using device_ptr = thrust::device_ptr<int64_t>;
       const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-      linearIndex.div_(sliceSize);
+      linearIndex.floor_divide_(sliceSize);
       {
       sorted_indices.copy_(linearIndex);
       auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());

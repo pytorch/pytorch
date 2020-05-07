@@ -20,7 +20,7 @@ struct TORCH_API LayerNormOptions {
   TORCH_ARG(std::vector<int64_t>, normalized_shape);
   /// a value added to the denominator for numerical stability. ``Default: 1e-5``.
   TORCH_ARG(double, eps) = 1e-5;
-  /// a boolean value that when set to ``True``, this module
+  /// a boolean value that when set to ``true``, this module
   /// has learnable per-element affine parameters initialized to ones (for weights)
   /// and zeros (for biases). ``Default: true``.
   TORCH_ARG(bool, elementwise_affine) = true;

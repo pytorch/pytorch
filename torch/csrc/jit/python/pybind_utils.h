@@ -604,11 +604,9 @@ inline IValue toIValue(
       AT_ERROR("RRef is only supported with the distributed package");
 #endif
     } break;
-    case TypeKind::PyObjectType:
-      // convert a py::handle to the IValue that holds the py::object
-      return c10::ivalue::ConcretePyObjectHolder::create(
-          obj.cast<py::object>());
-
+    case TypeKind::PyObjectType: {
+      return c10::ivalue::ConcretePyObjectHolder::create(obj);
+    }
     case TypeKind::CapsuleType: {
       return IValue::make_capsule(
           py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj));
@@ -1039,7 +1037,7 @@ inline py::object invokeScriptMethodFromPython(
     tuple_slice args,
     py::kwargs kwargs) {
   auto type = object.type();
-  Method init_method(object._ivalue(), type->getMethod(method_name));
+  Method init_method(object._ivalue(), &type->getMethod(method_name));
   invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
   return py::cast(Object(object));
 }

@@ -19,9 +19,10 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
       cpu_kernel(iter, [=](at::BFloat16 a) -> at::BFloat16 { return a; });
     } else if (isQIntType(dtype)) {
       AT_DISPATCH_QINT_TYPES(dtype, "copy_kernel", [&] {
-        cpu_kernel(
+        cpu_kernel_vec(
             iter,
-            [=](scalar_t a) -> scalar_t {return a; });
+            [=](scalar_t a) -> scalar_t { return a; },
+            [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a; });
       });
     } else if (isComplexType(dtype)) {
       AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
@@ -39,9 +40,9 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
           });
     }
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
       using dest_t = scalar_t;
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, iter.dtype(1), "copy_", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, iter.dtype(1), "copy_", [&] {
         // Note (@zasdfgbnm):
         //
         // The code below can not be simplified as

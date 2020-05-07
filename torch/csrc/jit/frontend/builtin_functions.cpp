@@ -52,13 +52,24 @@ def shape(a : Tensor) -> List[int]:
   return a.size()
 )SCRIPT";
 
-// This is only here for backwards-compatibility with the
+// _assert_int_or_pair is only here for backwards-compatibility with the
 // aten::_assert_int_or_pair op which was removed once we were able to compile
 // torch.nn.functional.assert_int_or_pair
+// list_with_default also needs to be here for BC
 auto aten_ops =
     R"SCRIPT(
 def _assert_int_or_pair(vals: List[int], name: str, message: str):
   pass
+def list_with_default(out_size: List[int], defaults: List[int]):
+  assert len(defaults) > len(out_size)
+  return out_size
+)SCRIPT";
+
+// Implementations of historic symbol behaviors are defined here
+// See note [Versioned Symbols]
+auto _test_serialization_subcmul = R"SCRIPT(
+def _test_serialization_subcmul_0_2(self: Tensor, other:Tensor, alpha: number=2) -> Tensor:
+  return other - (self * alpha)
 )SCRIPT";
 
 struct BuiltinFunctionRegistry {
@@ -96,6 +107,7 @@ struct BuiltinFunctionRegistry {
           .push_back(method);
     }
   }
+
   void loadBuiltinFunctions() {
     for (auto scalar : {"float", "int"}) {
       TemplateEnv env;
@@ -126,6 +138,11 @@ struct BuiltinFunctionRegistry {
     }
 
     loadSource(aten_ops, "aten");
+
+    // Loads functions implementing historic behavior, see note [Versioned
+    // Symbols]
+    // Note: these functions go into the "upgraders" namespace
+    loadSource(_test_serialization_subcmul, "upgraders");
 
     // These are under `prim` instead of `aten` since they exist to bind certain
     // tensor property getters to correpsonding methods
