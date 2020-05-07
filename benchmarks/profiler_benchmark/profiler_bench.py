@@ -16,7 +16,7 @@ def loop_workload(x):
     return x
 
 traced_loop_workload = None
-def run_profiler_benchmark_tight_loop():
+def run_profiler_benchmark_loop():
     x = torch.rand(profiling_tensor_size, profiling_tensor_size)
     if profiling_enabled:
         with torch.autograd.profiler.profile() as prof:
@@ -61,12 +61,12 @@ if __name__ == '__main__':
             x = torch.rand(profiling_tensor_size, profiling_tensor_size)
             workload = None
             if workload_name == "loop":
-                workload = run_profiler_benchmark_tight_loop
+                workload = run_profiler_benchmark_loop
                 traced_loop_workload = torch.jit.trace(loop_workload, x)
             elif workload_name == "parallel":
+                workload = run_profiler_benchmark_parallel
                 traced_parallel_workload = torch.jit.trace(
                     parallel_workload, x)
-                workload = run_profiler_benchmark_parallel
 
             runtimes = timeit.repeat(workload, repeat=N, number=1)
             avg_time = statistics.mean(runtimes) * 1000.0
