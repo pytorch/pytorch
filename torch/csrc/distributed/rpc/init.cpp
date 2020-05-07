@@ -558,11 +558,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               pythonRpcHandler.handleException(value);
             } /* unwrap_func */);
       },
-      py::call_guard<py::gil_scoped_release>(),
-      py::arg("dst"),
-      py::arg("pickledPythonUDF"),
-      py::arg("tensors"),
-      py::arg("rf") = nullptr);
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_rpc_torchscript",

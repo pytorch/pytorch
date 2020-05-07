@@ -49,6 +49,11 @@ namespace jit {
 py::object toPyObject(IValue ivalue);
 
 // The PythonFutureWrapper for ivalue::Future
+//
+// VISIBILITY_HIDDEN is for silencing compiling error,
+// "error: 'torch::jit::PythonFutureWrapper' declared with greater visibility
+// than the type of its field 'torch::jit::PythonFutureWrapper::unwrap_func'
+// [-Werror=attributes]"
 struct VISIBILITY_HIDDEN PythonFutureWrapper {
   using UnwrapFunc = std::function<void(py::object)>;
 

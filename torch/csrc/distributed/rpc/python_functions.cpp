@@ -140,8 +140,7 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
     futureResponseMessage->addCallback(
         [jitFuture](const FutureMessage& futureResponseMessage) {
           if (futureResponseMessage.hasError()) {
-            jitFuture->setError(c10::ivalue::Future::FutureError(
-                futureResponseMessage.error()->what()));
+            jitFuture->setError(futureResponseMessage.error()->what());
           } else {
             jitFuture->markCompleted(IValue());
           }
