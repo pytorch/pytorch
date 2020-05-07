@@ -422,13 +422,24 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
 
   if (use_cudnn && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()) {
-    return std::tuple_cat(
-             at::cudnn_batch_norm(
+    auto running_mean_contig = running_mean.defined() ? running_mean.detach().clone().contiguous() : running_mean;
+    auto running_var_contig = running_var.defined() ? running_var.detach().clone().contiguous() : running_var;
+    auto cudnn_result = at::cudnn_batch_norm(
                input.contiguous(input.suggest_memory_format()), weight.contiguous(),
                bias.contiguous(),
-               running_mean.defined() ? running_mean.contiguous() : running_mean,
-               running_var.defined() ? running_var.contiguous() : running_var,
-               training, momentum, eps),
+               running_mean_contig,
+               running_var_contig,
+               training, momentum, eps);
+    if (running_mean.defined() && !running_mean.is_contiguous()) {
+      //TODO(#13402): Remove it while implementing version counting of running mean
+      running_mean.variable_data().copy_(running_mean_contig);
+    }
+    if (running_var.defined() && !running_var.is_contiguous()) {
+      //TODO(#13402): Remove it while implementing version counting of running var
+      running_var.variable_data().copy_(running_var_contig);
+    }
+    return std::tuple_cat(
+             cudnn_result,
              std::make_tuple(1));
   }
 
@@ -447,12 +458,23 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                );
 
   if (use_miopen) {
-    return std::tuple_cat(
-             at::miopen_batch_norm(
+    auto running_mean_contig = running_mean.defined() ? running_mean.detach().clone().contiguous() : running_mean;
+    auto running_var_contig = running_var.defined() ? running_var.detach().clone().contiguous() : running_var;
+    auto result = at::miopen_batch_norm(
                input.contiguous(), weight.contiguous(), bias.contiguous(),
-               running_mean.defined() ? running_mean.contiguous() : running_mean,
-               running_var.defined() ? running_var.contiguous() : running_var,
-               training, momentum, eps),
+               running_mean_contig,
+               running_var_contig,
+               training, momentum, eps);
+    if (running_mean.defined() && !running_mean.is_contiguous()) {
+      //TODO(#13402): Remove it while implementing version counting of running mean
+      running_mean.variable_data().copy_(running_mean_contig);
+    }
+    if (running_var.defined() && !running_var.is_contiguous()) {
+      //TODO(#13402): Remove it while implementing version counting of running var
+      running_var.variable_data().copy_(running_var_contig);
+    }
+    return std::tuple_cat(
+             result,
              std::tuple<Tensor>(reserve),
              std::make_tuple(2));
   }
@@ -503,14 +525,7 @@ Tensor batch_norm(
       momentum,
       eps,
       cudnn_enabled);
-  // Not all implementations of batch norm do inplace modifications of mean and var #33867
-  if (running_mean.defined()) {
-    // copy is no-op if src == dst
-    running_mean.copy_(std::get<1>(result));
-  }
-  if (running_var.defined()) {
-    running_var.copy_(std::get<2>(result));
-  }
+
   return std::get<0>(result);
 }
 
