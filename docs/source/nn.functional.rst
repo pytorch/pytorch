@@ -322,6 +322,11 @@ Dropout functions
 
 .. autofunction:: alpha_dropout
 
+:hidden:`feature_alpha_dropout`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: feature_alpha_dropout
+
 :hidden:`dropout2d`
 ~~~~~~~~~~~~~~~~~~~
 
