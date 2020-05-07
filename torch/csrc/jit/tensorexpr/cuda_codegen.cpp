@@ -99,6 +99,7 @@ static void getMajorMinor(
 
 void CudaPrinter::maybe_insert_sync() {
   if (need_sync_) {
+    emitIndent();
     os() << "__syncthreads();" << std::endl;
     need_sync_ = false;
   }
@@ -157,10 +158,12 @@ void CudaPrinter::visit(const Allocate* v) {
     const For* for_v = dynamic_cast<const For*>(p);
     if (for_v) {
       if (for_v->loop_options().is_gpu_block_index()) {
+        emitIndent();
         os() << "__shared__ ";
         print_flat_alloc(os(), v);
         return;
       } else if (for_v->loop_options().is_gpu_thread_index()) {
+        emitIndent();
         print_flat_alloc(os(), v);
         thread_local_bufs_.insert(v->buffer_var());
         return;
@@ -177,7 +180,9 @@ void CudaPrinter::visit(const For* v) {
   if (loop_options.is_gpu_block_index()) {
     ScopedVarName var_name(
         name_manager(), v->var(), loop_options.gpu_block_index_str());
+    emitIndent();
     v->body()->accept(this);
+    os() << std::endl;
     int gpu_block_index = loop_options.gpu_block_index();
     if (gpu_block_extents_.size() <= gpu_block_index) {
       gpu_block_extents_.resize(gpu_block_index + 1);
@@ -191,7 +196,9 @@ void CudaPrinter::visit(const For* v) {
   } else if (loop_options.is_gpu_thread_index()) {
     ScopedVarName var_name(
         name_manager(), v->var(), loop_options.gpu_thread_index_str());
+    emitIndent();
     v->body()->accept(this);
+    os() << std::endl;
     int gpu_thread_index = loop_options.gpu_thread_index();
     if (gpu_thread_extents_.size() <= gpu_thread_index) {
       gpu_thread_extents_.resize(gpu_thread_index + 1);
@@ -318,15 +325,18 @@ class AtomicAddFuser : public IRMutator {
 };
 
 void CudaPrinter::visit(const Store* v) {
+  emitIndent();
   os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
   if (v->value()->dtype().scalar_type() == ScalarType::Half) {
     os() << "__float2half(" << *v->value() << ");";
   } else {
     os() << *v->value() << ";";
   }
+  os() << std::endl;
 }
 
 void CudaPrinter::visit(const AtomicAdd* v) {
+  emitIndent();
   if (thread_local_bufs_.count(v->base_handle()) > 0) {
     // atomicAdd only works on global and shared memory
     os() << *v->base_handle() << "[" << *v->flat_index()
@@ -335,6 +345,7 @@ void CudaPrinter::visit(const AtomicAdd* v) {
     os() << "atomicAdd(&" << *v->base_handle() << "[" << *v->flat_index() << "]"
          << ", " << *v->value() << ");";
   }
+  os() << std::endl;
 }
 
 void CudaPrinter::visit(const Max* v) {
@@ -382,6 +393,7 @@ void CudaPrinter::visit(const Min* v) {
 }
 
 void CudaPrinter::visit(const LetStmt* v) {
+  emitIndent();
   const Var* var = v->var();
   if (var->dtype().scalar_type() == ScalarType::Half) {
     // we do math in floats so use that.
@@ -390,7 +402,14 @@ void CudaPrinter::visit(const LetStmt* v) {
     os() << cudaDtypeCppString(var->dtype());
   }
   os() << " " << *var << " = " << *v->value() << "; " << std::endl;
+  auto b = dynamic_cast<Block*>(v->body());
+  if (b) {
+    emitIndent();
+  }
   v->body()->accept(this);
+  if (b) {
+    os() << std::endl;
+  }
 }
 
 void CudaPrinter::visit(const IfThenElse* v) {

@@ -92,42 +92,22 @@ void reflection_pad1d_out_template(
   /* resize output */
   if (input.ndimension() == 2) {
     output.resize_({nplane, output_w});
-    if (input.is_quantized()) {
-      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad1d", [&]() {
-        reflection_pad1d_out_frame<scalar_t>(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nplane,
-          input_w, output_w,
-          pad_l);
-      });
-    } else {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
-        reflection_pad1d_out_frame<scalar_t>(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nplane,
-          input_w, output_w,
-          pad_l);
-      });
-    }
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
+      reflection_pad1d_out_frame<scalar_t>(
+        input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+        nplane,
+        input_w, output_w,
+        pad_l);
+    });
   } else {
     output.resize_({nbatch, nplane, output_w});
-    if (input.is_quantized()) {
-      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad1d", [&]() {
-        reflection_pad1d_out_loop<scalar_t>(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nbatch, nplane,
-          input_w, output_w,
-          pad_l);
-      });
-    } else {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
-        reflection_pad1d_out_loop<scalar_t>(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nbatch, nplane,
-          input_w, output_w,
-          pad_l);
-      });
-    }
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
+      reflection_pad1d_out_loop<scalar_t>(
+        input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+        nbatch, nplane,
+        input_w, output_w,
+        pad_l);
+    });
   }
 }
 
@@ -499,18 +479,7 @@ Tensor& reflection_pad1d_out_cpu(
 }
 
 Tensor reflection_pad1d_cpu(const Tensor& input, IntArrayRef padding) {
-  Tensor output;
-  if (input.is_quantized()) {
-    if (input.qscheme() == kPerTensorAffine) {
-      output = at::_empty_affine_quantized({0}, input.options(),
-                                           input.q_scale(),
-                                           input.q_zero_point());
-    } else {
-      TORCH_CHECK(false, "Only per tensor quantization is supported");
-    }
-  } else {
-    output = at::empty({0}, input.options());
-  }
+  auto output = at::empty({0}, input.options());
   reflection_pad1d_out_template(output, input, padding);
   return output;
 }

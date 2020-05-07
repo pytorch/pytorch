@@ -36,12 +36,7 @@ PyObject* faulty_agent_init(PyObject* /* unused */) {
       "FaultyProcessGroupRpcBackendOptions",
       rpc_module.attr("ProcessGroupRpcBackendOptions"))
       .def(
-          py::init<
-              int,
-              std::chrono::milliseconds,
-              std::string,
-              std::vector<std::string>,
-              int>(),
+          py::init<int, float, std::string, std::vector<std::string>, int>(),
           py::arg("num_send_recv_threads"),
           py::arg("rpc_timeout"),
           py::arg("init_method"),
