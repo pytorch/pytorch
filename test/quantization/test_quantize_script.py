@@ -11,15 +11,11 @@ from torch.quantization import QConfig
 from torch.quantization import default_dynamic_qconfig
 from torch.quantization import QConfigDynamic
 from torch.quantization import default_observer
-from torch.quantization import default_weight_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
 from torch.quantization import get_default_qconfig
-from torch.quantization import quantize
 
 # torch.quantization._quantize_script
-from torch.nn.quantized.modules.linear import LinearPackedParams
-from torch.quantization._quantize_script import ConvPackedParams
 from torch.quantization._quantize_script import script_qconfig
 from torch.quantization._quantize_script import prepare_script
 from torch.quantization._quantize_script import convert_script
@@ -28,8 +24,6 @@ from torch.quantization._quantize_script import prepare_dynamic_script
 from torch.quantization._quantize_script import quantize_dynamic_script
 
 # Testing utils
-from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
-from torch.testing._internal.common_quantization import ConvModel, AnnotatedConvModel
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
 
 from torch.testing import FileCheck
