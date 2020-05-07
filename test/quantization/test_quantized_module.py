@@ -112,9 +112,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # Test serialization of quantized Linear Module using state_dict
         model_dict = qlinear.state_dict()
-        self.assertEqual(model_dict['_packed_params.weight'], W_q)
-        if use_bias:
-            self.assertEqual(model_dict['_packed_params.bias'], B)
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
