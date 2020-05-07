@@ -223,6 +223,28 @@ Tensor quantized_group_norm_impl(
   return Y;
 }
 
+Tensor quantized_instance_norm_impl(
+    const Tensor& qx,
+    const Tensor& weight, // optional
+    const Tensor& bias, // optional
+    double eps,
+    double output_scale,
+    int64_t output_zero_point) {
+
+  const auto input_ndim = qx.dim();
+  TORCH_CHECK(
+      input_ndim >= 3,
+      "Expected normalized_shape to be at least 3-dimensional");
+  const auto input_shape = qx.sizes();
+
+  // IN is GN with num_groups == num_channels
+  const auto num_channels = input_shape[1];
+  TORCH_CHECK(num_channels > 0, "Expected 2nd dimension to be positive");
+
+  return quantized_group_norm_impl(
+      qx, num_channels, weight, bias, eps, output_scale, output_zero_point);
+}
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   // TODO: this is kind of... blegh
   m.impl("layer_norm", [](
@@ -245,6 +267,16 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
       int64_t output_zero_point) {
     return quantized_group_norm_impl(
         qx, num_groups, weight, bias, eps, output_scale, output_zero_point);
+  });
+  m.impl("instance_norm", [](
+      Tensor qx,
+      Tensor weight,
+      Tensor bias,
+      double eps,
+      double output_scale,
+      int64_t output_zero_point) {
+    return quantized_instance_norm_impl(
+        qx, weight, bias, eps, output_scale, output_zero_point);
   });
 }
 

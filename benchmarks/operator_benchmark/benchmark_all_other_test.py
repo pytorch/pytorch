@@ -9,7 +9,7 @@ from pt import ( # noqa
     chunk_test, conv_test, diag_test, embeddingbag_test, fill_test,  # noqa
     gather_test, linear_test, matmul_test, pool_test,  # noqa
     softmax_test, hardsigmoid_test, hardswish_test, layernorm_test,  # noqa
-    groupnorm_test # noqa
+    groupnorm_test, instancenorm_test # noqa
 )
 
 if __name__ == "__main__":
