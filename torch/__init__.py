@@ -65,6 +65,7 @@ if platform.system() == 'Windows':
     kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
     dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
     with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
+    prev_error_mode = kernel32.SetErrorMode(0x0001)
 
     for dll_path in dll_paths:
         if sys.version_info >= (3, 8):
@@ -99,6 +100,8 @@ if platform.system() == 'Windows':
                 err = ctypes.WinError(ctypes.get_last_error())
                 err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
                 raise err
+
+    kernel32.SetErrorMode(prev_error_mode)
 
 
 # See Note [Global dependencies]
