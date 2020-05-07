@@ -29,12 +29,11 @@ Tensor reverse(const Tensor& input) {
   std::reverse(step_ref.begin(), step_ref.end());
   auto rev_step_inputs = std::move(step_ref);
   Tensor rev_input;
-  if(rev_step_inputs[0].dim() == 1) {
+  if(rev_step_inputs[0].size(0) != 1) {
     rev_input = at::stack(rev_step_inputs, 0);
   } else {
     rev_input = at::cat(rev_step_inputs, 0);
   }
-
 
   if(rev_input.dim() != input.dim()) {
     rev_input = rev_input.unsqueeze(1);
@@ -1482,17 +1481,17 @@ bool _use_cudnn_rnn_flatten_weight() {
     NAME##_packed_cudnn_stub(                                               \
       data.device().type(),                                                 \
       fwd_output,                                                           \
-       f_hy,                                                                \
-       data,                                                                \
+      f_hy,                                                                 \
+      data,                                                                 \
       batch_sizes,                                                          \
-       _fwd_hx,                                                             \
-       _params,                                                             \
-       has_biases,                                                          \
+      _fwd_hx,                                                              \
+      fwd_params,                                                           \
+      has_biases,                                                           \
       num_layers,                                                           \
-       dropout_p,                                                           \
-       train,                                                               \
-       bidirectional,                                                       \
-       type_2);                                                             \
+      dropout_p,                                                            \
+      train,                                                                \
+      bidirectional,                                                        \
+      type_2);                                                              \
     Tensor bwd_output, b_hy;                                                \
     NAME##_packed_cudnn_stub(                                               \
       data.device().type(),                                                 \
@@ -1501,7 +1500,7 @@ bool _use_cudnn_rnn_flatten_weight() {
       bwd_data,                                                             \
       batch_sizes,                                                          \
       _bwd_hx,                                                              \
-      _params,                                                              \
+      bwd_params,                                                           \
       has_biases,                                                           \
       num_layers,                                                           \
       dropout_p,                                                            \
@@ -1543,7 +1542,7 @@ bool _use_cudnn_rnn_flatten_weight() {
       data,                                                                 \
       batch_sizes,                                                          \
       _fwd_hx,                                                              \
-      _params,                                                              \
+      fwd_params,                                                           \
       has_biases,                                                           \
       num_layers,                                                           \
       dropout_p,                                                            \
@@ -1552,19 +1551,19 @@ bool _use_cudnn_rnn_flatten_weight() {
       type_2);                                                              \
     Tensor bwd_output, b_hy;                                                \
     NAME##_packed_miopen_stub(                                              \
-        data.device().type(),                                               \
-        bwd_output,                                                         \
-        b_hy,                                                               \
-        bwd_data,                                                           \
-        batch_sizes,                                                        \
-        _bwd_hx,                                                            \
-        _params,                                                            \
-        has_biases,                                                         \
-        num_layers,                                                         \
-        dropout_p,                                                          \
-        train,                                                              \
-        bidirectional,                                                      \
-        type_2);                                                            \
+      data.device().type(),                                                 \
+      bwd_output,                                                           \
+      b_hy,                                                                 \
+      bwd_data,                                                             \
+      batch_sizes,                                                          \
+      _bwd_hx,                                                              \
+      bwd_params,                                                           \
+      has_biases,                                                           \
+      num_layers,                                                           \
+      dropout_p,                                                            \
+      train,                                                                \
+      bidirectional,                                                        \
+      type_2);                                                              \
     auto bwd_rev_output = reverse(bwd_output);                              \
     std::vector<Tensor> outputs;                                            \
     outputs.push_back(fwd_output);                                          \
@@ -2012,13 +2011,13 @@ std::tuple<Tensor, Tensor, Tensor> lstm_packed_cudnn_type1(
 
   Tensor fwd_output, f_hy, f_cy;
   lstm_packed_cudnn_stub(data.device().type(), fwd_output, f_hy, f_cy, data,
-                          batch_sizes, _fwd_hx, fwd_params, has_biases,
-                          num_layers, dropout_p, train, bidirectional, type_2);
+                         batch_sizes, _fwd_hx, fwd_params, has_biases,
+                         num_layers, dropout_p, train, bidirectional, type_2);
 
   Tensor bwd_output, b_hy, b_cy;
-  lstm_packed_cudnn_stub(data.device().type(), bwd_output, f_hy, f_cy, bwd_data,
-                          batch_sizes, _bwd_hx, fwd_params, has_biases,
-                          num_layers, dropout_p, train, bidirectional, type_2);
+  lstm_packed_cudnn_stub(data.device().type(), bwd_output, b_hy, b_cy, bwd_data,
+                         batch_sizes, _bwd_hx, fwd_params, has_biases,
+                         num_layers, dropout_p, train, bidirectional, type_2);
 
   // Cat forward and backward outputs
   auto bwd_rev_output = reverse(bwd_output);
@@ -2057,7 +2056,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_packed_miopen_type1(
                           num_layers, dropout_p, train, bidirectional, type_2);
 
   Tensor bwd_output, b_hy, b_cy;
-  lstm_packed_miopen_stub(data.device().type(), bwd_output, f_hy, f_cy, bwd_data,
+  lstm_packed_miopen_stub(data.device().type(), bwd_output, b_hy, b_cy, bwd_data,
                           batch_sizes, _bwd_hx, fwd_params, has_biases,
                           num_layers, dropout_p, train, bidirectional, type_2);
 
