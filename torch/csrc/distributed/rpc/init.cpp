@@ -342,7 +342,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
                           const auto& value = fut.wait();
                           pybind11::gil_scoped_acquire ag;
                           auto obj = torch::jit::toPyObject(value);
-                          pythonRpcHandler.handleException(obj);
+                          pythonRpcHandler.handleExceptionGILHeld(obj);
                           return obj;
                         },
                         py::call_guard<py::gil_scoped_release>(),
