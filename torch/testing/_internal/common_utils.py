@@ -875,7 +875,7 @@ class TestCase(expecttest.TestCase):
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
-    def assertEqual(self, x, y, message='', *, atol=None, rtol=None, allow_inf=False, exact_dtype=None):
+    def assertEqual(self, x, y, message='', *, atol=None, rtol=None, allow_inf=False, exact_dtype=True):
         # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
         if isinstance(message, Number):
             self.assertIsNone(atol, "don't combine positional prec and atol")
