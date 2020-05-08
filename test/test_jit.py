@@ -6181,10 +6181,22 @@ a")
         def func3(x):
             return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
 
+        def func4(x):
+            ls = [0]
+            ls.append(1)
+            ls.append(2)
+            return x[ls]
+
+        def func5(x):
+            ls = [0.1, 1.2, 2.3]
+            return x[ls]
+
         input = torch.rand((6, 2))
         self.checkScript(func1, (input,))
         self.checkScript(func2, (input,))
         self.checkScript(func3, (input,))
+        self.checkScript(func4, (input,))
+        self.checkScript(func5, (input,))
 
     def test_keyword(self):
         @torch.jit.script
