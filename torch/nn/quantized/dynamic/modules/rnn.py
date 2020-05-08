@@ -84,10 +84,10 @@ class RNNBase(torch.nn.Module):
                     # bias vector is needed in standard definition.
                     b_hh = torch.Tensor(gate_size).float()
 
-                    packed_ih = torch.ops.quantized.linear_prepack_fp16(w_ih, b_ih)
-                    packed_hh = torch.ops.quantized.linear_prepack_fp16(w_hh, b_hh)
+                    packed_ih = torch.ops.quantized.linear_prepack_fp16(w_ih)
+                    packed_hh = torch.ops.quantized.linear_prepack_fp16(w_hh)
                     cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
-                        packed_ih, packed_hh)
+                        packed_ih, packed_hh, b_ih, b_hh)
 
                 _all_weight_values.append(PackedParameter(cell_params))
         self._all_weight_values = torch.nn.ModuleList(_all_weight_values)
@@ -247,12 +247,12 @@ class RNNBase(torch.nn.Module):
                         packed_ih, packed_hh, bias_ih, bias_hh)
                 else:
                     packed_ih = torch.ops.quantized.linear_prepack_fp16(
-                        weight_ih.float(), bias_ih)
+                        weight_ih.float())
                     packed_hh = torch.ops.quantized.linear_prepack_fp16(
-                        weight_hh.float(), bias_hh)
+                        weight_hh.float())
 
                     cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
-                        packed_ih, packed_hh)
+                        packed_ih, packed_hh, bias_ih, bias_hh)
 
                 _all_weight_values.append(PackedParameter(cell_params))
         qRNNBase._all_weight_values = torch.nn.ModuleList(_all_weight_values)

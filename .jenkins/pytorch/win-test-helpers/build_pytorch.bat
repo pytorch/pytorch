@@ -73,6 +73,8 @@ set PATH=%TMP_DIR_WIN%\bin;%PATH%
 :: jenkins has M40, which is 5.2
 if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=5.2
 
+:: The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
+set SCCACHE_IDLE_TIMEOUT=0
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats

@@ -17523,7 +17523,8 @@ a")
                 qweight = torch._empty_affine_quantized(
                     [out_features, in_features], scale=1, zero_point=0,
                     dtype=torch.qint8)
-                self._packed_weight = torch.ops.quantized.linear_prepack(qweight)
+                self.register_buffer('_packed_weight',
+                                     torch.ops.quantized.linear_prepack(qweight))
 
             @torch.jit.export
             def __getstate__(self):
@@ -17534,7 +17535,8 @@ a")
 
             @torch.jit.export
             def __setstate__(self, state):
-                self._packed_weight = torch.ops.quantized.linear_prepack(state[0])
+                self._packed_weight.set_(
+                    torch.ops.quantized.linear_prepack(state[0]))
                 self.training = state[1]
 
             @property
