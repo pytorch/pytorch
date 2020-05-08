@@ -271,6 +271,7 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/lower_utils.cpp",
     "torch/csrc/jit/codegen/cuda/lower2device.cpp",
     "torch/csrc/jit/codegen/cuda/manager.cpp",
+    "torch/csrc/jit/codegen/cuda/shape_inference.cpp",
     "torch/csrc/jit/codegen/cuda/mutator.cpp",
     "torch/csrc/jit/codegen/cuda/parser.cpp",
     "torch/csrc/jit/codegen/cuda/partition.cpp",

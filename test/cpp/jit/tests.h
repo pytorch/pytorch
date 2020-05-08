@@ -103,7 +103,6 @@ namespace jit {
   _(GPU_FusionDispatch)          \
   _(GPU_FusionSimpleArith)       \
   _(GPU_FusionSimpleTypePromote) \
-  _(GPU_FusionCastOp)            \
   _(GPU_FusionMutator)           \
   _(GPU_FusionRegister)          \
   _(GPU_FusionTopoSort)          \
@@ -117,10 +116,17 @@ namespace jit {
   _(GPU_FusionDependency)        \
   _(GPU_FusionCodeGen)           \
   _(GPU_FusionCodeGen2)          \
+  _(GPU_FusionCodeGen3)          \
   _(GPU_FusionSimplePWise)       \
   _(GPU_FusionExecKernel)        \
   _(GPU_FusionForLoop)           \
-  _(GPU_FusionLoopUnroll)
+  _(GPU_FusionLoopUnroll)        \
+  _(GPU_FusionUnaryOps)          \
+  _(GPU_FusionBinaryOps)         \
+  _(GPU_FusionTernaryOps)        \
+  _(GPU_FusionCompoundOps)       \
+  _(GPU_FusionCastOps)
+//_(GPU_FusionCodeGen4)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
