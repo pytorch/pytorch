@@ -177,6 +177,7 @@ class TestTypePromotion(TestCase):
         d = torch.tensor([1, 1, 1, 1], dtype=torch.double, device=device)
         torch.add(f, f, out=d)
         self.assertEqual(d.dtype, torch.double)
+        # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(f + f, d)
 
     @float_double_default_dtype
@@ -186,6 +187,7 @@ class TestTypePromotion(TestCase):
         tens = f * ten
         s = (tens + 2).sum()
         s.backward()
+        # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(f.grad, tens)
 
         # If we don't convert the returned grad_input to the actual input type
@@ -739,6 +741,7 @@ class TestTypePromotion(TestCase):
                 np_float_out = np_fn(a).astype(torch_to_numpy_dtype_dict[float_dtype])
                 float_out = torch.empty_like(t).float()
                 torch_fn(t, out=float_out)
+                # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
                 self.assertEqualIgnoreType(torch.from_numpy(np_float_out), float_out.cpu())
 
                 # Tests float out (resized out)
@@ -750,11 +753,13 @@ class TestTypePromotion(TestCase):
                 np_complex_out = np_fn(a)
                 complex_out = torch.empty_like(t)
                 torch_fn(t, out=complex_out)
+                # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
                 self.assertEqualIgnoreType(torch.from_numpy(np_complex_out), complex_out.cpu())
 
                 # Tests complex out (resized out)
                 complex_out = torch.empty(1, device=device, dtype=dtype)
                 torch_fn(t, out=complex_out)
+                # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
                 self.assertEqualIgnoreType(torch.from_numpy(np_complex_out), complex_out.cpu())
 
                 # Tests long out behavior (expected failure)

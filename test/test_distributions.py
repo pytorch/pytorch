@@ -765,9 +765,11 @@ class TestDistributions(TestCase):
             expected = torch.tensor(expected)
             d = dist(**params)
             actual = d.enumerate_support(expand=False)
+            # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(actual, expected)
             actual = d.enumerate_support(expand=True)
             expected_with_expand = expected.expand((-1,) + d.batch_shape + d.event_shape)
+            # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(actual, expected_with_expand)
 
     def test_repr(self):
@@ -1052,6 +1054,7 @@ class TestDistributions(TestCase):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         total_count = torch.tensor([[4, 7], [3, 8]])
         bin0 = Binomial(total_count, torch.tensor(1.))
+        # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(bin0.sample(), total_count)
         bin1 = Binomial(total_count, torch.tensor(0.5))
         samples = bin1.sample(torch.Size((100000,)))
@@ -1130,6 +1133,7 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
 
         # sample check for extreme value of probs
+        # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(Multinomial(total_count, s).sample(),
                                    torch.tensor([[total_count, 0], [0, total_count]]))
 

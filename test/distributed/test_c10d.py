@@ -681,6 +681,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             # Run with 1 input tensor
             x = fn(torch.tensor([self.rank]))
             broadcast([x], i, 0)
+            # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(torch.tensor([i]), x)
 
             # Run with 2 input tensors
@@ -692,7 +693,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 ]
 
                 broadcast(xs, i, j)
+                # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
                 self.assertEqualIgnoreType(torch.tensor([i * num + j]), xs[0])
+                # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
                 self.assertEqualIgnoreType(torch.tensor([i * num + j]), xs[1])
 
         # Test overloaded convenience function
@@ -767,6 +770,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             tensor = fn(input)
             work = pg.allreduce([tensor], opts)
             work.wait()
+            # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(output, tensor)
 
         # Multi input tests
@@ -778,6 +782,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work = pg.allreduce(tensors, opts)
             work.wait()
             for tensor in tensors:
+                # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
                 self.assertEqualIgnoreType(output, tensor)
 
         # Test overloaded convenience function (defaults to using sum)
@@ -799,6 +804,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         work_handles = [pg.allreduce(inputs[i]) for i in range(len(inputs))]
         for i, work_handle in enumerate(work_handles):
             work_handle.wait()
+            # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(
                 torch.tensor([
                     (i * self.world_size) +
@@ -864,6 +870,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work = pg.allreduce_coalesced(tensors, opts)
             work.wait()
             for result_tensor, expected in zip(tensors, outputs):
+                # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
                 self.assertEqualIgnoreType(result_tensor, expected)
 
     def test_allreduce_coalesced_basics(self):
@@ -875,6 +882,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         work_handles = [pg.allreduce_coalesced(input) for input in inputs]
         for i, work_handle in enumerate(work_handles):
             work_handle.wait()
+            # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(
                 2 * [torch.tensor([(i * self.world_size) + (self.world_size * (self.world_size - 1) / 2)])],
                 inputs[i],
@@ -1402,6 +1410,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 work = pg.reduce([tmp], opts)
                 work.wait()
                 if root == self.rank:
+                    # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
                     self.assertEqualIgnoreType(output, tmp)
 
     def test_reduce_basics(self):
@@ -1430,6 +1439,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             iter = i // self.world_size
             root = i % self.world_size
             if root == self.rank:
+                # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
                 self.assertEqualIgnoreType(
                     torch.tensor([
                         (iter * self.world_size) +
@@ -1624,6 +1634,7 @@ class ProcessGroupNCCLTest(TestCase):
         allreduce(tensors, c10d.ReduceOp.SUM)
 
         for i in range(self.num_gpus):
+            # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(
                 torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
                 tensors[i])
@@ -1636,6 +1647,7 @@ class ProcessGroupNCCLTest(TestCase):
         allreduce(tensors, c10d.ReduceOp.PRODUCT)
 
         for i in range(self.num_gpus):
+            # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(
                 torch.tensor([float(math.factorial(self.num_gpus))]),
                 tensors[i])
@@ -1648,6 +1660,7 @@ class ProcessGroupNCCLTest(TestCase):
         allreduce(tensors, c10d.ReduceOp.MIN)
 
         for i in range(self.num_gpus):
+            # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(torch.tensor([1.0]), tensors[i])
 
         # Max
@@ -1679,6 +1692,7 @@ class ProcessGroupNCCLTest(TestCase):
 
             reduce(tensors, self.rank, rt)
 
+            # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(
                 torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
                 tensors[rt])
@@ -1748,6 +1762,7 @@ class ProcessGroupNCCLTest(TestCase):
                 float(self.num_gpus * (self.num_gpus - 1) / 2) +
                 (virtual_rank + i) * virtual_world_size
             ])
+            # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(expected, output[i])
 
         # Min
@@ -1781,6 +1796,7 @@ class ProcessGroupNCCLTest(TestCase):
 
         for i in range(self.num_gpus):
             expected = torch.tensor([float(math.factorial(virtual_world_size))])
+            # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(expected, output[i])
 
     def test_barrier(self):
@@ -1809,6 +1825,7 @@ class ProcessGroupNCCLTest(TestCase):
 
         for i in range(2, self.num_gpus + 1):
             for j in range(i):
+                # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
                 self.assertEqualIgnoreType(
                     torch.tensor([float(i * (i + 1) / 2)]),
                     tensors_list[i - 2][j])
@@ -2734,6 +2751,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                     input[self.rank : (self.rank + 1)],
                     target[self.rank : (self.rank + 1)])
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
+                    # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
                     self.assertEqualIgnoreType(i.grad, j.grad)
 
             # Shuffle the input so that DDP input is different

@@ -210,8 +210,10 @@ class TestIndexing(TestCase):
 
         for a in tensors:
             self.assertNotEqual(a.data_ptr(), a[True].data_ptr())
+            # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(torch.empty(0, *a.shape), a[False])
             self.assertNotEqual(a.data_ptr(), a[true].data_ptr())
+            # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(torch.empty(0, *a.shape), a[false])
             self.assertEqual(a.data_ptr(), a[None].data_ptr())
             self.assertEqual(a.data_ptr(), a[...].data_ptr())
@@ -348,8 +350,10 @@ class TestIndexing(TestCase):
             self.assertEquals(len(w), 1)
 
         self.assertEqual(x[0], value)
+        # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(x[1], torch.arange(4, 8, device=device))
         self.assertEqual(x[2], value)
+        # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(x[3], torch.arange(12, 16, device=device))
 
     def test_variable_slicing(self, device):
@@ -475,6 +479,7 @@ class NumpyTests(TestCase):
     def test_empty_fancy_index(self, device):
         # Empty list index creates an empty array
         a = tensor([1, 2, 3], device=device)
+        # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(a[[]], torch.tensor([], device=device))
 
         b = tensor([], device=device).long()
@@ -658,6 +663,7 @@ class NumpyTests(TestCase):
         b = torch.arange(99, -1, -1, device=device).long()
         a[b] = v
         expected = b.double().unsqueeze(1).expand(100, 100)
+        # TODO(#38095):  Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(a, expected)
 
 instantiate_device_type_tests(TestIndexing, globals())
