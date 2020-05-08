@@ -306,6 +306,7 @@ c10::optional<script::Module> optimizeForMobile(const script::Module& m) {
   cloned_module = FoldConvBatchNorm2d(cloned_module);
   insertPrePackedOps(cloned_module);
   cloned_module = freeze_module(cloned_module);
+  fusePrePackedLinearConvWithClamp(cloned_module);
   FoldPrePackingOps(cloned_module);
   return cloned_module;
 }
