@@ -4,6 +4,9 @@
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
 
+#include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/cpu/packed_params.h>
+
 struct QnnpackOperatorDeleter {
   void operator()(pytorch_qnnp_operator_t op) {
     pytorch_qnnp_delete_operator(op);
@@ -11,31 +14,150 @@ struct QnnpackOperatorDeleter {
 };
 
 // PackedWeight struct for QNNPACK stores the original Weight and Bias as
-// QNNPACK currently does not support an unpack function. Possible optimization -
+// QNNPACK currently does not support an unpack function.
 // For PyTorch Mobile, once the model is scripted and serialized we don't need
-// to call unpack, so we can save some memory by checking for this case.
-// Input scale is set to null in pre-pack step. QNNPACK needs bias quantized with
-// input scale which is available at runtime in pytorch. During runtime if input
-// scale value changes then we requantize bias with the updated scale.
-// For inference we expect the graph to be static so the input scale should
-// not change across consecutive inference calls.
-struct PackedLinearWeightsQnnp {
+// to call unpack, so we can save some memory by checking for this case and free
+// the original weights after packing.
+// Input scale is set to null in pre-pack step. QNNPACK needs bias quantized
+// with input scale which is available at runtime in pytorch. During runtime if
+// input scale value changes then we requantize bias with the updated scale. For
+// inference we expect the graph to be static so the input scale should not
+// change across consecutive inference calls.
+struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
+  PackedLinearWeightsQnnp(
+      std::unique_ptr<qnnpack::PackBMatrix> w,
+      at::Tensor orig_weight,
+      at::Tensor bias,
+      c10::optional<double> input_scale,
+      double w_scale,
+      int64_t w_zp)
+      : w(std::move(w)),
+        orig_weight(std::move(orig_weight)),
+        bias_(std::move(bias)),
+        input_scale(std::move(input_scale)),
+        w_scale(w_scale),
+        w_zp(w_zp) {}
+
   std::unique_ptr<qnnpack::PackBMatrix> w;
   at::Tensor orig_weight;
-  at::Tensor bias;
+  at::Tensor bias_;
   c10::optional<double> input_scale;
   double w_scale;
   int64_t w_zp;
+
+  at::Tensor apply(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+  at::Tensor apply_relu(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+
+  at::Tensor apply_dynamic(at::Tensor input) override;
+  at::Tensor apply_dynamic_relu(at::Tensor input) override;
+
+  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+
+  c10::optional<at::Tensor> bias() override {
+    return bias_;
+  }
+
+  static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
+      at::Tensor weight,
+      c10::optional<at::Tensor> bias);
+
+ private:
+  template <bool ReluFused>
+  at::Tensor apply_impl(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point);
+
+  template <bool ReluFused>
+  at::Tensor apply_dynamic_impl(at::Tensor input);
 };
 
-struct PackedConvWeightsQnnp {
+template <int kSpatialDim = 2>
+struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
+  PackedConvWeightsQnnp(
+      std::unique_ptr<qnnpack::PrePackConvWeights> w,
+      at::Tensor orig_weight,
+      at::Tensor bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      c10::optional<float> input_scale,
+      std::vector<int64_t> kernel,
+      float w_scale,
+      int32_t w_zp)
+      : w(std::move(w)),
+        orig_weight(std::move(orig_weight)),
+        bias(std::move(bias)),
+        stride_(std::move(stride)),
+        padding_(std::move(padding)),
+        dilation_(std::move(dilation)),
+        groups_(groups),
+        input_scale(input_scale),
+        kernel(std::move(kernel)),
+        w_scale(w_scale),
+        w_zp(w_zp) {}
+
   std::unique_ptr<qnnpack::PrePackConvWeights> w;
   at::Tensor orig_weight;
   at::Tensor bias;
-  c10::optional<double> input_scale;
+  torch::List<int64_t> stride_;
+  torch::List<int64_t> padding_;
+  torch::List<int64_t> dilation_;
+  int64_t groups_;
+  c10::optional<float> input_scale;
   std::vector<int64_t> kernel;
-  double w_scale;
-  int64_t w_zp;
+  float w_scale;
+  int32_t w_zp;
+
+  at::Tensor apply(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point) override;
+
+  at::Tensor apply_relu(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point) override;
+
+  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+
+  static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> prepack(
+      at::Tensor weight,
+      c10::optional<at::Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups);
+
+  torch::List<int64_t> stride() const override {
+    return stride_;
+  }
+
+  torch::List<int64_t> padding() const override {
+    return padding_;
+  }
+
+  torch::List<int64_t> dilation() const override {
+    return dilation_;
+  }
+
+  int64_t groups() const override {
+    return groups_;
+  }
+
+ private:
+  template <bool ReluFused>
+  at::Tensor apply_impl(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point);
 };
 
 enum class Activation : uint8_t { NONE = 0, RELU = 1 };

@@ -659,15 +659,13 @@ class TestCuda(TestCase):
 
         r_tensors = list(map(comm.reduce_add, zip(*dup_tensors)))
         for r, t in zip(r_tensors, tensors):
-            self.assertEqual(r.get_device(), t.get_device())
+            self.assertEqualTypeString(r, t)
             self.assertEqual(r, t * 2)
-            self.assertEqual(r.type(), t.type())
 
         rc_tensors = comm.reduce_add_coalesced(dup_tensors, buffer_size=buffer_size)
         self.assertEqual(r_tensors, rc_tensors)
         for r, rc in zip(r_tensors, rc_tensors):
-            self.assertEqual(rc.get_device(), r.get_device())
-            self.assertEqual(rc.type(), r.type())
+            self.assertEqualTypeString(rc, r)
 
         # Since we have both cuda:0 and cuda:1 inputs, the outputs must be new.
         # We can check that they have different version counters.
