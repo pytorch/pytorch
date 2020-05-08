@@ -1541,7 +1541,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.hardsigmoid = torch.nn.Hardsigmoid()
                 self.relu = torch.nn.ReLU()
                 self.relu6 = torch.nn.ReLU6()
-                self.leaky_relu = torch.nn.LeakyReLU()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1576,9 +1575,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x.relu_()
                 x = self.relu6(x)
                 x = F.relu6(x)
-                x = self.leaky_relu(x)
-                x = F.leaky_relu(x)
-                x.leaky_relu_()
                 x = self.conv(x)
                 return x
 
@@ -1619,6 +1615,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.hardtanh = torch.nn.Hardtanh()
                 self.elu = torch.nn.ELU()
+                self.leaky_relu = torch.nn.LeakyReLU()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1651,6 +1648,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = self.elu(x)
                 x = F.elu(x)
                 x.elu_()
+                x = self.leaky_relu(x)
+                x = F.leaky_relu(x)
+                x.leaky_relu_()
                 x = self.conv(x)
                 return x
 
@@ -1674,7 +1674,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # number of quantize_per_tensor op for type
         num_quant_by_op_type = {'conv': 2, 'common': 1, 'interpolate': 3}
         # number of ops for each type
-        num_op_by_op_type = {'conv': 2, 'common': 24, 'interpolate': 3}
+        num_op_by_op_type = {'conv': 2, 'common': 27, 'interpolate': 3}
         num_quantize_per_tensor = 1 # for output
         for op_type, num_op in num_op_by_op_type.items():
             num_quantize_per_tensor += num_op * num_quant_by_op_type[op_type]
