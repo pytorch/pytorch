@@ -6,7 +6,7 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #endif
 
