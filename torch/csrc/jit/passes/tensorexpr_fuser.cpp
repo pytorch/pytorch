@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -151,6 +151,10 @@ bool isSupported(Node* node) {
 
 bool canHandle(Node* node, AliasDb& aliasDb) {
   if (node->kind() == prim::Constant) {
+    if (node->output()->type()->cast<TensorType>()) {
+      // TODO: add support for tensor constants.
+      return false;
+    }
     return true;
   }
   if (node->kind() == prim::Loop) {
@@ -158,6 +162,16 @@ bool canHandle(Node* node, AliasDb& aliasDb) {
   }
   if (!allShapesAreKnown(node)) {
     return false;
+  }
+
+  // Don't include nodes whose inputs are tensor constants - we cannot handle
+  // them at the moment.
+  // TODO: actually support tensor constants and remove this.
+  for (torch::jit::Value* input : node->inputs()) {
+    if (input->node()->kind() == prim::Constant &&
+        input->type()->cast<TensorType>()) {
+      return false;
+    }
   }
   return isSupported(node);
 }
