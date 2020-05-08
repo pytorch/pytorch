@@ -30,8 +30,8 @@ class TestComplexTensor(TestCase):
         real = torch.randn(4)
         imag = torch.randn(4)
         complex_tensor = real + 1j * imag
-        self.assertEqual(complex_tensor.copy_real(), real)
-        self.assertEqual(complex_tensor.copy_imag(), imag)
+        self.assertEqualIgnoreType(complex_tensor.copy_real(), real)
+        self.assertEqualIgnoreType(complex_tensor.copy_imag(), imag)
 
 if __name__ == '__main__':
     run_tests()
