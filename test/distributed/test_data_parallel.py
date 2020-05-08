@@ -684,19 +684,20 @@ class TestDataParallel(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_module_with_no_inputs(self):
         # gh-37814
+        shape = 3
+
         class Holder(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, shape):
                 super().__init__()
-                self.x = torch.nn.Parameter(torch.arange(3).float())
+                self.x = torch.nn.Parameter(torch.arange(shape).float())
 
             def forward(self):
                 return self.x
 
-        expected = torch.arange(3).float().cuda()
-        holder = dp.DataParallel(Holder().cuda())
+        expected = torch.arange(shape).float().cuda()
+        holder = dp.DataParallel(Holder(shape).cuda())
         output = holder()
-        for replica in output.split(3):
-            self.assertEqual(expected, replica)
+        self.assertEqual(expected, output)
 
 if __name__ == '__main__':
     run_tests()

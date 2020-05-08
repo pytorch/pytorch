@@ -33,16 +33,12 @@ def scatter(inputs, target_gpus, dim=0):
 
 def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
     r"""Scatter with support for kwargs dictionary"""
-    inputs = scatter(inputs, target_gpus, dim) if inputs else []
-    kwargs = scatter(kwargs, target_gpus, dim) if kwargs else []
+    inputs = scatter(inputs, target_gpus, dim) if inputs else [()]
+    kwargs = scatter(kwargs, target_gpus, dim) if kwargs else [{}]
     if len(inputs) < len(kwargs):
         inputs.extend([() for _ in range(len(kwargs) - len(inputs))])
     elif len(kwargs) < len(inputs):
         kwargs.extend([{} for _ in range(len(inputs) - len(kwargs))])
-
-    if len(inputs) == 0 and len(kwargs) == 0:
-        inputs = [tuple() for _ in range(len(target_gpus))]
-        kwargs = [dict() for _ in range(len(target_gpus))]
 
     inputs = tuple(inputs)
     kwargs = tuple(kwargs)

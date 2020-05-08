@@ -2178,17 +2178,18 @@ class _DistTestBase(object):
         # gh-37814
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
+        shape = 3
 
         class Holder(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, shape):
                 super().__init__()
-                self.x = torch.nn.Parameter(torch.arange(3).float())
+                self.x = torch.nn.Parameter(torch.arange(shape).float())
 
             def forward(self):
                 return self.x
 
-        expected = torch.arange(3).float().cuda()
-        holder = nn.parallel.DistributedDataParallel(Holder().cuda(rank), device_ids=[rank])
+        expected = torch.arange(shape).float().cuda()
+        holder = nn.parallel.DistributedDataParallel(Holder(shape).cuda(rank), device_ids=[rank])
         output = holder()
         self.assertEqual(expected, output)
 
