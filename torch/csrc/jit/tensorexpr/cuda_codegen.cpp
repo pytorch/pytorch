@@ -227,6 +227,13 @@ void CudaPrinter::visit(const For* v) {
   }
 }
 
+void CudaPrinter::visit(const Cast* v) {
+  os() << cudaDtypeCppString(v->dtype());
+  os() << "(";
+  v->src_value()->accept(this);
+  os() << ")";
+}
+
 void CudaPrinter::visit(const Intrinsics* v) {
   if (v->op_type() == IntrinsicsOp::kRand) {
     os() << "Uint32ToFloat(" << *rand_func_ << "())";
