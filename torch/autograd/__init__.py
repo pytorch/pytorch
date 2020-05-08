@@ -51,7 +51,7 @@ def _make_grads(outputs, grads):
     return tuple(new_grads)
 
 
-_TensorOrTensors = Union[Tensor, Sequence[Tensor]]
+_TensorOrTensors = Union[torch.Tensor, Sequence[torch.Tensor]]
 
 
 def backward(
@@ -132,7 +132,7 @@ def grad(
     create_graph: bool = False,
     only_inputs: bool = True,
     allow_unused: bool = False
-) -> Tuple[Tensor, ...]:
+) -> Tuple[torch.Tensor, ...]:
     r"""Computes and returns the sum of gradients of outputs w.r.t. the inputs.
 
     ``grad_outputs`` should be a sequence of length matching ``output``

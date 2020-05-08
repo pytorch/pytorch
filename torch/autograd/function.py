@@ -5,6 +5,7 @@ from torch._six import with_metaclass
 import functools
 import warnings
 from collections import OrderedDict
+from typing import Any
 
 
 class _ContextMethodMixin(object):

@@ -3,6 +3,7 @@ from torch._six import container_abcs, istuple
 import torch.testing
 from itertools import product
 import warnings
+from typing import Callable, Union, Tuple
 
 def zero_gradients(x):
     if isinstance(x, torch.Tensor):
@@ -202,8 +203,8 @@ def _differentiable_outputs(x):
 # the '...' first argument of Callable can be replaced with VarArg(Tensor).
 # For now, we permit any input.
 def gradcheck(
-    func: Callable[..., Union[Tensor, Tuple[Tensor, ...]]],
-    inputs: Union[Tensor, Tuple[Tensor, ...]],
+    func: Callable[..., Union[torch.Tensor, Tuple[torch.Tensor, ...]]],
+    inputs: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
     eps: float = 1e-6,
     atol: float = 1e-5,
     rtol: float = 1e-3,
@@ -353,8 +354,8 @@ def gradcheck(
 
 
 def gradgradcheck(
-    func: Callable[..., Union[Tensor, Tuple[Tensor, ...]]],
-    inputs: Union[Tensor, Tuple[Tensor, ...]],
+    func: Callable[..., Union[torch.Tensor, Tuple[torch.Tensor, ...]]],
+    inputs: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
     eps: float = 1e-6,
     atol: float = 1e-5,
     rtol: float = 1e-3,
