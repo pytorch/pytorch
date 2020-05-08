@@ -1603,7 +1603,7 @@ except RuntimeError as e:
 
         arr = [1.1, 2.3, -0.9]
         collated = _utils.collate.default_collate(arr)
-        self.assertEqual(collated, torch.tensor(arr))
+        self.assertEqualIgnoreType(collated, torch.tensor(arr))
         self.assertEqual(collated.dtype, torch.float64)
 
         arr = [True, False]
