@@ -6316,10 +6316,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(np_result, torch_result)
 
     def _rand_shape(self, dim, min_size, max_size):
-            shape = []
-            for i in range(dim):
-                shape.append(random.randint(min_size, max_size))
-            return tuple(shape)
+        shape = []
+        for i in range(dim):
+            shape.append(random.randint(min_size, max_size))
+        return tuple(shape)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float)
@@ -8029,8 +8029,8 @@ class TestTorchDeviceType(TestCase):
         shape = self._rand_shape(random.randint(2, 4), 5, 10)
         for rot_times in range(4):
             data = torch.randn(*shape, dtype=dtype).tolist()
-            torch_fn = partial(torch.rot90, k=rot_times, dims=[0,1])
-            np_fn = partial(np.rot90, k=rot_times, axes=[0,1])
+            torch_fn = partial(torch.rot90, k=rot_times, dims=[0, 1])
+            np_fn = partial(np.rot90, k=rot_times, axes=[0, 1])
             self._np_compare_func((torch_fn, np_fn), data, device, dtype)
 
     def test_signal_window_functions(self, device):
