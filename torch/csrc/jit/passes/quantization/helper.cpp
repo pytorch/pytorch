@@ -63,8 +63,6 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "relu_",
     "sigmoid",
     "tanh",
-    "hardtanh",
-    "hardtanh_",
     "elu",
     "elu_",
     "hardsigmoid",
@@ -98,8 +96,6 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "relu_",
     "sigmoid",
     "tanh",
-    "hardtanh",
-    "hardtanh_",
     "elu",
     "elu_",
     "hardsigmoid",
@@ -111,6 +107,8 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
 // Theses are prim::CallFunctions for ops that doesn't require observation and
 // have a single input Tensor
 // Also these ops do computation on the value of Tensor
+// TODO: [Need verify] looks like we can quantize simple functionals that just call
+// into aten functions
 std::vector<std::string> _single_input_general_value_call_funcs = {
     "avg_pool1d",
     "avg_pool2d",
@@ -122,6 +120,7 @@ std::vector<std::string> _single_input_general_value_call_funcs = {
     "upsample",
     "upsample_bilinear",
     "upsample_nearest",
+    "hardtanh",
 };
 
 // Theses are aten functions for ops that doesn't require observation and
@@ -145,6 +144,8 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     "upsample_bicubic2d",
     "clamp",
     // "clamp_",  // Enable when quantized `clamp_` is ready
+    "hardtanh",
+    "hardtanh_",
 };
 
 // Special checks for ops that do not require observers for all input tensors.
