@@ -120,7 +120,7 @@ std::string cudaDtypeCppString(const Dtype& dtype) {
     case ScalarType::Long:
       return "long";
     default:
-      throw unsupported_dtype();
+      return dtype.ToCppString();
   }
 }
 

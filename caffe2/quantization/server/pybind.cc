@@ -373,14 +373,9 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
         const Int8FCDNNLowPPackedWeightBlob& packedInt8Blob =
             blob->template Get<Int8FCDNNLowPPackedWeightBlob>();
         auto& qparams = packedInt8Blob.qparams;
-        auto& unpacked_tensor = packedInt8Blob.original_tensor;
-        auto& packed_tensor = packedInt8Blob.W;
+        auto& int8_tensor = packedInt8Blob.original_tensor;
 
-        auto shape = unpacked_tensor.sizes();
-        CAFFE_ENFORCE(shape.size() == 2);
-        vector<int8_t> unpacked_int8_data;
-        unpacked_int8_data.resize(shape[0] * shape[1]);
-        packed_tensor->unpack(unpacked_int8_data.data());
+        auto shape = int8_tensor.sizes();
 
         ofstream fout;
         fout.open(weights_out_file);
@@ -397,12 +392,13 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
                << to_string(qparams[i].zero_point);
         }
         fout << endl;
+        int8_t* int8_data = int8_tensor.data<int8_t>();
         for (int i = 0; i < shape[0]; ++i) {
           for (int j = 0; j < shape[1]; ++j) {
             if (j > 0) {
               fout << " ";
             }
-            fout << to_string(unpacked_int8_data.data()[i * shape[1] + j]);
+            fout << to_string(int8_data[i * shape[1] + j]);
           }
           fout << endl;
         }

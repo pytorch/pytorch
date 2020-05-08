@@ -1,5 +1,5 @@
 #include <torch/torch.h>
-#include <ATen/record_function.h>
+#include <torch/csrc/autograd/record_function.h>
 
 #include "c10/util/Flags.h"
 
@@ -22,22 +22,22 @@ using namespace torch::autograd;
 
 void setupCallbacks() {
   // non-sampled callback
-  at::addGlobalCallback(at::RecordFunctionCallback(
-      [&](const at::RecordFunction& fn) {
+  profiler::pushCallback(
+      [&](const profiler::RecordFunction& fn) {
         return true;
       },
-      [](const at::RecordFunction&) {})
-    .needsInputs(true));
+      [](const profiler::RecordFunction&) {},
+      /* needs_inputs */ true);
 
   // sampled
   for (auto idx = 0; idx < kNumSampledCb; ++idx) {
-    at::addGlobalCallback(at::RecordFunctionCallback(
-        [](const at::RecordFunction& fn) {
+    profiler::pushCallback(
+        [](const profiler::RecordFunction& fn) {
           return true;
         },
-        [](const at::RecordFunction&) {})
-      .needsInputs(true)
-      .samplingProb(kSampingProb)
+        [](const profiler::RecordFunction&) {},
+        /* needs_inputs */ true,
+        /* sampling_prob */ kSampingProb
     );
   }
 }
