@@ -63,8 +63,6 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "relu_",
     "sigmoid",
     "tanh",
-    "elu",
-    "elu_",
     "hardsigmoid",
     "hardsigmoid_",
     "leaky_relu",
@@ -96,8 +94,6 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "relu_",
     "sigmoid",
     "tanh",
-    "elu",
-    "elu_",
     "hardsigmoid",
     "hardsigmoid_",
     "leaky_relu",
@@ -121,6 +117,7 @@ std::vector<std::string> _single_input_general_value_call_funcs = {
     "upsample_bilinear",
     "upsample_nearest",
     "hardtanh",
+    "elu",
 };
 
 // Theses are aten functions for ops that doesn't require observation and
@@ -146,6 +143,8 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     // "clamp_",  // Enable when quantized `clamp_` is ready
     "hardtanh",
     "hardtanh_",
+    "elu",
+    "elu_",
 };
 
 // Special checks for ops that do not require observers for all input tensors.

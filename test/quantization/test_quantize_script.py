@@ -1538,7 +1538,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.sigmoid = torch.nn.Sigmoid()
                 self.tanh = torch.nn.Tanh()
-                self.elu = torch.nn.ELU()
                 self.hardsigmoid = torch.nn.Hardsigmoid()
                 self.relu = torch.nn.ReLU()
                 self.relu6 = torch.nn.ReLU6()
@@ -1569,9 +1568,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = self.tanh(x)
                 x = F.tanh(x)
                 x = torch.tanh(x)
-                x = self.elu(x)
-                x = F.elu(x)
-                x.elu_()
                 x = self.hardsigmoid(x)
                 x = F.hardsigmoid(x)
                 x.hardsigmoid_()
@@ -1622,6 +1618,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.hardtanh = torch.nn.Hardtanh()
+                self.elu = torch.nn.ELU()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1651,6 +1648,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = self.hardtanh(x)
                 x = F.hardtanh(x)
                 x.hardtanh_()
+                x = self.elu(x)
+                x = F.elu(x)
+                x.elu_()
                 x = self.conv(x)
                 return x
 
@@ -1674,7 +1674,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # number of quantize_per_tensor op for type
         num_quant_by_op_type = {'conv': 2, 'common': 1, 'interpolate': 3}
         # number of ops for each type
-        num_op_by_op_type = {'conv': 2, 'common': 21, 'interpolate': 3}
+        num_op_by_op_type = {'conv': 2, 'common': 24, 'interpolate': 3}
         num_quantize_per_tensor = 1 # for output
         for op_type, num_op in num_op_by_op_type.items():
             num_quantize_per_tensor += num_op * num_quant_by_op_type[op_type]
