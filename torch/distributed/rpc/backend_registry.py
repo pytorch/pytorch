@@ -156,18 +156,13 @@ register_backend(
 def _tensorpipe_construct_rpc_backend_options_handler(
     rpc_timeout,
     init_method,
-    worker_name_to_id=None,
     **kwargs
 ):
     from . import TensorPipeRpcBackendOptions
 
-    assert (
-        worker_name_to_id is not None
-    ), "worker_name_to_id must be provided as a kwargs."
     rpc_backend_options = TensorPipeRpcBackendOptions()
     rpc_backend_options.rpc_timeout = rpc_timeout
     rpc_backend_options.init_method = init_method
-    rpc_backend_options.worker_name_to_id = worker_name_to_id
     return rpc_backend_options
 
 
@@ -188,7 +183,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         )
 
     agent = TensorPipeAgent(
-        rank, name, store, rpc_backend_options
+        store, name, rank, world_size, rpc_backend_options
     )
     return agent
 
