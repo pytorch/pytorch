@@ -1137,7 +1137,6 @@ def _recursive_compile_class(obj, loc):
     error_stack.update_pending_range(loc)
     rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
     _compile_and_register_class(obj, rcb, _qual_name)
-    del error_stack
 
 def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)
