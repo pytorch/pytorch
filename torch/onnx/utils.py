@@ -736,10 +736,10 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 # inplace annotations, but we are losing information this way.
 
 
-def _find_symbolic_fn(ns, domain, op_name, opset_version, operator_export_type, msg=''):
+def _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type):
     import torch.onnx.symbolic_registry as sym_registry
     if not sym_registry.is_registered_op(op_name, domain, opset_version):
-        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLTHROUGH:
+        if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
             # Use the original node directly
             return None
     return sym_registry.get_registered_op(op_name, domain, opset_version)
@@ -754,9 +754,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
         import torch.onnx.symbolic_registry as sym_registry
 
         sym_registry.register_version('', opset_version)
-        # Quantized op registration overwrites opset 9 symbolics with Caffe2 symbolics.
-        # Again in Caffe2 symbolics we check if an op is registered as a quantized op, and if not,
-        # we fallback to opset 9 symbolics. 
+
+        # Quantized op symbolics are registered for opset 9 only.
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and opset_version == 9:
             import torch.onnx.symbolic_caffe2
             torch.onnx.symbolic_caffe2.register_quantized_ops('caffe2', opset_version)
@@ -785,7 +784,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             else:
                 # Export it regularly
                 domain = ''
-                symbolic_fn = _find_symbolic_fn(ns, domain, op_name, opset_version, operator_export_type)
+                symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
                 if symbolic_fn is None:
                     return None
                 attrs = {k: n[k] for k in n.attributeNames()}
@@ -808,9 +807,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                         n.kindOf("value")))
             elif n.mustBeNone() or op_name == "ListConstruct" or op_name == "ListUnpack":
                 # None is not an ONNX operator; keep it as None
-                # let the exporter handle finally eliminating these
-
-                # For ListConstruct/ListUnpack, it will be erased in the ONNX peephole pass
+                # Let the exporter handle and finally eliminate these ops
+                # ListConstruct and ListUnpack will be erased in the ONNX peephole pass
                 return None
             elif op_name == 'Loop' or op_name == 'If':
                 new_op_outputs = g.op(op_name, *inputs, outputs=n.outputsSize())
@@ -820,51 +818,46 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                     torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env)
                 return new_op_outputs
             else:
-                # TODO: we sould lift prim's symbolic out
                 symbolic_name = 'prim_' + op_name
                 domain = ''
-                symbolic_fn = _find_symbolic_fn(ns, domain, symbolic_name, opset_version,
-                                                operator_export_type)
+                symbolic_fn = _find_symbolic_in_registry(domain, symbolic_name, opset_version,
+                                                         operator_export_type)
                 if symbolic_fn is None:
-                    return symbolic_fn
+                    return None
                 attrs = {k: n[k] for k in n.attributeNames()}
                 return symbolic_fn(g, *inputs, **attrs)
+
         elif ns == "quantized":
             domain = ''
             if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
                 domain = 'caffe2'
-            symbolic_fn = _find_symbolic_fn(ns, domain, op_name, opset_version, operator_export_type)
+            symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
             if symbolic_fn is None:
-                return symbolic_fn
+                return None
             attrs = {k: n[k] for k in n.attributeNames()}
             return symbolic_fn(g, *inputs, **attrs)
 
         # custom ops
         elif sym_registry.is_registered_version(ns, opset_version):
             domain = ns
-            error_msg = "Have you registered your symbolic function with " \
-                        "torch.onnx.register_custom_op_symbolic(symbolic_name, symbolic_fn)?"
-            symbolic_fn = _find_symbolic_fn(ns, domain, op_name, opset_version, operator_export_type,
-                                            error_msg)
+            symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
             if symbolic_fn is None:
-                return symbolic_fn
+                return None
             attrs = {k: n[k] for k in n.attributeNames()}
             return symbolic_fn(g, *inputs, **attrs)
         else:
-            if operator_export_type != OperatorExportTypes.ONNX_ATEN_FALLTHROUGH:
-                warnings.warn("ONNX export failed on an operator with unrecognized namespace {}::{}; "
-                              "If you are trying to export a custom operator, make sure you registered "
-                              "it with the right domain and version."
-                              "Otherwise please report a bug".format(ns, op_name))
-            return None
+            raise RuntimeError("ONNX export failed on an operator with unrecognized namespace {}::{}. "
+                               "If you are trying to export a custom operator, make sure you registered "
+                               "it with the right domain and version. "
+                               "Otherwise, please report a bug.".format(ns, op_name))
     except RuntimeError:
-        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLTHROUGH:
+        if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
         raise
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch.
         # Otherwise, the backtrace will have the clues you need.
-        e.args = ("{} (occurred when translating {})".format(e.args[0], op_name), )
+        e.args = ("{} (occurred when translating {})".format(e.args[0], op_name))
         raise
 
 

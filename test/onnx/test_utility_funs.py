@@ -557,12 +557,12 @@ class TestUtilityFuns(TestCase):
         x = torch.randn(2, 3, 4)
         _set_opset_version(self.opset_version)
         graph, _, __ = utils._model_to_graph(Module(), (x, ),
-                                             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLTHROUGH)
+                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
         iter = graph.nodes()
         assert next(iter).kind() == "onnx::Constant"
         assert next(iter).kind() == "aten::triu"
 
-    def test_onnx_custom_op_fallthrough(self):
+    def test_custom_op_fallthrough(self):
         # Test custom op
         op_source = """
         #include <torch/script.h>
@@ -591,24 +591,24 @@ class TestUtilityFuns(TestCase):
         y = torch.randn(2, 3, 4, requires_grad=False)
         model = FooModel()
         graph, _, __ = torch.onnx.utils._model_to_graph(model, (x, y),
-                                                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLTHROUGH)
+                                                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH)
         iter = graph.nodes()
         assert next(iter).kind() == "custom_namespace::custom_op"
 
-    def test_onnx_aten_fallthrough(self):
+    def test_onnx_fallthrough(self):
         # Test aten export of op with symbolic for aten
         x = torch.randn(100, 128)
         y = torch.randn(100, 128)
         model = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
 
         graph, _, __ = utils._model_to_graph(model, (x, y),
-                                             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLTHROUGH)
+                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
         iter = graph.nodes()
         assert next(iter).kind() == "onnx::Constant"
         assert next(iter).kind() == "onnx::Constant"
         assert next(iter).kind() == "aten::cosine_similarity"
 
-    def test_quantized_aten_fallthrough(self):
+    def test_quantized_fallthrough(self):
         # Test Quantized op
         class QModule(torch.nn.Module):
             def __init__(self):
@@ -631,7 +631,7 @@ class TestUtilityFuns(TestCase):
         output = q_model(*pt_inputs)
 
         graph, _, __ = utils._model_to_graph(q_model, pt_inputs, example_outputs=output,
-                                             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLTHROUGH)
+                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
 
         iter = graph.nodes()
         assert next(iter).kind() == "onnx::Constant"
@@ -640,7 +640,7 @@ class TestUtilityFuns(TestCase):
         assert next(iter).kind() == "aten::quantize_per_tensor"
         assert next(iter).kind() == "aten::dequantize"
 
-    def test_prim_aten_fallthrough(self):
+    def test_prim_fallthrough(self):
         # Test prim op
         class PrimModule(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -653,7 +653,7 @@ class TestUtilityFuns(TestCase):
         model = PrimModule()
         output = model(x)
         graph, _, __ = utils._model_to_graph(model, (x,), example_outputs=output,
-                                             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLTHROUGH)
+                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
         iter = graph.nodes()
         assert next(iter).kind() == "prim::Uninitialized"
 
