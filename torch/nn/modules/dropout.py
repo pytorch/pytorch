@@ -202,7 +202,7 @@ class FeatureAlphaDropout(_DropoutNd):
     will not regularize the activations and will otherwise just result
     in an effective learning rate decrease.
 
-    In this case, :func:`nn.Dropout3d` will help promote independence between
+    In this case, :func:`nn.AlphaDropout` will help promote independence between
     feature maps and should be used instead.
 
     Args:
