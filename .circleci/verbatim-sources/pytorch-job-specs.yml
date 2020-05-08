@@ -106,6 +106,27 @@ jobs:
           echo "export PARALLEL_FLAGS=\"${PARALLEL_FLAGS}\"" >> $BASH_ENV
           echo "export id=$id" >> $BASH_ENV
     - run:
+        name: Check for no AVX instruction by default
+        no_output_timeout: "20m"
+        command: |
+          set -e
+          is_vanilla_build() {
+            if [ "${BUILD_ENVIRONMENT}" == "pytorch-linux-bionic-py3.6-clang9-test" ]; then
+              return 0
+            fi
+            if [ "${BUILD_ENVIRONMENT}" == "pytorch-linux-xenial-py3.6-gcc-5.4-test" ]; then
+              return 0
+            fi
+            return 1
+          }
+
+          if is_vanilla_build; then
+            echo "apt-get update && apt-get install -y qemu-user" | docker exec -u root -i "$id" bash
+            echo "cd workspace/build; qemu-x86_64 -cpu Broadwell -E ATEN_CPU_CAPABILITY=default ./bin/basic --gtest_filter=BasicTest.BasicTestCPU" | docker exec -u jenkins -i "$id" bash
+          else
+            echo "Skipping for ${BUILD_ENVIRONMENT}"
+          fi
+    - run:
         name: Run tests
         no_output_timeout: "90m"
         command: |

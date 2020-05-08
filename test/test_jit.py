@@ -8,6 +8,7 @@ import torch
 from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
 from jit.test_type_sharing import TestTypeSharing  # noqa: F401
 from jit.test_logging import TestLogging  # noqa: F401
+from jit.test_backends import TestBackends  # noqa: F401
 from jit.test_list_dict import TestList, TestDict  # noqa: F401
 from jit.test_async import TestAsync  # noqa: F401
 from jit.test_data_parallel import TestDataParallel  # noqa: F401
@@ -6674,7 +6675,7 @@ a")
         def test_integral_shape_inference(a):
             return a / a
         ''')
-        inputs = [torch.ones(10, 10).type(torch.LongTensor)]
+        inputs = [torch.ones(10, 10, dtype=torch.long)]
         outputs = torch.ones(10, 10)
 
         self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
