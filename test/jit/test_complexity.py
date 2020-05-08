@@ -49,7 +49,7 @@ class TestComplexity(JitTestCase):
         super(TestComplexity, self).tearDown()
         torch.set_grad_enabled(self.grad_enabled)
 
-    @suppress_warnings 
+    @suppress_warnings
     def test_generated_functional_tests(self):
         with enable_profiling_mode():
             stats = [("Name", "Ifs/Loops", "non-tensor ops")]
@@ -65,7 +65,7 @@ class TestComplexity(JitTestCase):
         for line in stats:
             print(line)
 
-    @suppress_warnings 
+    @suppress_warnings
     def test_nn_module_tests(self):
         with enable_profiling_mode():
             stats = [("Name", "Ifs/Loops", "non-tensor ops")]

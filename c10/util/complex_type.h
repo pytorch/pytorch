@@ -123,6 +123,8 @@ struct complex;
 
 template<typename T>
 struct alignas(sizeof(T) * 2) complex_common {
+  using value_type = T;
+
   T storage[2];
 
   constexpr complex_common(): storage{T(), T()} {}
@@ -435,15 +437,11 @@ constexpr T imag(const c10::complex<T>& z) {
 
 template<typename T>
 C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
-  // Algorithm reference:
-  //   https://www.johndcook.com/blog/2010/06/02/whats-so-hard-about-finding-a-hypotenuse/
-  //   https://en.wikipedia.org/wiki/Hypot#Implementation
-  auto r = std::abs(std::real(z));
-  auto i = std::abs(std::imag(z));
-  auto max = r > i ? r : i;
-  auto min = r > i ? i : r;
-  auto rr = min / max;
-  return max * std::sqrt(1 + rr * rr);
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  return thrust::abs(static_cast<thrust::complex<T>>(z));
+#else
+  return std::abs(static_cast<std::complex<T>>(z));
+#endif
 }
 
 #ifdef __HIP_PLATFORM_HCC__
@@ -500,3 +498,5 @@ C10_HOST_DEVICE c10::complex<T> polar(const T& r, const T& theta = T()) {
 
 // math functions are included in a separate file
 #include <c10/util/complex_math.h>
+// utilities for complex types
+#include <c10/util/complex_utils.h>
