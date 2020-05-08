@@ -1,9 +1,10 @@
 import torch
+from torch.types import _TensorOrTensors
 from torch._six import container_abcs, istuple
 import torch.testing
 from itertools import product
 import warnings
-from typing import Callable, Union, Tuple
+from typing import Callable, Union, Optional
 
 def zero_gradients(x):
     if isinstance(x, torch.Tensor):
@@ -196,15 +197,18 @@ def _differentiable_outputs(x):
     return tuple(o for o in _as_tuple(x) if o.requires_grad)
 
 
+# Note [VarArg of Tensors]
+# ~~~~~~~~~~~~~~~~~~~~~~~~
 # 'func' accepts a vararg of tensors, which isn't expressable in the type system at the moment.
 # If https://mypy.readthedocs.io/en/latest/additional_features.html?highlight=callable#extended-callable-types is accepted,
 # the '...' first argument of Callable can be replaced with VarArg(Tensor).
 # For now, we permit any input.
 # the '...' first argument of Callable can be replaced with VarArg(Tensor).
 # For now, we permit any input.
+
 def gradcheck(
-    func: Callable[..., Union[torch.Tensor, Tuple[torch.Tensor, ...]]],
-    inputs: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
+    func: Callable[..., Union[_TensorOrTensors]],  # See Note [VarArg of Tensors]
+    inputs: _TensorOrTensors,
     eps: float = 1e-6,
     atol: float = 1e-5,
     rtol: float = 1e-3,
@@ -354,8 +358,9 @@ def gradcheck(
 
 
 def gradgradcheck(
-    func: Callable[..., Union[torch.Tensor, Tuple[torch.Tensor, ...]]],
-    inputs: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
+    func: Callable[..., _TensorOrTensors],  # See Note [VarArg of Tensors]
+    inputs: _TensorOrTensors,
+    grad_outputs: Optional[_TensorOrTensors] = None,
     eps: float = 1e-6,
     atol: float = 1e-5,
     rtol: float = 1e-3,

@@ -7,6 +7,7 @@ for which gradients should be computed with the ``requires_grad=True`` keyword.
 import torch
 import warnings
 from typing import Any, Callable, Union, Tuple, Sequence, Optional
+from torch.types import _TensorOrTensors
 
 from .variable import Variable
 from .function import Function, NestedIOFunction
@@ -51,14 +52,12 @@ def _make_grads(outputs, grads):
     return tuple(new_grads)
 
 
-_TensorOrTensors = Union[torch.Tensor, Sequence[torch.Tensor]]
-
-
 def backward(
     tensors: _TensorOrTensors,
     grad_tensors: Optional[_TensorOrTensors] = None,
     retain_graph: Optional[bool] = None,
-    create_graph: bool = None
+    create_graph: bool = False,
+    grad_variables: Optional[_TensorOrTensors] = None,
 ) -> None:
     r"""Computes the sum of gradients of given tensors w.r.t. graph leaves.
 

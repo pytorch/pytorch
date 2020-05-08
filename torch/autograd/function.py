@@ -349,7 +349,7 @@ _map_tensor_data = _nested_map(lambda x: isinstance(x, torch.Tensor), lambda o: 
 
 class NestedIOFunction(Function):
     # The 'type: ignore' statements are needed here because these functions are declared as '@staticmethod' in the
-    # superclass (Function) but are instance methods here, which mypy reports as incomptabile.
+    # superclass (Function) but are instance methods here, which mypy reports as incompatible.
 
     def _do_forward(self, *input):
         self._nested_input = input
@@ -367,14 +367,14 @@ class NestedIOFunction(Function):
             del self._to_save_nested
         return result
 
-    def backward(self, *gradients: Any) -> Any:  # type: ignore
+    def backward(self, *gradients: Any) -> Any:
         nested_gradients = _unflatten(gradients, self._nested_output)
         result = self.backward_extended(*nested_gradients)
         return tuple(_iter_None_tensors(result))
 
     __call__ = _do_forward
 
-    def forward(self, *args: Any) -> None:  # type: ignore
+    def forward(self, *args: Any) -> Any:
         nested_tensors = _map_tensor_data(self._nested_input)
         result = self.forward_extended(*nested_tensors)
         del self._nested_input
