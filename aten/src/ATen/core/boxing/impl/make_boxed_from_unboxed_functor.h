@@ -42,7 +42,7 @@ using supported_primitive_arg_types = guts::typelist::typelist<
     at::Tensor,
     at::Scalar,
     c10::QScheme,
-    c10::ScalarType,
+    c10::ScalarType
   >;
 
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
