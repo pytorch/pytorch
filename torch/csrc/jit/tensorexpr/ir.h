@@ -289,7 +289,7 @@ Expr* getImmediateByType(ScalarType immType, T initialVal) {
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
     return new Name##Imm(initialVal);
-    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
       throw unsupported_dtype();
@@ -308,7 +308,7 @@ T immediateAs(const Expr* e) {
   if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
     return imm->value();                                          \
   }
-  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
   throw unsupported_dtype();
   return 0;
@@ -320,7 +320,7 @@ bool immediateEquals(const Expr* e, T val) {
   if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
     return imm->value() == val;                                   \
   }
-  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
   throw unsupported_dtype();
   return false;
