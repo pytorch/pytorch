@@ -242,7 +242,16 @@ void IRPrinter::handle(const UnaryOp* const uop) {
     os << inline_uop.value();
     handle(uop->in());
   } else {
-    os << uop->getUnaryOpType() << "(";
+    if (uop->getUnaryOpType() == UnaryOpType::Cast) {
+      c10::optional<std::string> cast_str =
+        cast_func_str(std::make_pair(static_cast<TensorIndex*>(uop->in())->view()->getDataType().value(),
+                                     static_cast<TensorIndex*>(uop->out())->view()->getDataType().value()));
+      TORCH_INTERNAL_ASSERT(cast_str != c10::nullopt, "Unsupported Cast");
+	  os << cast_str.value();
+    } else {
+      os << uop->getUnaryOpType();
+    }
+    os << "(";
     if (uop->getUnaryOpType() == UnaryOpType::RandLike)
       os << "rnd";
     else

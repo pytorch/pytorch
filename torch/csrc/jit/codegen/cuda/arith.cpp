@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/type.h>
 
 namespace torch {
 namespace jit {
@@ -95,10 +96,19 @@ TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1) {
   if (v1->getDataType().value() == dtype)
     return v1;
 
-  auto uop_type = cast_type(v1->getDataType().value(), dtype);
+  if (cast_func_str(std::make_pair(v1->getDataType().value(), dtype))
+       == c10::nullopt)
+  {
+    TORCH_CHECK(
+        false,
+        "Illegal Cast value from  DataType: ",
+        v1->getDataType().value(),
+        " to DataType: ",
+        dtype);
+  }
 
   Val* out = newValLike(v1, dtype);
-  Statement* expr = new UnaryOp(uop_type.value(), out, v1);
+  Statement* expr = new UnaryOp(UnaryOpType::Cast, out, v1);
   return out;
 }
 

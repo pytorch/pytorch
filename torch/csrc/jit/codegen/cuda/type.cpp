@@ -31,21 +31,6 @@ ValType promote_type(const ValType& t1, const ValType& t2) {
   return t1 < t2 ? t1 : t2;
 }
 
-c10::optional<UnaryOpType> cast_type(const DataType& t1, const DataType& t2) {
-  c10::optional<UnaryOpType> cast = c10::nullopt;
-
-  if ((DataType::Half == t1) && (DataType::Float == t2))
-    cast = UnaryOpType::HalfToFloat;
-  if ((DataType::Float == t1) && (DataType::Half == t2))
-    cast = UnaryOpType::FloatToHalf;
-
-  TORCH_CHECK(
-      !cast, "Illegal Cast value from  DataType: ", t1, " to DataType: ", t2);
-
-  // In theory there could be stronger real check here in the future
-  return cast;
-}
-
 template <typename T>
 struct _enum_class_hash {
   size_t operator()(T v) const {
@@ -84,7 +69,7 @@ static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
     {UnaryOpType::Asin, "asinf"},
     {UnaryOpType::Atan, "atanf"},
     {UnaryOpType::Atanh, "atanhf"},
-    //{UnaryOpType::Cast,       "cast"},
+    {UnaryOpType::Cast, "cast"},
     {UnaryOpType::Ceil, "ceilf"},
     {UnaryOpType::Cos, "cosf"},
     {UnaryOpType::Cosh, "coshf"},
@@ -92,11 +77,9 @@ static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
     {UnaryOpType::Expm1, "expm1f"},
     {UnaryOpType::Erf, "erff"},
     {UnaryOpType::Erfc, "erfcf"},
-    {UnaryOpType::FloatToHalf, "__float2half"},
     {UnaryOpType::Floor, "floorf"},
     {UnaryOpType::Frac, "frac"},
     {UnaryOpType::Gelu, "gelu"},
-    {UnaryOpType::HalfToFloat, "__half2float"},
     {UnaryOpType::Lgamma, "lgammaf"},
     {UnaryOpType::Log, "logf"},
     {UnaryOpType::Log10, "log10f"},
@@ -201,6 +184,19 @@ static std::unordered_set<BinaryOpType, _enum_class_hash<BinaryOpType>>
                        BinaryOpType::LE,
                        BinaryOpType::LT,
                        BinaryOpType::NE};
+
+template <typename T>
+struct _enum_pair_hash {
+  size_t operator()(std::pair<T, T> p) const {
+    return static_cast<size_t>(p.first) ^ static_cast<size_t>(p.second);
+  }
+};
+template <typename KeyType, typename ValType>
+using _enum_pair_unordered_map =
+    std::unordered_map<std::pair<KeyType,KeyType>, ValType, _enum_pair_hash<KeyType>>;
+static _enum_pair_unordered_map<DataType, std::string> supported_casts {
+    {{DataType::Float, DataType::Half }, "__float2half"},
+    {{DataType::Half,  DataType::Float}, "__half2float"}};
 
 bool is_logical_op(const BinaryOpType& bot) {
   return logical_binary_ops.count(bot) > 0;
@@ -308,6 +304,16 @@ std::string stringifyThreadSize(const ParallelType ptype) {
       ptype);
   return thread_size_string_map[ptype];
 }
+
+TORCH_CUDA_API c10::optional<std::string> cast_func_str(
+    const std::pair<DataType, DataType> &cast) {
+  if (supported_casts.count(cast) == 0) {
+    return c10::nullopt;
+  } else {
+    return supported_casts[cast];
+  }
+}
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch
