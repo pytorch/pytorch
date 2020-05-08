@@ -14609,6 +14609,24 @@ class TestTorchDeviceType(TestCase):
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
         self.assertEqual(X, Xhat, atol=1e-8, message='VeV\' wrong')
 
+        # test invalid input
+        self.assertRaisesRegex(
+            RuntimeError, 
+            'A should be 2 dimensional', 
+            lambda: torch.eig(torch.ones((2))))
+        self.assertRaisesRegex(
+            RuntimeError, 
+            'A should be square', 
+            lambda: torch.eig(torch.ones((2, 3))))
+        self.assertRaisesRegex(
+            RuntimeError, 
+            'A should not contain infs or NaNs', 
+            lambda: torch.eig(np.inf * torch.ones((2, 2))))
+        self.assertRaisesRegex(
+            RuntimeError, 
+            'A should not contain infs or NaNs', 
+            lambda: torch.eig(np.nan * torch.ones((2, 2))))
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
