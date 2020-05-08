@@ -913,7 +913,10 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
     ptr_to_args[buffer_args.size()] = &rand_seed;
     ptr_to_args[buffer_args.size() + 1] = &rand_offset;
   }
-
+  const auto prior_device = at::cuda::current_device();
+  if (prior_device != this->device().index()) {
+    at::cuda::set_device(this->device().index());
+  }
   // Launch the kernels
   auto stream = at::cuda::getCurrentCUDAStream();
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
@@ -929,6 +932,10 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
       ptr_to_args.data(),
       nullptr));
   USE_TRIGGER(cuda_codegen_executed);
+
+  if (prior_device != this->device().index()) {
+    at::cuda::set_device(prior_device);
+  }
 }
 
 void CudaCodeGen::CompileToNVRTC(
