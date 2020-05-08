@@ -131,7 +131,7 @@ class Module(object):
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
 
         """
-        if persistent == False and isinstance(self, torch.jit.ScriptModule):
+        if persistent is False and isinstance(self, torch.jit.ScriptModule):
             raise RuntimeError("ScriptModule does not support non-persistent buffers")
 
         if '_buffers' not in self.__dict__:
