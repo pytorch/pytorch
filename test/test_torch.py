@@ -19,6 +19,7 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._six import inf, nan, string_classes, istuple
 from itertools import product, combinations, combinations_with_replacement, permutations
 from functools import reduce
+from functools import partial
 from random import randrange
 from torch import multiprocessing as mp
 from torch.testing._internal.common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
@@ -6302,6 +6303,24 @@ class TestTorchDeviceType(TestCase):
         torch_result = torch_fn(t).cpu()
         self.assertEqual(np_result, torch_result)
 
+    def _np_compare_func(self, fns, vals, device, dtype):
+        assert TEST_NUMPY
+
+        torch_fn, np_fn = fns
+
+        a = np.array(vals, dtype=torch_to_numpy_dtype_dict[dtype])
+        np_result = torch.from_numpy(np_fn(a).copy())
+
+        t = torch.tensor(vals, device=device, dtype=dtype)
+        torch_result = torch_fn(t).cpu()
+        self.assertEqual(np_result, torch_result)
+
+    def _rand_shape(self, dim, min_size, max_size):
+            shape = []
+            for i in range(dim):
+                shape.append(random.randint(min_size, max_size))
+            return tuple(shape)
+
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float)
     def test_isfinite_isinf_isnan(self, device, dtype):
@@ -7908,18 +7927,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2), data.flip(0, 1))
         self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2), data.flip(0, 1, 2))
 
-        # Complex Dtypes
-        def _test_complex_flip(dtype):
-            complex_data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=device, dtype=dtype).view(2, 2, 2)
-            self.assertEqual(torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], dtype=dtype).view(2, 2, 2), complex_data.flip(0))
-            self.assertEqual(torch.tensor([3, 4, 1, 2, 7, 8, 5, 6], dtype=dtype).view(2, 2, 2), complex_data.flip(1))
-            self.assertEqual(torch.tensor([2, 1, 4, 3, 6, 5, 8, 7], dtype=dtype).view(2, 2, 2), complex_data.flip(2))
-            self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2], dtype=dtype).view(2, 2, 2), complex_data.flip(0, 1))
-            self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1], dtype=dtype).view(2, 2, 2), complex_data.flip(0, 1, 2))
-
-        _test_complex_flip(torch.complex64)
-        _test_complex_flip(torch.complex128)
-
         # check for wrap dim
         self.assertEqual(torch.tensor([2, 1, 4, 3, 6, 5, 8, 7]).view(2, 2, 2), data.flip(-1))
         # check for permute
@@ -7968,23 +7975,27 @@ class TestTorchDeviceType(TestCase):
         a = torch.tensor([False, True])
         self.assertEqual(a.flip(0), torch.tensor([True, False]))
 
+    @dtypes(torch.cfloat, torch.cdouble)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_complex_flip(self, device, dtype):
+        rand_dim = random.randint(3, 4)
+        shape = self._rand_shape(rand_dim, 5, 10)
+
+        # Axis to sample for given shape.
+        for i in range(1, rand_dim):
+            # Check all combinations of `i` axis.
+            for flip_dim in combinations(range(rand_dim), i):
+                data = torch.randn(*shape, dtype=dtype).tolist()
+                torch_fn = partial(torch.flip, dims=flip_dim)
+                np_fn = partial(np.flip, axis=flip_dim)
+                self._np_compare_func((torch_fn, np_fn), data, device, dtype)
+
     def test_rot90(self, device):
         data = torch.arange(1, 5, device=device).view(2, 2)
         self.assertEqual(torch.tensor([1, 2, 3, 4]).view(2, 2), data.rot90(0, [0, 1]))
         self.assertEqual(torch.tensor([2, 4, 1, 3]).view(2, 2), data.rot90(1, [0, 1]))
         self.assertEqual(torch.tensor([4, 3, 2, 1]).view(2, 2), data.rot90(2, [0, 1]))
         self.assertEqual(torch.tensor([3, 1, 4, 2]).view(2, 2), data.rot90(3, [0, 1]))
-
-        def _test_complex_rot90(dtype):
-            data = torch.arange(1, 5, device=device).view(2, 2)
-            data = data.to(dtype)
-            self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype).view(2, 2), data.rot90(0, [0, 1]))
-            self.assertEqual(torch.tensor([2, 4, 1, 3], dtype=dtype).view(2, 2), data.rot90(1, [0, 1]))
-            self.assertEqual(torch.tensor([4, 3, 2, 1], dtype=dtype).view(2, 2), data.rot90(2, [0, 1]))
-            self.assertEqual(torch.tensor([3, 1, 4, 2], dtype=dtype).view(2, 2), data.rot90(3, [0, 1]))
-
-        _test_complex_rot90(torch.complex64)
-        _test_complex_rot90(torch.complex128)
 
         # test for default args k=1, dims=[0, 1]
         self.assertEqual(data.rot90(), data.rot90(1, [0, 1]))
@@ -8011,6 +8022,16 @@ class TestTorchDeviceType(TestCase):
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [1, 1]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 1, 2]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [0]))
+
+    @dtypes(torch.cfloat, torch.cdouble)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_complex_rot90(self, device, dtype):
+        shape = self._rand_shape(random.randint(2, 4), 5, 10)
+        for rot_times in range(4):
+            data = torch.randn(*shape, dtype=dtype).tolist()
+            torch_fn = partial(torch.rot90, k=rot_times, dims=[0,1])
+            np_fn = partial(np.rot90, k=rot_times, axes=[0,1])
+            self._np_compare_func((torch_fn, np_fn), data, device, dtype)
 
     def test_signal_window_functions(self, device):
         if not TEST_SCIPY:
