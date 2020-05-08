@@ -5280,6 +5280,63 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(hvp, torch.mm(hes, v.unsqueeze(1)).squeeze(1))
         self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
 
+    @deviceCountAtLeast(2)
+    def test_AA_scalar_different_devices(self, devices):
+        # This test is expected to fail in CI and trigger
+        # 'RuntimeError: CUDA error: an illegal memory access was encountered'
+        #
+        # The "AAAA" in the name is so that the test runs early in the test
+        # suite
+        a = torch.rand([], requires_grad=True, device=devices[0])
+        b = torch.rand(10, requires_grad=True, device=devices[1])
+
+        a.to(devices[1])
+        b.to(devices[0])
+
+    @deviceCountAtLeast(2)
+    def test_AAA_scalar_different_devices(self, devices):
+        # This test is expected to fail in CI and trigger
+        # 'RuntimeError: CUDA error: an illegal memory access was encountered'
+        #
+        # The "AAAA" in the name is so that the test runs early in the test
+        # suite
+        a = torch.rand(10, requires_grad=True, device=devices[0])
+        b = torch.rand(10, requires_grad=True, device=devices[1])
+
+        # c = a * b
+        a.to(devices[1])
+        # torch.cuda.synchronize()
+        b.to(devices[0])
+
+    @deviceCountAtLeast(2)
+    def test_AAAA_scalar_different_devices(self, devices):
+        # This test is expected to fail in CI and trigger
+        # 'RuntimeError: CUDA error: an illegal memory access was encountered'
+        #
+        # The "AAAA" in the name is so that the test runs early in the test
+        # suite
+        a = torch.rand([], requires_grad=True, device=devices[0])
+        b = torch.rand(10, requires_grad=True, device=devices[1])
+
+        c = a * b
+        a.to(devices[1])
+        torch.cuda.synchronize()
+        b.to(devices[0])
+
+    @deviceCountAtLeast(2)
+    def test_BBBB_scalar_different_devices(self, devices):
+        # This test is expected to fail in CI and trigger
+        # 'RuntimeError: CUDA error: an illegal memory access was encountered'
+        #
+        # The "AAAA" in the name is so that the test runs early in the test
+        # suite
+        a = torch.rand([], requires_grad=True, device=devices[0])
+        b = torch.rand(10, requires_grad=True, device=devices[1])
+
+        c = a * b
+        a.to(devices[1])
+        b.to(devices[0])
+
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
