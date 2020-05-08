@@ -193,7 +193,7 @@ class FeatureAlphaDropout(_DropoutNd):
     The elements to be masked are randomized on every forward call, and scaled
     and shifted to maintain zero mean and unit variance.
 
-    Usually the input comes from :class:`nn.Conv3d` modules.
+    Usually the input comes from :class:`nn.AlphaDropout` modules.
 
     As described in the paper
     `Efficient Object Localization Using Convolutional Networks`_ ,
