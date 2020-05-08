@@ -1,5 +1,5 @@
 #include <torch/csrc/autograd/python_cpp_function.h>
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/jit/python/pybind_utils.h>

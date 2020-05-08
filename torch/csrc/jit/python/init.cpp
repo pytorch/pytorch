@@ -1,6 +1,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
@@ -495,6 +496,8 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_set_texpr_fuser_enabled", &setTensorExprFuserEnabled)
       .def("_jit_texpr_fuser_enabled", &tensorExprFuserEnabled)
+      .def("_jit_texpr_fallback_allowed", &tensorexpr::fallbackAllowed)
+      .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
       .def(
           "_jit_pass_fuse_tensorexprs",
           [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
@@ -903,6 +906,7 @@ void initJITBindings(PyObject* module) {
   tracer::initPythonTracerBindings(module);
   initTreeViewBindings(module);
   initJitScriptBindings(module);
+  initJitBackendBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;

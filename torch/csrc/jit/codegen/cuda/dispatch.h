@@ -60,7 +60,9 @@ struct IterDomain;
 struct TensorDomain;
 struct TensorView;
 struct TensorIndex;
+struct Bool;
 struct Float;
+struct Half;
 struct Int;
 struct NamedScalar;
 
@@ -70,6 +72,7 @@ struct Merge;
 struct Reorder;
 struct UnaryOp;
 struct BinaryOp;
+struct TernaryOp;
 struct ForLoop;
 struct IfThenElse;
 struct Allocate;
@@ -98,7 +101,9 @@ struct TORCH_CUDA_API OptOutConstDispatch {
   virtual void handle(const TensorDomain* const) {}
   virtual void handle(const TensorView* const) {}
   virtual void handle(const TensorIndex* const) {}
+  virtual void handle(const Bool* const) {}
   virtual void handle(const Float* const) {}
+  virtual void handle(const Half* const) {}
   virtual void handle(const Int* const) {}
   virtual void handle(const NamedScalar* const) {}
 
@@ -108,6 +113,7 @@ struct TORCH_CUDA_API OptOutConstDispatch {
   virtual void handle(const Reorder* const) {}
   virtual void handle(const UnaryOp* const) {}
   virtual void handle(const BinaryOp* const) {}
+  virtual void handle(const TernaryOp* const) {}
   virtual void handle(const ForLoop* const) {}
   virtual void handle(const IfThenElse* const) {}
   virtual void handle(const Allocate* const) {}
@@ -133,7 +139,9 @@ struct TORCH_CUDA_API OptOutDispatch {
   virtual void handle(TensorDomain*) {}
   virtual void handle(TensorView*) {}
   virtual void handle(TensorIndex*) {}
+  virtual void handle(Bool*) {}
   virtual void handle(Float*) {}
+  virtual void handle(Half*) {}
   virtual void handle(Int*) {}
   virtual void handle(NamedScalar*) {}
 
@@ -143,6 +151,7 @@ struct TORCH_CUDA_API OptOutDispatch {
   virtual void handle(Reorder*) {}
   virtual void handle(UnaryOp*) {}
   virtual void handle(BinaryOp*) {}
+  virtual void handle(TernaryOp*) {}
   virtual void handle(ForLoop*) {}
   virtual void handle(IfThenElse*) {}
   virtual void handle(Allocate*) {}
@@ -176,8 +185,14 @@ struct TORCH_CUDA_API OptInConstDispatch {
   virtual void handle(const TensorIndex* const) {
     AT_ERROR("Handle not overriden for TensorIndex.");
   }
+  virtual void handle(const Bool* const) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Bool.");
+  }
   virtual void handle(const Float* const) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Float.");
+  }
+  virtual void handle(const Half* const) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Half.");
   }
   virtual void handle(const Int* const) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
@@ -201,6 +216,9 @@ struct TORCH_CUDA_API OptInConstDispatch {
   }
   virtual void handle(const BinaryOp* const) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BinaryOp.");
+  }
+  virtual void handle(const TernaryOp* const) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TernaryOp.");
   }
   virtual void handle(const ForLoop* const) {
     AT_ERROR("Handle not overriden for ForLoop.");
@@ -241,8 +259,14 @@ struct TORCH_CUDA_API OptInDispatch {
   virtual void handle(TensorIndex*) {
     AT_ERROR("Handle not overriden for TensorIndex.");
   }
+  virtual void handle(Bool*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Bool.");
+  }
   virtual void handle(Float*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Float.");
+  }
+  virtual void handle(Half*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Half.");
   }
   virtual void handle(Int*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
@@ -266,6 +290,9 @@ struct TORCH_CUDA_API OptInDispatch {
   }
   virtual void handle(BinaryOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BinaryOp.");
+  }
+  virtual void handle(TernaryOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TernaryOp.");
   }
   virtual void handle(ForLoop*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ForLoop.");
@@ -322,7 +349,9 @@ struct TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(TensorDomain*);
   virtual Statement* mutate(TensorView*);
   virtual Statement* mutate(TensorIndex*);
+  virtual Statement* mutate(Bool*);
   virtual Statement* mutate(Float*);
+  virtual Statement* mutate(Half*);
   virtual Statement* mutate(Int*);
   virtual Statement* mutate(NamedScalar*);
 
@@ -332,6 +361,7 @@ struct TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(Reorder*);
   virtual Statement* mutate(UnaryOp*);
   virtual Statement* mutate(BinaryOp*);
+  virtual Statement* mutate(TernaryOp*);
   virtual Statement* mutate(ForLoop*);
   virtual Statement* mutate(IfThenElse*);
   virtual Statement* mutate(Allocate*);
@@ -375,6 +405,9 @@ struct TORCH_CUDA_API OptInMutator {
   virtual Statement* mutate(TensorIndex*) {
     AT_ERROR("Mutate not overriden for TensorIndex.");
   }
+  virtual Statement* mutate(Bool*) {
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Bool.");
+  }
   virtual Statement* mutate(Float*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Float.");
   }
@@ -400,6 +433,9 @@ struct TORCH_CUDA_API OptInMutator {
   }
   virtual Statement* mutate(BinaryOp*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for BinaryOp.");
+  }
+  virtual Statement* mutate(TernaryOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TernaryOp.");
   }
   virtual Statement* mutate(ForLoop*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ForLoop.");
