@@ -305,7 +305,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
                     return py::make_tuple();
                   },
                   /* __setstate__ */
-                  [](py::tuple /* unused */) {
+                  [](const py::tuple& /* unused */) {
                     TORCH_CHECK(
                         false,
                         "Can not unpickle rref in python pickler, rref can only be "
