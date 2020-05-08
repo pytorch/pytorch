@@ -3668,6 +3668,13 @@ class _TestTorchMixin(object):
         self.assertTrue(isinstance(b, torch.Size))
         self.assertEqual(a, b)
 
+    def test_pickle_function(self):
+        # https://github.com/pytorch/pytorch/issues/37703
+        a = torch.tanh
+        serialized = pickle.dumps(a)
+        b = pickle.loads(serialized)
+        self.assertEqual(a, b)
+
     def test_norm_fastpaths(self):
         x = torch.randn(3, 5)
 
