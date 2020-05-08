@@ -94,8 +94,6 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "contiguous",
     "permute",
     "repeat_interleave",
-    "clamp",
-    // "clamp_",  // Enable when quantized `clamp_` is ready
     "relu",
     "relu_",
     "sigmoid",
@@ -145,6 +143,8 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     "upsample_bilinear2d",
     "upsample_trilinear3d",
     "upsample_bicubic2d",
+    "clamp",
+    // "clamp_",  // Enable when quantized `clamp_` is ready
 };
 
 // Special checks for ops that do not require observers for all input tensors.

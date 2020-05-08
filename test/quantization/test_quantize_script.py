@@ -1564,9 +1564,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = F.dropout(x)
                 x = self.dropout(x)
                 x, _ = torch.sort(x)
-                x = torch.clamp(x, -3, 3)
-                x = x.clamp(-2.5, 2.5)
-                # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
                 x = F.sigmoid(x)
                 x = x.permute(0, 2, 3, 1)
                 x = torch.repeat_interleave(x, 3, 1)
@@ -1651,6 +1648,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = F.upsample_nearest(x, (32, 32)) # interpolate node
                 x = F.interpolate(x, 4, mode='linear') # common node
                 x = F.upsample_bilinear(x, (32, 32)) # common node
+                x = torch.clamp(x, -3, 3)
+                x = x.clamp(-2.5, 2.5)
+                # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
                 x = self.conv(x)
                 return x
 
@@ -1674,7 +1674,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # number of quantize_per_tensor op for type
         num_quant_by_op_type = {'conv': 2, 'common': 1, 'interpolate': 3}
         # number of ops for each type
-        num_op_by_op_type = {'conv': 2, 'common': 16, 'interpolate': 3}
+        num_op_by_op_type = {'conv': 2, 'common': 18, 'interpolate': 3}
         num_quantize_per_tensor = 1 # for output
         for op_type, num_op in num_op_by_op_type.items():
             num_quantize_per_tensor += num_op * num_quant_by_op_type[op_type]

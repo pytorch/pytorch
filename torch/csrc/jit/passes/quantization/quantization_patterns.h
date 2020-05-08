@@ -604,6 +604,18 @@ graph(%a_quant, %size, %align_corners, %scales_d, %scales_h, %scales_w):
           %r = aten::upsample_trilinear3d(%a_quant, %size, %align_corners, %scales_d, %scales_h, %scales_w)
           return (%r) )";
 
+  // aten::clamp
+  std::string clamp = R"(
+graph(%a_quant, %min, %max):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::clamp(%a_dequant, %min, %max)
+)" + common_general_value_op;
+
+  std::string aten_clamp = R"(
+graph(%a_quant, %min, %max):
+          %r = aten::clamp(%a_quant, %min, %max)
+          return (%r) )";
+
   return {
       {"quantized::conv2d", conv2d, quantized_conv2d},
       {"quantized::conv2d_relu", conv2d_relu, quantized_conv2d_relu},
@@ -678,6 +690,7 @@ graph(%a_quant, %size, %align_corners, %scales_d, %scales_h, %scales_w):
       {"aten::upsample_linea1d", upsample_linear1d, aten_upsample_linear1d},
       {"aten::upsample_bilinear2d", upsample_bilinear2d, aten_upsample_bilinear2d},
       {"aten::upsample_trilinear3d", upsample_trilinear3d, aten_upsample_trilinear3d},
+      {"aten::clamp", clamp, aten_clamp},
   };
 }
 
