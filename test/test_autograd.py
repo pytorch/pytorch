@@ -5321,6 +5321,37 @@ class TestAutogradDeviceType(TestCase):
         a.to(devices[1])
         # torch.cuda.synchronize()
         b.to(devices[0])
+        
+    @deviceCountAtLeast(2)
+    def test_AAAAA_scalar_different_devices(self, devices):
+        a = torch.rand(1, requires_grad=True, device=devices[0])
+        b = torch.rand(10, requires_grad=True, device=devices[1])
+
+        c = a * b
+        a.to(devices[1])
+        b.to(devices[0])
+        
+    @deviceCountAtLeast(2)
+    def test_A_scalar_different_devices(self, devices):
+        a = torch.rand([], requires_grad=True, device=devices[0])
+        b = torch.rand(10, requires_grad=True, device=devices[1])
+
+        c = a * b
+        torch.cuda.synchronize()
+        a = a.to(devices[1])
+        torch.cuda.synchronize()
+        b.to(devices[0])
+        
+    @deviceCountAtLeast(2)
+    def test_BBB_scalar_different_devices(self, devices):
+        a = torch.rand([], requires_grad=True, device=devices[0])
+        b = torch.rand(10, requires_grad=True, device=devices[1])
+
+        c = a * b
+        torch.cuda.synchronize()
+        a.to(devices[1])
+        torch.cuda.synchronize()
+        b.to(devices[0])
 
     @deviceCountAtLeast(2)
     def test_CC_scalar_different_devices(self, devices):
