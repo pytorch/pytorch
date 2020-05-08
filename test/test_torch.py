@@ -14238,10 +14238,7 @@ class TestTorchDeviceType(TestCase):
         print(samples.unique().size(0))
         # expect no more than 1 repeating elements generated in 2 attempts
         # the probability of at least element being repeated is surprisingly large, 18%
-        self.assertLessEqual(2*n_sample - samples.unique().size(0), 2)
-
-
-
+        self.assertLessEqual(2 * n_sample - samples.unique().size(0), 2)
 
     def test_var_unbiased(self, device):
         tensor = torch.randn(100, device=device)
