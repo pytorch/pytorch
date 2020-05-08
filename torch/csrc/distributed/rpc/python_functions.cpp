@@ -15,7 +15,6 @@
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/utils/python_compat.h>
 
 namespace torch {
 namespace distributed {
@@ -114,8 +113,6 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
     const std::shared_ptr<FutureMessage>& futureResponseMessage,
     bool hasValue) {
   if (hasValue) {
-    // NB: The custom deleter is necessary because the FutureIValue object
-    // holds a py::object and it would require GIL to delete.
     c10::intrusive_ptr<JitFuture> jitFuture =
         c10::make_intrusive<JitFuture>(PyObjectType::get());
 

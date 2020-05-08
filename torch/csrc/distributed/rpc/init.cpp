@@ -12,7 +12,6 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/types.h>
 
 #include <pybind11/chrono.h>
@@ -544,7 +543,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
          const float rpcTimeoutSeconds) {
         return std::make_shared<jit::PythonFutureWrapper>(
             pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rpcTimeoutSeconds),
-            [](const py::object& value) {
+            /* unwrap_func */ [](const py::object& value) {
               py::gil_scoped_release release;
               auto& pythonRpcHandler = PythonRpcHandler::getInstance();
               // This will unwrap RemoteException and raise the contained
@@ -556,7 +555,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               // also no pybind handling code can help shown the Python
               // exception.
               pythonRpcHandler.handleException(value);
-            } /* unwrap_func */);
+            });
       },
       py::call_guard<py::gil_scoped_release>());
 
