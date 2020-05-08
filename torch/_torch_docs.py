@@ -7754,3 +7754,84 @@ Example::
     >>> g_cpu.device
     device(type='cpu')
 """)
+
+add_docstr(torch.searchsorted,
+           r"""
+searchsorted(sorted_sequence, values, out_int32=False, right=False, out=None) -> Tensor
+
+Returns a new tensor, same size as :attr:`values`, containing the result of applying
+either lower_bound or upper_bound (depends on :attr:`right`) to each value in :attr:`values`
+against the corresponding values on the innermost dimension of :attr:`sorted_sequence`.
+
+Args:
+    sorted_sequence (Tensor): N-D or 1-D tensor, containing sorted sequence on innermost dimension.
+      If :attr:`sorted_sequence` is 1-D tensor, then every value in :attr:`values` will apply 
+      lower_bound or upper_bound against the entire :attr:`sorted_sequence`.
+    values (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).    
+    out_int32 (bool): output data type is torch.int32 if True, torch.int64 otherwise.
+    right (bool): apply upper bound if True, lower bound otherwise.
+    out (Tensor, optional): the output tensor, must be the same size as :attr:`values` if provided.
+
+.. note:: If your use case is always 1-D sorted sequence, :func:`torch.bucketize` is preferred,
+          it has less internal check, slightly better performance. 
+
+
+Example::
+
+    >>> sorted_sequence = torch.tensor([[1, 3, 5, 7, 9], [2, 4, 6, 8, 10]]) 
+    >>> sorted_sequence
+    tensor([[ 1,  3,  5,  7,  9],
+            [ 2,  4,  6,  8, 10]])
+    >>> values = torch.tensor([[3, 6, 9], [3, 6, 9]])
+    >>> values
+    tensor([[3, 6, 9],
+            [3, 6, 9]])
+    >>> torch.searchsorted(sorted_sequence, values)
+    tensor([[1, 3, 4],
+            [1, 2, 4]])
+    >>> torch.searchsorted(sorted_sequence, values, right=True)
+    tensor([[2, 3, 5],
+            [1, 3, 4]])
+
+    >>> sorted_sequence_1d = torch.tensor([1, 3, 5, 7, 9])
+    >>> sorted_sequence_1d
+    tensor([1, 3, 5, 7, 9])
+    >>> torch.searchsorted(sorted_sequence_1d, values)
+    tensor([[1, 3, 4],
+            [1, 3, 4]])
+""")
+
+add_docstr(torch.bucketize,
+           r"""
+bucketize(input, boundaries, out_int32=False, right=False, out=None) -> Tensor
+
+Returns a new tensor, same size as :attr:`input`, containing the result of applying
+either lower_bound or upper_bound (depends on :attr:`right`) to each value in :attr:`input`
+against entire :attr:`boundaries`.
+
+Args:
+    input (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
+    boundaries (Tensor): 1-D tensor, must contain a sorted sequence.
+    out_int32 (bool): output data type is torch.int32 if True, torch.int64 otherwise.
+    right (bool): apply upper bound if True, lower bound otherwise.
+    out (Tensor, optional): the output tensor, must be the same size as :attr:`input` if provided.
+
+
+Example::
+
+    >>> boundaries = torch.tensor([1, 3, 5, 7, 9])
+    >>> boundaries
+    tensor([1, 3, 5, 7, 9])
+    >>> v = torch.tensor([[3, 6, 9], [3, 6, 9]])
+    >>> v
+    tensor([[3, 6, 9],
+            [3, 6, 9]])
+    >>> torch.bucketize(v, boundaries)
+    tensor([[1, 3, 4],
+            [1, 3, 4]])
+    >>> torch.bucketize(v, boundaries, right=True)
+    tensor([[2, 3, 5],
+            [2, 3, 5]])
+ 
+""")
+
