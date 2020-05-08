@@ -544,7 +544,7 @@ static void _trace_post_record(
     return;
   }
 
-  node->i_(attr::inplace, is_inplace);
+  node->i_(jit::attr::inplace, is_inplace);
 
   // Isolate C variable ptrs in a vector
   int num_outputs = PyTuple_GET_SIZE(output_objects);

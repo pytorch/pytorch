@@ -3,9 +3,7 @@ import contextlib
 import functools
 import logging
 import numbers
-import sys
 import threading
-from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -26,15 +24,16 @@ from . import (
     _is_current_rpc_agent_set,
     _reset_current_rpc_agent,
     _set_and_start_rpc_agent,
-    _set_rpc_timeout,
     backend_registry,
 )
 from .internal import (
     PythonUDF,
     RPCExecMode,
     _internal_rpc_pickler,
-    _start_record_function,
+    _build_rpc_profiling_key,
 )
+
+from .constants import UNSET_RPC_TIMEOUT
 
 
 logger = logging.getLogger(__name__)
@@ -174,11 +173,11 @@ def _wait_all_workers():
     # after receiving all followers' intents.
     if is_leader_worker:
         # The leader sends out proceeed signals to all followers.
-        timeout = timedelta(seconds=5)
-        _set_rpc_timeout(timeout)
+        timeout = 5  # seconds
         worker_name_to_response_future_dict = dict()
         for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
-            fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal, args=(sequence_id,))
+            fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal,
+                            args=(sequence_id,), timeout=timeout)
             worker_name_to_response_future_dict[follower_worker_name] = fut
         for follower_worker_name, fut in worker_name_to_response_future_dict.items():
             try:
@@ -263,9 +262,6 @@ def _init_rpc_backend(
     world_size=-1,
     rpc_backend_options=None,
 ):
-
-    if sys.version_info < (3, 0):
-        raise RuntimeError("RPC package does not support Python2.")
 
     _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
 
@@ -423,11 +419,10 @@ def remote(to, func, args=None, kwargs=None):
     """
     qualified_name = torch.jit._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
+    should_profile = torch.autograd._profiler_enabled()
 
-    # If profiling is enabled, kick off the timer and retrieve back a
-    # RecordFunction instance.
-    rf = None
-    if torch.autograd._profiler_enabled():
+    ctx_manager = contextlib.suppress()
+    if should_profile:
         # Create appropriate string representation based on type of func
         # (builtin, script, python)
         if qualified_name is None:
@@ -438,39 +433,53 @@ def remote(to, func, args=None, kwargs=None):
             )
         else:
             func_name = qualified_name
-        rf = _start_record_function(
+        # Build RPC profiling key.
+        rpc_profiling_key = _build_rpc_profiling_key(
             RPCExecMode.REMOTE,
             func_name,
             get_worker_info().name,
             dst_worker_info.name,
         )
+        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)
 
-    args = args if args else ()
-    kwargs = kwargs if kwargs else {}
+    with ctx_manager as rf:
+        args = args if args else ()
+        kwargs = kwargs if kwargs else {}
+        if qualified_name is not None:
+            rref = _invoke_remote_builtin(dst_worker_info, qualified_name, *args, **kwargs)
+        elif isinstance(func, torch.jit.ScriptFunction):
+            rref = _invoke_remote_torchscript(
+                dst_worker_info.name,
+                torch._jit_internal._qualified_name(func),
+                *args,
+                **kwargs
+            )
+        else:
+            (pickled_python_udf, tensors) = _default_pickler.serialize(
+                PythonUDF(func, args, kwargs)
+            )
+            rref = _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors)
+        # attach profiling information
+        if should_profile:
+            assert torch.autograd._profiler_enabled()
+            assert rf is not None
+            rf._call_end_callbacks_on_future(rref._get_future())
 
-    if qualified_name is not None:
-        return _invoke_remote_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
-    elif isinstance(func, torch.jit.ScriptFunction):
-        return _invoke_remote_torchscript(
-            dst_worker_info.name, torch._jit_internal._qualified_name(func), rf, *args, **kwargs
-        )
-    else:
-        (pickled_python_udf, tensors) = _default_pickler.serialize(
-            PythonUDF(func, args, kwargs)
-        )
-        return _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors, rf)
+    return rref
 
-
-def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
+def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RPC_TIMEOUT):
     if not callable(func):
         raise TypeError("function should be callable.")
 
     qualified_name = torch.jit._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
-    # If profiling is enabled, kick off the timer and retrieve back a
-    # RecordFunction instance.
-    rf = None
-    if torch.autograd._profiler_enabled():
+
+    # TODO: profiling logic does not really belong in invoke_rpc, it should be
+    # added as part of a context manager or helper (https://github.com/pytorch/pytorch/issues/36360)
+    should_profile = torch.autograd._profiler_enabled()
+
+    ctx_manager = contextlib.suppress()
+    if should_profile:
         # Create appropriate string representation based on type of func
         # (builtin, script, python)
         if qualified_name is None:
@@ -481,32 +490,40 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
             )
         else:
             func_name = qualified_name
-        rf = _start_record_function(
+        # Build RPC profiling key.
+        rpc_profiling_key = _build_rpc_profiling_key(
             rpc_type,
             func_name,
             get_worker_info().name,
             dst_worker_info.name,
         )
+        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)
 
-    args = args if args else ()
-    kwargs = kwargs if kwargs else {}
+    with ctx_manager as rf:
+        args = args if args else ()
+        kwargs = kwargs if kwargs else {}
 
-    if qualified_name is not None:
-        fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
-    elif isinstance(func, torch.jit.ScriptFunction):
-        fut = _invoke_rpc_torchscript(
-            dst_worker_info.name, torch.jit._qualified_name(func), rf, args, kwargs
-        )
-    else:
-        (pickled_python_udf, tensors) = _default_pickler.serialize(
-            PythonUDF(func, args, kwargs)
-        )
-        fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rf)
+        if qualified_name is not None:
+            fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rpc_timeout, *args, **kwargs)
+        elif isinstance(func, torch.jit.ScriptFunction):
+            fut = _invoke_rpc_torchscript(
+                dst_worker_info.name, torch.jit._qualified_name(func), args, kwargs, rpc_timeout
+            )
+        else:
+            (pickled_python_udf, tensors) = _default_pickler.serialize(
+                PythonUDF(func, args, kwargs)
+            )
+            fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rpc_timeout)
+        if should_profile:
+            assert torch.autograd._profiler_enabled()
+            assert rf is not None
+            # Schedule profiling callbacks to run when the future completes.
+            rf._call_end_callbacks_on_future(fut)
     return fut
 
 
 @_require_initialized
-def rpc_sync(to, func, args=None, kwargs=None):
+def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
     Make a blocking RPC call to run function ``func`` on worker ``to``. RPC
     messages are sent and received in parallel to execution of Python code. This
@@ -520,6 +537,14 @@ def rpc_sync(to, func, args=None, kwargs=None):
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
+        timeout (float, optional): timeout in seconds to use for this RPC. If
+                                   the RPC does not complete in this amount of
+                                   time, an exception indicating it has
+                                   timed out will be raised. A value of 0
+                                   indicates an infinite timeout, i.e. a timeout
+                                   error will never be raised. If not provided,
+                                   the default value set during initialization
+                                   or with `_set_rpc_timeout` is used.
 
     Returns:
         Returns the result of running ``func`` with ``args`` and ``kwargs``.
@@ -571,12 +596,12 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> rpc.shutdown()
 
     """
-    fut = _invoke_rpc(to, func, RPCExecMode.SYNC, args, kwargs)
+    fut = _invoke_rpc(to, func, RPCExecMode.SYNC, args, kwargs, timeout)
     return fut.wait()
 
 
 @_require_initialized
-def rpc_async(to, func, args=None, kwargs=None):
+def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
     Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
     messages are sent and received in parallel to execution of Python code. This
@@ -591,6 +616,15 @@ def rpc_async(to, func, args=None, kwargs=None):
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
+        timeout (float, optional): timeout in seconds to use for this RPC. If
+                                   the RPC does not complete in this amount of
+                                   time, an exception indicating it has
+                                   timed out will be raised. A value of 0
+                                   indicates an infinite timeout, i.e. a timeout
+                                   error will never be raised. If not provided,
+                                   the default value set during initialization
+                                   or with `_set_rpc_timeout` is used.
+
 
     Returns:
         Returns a Future object that can be waited
@@ -653,4 +687,4 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
-    return _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs)
+    return _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs, timeout)

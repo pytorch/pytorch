@@ -36,7 +36,6 @@ FUNCTION_DEFINITION = CodeTemplate("""\
 Tensor ${function_name}(${method_formals}) {
   static OperatorHandle OP = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${name}", "${overload_name}");
   ${dispatch_key_init}
-  globalLegacyTypeDispatch().initForDispatchKey(_dk);
   return OP.callUnboxedWithDispatchKey<${formals_types}>(_dk, ${type_method_actuals});
 }
 """)
@@ -58,7 +57,7 @@ def register_backend_select_methods(declarations, template_path, file_manager):
     for decl in declarations:
         for option in decl["options"]:
             if needs_backend_select(option):
-                assert option['use_c10_dispatcher'] in ['unboxed_only', 'with_codegenerated_unboxing_wrapper']
+                assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
 
                 name = option['name']
                 if option.get('overload_name', '') != '':

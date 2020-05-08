@@ -838,7 +838,7 @@ def ConvertNetForDevice(net, device=None):
     namescope = "{}_{}/".format(device_prefix, device.device_id)
     for op in mnet.Proto().op:
         if "RecurrentNetwork" in op.type:
-            raise("RecurrentNetwork conversion not yet supported")
+            raise NotImplementedError("RecurrentNetwork conversion not yet supported")
         for i, inputb in enumerate(op.input):
             op.input[i] = namescope + inputb
         for i, outputb in enumerate(op.output):

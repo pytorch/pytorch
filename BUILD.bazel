@@ -56,6 +56,7 @@ cc_library(
         "c10/cuda/impl/*.h",
         "c10/macros/*.h",
         "c10/util/*.h",
+        "c10/util/*.hpp",
     ]) + [
         "c10/macros/cmake_macros.h",
         "c10/cuda/impl/cuda_cmake_macros.h",
@@ -138,7 +139,7 @@ genrule(
         "aten/src/ATen/TypeDefault.cpp",
         "aten/src/ATen/core/TensorBody.h",
         "aten/src/ATen/core/TensorMethods.h",
-        "aten/src/ATen/core/OpsAlreadyMovedToC10.cpp",
+        "aten/src/ATen/core/ATenOpList.cpp",
     ],
     cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)` aten/src/ATen/Declarations.cwrap aten/src/THCUNN/generic/THCUNN.h aten/src/ATen/nn.yaml aten/src/ATen/native/native_functions.yaml",
     tools = [":gen"],
@@ -193,13 +194,19 @@ genrule(
         "torch/csrc/autograd/generated/VariableType_3.cpp",
         "torch/csrc/autograd/generated/VariableType_4.cpp",
         # "torch/csrc/autograd/generated/VariableTypeEverything.cpp",
+        "torch/csrc/autograd/generated/ProfiledType_0.cpp",
+        "torch/csrc/autograd/generated/ProfiledType_1.cpp",
+        "torch/csrc/autograd/generated/ProfiledType_2.cpp",
+        "torch/csrc/autograd/generated/ProfiledType_3.cpp",
+        "torch/csrc/autograd/generated/ProfiledType_4.cpp",
+        # "torch/csrc/autograd/generated/ProfiledTypeEverything.cpp",
         "torch/csrc/autograd/generated/RegistrationDeclarations.h",
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
         "torch/csrc/autograd/generated/variable_factories.h",
-        "torch/csrc/jit/generated/register_aten_ops_0.cpp",
-        "torch/csrc/jit/generated/register_aten_ops_1.cpp",
-        "torch/csrc/jit/generated/register_aten_ops_2.cpp",
+        "torch/csrc/jit/generated/generated_unboxing_wrappers_0.cpp",
+        "torch/csrc/jit/generated/generated_unboxing_wrappers_1.cpp",
+        "torch/csrc/jit/generated/generated_unboxing_wrappers_2.cpp",
     ],
     cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --nn-path aten/src",
     tools = [":generate_code"],
@@ -510,6 +517,7 @@ template_rule(
         "@AT_MKL_ENABLED@": "0",
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
+        "@USE_BLAS@": "1",
     },
 )
 
@@ -629,6 +637,7 @@ intern_build_aten_ops(
     copts = ATEN_COPTS,
     deps = [
         ":aten_headers",
+        "@sleef",
         "@fbgemm",
     ],
 )
@@ -1730,6 +1739,8 @@ cc_library(
         "@foxi",
         "@gloo",
         "@onnx",
+        "@fmt",
+        "@tensorpipe",
     ] + if_cuda(
         [
             ":caffe2_cpp_cuda",
@@ -1766,6 +1777,7 @@ cu_library(
         "@cudnn",
         "@eigen",
         "@gloo",
+        "@tensorpipe",
     ],
     alwayslink = True,
 )

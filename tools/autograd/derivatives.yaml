@@ -110,6 +110,9 @@
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sign()
 
+- name: absolute(Tensor self) -> Tensor
+  self: grad * self.sign()
+
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt())
 
@@ -208,6 +211,10 @@
 - name: bmm(Tensor self, Tensor mat2) -> Tensor
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
+
+- name: _bmm(Tensor self, Tensor mat2, *, bool deterministic=False) -> Tensor
+  self: at::_bmm(grad, mat2.transpose(1, 2), deterministic)
+  mat2: at::_bmm(self.transpose(1, 2), grad, deterministic)
 
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor
   tensors: cat_tensors_backward(grad, to_args_sizes(tensors), dim)
@@ -558,7 +565,7 @@
   self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: max(Tensor self) -> Tensor
-  self: select_equals_backward(grad, self, result)
+  self: select_first_equal_backward(grad, self, result)
 
 - name: max.other(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_(self <= other, 0)
@@ -571,7 +578,7 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
 
 - name: median(Tensor self) -> Tensor
-  self: select_equals_backward(grad, self, result)
+  self: select_first_equal_backward(grad, self, result)
 
 # This is in theory incorrect in the following case:
 #   sorted list: [..., a, b, b, ..., b, b, c, ...] with median = b and the value
@@ -594,7 +601,7 @@
   self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: min(Tensor self) -> Tensor
-  self: select_equals_backward(grad, self, result)
+  self: select_first_equal_backward(grad, self, result)
 
 - name: min.other(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_(self >= other, 0)
@@ -661,6 +668,9 @@
   grad: not_implemented("_pdist_backward")
   self: not_implemented("_pdist_backward")
   pdist: not_implemented("_pdist_backward")
+
+- name: _euclidean_dist(Tensor x1, Tensor x2) -> Tensor
+  x1, x2: _euclidean_dist_backward(grad, x1, x2, result)
 
 - name: _cdist_forward(Tensor x1, Tensor x2, float p, int? compute_mode) -> Tensor
   x1: _cdist_backward(grad.contiguous(), x1, x2, p, result)

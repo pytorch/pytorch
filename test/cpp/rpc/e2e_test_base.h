@@ -6,7 +6,9 @@
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
+#include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
+#include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -45,6 +47,32 @@ class TestE2EBase : public ::testing::Test {
         });
     rpcAgent->setTypeResolver(typeResolver);
     rpcAgent->start();
+  }
+
+  c10::intrusive_ptr<OwnerRRef> createRemoteRRef(
+      at::Tensor t1,
+      at::Tensor t2,
+      std::shared_ptr<torch::jit::Operator> op) {
+    auto& ctx = RRefContext::getInstance();
+    auto ownerRRef = ctx.createOwnerRRef(c10::TensorType::create(t1));
+    // prevent this owner RRef being deleted due to other forks
+    ctx.addSelfAsFork(ownerRRef);
+
+    ScriptRemoteCall scriptRemoteCall(
+        op, {t1, t2, 1}, ownerRRef->rrefId(), ownerRRef->rrefId());
+    auto fm = autograd::sendMessageWithAutograd(
+        *rpcAgent,
+        rpcAgent->getWorkerInfo("worker"),
+        std::move(scriptRemoteCall).toMessage(),
+        false);
+
+    ownerRRef->registerOwnerCreationFuture(fm);
+
+    // Builtin operators does not return py::object, and hence does not require
+    // GIL for destructing the potentially deleted OwerRRef.
+    fm->addCallback(
+        [](const FutureMessage& fm) { callback::finishCreatingOwnerRRef(fm); });
+    return ownerRRef;
   }
 
   at::Tensor remoteAdd(
@@ -97,6 +125,9 @@ class TestE2EBase : public ::testing::Test {
       for (size_t j = 0; j < 5; j++) {
         result = remoteAdd(t1, result, matchedOp);
       }
+
+      auto rref = createRemoteRRef(t1, result, matchedOp);
+      result = rref->getValue().toTensor();
 
       // Run backward pass now.
       autograd::DistEngine::getInstance().execute(

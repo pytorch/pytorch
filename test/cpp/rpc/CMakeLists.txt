@@ -7,7 +7,7 @@ set(TORCH_RPC_TEST_SOURCES
 
 add_executable(test_cpp_rpc ${TORCH_RPC_TEST_SOURCES})
 target_include_directories(test_cpp_rpc PRIVATE ${ATen_CPU_INCLUDE})
-target_link_libraries(test_cpp_rpc PRIVATE torch gtest)
+target_link_libraries(test_cpp_rpc PRIVATE torch_python gtest ${PYTHON_LIBRARIES})
 
 if(USE_CUDA)
   target_link_libraries(test_cpp_rpc PRIVATE

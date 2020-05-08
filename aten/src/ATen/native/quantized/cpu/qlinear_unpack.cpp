@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
@@ -60,6 +60,10 @@ class QLinearUnpackWeightInt8 final {
       at::Tensor packed_weight) {
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
+    TORCH_CHECK(
+        pack_ptr.orig_weight.defined(),
+        "Cannot unpack weights. "
+        "Call at::globalContext()::setReleaseOriginalWeights(false) before packing or loading to enable unpacking.");
     return std::tuple<at::Tensor, c10::optional<Tensor>>(
         pack_ptr.orig_weight, pack_ptr.bias);
   }

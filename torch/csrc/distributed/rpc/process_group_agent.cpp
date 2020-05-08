@@ -11,6 +11,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace {
+constexpr auto kSecToMsConversion = 1000;
+}
+
 //////////////////////////  MessageCounter  /////////////////////////////////
 
 ProcessGroupAgent::MessageCounter::MessageCounter(int worldSize)
@@ -287,7 +291,8 @@ void ProcessGroupAgent::shutdownImpl() {
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
-    Message&& message) {
+    Message&& message,
+    const float rpcTimeoutSeconds) {
   // Throw if we previously encountered an exception in ::listenLoop.
   {
     std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
@@ -320,9 +325,15 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   if (message.isRequest()) {
     // millisecond level precision of when request started.
     auto futureStartTime = std::chrono::steady_clock::now();
-    // Prepare endTime from timeout.
-    auto timeout = rpcTimeout_.load();
-    // Set infinite timeout if specified.
+    // if passed in timeout is unset, then use the currently set default timeout
+    // for all RPCs.
+    auto timeout = rpcTimeoutSeconds == kUnsetRpcTimeout
+        ? getRpcTimeout()
+        : std::chrono::milliseconds(
+              static_cast<int>(rpcTimeoutSeconds * kSecToMsConversion));
+
+    // Prepare endTime from timeout. Set infinite timeout if
+    // specified.
     steady_clock_time_point endTime = timeout.count() == 0
         ? kInfiniteTimeoutTimePoint
         : futureStartTime + timeout;
@@ -421,6 +432,7 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
   std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
   const auto dst = work.to_.id_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto serializedPayloadData = const_cast<char*>(serializedPayload->data());
   auto serializedPayloadSize = serializedPayload->size();
   std::string* deleteWhenDone = serializedPayload.release();
@@ -787,13 +799,9 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
           "RPC ran for more than ",
           timedOutFuture.timeout_.count(),
           " milliseconds and timed out.");
-      // This is a dummy response that's not send over RPC, so the ID field is
-      // not used for any request/response matching.
-      const auto exceptionMsg = createExceptionResponse(err, -1);
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
-        timedOutFuture.future_->setError(std::string(
-            exceptionMsg.payload().begin(), exceptionMsg.payload().end()));
+        timedOutFuture.future_->setError(err);
         // The future timed out and will not be processed by handleRecv(), even
         // if we eventually get a response. In order to keep track of all
         // send/recv pairs, we increment the count here.

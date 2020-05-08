@@ -40,7 +40,7 @@ namespace util {
 #elif defined(__GNUC__)
 
 // except when gcc < 9
-#if (__GNUC__ < 9)
+#if (__GNUC__ < 9) || defined(__CUDACC__)
 #define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
 #define C10_TYPENAME_CONSTEXPR
 #else

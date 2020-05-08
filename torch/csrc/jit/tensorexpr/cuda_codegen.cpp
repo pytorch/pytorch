@@ -97,12 +97,92 @@ static void getMajorMinor(
   minor = dev_version.second;
 }
 
+void CudaPrinter::maybe_insert_sync() {
+  if (need_sync_) {
+    emitIndent();
+    os() << "__syncthreads();" << std::endl;
+    need_sync_ = false;
+  }
+}
+
+std::string cudaDtypeCppString(const Dtype& dtype) {
+  switch (dtype.scalar_type()) {
+    case ScalarType::Half:
+      return "half";
+    case ScalarType::Char:
+      return "char";
+    case ScalarType::Byte:
+      return "unsigned char";
+    case ScalarType::Short:
+      return "short";
+    case ScalarType::Long:
+      return "long";
+    default:; /* nothing */
+  }
+  return dtype.ToCppString();
+}
+
+static void print_flat_alloc(std::ostream& os, const Allocate* alloc) {
+  std::vector<const Expr*> dims = alloc->dims();
+  // TODO: this should be merged with the storage flattener.
+  int64_t flat_size = 1;
+  for (auto dim : dims) {
+    const IntImm* dim_i = dynamic_cast<const IntImm*>(dim);
+    if (dim_i) {
+      flat_size *= dim_i->value();
+    } else {
+      throw std::runtime_error("Only IntImm dimensions are supported for now");
+    }
+  }
+  os << cudaDtypeCppString(alloc->dtype()) << " " << (*alloc->buffer_var())
+     << "[" << flat_size << "];" << std::endl;
+}
+
+void CudaPrinter::visit(const Free* v) {
+  Stmt* p = v->get_parent();
+  while (p) {
+    const For* for_v = dynamic_cast<const For*>(p);
+    if (for_v &&
+        (for_v->loop_options().is_gpu_block_index() ||
+         for_v->loop_options().is_gpu_thread_index())) {
+      return;
+    }
+    p = p->get_parent();
+  }
+  throw std::runtime_error("Global free not supported yet");
+}
+
+void CudaPrinter::visit(const Allocate* v) {
+  Stmt* p = v->get_parent();
+  while (p) {
+    const For* for_v = dynamic_cast<const For*>(p);
+    if (for_v) {
+      if (for_v->loop_options().is_gpu_block_index()) {
+        emitIndent();
+        os() << "__shared__ ";
+        print_flat_alloc(os(), v);
+        return;
+      } else if (for_v->loop_options().is_gpu_thread_index()) {
+        emitIndent();
+        print_flat_alloc(os(), v);
+        thread_local_bufs_.insert(v->buffer_var());
+        return;
+      }
+    }
+    p = p->get_parent();
+  }
+  throw std::runtime_error("Global alloc not supported yet");
+}
+
 void CudaPrinter::visit(const For* v) {
+  maybe_insert_sync();
   const LoopOptions& loop_options = v->loop_options();
   if (loop_options.is_gpu_block_index()) {
     ScopedVarName var_name(
         name_manager(), v->var(), loop_options.gpu_block_index_str());
+    emitIndent();
     v->body()->accept(this);
+    os() << std::endl;
     int gpu_block_index = loop_options.gpu_block_index();
     if (gpu_block_extents_.size() <= gpu_block_index) {
       gpu_block_extents_.resize(gpu_block_index + 1);
@@ -116,7 +196,9 @@ void CudaPrinter::visit(const For* v) {
   } else if (loop_options.is_gpu_thread_index()) {
     ScopedVarName var_name(
         name_manager(), v->var(), loop_options.gpu_thread_index_str());
+    emitIndent();
     v->body()->accept(this);
+    os() << std::endl;
     int gpu_thread_index = loop_options.gpu_thread_index();
     if (gpu_thread_extents_.size() <= gpu_thread_index) {
       gpu_thread_extents_.resize(gpu_thread_index + 1);
@@ -126,6 +208,13 @@ void CudaPrinter::visit(const For* v) {
           "start must be zero for gpu_block_index: " +
           std::to_string(v->start()));
     }
+    // A conservative measure to insert thread-syncs between each thread-idx
+    // change.
+    // TODO: only apply this when a cross-thread dependency happens across this
+    // point.
+    // TODO: maybe move this to a dedicated IRNode, if the logic gets
+    // sufficiently complicated.
+    need_sync_ = true;
     if (gpu_thread_extents_[gpu_thread_index]) {
       if (immediateEquals(v->stop(), 1)) {
         // This is a trivial thread-idx
@@ -236,17 +325,27 @@ class AtomicAddFuser : public IRMutator {
 };
 
 void CudaPrinter::visit(const Store* v) {
+  emitIndent();
   os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
   if (v->value()->dtype().scalar_type() == ScalarType::Half) {
     os() << "__float2half(" << *v->value() << ");";
   } else {
     os() << *v->value() << ";";
   }
+  os() << std::endl;
 }
 
 void CudaPrinter::visit(const AtomicAdd* v) {
-  os() << "atomicAdd(&" << *v->base_handle() << "[" << *v->flat_index() << "]"
-       << ", " << *v->value() << ");";
+  emitIndent();
+  if (thread_local_bufs_.count(v->base_handle()) > 0) {
+    // atomicAdd only works on global and shared memory
+    os() << *v->base_handle() << "[" << *v->flat_index()
+         << "] += " << *v->value() << ";";
+  } else {
+    os() << "atomicAdd(&" << *v->base_handle() << "[" << *v->flat_index() << "]"
+         << ", " << *v->value() << ");";
+  }
+  os() << std::endl;
 }
 
 void CudaPrinter::visit(const Max* v) {
@@ -293,24 +392,8 @@ void CudaPrinter::visit(const Min* v) {
   os() << ")";
 }
 
-std::string cudaDtypeCppString(const Dtype& dtype) {
-  switch (dtype.scalar_type()) {
-    case ScalarType::Half:
-      return "half";
-    case ScalarType::Char:
-      return "char";
-    case ScalarType::Byte:
-      return "unsigned char";
-    case ScalarType::Short:
-      return "short";
-    case ScalarType::Long:
-      return "long";
-    default:; /* nothing */
-  }
-  return dtype.ToCppString();
-}
-
 void CudaPrinter::visit(const LetStmt* v) {
+  emitIndent();
   const Var* var = v->var();
   if (var->dtype().scalar_type() == ScalarType::Half) {
     // we do math in floats so use that.
@@ -319,7 +402,14 @@ void CudaPrinter::visit(const LetStmt* v) {
     os() << cudaDtypeCppString(var->dtype());
   }
   os() << " " << *var << " = " << *v->value() << "; " << std::endl;
+  auto b = dynamic_cast<Block*>(v->body());
+  if (b) {
+    emitIndent();
+  }
   v->body()->accept(this);
+  if (b) {
+    os() << std::endl;
+  }
 }
 
 void CudaPrinter::visit(const IfThenElse* v) {
@@ -339,11 +429,30 @@ class PrioritizeLoad : public IRMutator {
     if (nested_if_then_else_ > 0) {
       return IRMutator::mutate(v);
     }
+    if (thread_local_bufs_.count(v->base_handle()) > 0) {
+      return IRMutator::mutate(v);
+    }
     MemLoadList& load_list = load_stack_.back();
     const Var* load_new_var = new Var("v", v->dtype());
     const Expr* new_value = IRMutator::mutate(v);
     load_list.push_back(std::make_pair(load_new_var, new_value));
     return load_new_var;
+  }
+
+  // TODO: merge this with CudaPrinter into CudaAnalysis
+  Stmt* mutate(const Allocate* v) override {
+    Stmt* p = v->get_parent();
+    while (p) {
+      const For* for_v = dynamic_cast<const For*>(p);
+      if (for_v) {
+        if (for_v->loop_options().is_gpu_thread_index()) {
+          thread_local_bufs_.insert(v->buffer_var());
+          break;
+        }
+      }
+      p = p->get_parent();
+    }
+    return (Stmt*)v;
   }
 
   // TODO: merge this with the IRMutator::mutate version.
@@ -464,6 +573,7 @@ class PrioritizeLoad : public IRMutator {
   // }
   // int v2 = v + 2;
   int nested_if_then_else_ = 0;
+  std::unordered_set<const Var*> thread_local_bufs_;
 };
 
 std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
@@ -525,7 +635,7 @@ class NoThreadIdxRewriter : public IRMutator {
   }
 
   Stmt* mutate(const Block* v) override {
-    std::list<Stmt*> old_stmts = v->stmts();
+    std::list<Stmt*> old_stmts(v->begin(), v->end());
     std::vector<bool> need_rewrites(old_stmts.size());
     std::vector<Stmt*> new_stmts(old_stmts.size());
     int index = 0;
@@ -538,7 +648,7 @@ class NoThreadIdxRewriter : public IRMutator {
     }
 
     bool any_need_fix = false;
-    bool all_need_fix = true;
+    bool all_need_fix = need_rewrites.empty();
     for (auto need_fix : need_rewrites) {
       if (need_fix) {
         any_need_fix = true;
@@ -575,6 +685,9 @@ class NoThreadIdxRewriter : public IRMutator {
       while (start < count && !need_rewrites[start]) {
         rewrite_stmts.push_back(Stmt::clone(new_stmts[start]));
         start++;
+      }
+      if (start >= count) {
+        break;
       }
       int stop = start + 1;
       while (stop < count && need_rewrites[stop]) {
