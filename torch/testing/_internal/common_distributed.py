@@ -58,17 +58,6 @@ def skip_if_small_worldsize(func):
     return wrapper
 
 
-def skip_if_no_cuda_distributed(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not torch.cuda.is_available():
-            sys.exit(TEST_SKIPS["no_cuda"].exit_code)
-
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
 def skip_if_not_multigpu(func):
     """Multi-GPU tests requires at least 2 GPUS. Skip if this is not met."""
     @wraps(func)

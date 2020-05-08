@@ -1912,6 +1912,7 @@ cc_library(
             "torch/csrc/generic/*.cpp",
             "torch/csrc/jit/*.h",
             "torch/csrc/jit/api/*.h",
+            "torch/csrc/jit/backends/backend_interface.h",
             "torch/csrc/jit/codegen/cuda/*.h",
             "torch/csrc/jit/codegen/fuser/*.h",
             "torch/csrc/jit/codegen/fuser/cpu/*.h",

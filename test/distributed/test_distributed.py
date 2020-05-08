@@ -26,7 +26,6 @@ from torch.testing._internal.common_distributed import (
     simple_sparse_reduce_tests,
     skip_if_rocm,
     skip_if_small_worldsize,
-    skip_if_no_cuda_distributed,
     skip_if_lt_x_gpu,
     skip_if_no_gpu,
 )
@@ -622,7 +621,6 @@ class _DistTestBase(object):
         BACKEND != "gloo" and BACKEND != "nccl",
         "Only Gloo and Nccl backend supports CUDA allReduce",
     )
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_broadcast_cuda(self):
         group, group_id, rank = self._init_global_test()
@@ -682,7 +680,6 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA reduce")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     @skip_if_rocm
     def test_reduce_sum_cuda(self):
@@ -845,7 +842,6 @@ class _DistTestBase(object):
         BACKEND != "gloo",
         "Only Gloo backend will have CUDA allReduce tested",
     )
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_all_reduce_sum_cuda(self):
         group, group_id, rank = self._init_global_test()
@@ -991,7 +987,6 @@ class _DistTestBase(object):
         self._test_sparse_all_reduce_sum(lambda t: t)
 
     @unittest.skipIf(BACKEND != "gloo", "Only Gloo backend support sparse all reduce")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     @skip_if_rocm
     def test_sparse_all_reduce_sum_cuda(self):
@@ -1345,7 +1340,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA all gather")
     @unittest.skipIf(BACKEND == "nccl", "CUDA all gather skipped for NCCL")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_all_gather_cuda(self):
         group, group_id, rank = self._init_global_test()
@@ -1915,7 +1909,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     @skip_if_rocm
     def test_DistributedDataParallel(self):
@@ -1977,7 +1970,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_DistributedDataParallel_SyncBatchNorm(self):
         group, group_id, rank = self._init_global_test()
@@ -2019,7 +2011,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_DistributedDataParallel_SyncBatchNorm_2D_Input(self):
         group, group_id, rank = self._init_global_test()
@@ -2067,7 +2058,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     @require_world_size(2)
     @skip_if_rocm
@@ -2117,7 +2107,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_Running_Value(self):
         group, group_id, rank = self._init_global_test()
@@ -2147,7 +2136,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_gradient(self):
         group, group_id, rank = self._init_global_test()

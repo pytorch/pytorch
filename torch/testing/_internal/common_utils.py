@@ -1298,7 +1298,7 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
 
 
 # Decorator to retry upon certain Exceptions.
-def retry(ExceptionToCheck, tries=3, delay=3):
+def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
     def deco_retry(f):
         @wraps(f)
         def f_retry(*args, **kwargs):
@@ -1311,7 +1311,10 @@ def retry(ExceptionToCheck, tries=3, delay=3):
                     print(msg)
                     time.sleep(mdelay)
                     mtries -= 1
-            return f(*args, **kwargs)
+            try:
+                return f(*args, **kwargs)
+            except ExceptionToCheck as e:
+                raise unittest.SkipTest(f"Skipping after {tries} consecutive {str(e)}") from e if skip_after_retries else e
         return f_retry  # true decorator
     return deco_retry
 
