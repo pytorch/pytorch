@@ -2,8 +2,6 @@
 #define TH_GENERIC_FILE "TH/generic/THVector.h"
 #else
 
-#include <ATen/core/DistributionsHelper.h>
-
 TH_API void THVector_(fill)(scalar_t *x, const scalar_t c, const ptrdiff_t n);
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
