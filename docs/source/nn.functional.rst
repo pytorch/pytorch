@@ -164,7 +164,6 @@ Non-linear activation functions
 ~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: hardswish
-.. autofunction:: hardswish_
 
 :hidden:`relu6`
 ~~~~~~~~~~~~~~~
