@@ -197,11 +197,6 @@ NATIVE_DECLARATION = CodeTemplate("""\
 CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
 
-CONDITIONAL_INITIALIZER = CodeTemplate("""\
-if (${name}.defined()) {
-    ${initializer}
-}""")
-
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
 OPERATOR_NAME = CodeTemplate("aten::${operator_name}")
@@ -1410,17 +1405,6 @@ def create_derived(backend_type_env, declarations):
                                 size=arg.get('size'), scalar_type='dispatch_scalar_type')
                             case_body.append("auto {}_ = {};".format(
                                 arg['name'], check_cast))
-
-                        initializers = []
-
-                        # only initialize non-null arguments
-                        if nullable_argument(arg) and len(initializers) > 0:
-                            case_body.append(CONDITIONAL_INITIALIZER.substitute({
-                                'name': arg['name'],
-                                'initializer': initializers
-                            }))
-                        else:
-                            case_body += initializers
 
                 # cimpls, if it exists, contains the underlying C function names and
                 # arguments. Otherwise use option
