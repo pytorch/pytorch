@@ -9,6 +9,9 @@
 
 #include <torch/csrc/THP.h>
 
+// Do not show cpp stack traces by default
+bool torch::utils::CPPStackTraces::_enabled = false;
+
 PyObject *THPException_FatalError;
 
 #define ASSERT_TRUE(cond) if (!(cond)) return false

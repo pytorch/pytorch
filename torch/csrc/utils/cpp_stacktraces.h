@@ -4,7 +4,7 @@
 namespace torch {
 namespace utils {
 
-struct TORCH_API CPPStackTraces {
+struct CPPStackTraces {
   static bool is_enabled() {
     return _enabled;
   }
@@ -13,7 +13,7 @@ struct TORCH_API CPPStackTraces {
   }
 
 private:
-  static bool _enabled = false;
+  static bool _enabled;
 };
 
 } // namespace utils
