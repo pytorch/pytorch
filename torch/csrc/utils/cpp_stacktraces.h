@@ -13,7 +13,7 @@ struct TORCH_API CPPStackTraces {
   }
 
 private:
-  static bool _enabled;
+  static bool _enabled = false;
 };
 
 } // namespace utils
