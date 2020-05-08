@@ -222,8 +222,10 @@ void setOutput(O& opts, at::Tensor& tensor, std::vector<size_t>& counts) {
 at::Tensor pinnedLike(at::Tensor& tensor) {
   auto* allocator = at::cuda::getPinnedMemoryAllocator();
   auto storage = c10::Storage(
+      c10::Storage::use_byte_size_t(),
       tensor.dtype(),
-      at::detail::computeStorageSize(tensor.sizes(), tensor.strides()),
+      at::detail::computeStorageNbytes(
+          tensor.sizes(), tensor.strides(), tensor.dtype().itemsize()),
       allocator,
       /*resizable=*/false);
   return at::empty({0}, tensor.options().device(at::kCPU))
@@ -333,14 +335,17 @@ ProcessGroupGloo::SendWork::SendWork(
 
 bool ProcessGroupGloo::SendWork::wait() {
   bool sendCompleted = false;
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::exception_ptr exception{nullptr};
   try {
     sendCompleted = buffer_->waitSend();
   } catch (...) {
-    exception_ = std::current_exception();
+    exception = std::current_exception();
   }
-
+  // Lock to write completed_ and exception_, and throw if there is an
+  // exception.
+  std::lock_guard<std::mutex> lock(mutex_);
   completed_ = true;
+  exception_ = exception;
   if (exception_) {
     std::rethrow_exception(exception_);
   }
@@ -363,14 +368,17 @@ int ProcessGroupGloo::RecvWork::sourceRank() const {
 
 bool ProcessGroupGloo::RecvWork::wait() {
   bool recvCompleted = false;
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::exception_ptr exception{nullptr};
   try {
     recvCompleted = buffer_->waitRecv(&srcRank_);
   } catch (...) {
-    exception_ = std::current_exception();
+    exception = std::current_exception();
   }
-
+  // Lock to write completed_ and exception_, and throw if there is an
+  // exception.
+  std::lock_guard<std::mutex> lock(mutex_);
   completed_ = true;
+  exception_ = exception;
   if (exception_) {
     std::rethrow_exception(exception_);
   }
@@ -948,7 +956,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
           continue;
         }
         const auto actual = metadata[i].sizes();
-        AT_CHECK(actual == expected, "Sparse dimensions do not match");
+        TORCH_CHECK(actual == expected, "Sparse dimensions do not match");
       }
     }
 

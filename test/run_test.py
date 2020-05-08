@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import argparse
 from datetime import datetime
+import modulefinder
 import os
 import shutil
 import signal
@@ -16,15 +17,19 @@ import torch._six
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
-PY33 = sys.version_info >= (3, 3)
-PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'test_autograd',
-    'test_cpp_extensions',
+    'test_bundled_inputs',
+    'test_complex',
+    'test_cpp_api_parity',
+    'test_cpp_extensions_aot_no_ninja',
+    'test_cpp_extensions_aot_ninja',
+    'test_cpp_extensions_jit',
     'distributed/test_c10d',
     'distributed/test_c10d_spawn',
     'test_cuda',
+    'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
     'test_dataloader',
     'distributed/test_data_parallel',
@@ -32,7 +37,6 @@ TESTS = [
     'test_distributions',
     'test_docs_coverage',
     'test_expecttest',
-    'test_fake_quant',
     'test_indexing',
     'test_jit',
     'test_logging',
@@ -43,64 +47,125 @@ TESTS = [
     'test_nn',
     'test_numba_integration',
     'test_optim',
-    'test_qat',
+    'test_mobile_optimizer',
+    'test_xnnpack_integration',
     'test_quantization',
-    'test_quantized',
-    'test_quantized_tensor',
-    'test_quantized_nn_mods',
     'test_sparse',
+    'test_serialization',
+    'test_show_pickle',
     'test_torch',
     'test_type_info',
     'test_type_hints',
     'test_utils',
     'test_namedtuple_return_api',
-    'test_jit_fuser',
-    'test_jit_simple',
+    'test_jit_profiling',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
+    'test_jit_fuser_profiling',
     'test_tensorboard',
     'test_namedtensor',
     'test_type_promotion',
     'test_jit_disabled',
     'test_function_schema',
     'test_overrides',
-]
-
-# skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
-# skip python2 for rpc and dist_autograd tests that do not support python2
-if PY33:
-    TESTS.extend([
-        'distributed/rpc/test_rpc_spawn',
-        'distributed/rpc/test_dist_autograd_spawn',
-        'distributed/rpc/test_dist_optimizer_spawn',
-    ])
-
-# skip < 3.6 b/c fstrings added in 3.6
-if PY36:
-    TESTS.extend([
-        'test_jit_py3',
-    ])
-
-WINDOWS_BLACKLIST = [
-    'distributed/test_distributed',
-    'distributed/rpc/test_rpc_spawn',
+    'test_jit_fuser_te',
+    'test_tensorexpr',
+    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
+    'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'distributed/rpc/jit/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
+    'distributed/rpc/test_rpc_spawn',
+    'test_jit_py3',
+    'test_determination',
+    'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/faulty_agent/test_rpc_spawn',
+]
+
+WINDOWS_BLACKLIST = [
+    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
+    'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'distributed/rpc/jit/test_dist_autograd_spawn',
+    'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/test_dist_autograd_spawn',
+    'distributed/rpc/test_dist_optimizer_spawn',
+    'distributed/rpc/test_rpc_spawn',
+    'distributed/test_distributed',
 ]
 
 ROCM_BLACKLIST = [
-    'test_cpp_extensions',
-    'distributed/test_distributed',
+    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
+    'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'distributed/rpc/jit/test_dist_autograd_spawn',
+    'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/test_dist_autograd_spawn',
+    'distributed/rpc/test_dist_optimizer_spawn',
+    'distributed/rpc/test_rpc_spawn',
+    'test_determination',
     'test_multiprocessing',
+    'test_jit_simple',
+    'test_jit_legacy',
+    'test_jit_fuser_legacy',
+    'test_tensorexpr',
+    'test_type_hints',
+]
+
+RUN_PARALLEL_BLACKLIST = [
+    'test_cpp_extensions_jit',
+    'test_docs_coverage',
+    'test_expecttest',
+    'test_jit_disabled',
+    'test_mobile_optimizer',
+    'test_multiprocessing',
+    'test_multiprocessing_spawn',
+    'test_namedtuple_return_api',
+    'test_overrides',
+    'test_show_pickle',
+    'test_tensorexpr',
+    'test_cuda_primary_ctx',
+] + [test for test in TESTS if test.startswith('distributed/')]
+
+# These tests are slow enough that it's worth calculating whether the patch
+# touched any related files first.
+SLOW_TESTS = [
+    'test_nn',
+    'test_autograd',
+    'test_cpp_extensions_jit',
+    'test_jit_legacy',
+    'test_dataloader',
+    'test_overrides',
+    'test_jit',
+    'test_jit_profiling',
+    'test_jit_fuser_profiling',
+    'test_torch',
+    'distributed/test_distributed',
     'distributed/rpc/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
+    'test_cuda',
+    'test_cuda_primary_ctx',
+    'test_cpp_extensions_aot_ninja',
+    'test_cpp_extensions_aot_no_ninja',
+    'test_serialization',
+    'test_distributions',
+    'test_optim',
+    'test_utils',
+    'test_multiprocessing',
+    'test_tensorboard',
+    'distributed/test_c10d',
+    'distributed/test_c10d_spawn',
+    'test_quantization',
+    'test_determination',
 ]
+_DEP_MODULES_CACHE = {}
 
 DISTRIBUTED_TESTS_CONFIG = {}
 
 
 if dist.is_available():
-    if dist.is_mpi_available():
+    DISTRIBUTED_TESTS_CONFIG['test'] = {
+        'WORLD_SIZE': '1'
+    }
+    if not TEST_WITH_ROCM and dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG['mpi'] = {
             'WORLD_SIZE': '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-mpi'
@@ -110,7 +175,7 @@ if dist.is_available():
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-nccl'
         }
-    if dist.is_gloo_available():
+    if not TEST_WITH_ROCM and dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG['gloo'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-gloo'
@@ -121,10 +186,10 @@ SIGNALS_TO_NAMES_DICT = {getattr(signal, n): n for n in dir(signal)
                          if n.startswith('SIG') and '_' not in n}
 
 CPP_EXTENSIONS_ERROR = """
-Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
-but it could not be found. Install ninja with `pip install ninja`
-or `conda install ninja`. Alternatively, disable C++ extensions test with
-`run_test.py --exclude cpp_extensions`.
+Ninja (https://ninja-build.org) is required for some of the C++ extensions
+tests, but it could not be found. Install ninja with `pip install ninja`
+or `conda install ninja`. Alternatively, disable said tests with
+`run_test.py --exclude test_cpp_extensions_aot_ninja test_cpp_extensions_jit`.
 """
 
 
@@ -136,6 +201,8 @@ def run_test(executable, test_module, test_directory, options, *extra_unittest_a
     unittest_args = options.additional_unittest_args
     if options.verbose:
         unittest_args.append('--verbose')
+    if test_module in RUN_PARALLEL_BLACKLIST:
+        unittest_args = [arg for arg in unittest_args if not arg.startswith('--run-parallel')]
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + '.py'] + unittest_args + list(extra_unittest_args)
@@ -147,23 +214,36 @@ def run_test(executable, test_module, test_directory, options, *extra_unittest_a
 def test_cuda_primary_ctx(executable, test_module, test_directory, options):
     return run_test(executable, test_module, test_directory, options, '--subprocess')
 
-def test_cpp_extensions(executable, test_module, test_directory, options):
-    try:
-        cpp_extension.verify_ninja_availability()
-    except RuntimeError:
-        print(CPP_EXTENSIONS_ERROR)
-        return 1
+
+def _test_cpp_extensions_aot(executable, test_module, test_directory, options, use_ninja):
+    if use_ninja:
+        try:
+            cpp_extension.verify_ninja_availability()
+        except RuntimeError:
+            print(CPP_EXTENSIONS_ERROR)
+            return 1
+
+    # Wipe the build folder, if it exists already
     cpp_extensions_test_dir = os.path.join(test_directory, 'cpp_extensions')
-    return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
-                        cwd=cpp_extensions_test_dir)
+    cpp_extensions_test_build_dir = os.path.join(cpp_extensions_test_dir, 'build')
+    if os.path.exists(cpp_extensions_test_build_dir):
+        shutil.rmtree(cpp_extensions_test_build_dir)
+
+    # Build the test cpp extensions modules
+    shell_env = os.environ.copy()
+    shell_env['USE_NINJA'] = str(1 if use_ninja else 0)
+    cmd = [sys.executable, 'setup.py', 'install', '--root', './install']
+    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=shell_env)
     if return_code != 0:
         return return_code
     if sys.platform != 'win32':
-        return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
-                            cwd=os.path.join(cpp_extensions_test_dir, 'no_python_abi_suffix_test'))
+        return_code = shell(cmd,
+                            cwd=os.path.join(cpp_extensions_test_dir, 'no_python_abi_suffix_test'),
+                            env=shell_env)
         if return_code != 0:
             return return_code
 
+    # "install" the test modules and run tests
     python_path = os.environ.get('PYTHONPATH', '')
     try:
         cpp_extensions = os.path.join(test_directory, 'cpp_extensions')
@@ -179,6 +259,16 @@ def test_cpp_extensions(executable, test_module, test_directory, options):
         return run_test(executable, test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
+
+
+def test_cpp_extensions_aot_ninja(executable, test_module, test_directory, options):
+    return _test_cpp_extensions_aot(executable, 'test_cpp_extensions_aot', test_directory,
+                                    options, use_ninja=True)
+
+
+def test_cpp_extensions_aot_no_ninja(executable, test_module, test_directory, options):
+    return _test_cpp_extensions_aot(executable, 'test_cpp_extensions_aot',
+                                    test_directory, options, use_ninja=False)
 
 
 def test_distributed(executable, test_module, test_directory, options):
@@ -233,7 +323,8 @@ def test_distributed(executable, test_module, test_directory, options):
 
 CUSTOM_HANDLERS = {
     'test_cuda_primary_ctx': test_cuda_primary_ctx,
-    'test_cpp_extensions': test_cpp_extensions,
+    'test_cpp_extensions_aot_no_ninja': test_cpp_extensions_aot_no_ninja,
+    'test_cpp_extensions_aot_ninja': test_cpp_extensions_aot_ninja,
     'distributed/test_distributed': test_distributed,
 }
 
@@ -315,6 +406,9 @@ def parse_args():
         action='store_true',
         help='always run blacklisted windows tests')
     parser.add_argument(
+        '--determine-from',
+        help='File of affected source filenames to determine which tests to run.')
+    parser.add_argument(
         'additional_unittest_args',
         nargs='*',
         help='additional arguments passed through to unittest, e.g., '
@@ -370,8 +464,8 @@ def find_test_index(test, selected_tests, find_last_index=False):
 
 
 def exclude_tests(exclude_list, selected_tests, exclude_message=None):
-    tests_copy = selected_tests[:]
     for exclude_test in exclude_list:
+        tests_copy = selected_tests[:]
         for test in tests_copy:
             if test.startswith(exclude_test):
                 if exclude_message is not None:
@@ -401,7 +495,9 @@ def get_selected_tests(options):
     if sys.platform == 'win32' and not options.ignore_win_blacklist:
         target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')
         if target_arch != 'x64':
-            WINDOWS_BLACKLIST.append('cpp_extensions')
+            WINDOWS_BLACKLIST.append('cpp_extensions_aot_no_ninja')
+            WINDOWS_BLACKLIST.append('cpp_extensions_aot_ninja')
+            WINDOWS_BLACKLIST.append('cpp_extensions_jit')
             WINDOWS_BLACKLIST.append('jit')
             WINDOWS_BLACKLIST.append('jit_fuser')
 
@@ -411,6 +507,130 @@ def get_selected_tests(options):
         selected_tests = exclude_tests(ROCM_BLACKLIST, selected_tests, 'on ROCm')
 
     return selected_tests
+
+
+def test_impact_of_file(filename):
+    """Determine what class of impact this file has on test runs.
+
+    Possible values:
+        TORCH - torch python code
+        CAFFE2 - caffe2 python code
+        TEST - torch test code
+        UNKNOWN - may affect all tests
+        NONE - known to have no effect on test outcome
+        CI - CI configuration files
+    """
+    parts = filename.split(os.sep)
+    if parts[0] in ['.jenkins', '.circleci']:
+        return 'CI'
+    if parts[0] in ['docs', 'scripts', 'CODEOWNERS', 'README.md']:
+        return 'NONE'
+    elif parts[0] == 'torch':
+        if parts[-1].endswith('.py') or parts[-1].endswith('.pyi'):
+            return 'TORCH'
+    elif parts[0] == 'caffe2':
+        if parts[-1].endswith('.py') or parts[-1].endswith('.pyi'):
+            return 'CAFFE2'
+    elif parts[0] == 'test':
+        if parts[-1].endswith('.py') or parts[-1].endswith('.pyi'):
+            return 'TEST'
+
+    return 'UNKNOWN'
+
+
+def log_test_reason(file_type, filename, test, options):
+    if options.verbose:
+        print_to_stderr(
+            'Determination found {} file {} -- running {}'.format(
+                file_type,
+                filename,
+                test,
+            )
+        )
+
+
+def get_dep_modules(test):
+    # Cache results in case of repitition
+    if test in _DEP_MODULES_CACHE:
+        return _DEP_MODULES_CACHE[test]
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    test_location = os.path.join(repo_root, 'test', test + '.py')
+    finder = modulefinder.ModuleFinder(
+        # Ideally exclude all third party modules, to speed up calculation.
+        excludes=[
+            'scipy',
+            'numpy',
+            'numba',
+            'multiprocessing',
+            'sklearn',
+            'setuptools',
+            'hypothesis',
+            'llvmlite',
+            'joblib',
+            'email',
+            'importlib',
+            'unittest',
+            'urllib',
+            'json',
+            'collections',
+        ],
+    )
+    # HACK: some platforms default to ascii, so we can't just run_script :(
+    with open(test_location, 'r', encoding='utf-8') as fp:
+        finder.load_module('__main__', fp, test_location, ('', 'r', 1))
+
+    dep_modules = set(finder.modules.keys())
+    _DEP_MODULES_CACHE[test] = dep_modules
+    return dep_modules
+
+
+def determine_target(test, touched_files, options):
+    test = parse_test_module(test)
+    # Some tests are faster to execute than to determine.
+    if test not in SLOW_TESTS:
+        if options.verbose:
+            print_to_stderr('Running {} without determination'.format(test))
+        return True
+    # HACK: "no_ninja" is not a real module
+    if test.endswith('_no_ninja'):
+        test = test[:(-1 * len('_no_ninja'))]
+    if test.endswith('_ninja'):
+        test = test[:(-1 * len('_ninja'))]
+
+    dep_modules = get_dep_modules(test)
+
+    for touched_file in touched_files:
+        file_type = test_impact_of_file(touched_file)
+        if file_type == 'NONE':
+            continue
+        elif file_type == 'CI':
+            # Force all tests to run if any change is made to the CI
+            # configurations.
+            log_test_reason(file_type, touched_file, test, options)
+            return True
+        elif file_type == 'UNKNOWN':
+            # Assume uncategorized source files can affect every test.
+            log_test_reason(file_type, touched_file, test, options)
+            return True
+        elif file_type in ['TORCH', 'CAFFE2', 'TEST']:
+            parts = os.path.splitext(touched_file)[0].split(os.sep)
+            touched_module = ".".join(parts)
+            # test/ path does not have a "test." namespace
+            if touched_module.startswith('test.'):
+                touched_module = touched_module.split('test.')[1]
+            if (
+                touched_module in dep_modules
+                or touched_module == test.replace('/', '.')
+            ):
+                log_test_reason(file_type, touched_file, test, options)
+                return True
+
+    # If nothing has determined the test has run, don't run the test.
+    if options.verbose:
+        print_to_stderr('Determination is skipping {}'.format(test))
+
+    return False
 
 
 def main():
@@ -428,6 +648,20 @@ def main():
 
     if options.jit:
         selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
+
+    if options.determine_from is not None and os.path.exists(options.determine_from):
+        with open(options.determine_from, 'r') as fh:
+            touched_files = [
+                os.path.normpath(name.strip()) for name in fh.read().split('\n')
+                if len(name.strip()) > 0
+            ]
+        # HACK: Ensure the 'test' paths can be traversed by Modulefinder
+        sys.path.append('test')
+        selected_tests = [
+            test for test in selected_tests
+            if determine_target(test, touched_files, options)
+        ]
+        sys.path.remove('test')
 
     for test in selected_tests:
 

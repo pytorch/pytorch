@@ -46,13 +46,35 @@ def _get_valid_min_max(qparams):
 # in 3.67.0
 def _floats_wrapper(*args, **kwargs):
     if 'width' in kwargs and hypothesis.version.__version_info__ < (3, 67, 0):
+        # As long as nan, inf, min, max are not specified, reimplement the width
+        # parameter for older versions of hypothesis.
+        no_nan_and_inf = (
+            (('allow_nan' in kwargs and not kwargs['allow_nan']) or
+             'allow_nan' not in kwargs) and
+            (('allow_infinity' in kwargs and not kwargs['allow_infinity']) or
+             'allow_infinity' not in kwargs))
+        min_and_max_not_specified = (
+            len(args) == 0 and
+            'min_value' not in kwargs and
+            'max_value' not in kwargs
+        )
+        if no_nan_and_inf and min_and_max_not_specified:
+            if kwargs['width'] == 16:
+                kwargs['min_value'] = torch.finfo(torch.float16).min
+                kwargs['max_value'] = torch.finfo(torch.float16).max
+            elif kwargs['width'] == 32:
+                kwargs['min_value'] = torch.finfo(torch.float32).min
+                kwargs['max_value'] = torch.finfo(torch.float32).max
+            elif kwargs['width'] == 64:
+                kwargs['min_value'] = torch.finfo(torch.float64).min
+                kwargs['max_value'] = torch.finfo(torch.float64).max
         kwargs.pop('width')
     return st.floats(*args, **kwargs)
 
 def floats(*args, **kwargs):
     if 'width' not in kwargs:
         kwargs['width'] = 32
-    return st.floats(*args, **kwargs)
+    return _floats_wrapper(*args, **kwargs)
 
 """Hypothesis filter to avoid overflows with quantized tensors.
 
@@ -319,7 +341,6 @@ current_settings['deadline'] = None
 if hypothesis_version >= (3, 16, 0) and hypothesis_version < (5, 0, 0):
     current_settings['timeout'] = hypothesis.unlimited
 def assert_deadline_disabled():
-    assert settings().deadline is None
     if hypothesis_version < (3, 27, 0):
         import warnings
         warning_message = (
@@ -328,3 +349,5 @@ def assert_deadline_disabled():
             "Current hypothesis version: {}".format(hypothesis.__version__)
         )
         warnings.warn(warning_message)
+    else:
+        assert settings().deadline is None

@@ -1,10 +1,12 @@
-#include "import.h"
+#include <torch/csrc/jit/mobile/import.h>
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
-#include <torch/csrc/jit/unpickler.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/jit/instruction.h>
-
+#include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
+#include <torch/custom_class.h>
 
 #include <fstream>
 #include <string>
@@ -32,73 +34,121 @@
 // This format and process need to be revisted and redesigned if we want to
 // support backward compatibility in future.
 
+namespace c10 {
+// std::string serializeType(const Type &t);
+TypePtr parseType(const std::string& pythonStr);
+} // namespace c10
+
 namespace torch {
 namespace jit {
-using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::IStreamAdapter;
+using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
-OpCode parseOpCode(const char *str);
+OpCode parseOpCode(const char* str);
+
+IValue expect_field(
+    IValue tup,
+    const std::string& expected_name,
+    size_t entry) {
+  auto row = tup.toTuple()->elements().at(entry).toTuple();
+  TORCH_INTERNAL_ASSERT(
+      row->elements().at(0).toStringRef() == expected_name,
+      "Expected ",
+      expected_name,
+      " found ",
+      row->elements().at(0).toStringRef());
+  return row->elements().at(1);
+}
+
+std::string operator_str(
+    const std::string& name,
+    const std::string& overloadname) {
+  std::string result = name;
+  if (!overloadname.empty()) {
+    result += "." + overloadname;
+  }
+  return result;
+}
+
 namespace {
-void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::CompilationUnit> mcu) {
+void print_unsupported_ops_and_throw(
+    const std::unordered_set<std::string>& unsupported_ops) {
+  std::string error_message("{");
+  for (const auto& op_name : unsupported_ops) {
+    error_message += op_name + ", ";
+  }
+  error_message += "}";
+  TORCH_CHECK(false, "Following ops cannot be found:", error_message);
+}
+
+void parseMethods(
+    const std::vector<IValue>& vals,
+    mobile::CompilationUnit& mcu) {
   for (const auto& element : vals) {
     const auto& m_tuple = element.toTuple()->elements();
+    const std::string& function_name = m_tuple[0].toStringRef();
+    IValue table = m_tuple[1];
 
-    auto function = std::unique_ptr<mobile::Function>(new mobile::Function(
-        c10::QualifiedName(m_tuple[0].toString()->string())));
-    auto comps = m_tuple[1].toTuple()->elements();
+    auto function = std::unique_ptr<mobile::Function>(
+        new mobile::Function(c10::QualifiedName(function_name)));
 
-    // The sequence of the named tuple is 0: instructions, 1: operators,
-    // 2: constants, 3: register_size
-    auto named_ins = comps[0].toTuple()->elements();
-    auto ins_name = named_ins[0].toString()->string();
-    TORCH_CHECK(ins_name == "instructions",
-                "instruction is expected, but get", ins_name);
-    auto ins_list = named_ins[1].toTuple()->elements();
-
-    auto named_ops = comps[1].toTuple()->elements();
-    auto ops_name = named_ops[0].toString()->string();
-    TORCH_CHECK(ops_name == "operators",
-                "operator is expected, but get", ops_name);
-    auto ops_list = named_ops[1].toTuple()->elements();
+    const auto& ins_list =
+        expect_field(table, "instructions", BYTECODE_INDEX_INSTRUCTION)
+            .toTuple()
+            ->elements();
+    const auto& ops_list =
+        expect_field(table, "operators", BYTECODE_INDEX_OPERATOR)
+            .toTuple()
+            ->elements();
+    const auto& consts_list =
+        expect_field(table, "constants", BYTECODE_INDEX_CONSTANT)
+            .toTuple()
+            ->elements();
+    const auto& types_list =
+        expect_field(table, "types", BYTECODE_INDEX_TYPE).toTuple()->elements();
+    const auto& register_size = expect_field(table, "register_size", 4).toInt();
 
     for (const auto& ins : ins_list) {
       auto ins_item = ins.toTuple()->elements();
-      TORCH_CHECK(ins_item.size() == 3,
-                  "There should be three parts in an instruction.");
+      TORCH_CHECK(
+          ins_item.size() == 3,
+          "There should be three parts in an instruction.");
       OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
       function->append_instruction(op_code, X, N);
     }
 
+    std::unordered_set<std::string> unsupported_op_names;
     for (const auto& op : ops_list) {
       auto op_item = op.toTuple()->elements();
-      TORCH_CHECK(op_item.size() == 2,
-                  "There should be two parts in an operator name.");
-      function->append_operator(op_item[0].toString()->string(),
-                           op_item[1].toString()->string());
+      TORCH_CHECK(
+          op_item.size() == 2,
+          "There should be two parts in an operator name.");
+      auto op_found = function->append_operator(
+          op_item[0].toString()->string(), op_item[1].toString()->string());
+      if (!op_found) {
+        unsupported_op_names.emplace(operator_str(
+            op_item[0].toString()->string(), op_item[1].toString()->string()));
+      }
     }
 
-    // vararg operators are stored in a separate table.
-    function->build_vararg_operator_table();
+    if (!unsupported_op_names.empty()) {
+      print_unsupported_ops_and_throw(unsupported_op_names);
+    };
 
-    auto named_consts = comps[2].toTuple()->elements();
-    auto consts_name = named_consts[0].toString()->string();
-    TORCH_CHECK(consts_name == "constants",
-                "constant is expected, but get", consts_name);
-    auto consts_list = named_consts[1].toTuple()->elements();
     for (const auto& constant : consts_list) {
       function->append_constant(constant);
     }
 
-    auto named_agg_size = comps[3].toTuple()->elements();
-    auto size_name = named_agg_size[0].toString()->string();
-    TORCH_CHECK(size_name == "register_size",
-                "register_size is expected, but get", ops_name);
-    function->set_register_size(named_agg_size[1].toInt());
+    for (const auto& t : types_list) {
+      function->append_type(c10::parseType(t.toStringRef()));
+    }
 
-    mcu->register_function(std::move(function));
+    function->set_register_size(register_size);
+
+    mcu.register_function(std::move(function));
   }
 }
 
@@ -109,26 +159,33 @@ class BytecodeDeserializer final {
   mobile::Module deserialize(c10::optional<at::Device> device);
 
  private:
-  c10::IValue readArchive(const std::string& archive_name);
-  std::shared_ptr<script::CompilationUnit> compilation_unit_;
+  c10::IValue readArchive(
+      const std::string& archive_name,
+      std::shared_ptr<mobile::CompilationUnit> mcu);
+  std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
 };
 
-BytecodeDeserializer::BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader)
-    : compilation_unit_(std::make_shared<script::CompilationUnit>()), reader_(std::move(reader)) {}
+BytecodeDeserializer::BytecodeDeserializer(
+    std::unique_ptr<PyTorchStreamReader> reader)
+    : compilation_unit_(std::make_shared<CompilationUnit>()),
+      reader_(std::move(reader)) {}
 
-mobile::Module BytecodeDeserializer::deserialize(c10::optional<at::Device> device) {
+mobile::Module BytecodeDeserializer::deserialize(
+    c10::optional<at::Device> device) {
   device_ = device;
-  auto bvals = readArchive("bytecode").toTuple()->elements();
   auto mcu = std::make_shared<mobile::CompilationUnit>();
-  parseMethods(bvals, mcu);
+  auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
+  parseMethods(bvals, *mcu);
 
-  return mobile::Module(readArchive("data").toObject(), mcu);
+  return mobile::Module(readArchive("data", mcu).toObject(), mcu);
 }
 
-c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
+c10::IValue BytecodeDeserializer::readArchive(
+    const std::string& archive_name,
+    std::shared_ptr<mobile::CompilationUnit> mcu) {
   std::stringstream picklename;
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
@@ -149,25 +206,59 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
     return len;
   };
 
-  auto class_resolver = [&](const c10::QualifiedName& qn) {
-    if (compilation_unit_->get_class(qn) == nullptr) {
-      auto typeptr = ClassType::create(qn, compilation_unit_, true);
-      compilation_unit_->register_type(typeptr);
+  static const c10::QualifiedName torchPrefix = "__torch__";
+  auto type_resolver = [&](const c10::QualifiedName& qn) {
+    TypePtr type;
+    // HACK: first we check whether the name starts with `__torch__` to tell if
+    // it's "supposed" to be a class type. This is a reliable check today, but
+    // there is no guarantee that this is the case. The real solution is to
+    // merge type parsers so we can share class resolution logic.
+    if (torchPrefix.isPrefixOf(qn)) {
+      if (compilation_unit_->get_class(qn) == nullptr) {
+        auto typeptr = ClassType::create(qn, compilation_unit_, true);
+        compilation_unit_->register_type(typeptr);
+      }
+      type = compilation_unit_->get_class(qn);
+    } else {
+      type = c10::parseType(qn.qualifiedName());
     }
-    return c10::StrongTypePtr(
-        compilation_unit_, compilation_unit_->get_class(qn));
+    return c10::StrongTypePtr(compilation_unit_, type);
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
-    auto dict = std::move(input).toGenericDict();
-    size_t ndict = dict.size();
-    auto obj = c10::ivalue::Object::create(type, ndict);
-    auto it = dict.begin();
-    for (size_t i = 0; i < ndict; ++i) {
-      obj->setSlot(i, it->value());
-      ++it;
+    auto cls = type.type_->expect<at::ClassType>();
+    auto qn = cls->name();
+    c10::QualifiedName method_name(qn.value(), "__setstate__");
+    auto setstate = mcu->find_function(method_name);
+    auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
+      auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
+      if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
+        return custom_class_type;
+      }
+      return nullptr;
+    };
+    if (setstate) {
+      auto obj = c10::ivalue::Object::create(type, 0);
+      Stack stack({obj, input});
+      setstate->run(stack);
+      return obj;
+    } else if (auto custom_class_type = find_custom_class_with_setstate()) {
+      auto obj = c10::ivalue::Object::create(
+          c10::StrongTypePtr(nullptr, custom_class_type), 1);
+      Stack stack({obj, input});
+      custom_class_type->getMethod("__setstate__").run(stack);
+      return obj;
+    } else {
+      auto dict = std::move(input).toGenericDict();
+      size_t ndict = dict.size();
+      auto obj = c10::ivalue::Object::create(type, ndict);
+      auto it = dict.begin();
+      for (size_t i = 0; i < ndict; ++i) {
+        obj->setSlot(i, it->value());
+        ++it;
+      }
+      return obj;
     }
-    return obj;
   };
 
   auto read_record = [&](const std::string& name) {
@@ -176,8 +267,12 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
     return std::get<0>(reader_->getRecord(ss.str()));
   };
 
-  Unpickler unpickler(reader, std::move(class_resolver),
-                      std::move(obj_loader), std::move(read_record), device_);
+  Unpickler unpickler(
+      reader,
+      std::move(type_resolver),
+      std::move(obj_loader),
+      std::move(read_record),
+      device_);
   return unpickler.parse_ivalue();
 }
 
@@ -186,8 +281,7 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
 mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device) {
-  std::unique_ptr<IStreamAdapter> rai =
-      std::make_unique<IStreamAdapter>(&in);
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
   auto module = _load_for_mobile(std::move(rai), device);
   return module;
 }

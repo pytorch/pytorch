@@ -8,7 +8,7 @@ Module
 
 .. java:type:: public class Module
 
-   Java wrapper for torch::jit::script::Module.
+   Java wrapper for torch::jit::Module.
 
 Methods
 -------
@@ -18,7 +18,7 @@ destroy
 .. java:method:: public void destroy()
    :outertype: Module
 
-   Explicitly destroys the native torch::jit::script::Module. Calling this method is not required, as the native object will be destroyed when this object is garbage-collected. However, the timing of garbage collection is not guaranteed, so proactively calling \ ``destroy``\  can free memory more quickly. See \ :java:ref:`com.facebook.jni.HybridData.resetNative`\ .
+   Explicitly destroys the native torch::jit::Module. Calling this method is not required, as the native object will be destroyed when this object is garbage-collected. However, the timing of garbage collection is not guaranteed, so proactively calling \ ``destroy``\  can free memory more quickly. See \ :java:ref:`com.facebook.jni.HybridData.resetNative`\ .
 
 forward
 ^^^^^^^
@@ -40,7 +40,7 @@ load
    Loads a serialized TorchScript module from the specified path on the disk.
 
    :param modelPath: path to file that contains the serialized TorchScript module.
-   :return: new \ :java:ref:`org.pytorch.Module`\  object which owns torch::jit::script::Module.
+   :return: new \ :java:ref:`org.pytorch.Module`\  object which owns torch::jit::Module.
 
 runMethod
 ^^^^^^^^^

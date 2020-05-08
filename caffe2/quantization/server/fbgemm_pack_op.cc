@@ -327,6 +327,33 @@ bool FullyConnectedDNNLowPPackWeightOp::RunOnDevice() {
     Y->bias = nullptr;
   }
 
+  // Output quantized bias if we specify a second output. This output is meant
+  // to be consumed by accelerator instead of CPU ops.
+  if (OutputSize() >= 2) {
+    CAFFE_ENFORCE(Y->bias, "Bias is not quantized");
+    // The reason we don't support this is basically due to limitation of
+    // Int8TensorCPU only support single scale and zero_point. If we choose to
+    // output bias as Int8FCDNNLowPPackedWeightBlob with original layout,
+    // everything should still work for accelerator.
+    CAFFE_ENFORCE_EQ(
+        1,
+        Y->qparams.size(),
+        "We don't support outputing channelwise quantized bias yet");
+    auto quantized_bias = Y->bias;
+    float in_scale = GetSingleArgument<float>("in_scale", 0);
+    float bias_scale = in_scale * Y->qparams.front().scale;
+    LOG(INFO) << "Bias scale " << bias_scale << ": input scale " << in_scale
+              << " weight scale " << Y->qparams.front().scale;
+    auto* Bq = this->Output<int8::Int8TensorCPU>(1);
+    std::vector<int64_t> shape = {static_cast<int64_t>(quantized_bias->size())};
+    Bq->t.Resize(shape);
+    Bq->scale = bias_scale;
+    Bq->zero_point = 0;
+    auto* data = Bq->t.template mutable_data<int32_t>();
+    context_.template CopySameDevice<int32_t>(
+        quantized_bias->size(), quantized_bias->data(), data);
+  }
+
   return true;
 }
 
@@ -736,7 +763,8 @@ void Int8FCDNNLowpPackedWeightBlobShapeFunctions::SetupExternalTensorDescriptor(
   std::vector<int32_t> offsets;
   for (const auto v : dnntensor.qparams) {
     scales.push_back(v.scale);
-    offsets.push_back(reinterpret_cast<int32_t>(v.zero_point));
+    int32_t cur_offset = v.zero_point;
+    offsets.push_back(cur_offset);
   }
   all_scales->push_back(scales);
   all_offsets->push_back(offsets);
@@ -784,7 +812,8 @@ void Int8ConvDNNLowpPackedWeightBlobShapeFunctions::
   std::vector<int32_t> offsets;
   for (const auto v : dnntensor.qparams) {
     scales.push_back(v.scale);
-    offsets.push_back(reinterpret_cast<int32_t>(v.zero_point));
+    int32_t cur_offset = v.zero_point;
+    offsets.push_back(cur_offset);
   }
   all_scales->push_back(scales);
   all_offsets->push_back(offsets);
@@ -830,11 +859,29 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 
 OPERATOR_SCHEMA(Int8FCPackWeight)
     .NumInputs(1, 2)
-    .NumOutputs(1)
+    .NumOutputs(1, 2)
     .SetDoc(R"DOC(Prepack weight for Int8FC)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
-    .Output(0, "W_q", "Weight/bias tensor in a packed format");
+    .Output(
+        0,
+        "W_q",
+        "Weight/bias tensor in a packed format "
+        "with type Int8FCDNNLowPPackedWeightBlob")
+    .Output(1, "B_q", "Bias int32 quantized tensor")
+    .Arg("axis_w", "See FC operator")
+    .Arg(
+        "quantize_channelwise",
+        "Default false. Per output channel quantization")
+    .Arg(
+        "save_unpacked_weights",
+        "Default false. "
+        "Store unpacked quantized weights to W_q.original_tensor")
+    .Arg(
+        "in_scale",
+        "The scale of input activation tensor. "
+        "Only meaningful when bias is provided "
+        "(NOTE: this is not the scale of weight");
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ConvPackWeight,
@@ -852,6 +899,20 @@ OPERATOR_SCHEMA(Int8ConvPackWeight)
     .SetDoc(R"DOC(Prepack weight for Int8Conv)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
-    .Output(0, "W_q", "Weight/bias tensor in a packed format");
+    .Output(
+        0,
+        "W_q",
+        "Weight/bias tensor in a packed format "
+        "with type Int8ConvDNNLowPPackedWeightBlob")
+    .Arg("quantize_groupwise", "Default false. Per group quantization")
+    .Arg(
+        "save_unpacked_weights",
+        "Default false. "
+        "Store unpacked quantized weights to W_q.original_tensor")
+    .Arg(
+        "in_scale",
+        "The scale of input activation tensor. "
+        "Only meaningful when bias is provided "
+        "(NOTE: this is not the scale of weight");
 
 } // namespace caffe2

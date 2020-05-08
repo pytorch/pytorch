@@ -361,7 +361,7 @@ using SizeType = uint64_t;
 // `errno` is only meaningful when it fails. E.g., a  successful `fork()` sets
 // `errno` to `EINVAL` in child process on some macos
 // (https://stackoverflow.com/a/20295079), and thus `errno` should really only
-// be inspected if an error occured.
+// be inspected if an error occurred.
 //
 // `success_cond` is an expression used to check if an error has happend. So for
 // `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output

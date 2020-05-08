@@ -39,6 +39,7 @@ class Tags(object):
     HANDLE_AS_SPARSE_LAYER = 'handle_as_sparse_layer'
     PREFER_GPU = 'prefer_gpu'
     CPU_ONLY = 'cpu_only'
+    LOCAL = 'local'
 
     # The following three tags are hints to **distributed training framework**.
     """

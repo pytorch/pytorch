@@ -12,15 +12,6 @@ import android.view.TextureView;
 import android.view.ViewStub;
 import android.widget.TextView;
 import android.widget.Toast;
-
-import org.pytorch.IValue;
-import org.pytorch.Module;
-import org.pytorch.PyTorchAndroid;
-import org.pytorch.Tensor;
-import org.pytorch.torchvision.TensorImageUtils;
-
-import java.nio.FloatBuffer;
-
 import androidx.annotation.Nullable;
 import androidx.annotation.UiThread;
 import androidx.annotation.WorkerThread;
@@ -32,6 +23,12 @@ import androidx.camera.core.ImageProxy;
 import androidx.camera.core.Preview;
 import androidx.camera.core.PreviewConfig;
 import androidx.core.app.ActivityCompat;
+import java.nio.FloatBuffer;
+import org.pytorch.IValue;
+import org.pytorch.Module;
+import org.pytorch.PyTorchAndroid;
+import org.pytorch.Tensor;
+import org.pytorch.torchvision.TensorImageUtils;
 
 public class CameraActivity extends AppCompatActivity {
   private static final String TAG = BuildConfig.LOGCAT_TAG;
@@ -59,10 +56,7 @@ public class CameraActivity extends AppCompatActivity {
 
     if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
         != PackageManager.PERMISSION_GRANTED) {
-      ActivityCompat.requestPermissions(
-          this,
-          PERMISSIONS,
-          REQUEST_CODE_CAMERA_PERMISSION);
+      ActivityCompat.requestPermissions(this, PERMISSIONS, REQUEST_CODE_CAMERA_PERMISSION);
     } else {
       setupCameraX();
     }
@@ -103,9 +97,9 @@ public class CameraActivity extends AppCompatActivity {
     if (requestCode == REQUEST_CODE_CAMERA_PERMISSION) {
       if (grantResults[0] == PackageManager.PERMISSION_DENIED) {
         Toast.makeText(
-            this,
-            "You can't use image classification example without granting CAMERA permission",
-            Toast.LENGTH_LONG)
+                this,
+                "You can't use image classification example without granting CAMERA permission",
+                Toast.LENGTH_LONG)
             .show();
         finish();
       } else {
@@ -118,17 +112,19 @@ public class CameraActivity extends AppCompatActivity {
   private static final int TENSOR_HEIGHT = 224;
 
   private void setupCameraX() {
-    final TextureView textureView = ((ViewStub) findViewById(R.id.camera_texture_view_stub))
-        .inflate()
-        .findViewById(R.id.texture_view);
+    final TextureView textureView =
+        ((ViewStub) findViewById(R.id.camera_texture_view_stub))
+            .inflate()
+            .findViewById(R.id.texture_view);
     final PreviewConfig previewConfig = new PreviewConfig.Builder().build();
     final Preview preview = new Preview(previewConfig);
-    preview.setOnPreviewOutputUpdateListener(new Preview.OnPreviewOutputUpdateListener() {
-      @Override
-      public void onUpdated(Preview.PreviewOutput output) {
-        textureView.setSurfaceTexture(output.getSurfaceTexture());
-      }
-    });
+    preview.setOnPreviewOutputUpdateListener(
+        new Preview.OnPreviewOutputUpdateListener() {
+          @Override
+          public void onUpdated(Preview.PreviewOutput output) {
+            textureView.setSurfaceTexture(output.getSurfaceTexture());
+          }
+        });
 
     final ImageAnalysisConfig imageAnalysisConfig =
         new ImageAnalysisConfig.Builder()
@@ -149,12 +145,13 @@ public class CameraActivity extends AppCompatActivity {
 
             if (result != null) {
               mLastAnalysisResultTime = SystemClock.elapsedRealtime();
-              CameraActivity.this.runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                  CameraActivity.this.handleResult(result);
-                }
-              });
+              CameraActivity.this.runOnUiThread(
+                  new Runnable() {
+                    @Override
+                    public void run() {
+                      CameraActivity.this.handleResult(result);
+                    }
+                  });
             }
           }
         });
@@ -174,17 +171,20 @@ public class CameraActivity extends AppCompatActivity {
       Log.i(TAG, "Loading module from asset '" + BuildConfig.MODULE_ASSET_NAME + "'");
       mModule = PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
       mInputTensorBuffer = Tensor.allocateFloatBuffer(3 * TENSOR_WIDTH * TENSOR_HEIGHT);
-      mInputTensor = Tensor.fromBlob(mInputTensorBuffer, new long[]{1, 3, TENSOR_WIDTH,
-          TENSOR_HEIGHT});
+      mInputTensor =
+          Tensor.fromBlob(mInputTensorBuffer, new long[] {1, 3, TENSOR_WIDTH, TENSOR_HEIGHT});
     }
 
     final long startTime = SystemClock.elapsedRealtime();
     TensorImageUtils.imageYUV420CenterCropToFloatBuffer(
-        image.getImage(), rotationDegrees,
-        TENSOR_WIDTH, TENSOR_HEIGHT,
+        image.getImage(),
+        rotationDegrees,
+        TENSOR_WIDTH,
+        TENSOR_HEIGHT,
         TensorImageUtils.TORCHVISION_NORM_MEAN_RGB,
         TensorImageUtils.TORCHVISION_NORM_STD_RGB,
-        mInputTensorBuffer, 0);
+        mInputTensorBuffer,
+        0);
     final long moduleForwardStartTime = SystemClock.elapsedRealtime();
     final Tensor outputTensor = mModule.forward(IValue.from(mInputTensor)).toTensor();
     final long moduleForwardDuration = SystemClock.elapsedRealtime() - moduleForwardStartTime;
@@ -198,9 +198,10 @@ public class CameraActivity extends AppCompatActivity {
   @UiThread
   protected void handleResult(Result result) {
     int ixs[] = Utils.topK(result.scores, 1);
-    String message = String.format("forwardDuration:%d class:%s",
-        result.moduleForwardDuration,
-        Constants.IMAGENET_CLASSES[ixs[0]]);
+    String message =
+        String.format(
+            "forwardDuration:%d class:%s",
+            result.moduleForwardDuration, Constants.IMAGENET_CLASSES[ixs[0]]);
     Log.i(TAG, message);
     mTextViewStringBuilder.insert(0, '\n').insert(0, message);
     if (mTextViewStringBuilder.length() > TEXT_TRIM_SIZE) {

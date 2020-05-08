@@ -12,6 +12,8 @@
 
 #include <caffe2/core/common.h>
 
+#include <ATen/native/DispatchStub.h>
+
 #include <sstream>
 
 namespace at {
@@ -88,6 +90,28 @@ std::string get_openmp_version() {
   return ss.str();
 }
 
+std::string used_cpu_capability() {
+  // It is possible that we override the cpu_capability with
+  // environment variable
+  std::ostringstream ss;
+  ss << "CPU capability usage: ";
+  auto capability = native::get_cpu_capability();
+  switch (capability) {
+    case native::CPUCapability::DEFAULT:
+      ss << "NO AVX";
+      break;
+    case native::CPUCapability::AVX:
+      ss << "AVX";
+      break;
+    case native::CPUCapability::AVX2:
+      ss << "AVX2";
+      break;
+    default:
+      break;
+  }
+  return ss.str();
+}
+
 std::string show_config() {
   std::ostringstream ss;
   ss << "PyTorch built with:\n"; // TODO add the version of PyTorch
@@ -98,6 +122,12 @@ std::string show_config() {
 #if defined(__GNUC__)
   {
     ss << "  - GCC " << __GNUC__ << "." << __GNUC_MINOR__ << "\n";
+  }
+#endif
+
+#if defined(__cplusplus)
+  {
+    ss << "  - C++ Version: " << __cplusplus << "\n";
   }
 #endif
 
@@ -134,6 +164,8 @@ std::string show_config() {
   // TODO: No version; c.f. https://github.com/Maratyszcza/NNPACK/issues/165
   ss << "  - NNPACK is enabled\n";
 #endif
+
+  ss << "  - "<< used_cpu_capability() << "\n";
 
   if (hasCUDA()) {
     ss << detail::getCUDAHooks().showConfig();

@@ -45,10 +45,6 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
     AT_ERROR("opaque tensors do not have strides");
   }
 
-  void resize_dim(int64_t ndim) override {
-    AT_ERROR("opaque tensors do not have resize_dim");
-  }
-
   void set_size(int64_t dim, int64_t new_size) override {
     AT_ERROR("opaque tensors do not have set_size");
   }
