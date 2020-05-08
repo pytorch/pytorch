@@ -19,6 +19,20 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
       : RpcBackendOptions(rpc_timeout, init_method) {}
 };
 
+// Struct to track the network source metrics
+struct NetworkSourceInfo {
+  worker_id_t srcRank;
+  std::vector<uint8_t> srcMachineAddr;
+};
+
+// Struct to track aggregated network metrics
+struct AggregatedNetworkData {
+  uint64_t numCalls{0};
+  uint64_t totalSentBytes{0};
+  uint64_t totalRecvBytes{0};
+  uint64_t totalErrors{0};
+};
+
 // TensorPipeAgent leverages tensorpipe (https://github.com/pytorch/tensorpipe)
 // to move tensors and payload through fatested transport and channel
 // transparently. We can see it as a hybrid RPC transport, providing
@@ -29,7 +43,7 @@ class TensorPipeAgent : public RpcAgent {
       std::shared_ptr<::c10d::Store> addressStore,
       std::string selfName,
       worker_id_t selfId,
-      worker_id_t worldSize,
+      int worldSize,
       TensorPipeRpcBackendOptions opts);
 
   TensorPipeAgent(const TensorPipeAgent&) = delete;
@@ -53,12 +67,15 @@ class TensorPipeAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(worker_id_t workerId) const override;
   std::vector<WorkerInfo> getWorkerInfos() const override;
 
-  std::unordered_map<std::string, std::string> getMetrics() override {
-    std::unordered_map<std::string, std::string> metrics;
-    return metrics;
-  }
+  std::unordered_map<std::string, std::string> getMetrics() override;
 
-  void addGilWaitTime(const std::chrono::microseconds /* unused */) override {}
+  void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
+
+  using NetworkDataDict =
+      std::unordered_map<std::string, AggregatedNetworkData>;
+
+  NetworkDataDict getNetworkData();
+  NetworkSourceInfo getNetworkSourceInfo();
 
  private:
   void collectNames();
@@ -95,6 +112,17 @@ class TensorPipeAgent : public RpcAgent {
       std::shared_ptr<FutureMessage>& futureResponseMessage,
       uint64_t messageId);
 
+  // Collects metrics from successful RPC calls
+  void trackNetworkData(
+      uint64_t requestSize,
+      uint64_t responseSize,
+      const std::string& destWorkerName);
+
+  // Collects metrics from failed RPC calls
+  void trackNetworkError(
+      uint64_t requestSize,
+      const std::string& destWorkerName);
+
   // State per client pipe to keep tracking of pending response message
   // and error sate. pendingResponseMessage_ should be protected by
   // mutex since it can be raced with user send() call.
@@ -120,11 +148,44 @@ class TensorPipeAgent : public RpcAgent {
   std::unordered_map<std::string, std::string> workerNameToURL_;
 
   const std::shared_ptr<::c10d::Store> addressStore_;
-  const worker_id_t worldSize_;
+  const int worldSize_;
   const TensorPipeRpcBackendOptions opts_;
 
   mutable std::mutex mutex_;
   uint64_t nextMessageID_{0};
+
+  // This is a generic struct for capturing Time-Series Metrics. It keeps a
+  // running sum and count of data points (observations), and can return an
+  // average of the data points seen so far. This is currently only used for
+  // tracking the GIL Wait Time in RPC Agents, but can be used for other metrics
+  // as well.
+  struct TimeSeriesMetricsTracker {
+    // Running sum of the data points seen so far
+    uint64_t currentSum_;
+    // Running count of the data points seen so far
+    uint64_t currentCount_;
+
+    explicit TimeSeriesMetricsTracker(
+        uint64_t currentSum = 0,
+        uint64_t currentCount = 0);
+
+    // Adds a data point (which is basically one observation for the metric
+    // being tracked) to the running sum and count.
+    void addData(uint64_t dataPoint);
+    // Returns the average of all the data points seen so far.
+    float computeAverage() const;
+  };
+
+  // Map of Time-Series metrics tracked by the RPC Agent
+  std::unordered_map<std::string, std::unique_ptr<TimeSeriesMetricsTracker>>
+      timeSeriesMetrics_;
+  // Mutex to guard timeSeriesMetrics_
+  std::mutex metricsMutex_;
+
+  // Map to Track Network Data
+  NetworkDataDict networkData_;
+  // Mutex to guarg networkData_
+  std::mutex networkDataMutex_;
 };
 
 } // namespace rpc

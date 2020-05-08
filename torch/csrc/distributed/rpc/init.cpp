@@ -459,7 +459,7 @@ If the future completes with an error, an exception is thrown.
               std::shared_ptr<::c10d::Store> /* addressStore */,
               std::string /* selfName */,
               worker_id_t /* selfId */,
-              worker_id_t /* worldSize */,
+              int /* worldSize */,
               TensorPipeRpcBackendOptions /* TensorPipeBackendOptions */>(),
           py::arg("store"),
           py::arg("name"),
