@@ -107,6 +107,8 @@ void CudaPrinter::maybe_insert_sync() {
 
 std::string cudaDtypeCppString(const Dtype& dtype) {
   switch (dtype.scalar_type()) {
+    case ScalarType::Bool:
+      return "bool";
     case ScalarType::Half:
       return "half";
     case ScalarType::Char:
@@ -117,9 +119,9 @@ std::string cudaDtypeCppString(const Dtype& dtype) {
       return "short";
     case ScalarType::Long:
       return "long";
-    default:; /* nothing */
+    default:
+      return dtype.ToCppString();
   }
-  return dtype.ToCppString();
 }
 
 static void print_flat_alloc(std::ostream& os, const Allocate* alloc) {
