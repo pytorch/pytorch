@@ -362,12 +362,11 @@ inline std::string if_empty_then(std::string x, std::string y) {
 
 // Like TORCH_CHECK, but raises IndexErrors instead of Errors.
 #define TORCH_CHECK_INDEX(cond, ...) \
-  TORCH_CHECK_WITH_MSG(IndexError, cond, "INDEX" __VA_ARGS__)
+  TORCH_CHECK_WITH_MSG(IndexError, cond, "INDEX", __VA_ARGS__)
 
 // Like TORCH_CHECK, but raises ValueErrors instead of Errors.
-
 #define TORCH_CHECK_VALUE(cond, ...) \
-  TORCH_CHECK_WITH_MSG(IndexError, cond, "VALUE" __VA_ARGS__)
+  TORCH_CHECK_WITH_MSG(ValueError, cond, "VALUE", __VA_ARGS__)
 
 // Report a warning to the user.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
