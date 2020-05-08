@@ -42,7 +42,7 @@ def benchmark_simple_fn(args, config, module_config, module_type, result):
     Args:
         config:         contains number of warmup and benchmark iterations.
         module_config:  module_config which contains op, number of parameters that op takes
-                    and wether graph mode is enabled or not.
+                    and whether graph mode is enabled or not.
         module_type:    Type of the module to be wrapped. e.g. SimpleAddModule for add op.
         result:         dictionary instance to be populated with the benchmark result (latency per iter).
     """

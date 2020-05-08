@@ -6,11 +6,9 @@ import sys
 import torch
 import torch.distributed as dist
 
-from . import backend_registry
-
 
 def is_available():
-    return sys.version_info >= (3, 0) and hasattr(torch._C, "_rpc_init")
+    return hasattr(torch._C, "_rpc_init")
 
 
 if is_available() and not torch._C._rpc_init():
@@ -18,8 +16,7 @@ if is_available() and not torch._C._rpc_init():
 
 
 if is_available():
-    from .api import _init_rpc_backend, _require_initialized
-    from .api import _rpc_sync_torchscript, _rpc_async_torchscript
+    from . import api, backend_registry
     from .api import *  # noqa: F401
     import torch.distributed.autograd as dist_autograd
 
@@ -36,8 +33,8 @@ if is_available():
 
         Initializes the local RPC agent which immediately makes the current
         process ready to send and receive RPCs. This method also properly
-        initializes a default process group backend that uses gloo for
-        collective communication.
+        initializes a default process group backend that uses Gloo for
+        communication.
 
         Arguments:
             backend (Enum): type of RPC backend implementation. Currently,
@@ -58,7 +55,9 @@ if is_available():
                 ``rpc_backend_options``, RPC would initialize the underlying
                 process group backend using ``init_method = "env://"``,
                 meaning that environment variables ``MASTER_ADDRESS`` and
-                ``MASTER_PORT`` needs to be set properly.
+                ``MASTER_PORT`` needs to be set properly. See
+                :class:`~torch.distributed.rpc.ProcessGroupRpcBackendOptions`
+                for examples.
         """
 
         if not rpc_backend_options:
@@ -68,6 +67,10 @@ if is_available():
             )
 
         # Rendezvous.
+        # This rendezvous state sometimes is destroyed before all processes
+        # finishing handshaking. To avoid that issue, we make it global to
+        # keep it alive.
+        global rendezvous_iterator
         rendezvous_iterator = torch.distributed.rendezvous(
             rpc_backend_options.init_method, rank=rank, world_size=world_size
         )
@@ -82,14 +85,13 @@ if is_available():
         dist_autograd._init(rank)
 
         # Initialize RPC.
-        _init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
+        api._init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
 
 
-    @_require_initialized
+    @api._require_initialized
     def _get_debug_info():
         from . import _rref_context_get_debug_info
-        from .api import _agent
         info = _rref_context_get_debug_info()
-        info.update(_agent.get_debug_info())
+        info.update(api._get_current_rpc_agent().get_debug_info())
         info.update(dist_autograd._get_debug_info())
         return info

@@ -53,6 +53,7 @@ static void init(void) {
   pytorch_qnnp_params.q8conv = (struct pytorch_q8conv_parameters){
       .gemm = pytorch_q8gemm_ukernel_4x8__aarch32_neon,
       .conv = pytorch_q8conv_ukernel_4x8__aarch32_neon,
+      .gemm_dq = pytorch_q8gemm_dq_ukernel_4x8__aarch32_neon,
       .mr = 4,
       .nr = 8,
       .kr = 1,
@@ -137,6 +138,7 @@ static void init(void) {
   pytorch_qnnp_params.q8conv = (struct pytorch_q8conv_parameters){
       .gemm = pytorch_q8gemm_ukernel_8x8__aarch64_neon,
       .conv = pytorch_q8conv_ukernel_8x8__aarch64_neon,
+      .gemm_dq = pytorch_q8gemm_dq_ukernel_8x8__aarch64_neon,
       .mr = 8,
       .nr = 8,
       .kr = 1,
@@ -194,6 +196,7 @@ static void init(void) {
   pytorch_qnnp_params.q8conv = (struct pytorch_q8conv_parameters){
       .gemm = pytorch_q8gemm_ukernel_4x4c2__sse2,
       .conv = pytorch_q8conv_ukernel_4x4c2__sse2,
+      .gemm_dq = pytorch_q8gemm_dq_ukernel_4x4c2__sse2,
       .mr = 4,
       .nr = 4,
       .kr = 2,

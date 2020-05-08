@@ -1,8 +1,8 @@
 # Torch
-from torch._six import PY2
 from torch.autograd import Variable
 from torch.autograd.function import _nested_map
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
+
 from torch.onnx import OperatorExportTypes
 import torch
 import torch.cuda
@@ -15,7 +15,8 @@ import functools
 
 # Testing utils
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
-    freeze_rng_state, TemporaryFileName, enable_profiling_mode, ProfilingMode
+    freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS
+from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
 
 # Standard library
 from contextlib import contextmanager
@@ -36,10 +37,7 @@ RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 def execWrapper(code, glob, loc):
-    if PY2:
-        exec(code) in glob, loc
-    else:
-        exec(code, glob, loc)
+    exec(code, glob, loc)
 
 def do_input_map(fn, input):
     return _nested_map(lambda t: isinstance(t, torch.Tensor), fn)(input)
@@ -47,6 +45,14 @@ def do_input_map(fn, input):
 def clear_class_registry():
     torch._C._jit_clear_class_registry()
     torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
+
+def get_execution_plan(graph_executor_state):
+    execution_plans = list(graph_executor_state.execution_plans.values())
+    num_plans = len(execution_plans)
+    if num_plans != 1:
+        raise RuntimeError('This test assumes this GraphExecutor should '
+                           'only have one execution plan, got: {}'.format(num_plans))
+    return execution_plans[0]
 
 
 class JitTestCase(TestCase):
@@ -75,7 +81,7 @@ class JitTestCase(TestCase):
         torch._C._jit_set_emit_hooks(None, None)
 
     def setUp(self):
-        super(JitTestCase, self).setUp()
+        super().setUp()
         # unittest overrides all warning filters and forces all of them to show up
         # after we install our own to silence those coming from inside PyTorch.
         # This will ensure that our filter still takes precedence.
@@ -85,7 +91,7 @@ class JitTestCase(TestCase):
         self.setHooks()
 
     def tearDown(self):
-        super(JitTestCase, self).tearDown()
+        super().tearDown()
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         self.clearHooks()
@@ -101,12 +107,6 @@ class JitTestCase(TestCase):
         return False
 
     def _compared_saved_loaded(self, m):
-        if PY2:
-            # Disable for Python 2, which does not allow manipulation of multiple objects
-            # returned by zipfile.open().
-            # See: https://docs.python.org/2.7/library/zipfile.html#zipfile.ZipFile.open
-            return
-
         def extract_files(buffer):
             # crack open the zip format to get at the main module code
             archive = zipfile.ZipFile(buffer)
@@ -170,8 +170,7 @@ class JitTestCase(TestCase):
 
     def emitFunctionHook(self, func):
         # func has invalid names for export, skip the jitter check
-        inline_everything = torch._C._jit_get_inline_everything_mode()
-        if func.name == "<lambda>" or "aten::" in func.name or not inline_everything:
+        if func.name == "<lambda>" or "aten::" in func.name:
             return
         self._compared_saved_loaded(func)
 
@@ -311,7 +310,7 @@ class JitTestCase(TestCase):
         when executed with normal python, the string frontend, and the AST frontend
         """
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             # normal python
             with self.assertRaisesRegex(exception, regex):
                 script(*inputs)
@@ -334,6 +333,16 @@ class JitTestCase(TestCase):
                 # optimized run
                 ge(*inputs)
 
+
+    def checkBailouts(self, model, inputs, expected):
+        state = model.get_debug_state()
+        plan = get_execution_plan(state)
+        num_bailouts = plan.code.num_bailouts()
+        for i in range(0, num_bailouts):
+            plan.code.request_bailout(i)
+            bailout_outputs = model(*inputs)
+            self.assertEqual(bailout_outputs, expected)
+
     def checkScript(self,
                     script,
                     inputs,
@@ -344,7 +353,7 @@ class JitTestCase(TestCase):
                     frames_up=1,
                     profiling=ProfilingMode.PROFILING):
         with torch.jit.optimized_execution(optimize):
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 if isinstance(script, str):
                     # Compile the string to a Script function
                     # with enable_profiling_mode():
@@ -368,7 +377,9 @@ class JitTestCase(TestCase):
                         source,
                         inputs,
                         script.__name__,
-                        capture_output,
+                        optimize=optimize,
+                        inputs_requires_grad=inputs_requires_grad,
+                        capture_output=capture_output,
                         profiling=profiling,
                         frames_up=2)
 
@@ -396,6 +407,8 @@ class JitTestCase(TestCase):
                     script_outputs = scripted_fn(*recording_inputs)
                     # optimized run
                     opt_script_outputs = scripted_fn(*recording_inputs)
+                    if TEST_BAILOUTS:
+                        self.checkBailouts(scripted_fn, inputs, opt_script_outputs)
                     python_outputs = python_fn(*inputs)
                 self.assertEqual(python_outputs, script_outputs)
                 self.assertEqual(script_outputs, opt_script_outputs)
@@ -613,3 +626,7 @@ def get_forward_graph(c):
 
 def get_module_method(m, module, method):
     return m._c.getattr(module)._get_method(method)
+
+def attrs_with_prefix(module, prefix):
+    return [x for x, _ in module._modules._c.items()
+            if x.startswith(prefix)]

@@ -7,16 +7,16 @@
 #include <string>
 #include <vector>
 
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Parallel.h"
-#include "ATen/WrapDimUtilsMulti.h"
-#include "ATen/cpp_custom_type_hack.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/cpp_custom_type_hack.h>
 
 #ifdef USE_FBGEMM
-#include "fbgemm/Fbgemm.h"
-#include "fbgemm/FbgemmFP16.h"
-#include "fbgemm/QuantUtils.h"
+#include <fbgemm/Fbgemm.h>
+#include <fbgemm/FbgemmFP16.h>
+#include <fbgemm/QuantUtils.h>
 #endif // USE_FBGEMM
 
 #ifdef USE_FBGEMM
@@ -239,7 +239,7 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
       weight_contig, weight_contig.options().dtype(at::kChar), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   // Tensor quantized = at::native::empty_cpu(
   //     weight_contig.sizes(), weight_contig.options().dtype(at::kChar));
-  fbgemm::Quantize<int8_t>(
+  fbgemm::Quantize<int8_t, false /*LEGACY*/>(
       /*src=*/weight_contig.data_ptr<float>(),
       /*dst=*/quantized.data_ptr<int8_t>(),
       /*len=*/weight_contig.numel(),
@@ -301,7 +301,8 @@ float RawUint16ToFp16(unsigned short value) {
   const unsigned short significand_bits = value & 0x3ff;
 
   const float sign = sign_bits ? -1 : 1;
-  const float significand = 1 + significand_bits * 0x1p-10;
+  const float significand =
+      1 + significand_bits * 0.0009765625f; // 0.0009765625f = 0x1p-10 = 2^-10
   const float exponent = exponent_bits - 0xf;
 
   return sign * std::ldexp(significand, exponent);

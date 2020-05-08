@@ -1,6 +1,6 @@
-#include "c10/util/Logging.h"
-#include "c10/util/Backtrace.h"
-#include "c10/util/Flags.h"
+#include <c10/util/Logging.h>
+#include <c10/util/Backtrace.h>
+#include <c10/util/Flags.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -44,7 +44,7 @@ void ThrowEnforceNotMet(
     const void* caller) {
   c10::Error e(file, line, condition, msg, (*GetFetchStackTrace())(), caller);
   if (FLAGS_caffe2_use_fatal_for_enforce) {
-    LOG(FATAL) << e.msg_stack()[0];
+    LOG(FATAL) << e.msg();
   }
   throw e;
 }
@@ -63,8 +63,8 @@ void ThrowEnforceFiniteNotMet(
 
 // PyTorch-style error message
 // (This must be defined here for access to GetFetchStackTrace)
-Error::Error(SourceLocation source_location, const std::string& msg)
-    : Error(msg, str(" (", source_location, ")\n", (*GetFetchStackTrace())())) {
+Error::Error(SourceLocation source_location, std::string msg)
+    : Error(std::move(msg), str("Exception raised from ", source_location, " (most recent call first):\n", (*GetFetchStackTrace())())) {
 }
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;
@@ -92,13 +92,20 @@ void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
   *GetAPIUsageLogger() = logger;
 }
 
-void LogAPIUsage(const std::string& event) {
-  (*GetAPIUsageLogger())(event);
+void LogAPIUsage(const std::string& event) try {
+  if (auto logger = GetAPIUsageLogger())
+    (*logger)(event);
+} catch (std::bad_function_call&) {
+  // static destructor race
 }
 
 namespace detail {
-bool LogAPIUsageFakeReturn(const std::string& event) {
-  (*GetAPIUsageLogger())(event);
+bool LogAPIUsageFakeReturn(const std::string& event) try {
+  if (auto logger = GetAPIUsageLogger())
+    (*logger)(event);
+  return true;
+} catch (std::bad_function_call&) {
+  // static destructor race
   return true;
 }
 } // namespace detail
@@ -140,7 +147,7 @@ using fLI::FLAGS_v;
 
 C10_DEFINE_int(
     caffe2_log_level,
-    google::GLOG_ERROR,
+    google::GLOG_WARNING,
     "The minimum log level that caffe2 will output.");
 
 // Google glog's api does not have an external function that allows one to check
@@ -177,7 +184,7 @@ void UpdateLoggingLevelsFromFlags() {
   // we will transfer the caffe2_log_level setting to glog to override that.
   FLAGS_minloglevel = std::min(FLAGS_caffe2_log_level, FLAGS_minloglevel);
   // If caffe2_log_level is explicitly set, let's also turn on logtostderr.
-  if (FLAGS_caffe2_log_level < google::GLOG_ERROR) {
+  if (FLAGS_caffe2_log_level < google::GLOG_WARNING) {
     FLAGS_logtostderr = 1;
   }
   // Also, transfer the caffe2_log_level verbose setting to glog.
@@ -200,7 +207,7 @@ void ShowLogInfoToStderr() {
 
 C10_DEFINE_int(
     caffe2_log_level,
-    ERROR,
+    WARNING,
     "The minimum log level that caffe2 will output.");
 
 namespace c10 {

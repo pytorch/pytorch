@@ -51,7 +51,7 @@
 // technically [[deprecated]] syntax is from c++14 standard, but it works in
 // many compilers.
 #if defined(__has_cpp_attribute)
-#if __has_cpp_attribute(deprecated)
+#if __has_cpp_attribute(deprecated) && !defined(__CUDACC__)
 # define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName [[deprecated]] = TypeThingy;
 #endif
 #endif

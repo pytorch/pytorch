@@ -10,7 +10,7 @@
 #include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/autograd/utils/error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/frontend/tracer.h"
 #ifdef USE_CUDA
 #include "torch/csrc/cuda/Stream.h"
 #include "torch/csrc/cuda/Event.h"
@@ -30,8 +30,6 @@
 
 #include <ATen/ATen.h>
 #include "c10/util/Optional.h"
-
-#include "python_variable_methods_dispatch.h"
 
 #include <stdexcept>
 
@@ -339,21 +337,23 @@ static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking,
   // are missing from the self argument while the tracer assumes that they should be populated with the
   // default values (eg. float for scalar type). By explicitly copying over the tensor options here we fully
   // specify all tensor options and thus record the proper trace
-  return self.to(self.options().device(device), non_blocking, copy, optional_memory_format);
+  return self.to(self.options().device(device).memory_format(optional_memory_format), non_blocking, copy);
 }
 
 static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   AutoNoGIL no_gil;
-  return self.to(self.options(), non_blocking, copy, optional_memory_format);
+  return self.to(self.options().memory_format(optional_memory_format), non_blocking, copy);
 }
 
 static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
+  // TODO: Make this call the TensorOptions version, maybe?
   return self.to(dtype, non_blocking, copy, optional_memory_format);
 }
 
 static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
+  // TODO: Make this call the TensorOptions version, maybe?
   return self.to(device, dtype, non_blocking, copy, optional_memory_format);
 }
 
@@ -597,7 +597,7 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
   if (!self_.is_leaf() && !requires_grad) {
     throw std::runtime_error(autograd::utils::requires_grad_leaf_error(requires_grad));
   }
-  if (requires_grad && !self_.is_floating_point()) {
+  if (requires_grad && !(self_.is_floating_point() || self_.is_complex())) {
     throw std::runtime_error("only Tensors of floating point dtype can require gradients");
   }
   self_.set_requires_grad(requires_grad);

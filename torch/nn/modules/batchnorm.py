@@ -11,8 +11,7 @@ from .. import init
 class _NormBase(Module):
     """Common base of _InstanceNorm and _BatchNorm"""
     _version = 2
-    __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
-                     'running_mean', 'running_var', 'num_batches_tracked',
+    __constants__ = ['track_running_stats', 'momentum', 'eps',
                      'num_features', 'affine']
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
@@ -85,7 +84,7 @@ class _BatchNorm(_NormBase):
         self._check_input_dim(input)
 
         # exponential_average_factor is set to self.momentum
-        # (when it is available) only so that if gets updated
+        # (when it is available) only so that it gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
             exponential_average_factor = 0.0
@@ -110,7 +109,8 @@ class _BatchNorm(_NormBase):
 class BatchNorm1d(_BatchNorm):
     r"""Applies Batch Normalization over a 2D or 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -168,9 +168,6 @@ class BatchNorm1d(_BatchNorm):
         >>> m = nn.BatchNorm1d(100, affine=False)
         >>> input = torch.randn(20, 100)
         >>> output = m(input)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def _check_input_dim(self, input):
@@ -182,7 +179,8 @@ class BatchNorm1d(_BatchNorm):
 class BatchNorm2d(_BatchNorm):
     r"""Applies Batch Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -240,9 +238,6 @@ class BatchNorm2d(_BatchNorm):
         >>> m = nn.BatchNorm2d(100, affine=False)
         >>> input = torch.randn(20, 100, 35, 45)
         >>> output = m(input)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def _check_input_dim(self, input):
@@ -254,7 +249,8 @@ class BatchNorm2d(_BatchNorm):
 class BatchNorm3d(_BatchNorm):
     r"""Applies Batch Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -313,9 +309,6 @@ class BatchNorm3d(_BatchNorm):
         >>> m = nn.BatchNorm3d(100, affine=False)
         >>> input = torch.randn(20, 100, 35, 45, 10)
         >>> output = m(input)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def _check_input_dim(self, input):
@@ -327,7 +320,8 @@ class BatchNorm3d(_BatchNorm):
 class SyncBatchNorm(_BatchNorm):
     r"""Applies Batch Normalization over a N-Dimensional input (a mini-batch of [N-2]D inputs
     with additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -405,9 +399,6 @@ class SyncBatchNorm(_BatchNorm):
         >>>                         sync_bn_network,
         >>>                         device_ids=[args.local_rank],
         >>>                         output_device=args.local_rank)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
@@ -436,7 +427,7 @@ class SyncBatchNorm(_BatchNorm):
         self._check_input_dim(input)
 
         # exponential_average_factor is set to self.momentum
-        # (when it is available) only so that if gets updated
+        # (when it is available) only so that it gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
             exponential_average_factor = 0.0

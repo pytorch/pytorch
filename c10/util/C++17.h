@@ -40,7 +40,7 @@ make_unique_base(Args&&... args) {
 
 
 
-#ifdef __cpp_lib_logical_traits
+#if defined(__cpp_lib_logical_traits) && !(defined(_MSC_VER) && _MSC_VER < 1920)
 
 template <class... B>
 using conjunction = std::conjunction<B...>;
@@ -93,8 +93,12 @@ template<typename... Ts> using void_t = typename make_void<Ts...>::type;
 
 #endif
 
-
-
+#ifdef __HIP_PLATFORM_HCC__
+// rocm doesn't like the C10_HOST_DEVICE
+#define CUDA_HOST_DEVICE
+#else
+#define CUDA_HOST_DEVICE C10_HOST_DEVICE
+#endif
 
 namespace detail {
 struct _identity final {
@@ -109,8 +113,15 @@ struct _identity final {
 
 template<class Func, class Enable = void>
 struct function_takes_identity_argument : std::false_type {};
+#if defined(_MSC_VER)
+// For some weird reason, MSVC shows a compiler error when using guts::void_t instead of std::void_t.
+// But we're only building on MSVC versions that have std::void_t, so let's just use that one.
+template<class Func>
+struct function_takes_identity_argument<Func, std::void_t<decltype(std::declval<Func>()(_identity()))>> : std::true_type {};
+#else
 template<class Func>
 struct function_takes_identity_argument<Func, void_t<decltype(std::declval<Func>()(_identity()))>> : std::true_type {};
+#endif
 
 template<bool Condition>
 struct _if_constexpr;
