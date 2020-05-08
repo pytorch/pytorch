@@ -1740,6 +1740,7 @@ cc_library(
         "@gloo",
         "@onnx",
         "@fmt",
+        "@tensorpipe",
     ] + if_cuda(
         [
             ":caffe2_cpp_cuda",
@@ -1776,6 +1777,7 @@ cu_library(
         "@cudnn",
         "@eigen",
         "@gloo",
+        "@tensorpipe",
     ],
     alwayslink = True,
 )
@@ -1910,6 +1912,7 @@ cc_library(
             "torch/csrc/generic/*.cpp",
             "torch/csrc/jit/*.h",
             "torch/csrc/jit/api/*.h",
+            "torch/csrc/jit/backends/backend_interface.h",
             "torch/csrc/jit/codegen/cuda/*.h",
             "torch/csrc/jit/codegen/fuser/*.h",
             "torch/csrc/jit/codegen/fuser/cpu/*.h",
@@ -1920,6 +1923,7 @@ cc_library(
             "torch/csrc/jit/fuser/cuda/*.h",
             "torch/csrc/jit/passes/*.h",
             "torch/csrc/jit/passes/onnx/*.h",
+            "torch/csrc/jit/passes/quantization/*.h",
             "torch/csrc/jit/passes/utils/*.h",
             "torch/csrc/jit/python/*.h",
             "torch/csrc/jit/runtime/*.h",

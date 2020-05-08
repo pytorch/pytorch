@@ -7,7 +7,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
-class CustomClassHolder : public c10::intrusive_ptr_target {};
+class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
 namespace jit {
 using ::torch::CustomClassHolder;
 struct Function;
@@ -168,7 +168,7 @@ struct CAFFE2_API IValue final {
    *      [tensor1] == [tensor1] -> True (because container equality will first compare identity)
    *      [tensor1] == [tensor1_copy] -> RuntimeError: bool value of Tensor is ambiguous
    */
-  friend bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs);
+  TORCH_API friend bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs);
 
   /// @private [doxygen private]
   bool isAliasOf(const IValue& rhs) const {

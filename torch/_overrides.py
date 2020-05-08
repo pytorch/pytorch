@@ -213,6 +213,7 @@ def get_testing_overrides():
         torch.ceil: lambda input, out=None: -1,
         torch.celu: lambda input, alhpa=1., inplace=False: -1,
         torch.chain_matmul: lambda *matrices: -1,
+        torch.channel_shuffle: lambda input, groups : -1,
         torch.cholesky: lambda input, upper=False, out=None: -1,
         torch.cholesky_inverse: lambda input, upper=False, out=None: -1,
         torch.cholesky_solve: lambda input1, input2, upper=False, out=None: -1,
@@ -552,6 +553,8 @@ def get_testing_overrides():
         torch.quantize_per_channel: lambda input, scales, zero_points, axis, dtype: -1,
         torch.quantize_per_tensor: lambda input, scale, zero_point, dtype: -1,
         torch.quantized_batch_norm: lambda input, weight, bias, mean, var, eps, output_scale, output_zero_point: -1,
+        torch.quantized_group_norm: lambda input, num_groups, weight, bias, eps, output_scale, output_zero_point: -1,
+        torch.quantized_instance_norm: lambda input, weight, bias, eps, output_scale, output_zero_point: -1,
         torch.quantized_layer_norm: lambda input, normalized_shape, weight, bias, eps, output_scale, output_zero_point: -1,
 
         torch.quantized_gru_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,

@@ -211,7 +211,8 @@ class TestTypeHints(TestCase):
         cwd = os.getcwd()
         try:
             os.chdir(repo_rootdir)
-            subprocess.run([sys.executable, '-mmypy'], check=True)
+            subprocess.run([sys.executable, '-mmypy', '--check-untyped-defs',
+                            '--follow-imports', 'silent'], check=True)
         except subprocess.CalledProcessError as e:
             raise AssertionError("mypy failed. Look above this error for mypy's output.")
         finally:

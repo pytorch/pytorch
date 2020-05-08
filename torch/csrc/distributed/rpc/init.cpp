@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -291,21 +292,22 @@ PyObject* rpc_init(PyObject* /* unused */) {
                       >>> rref.remote().view(1, 4).to_here()  # returns tensor([[1., 1., 1., 1.]])
               )")
           .def(
-              py::pickle(
-                  [](const PyRRef& self) {
-                    TORCH_CHECK(
-                        false,
-                        "Can not pickle rref in python pickler, rref can only be pickled when using RPC");
-                    // __getstate__
-                    return self.pickle();
-                  },
-                  [](py::tuple t) { // NOLINT
-                    TORCH_CHECK(
-                        false,
-                        "Can not unpickle rref in python pickler, rref can only be unpickled when using RPC");
-                    // __setstate__
-                    return PyRRef::unpickle(t);
-                  }),
+              "__getstate__",
+              [](const PyRRef& /* unused */) {
+                TORCH_CHECK(
+                    false,
+                    "Can not pickle rref in python pickler, rref can only be "
+                    "pickled when using RPC");
+              },
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "__setstate__",
+              [](const PyRRef& /* unused */, const py::tuple& /* unused */) {
+                TORCH_CHECK(
+                    false,
+                    "Can not unpickle rref in python pickler, rref can only be "
+                    "unpickled when using RPC");
+              },
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_serialize",
@@ -441,6 +443,51 @@ If the future completes with an error, an exception is thrown.
       .def(
           "sync",
           &ProcessGroupAgent::sync,
+          py::call_guard<py::gil_scoped_release>());
+
+  // Base class: torch.distributed.rpc.RpcBackendOptions.
+  py::class_<TensorPipeRpcBackendOptions>(
+      module, "TensorPipeRpcBackendOptions", rpcBackendOptions)
+      .def(
+          py::init<float, std::string>(),
+          py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
+          py::arg("init_method") = kDefaultInitMethod);
+
+  shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
+      .def(
+          py::init<
+              std::shared_ptr<::c10d::Store> /* addressStore */,
+              std::string /* selfName */,
+              worker_id_t /* selfId */,
+              int /* worldSize */,
+              TensorPipeRpcBackendOptions /* TensorPipeBackendOptions */>(),
+          py::arg("store"),
+          py::arg("name"),
+          py::arg("rank"),
+          py::arg("world_size"),
+          py::arg("rpc_backend_options"))
+      .def(
+          "join",
+          &TensorPipeAgent::join,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "shutdown",
+          &TensorPipeAgent::shutdown,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (TensorPipeAgent::*)(void)const) &
+              RpcAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (TensorPipeAgent::*)(const std::string&)const) &
+              TensorPipeAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_infos",
+          (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
+              TensorPipeAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>());
 
   module.def("_is_current_rpc_agent_set", &RpcAgent::isCurrentRpcAgentSet);

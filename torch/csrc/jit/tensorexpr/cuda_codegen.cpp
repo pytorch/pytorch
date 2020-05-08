@@ -107,6 +107,8 @@ void CudaPrinter::maybe_insert_sync() {
 
 std::string cudaDtypeCppString(const Dtype& dtype) {
   switch (dtype.scalar_type()) {
+    case ScalarType::Bool:
+      return "bool";
     case ScalarType::Half:
       return "half";
     case ScalarType::Char:
@@ -117,9 +119,9 @@ std::string cudaDtypeCppString(const Dtype& dtype) {
       return "short";
     case ScalarType::Long:
       return "long";
-    default:; /* nothing */
+    default:
+      return dtype.ToCppString();
   }
-  return dtype.ToCppString();
 }
 
 static void print_flat_alloc(std::ostream& os, const Allocate* alloc) {
@@ -225,6 +227,13 @@ void CudaPrinter::visit(const For* v) {
   } else {
     IRPrinter::visit(v);
   }
+}
+
+void CudaPrinter::visit(const Cast* v) {
+  os() << cudaDtypeCppString(v->dtype());
+  os() << "(";
+  v->src_value()->accept(this);
+  os() << ")";
 }
 
 void CudaPrinter::visit(const Intrinsics* v) {
@@ -635,7 +644,7 @@ class NoThreadIdxRewriter : public IRMutator {
   }
 
   Stmt* mutate(const Block* v) override {
-    std::list<Stmt*> old_stmts = v->stmts();
+    std::list<Stmt*> old_stmts(v->begin(), v->end());
     std::vector<bool> need_rewrites(old_stmts.size());
     std::vector<Stmt*> new_stmts(old_stmts.size());
     int index = 0;

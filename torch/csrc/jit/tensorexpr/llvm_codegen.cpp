@@ -228,6 +228,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   HalfTy_ = llvm::Type::getHalfTy(getContext());
   FloatTy_ = llvm::Type::getFloatTy(getContext());
   DoubleTy_ = llvm::Type::getDoubleTy(getContext());
+  BoolTy_ = ByteTy_;
 
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
@@ -522,7 +523,7 @@ void LLVMCodeGenImpl::visit(const Max* v) {
   v->rhs()->accept(this);
   auto rhs = this->value_;
 
-  if (v->dtype() == kInt) {
+  if (v->dtype().is_integral()) {
     auto icmp = irb_.CreateICmpSGT(lhs, rhs);
     value_ = irb_.CreateSelect(icmp, lhs, rhs);
     return;
@@ -962,7 +963,7 @@ void LLVMCodeGenImpl::visit(const For* v) {
 }
 
 void LLVMCodeGenImpl::visit(const Block* v) {
-  for (Stmt* s : v->stmts()) {
+  for (Stmt* s : *v) {
     s->accept(this);
   }
 }
@@ -1083,8 +1084,8 @@ void LLVMCodeGenImpl::visit(const Broadcast* v) {
 void LLVMCodeGenImpl::visit(const IfThenElse* v) {
   v->condition()->accept(this);
   llvm::Value* condition = value_;
-  llvm::Value* c =
-      irb_.CreateICmpNE(condition, llvm::ConstantInt::get(IntTy_, 0));
+  llvm::Value* c = irb_.CreateICmpNE(
+      condition, llvm::ConstantInt::get(condition->getType(), 0));
 
   auto then_block = llvm::BasicBlock::Create(getContext(), "then", fn_);
   auto else_block = llvm::BasicBlock::Create(getContext(), "else", fn_);
