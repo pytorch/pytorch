@@ -803,6 +803,7 @@ class TestFuser(JitTestCase):
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skip("rand_like is not supported yet")
     @skipIfRocm
     def test_rand_cuda(self):
         class M(torch.jit.ScriptModule):
@@ -855,6 +856,7 @@ class TestFuser(JitTestCase):
                                                          "aten::_size_if_not_equal"))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skip("rand_like is not supported yet")
     def test_rand_broadcast_cuda(self):
         def fn_test_rand(x, y):
             r = torch.rand_like(y)
@@ -886,6 +888,7 @@ class TestFuser(JitTestCase):
         self.assertEqual(out[0, :] + torch.zeros(4, 4, device='cuda'), out)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skip("rand_like is not supported yet")
     @skipIfRocm
     def test_rand_diamond(self):
         def fn_test_diamond(x, y):
