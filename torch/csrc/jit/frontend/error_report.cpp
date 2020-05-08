@@ -25,7 +25,9 @@ void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
   calls.back().caller_range = range;
 }
 
-ErrorReport::CallStack::CallStack(const std::string& name, const SourceRange& range) {
+ErrorReport::CallStack::CallStack(
+    const std::string& name,
+    const SourceRange& range) {
   calls.push_back({name, range});
 }
 

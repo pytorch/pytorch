@@ -1205,19 +1205,6 @@ void initJitScriptBindings(PyObject* module) {
     Parser p(std::make_shared<Source>(comment));
     return Decl(p.parseTypeComment());
   });
-  m.def(
-      "_recursive_compile_class", [](py::object obj, const SourceRange& range) {
-        py::str qualifiedName =
-            py::module::import("torch.jit").attr("_qualified_name")(obj);
-        auto qualname = c10::QualifiedName(qualifiedName);
-        {
-          ErrorReport::CallStack stack(qualname.name(), range);
-          auto rcb = py::module::import("torch._jit_internal")
-                         .attr("createResolutionCallbackForClassMethods")(obj);
-          py::module::import("torch.jit")
-              .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
-        }
-      });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def(
