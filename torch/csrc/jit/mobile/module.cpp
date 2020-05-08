@@ -5,7 +5,7 @@
 #include <torch/csrc/jit/mobile/observer.h>
 #endif
 
-#include <ATen/record_function.h>
+#include <torch/csrc/autograd/record_function.h>
 
 namespace torch {
 namespace jit {
@@ -50,7 +50,7 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
 
   c10::IValue result;
   {
-    at::RecordFunctionGuard g;
+    torch::autograd::profiler::RecordFunctionGuard g;
     auto m = find_method(method_name);
     stack.insert(stack.begin(), object_);
     m->run(stack);
