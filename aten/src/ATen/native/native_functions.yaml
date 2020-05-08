@@ -1878,6 +1878,7 @@
     CPU: mean_cpu_gpu
     CUDA: mean_cpu_gpu
     QuantizedCPU: quantized_mean_cpu
+    Vulkan: mean_vulkan
 
 - func: mean.out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True

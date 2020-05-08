@@ -283,6 +283,24 @@ Tensor& vulkan_hardtanh_(Tensor& self, Scalar min, Scalar max) {
   return _clamp__vulkan(self, min, max);
 }
 
+Tensor mean_vulkan(
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> dtype) {
+  TORCH_INTERNAL_ASSERT(
+      self.is_vulkan(), "mean_vulkan expects Vulkan tensor input");
+  TORCH_INTERNAL_ASSERT(
+      self.dim() == 4 && dim.size() == 2 && dim[0] == 2 && dim[1] == 3);
+  VTensor& x = vtensor_from_vulkan(self);
+  auto sizes = self.sizes();
+  std::vector<int64_t> outputSizes{sizes[0], sizes[1]};
+  VTensor output = VTensor{outputSizes};
+  output.allocateStorage();
+  at::native::vulkan::details::VULKAN_GL::mean(output, x);
+  return new_with_vtensor_vulkan(std::move(output), self.options());
+}
+
 } // namespace native
 } // namespace at
 #endif

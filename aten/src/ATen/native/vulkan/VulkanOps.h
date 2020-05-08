@@ -55,6 +55,9 @@ void addmm(
     const VulkanTensor& m2,
     float beta,
     float alpha);
+
+void mean(VulkanTensor& output, const VulkanTensor& input);
+
 } // namespace vulkan
 } // namespace details
 } // namespace vulkan

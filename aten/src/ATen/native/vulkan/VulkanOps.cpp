@@ -580,6 +580,56 @@ void addmm(
   vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
+void mean(VulkanTensor& output, const VulkanTensor& input) {
+  auto isizes = input.sizes();
+  auto N = isizes[0];
+  auto C = isizes[1];
+  auto H = isizes[2];
+  auto W = isizes[3];
+  auto C_4 = UP_DIV(N * C, 4);
+
+  auto device = context().device();
+  auto physicalDevice = context().physicalDevice();
+  struct ConstBlock {
+    int32_t W;
+    int32_t H;
+    int32_t OW;
+    int32_t OH;
+  };
+  ConstBlock cb{W, H, C, N};
+  VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
+
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
+
+  output.image().bindStorageImage(descriptorSet, 0);
+  input.image().bindShaderRead(descriptorSet, 1);
+  constBuffer.bind(descriptorSet, 2);
+
+  WorkGroupSize workGroupSize{1, 1, 1};
+  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(vulkan_mean),
+                          descriptorSetLayout,
+                          workGroupSize};
+  computeUnit.createCommandBuffer(descriptorSet);
+  auto commandBuffer = computeUnit.commandBuffer();
+  output.image().addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
+  input.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
+  computeUnit.dispatchCommandBuffer(1, 1, C_4, workGroupSize);
+  computeUnit.runCommandBuffer();
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+}
 } // namespace vulkan
 } // namespace details
 } // namespace vulkan
