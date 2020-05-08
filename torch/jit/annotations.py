@@ -280,10 +280,10 @@ def try_ann_to_type(ann, loc):
     if ann is torch.device:
         return DeviceObjType.get()
     if inspect.isclass(ann):
-        ignored_builtin_classes = (torch.nn.Module, tuple, Exception, type)
-        if not issubclass(ann, ignored_builtin_classes):
-            if not hasattr(ann, "__torch_script_class__"):
-                torch.jit.script(ann)
+        if hasattr(ann, "__torch_script_class__"):
+            return ClassType(_qualified_name(ann))
+        if torch._jit_internal.can_compile_class(ann):
+            torch.jit._recursive_compile_class(ann, loc)
             return ClassType(_qualified_name(ann))
 
     # Maybe resolve a NamedTuple to a Tuple Type
