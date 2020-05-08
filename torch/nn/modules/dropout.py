@@ -206,7 +206,7 @@ class FeatureAlphaDropout(_DropoutNd):
     feature maps and should be used instead.
 
     Args:
-        p (float, optional): probability of an element to be zeroed.
+        p (float, optional): probability of an element to be zeroed. Default: 0.5
         inplace (bool, optional): If set to ``True``, will do this operation
             in-place
 
@@ -216,7 +216,7 @@ class FeatureAlphaDropout(_DropoutNd):
 
     Examples::
 
-        >>> m = nn.Dropout3d(p=0.2)
+        >>> m = nn.FeatireAlphaDropout(p=0.2)
         >>> input = torch.randn(20, 16, 4, 32, 32)
         >>> output = m(input)
 

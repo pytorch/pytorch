@@ -1066,7 +1066,7 @@ def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
     See :class:`~torch.nn.FeatureAlphaDropout` for details.
 
     Args:
-        p: dropout probability of a channel to be zeroed.Default: 0.5
+        p: dropout probability of a channel to be zeroed. Default: 0.5
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
