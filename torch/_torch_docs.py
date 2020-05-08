@@ -2705,34 +2705,30 @@ add_docstr(torch.is_nonzero,
            r"""
 is_nonzero(input) -> (bool)
 
-Returns True if the :attr:`input` is a scalar which is not equal to zero
+Returns True if the :attr:`input` is a single element tensor which is not equal to zero
 after type conversions.
-i.e. not equal to ``torch.Tensor([0.])`` or ``torch.Tensor([0])`` or
-``torch.Tensor([False])``.
-Throws a ``RuntimeError`` if ``torch.numel() != 1`` (after coalescing in case
+i.e. not equal to ``torch.tensor([0.])`` or ``torch.tensor([0])`` or
+``torch.tensor([False])``.
+Throws a ``RuntimeError`` if ``torch.numel() != 1`` (even in case
 of sparse tensors).
 
 Args:
     input (Tensor): the PyTorch tensor to test
 Example::
 
-    >>> torch.is_nonzero(torch.Tensor([0.]))
+    >>> torch.is_nonzero(torch.tensor([0.]))
     False
-    >>> torch.is_nonzero(torch.Tensor([1.5]))
+    >>> torch.is_nonzero(torch.tensor([1.5]))
     True
-    >>> torch.is_nonzero(torch.Tensor([False]))
+    >>> torch.is_nonzero(torch.tensor([False]))
     False
-    >>> torch.is_nonzero(torch.Tensor([True]))
+    >>> torch.is_nonzero(torch.tensor([3]))
     True
-    >>> torch.is_nonzero(torch.Tensor([0]))
-    False
-    >>> torch.is_nonzero(torch.Tensor([3]))
-    True
-    >>> torch.is_nonzero(torch.Tensor([]))
+    >>> torch.is_nonzero(torch.tensor([1, 3, 5]))
     Traceback (most recent call last):
     ...
-    RuntimeError: bool value of Tensor with no values is ambiguous
-    >>> torch.is_nonzero(torch.sparse_coo_tensor([0]))
+    RuntimeError: bool value of Tensor with more than one value is ambiguous
+    >>> torch.is_nonzero(torch.tensor([]))
     Traceback (most recent call last):
     ...
     RuntimeError: bool value of Tensor with no values is ambiguous
