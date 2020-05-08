@@ -5178,6 +5178,24 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             model.weight.data = weight
             out = model(input)
 
+    def test_cpp_stacktraces(self):
+        python_error_msg = "Trying to create tensor with negative dimension"
+        cpp_stack_msg = "Exception raised from check_size_nonnegative at"
+
+        def check_error(has_cpp_stack_trace):
+            raised = False
+            try:
+                torch.rand(-1)
+            except Exception as e:
+                raised = True
+                err_msg = str(e)
+                self.assertTrue(python_error_msg in err_msg)
+                self.assertTrue((cpp_stack_msg in err_msg) == has_cpp_stack_trace)
+
+        check_error(False)
+        with torch.utils.debug.cpp_stacktraces():
+            check_error(True)
+
 
 # Functions to test negative dimension wrapping
 METHOD = 1

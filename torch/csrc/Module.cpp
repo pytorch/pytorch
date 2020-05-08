@@ -41,6 +41,7 @@
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/python_dispatch.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
@@ -526,6 +527,28 @@ PyObject *THPModule_isEnabledXNNPACK(PyObject * /* unused */)
   else Py_RETURN_FALSE;
 }
 
+PyObject * THPModule_setCppStacktracesEnabled(PyObject* _unused, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw torch::TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  torch::utils::CPPStackTraces::set_enabled(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THPModule_isCppStacktracesEnabled(PyObject* /* unused */)
+{
+  HANDLE_TH_ERRORS
+  if (torch::utils::CPPStackTraces::is_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 //NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       nullptr},
@@ -567,6 +590,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_qengine", (PyCFunction)THPModule_setQEngine, METH_O, nullptr},
   {"_supported_qengines", (PyCFunction)THPModule_supportedQEngines, METH_NOARGS, nullptr},
   {"_is_xnnpack_enabled", (PyCFunction)THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
+  {"_set_cpp_stacktraces_enabled", (PyCFunction)THPModule_setCppStacktracesEnabled, METH_O, nullptr},
+  {"_is_cpp_stacktraces_enabled", (PyCFunction)THPModule_isCppStacktracesEnabled, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

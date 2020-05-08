@@ -14,6 +14,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/StringUtil.h>
 #include <ATen/detail/FunctionTraits.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 
 /// NOTE [ Conversion Cpp Python Warning ]
 /// The warning handler cannot set python warnings immediately
@@ -51,18 +52,21 @@
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::IndexError& e) {                               \
-      auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
-      PyErr_SetString(PyExc_IndexError, msg.c_str());                \
+      auto msg = torch::utils::CPPStackTraces::is_enabled() ?        \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(PyExc_IndexError, torch::processErrorMsg(msg).c_str()); \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::ValueError& e) {                               \
-      auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
-      PyErr_SetString(PyExc_ValueError, msg.c_str());                \
+      auto msg = torch::utils::CPPStackTraces::is_enabled() ?        \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(PyExc_ValueError, torch::processErrorMsg(msg).c_str()); \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::Error& e) {                                    \
-      auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
-      PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
+      auto msg = torch::utils::CPPStackTraces::is_enabled() ?        \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(PyExc_RuntimeError, torch::processErrorMsg(msg).c_str()); \
       retstmnt;                                                      \
     }                                                                \
     catch (torch::PyTorchError & e) {                                \
