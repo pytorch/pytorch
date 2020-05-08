@@ -5280,6 +5280,10 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(hvp, torch.mm(hes, v.unsqueeze(1)).squeeze(1))
         self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
 
+
+# Generic device type autograd tests.
+class TestAutogradDeviceType(TestCase):
+
     @deviceCountAtLeast(2)
     def test_AA_scalar_different_devices(self, devices):
         # This test is expected to fail in CI and trigger
@@ -5336,10 +5340,6 @@ class TestAutogradFunctional(TestCase):
         c = a * b
         a.to(devices[1])
         b.to(devices[0])
-
-
-# Generic device type autograd tests.
-class TestAutogradDeviceType(TestCase):
 
     def test_min_max_median_backprops_to_single_value(self, device):
         for f in [torch.min, torch.max, torch.median]:
