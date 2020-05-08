@@ -604,6 +604,9 @@ def skipCPUIfNoLapack(fn):
 def skipCPUIfNoMkl(fn):
     return skipCPUIf(not TEST_MKL, "PyTorch is built without MKL support")(fn)
 
+# Skips a test if MKL is not available.
+def skipIfNoMkl(fn):
+    return skipIf(not TEST_MKL, "PyTorch is built without MKL support")(fn)
 
 # Skips a test on CUDA if MAGMA is not available.
 def skipCUDAIfNoMagma(fn):

@@ -681,7 +681,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             # Run with 1 input tensor
             x = fn(torch.tensor([self.rank]))
             broadcast([x], i, 0)
-            self.assertEqual(torch.tensor([i]), x)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(torch.tensor([i]), x)
 
             # Run with 2 input tensors
             num = 2
@@ -692,8 +693,10 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 ]
 
                 broadcast(xs, i, j)
-                self.assertEqual(torch.tensor([i * num + j]), xs[0])
-                self.assertEqual(torch.tensor([i * num + j]), xs[1])
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                self.assertEqualIgnoreType(torch.tensor([i * num + j]), xs[0])
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                self.assertEqualIgnoreType(torch.tensor([i * num + j]), xs[1])
 
         # Test overloaded convenience function
         x = torch.tensor([self.rank + 1.0])
@@ -767,7 +770,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             tensor = fn(input)
             work = pg.allreduce([tensor], opts)
             work.wait()
-            self.assertEqual(output, tensor)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(output, tensor)
 
         # Multi input tests
         tests = simple_multi_input_reduce_tests(self.rank, self.world_size)
@@ -778,7 +782,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work = pg.allreduce(tensors, opts)
             work.wait()
             for tensor in tensors:
-                self.assertEqual(output, tensor)
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                self.assertEqualIgnoreType(output, tensor)
 
         # Test overloaded convenience function (defaults to using sum)
         x = fn(torch.tensor([self.rank + 1.0]))
@@ -799,7 +804,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         work_handles = [pg.allreduce(inputs[i]) for i in range(len(inputs))]
         for i, work_handle in enumerate(work_handles):
             work_handle.wait()
-            self.assertEqual(
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(
                 torch.tensor([
                     (i * self.world_size) +
                     (self.world_size * (self.world_size - 1) / 2)
@@ -864,7 +870,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work = pg.allreduce_coalesced(tensors, opts)
             work.wait()
             for result_tensor, expected in zip(tensors, outputs):
-                self.assertEqual(result_tensor, expected)
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                self.assertEqualIgnoreType(result_tensor, expected)
 
     def test_allreduce_coalesced_basics(self):
         self._test_allreduce_coalesced_basics(lambda t: t.clone())
@@ -875,7 +882,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         work_handles = [pg.allreduce_coalesced(input) for input in inputs]
         for i, work_handle in enumerate(work_handles):
             work_handle.wait()
-            self.assertEqual(
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(
                 2 * [torch.tensor([(i * self.world_size) + (self.world_size * (self.world_size - 1) / 2)])],
                 inputs[i],
                 message="Mismatch in interation {}".format(i)
@@ -1402,7 +1410,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 work = pg.reduce([tmp], opts)
                 work.wait()
                 if root == self.rank:
-                    self.assertEqual(output, tmp)
+                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                    self.assertEqualIgnoreType(output, tmp)
 
     def test_reduce_basics(self):
         self._test_reduce_basics(lambda t: t.clone())
@@ -1430,7 +1439,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             iter = i // self.world_size
             root = i % self.world_size
             if root == self.rank:
-                self.assertEqual(
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                self.assertEqualIgnoreType(
                     torch.tensor([
                         (iter * self.world_size) +
                         (self.world_size * (self.world_size - 1) / 2)
@@ -1624,7 +1634,8 @@ class ProcessGroupNCCLTest(TestCase):
         allreduce(tensors, c10d.ReduceOp.SUM)
 
         for i in range(self.num_gpus):
-            self.assertEqual(
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(
                 torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
                 tensors[i])
 
@@ -1636,7 +1647,8 @@ class ProcessGroupNCCLTest(TestCase):
         allreduce(tensors, c10d.ReduceOp.PRODUCT)
 
         for i in range(self.num_gpus):
-            self.assertEqual(
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(
                 torch.tensor([float(math.factorial(self.num_gpus))]),
                 tensors[i])
 
@@ -1648,7 +1660,8 @@ class ProcessGroupNCCLTest(TestCase):
         allreduce(tensors, c10d.ReduceOp.MIN)
 
         for i in range(self.num_gpus):
-            self.assertEqual(torch.tensor([1.0]), tensors[i])
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(torch.tensor([1.0]), tensors[i])
 
         # Max
         tensors = []
@@ -1679,7 +1692,8 @@ class ProcessGroupNCCLTest(TestCase):
 
             reduce(tensors, self.rank, rt)
 
-            self.assertEqual(
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(
                 torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
                 tensors[rt])
 
@@ -1748,7 +1762,8 @@ class ProcessGroupNCCLTest(TestCase):
                 float(self.num_gpus * (self.num_gpus - 1) / 2) +
                 (virtual_rank + i) * virtual_world_size
             ])
-            self.assertEqual(expected, output[i])
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(expected, output[i])
 
         # Min
         reduce_scatter(output, tensor_lists, c10d.ReduceOp.MIN)
@@ -1781,7 +1796,8 @@ class ProcessGroupNCCLTest(TestCase):
 
         for i in range(self.num_gpus):
             expected = torch.tensor([float(math.factorial(virtual_world_size))])
-            self.assertEqual(expected, output[i])
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(expected, output[i])
 
     def test_barrier(self):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -1809,7 +1825,8 @@ class ProcessGroupNCCLTest(TestCase):
 
         for i in range(2, self.num_gpus + 1):
             for j in range(i):
-                self.assertEqual(
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                self.assertEqualIgnoreType(
                     torch.tensor([float(i * (i + 1) / 2)]),
                     tensors_list[i - 2][j])
 
@@ -2734,7 +2751,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                     input[self.rank : (self.rank + 1)],
                     target[self.rank : (self.rank + 1)])
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
-                    self.assertEqual(i.grad, j.grad)
+                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                    self.assertEqualIgnoreType(i.grad, j.grad)
 
             # Shuffle the input so that DDP input is different
             torch.manual_seed(1337 + iteration)
