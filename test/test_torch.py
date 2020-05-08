@@ -15449,6 +15449,27 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 long_res1 = long_m1.clone()
                 long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
 
+    # remove onlyCUDA after CPU impl of remainder_kernel be fixed
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    def test_remainder_fmod_large_dividend(self, device, dtype):
+        alarge = 1e9
+        pi = 3.14159265358979
+        for avalue in [alarge, -alarge]:
+            for bvalue in [pi, -pi]:
+                a = torch.tensor([avalue], dtype=dtype, device=device)
+                b = torch.tensor([bvalue], dtype=dtype, device=device)
+                c = torch.remainder(a, b)
+                d = torch.fmod(a, b)
+                self.assertTrue((b[0] > 0) == (c[0] > 0))  # remainder has same sign as divisor
+                self.assertTrue((a[0] > 0) == (d[0] > 0))  # fmod has same sign as dividend
+                self.assertTrue(abs(c[0]) < abs(b[0]))     # remainder is within range of divisor
+                self.assertTrue(abs(d[0]) < abs(b[0]))     # fmod is within range of divisor
+                if ((a[0] > 0) == (b[0] > 0)):
+                    self.assertTrue(c[0] == d[0])   # remainder is same as fmod
+                else:
+                    self.assertTrue(abs(c[0] - d[0]) == abs(b[0]))  # differ by one divisor
+
     @dtypes(torch.int64, torch.float64)
     def test_remainder_edge_cases(self, device, dtype):
         # Test variations of negative values used as input
