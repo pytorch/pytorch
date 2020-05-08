@@ -295,7 +295,7 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.arange(True, device=device), expected)
         expected = torch.tensor([0, 0.5], dtype=torch.get_default_dtype(), device=device)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreTypes(torch.arange(False, True, 0.5, device=device), expected)
+        self.assertEqualIgnoreType(torch.arange(False, True, 0.5, device=device), expected)
         expected = torch.ones(0, dtype=torch.int64, device=device)
         self.assertEqual(torch.arange(False, False, device=device), expected)
 
