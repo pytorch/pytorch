@@ -11,10 +11,14 @@ import torch
 import torch.onnx
 import torch.onnx.utils
 
+# Directly access at _C to appease type checker (which refuses
+# to reexport identifiers with leading underscore)
+import torch._C
+
 
 def shape_as_tensor(x):
-    return torch._shape_as_tensor(x)
+    return torch._C._VariableFunctions._shape_as_tensor(x)
 
 
 def reshape_from_tensor_shape(x, shape):
-    return torch._reshape_from_tensor(x, shape)
+    return torch._C._VariableFunctions._reshape_from_tensor(x, shape)
