@@ -15,5 +15,4 @@ void ConstantFoldONNX(
     int opset_version);
 
 } // namespace jit
-
 } // namespace torch
