@@ -10,11 +10,11 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     prepare_dynamic,
     _make_conv_test_input,
+    skipIfNoFBGEMM,
 )
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_qparams,
     override_quantized_engine,
-    supported_qengines,
     override_qengines,
 )
 from hypothesis import assume, given
@@ -400,6 +400,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
             Y_zero_point, use_bias, use_fused, use_channelwise)
 
+    @skipIfNoFBGEMM
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16]),
            D=st.integers(3, 6),
@@ -441,33 +442,32 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         stride = (stride_d, stride_h, stride_w)
         padding = (pad_d, pad_h, pad_w)
         dilation = (dilation, dilation, dilation)
-        if 'fbgemm' in supported_qengines:
-            with override_quantized_engine('fbgemm'):
-                if use_fused:
-                    module_name = "QuantizedConvReLU3d"
-                    qconv_module = nnq_fused.ConvReLU3d(
-                        in_channels, out_channels, kernel_size, stride, padding,
-                        dilation, groups, use_bias, padding_mode="zeros")
-                else:
-                    module_name = "QuantizedConv3d"
-                    qconv_module = nnq.Conv3d(
-                        in_channels, out_channels, kernel_size, stride, padding,
-                        dilation, groups, use_bias, padding_mode="zeros")
-
-                conv_module = nn.Conv3d(
+        with override_quantized_engine('fbgemm'):
+            if use_fused:
+                module_name = "QuantizedConvReLU3d"
+                qconv_module = nnq_fused.ConvReLU3d(
                     in_channels, out_channels, kernel_size, stride, padding,
                     dilation, groups, use_bias, padding_mode="zeros")
-                if use_fused:
-                    relu_module = nn.ReLU()
-                    conv_module = nni.ConvReLU3d(conv_module, relu_module)
-                conv_module = conv_module.float()
+            else:
+                module_name = "QuantizedConv3d"
+                qconv_module = nnq.Conv3d(
+                    in_channels, out_channels, kernel_size, stride, padding,
+                    dilation, groups, use_bias, padding_mode="zeros")
 
-                self._test_conv_api_impl(
-                    module_name, qconv_module, conv_module, batch_size,
-                    in_channels_per_group, input_feature_map_size,
-                    out_channels_per_group, groups, kernel_size, stride, padding,
-                    dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
-                    Y_zero_point, use_bias, use_fused, use_channelwise)
+            conv_module = nn.Conv3d(
+                in_channels, out_channels, kernel_size, stride, padding,
+                dilation, groups, use_bias, padding_mode="zeros")
+            if use_fused:
+                relu_module = nn.ReLU()
+                conv_module = nni.ConvReLU3d(conv_module, relu_module)
+            conv_module = conv_module.float()
+
+            self._test_conv_api_impl(
+                module_name, qconv_module, conv_module, batch_size,
+                in_channels_per_group, input_feature_map_size,
+                out_channels_per_group, groups, kernel_size, stride, padding,
+                dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
+                Y_zero_point, use_bias, use_fused, use_channelwise)
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.
@@ -564,6 +564,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
+    @skipIfNoFBGEMM
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),

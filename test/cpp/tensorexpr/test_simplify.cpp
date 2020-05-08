@@ -6,6 +6,8 @@
 #include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 
+#include <cmath>
+
 namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
@@ -596,6 +598,24 @@ void testSimplifyAdds() {
     IS_IMM_WITH_VAL(Int, root->lhs(), 4);
     IS_VAR_WITH_NAME(root->rhs(), "x");
   }
+
+  {
+    // (x + 0) => x.
+    ExprHandle body = x + 0;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // (x + 0.f) => float(x).
+    ExprHandle body = x + 0.f;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Cast, simplified.node(), cast);
+    ASSERT_EQ(cast->dtype().scalar_type(), ScalarType::Float);
+    IS_VAR_WITH_NAME(cast->src_value(), "x");
+  }
 }
 
 void testSimplifyMuls() {
@@ -632,6 +652,60 @@ void testSimplifyMuls() {
     IS_VAR_WITH_NAME(mul2->rhs(), "y");
     IS_VAR_WITH_NAME(mul3->lhs(), "x");
     IS_VAR_WITH_NAME(mul3->rhs(), "x");
+  }
+
+  {
+    // 1 * (x * 1) => x
+    // Ones cancel cleanly.
+    ExprHandle body = ExprHandle(1) * (x * ExprHandle(1));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // 1.f * (x * 1.f) => x
+    // Even float ones cancel cleanly, but carry their type.
+    ExprHandle body = ExprHandle(1.f) * (x * ExprHandle(1.f));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Cast, simplified.node(), cast);
+    ASSERT_EQ(cast->dtype().scalar_type(), ScalarType::Float);
+    IS_VAR_WITH_NAME(cast->src_value(), "x");
+  }
+
+  {
+    // 1 * (x * 1.f) => x
+    // One float is enough to cast the expr.
+    ExprHandle body = ExprHandle(1) * (x * ExprHandle(1.f));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Cast, simplified.node(), cast);
+    ASSERT_EQ(cast->dtype().scalar_type(), ScalarType::Float);
+    IS_VAR_WITH_NAME(cast->src_value(), "x");
+  }
+
+  {
+    // 1 * (x * 0) => 0
+    // Zeroes are eliminated.
+    ExprHandle body = ExprHandle(1) * (x * ExprHandle(0));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // 1 * (x * 0) => 0
+    // But not for Float since nan * 0 = nan.
+    ExprHandle body = ExprHandle(1.f) * (x * ExprHandle(0.f));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    std::cout << simplified << "\n";
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_NODE_WITH_NAME(Cast, mul->lhs(), cast);
+    ASSERT_EQ(cast->dtype().scalar_type(), ScalarType::Float);
+    IS_VAR_WITH_NAME(cast->src_value(), "x");
+    IS_IMM_WITH_VAL(Float, mul->rhs(), 0.0);
   }
 
   {
@@ -708,6 +782,32 @@ void testSimplifySubs() {
     ExprHandle body = (x + y) - y;
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // (x - 0) => x.
+    ExprHandle body = x - 0;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // (x - 0.f) => x.
+    // Simple enough to cancel in float.
+    ExprHandle body = x - ExprHandle(0.f);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cast, simplified.node(), cast);
+    ASSERT_EQ(cast->dtype().scalar_type(), ScalarType::Float);
+    IS_VAR_WITH_NAME(cast->src_value(), "x");
+  }
+
+  {
+    // (x - (float)(y - y)) => x.
+    ExprHandle body = x - Cast::make(kFloat, y - y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cast, simplified.node(), cast);
+    ASSERT_EQ(cast->dtype().scalar_type(), ScalarType::Float);
+    IS_VAR_WITH_NAME(cast->src_value(), "x");
   }
 
   {
@@ -805,6 +905,31 @@ void testSimplifyMultiOp() {
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
     IS_IMM_WITH_VAL(Int, mul->lhs(), -2);
     IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // (x - 0) + (x * 1) - (x + 0) => x
+    ExprHandle body = (x - 0) + (x * 1) - (x + 0);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // (x - 0.f) + (x * 1.f) - (x + 0.f) => float(x) + float(x) - float(x)
+    // Even in Float simple terms cancel out, but the variable ones cannot.
+    ExprHandle body =
+        (x - ExprHandle(0.f)) + (x * ExprHandle(1.f)) - (x + ExprHandle(0.f));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
+    IS_NODE_WITH_NAME(Add, sub->lhs(), add);
+    IS_NODE_WITH_NAME(Cast, add->lhs(), cast1);
+    IS_VAR_WITH_NAME(cast1->src_value(), "x");
+    IS_NODE_WITH_NAME(Cast, add->rhs(), cast2);
+    IS_VAR_WITH_NAME(cast2->src_value(), "x");
+    IS_NODE_WITH_NAME(Cast, sub->rhs(), cast3);
+    IS_VAR_WITH_NAME(cast3->src_value(), "x");
   }
 }
 
