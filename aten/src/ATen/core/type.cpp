@@ -1143,10 +1143,14 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
 size_t ClassType::addAttribute(
     const std::string& name,
     const TypePtr& type,
-    bool is_parameter) {
+    bool is_parameter,
+    bool allow_any) {
   const char* what = is_parameter ? "parameter" : "attribute";
   checkNotExist(name, what);
-  checkNoAny(*this, what, name, type);
+
+  if (!allow_any) {
+    checkNoAny(*this, what, name, type);
+  }
 
   size_t slot = attributeNames_.size();
   attributeNames_.push_back(name);
