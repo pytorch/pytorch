@@ -10343,7 +10343,7 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
             torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float, torch.double, torch.half, torch.bfloat16)
+                  torch.float, torch.double, torch.half, torch.bfloat16)
     def test_geometric_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
