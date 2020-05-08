@@ -1,6 +1,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
@@ -558,7 +559,10 @@ void initJITBindings(PyObject* module) {
                       "__torch__.torch.classes.quantized.Conv2dPackedParamsBase") ||
               i->type() ==
                   getCustomClass(
-                      "__torch__.torch.classes.quantized.Conv3dPackedParamsBase")) {
+                      "__torch__.torch.classes.quantized.Conv3dPackedParamsBase") ||
+              i->type() ==
+                  getCustomClass(
+                      "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
             // Dummy CompleteTensorType to appease ONNX validator.
             i->setType(TensorType::create(
                 at::kQInt8,
@@ -905,6 +909,7 @@ void initJITBindings(PyObject* module) {
   tracer::initPythonTracerBindings(module);
   initTreeViewBindings(module);
   initJitScriptBindings(module);
+  initJitBackendBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
