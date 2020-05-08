@@ -124,18 +124,18 @@ sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
   // search due to divergence. It seems possible to compute multiple
   // values and limit divergence though later on.
 
-  // global index formula for 1D grid of 1D blocks
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  // global index formula for 2D grid of 1D blocks
+  int idx = blockIdx.y * gridDim.x * blockDim.x + blockIdx.x * blockDim.x + threadIdx.x;
 
   curandStatePhilox4_32_10_t state;
   curand_init(seeds.first, idx, seeds.second, &state);
 
   // The block determines the distribution for which we generate a point
-  for (int64_t curDist = blockIdx.x;
+  for (int64_t curDist = blockIdx.y;
        curDist < distributions;
-       curDist += gridDim.x) {
-    for (int sample = threadIdx.x;
-         sample < totalSamples; sample += blockDim.x) {
+       curDist += gridDim.y) {
+    for (int sample = blockIdx.x*blockDim.x + threadIdx.x;
+         sample < totalSamples; sample += blockDim.x*gridDim.x) {
 
       //we are losing 3 out of 4 generated numbers but it's ok
       //this kernel is not very efficient anyway
@@ -416,7 +416,8 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
 
         // Each block will generate a sample from one
         // distribution concurrently.
-        dim3 grid(numDist < MAX_NUM_BLOCKS ? numDist : MAX_NUM_BLOCKS);
+        int grid_y=std::min<int>(numDist, at::cuda::getCurrentDeviceProperties()->maxGridSize[1]);
+        dim3 grid((n_sample-1)/block.x+1, grid_y);
         {
           // See Note [Acquire lock when using random generators]
           std::lock_guard<std::mutex> lock(gen->mutex_);
