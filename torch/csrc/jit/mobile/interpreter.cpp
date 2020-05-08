@@ -6,7 +6,7 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #endif
 
@@ -54,12 +54,12 @@ bool InterpreterState::run(Stack& stack) {
         ++pc;
       } break;
       case INTERFACE_CALL: {
-        torch::jit::Function* method =
+        torch::jit::Function& method =
             peek(stack, 0, inst.N)
                 .toObject()
                 ->type()
                 ->getMethod(code_->constants_[inst.X].toStringRef());
-        method->run(stack);
+        method.run(stack);
         ++pc;
       } break;
       case LOAD:
