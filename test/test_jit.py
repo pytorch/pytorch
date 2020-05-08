@@ -6675,7 +6675,7 @@ a")
         def test_integral_shape_inference(a):
             return a / a
         ''')
-        inputs = [torch.ones(10, 10).type(torch.LongTensor)]
+        inputs = [torch.ones(10, 10, dtype=torch.long)]
         outputs = torch.ones(10, 10)
 
         self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
@@ -17523,8 +17523,7 @@ a")
                 qweight = torch._empty_affine_quantized(
                     [out_features, in_features], scale=1, zero_point=0,
                     dtype=torch.qint8)
-                self.register_buffer('_packed_weight',
-                                     torch.ops.quantized.linear_prepack(qweight))
+                self._packed_weight = torch.ops.quantized.linear_prepack(qweight)
 
             @torch.jit.export
             def __getstate__(self):
@@ -17535,8 +17534,7 @@ a")
 
             @torch.jit.export
             def __setstate__(self, state):
-                self._packed_weight.set_(
-                    torch.ops.quantized.linear_prepack(state[0]))
+                self._packed_weight = torch.ops.quantized.linear_prepack(state[0])
                 self.training = state[1]
 
             @property

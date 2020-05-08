@@ -268,6 +268,12 @@ Non-linear activation functions
 
 .. autofunction:: sigmoid
 
+:hidden:`hardsigmoid`
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: hardsigmoid
+
+
 Normalization functions
 -----------------------
 
