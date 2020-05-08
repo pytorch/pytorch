@@ -112,19 +112,15 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # Test serialization of quantized Linear Module using state_dict
         model_dict = qlinear.state_dict()
+        self.assertEqual(model_dict['_packed_params.weight'], W_q)
+        if use_bias:
+            self.assertEqual(model_dict['_packed_params.bias'], B)
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
         loaded_dict = torch.load(b)
         for key in model_dict:
-            if isinstance(model_dict[key], torch._C.ScriptObject):
-                assert isinstance(loaded_dict[key], torch._C.ScriptObject)
-                w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
-                w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
-                self.assertEqual(w_model, w_loaded)
-                self.assertEqual(b_model, b_loaded)
-            else:
-                self.assertEqual(model_dict[key], loaded_dict[key])
+            self.assertEqual(model_dict[key], loaded_dict[key])
         if use_fused:
             loaded_qlinear = nnq_fused.LinearReLU(in_features, out_features)
         else:
@@ -162,11 +158,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # self.assertEqual(qlinear.scale, loaded.scale)
         # self.assertEqual(qlinear.zero_point, loaded.zero_point)
         # <end code>
-        #
-        # Currently disabled after TorchBind PR
-        # with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
-        #     b = io.BytesIO()
-        #     torch.save(qlinear, b)
+        with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
+            b = io.BytesIO()
+            torch.save(qlinear, b)
 
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X_q], [Z_ref])), check_save_load=True)
@@ -604,19 +598,15 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         # Test serialization of dynamic quantized Linear Module using state_dict
         model_dict = qlinear.state_dict()
+        self.assertEqual(model_dict['_packed_params.weight'], W_q)
+        if use_bias:
+            self.assertEqual(model_dict['_packed_params.bias'], B)
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
         loaded_dict = torch.load(b)
         for key in model_dict:
-            if isinstance(model_dict[key], torch._C.ScriptObject):
-                assert isinstance(loaded_dict[key], torch._C.ScriptObject)
-                w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
-                w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
-                self.assertEqual(w_model, w_loaded)
-                self.assertEqual(b_model, b_loaded)
-            else:
-                self.assertEqual(model_dict[key], loaded_dict[key])
+            self.assertEqual(model_dict[key], loaded_dict[key])
         loaded_qlinear = nnqd.Linear(in_features, out_features)
         loaded_qlinear.load_state_dict(loaded_dict)
 
@@ -649,9 +639,9 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         # self.assertEqual(qlinear.weight(), loaded.weight())
         # self.assertEqual(qlinear.zero_point, loaded.zero_point)
         # <end code>
-        # with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
-        #     b = io.BytesIO()
-        #     torch.save(qlinear, b)
+        with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
+            b = io.BytesIO()
+            torch.save(qlinear, b)
 
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X], [Z_ref])), check_save_load=True)
