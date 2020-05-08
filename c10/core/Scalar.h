@@ -62,7 +62,7 @@ class C10_API Scalar {
     if (Tag::HAS_d == tag) {                              \
       return checked_convert<type, double>(v.d, #type);   \
     } else if (Tag::HAS_z == tag) {                       \
-      return checked_convert<type, std::complex<double>>( \
+      return checked_convert<type, c10::complex<double>>( \
           {v.z[0], v.z[1]}, #type);                       \
     } if (Tag::HAS_b == tag) {                            \
       return checked_convert<type, bool>(v.i, #type);     \
@@ -140,6 +140,7 @@ class C10_API Scalar {
     // Can't do put std::complex in the union, because it triggers
     // an nvcc bug:
     //    error: designator may not specify a non-POD subobject
+    // TODO: can we put c10::complex to it?
     double z[2];
   } v;
 };

@@ -133,9 +133,9 @@ void setstateTuple(const IValue& ivalue, std::vector<c10::IValue>& elements) {
   auto obj = ivalue.toObject();
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
-    Function* setstate = type->getMethod("__setstate__");
-    if (setstate->isGraphFunction()) {
-      elements.push_back(getFunctionTuple(*setstate));
+    Function& setstate = type->getMethod("__setstate__");
+    if (setstate.isGraphFunction()) {
+      elements.push_back(getFunctionTuple(setstate));
     }
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
