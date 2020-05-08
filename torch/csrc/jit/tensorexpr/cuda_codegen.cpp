@@ -227,7 +227,7 @@ void CudaPrinter::visit(const For* v) {
   }
 }
 
-void CudaPrinter::visit(const Cast* v) override {
+void CudaPrinter::visit(const Cast* v) {
   os() << cudaDtypeCppString(v->dtype());
   os() << "(";
   v->src_value()->accept(this);
