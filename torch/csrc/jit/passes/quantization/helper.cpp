@@ -59,10 +59,6 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "_max_pool2d",
     "_max_pool3d",
     "dropout",
-    "interpolate",
-    "upsample",
-    "upsample_bilinear",
-    "upsample_nearest",
     "relu",
     "relu_",
     "sigmoid",
@@ -89,13 +85,6 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "flatten",
     "max",
     "min",
-    "upsample_nearest1d",
-    "upsample_nearest2d",
-    "upsample_nearest3d",
-    "upsample_linear1d",
-    "upsample_bilinear2d",
-    "upsample_trilinear3d",
-    "upsample_bicubic2d",
     "dropout",
     "reshape",
     "resize_", // Non-inplace resize is deprecated
@@ -131,6 +120,10 @@ std::vector<std::string> _single_input_general_value_call_funcs = {
     "adaptive_avg_pool1d",
     "adaptive_avg_pool2d",
     "adaptive_avg_pool3d",
+    "interpolate",
+    "upsample",
+    "upsample_bilinear",
+    "upsample_nearest",
 };
 
 // Theses are aten functions for ops that doesn't require observation and
@@ -145,6 +138,13 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     "adaptive_avg_pool2d",
     "adaptive_avg_pool3d",
     "mean",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "upsample_linear1d",
+    "upsample_bilinear2d",
+    "upsample_trilinear3d",
+    "upsample_bicubic2d",
 };
 
 // Special checks for ops that do not require observers for all input tensors.
