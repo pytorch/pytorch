@@ -189,6 +189,7 @@ class _TestTorchMixin(object):
                        'sparse_resize_and_clear_',
                        )
         test_namespace(torch.nn)
+        test_namespace(torch.nn.functional, 'assert_int_or_pair')
         # TODO: add torch.* tests when we have proper namespacing on ATen functions
         # test_namespace(torch)
 
