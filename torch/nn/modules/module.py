@@ -82,15 +82,10 @@ class Module(object):
         torch._C._log_api_usage_once("python.nn_module")
 
         self.training = True
-        self._parameters = OrderedDict()
-        self._buffers = OrderedDict()
         self._persistent_buffers_set = set()
         self._backward_hooks = OrderedDict()
-        self._forward_hooks = OrderedDict()
-        self._forward_pre_hooks = OrderedDict()
         self._state_dict_hooks = OrderedDict()
         self._load_state_dict_pre_hooks = OrderedDict()
-        self._modules = OrderedDict()
 
     def forward(self, *input):
         r"""Defines the computation performed at every call.
@@ -1153,9 +1148,6 @@ class Module(object):
 
     def share_memory(self):
         return self._apply(lambda t: t.share_memory_())
-
-    def _get_name(self):
-        return self.__class__.__name__
 
     def extra_repr(self):
         r"""Set the extra representation of the module
