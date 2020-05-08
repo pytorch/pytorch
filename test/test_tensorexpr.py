@@ -1270,5 +1270,20 @@ class TestTensorExprFuser(BaseTestClass):
         assert torch.allclose(scripted(a), 2 * a)
         assert cx.elapsed_value() == 1
 
+    def test_doc(self):
+        @torch.jit.script
+        def foo(x, y):
+            if x.max() > y.max():
+                r = x
+            else:
+                r = y
+            return r
+
+
+        def bar(x, y, z):
+            return foo(x, y) + z
+
+        traced_bar = torch.jit.trace(bar, (torch.rand(3), torch.rand(3), torch.rand(3)))
+
 if __name__ == '__main__':
     unittest.main()
