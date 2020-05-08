@@ -11864,6 +11864,11 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "x must be a one-dimensional tensor."):
             torch.vander(torch.stack((x, x)))
 
+        # This passes on the xla backend
+        if device != 'xla' and device != 'cpu':
+            with self.assertRaises(RuntimeError):
+                torch.vander(x.to(torch.complex64))
+
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
@@ -11894,6 +11899,30 @@ class TestTorchDeviceType(TestCase):
                 torch.from_numpy(np_res),
                 atol=1e-3,
                 rtol=0,
+                exact_dtype=False)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @onlyCPU
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_vander_complex_types(self, device, dtype):
+        X = [[1 + 1j, 1 + 0j, 0 + 1j, 0 + 0j],
+             [2 + 2j, 3 + 2j, 4 + 3j, 5 + 4j]]
+
+        N = [None, 0, 1, 3]
+        increasing = [False, True]
+
+        for x, n, inc in product(X, N, increasing):
+            numpy_dtype = torch_to_numpy_dtype_dict[dtype]
+            pt_x = torch.tensor(x, device=device, dtype=dtype)
+            np_x = np.array(x, dtype=numpy_dtype)
+
+            pt_res = torch.vander(pt_x, increasing=inc) if n is None else torch.vander(pt_x, n, inc)
+            np_res = np.vander(np_x, n, inc)
+
+            self.assertEqual(
+                pt_res,
+                torch.from_numpy(np_res),
+                atol=1e-3,
                 exact_dtype=False)
 
     def test_eye(self, device):
