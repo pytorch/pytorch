@@ -46,7 +46,6 @@ class TestSparse(TestCase):
         self.is_cuda = False
         self.is_uncoalesced = False
         self.device = 'cpu'
-        self.exact_dtype = True
         self.value_dtype = torch.float64
         self.index_tensor = lambda *args: torch.tensor(*args, dtype=torch.int64, device=self.device)
         self.value_empty = lambda *args: torch.empty(*args, dtype=self.value_dtype, device=self.device)

@@ -696,7 +696,6 @@ class TestCase(expecttest.TestCase):
     maxDiff = None
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
-    exact_dtype = False
 
     def __init__(self, method_name='runTest'):
         super().__init__(method_name)
@@ -891,9 +890,6 @@ class TestCase(expecttest.TestCase):
                 rtol = 0
             if atol is None:
                 atol = 0
-
-        if exact_dtype is None:
-            exact_dtype = self.exact_dtype
 
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, message=message,

@@ -5286,7 +5286,6 @@ def add_neg_dim_tests():
 
 # Device-generic tests. Instantiated below and not run directly.
 class TestTorchDeviceType(TestCase):
-    exact_dtype = True
 
     @dtypes(torch.float32, torch.complex64)
     def test_storage(self, device, dtype):
@@ -16483,7 +16482,6 @@ LINSPACE_LOGSPACE_EXTRA_EPS = 1e-5
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
-    exact_dtype = True
 
     # The implementation of linspace+logspace goes through a different path
     # when the steps arg is equal to 0 or 1. For other values of `steps`
@@ -16880,7 +16878,6 @@ class TestDevicePrecision(TestCase):
 # Tests ops and indexing to ensure they return views (and new tensors) as
 # appropriate.
 class TestViewOps(TestCase):
-    exact_dtype = True
 
     def is_view_of(self, base, other):
         if (not other._is_view() or
@@ -18034,7 +18031,6 @@ def generate_not_implemented_tests(cls):
 
 
 class TestTensorDeviceOps(TestCase):
-    exact_dtype = True
 
     def _test_svd_helper(self, shape, some, col_maj, device, dtype):
         cpu_tensor = torch.randn(shape, device='cpu').to(dtype)
@@ -18085,11 +18081,10 @@ class TestTensorDeviceOps(TestCase):
         self._test_svd_helper((5, 20), False, True, device, dtype)
 
 class TestTorchMathOps(TestCase):
-    exact_dtype = True
+    pass
 
 class TestTorch(TestCase, _TestTorchMixin):
-    exact_dtype = True
-
+    pass
 
 # Generates tests
 # Note: test generation must be done at file scope, not within main, or

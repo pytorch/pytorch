@@ -33,7 +33,6 @@ def drosenbrock(tensor):
 
 
 class TestOptim(TestCase):
-    exact_dtype = True
 
     def _test_rosenbrock_sparse(self, constructor, scheduler_constructors=None,
                                 sparse_only=False):
@@ -511,7 +510,6 @@ class LambdaLRTestObject:
 
 
 class TestLRScheduler(TestCase):
-    exact_dtype = True
 
     def setUp(self):
         super(TestLRScheduler, self).setUp()
