@@ -449,24 +449,23 @@ If the future completes with an error, an exception is thrown.
   py::class_<TensorPipeRpcBackendOptions>(
       module, "TensorPipeRpcBackendOptions", rpcBackendOptions)
       .def(
-          py::init<std::map<std::string, worker_id_t>, float, std::string>(),
-          py::arg("worker_name_to_id"),
+          py::init<float, std::string>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
-          py::arg("init_method") = kDefaultInitMethod)
-      .def_readwrite(
-          "worker_name_to_id", &TensorPipeRpcBackendOptions::workerNameToId);
+          py::arg("init_method") = kDefaultInitMethod);
 
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
           py::init<
-              worker_id_t /* selfId */,
-              std::string /* selfName */,
               std::shared_ptr<::c10d::Store> /* addressStore */,
+              std::string /* selfName */,
+              worker_id_t /* selfId */,
+              int /* worldSize */,
               TensorPipeRpcBackendOptions /* TensorPipeBackendOptions */>(),
-          py::arg("worker_id"),
+          py::arg("store"),
           py::arg("name"),
-          py::arg("address_store"),
-          py::arg("tensorpipe_backend_options"))
+          py::arg("rank"),
+          py::arg("world_size"),
+          py::arg("rpc_backend_options"))
       .def(
           "join",
           &TensorPipeAgent::join,
