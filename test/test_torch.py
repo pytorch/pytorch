@@ -410,7 +410,7 @@ class _TestTorchMixin(object):
                 x = torch.rand(16, device=devices[1])
                 y = torch.rand(16, device=devices[2])
                 with self.assertRaisesRegex(RuntimeError,
-                                            "expected condition, x and y to be on the same device"):
+                                            "Expected condition, x and y to be on the same device"):
                     torch.where(condition, x, y)
 
     def test_where_bool_tensor(self):
@@ -4721,12 +4721,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertExpectedRaisesInline(
             RuntimeError,
             lambda: torch.tensor([]).is_nonzero(),
-            "bool value of Tensor with no values is ambiguous",
+            "Boolean value of Tensor with no values is ambiguous",
         )
         self.assertExpectedRaisesInline(
             RuntimeError,
             lambda: torch.tensor([0, 0]).is_nonzero(),
-            "bool value of Tensor with more than one value is ambiguous",
+            "Boolean value of Tensor with more than one value is ambiguous",
         )
         self.assertFalse(torch.tensor(0).is_nonzero())
         self.assertTrue(torch.tensor(1).is_nonzero())

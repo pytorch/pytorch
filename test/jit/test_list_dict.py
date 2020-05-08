@@ -311,7 +311,7 @@ class TestList(JitTestCase):
             test_invalid_list_equality,
             (),
             RuntimeError,
-            "bool value of Tensor")
+            "Boolean value of Tensor")
 
     def test_list_sort(self):
         template = dedent('''
@@ -343,7 +343,7 @@ class TestList(JitTestCase):
             return x
 
         self.checkScriptRaisesRegex(test_fail, (([torch.zeros([2]), torch.zeros([2])],)), Exception,
-                                    "bool value of Tensor with more than one value")
+                                    "Boolean value of Tensor with more than one value")
 
         @torch.jit.script
         def test_mutation():
