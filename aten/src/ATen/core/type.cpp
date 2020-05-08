@@ -915,7 +915,7 @@ InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_modu
 
 void ClassType::addMethod(torch::jit::Function* method) {
   TORCH_CHECK(
-      getMethod(method->name()) == nullptr,
+      findMethod(method->name()) == nullptr,
       "Can't redefine method: ",
       method->name(),
       " on class: ",
@@ -923,13 +923,27 @@ void ClassType::addMethod(torch::jit::Function* method) {
   methods_.push_back(method);
 }
 
-torch::jit::Function* ClassType::getMethod(const std::string& name) const {
+torch::jit::Function* ClassType::findMethod(const std::string& name) const {
   for (auto method : methods_) {
     if (name == method->name()) {
       return method;
     }
   }
   return nullptr;
+}
+torch::jit::Function& ClassType::getMethod(const std::string& name) const {
+  auto method = findMethod(name);
+  TORCH_CHECK(
+      method != nullptr,
+      "Couldn't find method: '",
+      name,
+      "' on class: '",
+      python_str(),
+      "'");
+  return *method;
+}
+bool ClassType::hasMethod(const std::string& name) const {
+  return findMethod(name) != nullptr;
 }
 
 void ClassType::unsafeRemoveMethod(const std::string& name) {
@@ -981,7 +995,7 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
       return false;
     }
     for (const FunctionSchema& schema : iface->methods()) {
-      auto self_method = getMethod(schema.name());
+      auto self_method = findMethod(schema.name());
       if (!self_method) {
         if (why_not) {
           *why_not << "Class '" << python_str() << "' does not have method '"
@@ -1128,13 +1142,16 @@ size_t ClassType::addAttribute(
     const std::string& name,
     const TypePtr& type,
     bool is_parameter,
-    bool was_registered_as_buffer) {
+    bool was_registered_as_buffer,
+    bool allow_any) {
 
   std::string what = is_parameter ? "parameter" : "attribute";
   what += (was_registered_as_buffer? "buffer" : "not buffer");
 
   checkNotExist(name, what);
-  checkNoAny(*this, what.c_str(), name, type);
+  if (!allow_any) {
+    checkNoAny(*this, what.c_str(), name, type);
+  }
 
   size_t slot = attributes_.size();
 

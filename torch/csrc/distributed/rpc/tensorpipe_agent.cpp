@@ -19,6 +19,28 @@ namespace rpc {
 
 constexpr long kToMilliseconds = 1000;
 
+const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
+const std::string kThreadPoolSize = "agent.thread_pool_size";
+const std::string kNumIdleThreads = "agent.num_idle_threads";
+
+//////////////////////////  MetricsTracker  /////////////////////////////////
+
+TensorPipeAgent::TimeSeriesMetricsTracker::TimeSeriesMetricsTracker(
+    uint64_t currentSum,
+    uint64_t currentCount)
+    : currentSum_(currentSum), currentCount_(currentCount) {}
+
+void TensorPipeAgent::TimeSeriesMetricsTracker::addData(uint64_t dataPoint) {
+  currentSum_ += dataPoint;
+  ++currentCount_;
+}
+
+float TensorPipeAgent::TimeSeriesMetricsTracker::computeAverage() const {
+  return currentCount_ == 0 ? 0 : currentSum_ / (float)currentCount_;
+}
+
+////////////////////////  TensorpipeRpcAgent  /////////////////////////////////
+
 TensorPipeAgent::TensorPipeAgent(
     worker_id_t selfId,
     std::string selfName,
@@ -39,6 +61,10 @@ TensorPipeAgent::TensorPipeAgent(
     workerIdToInfo_.emplace(workerId, WorkerInfo(workerName, workerId));
     workerNameToInfo_.emplace(workerName, WorkerInfo(workerName, workerId));
   }
+
+  // Initialize the time-series metrics tracking map
+  timeSeriesMetrics_[kGilAverageWaitTime] =
+      std::make_unique<TimeSeriesMetricsTracker>();
 }
 
 TensorPipeAgent::~TensorPipeAgent() {
@@ -122,15 +148,6 @@ void TensorPipeAgent::pipeRead(
 
     // Allocate memory and fill in pointers
     Message rpcMessage = tensorpipeAllocateMessage(tpMessage);
-    TORCH_INTERNAL_ASSERT(
-        rpcMessage.tensors().size() == tpMessage.tensors.size(),
-        "Tensor num mismatch");
-    tpMessage.data = (uint8_t*)(rpcMessage.payload().data());
-    for (size_t i = 0; i < rpcMessage.tensors().size(); i++) {
-      auto& rpcTensor = rpcMessage.tensors()[i];
-      auto& tpTensor = tpMessage.tensors[i];
-      tpTensor.data = (uint8_t*)(rpcTensor.data_ptr());
-    }
 
     pipe->read(
         std::move(tpMessage),
@@ -404,6 +421,63 @@ std::string TensorPipeAgent::createUniqueShmAddr() {
       threadLocalId++);
 }
 #endif
+
+std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
+  std::unordered_map<std::string, std::string> metrics;
+  metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
+  metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
+  if (isGILProfilingEnabled()) {
+    {
+      std::unique_lock<std::mutex> lock(metricsMutex_);
+      // Include the averages for each time series metric. This is just the GIL
+      // Wait Time for now.
+      auto averageGilWaitTime =
+          timeSeriesMetrics_[kGilAverageWaitTime]->computeAverage();
+      lock.unlock();
+      metrics[kGilAverageWaitTime] = c10::to_string(averageGilWaitTime);
+    }
+  }
+
+  return metrics;
+}
+
+void TensorPipeAgent::addGilWaitTime(
+    const std::chrono::microseconds gilWaitTime) {
+  std::lock_guard<std::mutex> lock(metricsMutex_);
+  timeSeriesMetrics_[kGilAverageWaitTime]->addData(gilWaitTime.count());
+}
+
+TensorPipeAgent::NetworkDataDict TensorPipeAgent::getNetworkData() {
+  std::lock_guard<std::mutex> lock(networkDataMutex_);
+  return networkData_;
+}
+
+NetworkSourceInfo TensorPipeAgent::getNetworkSourceInfo() {
+  NetworkSourceInfo info = {
+      RpcAgent::getWorkerInfo().id_,
+      addressStore_->get(RpcAgent::getWorkerInfo().name_)};
+
+  return info;
+}
+
+void TensorPipeAgent::trackNetworkData(
+    uint64_t requestSize,
+    uint64_t responseSize,
+    const std::string& destWorkerName) {
+  std::lock_guard<std::mutex> lock(networkDataMutex_);
+  networkData_[destWorkerName].numCalls++;
+  networkData_[destWorkerName].totalSentBytes += requestSize;
+  networkData_[destWorkerName].totalRecvBytes += responseSize;
+}
+
+void TensorPipeAgent::trackNetworkError(
+    uint64_t requestSize,
+    const std::string& destWorkerName) {
+  std::lock_guard<std::mutex> lock(networkDataMutex_);
+  networkData_[destWorkerName].numCalls++;
+  networkData_[destWorkerName].totalSentBytes += requestSize;
+  networkData_[destWorkerName].totalErrors++;
+}
 
 } // namespace rpc
 } // namespace distributed

@@ -137,8 +137,9 @@ struct TORCH_API Module : public Object {
       const TypePtr t,
       IValue v,
       bool is_param = false,
-      bool was_registered_as_buffer = false) {
-    type()->addOrCheckAttribute(name, t, is_param, was_registered_as_buffer);
+      bool was_registered_as_buffer = false,
+      bool allow_any = false) {
+    type()->addOrCheckAttribute(name, t, is_param, was_registered_as_buffer, allow_any);
     _ivalue()->setAttr(name, std::move(v));
   }
 

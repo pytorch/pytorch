@@ -17,6 +17,24 @@ namespace tensorexpr {
 static int te_cuda_pointwise_loop_levels = -1;
 static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
+static bool fallback_allowed = true;
+
+bool setFallbackAllowed(bool value) {
+  bool old_value = fallback_allowed;
+  fallback_allowed = value;
+  return old_value;
+}
+
+bool fallbackAllowed() {
+  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
+  if (!enable_c_str) {
+    return fallback_allowed;
+  }
+  if (std::string(enable_c_str) == "0") {
+    return false;
+  }
+  return true;
+}
 
 int& getTECudaPointwiseLoopLevels() {
   return te_cuda_pointwise_loop_levels;
@@ -136,7 +154,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     const ExprHandle& e,
     const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
-    throw malformed_input("type is not tensor in demoteOutput");
+    return e;
   }
 
   auto tt = *v->type()->cast<TensorType>()->scalarType();
@@ -1308,6 +1326,12 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
       scalars_.emplace(input->unique(), v);
       break;
     }
+    case TypeKind::BoolType: {
+      VarHandle v("v" + input->debugName(), kBool);
+      kernelArgs_.emplace_back(v);
+      scalars_.emplace(input->unique(), v);
+      break;
+    }
     case TypeKind::IntType: {
       VarHandle v("v" + input->debugName(), kInt);
       kernelArgs_.emplace_back(v);
@@ -1360,6 +1384,11 @@ void TensorExprKernel::compile() {
 
 TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
     : graph_(subgraph), code_(subgraph, "") {
+  if (!fallbackAllowed()) {
+    compile();
+    return;
+  }
+
   try {
     compile();
   } catch (...) {
@@ -1368,6 +1397,11 @@ TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
 }
 
 void TensorExprKernel::run(Stack& stack) {
+  if (!fallbackAllowed()) {
+    runKernel(stack);
+    return;
+  }
+
   if (fallback_) {
     fallback(stack);
     return;

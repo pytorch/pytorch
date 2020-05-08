@@ -2,11 +2,11 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/record_function.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -814,7 +814,7 @@ struct CodeImpl {
         break;
       case prim::CallMethod:
         if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
-          emitCall(class_type->getMethod(node->s(attr::name)), node->inputs());
+          emitCall(&class_type->getMethod(node->s(attr::name)), node->inputs());
         } else {
           emitInterfaceCall(node->s(attr::name), node->inputs());
         }
@@ -1142,14 +1142,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // reduce the number of compilations for too dynamic callers we
             // might miss opportunities where a caller is dynamic but a callee
             // gets stable arguments
-            auto function = peek(stack, 0, inst.N)
-                                .toObject()
-                                ->type()
-                                ->getMethod(af.constants[inst.X].toStringRef());
-            if (!function->isGraphFunction()) {
-              runBuiltinFunction(stack, function, &af);
+            Function& function =
+                peek(stack, 0, inst.N)
+                    .toObject()
+                    ->type()
+                    ->getMethod(af.constants[inst.X].toStringRef());
+            if (!function.isGraphFunction()) {
+              runBuiltinFunction(stack, &function, &af);
             } else {
-              runGraphFunction(stack, function, &af);
+              runGraphFunction(stack, &function, &af);
             }
           } break;
           case RET:

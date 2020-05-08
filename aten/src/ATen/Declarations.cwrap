@@ -655,7 +655,6 @@
   arguments:
     - arg: THTensor* result
       output: True
-      resize: [ [self,0], [self,1], [mat2,2] ]
     - argument 0
     - THTensor* self
     - THTensor* mat2

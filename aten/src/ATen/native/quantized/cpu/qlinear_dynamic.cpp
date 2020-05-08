@@ -274,6 +274,11 @@ class QLinearDynamicInt8 final {
           (uint8_t*)qnnp_w_data,
           nullptr);
       packB = pack_ptr.w.get();
+      if (at::globalContext().releaseWeightsWhenPrepacking()) {
+        // On mobile, we release the original weight by resetting the intrusive_ptr.
+        // Calling unpack after this will throw an assertion.
+        pack_ptr.orig_weight.reset();
+      }
     }
 
     // Quantize input

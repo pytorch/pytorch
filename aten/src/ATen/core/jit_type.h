@@ -1792,7 +1792,8 @@ struct CAFFE2_API ClassType : public NamedType {
       const std::string& name,
       const TypePtr& type,
       bool is_parameter = false,
-      bool was_registered_as_buffer = false);
+      bool was_registered_as_buffer = false,
+      bool allow_any = false);
 
   // [Internal Only] Remove attribute from the ClassType,
   // caller is responsible to make sure the modification is safe:
@@ -1808,10 +1809,11 @@ struct CAFFE2_API ClassType : public NamedType {
       const std::string& name,
       TypePtr ty,
       bool is_parameter = false,
-      bool was_registered_as_buffer = false) {
+      bool was_registered_as_buffer = false,
+      bool allow_any = false) {
     auto slot_idx = findAttributeSlot(name);
     if (!slot_idx) {
-      return addAttribute(name, ty, is_parameter, was_registered_as_buffer);
+      return addAttribute(name, ty, is_parameter, was_registered_as_buffer, allow_any);
     }
 
     TORCH_CHECK(
@@ -1934,7 +1936,9 @@ struct CAFFE2_API ClassType : public NamedType {
   }
 
   void addMethod(torch::jit::Function* method);
-  torch::jit::Function* getMethod(const std::string& name) const;
+  torch::jit::Function* findMethod(const std::string& name) const;
+  torch::jit::Function& getMethod(const std::string& name) const;
+  bool hasMethod(const std::string& name) const;
 
   // [Internal Only] Remove method from the ClassType
   // caller is responsible to make sure the modification is safe:
