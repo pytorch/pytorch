@@ -73,34 +73,21 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
 // operation only depends on the shape of the Tensor
 // e.g. `aten::flatten(%input_tensor, ...)`
 std::vector<std::string> _single_input_general_shape_aten_funcs = {
-    "max_pool1d",
-    "max_pool2d",
-    "max_pool3d",
-    "flatten",
-    "max",
-    "min",
-    "dropout",
-    "reshape",
+    "max_pool1d", "max_pool2d",  "max_pool3d",
+    "flatten",    "max",         "min",
+    "dropout",    "reshape",
     "resize_", // Non-inplace resize is deprecated
-    "chunk",
-    "view",
-    "transpose",
-    "contiguous",
-    "permute",
-    "repeat_interleave",
-    "relu",
-    "relu_",
-    "sigmoid",
-    "tanh",
-    "hardsigmoid",
-    "hardsigmoid_",
+    "chunk",      "view",        "transpose",
+    "contiguous", "permute",     "repeat_interleave",
+    "relu",       "relu_",       "sigmoid",
+    "tanh",       "hardsigmoid", "hardsigmoid_",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
 // have a single input Tensor
 // Also these ops do computation on the value of Tensor
-// TODO: [Need verify] looks like we can quantize simple functionals that just call
-// into aten functions
+// TODO: [Need verify] looks like we can quantize simple functionals that just
+// call into aten functions
 std::vector<std::string> _single_input_general_value_call_funcs = {
     "avg_pool1d",
     "avg_pool2d",
