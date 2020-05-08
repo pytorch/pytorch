@@ -1433,6 +1433,7 @@ def create_derived(backend_type_env, declarations):
                     raise Exception("NYI - return handling")
 
                 cases.append(LEGACY_TH_DEFINITION_CASE.substitute(case_env, case_body=case_body))
+        switch_epilogue = ''
         if ret['kind'] == 'arguments':
             arguments_indices = ret['arguments']
             arguments = [option['arguments'][argi]
