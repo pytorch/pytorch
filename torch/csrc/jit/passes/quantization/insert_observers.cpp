@@ -22,7 +22,8 @@ struct OptionalQConfigHash {
     if (qconfig_opt.has_value()) {
       const auto& m1 = std::get<0>(*qconfig_opt);
       const auto& m2 = std::get<1>(*qconfig_opt);
-      return std::hash<Module>()(m1) + 7 * std::hash<Module>()(m2);
+      constexpr int CONST = 7;
+      return std::hash<Module>()(m1) + CONST * std::hash<Module>()(m2);
     }
     return 0;
   }
@@ -294,7 +295,7 @@ class InsertObserversHelper {
 
   void recordObserved(
       Value* v,
-      Module observer_module,
+      const Module& observer_module,
       std::unordered_map<Value*, Module>& values_to_observe,
       std::unordered_set<Value*>& block_observed_values);
 
@@ -807,7 +808,7 @@ InsertObserversHelper::insertObservers(
 
 void InsertObserversHelper::recordObserved(
     Value* v,
-    Module observer_module,
+    const Module& observer_module,
     std::unordered_map<Value*, Module>& values_to_observe,
     std::unordered_set<Value*>& block_observed_values) {
   Value* to_observe = v;
