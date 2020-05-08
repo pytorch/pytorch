@@ -7832,6 +7832,4 @@ Example::
     >>> torch.bucketize(v, boundaries, right=True)
     tensor([[2, 3, 5],
             [2, 3, 5]])
- 
 """)
-
