@@ -867,12 +867,14 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_event_idx = next(i for i, event in enumerate(events) if rpc_exec_mode.value in event.name)
                 self.assertLess(foo_event_ix, rpc_event_idx)
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_sync_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_sync_rpc_builtin(self):
         self._profiler_test_with_rpc(
@@ -883,12 +885,14 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_async_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_async_rpc_builtin(self):
         self._profiler_test_with_rpc(
@@ -899,12 +903,14 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_remote_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_remote_builtin(self):
         self._profiler_test_with_rpc(
@@ -915,6 +921,7 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_script_async_rpc(self):
         self._profiler_test_with_rpc(
@@ -927,6 +934,7 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_script_sync_rpc(self):
         self._profiler_test_with_rpc(
@@ -939,6 +947,7 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_script_remote_rpc(self):
         self._profiler_test_with_rpc(
@@ -951,6 +960,7 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_async_record_function_double_end_callbacks(self):
         num_sleep_seconds = 1
@@ -968,6 +978,7 @@ class RpcTest(RpcAgentTestFixture):
                         rf._call_end_callbacks_on_future(fut)
                 fut.wait()
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_async_record_function_cbs_jit_call(self):
         if self.rank == 1:
@@ -2360,7 +2371,7 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
 
     # no faulty_messages defined so this fails all retryable messages - see
     # faulty_rpc_agent_test_fixture.py for the list of retryable messages.
-    @dist_init
+    @dist_init(messages_to_delay={})
     def test_check_failed_messages(self):
         if self.rank == 0:
             dst_worker_b = worker_name((self.rank + 1) % self.world_size)
@@ -2381,6 +2392,7 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
         self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
         self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)
+        self.assertEqual(len(self.rpc_backend_options.messages_to_delay), 2)
         self.assertEqual(self.rpc_backend_options.rpc_timeout, rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
 
     @dist_init(faulty_messages=["RREF_FORK_REQUEST", "RREF_CHILD_ACCEPT"])

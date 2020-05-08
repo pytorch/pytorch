@@ -39,7 +39,7 @@ class ChannelShuffle(Module):
     __constants__ = ['groups']
 
     def __init__(self, groups):
-        super(ChanelShuffle, self).__init__()
+        super(ChannelShuffle, self).__init__()
         self.groups = groups
 
     def forward(self, input):

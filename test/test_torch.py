@@ -3321,6 +3321,13 @@ class _TestTorchMixin(object):
         self.assertTrue(isinstance(b, torch.Size))
         self.assertEqual(a, b)
 
+    def test_pickle_function(self):
+        # https://github.com/pytorch/pytorch/issues/37703
+        a = torch.tanh
+        serialized = pickle.dumps(a)
+        b = pickle.loads(serialized)
+        self.assertEqual(a, b)
+
     def test_norm_fastpaths(self):
         x = torch.randn(3, 5)
 
@@ -14602,6 +14609,24 @@ class TestTorchDeviceType(TestCase):
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
         self.assertEqual(X, Xhat, atol=1e-8, message='VeV\' wrong')
 
+        # test invalid input
+        self.assertRaisesRegex(
+            RuntimeError, 
+            'A should be 2 dimensional', 
+            lambda: torch.eig(torch.ones((2))))
+        self.assertRaisesRegex(
+            RuntimeError, 
+            'A should be square', 
+            lambda: torch.eig(torch.ones((2, 3))))
+        self.assertRaisesRegex(
+            RuntimeError, 
+            'A should not contain infs or NaNs', 
+            lambda: torch.eig(np.inf * torch.ones((2, 2))))
+        self.assertRaisesRegex(
+            RuntimeError, 
+            'A should not contain infs or NaNs', 
+            lambda: torch.eig(np.nan * torch.ones((2, 2))))
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
@@ -14962,8 +14987,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             run_test(m, v2, v1, lambda x: x.transpose(0, 1))
 
     @onlyCPU
-    @precisionOverride({torch.bfloat16: 1e-0, torch.float: 1e-4, torch.double: 1e-8})
-    @dtypes(torch.bfloat16, torch.float, torch.double)
+    @precisionOverride({torch.bfloat16: 1e-0, torch.float: 1e-4, torch.double: 1e-8,
+                        torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_addmv(self, device, dtype):
         t = torch.randn(10, device=device).to(dtype)
         m = torch.randn(10, 100, device=device).to(dtype)
@@ -14989,6 +15015,42 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 res2[i] += m[i, j] * v[j]
 
         self.assertEqual(res1, res2, atol=self.precision)
+
+    @dtypesIfCUDA(*([torch.half, torch.float, torch.double]
+                    + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypes(torch.float, torch.double)
+    def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype):
+        # tests (o, s)*(s).  o is output size, s is summed size.
+        o = 5
+        s = 3
+        a_data = torch.arange(1, o * s + 1, device=device, dtype=dtype).view(o, s)
+        x_data = torch.arange(1, s + 1, 1, device=device, dtype=dtype)
+        y_data = torch.ones(o, device=device, dtype=dtype)
+        control = torch.tensor([15., 33., 51., 69., 87.], device=device, dtype=dtype)
+
+        def _test(use_out, row_major, incx, incy, lda_tail):
+            if row_major:
+                a_storage = torch.full((o, s + lda_tail), float('nan'), device=device, dtype=dtype)
+            else:
+                a_storage = torch.full((s, o + lda_tail), float('nan'), device=device, dtype=dtype).permute(1, 0)
+            a = a_storage[:o, :s].copy_(a_data)
+
+            x_storage = torch.full((s, incx), float('nan'), device=device, dtype=dtype)
+            x = x_storage[:, 0].copy_(x_data)
+
+            y_storage = torch.full((o, incy), float('nan'), device=device, dtype=dtype)
+            y = y_storage[:, 0].copy_(y_data)
+
+            if use_out:
+                out = torch.addmv(y, a, x)
+            else:
+                out = torch.empty_like(y)
+                torch.addmv(y, a, x, out=out)
+
+            self.assertEqual(out, control, atol=1.e-4)
+
+        for use_out, row_major, incx, incy, lda_tail in product((False, True), (False, True), (1, 2), (1, 2), (0, 1)):
+            _test(use_out, row_major, incx, incy, lda_tail)
 
     @slowTest
     @onlyCPU
