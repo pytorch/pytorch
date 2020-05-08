@@ -216,7 +216,7 @@ class FeatureAlphaDropout(_DropoutNd):
 
     Examples::
 
-        >>> m = nn.FeatireAlphaDropout(p=0.2)
+        >>> m = nn.FeatureAlphaDropout(p=0.2)
         >>> input = torch.randn(20, 16, 4, 32, 32)
         >>> output = m(input)
 
