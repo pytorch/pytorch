@@ -207,6 +207,11 @@ struct bernoulli_distribution {
     T p;
 };
 
+template <typename T>
+struct GeometricType { using type = float; };
+
+template <> struct GeometricType<double> { using type = double; };
+
 /**
  * Samples a geometric distribution given a probability input
  */

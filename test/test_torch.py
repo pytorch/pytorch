@@ -10242,7 +10242,7 @@ class TestTorchDeviceType(TestCase):
             torch.rand(size, size, out=res2)
             self.assertEqual(res1, res2)
 
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.half)
     def test_log_normal(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).log_normal_()
         self.assertEqual(a.dtype, dtype)
@@ -10254,7 +10254,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
 
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.half)
     def test_exponential(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).exponential_(0.5)
         self.assertEqual(a.dtype, dtype)
@@ -10301,7 +10301,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertTrue(res.statistic < 0.1)
 
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_lognormal_kstest(self, device, dtype):
         from scipy import stats
@@ -10316,7 +10316,7 @@ class TestTorchDeviceType(TestCase):
                     self.assertTrue(res.statistic < 0.1)
 
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_exponential_kstest(self, device, dtype):
         from scipy import stats
@@ -10327,7 +10327,7 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(res.statistic < 0.1)
 
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_cauchy_kstest(self, device, dtype):
         from scipy import stats
@@ -10340,8 +10340,10 @@ class TestTorchDeviceType(TestCase):
 
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @dtypes(torch.float, torch.double)
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float, torch.double, torch.half, torch.bfloat16)
     def test_geometric_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -13817,7 +13819,7 @@ class TestTorchDeviceType(TestCase):
 
     def _test_unique_with_expects(self, device, dtype, f, x, expected_unique, expected_inverse, expected_counts, additional_shape):
         def ensure_tuple(x):
-            if torch.is_tensor(x):
+            if isinstance(x, torch.Tensor):
                 return (x,)
             return x
 
@@ -13846,7 +13848,7 @@ class TestTorchDeviceType(TestCase):
             return  # CPU does not have half support
 
         def ensure_tuple(x):
-            if torch.is_tensor(x):
+            if isinstance(x, torch.Tensor):
                 return (x,)
             return x
 
@@ -14690,6 +14692,24 @@ class TestTorchDeviceType(TestCase):
         torch.eig(X, True, out=(e, v))
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
         self.assertEqual(X, Xhat, atol=1e-8, message='VeV\' wrong')
+
+        # test invalid input
+        self.assertRaisesRegex(
+            RuntimeError, 
+            'A should be 2 dimensional', 
+            lambda: torch.eig(torch.ones((2))))
+        self.assertRaisesRegex(
+            RuntimeError, 
+            'A should be square', 
+            lambda: torch.eig(torch.ones((2, 3))))
+        self.assertRaisesRegex(
+            RuntimeError, 
+            'A should not contain infs or NaNs', 
+            lambda: torch.eig(np.inf * torch.ones((2, 2))))
+        self.assertRaisesRegex(
+            RuntimeError, 
+            'A should not contain infs or NaNs', 
+            lambda: torch.eig(np.nan * torch.ones((2, 2))))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -17790,13 +17810,13 @@ def generate_test_function(cls,
 
         # Converts CPU tensors to device tensors
         device_tensor = cpu_tensor.to(dtype=dtype, device=device)
-        device_args = [arg.to(device=device) if torch.is_tensor(arg) else arg for arg in cpu_args]
+        device_args = [arg.to(device=device) if isinstance(arg, torch.Tensor) else arg for arg in cpu_args]
 
         # Converts float device tensors to half/bfloat16 when the dtype is half/bfloat16
         # Note: CPU half tensors don't support many operations.
         if dtype in {torch.half, torch.bfloat16}:
             device_args = [arg.to(dtype=dtype) if
-                           (torch.is_tensor(arg) and arg.dtype == torch.float) else arg
+                           (isinstance(arg, torch.Tensor) and arg.dtype == torch.float) else arg
                            for arg in device_args]
 
         # Runs the tensor op on CPU and device
