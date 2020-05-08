@@ -179,8 +179,8 @@ class BatchNorm1d(_BatchNorm):
             learnable affine parameters. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
-            this module does not track such statistics and always uses batch
-            statistics in both training and eval modes. Default: ``True``
+            this module does not track such statistics and uses batch statistics instead
+            in both training and eval modes if the running mean and variance are ``None``. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C)` or :math:`(N, C, L)`
@@ -250,8 +250,8 @@ class BatchNorm2d(_BatchNorm):
             learnable affine parameters. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
-            this module does not track such statistics and always uses batch
-            statistics in both training and eval modes. Default: ``True``
+            this module does not track such statistics and uses batch statistics instead
+            in both training and eval modes if the running mean and variance are ``None``. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C, H, W)`
@@ -322,8 +322,8 @@ class BatchNorm3d(_BatchNorm):
             learnable affine parameters. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
-            this module does not track such statistics and always uses batch
-            statistics in both training and eval modes. Default: ``True``
+            this module does not track such statistics and uses batch statistics instead
+            in both training and eval modes if the running mean and variance are ``None``. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C, D, H, W)`
@@ -402,8 +402,8 @@ class SyncBatchNorm(_BatchNorm):
             learnable affine parameters. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
-            this module does not track such statistics and always uses batch
-            statistics in both training and eval modes. Default: ``True``
+            this module does not track such statistics and uses batch statistics instead
+            in both training and eval modes if the running mean and variance are ``None``. Default: ``True``
         process_group: synchronization of stats happen within each process group
             individually. Default behavior is synchronization across the whole
             world
