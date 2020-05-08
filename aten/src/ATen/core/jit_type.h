@@ -1367,6 +1367,7 @@ inline TypePtr unshapedType(const TypePtr& type) {
   if (type->isSubtypeOf(TensorType::get())) {
     return TensorType::get();
   }
+  std::cout << "In type: " << type->str() << std::endl; 
   return type->withContained(fmap(type->containedTypes(), unshapedType));
 }
 
@@ -1615,9 +1616,6 @@ static const std::string attribute_name_from_enum(ATTRIBUTE_KIND_ENUM ake) {
   TORCH_CHECK(false, "Unexpeted attribute kind");
   return std::string();
 }
-
-struct AttributeKind;
-using AttributeKindPtr = std::shared_ptr<AttributeKind>;
 
 struct CAFFE2_API AttributeKind {
   public:
