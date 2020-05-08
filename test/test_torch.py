@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
+    skipCPUIfNoLapack, skipCPUIfNoMkl, skipIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, onlyOnCPUAndCUDA
 import torch.backends.quantized
@@ -12738,6 +12738,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyOnCPUAndCUDA
     @skipIfRocm
+    @skipIfNoMkl
     @dtypes(torch.double)
     def test_istft_of_sine(self, device, dtype):
         def _test(amplitude, L, n):
@@ -12773,6 +12774,7 @@ class TestTorchDeviceType(TestCase):
     @onlyOnCPUAndCUDA
     @skipIfRocm
     @dtypes(torch.double)
+    @skipCPUIfNoMkl
     def test_istft_linearity(self, device, dtype):
         num_trials = 100
 
@@ -12837,6 +12839,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyOnCPUAndCUDA
     @skipIfRocm
+    @skipCPUIfNoMkl
     def test_batch_istft(self, device):
         original = torch.tensor([
             [[4., 0.], [4., 0.], [4., 0.], [4., 0.], [4., 0.]],
