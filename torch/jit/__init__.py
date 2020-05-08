@@ -1129,7 +1129,6 @@ def whichmodule(obj):
             pass
     return '__main__'
 
-
 def _recursive_compile_class(obj, loc):
     _qual_name = _qualified_name(obj)
     # We're starting a new compilation, so update the error call stack in
@@ -1139,7 +1138,6 @@ def _recursive_compile_class(obj, loc):
     rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
     _compile_and_register_class(obj, rcb, _qual_name)
     del error_stack
-
 
 def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)

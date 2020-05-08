@@ -290,9 +290,6 @@ def try_ann_to_type(ann, loc):
     def fake_rcb(key):
         return None
     return torch._C._resolve_type_from_object(ann, loc, fake_rcb)
-    if the_type is not None:
-        return the_type
-    return None
 
 
 def ann_to_type(ann, loc):
