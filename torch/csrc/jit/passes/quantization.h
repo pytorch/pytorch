@@ -40,13 +40,6 @@ struct OptionalQConfigHash {
 using QConfigTypePtrMap =
     std::unordered_map<c10::optional<QConfig>, TypePtr, OptionalQConfigHash>;
 
-/** \brief Quantize model's inputs and outputs.
- *
- * This pass folds quant/dequant ops into the input/output tensors, essentially
- * quantizing these tensors. It's done to reduce model's memory footprint.
- */
-TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
-
 /** \brief Insert observer module and observer function call for
  *  the Tensors that needs to be observed.
  *
@@ -144,19 +137,6 @@ TORCH_API void QuantFusion(
  */
 TORCH_API Module FoldConvBatchNorm2d(const Module& module);
 
-/** \brief Fold quantize function call into module
- *
- *  For the graph of the specified method of module, if we find a
- * quantize_per_tensor call on an attribute("weight") of the module, we'll
- * quantize the attribute directly and register a new buffer "_quantized_weight"
- * on the module and remove the quantize_per_tensor call and replace the use of
- * the quantized weight with
- *  "_quantized_weight".
- */
-TORCH_API void FoldQuantizeCallIntoBuffer(
-    Module& module,
-    const std::string& method_name);
-
 /** \brief Insert prepack and unpack function in graph
  *  We want add pack/unpack functions for quantized weight because later we want
  * to fold the packed weight as an attribute of the module, in order to reduce
@@ -175,25 +155,6 @@ TORCH_API void InsertPrepackUnpack(std::shared_ptr<Graph>& graph);
  *   and call InsertPrepackUnpack on the graph.
  */
 TORCH_API void InsertPrepackUnpack(Module& module);
-
-/** \brief Fold prepack function call into module
- *
- *  For the graph of the specified method, if we find a
- * `quantized::linear_prepack` call, we'll clone the wrapper module and set the
- * weight and bias of the module and add the wrapper module as a child to the
- * input module. Folding is recursively applied to all methods of all child
- * modules of the input module
- *
- *  Wrapper module is used to overwrite serialization for packed
- *  weight and bias since they are not recognized by JIT, this
- *  is a workaround, a long term solution would be to support serialization of
- *  packed weight and bias using custom types
- *
- */
-TORCH_API void FoldPrepackedWeightIntoModule(
-    Module& module,
-    const Module& linear_params_module,
-    const Module& conv_params_module);
 
 /** Recursively deduplicate multiple uses of the same module by
  *  creating an instance clone for each use of the module, which means
