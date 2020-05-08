@@ -2702,20 +2702,20 @@ namespace c10 {
 #ifdef MPARK_CPP14_CONSTEXPR
   namespace detail_ {
 
-    inline constexpr bool all(std::initializer_list<bool> bs) {
+    inline constexpr bool any(std::initializer_list<bool> bs) {
       for (bool b : bs) {
-        if (!b) {
-          return false;
+        if (b) {
+          return true;
         }
       }
-      return true;
+      return false;
     }
 
   }  // namespace detail_
 
   template <typename Visitor, typename... Vs>
   inline constexpr decltype(auto) visit(Visitor &&visitor, Vs &&... vs) {
-    return (detail_::all({!vs.valueless_by_exception()...})
+    return (!detail_::any({vs.valueless_by_exception()...})
                 ? (void)0
                 : throw_bad_variant_access()),
            detail_::visitation::variant::visit_value(

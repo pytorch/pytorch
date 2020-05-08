@@ -5,13 +5,13 @@ import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any
+    is_optional, _qualified_name, Any, RRef, is_rref, Future, is_future
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType
+    DeviceObjType, RRefType, FutureType
 
 from textwrap import dedent
-from torch._six import builtins, PY2
+from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
 
@@ -39,6 +39,8 @@ class EvalEnv(object):
         'List': List,
         'Dict': Dict,
         'Optional': Optional,
+        'RRef': RRef,
+        'Future': Future,
     }
 
     def __init__(self, rcb):
@@ -55,7 +57,7 @@ def get_signature(fn, rcb, loc, is_method):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
     signature = None
     if PY35:
-        signature = try_real_annotations(fn)
+        signature = try_real_annotations(fn, loc)
         if signature is not None and is_method:
             # If this is a method, then the signaure will include a type for
             # `self`, but type comments do not contain a `self`. So strip it
@@ -93,14 +95,7 @@ def is_vararg(the_callable):
         the_callable = the_callable.__call__
 
     if is_function_or_method(the_callable):
-        if PY2:
-            # [inspect args]
-            # `inspect.getfullargspec` is not available in Python 2 but
-            # `inspect.getargspec` is deprecated in Python 3, so we have to
-            # switch over them
-            return inspect.getargspec(the_callable).varargs is not None
-        else:
-            return inspect.getfullargspec(the_callable).varargs is not None
+        return inspect.getfullargspec(the_callable).varargs is not None
     else:
         return False
 
@@ -111,11 +106,7 @@ def get_param_names(fn, n_args):
         fn = fn.__call__
 
     if is_function_or_method(fn):
-        if PY2:
-            # see [inspect args]
-            return inspect.getargspec(fn).args
-        else:
-            return inspect.getfullargspec(fn).args
+        return inspect.getfullargspec(fn).args
     else:
         # The `fn` was not a method or function (maybe a class with a __call__
         # method, so use a default param name list)
@@ -161,9 +152,8 @@ def parse_type_line(type_line, rcb, loc):
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the return type of a type annotation: {}".format(str(e)))
 
-    resolver = (rcb, loc)
-    arg_types = [ann_to_type(ann, resolver) for ann in arg_ann]
-    return arg_types, ann_to_type(ret_ann, resolver)
+    arg_types = [ann_to_type(ann, loc) for ann in arg_ann]
+    return arg_types, ann_to_type(ret_ann, loc)
 
 
 def get_type_line(source):
@@ -230,7 +220,7 @@ def split_type_line(type_line):
     return type_line[start_offset:arrow_pos].strip(), type_line[arrow_pos + 2:].strip()
 
 
-def try_real_annotations(fn):
+def try_real_annotations(fn, loc):
     """Tries to use the Py3.5+ annotation syntax to get the type."""
     try:
         sig = inspect.signature(fn)
@@ -245,32 +235,34 @@ def try_real_annotations(fn):
         # sig.empty is really annoying so convert it to None
         return ann if ann is not sig.empty else None
 
-    arg_types = [ann_to_type(as_ann(p.annotation))
+    arg_types = [ann_to_type(as_ann(p.annotation), loc)
                  for p in sig.parameters.values()]
-    return_type = ann_to_type(as_ann(sig.return_annotation))
+    return_type = ann_to_type(as_ann(sig.return_annotation), loc)
     return arg_types, return_type
 
 
-def ann_to_type(ann, resolver=None):
-    # resolver should be a Tuple[Callable, SourceRange] where the Callable
-    # is a resolutionCallback
+def try_ann_to_type(ann, loc):
     if ann is None:
         return TensorType.get()
     elif ann is torch.Tensor:
         return TensorType.get()
     elif is_tuple(ann):
-        return TupleType([ann_to_type(a) for a in ann.__args__])
+        return TupleType([try_ann_to_type(a, loc) for a in ann.__args__])
     elif is_list(ann):
-        return ListType(ann_to_type(ann.__args__[0]))
+        return ListType(try_ann_to_type(ann.__args__[0], loc))
     elif is_dict(ann):
-        key = ann_to_type(ann.__args__[0])
-        value = ann_to_type(ann.__args__[1])
+        key = try_ann_to_type(ann.__args__[0], loc)
+        value = try_ann_to_type(ann.__args__[1], loc)
         return DictType(key, value)
     elif is_optional(ann):
         if issubclass(ann.__args__[1], type(None)):
-            return OptionalType(ann_to_type(ann.__args__[0]))
+            return OptionalType(try_ann_to_type(ann.__args__[0], loc))
         else:
-            return OptionalType(ann_to_type(ann.__args__[1]))
+            return OptionalType(try_ann_to_type(ann.__args__[1], loc))
+    elif is_rref(ann):
+        return RRefType(try_ann_to_type(ann.__args__[0], loc))
+    elif is_future(ann):
+        return FutureType(try_ann_to_type(ann.__args__[0], loc))
     elif ann is float:
         return FloatType.get()
     elif ann is int:
@@ -283,18 +275,26 @@ def ann_to_type(ann, resolver=None):
         return AnyType.get()
     elif ann is type(None):
         return NoneType.get()
-    elif hasattr(ann, "__torch_script_class__"):
+    elif inspect.isclass(ann) and hasattr(ann, "__torch_script_class__"):
         return ClassType(_qualified_name(ann))
-    elif hasattr(ann, "__torch_script_interface__"):
+    elif inspect.isclass(ann) and hasattr(ann, "__torch_script_interface__"):
         return InterfaceType(_qualified_name(ann))
     elif ann is torch.device:
         return DeviceObjType.get()
-    elif resolver is not None:
+    else:
         # Maybe resolve a NamedTuple to a Tuple Type
-        rcb, loc = resolver
-        the_type = torch._C._resolve_type(ann.__name__, loc, rcb)
+        def fake_rcb(key):
+            return None
+        the_type = torch._C._resolve_type_from_object(ann, loc, fake_rcb)
         if the_type is not None:
             return the_type
+    return None
+
+
+def ann_to_type(ann, loc):
+    the_type = try_ann_to_type(ann, loc)
+    if the_type is not None:
+        return the_type
     raise ValueError("Unknown type annotation: '{}'".format(ann))
 
 
@@ -327,5 +327,6 @@ __all__ = [
     'get_type_line',
     'split_type_line',
     'try_real_annotations',
+    'try_ann_to_type',
     'ann_to_type',
 ]

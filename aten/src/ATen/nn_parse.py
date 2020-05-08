@@ -27,8 +27,8 @@ def argument_to_declaration(param, func=None):
         arg['type'] = 'THIndexTensor*'
     elif arg['type'] == 'Scalar':
         arg['type'] = 'accreal'
-    elif arg['type'] == 'Generator*':
-        arg['type'] = 'THGenerator*'
+    elif arg['type'] == 'Generator':
+        arg['type'] = 'c10::optional<at::Generator>'
 
     match = re.match(r'IntArrayRef\[(\d+)\]', arg['type'])
     if match:
@@ -40,11 +40,6 @@ def argument_to_declaration(param, func=None):
         arg['optional'] = True
         arg['default'] = default
     arg['name'] = name
-
-    if func is not None:
-        wrap_dims = func.get('wrap_dim', {})
-        if name in wrap_dims:
-            arg['wrap_dim'] = wrap_dims[name]
 
     return arg
 
@@ -287,21 +282,6 @@ def backward_declaration(base, thnn_functions, backend_types):
                   if arg['name'] != 'inplace']
     arguments += base['buffers']
 
-    if 'upsample' in base['name']:
-        # Add input_size as parameter to upsample backwards functions
-        # Note that input_size is 4-dim for upsample_xxx2d
-        size = 2 + int(re.search(r'(\d+)d', base['name']).group(1))
-        input_size_arg = {'type': 'IntArrayRef', 'name': 'input_size', 'size': size}
-        for output_size_idx, arg in enumerate(arguments):
-            if arg['name'] == 'output_size':
-                break
-        arguments.insert(output_size_idx + 1, input_size_arg)
-
-    if 'im2col' in base['name']:
-        # Add input_size as parameter to im2col backwards function
-        input_size_arg = {'type': 'IntArrayRef', 'name': 'input_size', 'size': 2}
-        arguments.insert(2, input_size_arg)
-
     # outputs from the forward may be inputs to the backwards
     for arg in arguments:
         if 'output' in arg:
@@ -315,10 +295,10 @@ def backward_declaration(base, thnn_functions, backend_types):
         arg['is_nullable'] = True
 
         # grad_weight and grad_bias need to be resized and zeroed
-        if arg['name'] == 'grad_weight':
+        if arg['name'] == 'grad_weight' and base['name'] != '_thnn_conv2d' and base['name'] != '_thnn_conv_depthwise2d':
             arg['resize'] = 'weight'
             arg['zero'] = True
-        if arg['name'] == 'grad_bias':
+        if arg['name'] == 'grad_bias' and base['name'] != '_thnn_conv2d' and base['name'] != '_thnn_conv_depthwise2d':
             dim = 1 if 'transpose' in name else 0
             arg['resize'] = [('weight', dim)]
             arg['zero'] = True

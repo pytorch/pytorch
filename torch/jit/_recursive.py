@@ -60,6 +60,12 @@ def _get_valid_constant(attr, v):
         3. a list or tuple of (2)
         """.format(type(v).__name__, attr, constants)))
 
+
+class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
+    def __init__(self, source, filename, file_lineno, leading_whitespace_len):
+        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
+
+
 def infer_concrete_type_builder(nn_module):
     """
     Build a ConcreteModuleTypeBuilder from an nn.Module. This
@@ -77,9 +83,9 @@ def infer_concrete_type_builder(nn_module):
     # try to infer the type from type annotation or from the object itself
     def infer_type(name, item):
         if name in class_annotations:
-            attr_type = torch.jit.annotations.ann_to_type(class_annotations[name])
+            attr_type = torch.jit.annotations.ann_to_type(class_annotations[name], _jit_internal.fake_range())
         elif isinstance(item, torch.jit.Attribute):
-            attr_type = torch.jit.annotations.ann_to_type(item.type)
+            attr_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())
         else:
             attr_type = torch._C._jit_try_infer_type(item)
         return attr_type
@@ -87,34 +93,31 @@ def infer_concrete_type_builder(nn_module):
     added_names = set()
 
     for name, item in nn_module._parameters.items():
-        if item is None:
-            # TODO special case: parameters can be None. The JIT assumes
-            # parameters are Tensor types, so in this case just add it as a
-            # attribute.
-            # The "correct" fix here is to add the parameter as a NoneType
-            # attribute, but NoneType refinemenet is currently wonky
-            continue
-        assert isinstance(item, torch.Tensor)
+        assert item is None or isinstance(item, torch.Tensor)
         attr_type = infer_type(name, item)
+        # We currently have the invariant in various places in our code
+        # that parameters must be Tensors. However, the nn.Module API also
+        # allows NoneType parameters. These parameters are not returned as
+        # part of `parameters()` and its variants, but are available
+        # through direct attribute access.
         concrete_type_builder.add_attribute(name, attr_type, True)
         added_names.add(name)
 
     for name, item in nn_module._buffers.items():
-        if item is None:
-            # TODO special case: parameters can be None. The JIT assumes
-            # parameters are Tensor types, so in this case just add it as a
-            # attribute.
-            # The "correct" fix here is to add the parameter as a NoneType
-            # attribute, but NoneType refinemenet is currently wonky
-            continue
-        assert isinstance(item, torch.Tensor)
+        assert item is None or isinstance(item, torch.Tensor)
         attr_type = infer_type(name, item)
         concrete_type_builder.add_attribute(name, attr_type, False)
         added_names.add(name)
 
     for name, item in nn_module._modules.items():
         attr_type = infer_type(name, item)
+        if item is None:
+            # Modules can be None. We don't have direct support for optional
+            # Modules, so the register it as an NoneType attribute instead.
+            concrete_type_builder.add_attribute(name, attr_type, False)
+            continue
         if attr_type is not None:
+            assert attr_type.is_interface_type()
             # if the type can be inferred, it should be a module interface type
             sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type)
         else:
@@ -134,13 +137,23 @@ def infer_concrete_type_builder(nn_module):
 
     for name in constants_set:
         if name in added_names:
-            # XXX: It is possible for something to be in the constants set but
-            # also in the parameters/buffers. This happens in BatchNorm as a
-            # hack to support optional parameters.
+            # TODO: We should really error in this case, but its bc-breaking so
+            # we need to warn for at least one release
+            if name in nn_module._modules:
+                hint = "submodule"
+            elif name in nn_module._buffers:
+                hint = "buffer"
+            elif name in nn_module._parameters:
+                hint = "parameter"
+            else:
+                raise AssertionError("added_names must be submodule, parameter, or buffer")
+
+            warnings.warn("'{}' was found in ScriptModule constants, "
+                          " but it is a non-constant {}. Consider removing it.".format(name, hint))
             continue
         if not hasattr(nn_module, name):
-            # TODO: We should really error in this case, but there are a couple
-            # extant examples of this so leave it for a future PR.
+            # TODO: We should really error in this case, but its bc-breaking so
+            # we need to warn for at least one release
             warnings.warn("'{}' was found in ScriptModule constants, "
                           "but was not actually set in __init__. "
                           "Consider removing it.".format(name))
@@ -327,6 +340,17 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 scripted = create_script_module_impl(orig_value, sub_concrete_type, infer_methods_to_compile)
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
+
+        # 3. Copy @ignored/@unused methods from the original `nn_module` to the new ScriptModule.
+        #    This ensures we can access these Python methods on the ScriptModule.
+        for name in dir(nn_module):
+            item = getattr(nn_module, name, None)
+            if not inspect.ismethod(item):
+                continue
+            if _jit_internal.is_ignored_fn(item):
+                unbound_function = getattr(type(nn_module), name)
+                bound_method = unbound_function.__get__(script_module)
+                setattr(script_module, name, bound_method)
 
         # For convenience, attach the concrete type to the new ScriptModule
         script_module._concrete_type = concrete_type

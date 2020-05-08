@@ -76,6 +76,10 @@ are sorted by the corresponding KEY.
     .Arg(
         "max_mismatched_ratio",
         "An error is raised when ratio of mismatched ranges exceeds this.")
+    .Arg(
+        "max_empty_ratio",
+        "An error is raised when ratio of empty ranges exceeds this (default is"
+        " 1, which means by default no error will be triggered).")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       ArgumentHelper helper(def);

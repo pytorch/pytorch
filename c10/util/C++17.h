@@ -40,7 +40,7 @@ make_unique_base(Args&&... args) {
 
 
 
-#ifdef __cpp_lib_logical_traits
+#if defined(__cpp_lib_logical_traits) && !(defined(_MSC_VER) && _MSC_VER < 1920)
 
 template <class... B>
 using conjunction = std::conjunction<B...>;
@@ -93,12 +93,17 @@ template<typename... Ts> using void_t = typename make_void<Ts...>::type;
 
 #endif
 
-
+#ifdef __HIP_PLATFORM_HCC__
+// rocm doesn't like the C10_HOST_DEVICE
+#define CUDA_HOST_DEVICE
+#else
+#define CUDA_HOST_DEVICE C10_HOST_DEVICE
+#endif
 
 #ifdef __cpp_lib_apply
 
 template <class F, class Tuple>
-inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
+CUDA_HOST_DEVICE inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
   return std::apply(std::forward<F>(f), std::forward<Tuple>(t));
 }
 
@@ -110,11 +115,10 @@ namespace detail {
 template <class F, class Tuple, std::size_t... INDEX>
 #if defined(_MSC_VER)
 // MSVC has a problem with the decltype() return type, but it also doesn't need it
-// Also, nvcc on Windows needs C10_HOST_DEVICE here.
 C10_HOST_DEVICE constexpr auto apply_impl(F&& f, Tuple&& t, std::index_sequence<INDEX...>)
 #else
-// GCC/Clang need the decltype() return type and rocm doesn't like the C10_HOST_DEVICE
-constexpr auto apply_impl(F&& f, Tuple&& t, std::index_sequence<INDEX...>)
+// GCC/Clang need the decltype() return type
+CUDA_HOST_DEVICE constexpr auto apply_impl(F&& f, Tuple&& t, std::index_sequence<INDEX...>)
 -> decltype(std::forward<F>(f)(std::get<INDEX>(std::forward<Tuple>(t))...))
 #endif
 {
@@ -123,10 +127,7 @@ constexpr auto apply_impl(F&& f, Tuple&& t, std::index_sequence<INDEX...>)
 }  // namespace detail
 
 template <class F, class Tuple>
-#if defined(_MSC_VER)
-C10_HOST_DEVICE // rocm doesn't like the C10_HOST_DEVICE
-#endif
-constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
+CUDA_HOST_DEVICE constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
     std::forward<F>(f), std::forward<Tuple>(t),
     std::make_index_sequence<std::tuple_size<std::remove_reference_t<Tuple>>::value>{}))
 {
@@ -137,7 +138,7 @@ constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
 
 #endif
 
-
+#undef CUDA_HOST_DEVICE
 
 
 template <typename Functor, typename... Args>
@@ -145,7 +146,7 @@ typename std::enable_if<
     std::is_member_pointer<typename std::decay<Functor>::type>::value,
     typename std::result_of<Functor && (Args && ...)>::type>::type
 invoke(Functor&& f, Args&&... args) {
-  return std::mem_fn(f)(std::forward<Args>(args)...);
+  return std::mem_fn(std::forward<Functor>(f))(std::forward<Args>(args)...);
 }
 
 template <typename Functor, typename... Args>
@@ -174,8 +175,15 @@ struct _identity final {
 
 template<class Func, class Enable = void>
 struct function_takes_identity_argument : std::false_type {};
+#if defined(_MSC_VER)
+// For some weird reason, MSVC shows a compiler error when using guts::void_t instead of std::void_t.
+// But we're only building on MSVC versions that have std::void_t, so let's just use that one.
+template<class Func>
+struct function_takes_identity_argument<Func, std::void_t<decltype(std::declval<Func>()(_identity()))>> : std::true_type {};
+#else
 template<class Func>
 struct function_takes_identity_argument<Func, void_t<decltype(std::declval<Func>()(_identity()))>> : std::true_type {};
+#endif
 
 template<bool Condition>
 struct _if_constexpr;

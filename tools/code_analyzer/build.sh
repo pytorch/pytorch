@@ -11,11 +11,18 @@
 #
 # 2. Analyze test project and compare with expected result:
 # LLVM_DIR=${HOME}/src/llvm8/build/install \
-# ANALYZE_TEST=1 CHECK_RESULT=1 tools/code_analyzer/build.sh
+# ANALYZE_TEST=1 tools/code_analyzer/build.sh
 #
 # 3. Analyze torch and generate yaml file of op dependency with debug path:
 # LLVM_DIR=${HOME}/src/llvm8/build/install \
-# ANALYZE_TORCH=1 tools/code_analyzer/build.sh -closure=false -debug_path=true
+# ANALYZE_TORCH=1 tools/code_analyzer/build.sh -debug_path=true
+#
+# If you're a Facebook employee, chances are you're running on CentOS 8.
+# If that's the case, you can install all the dependencies you need with:
+#
+#   sudo dnf install llvm-devel llvm-static clang ncurses-devel
+#
+# and then set LLVM_DIR=/usr
 
 set -ex
 
@@ -32,6 +39,7 @@ BUILD_ROOT="${BUILD_ROOT:-${SRC_ROOT}/build_code_analyzer}"
 WORK_DIR="${BUILD_ROOT}/work"
 
 mkdir -p "${BUILD_ROOT}"
+mkdir -p "${WORK_DIR}"
 cd "${BUILD_ROOT}"
 
 build_analyzer() {
@@ -71,78 +79,63 @@ build_test_project() {
 }
 
 call_analyzer() {
-  echo "Analyze: ${INPUT}"
-
-  "${LLVM_DIR}/bin/opt" \
-    -load="${BUILD_ROOT}/libOpDependencyPass.so" \
-    -op_dependency \
-    -disable-output \
-    -op_schema_pattern="^(_aten|_prim|aten|quantized|profiler|_test)::[^ ]+" \
-    -op_register_pattern="c10::RegisterOperators::(op|checkSchemaAndRegisterOp_)" \
-    -op_invoke_pattern="c10::Dispatcher::findSchema|callOp" \
-    -format="${FORMAT}" \
-    ${EXTRA_ANALYZER_FLAGS} \
-    "${INPUT}" \
-    > "${OUTPUT}"
-
-  echo "Result: ${OUTPUT}"
+  ANALYZER_BIN="${BUILD_ROOT}/analyzer" \
+    INPUT="${INPUT}" OUTPUT="${OUTPUT}" \
+    EXTRA_ANALYZER_FLAGS="${EXTRA_ANALYZER_FLAGS}" \
+    "${ANALYZER_SRC_HOME}/run_analyzer.sh"
 }
 
 analyze_torch_mobile() {
   INPUT="${WORK_DIR}/torch.ll"
-  FORMAT="${FORMAT:=yaml}"
-  OUTPUT="${WORK_DIR}/torch_result.${FORMAT}"
+  OUTPUT="${WORK_DIR}/torch_result.yaml"
 
   if [ ! -f "${INPUT}" ]; then
-    # Extract libtorch archive
-    OBJECT_DIR="${WORK_DIR}/torch_objs"
-    rm -rf "${OBJECT_DIR}" && mkdir -p "${OBJECT_DIR}" && pushd "${OBJECT_DIR}"
-    for f in "${TORCH_INSTALL_PREFIX}/lib"/*.a; do
-      ar x "${f}"
-    done
-    popd
-
     # Link libtorch into a single module
-    "${LLVM_DIR}/bin/llvm-link" -S "${OBJECT_DIR}"/*.cpp.o -o "${INPUT}"
+    # TODO: invoke llvm-link from cmake directly to avoid this hack.
+    # TODO: include *.c.o when there is meaningful fan-out from pure-c code.
+    "${LLVM_DIR}/bin/llvm-link" -S \
+    $(find "${TORCH_BUILD_ROOT}" -name '*.cpp.o' -o -name '*.cc.o') \
+    -o "${INPUT}"
   fi
 
   # Analyze dependency
   call_analyzer
+}
 
-  if [ -n "${DEPLOY}" ]; then
-    DEST="${BUILD_ROOT}/torch_deps.py"
-    cat > ${DEST} <<- EOM
-# Generated for selective build without using static dispatch.
-# Manually run the script to update:
-# ANALYZE_TORCH=1 FORMAT=py DEPLOY=1 tools/code_analyzer/build.sh -closure=false
-EOM
-    printf "TORCH_DEPS = " >> ${DEST}
-    cat "${OUTPUT}" >> ${DEST}
+convert_output_to_bazel() {
+  cd "${SRC_ROOT}"
+
+  DEST="${BUILD_ROOT}/pt_deps.bzl"
+
+  args=(
+    --op_dependency "${OUTPUT}"
+    --output "${DEST}"
+  )
+
+  if [ -n "${BASE_OPS_FILE}" ] && [ -f "${BASE_OPS_FILE}" ]; then
+    args+=(
+      --base_ops $(< ${BASE_OPS_FILE})
+    )
   fi
+
+  python -m tools.code_analyzer.op_deps_processor "${args[@]}"
+
+  echo "Deployed file at: ${DEST}"
 }
 
 analyze_test_project() {
   INPUT="${WORK_DIR}/test.ll"
-  FORMAT="${FORMAT:=yaml}"
-  OUTPUT="${WORK_DIR}/test_result.${FORMAT}"
+  OUTPUT="${WORK_DIR}/test_result.yaml"
 
-  # Extract archive
-  OBJECT_DIR="${WORK_DIR}/test_objs"
-  rm -rf "${OBJECT_DIR}" && mkdir -p "${OBJECT_DIR}" && pushd "${OBJECT_DIR}"
-  for f in "${TEST_INSTALL_PREFIX}/lib"/*.a; do
-    ar x "${f}"
-  done
-  popd
-
-  # Link into a single module
-  "${LLVM_DIR}/bin/llvm-link" -S "${OBJECT_DIR}"/*.cpp.o -o "${INPUT}"
+  # Link into a single module (only need c10 and OpLib srcs)
+  # TODO: invoke llvm-link from cmake directly to avoid this hack.
+  "${LLVM_DIR}/bin/llvm-link" -S \
+  $(find "${TORCH_BUILD_ROOT}" -path '*/c10*' \( -name '*.cpp.o' -o -name '*.cc.o' \)) \
+  $(find "${TEST_BUILD_ROOT}" -path '*/OpLib*' \( -name '*.cpp.o' -o -name '*.cc.o' \)) \
+  -o "${INPUT}"
 
   # Analyze dependency
   call_analyzer
-
-  if [ -n "${CHECK_RESULT}" ]; then
-    check_test_result
-  fi
 }
 
 check_test_result() {
@@ -150,7 +143,7 @@ check_test_result() {
     echo "Test result is the same as expected."
   else
     echo "Test result is DIFFERENT from expected!"
-    diff "${OUTPUT}" "${TEST_SRC_ROOT}/expected_deps.yaml"
+    diff -u "${TEST_SRC_ROOT}/expected_deps.yaml" "${OUTPUT}"
     exit 1
   fi
 }
@@ -160,10 +153,14 @@ build_analyzer
 if [ -n "${ANALYZE_TORCH}" ]; then
   build_torch_mobile
   analyze_torch_mobile
+  if [ -n "${DEPLOY}" ]; then
+    convert_output_to_bazel
+  fi
 fi
 
 if [ -n "${ANALYZE_TEST}" ]; then
   build_torch_mobile
   build_test_project
   analyze_test_project
+  check_test_result
 fi

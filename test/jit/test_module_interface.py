@@ -4,7 +4,14 @@
 from typing import List
 import torch
 import torch.nn as nn
+import os
+import sys
 from torch.testing._internal.jit_utils import JitTestCase
+
+# Make the helper files in test/ importable
+pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.append(pytorch_test_dir)
+from torch.testing._internal.jit_utils import JitTestCase, execWrapper
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -405,3 +412,70 @@ class TestModuleInterface(JitTestCase):
 
         scripted_mod.proxy_mod = NewScriptModule()
         self.assertEqual(scripted_mod(input), input * (input + 1) + 1)
+
+    # The call to forward of proxy_mod cannot be inlined. Making sure
+    # Freezing is throwing an error for now.
+    def test_freeze_module_with_interface(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.b = 20
+
+            def forward(self, x):
+                return self.b
+
+        class OrigMod(torch.nn.Module):
+            def __init__(self):
+                super(OrigMod, self).__init__()
+                self.a = 0
+
+            def forward(self, x):
+                return self.a
+
+        @torch.jit.interface
+        class ModInterface(torch.nn.Module):
+            def forward(self, x):
+                # type:  (Tensor) -> int
+                pass
+
+        class TestModule(torch.nn.Module):
+            proxy_mod : ModInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigMod()
+                self.sub = SubModule()  # folded
+
+            def forward(self, x):
+                return self.proxy_mod(x) + self.sub(x)
+
+        m = torch.jit.script(TestModule())
+        m.eval()
+        with self.assertRaisesRegex(RuntimeError, "attempted to freeze a module that uses interface attributes"):
+            mf = torch._C._freeze_module(m._c)
+
+    def test_module_apis_interface(self):
+        @torch.jit.interface
+        class ModuleInterface(nn.Module):
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
+        class TestModule(nn.Module):
+            proxy_mod : ModuleInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigModule()
+
+            def forward(self, input):
+                return input * 2
+
+            @torch.jit.export
+            def method(self, input):
+                for module in self.modules():
+                    input = module(input)
+                return input
+
+        with self.assertRaisesRegex(Exception, "Could not compile"):
+            scripted_mod = torch.jit.script(TestModule())

@@ -8,14 +8,12 @@
 #include <c10/core/MemoryFormat.h>
 #include <torch/csrc/api/include/torch/detail/TensorDataContainer.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <functional>
 #include <initializer_list>
 #include <utility>
-
-using at::DimnameList;
 
 namespace torch {
 
@@ -25,15 +23,13 @@ namespace torch {
 /// the largest data type that can represent all of the elements, or by using
 /// variadic templates.
 ///
-/// NOTE: C++ `torch::tensor` by default gives a double tensor, which is
-/// different from Python `torch.tensor` that gives a float tensor by default.
-/// We are going to fix this discrepancy by making `torch::tensor` give
-/// a float tensor by default.
-/// Tracking issue: https://github.com/pytorch/pytorch/issues/28902
+/// NOTE: C++ `torch::tensor` with a floating-point type or an `at::ArrayRef` / `std::vector` /
+/// (nested) braced-init-list of floating-point types always produces a tensor of dtype
+/// `torch::get_default_dtype()`, matching Python `torch.tensor` behavior.
 ///
-/// NOTE: C++ `torch::tensor` with an integer literal or a braced-init-list of
-/// integer literals always produces a tensor of dtype `at::kLong` (aka. int64_t),
-/// matching Python `torch.tensor` behavior.
+/// NOTE: C++ `torch::tensor` with an integer type or an `at::ArrayRef` / `std::vector` /
+/// (nested) braced-init-list of integer types always produces a tensor of dtype `at::kLong`
+/// (aka. int64_t), matching Python `torch.tensor` behavior.
 ///
 /// NOTE: The following dtypes are not supported by `torch::tensor` currently:
 /// - `unsigned int`

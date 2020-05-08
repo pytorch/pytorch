@@ -35,9 +35,9 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
 
     const auto& input = Input(DATA_FLOAT);
 
-    const auto input_rows = input.size(0);
-    const auto input_columns = input.size(1);
-    CAFFE_ENFORCE_EQ(input.dim(), 2, "Expect input to be a matrix");
+    CAFFE_ENFORCE_GT(input.dim(), 0, "Input's dimension must be at least 1");
+    const auto input_rows = input.size_to_dim(input.dim() - 1);
+    const auto input_columns = input.size(input.dim() - 1);
 
     // The "fused" representation stores the scale and bias with the row-wise
     // quantized data in one tensor. Since we quantize with 8 bits (1 byte) and
@@ -45,8 +45,9 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
     // bytes of each row for scale (4 bytes) and bias (4 bytes).
     // | ... int8 data ... | scale       | bias       |
     // | number_of_columns |  sizeof(Tsb)| sizeof(Tsb)|
-    const std::vector<std::int64_t> output_dimensions = {
-        input_rows, input_columns + 2 * static_cast<std::int64_t>(sizeof(Tsb))};
+    auto output_dimensions = input.sizes().vec();
+    output_dimensions[input.dim() - 1] =
+        input_columns + 2 * static_cast<std::int64_t>(sizeof(Tsb));
     auto* output = Output(
         DATA_FUSED_SCALE_BIAS_INT8,
         output_dimensions,
@@ -54,7 +55,7 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
 
     const auto* input_data = input.template data<T>();
     auto* output_data = output->template mutable_data<std::uint8_t>();
-    const auto output_columns = output->size(1);
+    const auto output_columns = output->size(output->dim() - 1);
 
     bool is_float = std::is_same<T, float>::value;
     bool out_sb_half = std::is_same<Tsb, at::Half>::value;
@@ -115,16 +116,17 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
 
     const auto& input = Input(DATA_FUSED_SCALE_BIAS_INT8);
 
-    const auto input_rows = input.size(0);
-    const auto input_columns = input.size(1);
-    CAFFE_ENFORCE_EQ(input.dim(), 2, "Expect input to be a matrix");
+    CAFFE_ENFORCE_GT(input.dim(), 0, "Input's dimension must be at least 1");
+    const auto input_rows = input.size_to_dim(input.dim() - 1);
+    const auto input_columns = input.size(input.dim() - 1);
 
     // The last 2*sizeof(Tsb) bytes per row are the scale and the bias.
     // The rest of input_columns is the number of values in the original row.
-    const std::vector<std::int64_t> output_dimensions = {
-        input_rows, input_columns - 2 * static_cast<std::int64_t>(sizeof(Tsb))};
+    auto output_dimensions = input.sizes().vec();
+    output_dimensions[input.dim() - 1] =
+        input_columns - 2 * static_cast<std::int64_t>(sizeof(Tsb));
     auto* output = Output(DATA_FLOAT, output_dimensions, at::dtype<T>());
-    const auto output_columns = output->size(1);
+    const auto output_columns = output->size(output->dim() - 1);
 
     const auto* input_data = input.template data<std::uint8_t>();
     T* output_data = output->template mutable_data<T>();

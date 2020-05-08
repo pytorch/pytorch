@@ -235,10 +235,6 @@ void TensorIterator::compute_types() {
       }
     }
 
-    if (is_different && !skip_output) {
-      have_differing_types_ = true;
-    }
-
     if (op.tensor.defined() && op.device != op.tensor.device()) {
       if (op.is_output) {
         TORCH_CHECK(false, "output with device ", op.tensor.device(),
@@ -290,11 +286,15 @@ void TensorIterator::allocate_outputs() {
     if (!op.tensor.defined()) {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
       int element_size = elementSize(op.target_dtype);
-      if (requires_channels_last_output_ && ndim() == 4) {
+      if ((requires_channels_last_output_ && ndim() == 4) ||
+          (requires_channels_last_3d_output_ && ndim() == 5)) {
         auto tensor_shape = invert_perm(shape_);
         op.tensor = at::empty(tensor_shape, op.options());
-        op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(
-            MemoryFormat::ChannelsLast);
+        if (requires_channels_last_output_) {
+          op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
+        } else {
+          op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast3d);
+        }
         // As we are allocating output after permutations is done, we need to
         // make sure that operand's strides are matching element size and
         // dimensions permutations which are stored in _perm
@@ -526,18 +526,18 @@ int TensorIterator::num_reduce_dims() const {
     }                                                                     \
   }
 
-void TensorIterator::for_each(loop_t loop) {
-  for_each(LOOP_WRAPPER(ntensors(), loop));
+void TensorIterator::for_each(loop_t loop, int64_t grain_size) {
+  for_each(LOOP_WRAPPER(ntensors(), loop), grain_size);
 }
 
-void TensorIterator::for_each(loop2d_t loop) {
+void TensorIterator::for_each(loop2d_t loop, int64_t grain_size) {
   int64_t numel = this->numel();
   if (numel == 0) {
     return;
   } else if (numel < internal::GRAIN_SIZE || at::get_num_threads() == 1) {
     return serial_for_each(loop, {0, numel});
   } else {
-    at::parallel_for(0, numel, internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
+    at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
       serial_for_each(loop, {begin, end});
     });
   }
@@ -634,10 +634,11 @@ void TensorIterator::remove_dimension(int dim) {
 void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
   TORCH_INTERNAL_ASSERT(dim < ndim() && size >= 1);
   shape_[dim] = size;
+  view_offsets_[dim] += start;
   for (auto& op : operands_) {
     op.data = ((char*)op.data) + op.stride_bytes[dim] * start;
   }
-  if (size == 1) {
+  if (size == 1 && !is_reduction_) {
     coalesce_dimensions();
   }
 }
@@ -675,7 +676,6 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
   iter.allow_cpu_scalars_ = true;
   iter.compute_common_dtype_only_for_inputs();
   iter.build();
-  iter.dynamic_cast_if(iter.dtype() != kBool);
   return iter;
 }
 
@@ -768,6 +768,8 @@ void TensorIterator::check_mem_overlaps() {
 }
 
 void TensorIterator::compute_shape() {
+  if (static_shape_) return;
+
   all_ops_same_shape_ = true;
   bool has_scalars = false;
   bool has_tensors = false;
@@ -807,8 +809,11 @@ void TensorIterator::compute_shape() {
         tensor.resize_(shape_);
         if (requires_channels_last_output_ && tensor.dim() == 4) {
           // Temporary stick to 4d tensor, will update with arbitrary batched later on
-          tensor.unsafeGetTensorImpl()->empty_tensor_restride(
-              MemoryFormat::ChannelsLast);
+          tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
+        }
+        else if (requires_channels_last_3d_output_ && tensor.dim() == 5) {
+          // Temporary stick to 5d tensor, will update with arbitrary batched later on
+          tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast3d);
         }
         continue;
       }
@@ -821,7 +826,7 @@ void TensorIterator::compute_shape() {
 void TensorIterator::compute_strides() {
   for (auto& op : operands_) {
     if (op.tensor.defined()) {
-      auto original_shape = op.tensor.sizes();
+      IntArrayRef original_shape = static_shape_ ? shape_ : op.tensor.sizes();
       auto original_stride = op.tensor.strides();
       auto element_size_in_bytes = op.tensor.element_size();
       auto offset = ndim() - original_shape.size();
@@ -842,9 +847,15 @@ void TensorIterator::compute_strides() {
 
 void TensorIterator::analyze_memory_format() {
   for (auto& op : operands_) {
-    if (op.tensor.defined() &&
-        op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
-      requires_channels_last_output_ = true;
+    if (op.tensor.defined()) {
+      if (!requires_channels_last_output_ &&
+          op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
+        requires_channels_last_output_ = true;
+      }
+      else if (!requires_channels_last_3d_output_ &&
+          op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast3d) {
+        requires_channels_last_3d_output_ = true;
+      }
     }
   }
 }
@@ -899,20 +910,73 @@ int TensorIterator::get_dim_to_split() const {
   return dim_to_split;
 }
 
-void TensorIterator::fast_set_up() {
-  //this function is called if all the inputs are contiguous to avoid needless reordering of dimensions
-  //and tracking output strides
-  //TODO enable fast handling for reductions
-  //TODO enable fast handling for channels_last
+bool TensorIterator::fast_set_up() {
+  // This function tries to do a fast setup to avoid needless reordering of dimensions and tracking output strides
+  // Return true if it can do fast setup or false otherwise
+  // TODO enable fast handling for reductions
+  FastSetupType setup_type = compute_fast_setup_type();
+  if (setup_type == FastSetupType::NONE) {
+    return false;
+  }
 
-  //allocate contiguous tensor for output
-  for (int i = 0; i < num_outputs_; i++){
-      auto& op = operands_[i];
-      if (!op.tensor.defined()) {
-        TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
-        op.tensor = at::empty(shape_, op.options());
+  // allocate memory for output, memory format depends on setup_type
+  switch (setup_type) {
+    case FastSetupType::CONTIGUOUS:
+      {
+        for (int i = 0; i < num_outputs_; i++){
+          auto& op = operands_[i];
+          if (!op.tensor.defined()) {
+            TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+            op.tensor = at::empty(shape_, op.options(), MemoryFormat::Contiguous);
+            op.current_dtype = op.target_dtype;
+          }
+        }
+        break;
       }
-      op.current_dtype = op.target_dtype;
+    case FastSetupType::CHANNELS_LAST:
+      {
+        for (int i = 0; i < num_outputs_; i++){
+          auto& op = operands_[i];
+          if (!op.tensor.defined()) {
+            TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+            op.tensor = at::empty(shape_, op.options(), MemoryFormat::ChannelsLast);
+            op.current_dtype = op.target_dtype;
+          }
+        }
+        break;
+      }
+    case FastSetupType::NON_OVERLAPPING_DENSE:
+      {
+        // find the index of a defined tensor in operands_ start from input tensor
+        int i_defined;
+        for (i_defined = ntensors() - 1; i_defined >= 0; --i_defined) {
+          if (operands_[i_defined].tensor.defined()) break;
+        }
+        TORCH_CHECK(i_defined >= 0, "Can not find a defined tensor when fast allocating memory to outputs");
+        for (int i = 0; i < num_outputs_; i++){
+          auto& op = operands_[i];
+          if (!op.tensor.defined()) {
+            TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+            op.tensor = at::empty_strided(shape_, operands_[i_defined].tensor.strides(), op.options());
+            op.current_dtype = op.target_dtype;
+          }
+          else if (resize_outputs_ && !op.is_read_write) {
+            // Note: This restride logic is for some of the tensor types, eg. qtensor.
+            //       These tensor class allocate a contigious output tensor directly no matter
+            //       what memory format the input tensors are. So we need to restride output here for fast setup.
+            //       We will revisit this logic when doing the TensorIterator refactor work and
+            //       it would probably be better to move this logic out of TensorIterator.
+
+            // Check whether output tensor needs restride, output's stride can be different than input tensors
+            if (i != i_defined && !op.tensor.strides().equals(operands_[i_defined].tensor.strides())) {
+              op.tensor.as_strided_(op.tensor.sizes(), operands_[i_defined].tensor.strides());
+            }
+          }
+        }
+        break;
+      }
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unsupported fast setup type", c10::to_string((int)setup_type));
   }
   //coalescing dimensions consists of collapsing dimensions to 1 (we are limited to contiguous no-broadcast cases here)
   if (ndim() > 1){
@@ -929,21 +993,53 @@ void TensorIterator::fast_set_up() {
       op.stride_bytes[0] = element_size_in_bytes;
     }
   }
+  return true;
 }
 
-bool TensorIterator::can_use_fast_set_up() {
-  if (is_reduction_) return false;
-  if (!all_ops_same_shape_) {
-    return false;
+FastSetupType TensorIterator::compute_fast_setup_type() {
+  if (is_reduction_ || !all_ops_same_shape_) {
+    return FastSetupType::NONE;
   }
-  for (auto& op : operands_) {
+
+  bool is_contiguous = true;
+  bool is_channels_last = true;
+  bool is_non_overlapping_and_dense = true;
+  for (const auto& op : operands_) {
     if (op.tensor.defined()) {
-      if (!op.tensor.is_contiguous()) {
-        return false;
-      }
+      is_contiguous &= op.tensor.is_contiguous(at::MemoryFormat::Contiguous);
+      is_channels_last &= op.tensor.is_contiguous(at::MemoryFormat::ChannelsLast);
+      is_non_overlapping_and_dense &= op.tensor.is_non_overlapping_and_dense();
     }
   }
-  return true;
+
+  if (is_contiguous) {
+    return FastSetupType::CONTIGUOUS;
+  }
+  if (is_channels_last) {
+    return FastSetupType::CHANNELS_LAST;
+  }
+  if (is_non_overlapping_and_dense) {
+    int64_t prev = -1;
+    // iterate from back to favor inputs' strides, then we check output strides.
+    // if only the output's strides is inconstent but all inputs' strides are equal,
+    // it is still a NON_OVERLAPPING_DENSE case and output will be restrided in fast_set_up()
+    for (int64_t i = ntensors() - 1; i >= 0; --i) {
+      const auto& op = operands_[i];
+      if (op.tensor.defined()) {
+        if (prev < 0) {
+          prev = i;
+          continue;
+        }
+        if (!operands_[prev].tensor.strides().equals(op.tensor.strides())) {
+          if (!resize_outputs_ || !op.is_output || op.is_read_write) {
+            return FastSetupType::NONE;
+          }
+        }
+      }
+    }
+    return FastSetupType::NON_OVERLAPPING_DENSE;
+  }
+  return FastSetupType::NONE;
 }
 
 void TensorIterator::build() {
@@ -960,9 +1056,8 @@ void TensorIterator::build() {
   compute_shape();
   // compute the result dtype and device
   compute_types();
-  if (can_use_fast_set_up()) {
-    fast_set_up();
-  } else {
+  // try fast setup output tensor, if failed, fallback to normal setup
+  if (!fast_set_up()) {
     // compute each tensor's stride after broadcasting
     compute_strides();
     // re-order dimensions to improve coalescing
@@ -979,6 +1074,13 @@ void TensorIterator::build() {
     TORCH_INTERNAL_ASSERT(op.tensor.defined());
     op.data = op.tensor.data_ptr();
   }
+
+  // zero out offsets
+  // If the tensor is a scalar, we leave room for it
+  // So index translations in reduction can access
+  // a valid value for the offset
+  int64_t ndim_offsets = (ndim() ? ndim() : 1);
+  view_offsets_ = DimVector(ndim_offsets, 0);
 }
 
 SplitUntil32Bit TensorIterator::with_32bit_indexing() const {
