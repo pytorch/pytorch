@@ -596,9 +596,15 @@ graph(%a_quant):
       {"aten::avg_pool1d", avg_pool1d, aten_avg_pool1d},
       {"aten::avg_pool2d", avg_pool2d, aten_avg_pool2d},
       {"aten::avg_pool3d", avg_pool3d, aten_avg_pool3d},
-      {"aten::adaptive_avg_pool1d", adaptive_avg_pool1d, aten_adaptive_avg_pool1d},
-      {"aten::adaptive_avg_pool2d", adaptive_avg_pool2d, aten_adaptive_avg_pool2d},
-      {"aten::adaptive_avg_pool3d", adaptive_avg_pool3d, aten_adaptive_avg_pool3d},
+      {"aten::adaptive_avg_pool1d",
+       adaptive_avg_pool1d,
+       aten_adaptive_avg_pool1d},
+      {"aten::adaptive_avg_pool2d",
+       adaptive_avg_pool2d,
+       aten_adaptive_avg_pool2d},
+      {"aten::adaptive_avg_pool3d",
+       adaptive_avg_pool3d,
+       aten_adaptive_avg_pool3d},
       {"aten::mean", mean, aten_mean},
   };
 }
