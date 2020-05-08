@@ -124,6 +124,28 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
         return val;
       });
 
+  struct AliasTester : public torch::CustomClassHolder {
+    std::vector<int64_t> sizes_;
+
+    AliasTester(IntArrayRef sizes) {
+      std::cout << "ctor got " << sizes << std::endl;
+      for (auto x : sizes) {
+        sizes_.push_back(x);
+      }
+    }
+  };
+
+  m.class_<AliasTester>("_AliasTester")
+    .def(torch::init<IntList>())
+    .def_pickle(
+      [](const c10::intrusive_ptr<AliasTester>& self) {
+        return torch::zeros(self->sizes_);
+      },
+      [](at::Tensor tensor) {
+        return c10::make_intrusive<AliasTester>(tensor.sizes());
+      }
+    );
+
   m.def(
       "take_an_instance(__torch__.torch.classes._TorchScriptTesting._PickleTester x) -> Tensor Y",
       take_an_instance);
