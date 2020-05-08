@@ -674,6 +674,54 @@ static py::dict _jit_debug_module_iterators(Module& module) {
   return result;
 }
 
+#define FORALL_MAGIC_METHODS(_) \
+  _(__lt__) \
+  _(__le__) \
+  _(__eq__) \
+  _(__ne__) \
+  _(__ge__) \
+  _(__gt__) \
+  _(__not__) \
+  _(__abs__) \
+  _(__add__) \
+  _(__and__) \
+  _(__floordiv__) \
+  _(__index__) \
+  _(__inv__) \
+  _(__invert__) \
+  _(__lshift__) \
+  _(__mod__) \
+  _(__mul__) \
+  _(__matmul__) \
+  _(__neg__) \
+  _(__or__) \
+  _(__pos__) \
+  _(__pow__) \
+  _(__rshift__) \
+  _(__sub__) \
+  _(__truediv__) \
+  _(__xor__) \
+  _(__concat__) \
+  _(__contains__) \
+  _(__delitem__) \
+  _(__getitem__) \
+  _(__setitem__) \
+  _(__iadd__) \
+  _(__iand__) \
+  _(__iconcat__) \
+  _(__ifloordiv__) \
+  _(__ilshift__) \
+  _(__imod__) \
+  _(__imul__) \
+  _(__imatmul__) \
+  _(__ior__) \
+  _(__ipow__) \
+  _(__irshift__) \
+  _(__isub__) \
+  _(__itruediv__) \
+  _(__ixor__) \
+  _(__str__)
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -684,7 +732,16 @@ void initJitScriptBindings(PyObject* module) {
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<c10::intrusive_ptr<CustomClassHolder>>(m, "Capsule");
 
-  py::class_<Object>(m, "ScriptObject")
+#define DEF_MAGIC(name) \
+      object_class.def(#name, [](const Object& self, py::args args, py::kwargs kwargs) { \
+        auto method = self.find_method(#name); \
+        if (!method) { \
+          throw NotImplementedError(); \
+        } \
+        return invokeScriptMethodFromPython(*method, args, kwargs); \
+      });
+
+  auto object_class = py::class_<Object>(m, "ScriptObject")
       .def("_type", [](Module& m) { return m.type(); })
       .def(
           "_get_method",
@@ -793,6 +850,8 @@ void initJitScriptBindings(PyObject* module) {
             err << "which does not have a __setstate__ method defined!";
             throw std::runtime_error(err.str());
           }));
+
+  FORALL_MAGIC_METHODS(DEF_MAGIC);
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be

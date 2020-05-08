@@ -4819,6 +4819,17 @@ def foo(x):
         mod = TorchBindOptionalExplicitAttr()
         scripted = torch.jit.script(mod)
 
+    @skipIfRocm
+    def test_torchbind_str(self):
+        foo = torch.classes._TorchScriptTesting._StackString(["foo", "bar", "baz"])
+        self.assertEqual(str(foo), "[foo, bar, baz]")
+
+    @skipIfRocm
+    def test_torchbind_magic_unimplemented(self):
+        foo = torch.classes._TorchScriptTesting._StackString(["foo", "bar", "baz"])
+        with self.assertRaises(NotImplementedError):
+            foo[3]
+
     def _test_lower_graph_impl(self, model, data):
         model.qconfig = torch.quantization.default_qconfig
         model = torch.quantization.prepare(model)
