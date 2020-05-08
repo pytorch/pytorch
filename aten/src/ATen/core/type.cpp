@@ -1145,9 +1145,9 @@ size_t ClassType::addAttribute(
     kind = ATTRIBUTE_KIND_ENUM::BUFFER;
   }
 
-  AttributeType attributeType(kind, type, name);
+  AttributeKind attributeKind(kind, type, name);
 
-  attributes_.push_back(attributeType);
+  attributes_.push_back(attributeKind);
 
   if (is_parameter) {
     TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter to a non module");

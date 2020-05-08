@@ -56,7 +56,6 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(AnyListType)            \
   _(AnyTupleType)           \
   _(AnyClassType)           \
-  _(AttributeType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1617,14 +1616,14 @@ static const std::string attribute_name_from_enum(ATTRIBUTE_KIND_ENUM ake) {
   return std::string();
 }
 
-struct AttributeType;
-using AttributeTypePtr = std::shared_ptr<AttributeType>;
+struct AttributeKind;
+using AttributeKindPtr = std::shared_ptr<AttributeKind>;
 
-struct CAFFE2_API AttributeType : public NamedType {
+struct CAFFE2_API AttributeKind {
   public:
-  AttributeType(ATTRIBUTE_KIND_ENUM kind,
+  AttributeKind(ATTRIBUTE_KIND_ENUM kind,
   TypePtr attributeType,
-  std::string attributeName) : NamedType(TypeKind::ClassType, attributeName),
+  std::string attributeName) :
     kind_(kind),
     attributeType_(std::move(attributeType)),
     attributeName_(std::move(attributeName)) {}
@@ -1641,21 +1640,7 @@ struct CAFFE2_API AttributeType : public NamedType {
     return attributeName_;
   }
 
-  std::string str() const override {
-    return python_str(nullptr);
-  };
-
-  std::string python_str(const TypePrinter& printer) const {
-    if (printer) {
-      // the printer can return nullopt to fall through to the default impl
-      if (auto renamed = printer(shared_from_this())) {
-        return *renamed;
-      }
-    }
-    return python_str_impl(printer);
-  }
-
-  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+  std::string python_str_impl(TypePrinter printer = nullptr) const {
     std::stringstream ss;
     ss << "Attribute: ";
     ss << "Type: [" << getType()->python_str(printer) << "]";
@@ -1664,39 +1649,30 @@ struct CAFFE2_API AttributeType : public NamedType {
     return ss.str();
   }
 
-  TypeKind kind() const {
-    return TypeKind::AttributeType;
-  }
-
-  bool operator==(const Type& rhs) const override {
-    if (auto user_rhs = rhs.cast<AttributeType>()) {
+  bool operator==(const AttributeKind& user_rhs) const {
       const auto& lhs_name = getName();
-      const auto& rhs_name = user_rhs->getName();
+      const auto& rhs_name = user_rhs.getName();
 
       if (lhs_name != rhs_name) {
         return false;
       }
 
       const auto& lhs_type = getType();
-      const auto& rhs_type = user_rhs->getType();
+      const auto& rhs_type = user_rhs.getType();
 
       if (lhs_type != rhs_type) {
         return false;
       }
 
       const auto& lhs_kind = getKind();
-      const auto& rhs_kind = user_rhs->getKind();
+      const auto& rhs_kind = user_rhs.getKind();
 
       if (lhs_kind != rhs_kind) {
         return false;
       }
 
       return true;
-    }
-    return false;
   }
-
-  static const TypeKind Kind = TypeKind::AttributeType;
 
   private:
   ATTRIBUTE_KIND_ENUM kind_;
@@ -1808,7 +1784,7 @@ struct CAFFE2_API ClassType : public NamedType {
     return std::find_if(
                attributes_.cbegin(),
                attributes_.cend(),
-               [&](const AttributeType& attr) { return attr.getName() == name; }) !=
+               [&](const AttributeKind& attr) { return attr.getName() == name; }) !=
         attributes_.cend();
   }
 
@@ -1941,7 +1917,7 @@ struct CAFFE2_API ClassType : public NamedType {
     return isModule_;
   }
 
-  const std::vector<AttributeType>& getAllAttributes() const {
+  const std::vector<AttributeKind>& getAllAttributes() const {
     return attributes_;
   }
 
@@ -2003,9 +1979,6 @@ struct CAFFE2_API ClassType : public NamedType {
   // TODO: This is better represented as an OrderedDict, but alas it is not yet
   // available from c10
 
-  // std::vector<std::string> attributeNames_;
-  // std::vector<TypePtr> attributeTypes_;
-
   // Mapping of constant names -> their value.
   std::vector<std::string> constantNames_;
   std::vector<IValue> constantValues_;
@@ -2018,7 +1991,7 @@ struct CAFFE2_API ClassType : public NamedType {
   // TODO - a comment
   // std::shared_ptr<std::vector<bool>> bufferWrittenSlots_;
 
-  std::vector<AttributeType> attributes_;
+  std::vector<AttributeKind> attributes_;
 
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;
