@@ -6,6 +6,8 @@
 #include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 
+#include <cmath>
+
 namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
@@ -346,9 +348,9 @@ void testHashDifferenceTypes() {
 void testHashLargeExpression() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}), kInt);
-  Buffer b(BufHandle("B", {N}), kInt);
-  Buffer c(BufHandle("C", {N}), kInt);
+  Buffer a(BufHandle("A", {N}, kInt));
+  Buffer b(BufHandle("B", {N}, kInt));
+  Buffer c(BufHandle("C", {N}, kInt));
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto memcpy_stmt = For::make(
@@ -364,8 +366,8 @@ void testHashLargeExpression() {
               CompareSelectOperation::kEQ),
           mask));
 
-  Buffer d(BufHandle("D", {1}), kInt);
-  Buffer e(BufHandle("E", {1}), kInt);
+  Buffer d(BufHandle("D", {1}, kInt));
+  Buffer e(BufHandle("E", {1}, kInt));
   auto store_ramp_stmt = Store::make(
       e,
       {Ramp::make(0, 1, 4)},
@@ -596,6 +598,24 @@ void testSimplifyAdds() {
     IS_IMM_WITH_VAL(Int, root->lhs(), 4);
     IS_VAR_WITH_NAME(root->rhs(), "x");
   }
+
+  {
+    // (x + 0) => x.
+    ExprHandle body = x + 0;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // (x + 0.f) => float(x).
+    ExprHandle body = x + 0.f;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Cast, simplified.node(), cast);
+    ASSERT_EQ(cast->dtype().scalar_type(), ScalarType::Float);
+    IS_VAR_WITH_NAME(cast->src_value(), "x");
+  }
 }
 
 void testSimplifyMuls() {
@@ -632,6 +652,60 @@ void testSimplifyMuls() {
     IS_VAR_WITH_NAME(mul2->rhs(), "y");
     IS_VAR_WITH_NAME(mul3->lhs(), "x");
     IS_VAR_WITH_NAME(mul3->rhs(), "x");
+  }
+
+  {
+    // 1 * (x * 1) => x
+    // Ones cancel cleanly.
+    ExprHandle body = ExprHandle(1) * (x * ExprHandle(1));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // 1.f * (x * 1.f) => x
+    // Even float ones cancel cleanly, but carry their type.
+    ExprHandle body = ExprHandle(1.f) * (x * ExprHandle(1.f));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Cast, simplified.node(), cast);
+    ASSERT_EQ(cast->dtype().scalar_type(), ScalarType::Float);
+    IS_VAR_WITH_NAME(cast->src_value(), "x");
+  }
+
+  {
+    // 1 * (x * 1.f) => x
+    // One float is enough to cast the expr.
+    ExprHandle body = ExprHandle(1) * (x * ExprHandle(1.f));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Cast, simplified.node(), cast);
+    ASSERT_EQ(cast->dtype().scalar_type(), ScalarType::Float);
+    IS_VAR_WITH_NAME(cast->src_value(), "x");
+  }
+
+  {
+    // 1 * (x * 0) => 0
+    // Zeroes are eliminated.
+    ExprHandle body = ExprHandle(1) * (x * ExprHandle(0));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // 1 * (x * 0) => 0
+    // But not for Float since nan * 0 = nan.
+    ExprHandle body = ExprHandle(1.f) * (x * ExprHandle(0.f));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    std::cout << simplified << "\n";
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_NODE_WITH_NAME(Cast, mul->lhs(), cast);
+    ASSERT_EQ(cast->dtype().scalar_type(), ScalarType::Float);
+    IS_VAR_WITH_NAME(cast->src_value(), "x");
+    IS_IMM_WITH_VAL(Float, mul->rhs(), 0.0);
   }
 
   {
@@ -711,6 +785,32 @@ void testSimplifySubs() {
   }
 
   {
+    // (x - 0) => x.
+    ExprHandle body = x - 0;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // (x - 0.f) => x.
+    // Simple enough to cancel in float.
+    ExprHandle body = x - ExprHandle(0.f);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cast, simplified.node(), cast);
+    ASSERT_EQ(cast->dtype().scalar_type(), ScalarType::Float);
+    IS_VAR_WITH_NAME(cast->src_value(), "x");
+  }
+
+  {
+    // (x - (float)(y - y)) => x.
+    ExprHandle body = x - Cast::make(kFloat, y - y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cast, simplified.node(), cast);
+    ASSERT_EQ(cast->dtype().scalar_type(), ScalarType::Float);
+    IS_VAR_WITH_NAME(cast->src_value(), "x");
+  }
+
+  {
     // (x - y) - y => x - 2 * y
     ExprHandle body = (x - y) - y;
     ExprHandle simplified = IRSimplifier::simplify(body);
@@ -747,6 +847,20 @@ void testSimplifySubs() {
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // Cancel out opaque modulus.
+    ExprHandle body = (x % y + 2) - (x % y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 2);
+  }
+
+  {
+    // Cancel out opaque modulus with a bit more going on.
+    ExprHandle body = (x % y + (x * 2 - x - y * 0) - x + 2) - (x % y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 2);
   }
 }
 
@@ -791,6 +905,31 @@ void testSimplifyMultiOp() {
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
     IS_IMM_WITH_VAL(Int, mul->lhs(), -2);
     IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // (x - 0) + (x * 1) - (x + 0) => x
+    ExprHandle body = (x - 0) + (x * 1) - (x + 0);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // (x - 0.f) + (x * 1.f) - (x + 0.f) => float(x) + float(x) - float(x)
+    // Even in Float simple terms cancel out, but the variable ones cannot.
+    ExprHandle body =
+        (x - ExprHandle(0.f)) + (x * ExprHandle(1.f)) - (x + ExprHandle(0.f));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
+    IS_NODE_WITH_NAME(Add, sub->lhs(), add);
+    IS_NODE_WITH_NAME(Cast, add->lhs(), cast1);
+    IS_VAR_WITH_NAME(cast1->src_value(), "x");
+    IS_NODE_WITH_NAME(Cast, add->rhs(), cast2);
+    IS_VAR_WITH_NAME(cast2->src_value(), "x");
+    IS_NODE_WITH_NAME(Cast, sub->rhs(), cast3);
+    IS_VAR_WITH_NAME(cast3->src_value(), "x");
   }
 }
 
@@ -1472,6 +1611,511 @@ void testSimplifyDivisionScalarFactorization() {
     IS_IMM_WITH_VAL(Int, lhs->lhs(), 2);
     IS_VAR_WITH_NAME(lhs->rhs(), "x");
     IS_VAR_WITH_NAME(div->rhs(), "y");
+  }
+}
+
+void testSimplifyConstantBranches() {
+  KernelScope kernel_scope;
+
+  {
+    // If the condition is constant true then take the true_value.
+    // 1 ? x : y => x
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle t(1);
+    ExprHandle body = IfThenElse::make(t, x, y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // If the condition is constant false then take the false_value.
+    // 0 ? x : y => y
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle t(0);
+    ExprHandle body = IfThenElse::make(t, x, y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "y");
+  }
+
+  {
+    // condition is simplified before checking.
+    // (x-x) ? x : y => y
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = IfThenElse::make(x - x, x, y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "y");
+  }
+
+  {
+    // If both branches are the same then don't do the condition.
+    // y ? x : x => x
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = IfThenElse::make(y, x, x);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // If both branches simplify to the same thing it still works.
+    // y ? (x + x) : (2 * x) => x
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = IfThenElse::make(y, x + x, ExprHandle(2) * x);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
+  }
+}
+
+void testSimplifyConstantCond() {
+  KernelScope kernel_scope;
+
+  {
+    // If the condition is constant true then take the true_value.
+    // 1 ? A[0] = 1 : B[0] = 1 => A[0] = 1
+    Buffer a(BufHandle("A", {1}, kInt));
+    Buffer b(BufHandle("B", {1}, kInt));
+    ExprHandle condition(1);
+    Stmt* true_val = Store::make(a, {0}, 1, 1);
+    Stmt* false_val = Store::make(b, {0}, 1, 1);
+
+    Cond* body = new Cond(condition.node(), true_val, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "A");
+  }
+
+  {
+    // If the condition is constant false then take the false_value.
+    // 0 ? A[0] = 1 : B[0] = 1 => B[0] = 1
+    Buffer a(BufHandle("A", {1}, kInt));
+    Buffer b(BufHandle("B", {1}, kInt));
+    ExprHandle condition(0);
+    Stmt* true_val = Store::make(a, {0}, 1, 1);
+    Stmt* false_val = Store::make(b, {0}, 1, 1);
+
+    Stmt* body = new Cond(condition.node(), true_val, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "B");
+  }
+
+  {
+    // condition is simplified before checking.
+    // (x-x) ? A[0] = 1 : B[0] = 1 => B[0] = 1
+    VarHandle x("x", kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
+    Buffer b(BufHandle("B", {1}, kInt));
+    ExprHandle condition(x - x);
+    Stmt* true_val = Store::make(a, {0}, 1, 1);
+    Stmt* false_val = Store::make(b, {0}, 1, 1);
+
+    Stmt* body = new Cond(condition.node(), true_val, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "B");
+  }
+
+  {
+    // If both branches are the same then don't do the condition.
+    // x ? A[0] = x : A[0] = x => A[0] = x
+    VarHandle x("x", kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
+    ExprHandle condition(x - x);
+    Stmt* true_val = Store::make(a, {0}, x, 1);
+    Stmt* false_val = Store::make(a, {0}, x, 1);
+
+    Stmt* body = new Cond(condition.node(), true_val, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "A");
+  }
+
+  {
+    // If both branches simplify to the same thing it still works.
+    // x ? (x + x) : (2 * x) => x
+    VarHandle x("x", kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
+    ExprHandle condition(x - x);
+    Stmt* true_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
+    Stmt* false_val = Store::make(a, {0}, x + x, 1);
+
+    Stmt* body = new Cond(condition.node(), true_val, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "A");
+  }
+
+  {
+    // But not if they dont
+    // x ? x : (2 * x) => x ? x : (2 * x)
+    VarHandle x("x", kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
+    ExprHandle condition(x);
+    Stmt* true_val = Store::make(a, {0}, x, 1);
+    Stmt* false_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
+
+    Stmt* body = new Cond(condition.node(), true_val, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    ASSERT_EQ(block, nullptr);
+  }
+}
+
+void testSimplifyEliminateZeroLengthFor() {
+  KernelScope kernel_scope;
+
+  {
+    // Will eliminate zero loop For.
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
+    auto mask = IntImm::make(1);
+    VarHandle i("i", kInt);
+    auto body =
+        For::make(i, 0, 0, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    ASSERT_EQ(block->nstmts(), 0);
+  }
+
+  {
+    // still works if start is not zero.
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
+    auto mask = IntImm::make(1);
+    VarHandle i("i", kInt);
+    auto body =
+        For::make(i, 2, 2, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    ASSERT_EQ(block->nstmts(), 0);
+  }
+
+  {
+    // works if both terms are variable.
+    VarHandle x("x", kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
+    auto mask = IntImm::make(1);
+    VarHandle i("i", kInt);
+    auto body =
+        For::make(i, x, x, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    ASSERT_EQ(block->nstmts(), 0);
+  }
+
+  {
+    // works if one term simplifies down.
+    VarHandle x("x", kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
+    auto mask = IntImm::make(1);
+    VarHandle i("i", kInt);
+    auto body = For::make(
+        i, 0, x - x, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    ASSERT_EQ(block->nstmts(), 0);
+  }
+
+  {
+    // Sanity check does nothing if the condition is not met.
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
+    auto mask = IntImm::make(1);
+    VarHandle i("i", kInt);
+    auto body =
+        For::make(i, 0, 3, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE(For, simplified);
+  }
+}
+
+void testSimplifyOneLoopFor() {
+  KernelScope kernel_scope;
+
+  {
+    // Will remove the loop if the body is run once.
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
+    auto mask = IntImm::make(1);
+    VarHandle i("i", kInt);
+    auto body =
+        For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "C");
+    IS_IMM_WITH_VAL(Int, store->flat_index(), 0);
+  }
+
+  {
+    // still works if start is not zero.
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
+    auto mask = IntImm::make(1);
+    VarHandle i("i", kInt);
+    auto body =
+        For::make(i, 2, 3, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "C");
+    IS_IMM_WITH_VAL(Int, store->flat_index(), 2);
+  }
+
+  {
+    // works if both terms are variable.
+    VarHandle x("x", kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
+    auto mask = IntImm::make(1);
+    VarHandle i("i", kInt);
+    auto body = For::make(
+        i, x, x + 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "C");
+    IS_VAR_WITH_NAME(store->flat_index(), "x");
+  }
+
+  {
+    // works if one term simplifies down.
+    VarHandle x("x", kInt);
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
+    auto mask = IntImm::make(1);
+    VarHandle i("i", kInt);
+    auto body = For::make(
+        i, 0, x - x + 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "C");
+    IS_IMM_WITH_VAL(Int, store->flat_index(), 0);
+  }
+
+  {
+    // Sanity check does nothing if the condition is not met.
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
+    auto mask = IntImm::make(1);
+    VarHandle i("i", kInt);
+    auto body =
+        For::make(i, 0, 3, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE(For, simplified);
+  }
+}
+
+void testSimplifyForWontLoseLoopOptions() {
+  KernelScope kernel_scope;
+
+  {
+    // Sanity check does nothing if the condition is not met.
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
+    auto mask = IntImm::make(1);
+    VarHandle i("i", kInt);
+    LoopOptions options;
+    options.set_gpu_block_index(12);
+    auto body = For::make(
+        i, 0, 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask), options);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, for_);
+    LoopOptions options2 = for_->loop_options();
+    ASSERT_EQ(options.gpu_block_index(), options2.gpu_block_index());
+  }
+}
+
+void testSimplifyMultilevelFor() {
+  KernelScope kernel_scope;
+
+  {
+    // Multiple layers of For will be simplified out.
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
+    auto mask = IntImm::make(1);
+    VarHandle i("i", kInt);
+    VarHandle j("j", kInt);
+    auto* body =
+        For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    auto outer = For::make(j, 0, 1, body);
+    Stmt* simplified = IRSimplifier::simplify(outer);
+    Block* block = dynamic_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "C");
+    IS_IMM_WITH_VAL(Int, store->flat_index(), 0);
+  }
+
+  {
+    // Will maintain an outer loop if the inner loop is eliminated.
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
+    auto mask = IntImm::make(1);
+    VarHandle i("i", kInt);
+    VarHandle j("j", kInt);
+    auto* body =
+        For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    auto outer = For::make(j, 0, 2, body);
+    Stmt* simplified = IRSimplifier::simplify(outer);
+    For* for__ = static_cast<For*>(simplified);
+    IS_NODE_WITH_NAME(For, for__, for_);
+    IS_VAR_WITH_NAME(for_->var(), "j");
+    IS_IMM_WITH_VAL(Int, for_->start(), 0);
+    IS_IMM_WITH_VAL(Int, for_->stop(), 2);
+    Block* block = dynamic_cast<Block*>(for_->body());
+    ASSERT_NE(block, nullptr);
+    IS_NODE_WITH_NAME(Store, block->front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "C");
+    IS_IMM_WITH_VAL(Int, store->flat_index(), 0);
+  }
+
+  {
+    // Will maintain inner loop if outer loops is eliminated.
+    Buffer a(BufHandle("A", {4}, kInt));
+    Buffer c(BufHandle("C", {4}, kInt));
+    auto mask = IntImm::make(1);
+    VarHandle i("i", kInt);
+    VarHandle j("j", kInt);
+    auto* body =
+        For::make(i, 0, 2, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
+    auto outer = For::make(j, 0, 1, body);
+    Stmt* simplified = IRSimplifier::simplify(outer);
+    Block* block = dynamic_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(For, block->front(), for_);
+    IS_VAR_WITH_NAME(for_->var(), "i");
+    IS_IMM_WITH_VAL(Int, for_->start(), 0);
+    IS_IMM_WITH_VAL(Int, for_->stop(), 2);
+    IS_NODE_WITH_NAME(Store, for_->body()->front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "C");
+    IS_VAR_WITH_NAME(store->flat_index(), "i");
+  }
+}
+
+void testSimplifyForCleansUp() {
+  KernelScope kernel_scope;
+
+  {
+    Buffer a("a", kFloat, {1, 12, 1});
+    VarHandle x("x", kInt);
+    Tensor* b = Compute(
+        "x",
+        {{1, "i"}, {12, "m"}, {1, "n"}},
+        [](const VarHandle& i, const VarHandle& m, const VarHandle& n) {
+          return i + m + n;
+        });
+    LoopNest l({b});
+    l.prepareForCodegen();
+
+    Stmt* body = l.root_stmt();
+    Stmt* simplified = IRSimplifier::simplify(body);
+
+    Block* block = dynamic_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(For, block->front(), for_);
+    // for is over "m".
+    IS_VAR_WITH_NAME(for_->var(), "m");
+    // x[m] = m;
+    IS_NODE_WITH_NAME(Store, for_->body()->front(), store);
+    IS_VAR_WITH_NAME(store->flat_index(), "m");
+    IS_VAR_WITH_NAME(store->value(), "m");
+  }
+}
+
+void testSimplifyFlattenBlock() {
+  KernelScope kernel_scope;
+
+  {
+    // Flatten multiple blocks down to one.
+    // { { { stmt1, stmt2 } } } =>  { stmt1, stmt2 }
+    Buffer a(BufHandle("A", {1}, kInt));
+    Store* store1 = Store::make(a, {0}, 1, 1);
+    Store* store2 = Store::make(a, {0}, 0, 1);
+
+    Block* block1 = new Block({store1, store2});
+    Block* block2 = new Block({block1});
+
+    Block* enclosing = new Block({block2});
+    Stmt* simplified = IRSimplifier::simplify(enclosing);
+
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+
+    IS_NODE_WITH_NAME(Store, block->front(), store1_);
+    IS_NODE_WITH_NAME(Store, block->back(), store2_);
+
+    ASSERT_EQ(store1->value(), store1_->value());
+    ASSERT_EQ(store2->value(), store2_->value());
+  }
+
+  {
+    // Flatten multiple sub blocks containing statements.
+    // { { stmt1 }, { stmt2 } } =>  { stmt1, stmt2 }
+    Buffer a(BufHandle("A", {1}, kInt));
+    Store* store1 = Store::make(a, {0}, 1, 1);
+    Store* store2 = Store::make(a, {0}, 0, 1);
+
+    Block* block1 = new Block({store1});
+    Block* block2 = new Block({store2});
+
+    Block* enclosing = new Block({block1, block2});
+    Stmt* simplified = IRSimplifier::simplify(enclosing);
+
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+
+    IS_NODE_WITH_NAME(Store, block->front(), store1_);
+    IS_NODE_WITH_NAME(Store, block->back(), store2_);
+
+    ASSERT_EQ(store1->value(), store1_->value());
+    ASSERT_EQ(store2->value(), store2_->value());
+  }
+
+  {
+    // Flatten sub blocks with different depths.
+    // { stmt1 , { { stmt2 } } } =>  { stmt1, stmt2 }
+    Buffer a(BufHandle("A", {1}, kInt));
+    Store* store1 = Store::make(a, {0}, 1, 1);
+    Store* store2 = Store::make(a, {0}, 0, 1);
+
+    Block* block1 = new Block({store2});
+    Block* block2 = new Block({block1});
+
+    Block* enclosing = new Block({store1, block2});
+    Stmt* simplified = IRSimplifier::simplify(enclosing);
+
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+
+    IS_NODE_WITH_NAME(Store, block->front(), store1_);
+    IS_NODE_WITH_NAME(Store, block->back(), store2_);
+
+    ASSERT_EQ(store1->value(), store1_->value());
+    ASSERT_EQ(store2->value(), store2_->value());
+  }
+
+  {
+    // Flatten many layers around an empty block to an empty block.
+    Stmt* last = new Block({});
+    for (int i = 0; i < 11; ++i) {
+      last = new Block({last});
+    }
+
+    Stmt* simplified = IRSimplifier::simplify(last);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 0);
   }
 }
 

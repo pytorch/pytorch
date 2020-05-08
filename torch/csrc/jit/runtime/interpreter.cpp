@@ -2,11 +2,11 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/record_function.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -371,8 +371,8 @@ struct CodeImpl {
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
   std::vector<Function*> function_table_;
+  std::vector<std::unique_ptr<GraphFunction>> forked_functions_;
   std::vector<TypePtr> type_table_;
-  std::vector<Code> code_table_;
   std::vector<std::function<void(std::vector<IValue>&)>>
       profile_function_table_;
 
@@ -772,9 +772,11 @@ struct CodeImpl {
 
   void emitFork(Node* node) {
     emitLoadInputs(node->inputs());
-    code_table_.emplace_back(
-        Code(node->g(attr::Subgraph), "<forked function>"));
-    insertInstruction(FORK, code_table_.size() - 1, node->inputs().size());
+    std::unique_ptr<GraphFunction> forked_fn(new GraphFunction(
+        "<forked function>", node->g(attr::Subgraph), nullptr));
+    forked_functions_.emplace_back(std::move(forked_fn));
+    function_table_.emplace_back(forked_functions_.back().get());
+    insertInstruction(FORK, function_table_.size() - 1, node->inputs().size());
   }
 
   void emitWarn(Node* node) {
@@ -812,7 +814,7 @@ struct CodeImpl {
         break;
       case prim::CallMethod:
         if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
-          emitCall(class_type->getMethod(node->s(attr::name)), node->inputs());
+          emitCall(&class_type->getMethod(node->s(attr::name)), node->inputs());
         } else {
           emitInterfaceCall(node->s(attr::name), node->inputs());
         }
@@ -1140,14 +1142,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // reduce the number of compilations for too dynamic callers we
             // might miss opportunities where a caller is dynamic but a callee
             // gets stable arguments
-            auto function = peek(stack, 0, inst.N)
-                                .toObject()
-                                ->type()
-                                ->getMethod(af.constants[inst.X].toStringRef());
-            if (!function->isGraphFunction()) {
-              runBuiltinFunction(stack, function, &af);
+            Function& function =
+                peek(stack, 0, inst.N)
+                    .toObject()
+                    ->type()
+                    ->getMethod(af.constants[inst.X].toStringRef());
+            if (!function.isGraphFunction()) {
+              runBuiltinFunction(stack, &function, &af);
             } else {
-              runGraphFunction(stack, function, &af);
+              runGraphFunction(stack, &function, &af);
             }
           } break;
           case RET:
@@ -1177,15 +1180,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 Callback(
                     c10::intrusive_ptr<InterpreterStateImpl> state,
                     Stack stack)
-                    : state_(std::move(state)), stack_(std::move(stack)) {}
+                    : state_(std::move(state)), stack_(std::move(stack)) {
+                  dist_autograd_context_id_ = getDistAutogradContextId();
+                }
                 void operator()() {
                   at::launch(InterpreterContinuation(
-                      state_, std::move(stack_), getDistAutogradContextId()));
+                      state_, std::move(stack_), dist_autograd_context_id_));
                 }
 
                private:
                 InterpreterState state_;
                 Stack stack_;
+                int64_t dist_autograd_context_id_;
               };
 
               // we are suspending, so we need to reset the stack to where we
@@ -1241,9 +1247,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             } else {
               auto t = stack.back().toTensor();
               const TypePtr& expected = af.types[inst.X];
-              bool comp = expected->cast<TensorType>()
-                              ->isCompatibleWithInCurrentExecutionContext(t);
-              push(stack, comp);
+              auto pttp = tensorTypeInCurrentExecutionContext(t);
+              push(stack, pttp->isSubtypeOf(expected));
             }
             ++af.pc;
           } break;
@@ -1311,8 +1316,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case FORK: {
             // Move inputs to a separate stack
+            Function* forked_fn = af.functions[inst.X];
             InterpreterState forked_interpreter(
-                frames.back().function->code_table_.at(inst.X));
+                forked_fn->get_executor()
+                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
+                    .code);
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
@@ -1331,7 +1339,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               drop(stack, 1);
               c10::SourceLocation location{
                   "", range->filename()->c_str(), uint32_t(line)};
-              c10::Warning::warn(location, pop(stack).toStringRef());
+              // Sends the warning to the warning handler with the
+              // "verbatim" flag. This flag ensures the warning handler
+              // will print the exception as configured.
+              c10::Warning::warn(
+                  location, pop(stack).toStringRef(), /*verbatim=*/true);
             } else {
               TORCH_WARN(pop(stack).toStringRef());
             }

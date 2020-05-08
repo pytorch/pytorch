@@ -118,6 +118,18 @@ using qtopk_fn = void(*)(Tensor&, Tensor&, const Tensor&, int64_t, int64_t, bool
 
 using qbatch_norm_fn = void(*)(int64_t, int64_t, int64_t, int64_t, int64_t, const Tensor&, const Tensor&, const Tensor&, Tensor&);
 
+using qnormalize_fn = void (*)(
+    const Tensor& /* X */,
+    const Tensor& /* gamma */,
+    const Tensor& /* beta */,
+    bool /* affine_per_channel */,
+    int /* num_channels */,
+    int /* num_groups */,
+    int64_t /* M */,
+    int64_t /* N */,
+    double /* eps */,
+    Tensor* /* Y */);
+
 // using qavg_pool2d_fn
 DECLARE_DISPATCH(qrelu_fn, qrelu_stub);
 DECLARE_DISPATCH(qrelu_fn, qrelu6_stub);
@@ -144,6 +156,7 @@ DECLARE_DISPATCH(qcat_nhwc_fn, qcat_relu_nhwc_stub);
 DECLARE_DISPATCH(qtopk_fn, qtopk_stub);
 DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_stub);
 DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_relu_stub);
+DECLARE_DISPATCH(qnormalize_fn, quantized_normalize_stub);
 
 } // namespace native
 } // namespace at

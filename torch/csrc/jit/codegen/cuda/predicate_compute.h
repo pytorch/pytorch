@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
 
 /*
  * Predicate compute takes a TensorView and set of indices. The number of
@@ -35,15 +34,11 @@ namespace fuser {
 
 struct PredicateCompute {
   // Return if there are any predicates
-  static bool hasPredicates(
-      const TensorView* tv,
-      const std::vector<Int*>& _indices);
+  static bool hasPredicates(const TensorIndex*);
 
   // Return the series of predicates, if an axis doesn't have a predicate
   // reutrns 1
-  static std::vector<Int*> computePredicates(
-      const TensorView* tv,
-      const std::vector<Int*>& _indices);
+  static std::vector<Int*> computePredicates(const TensorIndex*);
 };
 
 } // namespace fuser

@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/quantization.h>
@@ -19,6 +20,9 @@ namespace jit {
 namespace {
 
 void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
+  // fuse decomposed linear into aten::linear
+  FuseLinear(graph);
+
   std::string linear_before_inline = R"(
     graph(%linear, %input, %weight, %bias):
         %r = prim::CallFunction(%linear, %input, %weight, %bias)
@@ -65,7 +69,7 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
 
 void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   // Replace _convolution with conv2d
-  graph_rewrite_helper::replaceConvolutionWithConv2d(graph);
+  graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
   std::string conv_2d_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
@@ -296,12 +300,14 @@ void FoldPrePackingOps(script::Module& m) {
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
-void optimizeForMobile(script::Module& m) {
-  m.eval();
-  m = FoldConvBatchNorm2d(m);
-  insertPrePackedOps(m);
-  m = freeze_module(m);
-  FoldPrePackingOps(m);
+c10::optional<script::Module> optimizeForMobile(const script::Module& m) {
+  auto cloned_module = m.clone();
+  cloned_module.eval();
+  cloned_module = FoldConvBatchNorm2d(cloned_module);
+  insertPrePackedOps(cloned_module);
+  cloned_module = freeze_module(cloned_module);
+  FoldPrePackingOps(cloned_module);
+  return cloned_module;
 }
 
 #else
@@ -326,10 +332,11 @@ void FoldPrePackingOps(script::Module& m) {
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
-void optimizeForMobile(script::Module& m) {
+c10::optional<script::Module> optimizeForMobile(const script::Module& m) {
   TORCH_INTERNAL_ASSERT(
       "Mobile optimizaiton only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+  return c10::nullopt;
 }
 
 #endif

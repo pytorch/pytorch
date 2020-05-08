@@ -64,6 +64,9 @@ struct TORCH_API GraphExecutor {
   explicit operator bool() const {
     return pImpl != nullptr;
   }
+  void reset() {
+    pImpl.reset();
+  }
   std::shared_ptr<Graph> graph() const;
   GraphExecutorState getDebugState();
 

@@ -61,6 +61,27 @@
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
+      - binary_windows_build:
+          name: binary_windows_libtorch_3_7_cpu_debug_build
+          build_environment: "libtorch 3.7 cpu debug"
+          requires:
+            - setup
+      - binary_windows_build:
+          name: binary_windows_libtorch_3_7_cpu_release_build
+          build_environment: "libtorch 3.7 cpu release"
+          requires:
+            - setup
+      - binary_windows_build:
+          name: binary_windows_wheel_3_7_cu102_build
+          build_environment: "wheel 3.7 cu102"
+          requires:
+            - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
       - binary_linux_test:
           name: binary_linux_manywheel_3_7m_cu102_devtoolset7_test
           build_environment: "manywheel 3.7m cu102 devtoolset7"

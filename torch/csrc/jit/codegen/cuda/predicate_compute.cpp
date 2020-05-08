@@ -8,32 +8,29 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-bool PredicateCompute::hasPredicates(
-    const TensorView* tv,
-    const std::vector<Int*>& _indices) {
+bool PredicateCompute::hasPredicates(const TensorIndex* ti) {
   std::vector<Int*> preds;
-  for (auto ind : _indices)
+  for (auto ind : ti->indices())
     if (FusionGuard::getCurFusion()->origin(ind) != nullptr)
       return true;
   return false;
 }
 
-std::vector<Int*> PredicateCompute::computePredicates(
-    const TensorView* tv,
-    const std::vector<Int*>& _indices) {
+std::vector<Int*> PredicateCompute::computePredicates(const TensorIndex* ti) {
   std::vector<Int*> preds;
-  if (!hasPredicates(tv, _indices))
+  if (!hasPredicates(ti))
     return preds;
+  const TensorView* tv = ti->view();
 
   TensorDomain* root = tv->getRootDomain();
-  TORCH_CHECK(root->size() == _indices.size());
-  for (decltype(_indices.size()) i{0}; i < _indices.size(); i++)
+  TORCH_CHECK(root->nDims() == ti->nDims());
+  for (decltype(ti->nDims()) i{0}; i < ti->nDims(); i++)
 
-    if (FusionGuard::getCurFusion()->origin(_indices[i]) != nullptr) {
-      Val* pred = lt(_indices[i], root->axis(i)->size());
+    if (FusionGuard::getCurFusion()->origin(ti->index(i)) != nullptr) {
+      Val* pred = lt(ti->index(i), root->axis(i)->extent());
       TORCH_CHECK(
           pred->getValType().value() == ValType::Scalar &&
-          pred->getDataType().value() == DataType::Int);
+          pred->getDataType().value() == DataType::Bool);
       preds.push_back(static_cast<Int*>(pred));
     } else {
       preds.push_back(new Int(1));

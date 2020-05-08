@@ -7,7 +7,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
-class CustomClassHolder : public c10::intrusive_ptr_target {};
+class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
 namespace jit {
 using ::torch::CustomClassHolder;
 struct Function;
@@ -63,6 +63,7 @@ struct PyObjectHolder;
   _(Uninitialized) \
   _(Capsule) \
   _(RRef) \
+  _(Generator) \
 
 // [doxygen private]
 // These methods are not actually private but we don't want to document them, so
@@ -167,7 +168,7 @@ struct CAFFE2_API IValue final {
    *      [tensor1] == [tensor1] -> True (because container equality will first compare identity)
    *      [tensor1] == [tensor1_copy] -> RuntimeError: bool value of Tensor is ambiguous
    */
-  friend bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs);
+  TORCH_API friend bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs);
 
   /// @private [doxygen private]
   bool isAliasOf(const IValue& rhs) const {
@@ -334,7 +335,14 @@ struct CAFFE2_API IValue final {
   // Bool
   IValue(bool b)
   : tag(Tag::Bool), is_intrusive_ptr(false) {
+#if defined(__clang__) && defined(__x86_64__)
+    // Initializing entire payload stops valgrind's from reporting
+    // "jump or move depends on uninitialised value" in IValue copy constructor
+    // See https://github.com/pytorch/pytorch/issues/37117
+    payload.as_int = b;
+#else
     payload.as_bool = b;
+#endif
   }
    bool isBool() const { return Tag::Bool == tag; }
    bool toBool() const {
@@ -399,6 +407,8 @@ struct CAFFE2_API IValue final {
       class T,
       enable_if_ivalue_constructible<T> = nullptr>
   IValue(const std::vector<T>& v);
+  template<class T, size_t N>
+  IValue(std::array<T, N> v);
 
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);
@@ -517,6 +527,19 @@ struct CAFFE2_API IValue final {
     return static_cast<at::QScheme>(toInt());
   }
 
+  // Generator
+  IValue(at::Generator g)
+  : tag(Tag::Generator), is_intrusive_ptr(g.defined())  {
+    // Note: the undefined generator is not refcounted, so while it
+    // is tagged as a generator, is_intrusive_ptr is set to false.
+    // This is not an optional optimization: our incref call
+    // *will not* do the right thing when called on an
+    // undefined generator.
+    payload.as_intrusive_ptr = g.unsafeReleaseGeneratorImpl();
+  }
+  bool isGenerator() const { return Tag::Generator == tag; }
+  at::Generator toGenerator() &&;
+  at::Generator toGenerator() const &;
 
   // for debugging
   std::string tagKind() const {
@@ -606,6 +629,7 @@ struct CAFFE2_API IValue final {
   };
 
   using HashAliasedIValues = std::unordered_set<IValue, HashAliasedIValue, CompAliasedIValues>;
+  using HashAliasedIValueMap = std::unordered_map<IValue, IValue, HashAliasedIValue, CompAliasedIValues>;
 
   // Chechs if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.
@@ -613,6 +637,10 @@ struct CAFFE2_API IValue final {
 
   // Inserts all subvalues of this in subValues.
   void getSubValues(HashAliasedIValues& subValues) const;
+
+  IValue deepcopy() const;
+  IValue deepcopy(
+      HashAliasedIValueMap& memo) const;
 
  private:
   static bool ptrEqual(const IValue& lhs, const IValue& rhs);

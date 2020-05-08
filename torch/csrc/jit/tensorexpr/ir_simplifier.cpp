@@ -251,6 +251,23 @@ const Expr* PolynomialTransformer::mutate(const Add* v) {
     }
   }
 
+  const Expr* scalar = nullptr;
+  const Expr* variable = nullptr;
+  if (lhs_new->isConstant()) {
+    scalar = evaluateOp(lhs_new);
+    variable = rhs_new;
+  } else if (rhs_new->isConstant()) {
+    scalar = evaluateOp(rhs_new);
+    variable = lhs_new;
+  }
+
+  // If there is a scalar, and it's zero: short circuit and return the other
+  // side.
+  if (scalar && immediateEquals(scalar, 0)) {
+    auto* c = new Cast(v->dtype(), variable);
+    return c->accept_mutator(this);
+  }
+
   // If this is a floating point Add then order of operations is important, we
   // dont want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
@@ -294,22 +311,6 @@ const Expr* PolynomialTransformer::mutate(const Add* v) {
     // terms.
     return new Polynomial(
         hasher_, getImmediateByType(v->dtype(), 0), lhsTerm, rhsTerm);
-  }
-
-  const Expr* scalar = nullptr;
-  const Expr* variable = nullptr;
-  if (lhs_new->isConstant()) {
-    scalar = evaluateOp(lhs_new);
-    variable = rhs_new;
-  } else if (rhs_new->isConstant()) {
-    scalar = evaluateOp(rhs_new);
-    variable = lhs_new;
-  }
-
-  // If there is a scalar, and it's zero: short circuit and return the other
-  // side.
-  if (scalar && immediateEquals(scalar, 0)) {
-    return variable;
   }
 
   // Adds are commutative.
@@ -449,6 +450,11 @@ const Expr* PolynomialTransformer::mutate(const Sub* v) {
     if (auto* ret = combineMultilane<Sub>(lhs_new, rhs_new)) {
       return ret->accept_mutator(this);
     }
+  }
+
+  if (rhs_new->isConstant() && immediateEquals(rhs_new, 0)) {
+    auto* c = new Cast(v->dtype(), lhs_new);
+    return c->accept_mutator(this);
   }
 
   // If this is a floating point Sub then order of operations is important, we
@@ -751,11 +757,34 @@ const Expr* PolynomialTransformer::mutate(const Mul* v) {
     }
   }
 
+  // Order doesn't matter.
+  const Expr* scalar = nullptr;
+  const Expr* variable = nullptr;
+  if (lhs_new->isConstant()) {
+    scalar = lhs_new;
+    variable = rhs_new;
+  } else if (rhs_new->isConstant()) {
+    scalar = rhs_new;
+    variable = lhs_new;
+  }
+
+  // Handle special case mul by 1 since thats safe for floating point, even if
+  // it's Nan/Inf.
+  if (scalar && immediateEquals(scalar, 1)) {
+    auto* c = new Cast(v->dtype(), variable);
+    return c->accept_mutator(this);
+  }
+
   // If this is a floating point Mul then order of operations is important, we
   // dont want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return new Mul(lhs_new, rhs_new);
+  }
+
+  // Handle special case mul by 0.
+  if (scalar && immediateEquals(scalar, 0)) {
+    return getImmediateByType(v->dtype(), 0);
   }
 
   // Catch cases of rounding (Div(A/B) * B).
@@ -787,30 +816,13 @@ const Expr* PolynomialTransformer::mutate(const Mul* v) {
     return mulTerms(lhsTerm, rhsTerm);
   }
 
-  const Expr* scalar = nullptr;
-  const Expr* variable = nullptr;
-  if (lhs_new->isConstant()) {
-    scalar = lhs_new;
-    variable = rhs_new;
-  } else if (rhs_new->isConstant()) {
-    scalar = rhs_new;
-    variable = lhs_new;
-  }
-
   if (scalar && lhsTerm) {
     const Expr* newScalar = evaluateOp(new Mul(scalar, lhsTerm->scalar()));
-    if (immediateEquals(newScalar, 0)) {
-      return newScalar;
-    }
     return new Term(hasher_, newScalar, lhsTerm->variables());
   }
 
   if (scalar && rhsTerm) {
     const Expr* newScalar = evaluateOp(new Mul(scalar, rhsTerm->scalar()));
-
-    if (immediateEquals(newScalar, 0)) {
-      return newScalar;
-    }
     return new Term(hasher_, newScalar, rhsTerm->variables());
   }
 
@@ -973,7 +985,142 @@ const Expr* PolynomialTransformer::mutate(const Cast* v) {
     return evaluateOp(new Cast(v->dtype(), node));
   }
 
+  if (v->dtype() == node->dtype()) {
+    return node;
+  }
+
   return new Cast(v->dtype(), node);
+}
+
+const Expr* PolynomialTransformer::mutate(const IfThenElse* v) {
+  const Expr* condition = v->condition();
+  const Expr* true_value = v->true_value();
+  const Expr* false_value = v->false_value();
+  const Expr* condition_new = condition->accept_mutator(this);
+  const Expr* true_value_new = true_value->accept_mutator(this);
+  const Expr* false_value_new = false_value->accept_mutator(this);
+
+  // If the condition is constant then we can choose the right branch now.
+  if (condition_new->isConstant()) {
+    if (!immediateEquals(condition_new, 0)) {
+      return true_value_new;
+    } else {
+      return false_value_new;
+    }
+  }
+
+  // If both branches are the same then don't do the condition.
+  if (hasher_.hash(true_value_new) == hasher_.hash(false_value_new)) {
+    return true_value_new;
+  }
+
+  if (condition == condition_new && true_value == true_value_new &&
+      false_value == false_value_new) {
+    return v;
+  }
+
+  return new IfThenElse(condition_new, true_value_new, false_value_new);
+}
+
+Stmt* PolynomialTransformer::mutate(const Cond* v) {
+  const Expr* cond_old = v->condition();
+  Stmt* true_old = v->true_stmt();
+  Stmt* false_old = v->false_stmt();
+
+  const Expr* cond_new = cond_old->accept_mutator(this);
+  Stmt* true_new = true_old ? true_old->accept_mutator(this) : true_old;
+  Stmt* false_new = false_old ? false_old->accept_mutator(this) : false_old;
+
+  // If the condition is constant then we can choose the right branch now.
+  if (cond_new->isConstant()) {
+    if (!immediateEquals(cond_new, 0)) {
+      return Stmt::clone(true_new);
+    } else {
+      return Stmt::clone(false_new);
+    }
+  }
+
+  // If both branches are the same then don't do the condition.
+  if (true_new && false_new &&
+      hasher_.hash(true_new) == hasher_.hash(false_new)) {
+    return Stmt::clone(true_new);
+  }
+
+  if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
+    return (Stmt*)v;
+  }
+
+  if (true_old && true_new == true_old) {
+    true_new = Stmt::clone(true_old);
+  }
+  if (false_old && false_new == false_old) {
+    false_new = Stmt::clone(false_old);
+  }
+
+  return new Cond(cond_new, true_new, false_new);
+}
+
+Stmt* PolynomialTransformer::mutate(const For* v) {
+  const Expr* var = v->var();
+  const Expr* start = v->start();
+  const Expr* stop = v->stop();
+  Stmt* body = v->body();
+  LoopOptions loop_options = v->loop_options();
+  const Expr* var_new_expr = var->accept_mutator(this);
+  const Var* var_new = dynamic_cast<const Var*>(var_new_expr);
+  const Expr* start_new = start->accept_mutator(this);
+  const Expr* stop_new = stop->accept_mutator(this);
+  Stmt* body_new = body;
+
+  const Expr* loops = new Sub(stop_new, start_new);
+  loops = loops->accept_mutator(this);
+  if (loop_options.isDefault() && loops->isConstant()) {
+    if (immediateEquals(loops, 0)) {
+      return new Block({});
+    } else if (immediateEquals(loops, 1)) {
+      body_new = Substitute(body, {{var_new, start_new}});
+      body_new = body_new->accept_mutator(this);
+      return body_new;
+    }
+  }
+
+  body_new = body_new->accept_mutator(this);
+  if (!body_new) {
+    return new Block({});
+  }
+
+  if (var == var_new && start == start_new && stop == stop_new &&
+      body == body_new) {
+    return (Stmt*)v;
+  }
+  if (body_new == body) {
+    body_new = Stmt::clone(body);
+  }
+  return new For(var_new, start_new, stop_new, body_new, loop_options);
+}
+
+Stmt* PolynomialTransformer::mutate(const Block* v) {
+  std::vector<Stmt*> stmts;
+  for (Stmt* stmt : *v) {
+    Stmt* stmt_new = stmt->accept_mutator(this);
+    if (stmt_new == nullptr) {
+      continue;
+    }
+
+    if (auto* subBlock = dynamic_cast<Block*>(stmt_new)) {
+      for (Block::iterator I = subBlock->begin(), E = subBlock->end();
+           I != E;) {
+        // Be careful to avoid invalidating the iterator.
+        Stmt* s = *(I++);
+        subBlock->remove_stmt(s);
+        stmts.push_back(s);
+      }
+    } else {
+      stmts.push_back(Stmt::clone(stmt_new));
+    }
+  }
+
+  return new Block(stmts);
 }
 
 // TermExpander

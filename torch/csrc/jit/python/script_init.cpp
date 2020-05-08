@@ -440,6 +440,18 @@ static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
   auto s_iter = stack.begin();
   for (auto v : input_values) {
     AT_ASSERT(s_iter != stack.end());
+    // Leave packed param types alone. This is needed for downstream passes
+    // (like alias analysis) to work properly. This will be unpacked later
+    // in unpackQuantizedWeights.
+    if ((v->type() ==
+         getCustomClass(
+             "__torch__.torch.classes.quantized.Conv2dPackedParamsBase")) ||
+        (v->type() ==
+         getCustomClass(
+             "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"))) {
+      s_iter++;
+      continue;
+    }
     if (v->type()->kind() == TupleType::Kind) {
       AT_ASSERT(v->node()->kind() == prim::Param);
       v->setType(getTupleTensorType(s_iter, stack.end(), v->type(), complete));
@@ -703,7 +715,10 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def(
           "__getattr__",
-          [](Object& self, const std::string& name) {
+          [](Object& self, const std::string& name) -> py::object {
+            if (name == "__qualname__") {
+              return py::cast(self.type()->name()->name());
+            }
             if (auto method = self.find_method(name)) {
               return py::cast(*method);
             }
@@ -872,6 +887,7 @@ void initJitScriptBindings(PyObject* module) {
              py::function func,
              py::tuple input_tuple,
              py::function var_lookup_fn,
+             bool strict,
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
@@ -879,7 +895,12 @@ void initJitScriptBindings(PyObject* module) {
 
             std::shared_ptr<Graph> graph =
                 std::get<0>(tracer::createGraphByTracing(
-                    func, typed_inputs, var_lookup_fn, force_outplace, &self));
+                    func,
+                    typed_inputs,
+                    var_lookup_fn,
+                    strict,
+                    force_outplace,
+                    &self));
             const auto method_name = QualifiedName(*self.type()->name(), name);
             auto fn = self._ivalue()->compilation_unit()->create_function(
                 method_name, graph);
@@ -895,9 +916,26 @@ void initJitScriptBindings(PyObject* module) {
             pp.printNamedType(self.type());
             return pp.str();
           })
+      .def_property_readonly(
+          "code_with_constants",
+          [](Module& self) {
+            std::vector<at::Tensor> tensors;
+            std::vector<c10::NamedTypePtr> deps;
+            PythonPrint pp(tensors, deps);
+            pp.printNamedType(self.type());
+            std::map<std::string, at::Tensor> consts;
+            int i = 0;
+            for (auto const& tensor : tensors) {
+              consts["c" + std::to_string(i)] = tensor;
+              i += 1;
+            }
+            return std::make_tuple(pp.str(), consts);
+          })
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
       .def("_clone_instance", &Module::clone_instance)
+      .def("copy", &Module::copy)
+      .def("deepcopy", &Module::deepcopy)
       .def_property_readonly("qualified_name", [](const Module& self) {
         return self.type()->name()->qualifiedName();
       });
@@ -1034,12 +1072,27 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "schema", [](Method& m) { return m.function().getSchema(); })
       .def_property_readonly("name", &Method::name)
-      .def_property_readonly("code", [](Method& self) {
+      .def_property_readonly(
+          "code",
+          [](Method& self) {
+            std::vector<at::Tensor> tensors;
+            std::vector<c10::NamedTypePtr> deps;
+            PythonPrint pp(tensors, deps);
+            pp.printMethod(self.function());
+            return pp.str();
+          })
+      .def_property_readonly("code_with_constants", [](Method& self) {
         std::vector<at::Tensor> tensors;
         std::vector<c10::NamedTypePtr> deps;
         PythonPrint pp(tensors, deps);
         pp.printMethod(self.function());
-        return pp.str();
+        std::map<std::string, at::Tensor> consts;
+        int i = 0;
+        for (auto const& tensor : tensors) {
+          consts["c" + std::to_string(i)] = tensor;
+          i += 1;
+        }
+        return std::make_tuple(pp.str(), consts);
       });
   m.def(
       "_jit_script_compile",
@@ -1083,10 +1136,11 @@ void initJitScriptBindings(PyObject* module) {
          py::function func,
          py::tuple input_tuple,
          py::function var_lookup_fn,
+         bool strict,
          bool force_outplace) {
         auto typed_inputs = toTraceableStack(input_tuple);
         std::shared_ptr<Graph> graph = std::get<0>(tracer::createGraphByTracing(
-            func, typed_inputs, var_lookup_fn, force_outplace));
+            func, typed_inputs, var_lookup_fn, strict, force_outplace));
         auto cu = get_python_cu();
         auto name = c10::QualifiedName(qualname);
         auto result = cu->create_function(

@@ -11,6 +11,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace {
+constexpr auto kSecToMsConversion = 1000;
+}
+
 //////////////////////////  MessageCounter  /////////////////////////////////
 
 ProcessGroupAgent::MessageCounter::MessageCounter(int worldSize)
@@ -103,17 +107,13 @@ ProcessGroupAgent::ProcessGroupAgent(
       recvCounts_(pg_->getSize()),
       nextId_(0),
       sendMutexes_(pg_->getSize()),
-      threadPool_(numSendRecvThreads) {
+      threadPool_(numSendRecvThreads),
+      timeoutThreadEnabled_{false} {
   // initialize metric info counters
   metrics_.resize(ProcessGroupAgentMetrics::N_METRICS);
   metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME] =
       std::make_unique<AverageMetricsTracker>(kGilAverageWaitTime);
   collectNames();
-  TORCH_CHECK(
-      nameMap_.size() > 1,
-      "ProcessGroupAgent requires world_size to "
-      "be at least 2, but got ",
-      nameMap_.size());
   auto workerRankIter = nameMap_.find(workerInfo_.name_);
   TORCH_CHECK(
       workerRankIter != nameMap_.end(),
@@ -241,19 +241,19 @@ void ProcessGroupAgent::sync() {
 }
 
 void ProcessGroupAgent::startImpl() {
+  timeoutThreadEnabled_.store(true);
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
   futureTimeoutThread_ =
       std::thread(&ProcessGroupAgent::pollTimedOutRPCs, this);
 }
 
-void ProcessGroupAgent::shutdown() {
+void ProcessGroupAgent::shutdownImpl() {
   LOG(INFO) << "Shutting down ProcessGroupAgent on rank " << pg_->getRank()
             << ".";
-  std::unique_lock<std::mutex> lock{futureMutex_};
-  if (!rpcAgentRunning_.exchange(false)) {
-    return;
+  {
+    std::unique_lock<std::mutex> lock(futureMutex_);
+    timeoutThreadEnabled_.store(false);
   }
-  lock.unlock();
   futureTimeoutCV_.notify_one();
   futureTimeoutThread_.join();
   // Abort listener thread to stop accepting new work. We need to interrupt the
@@ -291,7 +291,8 @@ void ProcessGroupAgent::shutdown() {
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
-    Message&& message) {
+    Message&& message,
+    const float rpcTimeoutSeconds) {
   // Throw if we previously encountered an exception in ::listenLoop.
   {
     std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
@@ -324,9 +325,15 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   if (message.isRequest()) {
     // millisecond level precision of when request started.
     auto futureStartTime = std::chrono::steady_clock::now();
-    // Prepare endTime from timeout.
-    auto timeout = rpcTimeout_.load();
-    // Set infinite timeout if specified.
+    // if passed in timeout is unset, then use the currently set default timeout
+    // for all RPCs.
+    auto timeout = rpcTimeoutSeconds == kUnsetRpcTimeout
+        ? getRpcTimeout()
+        : std::chrono::milliseconds(
+              static_cast<int>(rpcTimeoutSeconds * kSecToMsConversion));
+
+    // Prepare endTime from timeout. Set infinite timeout if
+    // specified.
     steady_clock_time_point endTime = timeout.count() == 0
         ? kInfiniteTimeoutTimePoint
         : futureStartTime + timeout;
@@ -425,6 +432,7 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
   std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
   const auto dst = work.to_.id_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto serializedPayloadData = const_cast<char*>(serializedPayload->data());
   auto serializedPayloadSize = serializedPayload->size();
   std::string* deleteWhenDone = serializedPayload.release();
@@ -524,9 +532,16 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       ++serverActiveAsyncCalls_;
       // Callback processing returned an incomplete future. Add sending the
       // response as a callback which fires when the future completes.
+      // Use a weak_ptr, so we can std::move the future's value.
       auto fromId = work.from_.id_;
       auto requestId = work.id_;
-      futureResponse->addCallback([this, fromId, requestId, futureResponse]() {
+      futureResponse->addCallback([this,
+                                   fromId,
+                                   requestId,
+                                   weak = std::weak_ptr<FutureMessage>(
+                                       futureResponse)]() {
+        auto futureResponse = weak.lock();
+        TORCH_INTERNAL_ASSERT(futureResponse);
         --serverActiveCalls_;
         --serverActiveAsyncCalls_;
         if (!futureResponse->hasError()) {
@@ -732,7 +747,7 @@ void ProcessGroupAgent::listenLoopInternal() {
 }
 
 void ProcessGroupAgent::pollTimedOutRPCs() {
-  while (rpcAgentRunning_.load()) {
+  while (timeoutThreadEnabled_.load()) {
     std::unique_lock<std::mutex> lock{futureMutex_};
     steady_clock_time_point minEndTime;
     // Estimate amount of time the first future will time out in, and sleep
@@ -746,13 +761,13 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     }
 
     auto shouldUpdateMinEndTimePredicate = [&, this]() -> bool {
-      // Notice, whoever modifying `rpcAgentRunning_`
-      // must acquire lock on `futureMutex_`.
+      // Notice, whoever modifies `timeoutThreadEnabled_`
+      // must acquire a lock on `futureMutex_`.
       // Otherwise, this predicate could deadlock.
       // If during evaluating the predicate, `::shutdown()` is called, then
       // the predicate missed the notification before it started waiting
       // on the cond var.
-      if (!rpcAgentRunning_.load()) {
+      if (!timeoutThreadEnabled_.load()) {
         return true;
       }
       steady_clock_time_point minEndTimeInMap = kInfiniteTimeoutTimePoint;
@@ -784,13 +799,9 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
           "RPC ran for more than ",
           timedOutFuture.timeout_.count(),
           " milliseconds and timed out.");
-      // This is a dummy response that's not send over RPC, so the ID field is
-      // not used for any request/response matching.
-      const auto exceptionMsg = createExceptionResponse(err, -1);
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
-        timedOutFuture.future_->setError(std::string(
-            exceptionMsg.payload().begin(), exceptionMsg.payload().end()));
+        timedOutFuture.future_->setError(err);
         // The future timed out and will not be processed by handleRecv(), even
         // if we eventually get a response. In order to keep track of all
         // send/recv pairs, we increment the count here.

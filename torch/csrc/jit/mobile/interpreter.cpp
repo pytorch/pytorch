@@ -1,4 +1,4 @@
-#include "interpreter.h"
+#include <torch/csrc/jit/mobile/interpreter.h>
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/operator_name.h>
@@ -6,7 +6,7 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #endif
 
@@ -25,19 +25,14 @@ bool InterpreterState::run(Stack& stack) {
   while (true) {
     Instruction inst = code_->instructions_[pc];
 
-    //  std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
-    //  if (inst.op == OP) {
-    //    std::cout << ", " << code_->op_names_[inst.X].name << "." <<
-    //      code_->op_names_[inst.X].overload_name;
-    //  }
-    //  std::cout << std::endl;
-    //  for (auto val : stack) {
-    //    if (val.isTensor()) {
-    //      std::cout << val.toTensor().sizes() << std::endl;
-    //    } else {
-    //      std::cout << val << std::endl;
+    //    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
+    //    if (inst.op == OP) {
+    //      std::cout << ", " << code_->op_names_[inst.X].name;
+    //      if (!code_->op_names_[inst.X].overload_name.empty()) {
+    //        std::cout << "." << code_->op_names_[inst.X].overload_name;
+    //      }
     //    }
-    //  }
+    //    std::cout << std::endl;
     switch (inst.op) {
       case OP: {
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
@@ -59,12 +54,12 @@ bool InterpreterState::run(Stack& stack) {
         ++pc;
       } break;
       case INTERFACE_CALL: {
-        torch::jit::Function* method =
+        torch::jit::Function& method =
             peek(stack, 0, inst.N)
                 .toObject()
                 ->type()
                 ->getMethod(code_->constants_[inst.X].toStringRef());
-        method->run(stack);
+        method.run(stack);
         ++pc;
       } break;
       case LOAD:
@@ -178,6 +173,13 @@ bool InterpreterState::run(Stack& stack) {
       default:
         AT_ERROR(toString(inst.op), " is invalid.");
     }
+    //  for (auto val : stack) {
+    //    if (val.isTensor()) {
+    //      std::cout << val.toTensor().sizes() << std::endl;
+    //    } else {
+    //      std::cout << val << std::endl;
+    //    }
+    //  }
   }
   return false;
 }

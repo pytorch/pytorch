@@ -3,8 +3,9 @@
 #include <random>
 #include <thread>
 
-#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <aten/src/ATen/Parallel.h>
 
@@ -95,10 +96,17 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   using TimePoint = std::chrono::time_point<Clock>;
   TimePoint start_time;
 
+  std::unique_ptr<torch::autograd::profiler::RecordProfile> profiler_guard;
   {
     std::unique_lock<std::mutex> lock(m);
     while (initialized != config.num_calling_threads) {
       worker_main_cv.wait(lock);
+    }
+    if (!config.profiler_output_path.empty()) {
+      LOG(INFO) << "Using Autograd profiler. Trace will be saved to "
+                << config.profiler_output_path;
+      profiler_guard.reset(new torch::autograd::profiler::RecordProfile(
+        config.profiler_output_path));
     }
     LOG(INFO) << "Starting threads";
     start = true;
@@ -112,6 +120,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
         lock, [&]() { return finished == config.num_calling_threads; });
   }
   auto end_time = std::chrono::high_resolution_clock::now();
+  profiler_guard.reset();
   LOG(INFO) << "Finished benchmark";
 
   BenchmarkExecutionStats stats;
