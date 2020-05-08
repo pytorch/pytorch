@@ -242,14 +242,7 @@ class Conv2d : public BaseOp {
   };
 
   at::Tensor run(at::Tensor& t) override {
-    return at::conv2d(
-        t,
-        w,
-        b,
-        c10::IntArrayRef{stride},
-        c10::IntArrayRef{padding},
-        c10::IntArrayRef{1},
-        groups);
+    return at::conv2d(t, w, b, {stride}, {padding}, {1}, groups);
   }
   std::string toString() override {
     return "conv2d";
@@ -265,93 +258,93 @@ class Conv2d : public BaseOp {
 class MobileNetV2 {
  public:
   MobileNetV2() {
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{32, 3, 3, 3}, 1, 2, 1));
+    ops.emplace_back(new Conv2d({32, 3, 3, 3}, 1, 2, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{32, 1, 3, 3}, 32, 1, 1));
+    ops.emplace_back(new Conv2d({32, 1, 3, 3}, 32, 1, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{16, 32, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{96, 16, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({16, 32, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({96, 16, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{96, 1, 3, 3}, 96, 2, 1));
+    ops.emplace_back(new Conv2d({96, 1, 3, 3}, 96, 2, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{24, 96, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{144, 24, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({24, 96, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({144, 24, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{144, 1, 3, 3}, 144, 1, 1));
+    ops.emplace_back(new Conv2d({144, 1, 3, 3}, 144, 1, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{24, 144, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{144, 24, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({24, 144, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({144, 24, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{144, 1, 3, 3}, 144, 2, 1));
+    ops.emplace_back(new Conv2d({144, 1, 3, 3}, 144, 2, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{32, 144, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{192, 32, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({32, 144, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({192, 32, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{192, 1, 3, 3}, 192, 1, 1));
+    ops.emplace_back(new Conv2d({192, 1, 3, 3}, 192, 1, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{32, 192, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{192, 32, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({32, 192, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({192, 32, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{192, 1, 3, 3}, 192, 1, 1));
+    ops.emplace_back(new Conv2d({192, 1, 3, 3}, 192, 1, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{32, 192, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{192, 32, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({32, 192, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({192, 32, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{192, 1, 3, 3}, 192, 2, 1));
+    ops.emplace_back(new Conv2d({192, 1, 3, 3}, 192, 2, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{64, 192, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{384, 64, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({64, 192, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{384, 1, 3, 3}, 384, 1, 1));
+    ops.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
     ops.emplace_back(new Hardtanh_());
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{64, 384, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{384, 64, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{384, 1, 3, 3}, 384, 1, 1));
+    ops.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{64, 384, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{384, 64, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{384, 1, 3, 3}, 384, 1, 1));
+    ops.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{64, 384, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{384, 64, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{384, 1, 3, 3}, 384, 1, 1));
+    ops.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{96, 384, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{576, 96, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({96, 384, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{576, 1, 3, 3}, 576, 1, 1));
+    ops.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 1, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{96, 576, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{576, 96, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({96, 576, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{576, 1, 3, 3}, 576, 1, 1));
+    ops.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 1, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{96, 576, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{576, 96, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({96, 576, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{576, 1, 3, 3}, 576, 2, 1));
+    ops.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 2, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{160, 576, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{960, 160, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({160, 576, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{960, 1, 3, 3}, 960, 1, 1));
+    ops.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{160, 960, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{960, 160, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({160, 960, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{960, 1, 3, 3}, 960, 1, 1));
+    ops.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{160, 960, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{960, 160, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({160, 960, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{960, 1, 3, 3}, 960, 1, 1));
+    ops.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
     ops.emplace_back(new Hardtanh_());
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{320, 960, 1, 1}, 1, 1, 0));
-    ops.emplace_back(new Conv2d(c10::IntArrayRef{1280, 320, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({320, 960, 1, 1}, 1, 1, 0));
+    ops.emplace_back(new Conv2d({1280, 320, 1, 1}, 1, 1, 0));
     ops.emplace_back(new Hardtanh_());
     ops.emplace_back(new Mean());
     ops.emplace_back(new Addmm(1, 1280, 1000, 0, 1));
