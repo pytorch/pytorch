@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <sstream>
 
 namespace c10 {
 
@@ -881,7 +882,22 @@ std::mutex* getFreeMutex()
 
 static inline void assertValidDevice(int device) {
   int device_num = device_count();
-  AT_ASSERTM(0 <= device && device < device_num, "Invalid device argument.");
+  if (0 <= device && device < device_num) {
+      return;
+  }
+
+  if (getenv("CUDA_VISIBLE_DEVICES") != NULL) {
+    stringstream ss(getenv("CUDA_VISIBLE_DEVICES"));
+    while(ss.good())
+    {
+      string found_device;
+      getline(ss, found_device, ',');
+      if (found_device.size() > 0 && device == stoi(found_device)) {
+        return;
+      }
+    }
+  }
+  AT_ASSERTM(false, "Invalid device argument.");
 }
 
 DeviceStats getDeviceStats(int device) {
