@@ -1,5 +1,3 @@
-#ifdef USE_GLES
-
 #include <stdio.h>
 #include <cassert>
 #include <chrono>
@@ -9,7 +7,7 @@
 
 #include <c10/util/Exception.h>
 
-#include <ATen/native/vulkan/GLES.h>
+#include <ATen/native/vulkan/gl/GLES.h>
 #include <ATen/native/vulkan/glsl.h>
 
 #define GL_CHECK_ERROR                                        \
@@ -294,13 +292,6 @@ void GLTexture::read(GLuint unit) {
 
 void GLTexture::write(GLuint unit) {
   glBindImageTexture(unit, id_, 0, GL_TRUE, 0, GL_WRITE_ONLY, texFormat_);
-  GL_CHECK_ERROR;
-}
-
-void GLTexture::sample(GLuint unit, GLuint texId) {
-  glActiveTexture(GL_TEXTURE0 + texId);
-  glUniform1i(unit, texId);
-  glBindTexture(target_, id_);
   GL_CHECK_ERROR;
 }
 
@@ -883,6 +874,28 @@ void conv2d(
   GL_CHECK_ERROR;
 }
 
+void clamp(
+    GLTensor& output,
+    const GLTensor& input,
+    float min,
+    float max) {
+  TORCH_INTERNAL_ASSERT(false, "clamp not implemented for GLES");
+}
+
+void addmm(
+    GLTensor& output,
+    const GLTensor& t,
+    const GLTensor& m1,
+    const GLTensor& m2,
+    float beta,
+    float alpha) {
+  TORCH_INTERNAL_ASSERT(false, "addmm not implemented for GLES");
+}
+
+void mean(GLTensor& output, const GLTensor& input) {
+  TORCH_INTERNAL_ASSERT(false, "mean not implemented for GLES");
+}
+
 bool is_available() {
   return initGLContextOnce();
 }
@@ -892,4 +905,3 @@ bool is_available() {
 } // namespace vulkan
 } // namespace native
 } // namespace at
-#endif

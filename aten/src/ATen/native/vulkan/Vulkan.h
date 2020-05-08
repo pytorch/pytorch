@@ -1,5 +1,4 @@
 #pragma once
-#ifdef USE_VULKAN
 
 #include <cstring>
 #include <functional>
@@ -432,4 +431,3 @@ class ComputeUnit final {
 } // namespace vulkan
 } // namespace native
 } // namespace at
-#endif

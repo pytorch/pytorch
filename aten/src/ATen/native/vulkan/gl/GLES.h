@@ -1,5 +1,4 @@
 #pragma once
-#ifdef USE_GLES
 
 #include <memory>
 #include <vector>
@@ -36,7 +35,6 @@ class GLTexture {
 
   void read(GLuint unit);
   void write(GLuint unit);
-  void sample(GLuint unit, GLuint texId);
 
  private:
   unsigned int id_;
@@ -109,10 +107,23 @@ void conv2d(
     int64_t DX,
     int64_t G);
 
+void clamp(
+    GLTensor& output,
+    const GLTensor& input,
+    float min,
+    float max);
+
+void addmm(
+    GLTensor& output,
+    const GLTensor& t,
+    const GLTensor& m1,
+    const GLTensor& m2,
+    float beta,
+    float alpha);
+
+void mean(GLTensor& output, const GLTensor& input);
 } // namespace gl
 } // namespace details
 } // namespace vulkan
 } // namespace native
 } // namespace at
-
-#endif

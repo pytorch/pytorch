@@ -1,5 +1,3 @@
-#ifdef USE_VULKAN
-
 #include <stdio.h>
 #include <unistd.h>
 #include <cstring>
@@ -1149,4 +1147,3 @@ VulkanTensor::VulkanTensor(std::vector<int64_t> sizes)
 } // namespace vulkan
 } // namespace native
 } // namespace at
-#endif

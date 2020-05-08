@@ -1,4 +1,3 @@
-#if defined(USE_VULKAN) || defined(USE_GLES)
 #include <ATen/native/vulkan/VulkanAten.h>
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
@@ -14,7 +13,7 @@
 #else
 
 #ifdef USE_GLES
-#include <ATen/native/vulkan/GLES.h>
+#include <ATen/native/vulkan/gl/GLES.h>
 #define VULKAN_GL gl
 #endif
 
@@ -303,4 +302,3 @@ Tensor mean_vulkan(
 
 } // namespace native
 } // namespace at
-#endif
