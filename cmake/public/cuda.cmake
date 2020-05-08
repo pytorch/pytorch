@@ -465,20 +465,8 @@ endforeach()
 # Set C++14 support
 set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
 if(MSVC)
-  if(CMAKE_CUDA_COMPILER_LOADED)
-    # CUDA as a language
-    foreach(flag_var
-      CMAKE_CUDA_FLAGS_RELEASE CMAKE_CUDA_FLAGS_RELWITHDEBINFO CMAKE_CUDA_FLAGS_MINSIZEREL)
-        list(APPEND flag_var "--Werror" "cross-execution-space-call")
-        list(APPEND flag_var "--no-host-device-move-forward")
-    endforeach(flag_var)
-  else()
-    foreach(flag_var
-      CUDA_NVCC_FLAGS_RELEASE CUDA_NVCC_FLAGS_RELWITHDEBINFO CUDA_NVCC_FLAGS_MINSIZEREL)
-        list(APPEND flag_var "--Werror" "cross-execution-space-call")
-        list(APPEND flag_var "--no-host-device-move-forward")
-    endforeach(flag_var)
-  endif()
+  list(APPEND CUDA_NVCC_FLAGS "$<$<NOT:$<CONFIG:Debug>>:--Werror>" "$<$<NOT:$<CONFIG:Debug>>:cross-execution-space-call>")
+  list(APPEND CUDA_NVCC_FLAGS "$<$<NOT:$<CONFIG:Debug>>:--no-host-device-move-forward>")
 else()
   list(APPEND CUDA_NVCC_FLAGS "-std=c++14")
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
