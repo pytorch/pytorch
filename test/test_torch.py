@@ -10274,6 +10274,11 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_kstest(self, device, dtype):
+        # TODO: https://github.com/pytorch/pytorch/issues/33793
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
+            # Crashes with CUDA error: unspecified launch failure
+            return
+
         from scipy import stats
         size = 1000
         for from_ in [-42, 0, 4.2]:
