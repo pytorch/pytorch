@@ -531,7 +531,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
          const py::args& args,
          const py::kwargs& kwargs) {
         return std::make_shared<jit::PythonFutureWrapper>(
-            pyRpcBuiltin(dst, opName, rpcTimeoutSeconds, args, kwargs));
+            pyRpcBuiltin(dst, opName, args, kwargs, rpcTimeoutSeconds));
       },
       py::call_guard<py::gil_scoped_acquire>());
 
