@@ -65,7 +65,7 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
 
 void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   // Replace _convolution with conv2d
-  graph_rewrite_helper::replaceConvolutionWithConv2d(graph);
+  graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
   std::string conv_2d_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
