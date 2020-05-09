@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/tensorexpr/function.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/testing/file_check.h>
@@ -79,7 +80,7 @@ void testExprSimple02() {
     VarHandle x_inner("x_inner", kInt);
     VarHandle y("y", kInt);
     VarHandle x_tail("x_tail", kInt);
-    BufHandle f("f", {26, 5});
+    BufHandle f("f", {26, 5}, kFloat);
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(26) - 0) / 4;
     For* stmt1 = For::make(
@@ -122,6 +123,52 @@ void testExprSimple02() {
   }
 }
 
+void testExprSplitWithTail() {
+  KernelScope kernel_scope;
+  auto func = [](const ExprHandle& x) {
+    return ExprHandle(1.0f) + cast<float>(x);
+  };
+  Tensor* tensor = Compute("f", {{199, "x"}}, func);
+  LoopNest l({tensor});
+  For* x_outer;
+  For* x_inner;
+  For* x_tail;
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+  l.splitWithTail(loops[0], 17, &x_outer, &x_inner, &x_tail);
+
+  For* a;
+  For* b;
+  For* c;
+  l.splitWithTail(x_outer, 7, &a, &b, &c);
+
+  Stmt* stmt = l.root_stmt();
+  Stmt* simplified = IRSimplifier::simplify(stmt);
+  Block* body = dynamic_cast<Block*>(simplified);
+  ASSERT_EQ(body->nstmts(), 3);
+  auto biter = body->begin();
+
+  // Verify that the split loops are ordered correctly.
+  For* loop = dynamic_cast<For*>(*biter);
+  ++biter;
+  ASSERT_NE(loop, nullptr);
+  const IntImm* bound = dynamic_cast<const IntImm*>(loop->stop());
+  ASSERT_NE(bound, nullptr);
+  ASSERT_EQ(bound->value(), 7);
+
+  loop = dynamic_cast<For*>(*biter);
+  ++biter;
+  ASSERT_NE(loop, nullptr);
+  bound = dynamic_cast<const IntImm*>(loop->stop());
+  ASSERT_NE(bound, nullptr);
+  ASSERT_EQ(bound->value(), 4);
+
+  loop = dynamic_cast<For*>(*biter);
+  ASSERT_NE(loop, nullptr);
+  bound = dynamic_cast<const IntImm*>(loop->stop());
+  ASSERT_NE(bound, nullptr);
+  ASSERT_EQ(bound->value(), 12);
+}
+
 void testExprSplitWithTailNone() {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x, const ExprHandle& y) {
@@ -147,7 +194,7 @@ void testExprSplitWithTailNone() {
     VarHandle x_inner("x_inner", kInt);
     VarHandle y("y", kInt);
     VarHandle x_tail("x_tail", kInt);
-    BufHandle f("f", {24, 5});
+    BufHandle f("f", {24, 5}, kFloat);
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(24) - 0) / 4;
     Stmt* stmt = new Block({For::make(
@@ -454,7 +501,7 @@ void testScheduleFuserStyle() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
 
   Tensor* b = Compute(
       "f", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
@@ -487,10 +534,10 @@ void testScheduleFuserThreeArg() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a(BufHandle("A", {ExprHandle(kTotalSize)}), kFloat);
-  Buffer b(BufHandle("B", {ExprHandle(kTotalSize)}), kFloat);
-  Buffer c(BufHandle("C", {ExprHandle(kTotalSize)}), kFloat);
-  Buffer d(BufHandle("D", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer a(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Buffer b(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  Buffer c(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  Buffer d(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
 
   Tensor* e = Compute("e", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
     return a(i) + b(i);
@@ -525,8 +572,8 @@ void testScheduleDynamicShape2D() {
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    Buffer a(BufHandle("a", {m, n}), kFloat);
-    Buffer b(BufHandle("b", {m, n}), kFloat);
+    Buffer a(BufHandle("a", {m, n}, kFloat));
+    Buffer b(BufHandle("b", {m, n}, kFloat));
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j) + b(i, j);
@@ -582,7 +629,7 @@ void testBoundsInference_1() {
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 99}}
   KernelScope kernel_scope;
   ExprHandle n(100);
-  Buffer a(BufHandle("a", {n}), kFloat);
+  Buffer a(BufHandle("a", {n}, kFloat));
   Tensor* b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
   LoopNest l({b});
@@ -606,7 +653,7 @@ void testBoundsInference_2() {
   // {{b, kStore, 0, n-1}, {a, kLoad, 0, n-1}}
   KernelScope kernel_scope;
   VarHandle n("n", kInt);
-  Buffer a(BufHandle("a", {n}), kFloat);
+  Buffer a(BufHandle("a", {n}, kFloat));
   Tensor* b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
   LoopNest l({b});
@@ -630,7 +677,7 @@ void testBoundsInference_3() {
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 109}}
   KernelScope kernel_scope;
   ExprHandle n(100);
-  Buffer a(BufHandle("a", {n + 10}), kFloat);
+  Buffer a(BufHandle("a", {n + 10}, kFloat));
   Tensor* b = Compute(
       "b", {{n, "i"}}, [&](const VarHandle& i) { return a(i) * a(i + 10); });
   LoopNest l({b});
@@ -658,7 +705,7 @@ void testBoundsInference_4() {
   KernelScope kernel_scope;
   ExprHandle W(320);
   ExprHandle H(200);
-  Buffer a(BufHandle("a", {H, W}), kFloat);
+  Buffer a(BufHandle("a", {H, W}, kFloat));
   Tensor* b = Compute(
       "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
         return x * y;
@@ -730,7 +777,7 @@ void testBoundsInference_5() {
   //   b[i_tail + (100/16)*16] = a[i_tail + (100/16)*16];
   KernelScope kernel_scope;
   ExprHandle n(100);
-  Buffer a(BufHandle("a", {n}), kFloat);
+  Buffer a(BufHandle("a", {n}, kFloat));
   Tensor* b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
   LoopNest l({b});
@@ -776,7 +823,7 @@ void testBoundsInference_6() {
   ExprHandle H(200);
   ExprHandle CW(32);
   ExprHandle CH(20);
-  Buffer a(BufHandle("a", {H, W}), kFloat);
+  Buffer a(BufHandle("a", {H, W}, kFloat));
   Tensor* b = Compute(
       "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
         return x * y;
@@ -1141,7 +1188,7 @@ void testLoopNestReorderAxis1() {
   cg.call({stmt1_output});
 
   auto loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[0], loops[1]);
+  l.reorderAxis(loops[0], loops[1]);
   Stmt* stmt2 = Stmt::clone(l.root_stmt());
 
   ASSERT_NE(stmt1, stmt2);
@@ -1162,7 +1209,7 @@ void testLoopNestReorderAxis1() {
 
   // Reorder them back.
   loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[0], loops[1]);
+  l.reorderAxis(loops[0], loops[1]);
   Stmt* stmt3 = l.root_stmt();
 
   std::string order3 = loopOrderHelper.getOrder(stmt3);
@@ -1196,7 +1243,7 @@ void testLoopNestReorderPartialAxes() {
   cg.call({stmt1_output});
 
   auto loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[0], loops[1]);
+  l.reorderAxis(loops[0], loops[1]);
   ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "y,x,z,");
 
   Stmt* stmt2 = Stmt::clone(l.root_stmt());
@@ -1210,7 +1257,7 @@ void testLoopNestReorderPartialAxes() {
   }
 
   loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[1], loops[2]);
+  l.reorderAxis(loops[1], loops[2]);
   ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "y,z,x,");
 
   Stmt* stmt3 = Stmt::clone(l.root_stmt());
@@ -1247,7 +1294,7 @@ void testLoopNestReorderInternalAxis() {
   cg.call({stmt1_output});
 
   auto loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[2], loops[1]);
+  l.reorderAxis(loops[2], loops[1]);
   ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "w,y,x,z,");
 
   Stmt* stmt2 = l.root_stmt();
@@ -1283,7 +1330,7 @@ void testLoopNestReorderEnclosingAxis() {
   cg.call({stmt1_output});
 
   auto loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[0], loops[3]);
+  l.reorderAxis(loops[0], loops[3]);
   ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "z,x,y,w,");
 
   Stmt* stmt2 = l.root_stmt();
@@ -1307,7 +1354,7 @@ void testLoopNestReorderSameAxis() {
   Stmt* stmt1 = Stmt::clone(l.root_stmt());
 
   auto loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[1], loops[1]);
+  l.reorderAxis(loops[1], loops[1]);
   Stmt* stmt2 = Stmt::clone(l.root_stmt());
 
   std::ostringstream oss, oss2;
@@ -1338,7 +1385,7 @@ void testLoopNestReorderExtraStatements() {
       });
   LoopNest l({tensor});
 
-  Buffer extra(BufHandle("res", {6, 3}), kFloat);
+  Buffer extra(BufHandle("res", {6, 3}, kFloat));
 
   auto loops = l.getLoopStmtsFor(tensor);
 
@@ -1376,7 +1423,7 @@ void testLoopNestReorderExtraStatements() {
    *
    */
 
-  l.reorderAxis(tensor, loops[1], loops[2]);
+  l.reorderAxis(loops[1], loops[2]);
   Stmt* stmt2 = Stmt::clone(l.root_stmt());
 
   std::ostringstream oss;
@@ -1429,7 +1476,7 @@ void testLoopNestReorderExtraStatements() {
    *
    */
   loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(tensor, loops[0], loops[2]);
+  l.reorderAxis(loops[0], loops[2]);
   Stmt* stmt3 = Stmt::clone(l.root_stmt());
 
   std::ostringstream oss2;
@@ -1478,7 +1525,7 @@ void LoopNestReorderTestHelper(
       [](const std::vector<VarHandle>&) { return -1; });
   LoopNest l({c});
 
-  Buffer extra(BufHandle("extra", {5}), kInt);
+  Buffer extra(BufHandle("extra", {5}, kInt));
 
   auto loops = l.getLoopStmtsFor(c);
   int j = 0;
@@ -1520,7 +1567,7 @@ void LoopNestReorderTestHelper(
   }
 
   loops = l.getLoopStmtsFor(c);
-  l.reorderAxis(c, loops[index1], loops[index2]);
+  l.reorderAxis(loops[index1], loops[index2]);
   Stmt* stmt2 = Stmt::clone(l.root_stmt());
 
   std::ostringstream oss, oss2;
@@ -1597,19 +1644,18 @@ void testOuterLoopVectorization() {
   Stmt* root_stmt = l.root_stmt();
   Block* outer_block = dynamic_cast<Block*>(root_stmt);
   ASSERT_NE(outer_block, nullptr);
-  while (Block* inner_block =
-             dynamic_cast<Block*>(*outer_block->stmts().begin())) {
+  while (Block* inner_block = dynamic_cast<Block*>(outer_block->front())) {
     outer_block = inner_block;
   }
 
   // Verify that we have only a single loop level remaining after
   // vectorization.
   ASSERT_EQ(outer_block->nstmts(), 1);
-  For* for_loop = dynamic_cast<For*>(*outer_block->stmts().begin());
+  For* for_loop = dynamic_cast<For*>(outer_block->front());
   ASSERT_NE(for_loop, nullptr);
   Block* for_body = for_loop->body();
   ASSERT_EQ(for_body->nstmts(), 1);
-  ASSERT_EQ(dynamic_cast<For*>(*for_body->stmts().begin()), nullptr);
+  ASSERT_EQ(dynamic_cast<For*>(for_body->front()), nullptr);
 }
 
 } // namespace jit

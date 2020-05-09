@@ -7,9 +7,12 @@
 #include <ATen/native/xnnpack/Engine.h>
 
 #include <ATen/Config.h>
+#include <c10/macros/Macros.h>
+
 #if AT_NNPACK_ENABLED()
 #include <nnpack.h>
 #endif
+
 
 constexpr int MIOPEN_DIM_MAX = 5;
 
@@ -253,7 +256,9 @@ auto ConvParams::use_xnnpack(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias) const -> bool {
-#ifdef C10_MOBILE
+// Disable the xnnpack operators for both iOS and macOS temporarily due to the crash in pthreadpool
+// TODO:T66297472 remove `!defined(__APPLE__)` once we figure out the root cause of the crash.
+#if defined(C10_MOBILE) && !defined(__APPLE__)
   if (!transposed) {
     return (input.size(1) == groups) &&
             xnnpack::use_convolution2d(

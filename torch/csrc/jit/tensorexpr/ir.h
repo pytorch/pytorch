@@ -155,7 +155,7 @@ class And : public BinaryOpNode<And> {
  public:
   And(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kAnd) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+    if (!lhs->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
@@ -168,7 +168,7 @@ class Or : public BinaryOpNode<Or> {
  public:
   Or(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kOr) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+    if (!lhs->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
@@ -181,7 +181,7 @@ class Xor : public BinaryOpNode<Xor> {
  public:
   Xor(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kXor) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+    if (!lhs->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
@@ -289,7 +289,7 @@ Expr* getImmediateByType(ScalarType immType, T initialVal) {
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
     return new Name##Imm(initialVal);
-    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
       throw unsupported_dtype();
@@ -308,7 +308,7 @@ T immediateAs(const Expr* e) {
   if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
     return imm->value();                                          \
   }
-  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
   throw unsupported_dtype();
   return 0;
@@ -320,7 +320,7 @@ bool immediateEquals(const Expr* e, T val) {
   if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
     return imm->value() == val;                                   \
   }
-  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
   throw unsupported_dtype();
   return false;
@@ -495,7 +495,7 @@ class IfThenElse : public ExprNode<IfThenElse> {
 
   IfThenElse(const Expr* c, const Expr* t, const Expr* f)
       : ExprNodeBase(t->dtype()), condition_(c), true_(t), false_(f) {
-    if (c->dtype().scalar_type() != ScalarType::Int) {
+    if (!c->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (c->dtype().lanes() != 1) {
