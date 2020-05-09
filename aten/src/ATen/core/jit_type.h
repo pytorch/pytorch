@@ -55,7 +55,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(ScalarTypeType)         \
   _(AnyListType)            \
   _(AnyTupleType)           \
-  _(AnyClassType)           \
+  _(AnyClassType)           
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1367,7 +1367,6 @@ inline TypePtr unshapedType(const TypePtr& type) {
   if (type->isSubtypeOf(TensorType::get())) {
     return TensorType::get();
   }
-  std::cout << "In type: " << type->str() << std::endl; 
   return type->withContained(fmap(type->containedTypes(), unshapedType));
 }
 
