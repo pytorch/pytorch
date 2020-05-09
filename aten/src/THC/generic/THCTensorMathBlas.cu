@@ -612,7 +612,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
 
 #elif defined(THC_REAL_IS_HALF)
 
-#if CUDA_VERSION < 9010
+#if CUDA_VERSION < 9010 && !defined(__HIP_PLATFORM_HCC__)
   // Currently no HgemmBatched in Cublas
   for (int64_t i = 0; i < num_batches; ++i) {
     THCudaBlas_Hgemm(
