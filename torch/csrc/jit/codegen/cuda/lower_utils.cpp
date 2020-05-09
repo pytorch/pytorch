@@ -347,8 +347,10 @@ Expr* getParent(Expr* scope) {
 ForLoop* openFor(Expr* scope, IterDomain* id) {
   ForLoop* new_scope = nullptr;
   if (id->isThread()) {
+    std::stringstream ss;
+    ss << id->parallel_method();
     new_scope = new ForLoop(
-        new NamedScalar(stringify(id->parallel_method()), DataType::Int),
+        new NamedScalar(ss.str(), DataType::Int),
         id,
         {},
         scope);

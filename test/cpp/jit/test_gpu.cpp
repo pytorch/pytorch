@@ -710,7 +710,7 @@ void testGPU_FusionCodeGen() {
   at::Tensor output = at::empty({16, 8, 8}, options);
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
-  torch::jit::fuser::cuda::runTestKernel(prog, {}, {}, {output}, {});
+  torch::jit::fuser::cuda::runTestKernel(&prog, {}, {output});
 
   at::Tensor output_ref = at::zeros_like(output, options);
   output_ref = output_ref + 0.0 + 1.0 + 2.0 + 3.0;
@@ -759,7 +759,7 @@ void testGPU_FusionCodeGen2() {
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
   torch::jit::fuser::cuda::runTestKernel(
-      prog, {input1, input2}, {}, {output}, {});
+      &prog, {input1, input2}, {output});
 
   at::Tensor tv2_ref = input2 + 2.0;
   at::Tensor output_ref = input1 + tv2_ref;
@@ -821,7 +821,7 @@ void testGPU_FusionSimplePWise() {
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
   torch::jit::fuser::cuda::runTestKernel(
-      prog, {input1, input2}, {}, {output}, {});
+      &prog, {input1, input2}, {output});
 
   at::Tensor tv2_ref = input2 + 2.0;
   at::Tensor output_ref = input1 + tv2_ref;
@@ -879,7 +879,7 @@ void testGPU_FusionExecKernel() {
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
   torch::jit::fuser::cuda::runTestKernel(
-      prog, {input1, input2}, {}, {output}, {});
+      &prog, {input1, input2}, {output});
 
   at::Tensor check = at::full({1, 128}, 4, options);
   ;
@@ -979,7 +979,7 @@ void testGPU_FusionAdvancedComputeAt() {
     prog.block(128);
     torch::jit::fuser::cuda::compileKernel(fusion, &prog);
     torch::jit::fuser::cuda::runTestKernel(
-        prog, {t0}, {}, {kernel_tv5, kernel_tv6}, {});
+        &prog, {t0}, {kernel_tv5, kernel_tv6});
 
     TORCH_INTERNAL_ASSERT(at::allclose(kernel_tv5, t5));
     TORCH_INTERNAL_ASSERT(at::allclose(kernel_tv6, t6));
@@ -1062,7 +1062,7 @@ void testGPU_FusionAdvancedComputeAt() {
     prog.block(128);
     torch::jit::fuser::cuda::compileKernel(fusion, &prog);
     torch::jit::fuser::cuda::runTestKernel(
-        prog, {t0}, {}, {kernel_tv5, kernel_tv6}, {});
+        &prog, {t0}, {kernel_tv5, kernel_tv6});
 
     GPULower gpulw(&fusion);
     std::stringstream cdg;
@@ -1130,7 +1130,7 @@ void testGPU_FusionAdvancedComputeAt() {
     prog.block(128);
     torch::jit::fuser::cuda::compileKernel(fusion, &prog);
     torch::jit::fuser::cuda::runTestKernel(
-        prog, {t0, t1}, {}, {kernel_tv3}, {});
+        &prog, {t0, t1}, {kernel_tv3});
 
     GPULower gpulw(&fusion);
     std::stringstream cdg;
@@ -1210,7 +1210,7 @@ void testGPU_FusionAdvancedComputeAt() {
     prog.block(128);
     torch::jit::fuser::cuda::compileKernel(fusion, &prog);
     torch::jit::fuser::cuda::runTestKernel(
-        prog, {t0, t1, t2, t3}, {}, {kernel_tv6}, {});
+        &prog, {t0, t1, t2, t3}, {kernel_tv6});
 
     GPULower gpulw(&fusion);
     std::stringstream cdg;
@@ -1300,8 +1300,18 @@ void testGPU_FusionScalarInputs() {
   prog.grid(blocks);
   prog.block(128);
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+
   torch::jit::fuser::cuda::runTestKernel(
-      prog, {t0, t1, t2, t3}, {fl0, fl1, fl2, fl3}, {kernel_tv4}, {});
+      &prog,
+      {at::Scalar(fl0),
+       at::Scalar(fl1),
+       at::Scalar(fl2),
+       at::Scalar(fl3),
+       t0,
+       t1,
+       t2,
+       t3},
+      {kernel_tv4});
 
   GPULower gpulw(&fusion);
   std::stringstream cdg;
@@ -1363,7 +1373,7 @@ void testGPU_FusionLoopUnroll() {
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
   torch::jit::fuser::cuda::runTestKernel(
-      prog, {input1, input2}, {}, {output}, {});
+      &prog, {input1, input2}, {output});
 
   at::Tensor check = at::full({inp_size}, 4, options);
 

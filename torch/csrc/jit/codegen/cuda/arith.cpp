@@ -96,14 +96,6 @@ TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1) {
     return v1;
 
   auto uop_type = cast_type(v1->getDataType().value(), dtype);
-  if (uop_type == c10::nullopt) {
-    TORCH_CHECK(
-        false,
-        "Illegal Cast value from  DataType: ",
-        v1->getDataType().value(),
-        " to DataType: ",
-        dtype);
-  }
 
   Val* out = newValLike(v1, dtype);
   Statement* expr = new UnaryOp(uop_type.value(), out, v1);

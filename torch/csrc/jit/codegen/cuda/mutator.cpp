@@ -102,14 +102,24 @@ Statement* OptOutMutator::mutate(TensorIndex* ti) {
   return mutated_val;
 }
 
-Statement* OptOutMutator::mutate(Float* n) {
-  return n;
+Statement* OptOutMutator::mutate(Bool* b) {
+  return b;
 }
-Statement* OptOutMutator::mutate(Int* n) {
-  return n;
+
+Statement* OptOutMutator::mutate(Float* f) {
+  return f;
 }
-Statement* OptOutMutator::mutate(NamedScalar* n) {
-  return n;
+
+Statement* OptOutMutator::mutate(Half* h) {
+  return h;
+}
+
+Statement* OptOutMutator::mutate(Int* i) {
+  return i;
+}
+
+Statement* OptOutMutator::mutate(NamedScalar* ns) {
+  return ns;
 }
 
 // MUTATE FUNCTIONS FOR EXPRESSIONS.

@@ -245,8 +245,8 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
 
 void runKernel(
     CudaKernel* entry,
-    const at::ArrayRef<IValue>& inputs,
-    std::vector<at::Tensor>& outputs) {
+    const at::ArrayRef<IValue> inputs,
+    std::vector<at::Tensor> outputs) {
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry->device_);
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -316,8 +316,8 @@ void runKernel(
 // This function is here for testing purposes only
 void runTestKernel(
     CudaKernel* entry,
-    const at::ArrayRef<IValue>& inputs,
-    std::vector<at::Tensor>& outputs) {
+    const at::ArrayRef<IValue> inputs,
+    std::vector<at::Tensor> outputs) {
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry->device_);
   auto stream = at::cuda::getCurrentCUDAStream();

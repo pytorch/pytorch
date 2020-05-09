@@ -31,12 +31,22 @@ ValType promote_type(const ValType& t1, const ValType& t2) {
   return t1 < t2 ? t1 : t2;
 }
 
-bool is_cast_legal(const DataType& t1, const DataType& t2) {
-  if ((DataType::Null == t1) || (DataType::Null == t2))
-    return false;
+c10::optional<UnaryOpType> cast_type(const DataType& t1, const DataType& t2) {
+ 
+  c10::optional<UnaryOpType> cast = c10::nullopt;
+
+  if ((DataType::Half == t1) && (DataType::Float == t2))
+    cast = UnaryOpType::HalfToFloat;
+  if ((DataType::Float == t1) && (DataType::Half == t2))
+    cast = UnaryOpType::FloatToHalf;
+
+  TORCH_CHECK(
+      !cast, "Illegal Cast value from  DataType: ", t1, " to DataType: ", t2);
+
   // In theory there could be stronger real check here in the future
-  return true;
+  return cast;
 }
+
 
 template <typename T>
 struct _enum_class_hash {
