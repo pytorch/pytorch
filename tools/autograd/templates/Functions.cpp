@@ -698,20 +698,6 @@ Tensor trace_backward(const Tensor & grad, IntArrayRef sizes) {
   return grad_input.view(sizes);
 }
 
-Tensor unfold_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t dim, int64_t size, int64_t step) {
-
-  int64_t numel = 1;
-  for (auto size : input_sizes) {
-    numel *= size;
-  }
-
-  auto idx = at::arange(0, numel, grad.options().dtype(at::kLong)).view(input_sizes);
-  auto idx_unfolded = idx.unfold(dim, size, step).contiguous().view(-1);
-  auto grad_input = at::zeros({numel}, grad.options());
-  grad_input.index_add_(0, idx_unfolded, grad.contiguous().view(-1));
-  return grad_input.view(input_sizes);
-}
-
 Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {
   return (2.0 / (self.numel() - unbiased)) * grad * (self - self.mean());
 }

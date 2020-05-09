@@ -699,7 +699,6 @@ void testSimplifyMuls() {
     // But not for Float since nan * 0 = nan.
     ExprHandle body = ExprHandle(1.f) * (x * ExprHandle(0.f));
     ExprHandle simplified = IRSimplifier::simplify(body);
-    std::cout << simplified << "\n";
 
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
     IS_NODE_WITH_NAME(Cast, mul->lhs(), cast);
@@ -1502,6 +1501,24 @@ void testSimplifyRoundModPatternFactorization() {
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
     IS_IMM_WITH_VAL(Int, mul->lhs(), 5);
     IS_VAR_WITH_NAME(mul->rhs(), "x");
+  }
+
+  {
+    VarHandle x("x", kInt);
+    ExprHandle body = (x / 5) * 10 + ExprHandle(2) * (x % 5);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
+  }
+
+  {
+    VarHandle x("x", kInt);
+    ExprHandle body = (x / 10) * 0 + x % 5;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 5);
   }
 }
 
