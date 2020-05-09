@@ -34,6 +34,7 @@ template <> struct AccumulateType<int16_t, true> { using type = int64_t; };
 template <> struct AccumulateType<int32_t, true> { using type = int64_t; };
 template <> struct AccumulateType<int64_t, true> { using type = int64_t; };
 template <> struct AccumulateType<bool, true> {using type = bool; };
+template <> struct AccumulateType<Half, false> { using type = float; };
 template <> struct AccumulateType<BFloat16, false> { using type = float; };
 template <> struct AccumulateType<std::complex<float>, false> { using type = std::complex<double>; };
 template <> struct AccumulateType<std::complex<double>, false> { using type = std::complex<double>; };
