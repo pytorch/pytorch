@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+#include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 
@@ -147,16 +148,44 @@ bool TernaryOp::sameAs(const TernaryOp* other) const {
   return true;
 }
 
+
+ReductionOp::ReductionOp(
+    BinaryOpType _reduction_op_type,
+    Val* _init,
+    Val* _out,
+    Val* _in)
+    : Expr(ExprType::ReductionOp),
+      reduction_op_type_(_reduction_op_type),
+      init_(_init),
+      out_{_out},
+      in_{_in} {
+  TORCH_INTERNAL_ASSERT(
+      _init->isConstScalar(),
+      "Tried to create a reduction operation whith an initial value that isn't a constant.");
+  addOutput(_out);
+  addInput(_in);
+  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+bool ReductionOp::sameAs(const ReductionOp* other) const {
+  return (
+      this->in()->sameAs(other->in()) &&
+      this->getReductionOpType() == other->getReductionOpType() &&
+      this->init()->sameAs(other->init()));
+}
+
 IterDomain::IterDomain(
     Val* _start,
     Val* _extent,
     ParallelType _parallel_method,
-    bool _reduction_domain)
+    bool _reduction_domain,
+    bool _rfactor_domain)
     : Val(ValType::IterDomain, DataType::Int),
       start_(_start),
       extent_(_extent),
       parallel_method_(_parallel_method),
-      is_reduction_domain_(_reduction_domain) {
+      is_reduction_domain_(_reduction_domain),
+      is_rfactor_domain_(_rfactor_domain) {
   TORCH_INTERNAL_ASSERT(
       _extent->isAnInt(),
       "Cannot create an iter domain over an extent that is not an int but recieved ",
@@ -199,6 +228,18 @@ bool TensorDomain::sameAs(const TensorDomain* const other) const {
       return false;
 
   return true;
+}
+
+bool TensorDomain::hasReduction() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->isReduction();
+  });
+}
+
+bool TensorDomain::hasRFactor() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->isRFactorProduct();
+  });
 }
 
 TensorDomain* TensorDomain::noReductions() const {
@@ -256,12 +297,20 @@ TensorDomain* TensorDomain::split(int axis_, int factor) {
 
       // outer loop IterDomain
       IterDomain* ido = new IterDomain(
-          new Int(0), so, id->parallel_method(), id->isReduction());
+          new Int(0),
+          so,
+          id->parallel_method(),
+          id->isReduction(),
+          id->isRFactorProduct());
       new_domain.push_back(ido);
 
       // inner loop IterDomain
       IterDomain* idi = new IterDomain(
-          new Int(0), fact, id->parallel_method(), id->isReduction());
+          new Int(0),
+          fact,
+          id->parallel_method(),
+          id->isReduction(),
+          id->isRFactorProduct());
       new_domain.push_back(idi);
     }
   }
@@ -298,7 +347,8 @@ TensorDomain* TensorDomain::merge(int axis_) {
       new Int(0),
       static_cast<Int*>(merged_id_size),
       first->parallel_method(),
-      first->isReduction());
+      first->isReduction(),
+      first->isRFactorProduct() || second->isRFactorProduct());
 
   std::vector<IterDomain*> new_domain;
   for (decltype(nDims()) i = 0; i < nDims(); i++) {
@@ -315,19 +365,19 @@ TensorDomain* TensorDomain::merge(int axis_) {
 
 // Reorder axes according to map[old_pos] = new_pos
 TensorDomain* TensorDomain::reorder(
-    const std::unordered_map<int, int>& axis2pos_) {
+    const std::unordered_map<int, int>& old2new_) {
   // START VALIDATION CHECKS
   // Eventhough these checks are already in TensorView, we want to redo them as
   // we can enter this function from other places, not through TensorView
 
   // adjust based on negative values (any negative values gets nDims added to
   // it)
-  std::unordered_map<int, int> axis2pos;
+  std::unordered_map<int, int> old2new;
   auto ndims = nDims();
   std::transform(
-      axis2pos_.begin(),
-      axis2pos_.end(),
-      std::inserter(axis2pos, axis2pos.begin()),
+      old2new_.begin(),
+      old2new_.end(),
+      std::inserter(old2new, old2new.begin()),
       [ndims](std::unordered_map<int, int>::value_type entry) {
         return std::unordered_map<int, int>::value_type({
             entry.first < 0 ? entry.first + ndims : entry.first,
@@ -337,8 +387,8 @@ TensorDomain* TensorDomain::reorder(
 
   // Check if any adjusted values are < 0, or >= nDims, which are invalid
   bool out_of_range = std::any_of(
-      axis2pos.begin(),
-      axis2pos.end(),
+      old2new.begin(),
+      old2new.end(),
       [ndims](std::unordered_map<int, int>::value_type entry) {
         return entry.first < 0 || entry.first >= ndims || entry.second < 0 ||
             entry.second >= ndims;
@@ -352,8 +402,8 @@ TensorDomain* TensorDomain::reorder(
 
   std::set<int> old_pos_set;
   std::transform(
-      axis2pos.begin(),
-      axis2pos.end(),
+      old2new.begin(),
+      old2new.end(),
       std::inserter(old_pos_set, old_pos_set.begin()),
       [](std::unordered_map<int, int>::value_type entry) {
         return entry.first;
@@ -361,8 +411,8 @@ TensorDomain* TensorDomain::reorder(
 
   std::set<int> new_pos_set;
   std::transform(
-      axis2pos.begin(),
-      axis2pos.end(),
+      old2new.begin(),
+      old2new.end(),
       std::inserter(new_pos_set, new_pos_set.begin()),
       [](std::unordered_map<int, int>::value_type entry) {
         return entry.first;
@@ -370,32 +420,31 @@ TensorDomain* TensorDomain::reorder(
 
   // Error out if duplicate values are found.
   TORCH_CHECK(
-      old_pos_set.size() == axis2pos.size() &&
-          new_pos_set.size() == axis2pos.size(),
+      old_pos_set.size() == old2new.size() &&
+          new_pos_set.size() == old2new.size(),
       "Duplicate entries in transformation map sent to TensorView reorder.");
 
   // END VALIDATION CHECKS
 
-  // Map to save, from previous order, to new order.
-  std::vector<int> pos2axis(ndims, -1);
+  std::vector<int> new2old(ndims, -1);
 
   // Go through each old and new position, make sure they're within 0-ndims
-  for (std::pair<int, int> elem : axis2pos) {
+  for (std::pair<int, int> elem : old2new) {
     int old_pos = elem.first;
     int new_pos = elem.second;
 
     assert(old_pos >= 0 && old_pos < ndims && new_pos >= 0 && new_pos < ndims);
 
-    if (pos2axis[new_pos] != -1)
+    if (new2old[new_pos] != -1)
       TORCH_CHECK(false, "Reorder found duplicate destination positions.");
 
-    pos2axis[new_pos] = old_pos;
+    new2old[new_pos] = old_pos;
   }
 
-  std::set<int> old_positions(pos2axis.begin(), pos2axis.end());
+  std::set<int> old_positions(new2old.begin(), new2old.end());
   old_positions.erase(-1);
 
-  if (old_positions.size() != axis2pos.size())
+  if (old_positions.size() != old2new.size())
     TORCH_INTERNAL_ASSERT(
         false, "Reorder found duplicate destination positions.");
 
@@ -414,23 +463,47 @@ TensorDomain* TensorDomain::reorder(
 
   // Fill in positions that weren't specified, in relative order,
   // in empty spots in the set of new positions.
-  // pos2axis[new_position] = old_position
+  // new2old[new_position] = old_position
   auto it = positions_left.begin(); // old positions left
   std::transform(
-      pos2axis.begin(), pos2axis.end(), pos2axis.begin(), [&it](int i) -> int {
+      new2old.begin(), new2old.end(), new2old.begin(), [&it](int i) -> int {
         return i == -1 ? *it++ : i;
       });
 
   std::vector<IterDomain*> reordered_domain;
   std::transform(
-      pos2axis.begin(),
-      pos2axis.end(),
+      new2old.begin(),
+      new2old.end(),
       std::back_inserter(reordered_domain),
       [this](int i) -> IterDomain* { return this->axis(i); });
 
   TensorDomain* reordered_td = new TensorDomain(reordered_domain);
-  Reorder* merge_node = new Reorder(reordered_td, this, pos2axis);
+  Reorder* merge_node = new Reorder(reordered_td, this, new2old);
   return reordered_td;
+}
+
+// pair is in order where second is the consumer of first
+std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
+    const std::vector<int> axes) {
+  std::set<int> axes_set(axes.begin(), axes.end());
+  bool rfactor_found = false;
+  bool reduction_found = false;
+  for (decltype(nDims()) i{0}; i < nDims(); i++) {
+    if (axis(i)->isReduction()) {
+      if (axes_set.find(i) != axes_set.end())
+        rfactor_found = true;
+      else
+        reduction_found = true;
+    }
+  }
+
+  TORCH_CHECK(
+      rfactor_found && reduction_found,
+      "Invalid rfactor found, rfactor must be provided at least one reduction axis, but not all reduction axes.");
+
+  return std::pair<TensorDomain*, TensorDomain*>{
+      TransformRFactor::runReplay(this, axes),
+      TransformRFactor::runReplay2(this, axes)};
 }
 
 TensorDomain* TensorDomain::rootDomain() {
@@ -470,18 +543,18 @@ bool Merge::sameAs(const Merge* const other) const {
 Reorder::Reorder(
     TensorDomain* _out,
     TensorDomain* _in,
-    std::vector<int> _pos2axis)
+    std::vector<int> _new2old)
     : Expr(ExprType::Reorder),
       out_{_out},
       in_{_in},
-      pos2axis_{std::move(_pos2axis)} {
+      new2old_{std::move(_new2old)} {
   addOutput(_out);
   addInput(_in);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 bool Reorder::sameAs(const Reorder* const other) const {
-  // Implicitly in and out matching means pos2axis matches
+  // Implicitly in and out matching means new2old matches
   return (out()->sameAs(other->out()) && in()->sameAs(other->in()));
 }
 
@@ -556,8 +629,8 @@ Val* TensorIndex::index(int i) const {
   return indices_[i];
 }
 
-Allocate::Allocate(TensorView* _tv, Val* _size)
-    : Expr(ExprType::Allocate), buffer_(_tv), extent_{_size} {
+Allocate::Allocate(Val* _val, Val* _size)
+    : Expr(ExprType::Allocate), buffer_(_val), extent_{_size} {
   if (!_size->isAnInt() || !_size->isConstScalar()) {
     std::stringstream flat_size;
     IRPrinter irp(flat_size);
@@ -565,13 +638,13 @@ Allocate::Allocate(TensorView* _tv, Val* _size)
     TORCH_INTERNAL_ASSERT(
         false,
         "Allocations must be based on constant integers but tried to alloc ",
-        _tv,
+        _val,
         " with size ",
         flat_size.str(),
         ".");
   }
   addInput(_size);
-  addInput(_tv);
+  addInput(_val);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 

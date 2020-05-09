@@ -101,6 +101,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::TernaryOp:
       ptr(handler)->handle(static_cast<TernaryOp*>(expr));
       return;
+    case ExprType::ReductionOp:
+      ptr(handler)->handle(static_cast<ReductionOp*>(expr));
+      return;
     case ExprType::ForLoop:
       ptr(handler)->handle(static_cast<ForLoop*>(expr));
       return;
@@ -187,6 +190,9 @@ void Expr::constDispatch(T handler, const Expr* const expr) {
     case ExprType::TernaryOp:
       ptr(handler)->handle(static_cast<const TernaryOp* const>(expr));
       return;
+    case ExprType::ReductionOp:
+      ptr(handler)->handle(static_cast<const ReductionOp* const>(expr));
+      return;
     case ExprType::ForLoop:
       ptr(handler)->handle(static_cast<const ForLoop* const>(expr));
       return;
@@ -269,6 +275,8 @@ Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
       return ptr(mutator)->mutate(static_cast<BinaryOp*>(expr));
     case ExprType::TernaryOp:
       return ptr(mutator)->mutate(static_cast<TernaryOp*>(expr));
+    case ExprType::ReductionOp:
+      return ptr(mutator)->mutate(static_cast<ReductionOp*>(expr));
     case ExprType::ForLoop:
       return ptr(mutator)->mutate(static_cast<ForLoop*>(expr));
     case ExprType::IfThenElse:

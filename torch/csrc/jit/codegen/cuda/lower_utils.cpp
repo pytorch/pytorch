@@ -9,11 +9,11 @@ namespace scope_utils {
 // START SCOPE HELPER SYSTEMS
 namespace {
 
-struct forLoopIndices : private OptInDispatch {
+struct Loops : private OptInDispatch {
  private:
-  std::vector<Val*> inds_;
+  std::deque<ForLoop*> loops;
   void handle(ForLoop* fl) final {
-    inds_.insert(inds_.begin(), fl->index());
+    loops.insert(loops.begin(), fl);
   }
 
   void handle(IfThenElse* ite) final {}
@@ -23,39 +23,14 @@ struct forLoopIndices : private OptInDispatch {
   }
 
  public:
-  static std::vector<Val*> get(Expr* scope) {
-    forLoopIndices fli;
+  static std::vector<ForLoop*> getLoops(Expr* scope) {
+    Loops loops;
     Expr* it = scope;
     while (it != nullptr) {
-      fli.handle(it);
+      loops.handle(it);
       it = scope_utils::getParent(it);
     }
-    return fli.inds_;
-  }
-};
-
-struct forLoopIDs : private OptInDispatch {
- private:
-  std::vector<IterDomain*> IDs_;
-  void handle(ForLoop* fl) final {
-    IDs_.insert(IDs_.begin(), fl->iter_domain());
-  }
-
-  void handle(IfThenElse* ite) final {}
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
- public:
-  static std::vector<IterDomain*> get(Expr* scope) {
-    forLoopIDs fli;
-    Expr* it = scope;
-    while (it != nullptr) {
-      fli.handle(it);
-      it = scope_utils::getParent(it);
-    }
-    return fli.IDs_;
+    return std::vector<ForLoop*>(loops.loops.begin(), loops.loops.end());
   }
 };
 
@@ -330,20 +305,12 @@ struct FirstInnerMostScope : private OptInDispatch {
 // END SCOPE HELPER SYSTEMS
 } // namespace
 
-// Grab the index variables of the active loop nest
-std::vector<Val*> getLoopIndices(Expr* scope) {
+// Grab the ForLoop starting from scope working out
+std::vector<ForLoop*> getLoops(Expr* scope) {
   if (scope == nullptr)
-    return std::vector<Val*>();
+    return std::vector<ForLoop*>();
   assertScope(scope);
-  return forLoopIndices::get(scope);
-}
-
-// Grab the iterDomains of the active loops
-std::vector<IterDomain*> getLoopIterDomains(Expr* scope) {
-  if (scope == nullptr)
-    return std::vector<IterDomain*>();
-  assertScope(scope);
-  return forLoopIDs::get(scope);
+  return Loops::getLoops(scope);
 }
 
 // Track how far our for loop scope is
@@ -430,6 +397,22 @@ Expr* firstInnerMostScope(Expr* scope) {
 
 namespace ir_utils {
 
+std::vector<Val*> indices(std::vector<ForLoop*> loops) {
+  std::vector<Val*> inds(loops.size());
+  std::transform(loops.begin(), loops.end(), inds.begin(), [](ForLoop* fl) {
+    return fl->index();
+  });
+  return inds;
+}
+
+std::vector<IterDomain*> iterDomains(std::vector<ForLoop*> loops) {
+  std::vector<IterDomain*> ids(loops.size());
+  std::transform(loops.begin(), loops.end(), ids.begin(), [](ForLoop* fl) {
+    return fl->iter_domain();
+  });
+  return ids;
+}
+
 bool isTV(const Val* const val) {
   return val->getValType().value() == ValType::TensorView;
 }
@@ -438,10 +421,17 @@ bool isTV(const Val* const val) {
 bool isTVOp(const Expr* expr) {
   if (expr->nOutputs() == 1 && isTV(expr->output(0)) &&
       (expr->getExprType().value() == ExprType::BinaryOp ||
-       expr->getExprType().value() == ExprType::TernaryOp ||
-       expr->getExprType().value() == ExprType::UnaryOp))
+       expr->getExprType().value() == ExprType::UnaryOp ||
+       expr->getExprType().value() == ExprType::ReductionOp))
     return true;
   return false;
+}
+
+bool isScalarOp(const Expr* expr) {
+  for (auto out : expr->outputs())
+    if (!out->isScalar())
+      return false;
+  return true;
 }
 
 void ASSERT_EXPR(Statement* stmt) {

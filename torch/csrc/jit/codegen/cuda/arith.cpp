@@ -61,6 +61,36 @@ TORCH_CUDA_API Val* promoteNew(Val* v1, Val* v2) {
   return newValLike(v1, out_dtype);
 }
 
+Val* newConstScalar(DataType dtype, long int val) {
+  switch (dtype) {
+    case (DataType::Int):
+      return new Int((int)val);
+    default:
+      break;
+  }
+  TORCH_CHECK(
+      false,
+      "Could not generate a new Scalar with data type ",
+      dtype,
+      "and constant value: ",
+      val);
+}
+
+Val* newConstScalar(DataType dtype, double val) {
+  switch (dtype) {
+    case (DataType::Float):
+      return new Float(val);
+    default:
+      break;
+  }
+  TORCH_CHECK(
+      false,
+      "Could not generate a new Scalar with data type ",
+      dtype,
+      "and constant value: ",
+      val);
+}
+
 TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1) {
   if (v1->getDataType().value() == dtype)
     return v1;
@@ -80,11 +110,15 @@ TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1) {
   return out;
 }
 
+// UNARY OPERATIONS
+
 TORCH_CUDA_API Val* unaryOp(UnaryOpType type, Val* v1) {
   Val* out = newValLike(v1);
   Statement* expr = new UnaryOp(type, out, v1);
   return out;
 }
+
+// BINARY OPERATIONS
 
 TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
   Val* out = promoteNew(v1, v2);
@@ -139,6 +173,61 @@ TORCH_CUDA_API Val* andOp(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::And, v1, v2);
 }
 
+// REDUCTION OPERATIONS
+
+Val* reductionOp(
+    BinaryOpType reduction_op_type,
+    std::vector<int> axes,
+    Val* init,
+    Val* v1) {
+  TORCH_CHECK(
+      v1->getValType().value() == ValType::TensorView,
+      "Cannot reduce on values that are not TensorViews, but recieved type ",
+      v1->getValType().value());
+
+  TORCH_CHECK(
+      init->isConstScalar(),
+      "Cannot create a reduction operation where the initial value is not a const scalar.");
+
+  TensorView* tv = static_cast<TensorView*>(v1);
+
+  TORCH_CHECK(
+      tv->getRootDomain() == tv->domain(),
+      "Reducing a tensor once it's gone under transformations is not permitted at this time. Please set reductions before calling split/merge/reorder/computeAt.");
+
+  std::vector<unsigned int> uint_axes;
+  for (int axis : axes) {
+    if (axis < 0)
+      axis += int(tv->nDims());
+
+  TORCH_CHECK(
+        axis >= 0 && axis < tv->nDims(),
+        "Reduction on invalid axis, recieved: ",
+        axis,
+        " however tensor view only has ",
+        tv->nDims(),
+        " dims.");
+
+    uint_axes.push_back((unsigned int)axis);
+}
+
+  Val* out = tv->newForReduction(uint_axes);
+  if (init->getDataType().value() != v1->getDataType().value())
+    init = castOp(v1->getDataType().value(), init);
+  new ReductionOp(reduction_op_type, init, out, v1);
+  return out;
+}
+
+TORCH_CUDA_API Val* sum(Val* v1, std::vector<int> axes) {
+  return reductionOp(
+      BinaryOpType::Add,
+      axes,
+      newConstScalar(v1->getDataType().value(), 0.0),
+      v1);
+}
+
+// COMPOUND OPERATIONS
+
 TORCH_CUDA_API Val* add_alpha(Val* v1, Val* v2, Val* s) {
   TORCH_CHECK(
       s->getValType().value() == ValType::Scalar,
@@ -186,6 +275,8 @@ TORCH_CUDA_API Val* where(Val* c, Val* v1, Val* v2) {
   Statement* expr = new TernaryOp(TernaryOpType::Where, out, c, v1, v2);
   return out;
 }
+
+// TERNARY OPERATIONS
 
 TORCH_CUDA_API Val* threshold(Val* in, Val* thresh, Val* value) {
   TORCH_CHECK(

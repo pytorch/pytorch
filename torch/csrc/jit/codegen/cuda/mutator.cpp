@@ -34,8 +34,8 @@ Statement* OptOutMutator::mutate(IterDomain* id) {
   if (s->sameAs(id->start()) && e->sameAs(id->extent()))
     return id;
 
-  Val* mutated_val =
-      new IterDomain(s, e, id->parallel_method(), id->isReduction());
+  Val* mutated_val = new IterDomain(
+      s, e, id->parallel_method(), id->isReduction(), id->isRFactorProduct());
   registerMutation(id, mutated_val);
   return mutated_val;
 }
@@ -102,13 +102,7 @@ Statement* OptOutMutator::mutate(TensorIndex* ti) {
   return mutated_val;
 }
 
-Statement* OptOutMutator::mutate(Bool* n) {
-  return n;
-}
 Statement* OptOutMutator::mutate(Float* n) {
-  return n;
-}
-Statement* OptOutMutator::mutate(Half* n) {
   return n;
 }
 Statement* OptOutMutator::mutate(Int* n) {
@@ -159,7 +153,7 @@ Statement* OptOutMutator::mutate(Reorder* ro) {
     return ro;
 
   FusionGuard::getCurFusion()->removeExpr(ro);
-  return new Reorder(o, i, ro->pos2axis());
+  return new Reorder(o, i, ro->new2old());
 }
 
 Statement* OptOutMutator::mutate(UnaryOp* uop) {
@@ -192,6 +186,17 @@ Statement* OptOutMutator::mutate(TernaryOp* top) {
     return top;
   FusionGuard::getCurFusion()->removeExpr(top);
   return new TernaryOp(top->getTernaryOpType(), out, in1, in2, in3);
+}
+
+Statement* OptOutMutator::mutate(ReductionOp* rop) {
+  Val* out = static_cast<Val*>(mutate(rop->out()));
+  Val* in = static_cast<Val*>(mutate(rop->in()));
+  Val* init = rop->init();
+  if (out->sameAs(rop->out()) && in->sameAs(rop->in()) &&
+      init->sameAs(rop->init()))
+    return rop;
+
+  return new ReductionOp(rop->getReductionOpType(), init, out, in);
 }
 
 Statement* OptOutMutator::mutate(ForLoop* fl) {
@@ -229,7 +234,7 @@ Statement* OptOutMutator::mutate(IfThenElse* ite) {
   TORCH_INTERNAL_ASSERT(
       val_cond->getValType().value() == ValType::Scalar &&
       val_cond->getDataType().value() == DataType::Int);
-  Int* cond = static_cast<Int*>(val_cond);
+  Int* cond = static_cast<Int*>(cond);
 
   bool is_mutated = !cond->sameAs(ite->cond());
 

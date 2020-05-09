@@ -12,11 +12,8 @@ namespace fuser {
 
 namespace scope_utils {
 
-// Grab the index variables of the active loop nest
-std::vector<Val*> getLoopIndices(Expr* scope);
-
-// Grab the iterDomains of the active loops
-std::vector<IterDomain*> getLoopIterDomains(Expr* scope);
+// Grab the ForLoop starting from scope working out
+std::vector<ForLoop*> getLoops(Expr* scope);
 
 // Track how far our for loop scope is
 unsigned int computeForDepth(Expr* scope);
@@ -39,7 +36,8 @@ Expr* closeScope(Expr* scope);
 // Clear all expressions from the scope
 Expr* clearScope(Expr* scope);
 
-// Provide a new for loop matching the one provided
+// Provide a new for loop matching the one provided, sets parent_scope as
+// parent_scope, but does not insert into parent scope.
 ForLoop* cloneLoopNest(ForLoop* to_clone, Expr* parent_scope);
 
 // Run through a scope and replace expressions inside with replacement_map
@@ -53,9 +51,15 @@ Expr* firstInnerMostScope(Expr* scope);
 
 namespace ir_utils {
 
+std::vector<Val*> indices(std::vector<ForLoop*>);
+
+std::vector<IterDomain*> iterDomains(std::vector<ForLoop*>);
+
 bool isTV(const Val* const);
 
 bool isTVOp(const Expr*);
+
+bool isScalarOp(const Expr*);
 
 void ASSERT_EXPR(Statement*);
 

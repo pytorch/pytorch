@@ -2,9 +2,6 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
-#include <deque>
-#include <iostream>
-#include <queue>
 
 namespace torch {
 namespace jit {
@@ -31,46 +28,67 @@ std::vector<Statement*> IterVisitor::next(Expr* expr) {
   return {expr->inputs().begin(), expr->inputs().end()};
 }
 
+// Remove any stmt in stmts that is in visited
+namespace {
+void remove_visited(
+    std::vector<Statement*>& stmts,
+    const std::unordered_set<Statement*>& visited) {
+  std::deque<std::vector<Statement*>::iterator> to_erase;
+  for (auto it = stmts.begin(); it != stmts.end(); it++) {
+    if (visited.find(*it) != visited.end())
+      to_erase.push_back(it);
+  }
+
+  while (!to_erase.empty()) {
+    stmts.erase(to_erase.back());
+    to_erase.pop_back();
+  }
+}
+} // namespace
+
 void IterVisitor::traverseFrom(
     Fusion* const fusion,
-    const std::vector<Val*>& from) {
+    const std::vector<Val*>& from,
+    bool traverseAllPaths) {
   FusionGuard fg(fusion);
+  std::unordered_set<Statement*> visited;
+  stmt_stack.clear();
+  stmt_stack.push_back(std::vector<Statement*>(from.rbegin(), from.rend()));
 
-  std::set<Statement*> visited;
-  std::deque<Statement*> to_visit;
+  while (!stmt_stack.empty()) {
+    auto next_stmts = next(stmt_stack.back().back());
 
-  std::queue<Val*> outputs_to_visit;
-  for (Val* entry : from)
-    outputs_to_visit.emplace(entry);
+    // Remove statements we already visited if we're not traversing all paths
+    if (!traverseAllPaths)
+      remove_visited(next_stmts, visited);
 
-  while (!outputs_to_visit.empty()) {
-    if (stopCondition())
-      break;
+    // Traverse down until we get to a leaf
+    while (!next_stmts.empty()) {
+      stmt_stack.push_back(
+          std::vector<Statement*>(next_stmts.rbegin(), next_stmts.rend()));
+      next_stmts = next(stmt_stack.back().back());
+      // Remove statements we already visited if we're not traversing all paths
+      if (!traverseAllPaths)
+        remove_visited(next_stmts, visited);
+    }
 
-    to_visit.push_front(outputs_to_visit.front());
-    outputs_to_visit.pop();
-    while (!to_visit.empty()) {
-      if (stopCondition())
-        break;
+    // Traverse back up
+    // Mark visited
+    visited.emplace(stmt_stack.back().back());
+    // Handle
+    handle(stmt_stack.back().back());
+    // Remove
+    stmt_stack.back().pop_back();
 
-      Statement* stmt = to_visit.front();
-      std::vector<Statement*> inps = next(stmt);
-      for (auto it = inps.rbegin(); it != inps.rend(); it++) {
-        Statement* inp = *it;
-        if (visited.find(inp) == visited.end()) {
-          toVisitCallback(inp);
-          to_visit.emplace_front(inp);
-        }
-      }
-
-      if (to_visit.front() != stmt) {
-        continue;
-      }
-
-      to_visit.pop_front();
-      if (visited.find(stmt) == visited.end()) {
-        handle(stmt);
-        visited.emplace(stmt);
+    while (!stmt_stack.empty() && stmt_stack.back().empty()) {
+      stmt_stack.pop_back();
+      if (!stmt_stack.empty()) {
+        // Mark visited
+        visited.emplace(stmt_stack.back().back());
+        // Handle
+        handle(stmt_stack.back().back());
+        // Remove
+        stmt_stack.back().pop_back();
       }
     }
   }
@@ -83,73 +101,129 @@ void IterVisitor::traverse(
   FusionGuard fg(fusion);
   if (breadth_first)
     TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
-  std::set<Statement*> visited;
-  std::deque<Statement*> to_visit;
 
-  std::vector<Val*> outputs_to_visit;
-  if (from_outputs_only) {
-    for (Val* out : fusion->outputs()) {
-      outputs_to_visit.push_back(out);
-    }
-    // Search for Vals with no uses (output edges)
-  } else
+  std::vector<Val*> outputs;
+  for (Val* out : fusion->outputs()) {
+    outputs.push_back(out);
+  }
+  // Search for Vals with no uses (output edges)
+  if (!from_outputs_only)
     for (Val* val : fusion->vals()) {
       if (!fusion->used(val))
-        outputs_to_visit.push_back(val);
+        if (!fusion->hasOutput(val))
+          outputs.push_back(val);
     }
 
-  traverseFrom(fusion, outputs_to_visit);
+  if (outputs.empty())
+    return;
+
+  traverseFrom(fusion, outputs, false);
 }
 
-void DependencyCheck::handle(Val* val) {
-  // Debug dependency chain
-  if (val->sameAs(dependency_))
-    is_dependency = true;
-}
+void IterVisitor::traverseAllPaths(
+    Fusion* const fusion,
+    bool from_outputs_only,
+    bool breadth_first) {
+  FusionGuard fg(fusion);
+  if (breadth_first)
+    TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 
-void DependencyCheck::handle(Expr* expr) {
-  // We want to update the dependency chain, but we want to make sure
-  // that the top value on the chain is an output of this expr
-
-  for (decltype(expr->nOutputs()) i = 0; i < expr->nOutputs(); i++) {
-    TORCH_INTERNAL_ASSERT(
-        expr->hasOutput(dep_chain.top()),
-        "IterVisitor attempted to visit an expr, but this expr was visited in an incorrect order.");
-    dep_chain.pop();
+  std::vector<Val*> outputs;
+  for (Val* out : fusion->outputs()) {
+    outputs.push_back(out);
   }
+  // Search for Vals with no uses (output edges)
+  if (!from_outputs_only)
+    for (Val* val : fusion->vals()) {
+      if (!fusion->used(val))
+        if (!fusion->hasOutput(val))
+          outputs.push_back(val);
+    }
+
+  traverseFrom(fusion, outputs, true);
 }
 
-void DependencyCheck::toVisitCallback(Statement* stmt) {
-  // If an expression push outputs of expr to dependency chain.
-  if (stmt->isExpr()) {
-    Expr* expr = static_cast<Expr*>(stmt);
-    for (auto out : expr->outputs()) {
-      dep_chain.push(static_cast<Val*>(out));
+/* DEPENDENCY CHECKING */
+
+namespace {
+
+// Looks for and returns
+struct DependencyChains : public IterVisitor {
+  std::deque<std::deque<Val*>> dep_chains;
+  bool is_dependency = false;
+  Val* dependency_;
+
+  void handle(Val* val) {
+    if (val->sameAs(dependency_)) {
+      is_dependency = true;
+      std::deque<Val*> deps;
+      for (auto stack : stmt_stack) {
+        if (stack.back()->isVal())
+          deps.push_back(static_cast<Val*>(stack.back()));
+      }
+      // Order as dependency -> of
+      dep_chains.push_back(std::deque<Val*>(deps.rbegin(), deps.rend()));
     }
   }
-}
 
-bool DependencyCheck::check() {
-  is_dependency = false;
-  IterVisitor::traverseFrom(of_->fusion(), {of_});
-  return is_dependency;
-}
-
-std::stack<Val*> DependencyCheck::getDependencyChain(Val* dependency, Val* of) {
-  DependencyCheck dp(dependency, of);
-  dp.check();
-
-  // Return the reversed stack, we start from output and go to the input,
-  // including of, but not dependency
-  std::stack<Val*> dep_copy = dp.dep_chain;
-  std::stack<Val*> reversed_clean;
-
-  while (!dep_copy.empty()) {
-    Val* next = dep_copy.top();
-    dep_copy.pop();
-    reversed_clean.push(next);
+  DependencyChains(Val* _dependency, Val* _of, bool all_chains_ = false)
+      : dependency_(_dependency) {
+    traverseFrom(_of->fusion(), {_of}, all_chains_);
   }
-  return reversed_clean;
+
+  DependencyChains(Val* _dependency, bool all_chains_ = false)
+      : dependency_(_dependency) {
+    if (all_chains_)
+      traverseAllPaths(_dependency->fusion(), false);
+    else
+      traverse(_dependency->fusion(), false);
+  }
+
+  static std::deque<Val*> getDependencyChain(Val* dependency, Val* of) {
+    DependencyChains dp(dependency, of, false);
+    if (dp.dep_chains.empty())
+      return std::deque<Val*>();
+    return dp.dep_chains[0];
+  }
+
+  static std::deque<std::deque<Val*>> getDependencyChains(
+      Val* dependency,
+      Val* of) {
+    DependencyChains dp(dependency, of, true);
+    if (dp.dep_chains.empty())
+      return std::deque<std::deque<Val*>>();
+    return dp.dep_chains;
+  }
+
+  static std::deque<std::deque<Val*>> getDependencyChainsTo(Val* dependency) {
+    DependencyChains dp(dependency, true);
+    if (dp.dep_chains.empty())
+      return std::deque<std::deque<Val*>>();
+    return dp.dep_chains;
+  }
+};
+
+} // namespace
+
+bool DependencyCheck::isDependencyOf(Val* dependency, Val* of) {
+  return !DependencyChains::getDependencyChain(dependency, of).empty();
+}
+
+std::deque<Val*> DependencyCheck::getSingleDependencyChain(
+    Val* dependency,
+    Val* of) {
+  return DependencyChains::getDependencyChain(dependency, of);
+}
+
+std::deque<std::deque<Val*>> DependencyCheck::getAllDependencyChains(
+    Val* dependency,
+    Val* of) {
+  return DependencyChains::getDependencyChains(dependency, of);
+}
+
+std::deque<std::deque<Val*>> DependencyCheck::getAllDependencyChainsTo(
+    Val* dependency) {
+  return DependencyChains::getDependencyChainsTo(dependency);
 }
 
 } // namespace fuser

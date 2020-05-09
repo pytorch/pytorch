@@ -37,8 +37,11 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
     switch (val->getValType().value()) {
       case (ValType::TensorView):
         os << "Tensor<" << val->getDataType().value() << ", "
-           << static_cast<TensorView*>(val)->getRootDomain()->nDims() << "> T"
-           << val->name();
+           << static_cast<TensorView*>(val)
+                  ->getRootDomain()
+                  ->noReductions()
+                  ->nDims()
+           << "> T" << val->name();
         break;
       case (ValType::Scalar):
         os << val->getDataType().value() << " " << val;
@@ -119,6 +122,8 @@ void IRPrinter::handle(const IterDomain* const id) {
   }
   print_inline(id->extent());
   os << "}";
+  if (id->isRFactorProduct())
+    os << "rf";
 }
 
 void IRPrinter::handle(const TensorIndex* const ti) {
@@ -338,6 +343,12 @@ void IRPrinter::handle(const TernaryOp* const top) {
     os << ";\n";
 }
 
+void IRPrinter::handle(const ReductionOp* const rop) {
+  os << rop->out() << " = reduction( " << rop->in()
+     << ", op = " << rop->getReductionOpType()
+     << ", initial value = " << rop->init() << " )\n";
+  }
+
 void IRPrinter::handle(const ForLoop* const fl) {
   if (fl->iter_domain()->isThread()) {
     for (auto& expr : fl->constBody().exprs())
@@ -396,9 +407,23 @@ void IRPrinter::handle(const IfThenElse* const ite) {
 
 void IRPrinter::handle(const Allocate* const a) {
   indent();
-  os << a->buf_type() << " T" << a->buffer()->name() << "[";
+  os << a->buf_type();
+  if (a->buffer()->getValType() == ValType::TensorView) {
+    os << " T" << a->buffer()->name() << "[";
   print_inline(a->extent());
-  os << "];" << std::endl;
+    os << "];\n";
+  } else {
+    if (a->extent()->isOneInt()) {
+      os << " " << a->buffer() << ";\n";
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Received unexpected allocation: ",
+          a->buffer(),
+          " with alloc of ",
+          a->extent());
+    }
+  }
 }
 
 void IRPrinter::handle(const Split* const s) {

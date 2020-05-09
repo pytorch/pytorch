@@ -34,10 +34,9 @@ std::vector<Expr*> ExprSort::getExprs(
   return es.exprs;
 }
 
-std::vector<Statement*> InputsOf::next(Val* v) {
+void InputsOf::handle(Val* v) {
   if (FusionGuard::getCurFusion()->origin(v) == nullptr)
     inputs.emplace(v);
-  return IterVisitor::next(v);
 }
 
 std::set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
@@ -47,7 +46,7 @@ std::set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
       output_,
       " however, it is not an output of the provided fusion.");
   InputsOf io;
-  io.traverseFrom(FusionGuard::getCurFusion(), {output_});
+  io.traverseFrom(FusionGuard::getCurFusion(), {output_}, false);
   return io.inputs;
 }
 
