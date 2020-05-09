@@ -176,9 +176,7 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
       [&](const ConcreteModuleTypeBuilder::ModuleInfo& info) {
         return info.name_ == name;
       });
-  if (it == data_.modules_.end()) {
-    return nullptr;
-  }
+  TORCH_INTERNAL_ASSERT(it != data_.modules_.end());
   return it->meta_;
 }
 

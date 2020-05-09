@@ -863,8 +863,25 @@ OPERATOR_SCHEMA(Int8FCPackWeight)
     .SetDoc(R"DOC(Prepack weight for Int8FC)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
-    .Output(0, "W_q", "Weight/bias tensor in a packed format")
-    .Output(1, "B_q", "Bias int32 quantized tensor");
+    .Output(
+        0,
+        "W_q",
+        "Weight/bias tensor in a packed format "
+        "with type Int8FCDNNLowPPackedWeightBlob")
+    .Output(1, "B_q", "Bias int32 quantized tensor")
+    .Arg("axis_w", "See FC operator")
+    .Arg(
+        "quantize_channelwise",
+        "Default false. Per output channel quantization")
+    .Arg(
+        "save_unpacked_weights",
+        "Default false. "
+        "Store unpacked quantized weights to W_q.original_tensor")
+    .Arg(
+        "in_scale",
+        "The scale of input activation tensor. "
+        "Only meaningful when bias is provided "
+        "(NOTE: this is not the scale of weight");
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ConvPackWeight,
@@ -882,6 +899,20 @@ OPERATOR_SCHEMA(Int8ConvPackWeight)
     .SetDoc(R"DOC(Prepack weight for Int8Conv)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
-    .Output(0, "W_q", "Weight/bias tensor in a packed format");
+    .Output(
+        0,
+        "W_q",
+        "Weight/bias tensor in a packed format "
+        "with type Int8ConvDNNLowPPackedWeightBlob")
+    .Arg("quantize_groupwise", "Default false. Per group quantization")
+    .Arg(
+        "save_unpacked_weights",
+        "Default false. "
+        "Store unpacked quantized weights to W_q.original_tensor")
+    .Arg(
+        "in_scale",
+        "The scale of input activation tensor. "
+        "Only meaningful when bias is provided "
+        "(NOTE: this is not the scale of weight");
 
 } // namespace caffe2
