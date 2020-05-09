@@ -1,5 +1,3 @@
-#ifdef USE_VULKAN
-
 #include <ATen/native/vulkan/Vulkan.h>
 #include <c10/util/Optional.h>
 
@@ -63,4 +61,3 @@ void mean(VulkanTensor& output, const VulkanTensor& input);
 } // namespace vulkan
 } // namespace native
 } // namespace at
-#endif

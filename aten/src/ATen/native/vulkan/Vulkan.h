@@ -1,9 +1,7 @@
 #pragma once
 
 #include <cstring>
-#include <functional>
 #include <memory>
-#include <numeric>
 #include <vector>
 
 #ifdef USE_VULKAN_WRAPPER

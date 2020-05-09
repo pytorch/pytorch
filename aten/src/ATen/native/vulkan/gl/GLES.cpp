@@ -1,7 +1,8 @@
 #include <stdio.h>
-#include <cassert>
 #include <chrono>
+#include <functional>
 #include <iostream>
+#include <numeric>
 #include <sstream>
 #include <string>
 
@@ -38,6 +39,7 @@ class GLContext {
       int minorVersion;
       eglInitialize(display_, &majorVersion, &minorVersion);
       EGLint numConfigs;
+      EGLConfig surfaceConfig;
       static const EGLint configAttribs[] = {EGL_SURFACE_TYPE,
                                              EGL_PBUFFER_BIT,
                                              EGL_RENDERABLE_TYPE,
@@ -52,7 +54,6 @@ class GLContext {
                                              8,
                                              EGL_NONE};
 
-      EGLConfig surfaceConfig;
       if (!eglChooseConfig(
               display_, configAttribs, &surfaceConfig, 1, &numConfigs)) {
         eglMakeCurrent(
@@ -139,7 +140,7 @@ class GLContext {
   EGLDisplay display_;
   EGLSurface surface_;
   bool isCreateError_{false};
-};
+}; // class GLContext
 
 using buffer_size_t = GLsizeiptr;
 
@@ -147,12 +148,12 @@ class GLBuffer {
  public:
   GLBuffer(buffer_size_t size, GLenum type = GL_SHADER_STORAGE_BUFFER) {
     type_ = type;
-    assert(size > 0);
+    TORCH_INTERNAL_ASSERT(size > 0);
     glGenBuffers(1, &id_);
     GL_CHECK_ERROR;
     glBindBuffer(type_, id_);
     GL_CHECK_ERROR;
-    assert(id_ > 0);
+    TORCH_INTERNAL_ASSERT(id_ > 0);
     glBufferData(type_, size, NULL, GL_DYNAMIC_DRAW);
     GL_CHECK_ERROR;
     size_ = size;
@@ -194,7 +195,7 @@ class GLBuffer {
     float* bufferDataPtr =
         (float*)(buffer->map(GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT));
     if (!bufferDataPtr) {
-      assert(false);
+      TORCH_INTERNAL_ASSERT(false);
     }
     memset(bufferDataPtr, 0, size);
     memcpy(bufferDataPtr, data, sizeCopy);
@@ -212,7 +213,7 @@ class GLBuffer {
     float* retDataPtr = ret.data();
     const float* bufferDataPtr = (const float*)map(GL_MAP_READ_BIT);
     if (!bufferDataPtr) {
-      assert(false);
+      TORCH_INTERNAL_ASSERT(false);
     }
     memset(retDataPtr, 0, n);
     memcpy(retDataPtr, bufferDataPtr, size_);
@@ -223,7 +224,7 @@ class GLBuffer {
   void copyToHost(float* outputDataPtr, size_t sizeCopy) {
     const float* bufferDataPtr = (const float*)map(GL_MAP_READ_BIT);
     if (!bufferDataPtr) {
-      assert(false);
+      TORCH_INTERNAL_ASSERT(false);
     }
     memcpy(outputDataPtr, bufferDataPtr, sizeCopy);
     unmap();
@@ -233,52 +234,35 @@ class GLBuffer {
   GLuint id_ = 0;
   buffer_size_t size_;
   GLenum type_;
-};
+}; // class GLBuffer
 
-GLTexture::GLTexture(int w, int h, int d, GLenum texFormat, GLenum target) {
+GLImage::GLImage(int w, int h, int d, GLenum texFormat) {
   texFormat_ = texFormat;
-  if (target == GL_TEXTURE_3D) {
-    assert(w > 0 && h > 0 && d > 0);
-    target_ = target;
-    glGenTextures(1, &id_);
-    GL_CHECK_ERROR;
-    glBindTexture(target_, id_);
-    glTexParameteri(target_, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(target_, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(target_, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(target_, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(target_, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-    GL_CHECK_ERROR;
-    glTexStorage3D(target_, 1 /* level */, texFormat_, w, h, d);
-    GL_CHECK_ERROR;
-  } else if (target == GL_TEXTURE_2D) {
-    assert(w > 0 && h > 0);
-    target_ = target;
-    glGenTextures(1, &id_);
-    GL_CHECK_ERROR;
-    glBindTexture(target_, id_);
-    GL_CHECK_ERROR;
-    glTexParameteri(target_, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(target_, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(target_, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(target_, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(target_, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-    GL_CHECK_ERROR;
-    glTexStorage2D(target_, 1 /* level */, texFormat_, w, h);
-    GL_CHECK_ERROR;
-  }
+  TORCH_INTERNAL_ASSERT(w > 0 && h > 0 && d > 0);
+  target_ = GL_TEXTURE_3D;
+  glGenTextures(1, &id_);
+  GL_CHECK_ERROR;
+  glBindTexture(target_, id_);
+  glTexParameteri(target_, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(target_, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(target_, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(target_, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(target_, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+  GL_CHECK_ERROR;
+  glTexStorage3D(target_, 1 /* level */, texFormat_, w, h, d);
+  GL_CHECK_ERROR;
 }
 
-GLTexture::~GLTexture() {
+GLImage::~GLImage() {
   glDeleteTextures(1, &id_);
   GL_CHECK_ERROR;
 }
 
-unsigned int GLTexture::id() const {
+unsigned int GLImage::id() const {
   return id_;
 }
 
-void GLTexture::read(GLuint unit) {
+void GLImage::read(GLuint unit) {
   glBindImageTexture(
       unit,
       id_,
@@ -290,10 +274,11 @@ void GLTexture::read(GLuint unit) {
   GL_CHECK_ERROR;
 }
 
-void GLTexture::write(GLuint unit) {
+void GLImage::write(GLuint unit) {
   glBindImageTexture(unit, id_, 0, GL_TRUE, 0, GL_WRITE_ONLY, texFormat_);
   GL_CHECK_ERROR;
 }
+// class GLImage
 
 class GLShader {
  public:
@@ -351,12 +336,12 @@ class GLShader {
   }
 
   int getAttribLocation(const char* name) const {
-    assert(NULL != name && 0 != programId_);
+    TORCH_INTERNAL_ASSERT(NULL != name && 0 != programId_);
     return glGetAttribLocation(programId_, name);
   }
 
   int getUniformLocation(const char* name) const {
-    assert(NULL != name && 0 != programId_);
+    TORCH_INTERNAL_ASSERT(NULL != name && 0 != programId_);
     return glGetUniformLocation(programId_, name);
   }
 
@@ -588,54 +573,6 @@ double deviceTex2hostCHW(
   return shaderTime;
 }
 
-GLTensor::GLTensor(std::vector<int64_t> sizes) : sizes_(sizes) {
-  TORCH_CHECK(initGLContextOnce(), "Failed to create GLContext");
-  assert(sizes_.size() == 4);
-}
-
-void GLTensor::setDataFromHost(const float* data) {
-  int N = sizes_[0];
-  int C = sizes_[1];
-  int H = sizes_[2];
-  int W = sizes_[3];
-  int C_4 = UP_DIV(C, 4);
-
-  auto tex =
-      std::make_unique<GLTexture>(W, H, C_4, getTexFormat(), GL_TEXTURE_3D);
-  hostCHW_to_deviceTex(tex->id(), data, C, H, W);
-  tex_ = std::move(tex);
-}
-
-void GLTensor::copyDataToHost(float* output) {
-  int N = sizes_[0];
-  int C = sizes_[1];
-  int H = sizes_[2];
-  int W = sizes_[3];
-  int C_4 = UP_DIV(C, 4);
-
-  deviceTex2hostCHW(tex_->id(), output, W, H, C);
-}
-
-void GLTensor::allocateStorage() {
-  int N = sizes_[0];
-  int C = sizes_[1];
-  int H = sizes_[2];
-  int W = sizes_[3];
-  int C_4 = UP_DIV(C, 4);
-
-  auto tex =
-      std::make_unique<GLTexture>(W, H, C_4, getTexFormat(), GL_TEXTURE_3D);
-  tex_ = std::move(tex);
-}
-
-int GLTensor::texId() const {
-  if (!tex_) {
-    assert(false);
-  }
-
-  return tex_->id();
-}
-
 void upsample_nearest2d(
     GLTensor& output,
     const GLTensor& input,
@@ -756,7 +693,7 @@ auto kernelNCHW_OCHW_repack_O4C4HWi4o4(
   return kernelBuf;
 }
 
-std::unique_ptr<GLTexture> conv2d_kernel_tex_from_hostCHW(
+std::unique_ptr<GLImage> conv2d_kernel_tex_from_hostCHW(
     const float* data,
     int64_t OC,
     int64_t C,
@@ -767,8 +704,8 @@ std::unique_ptr<GLTexture> conv2d_kernel_tex_from_hostCHW(
   auto OC_4 = UP_DIV(OC, 4);
   auto C_4 = UP_DIV(C, 4);
 
-  auto kernelOutTex = std::make_unique<GLTexture>(
-      C_4 * 4, OC_4, KH * KW, getTexFormat(), GL_TEXTURE_3D);
+  auto kernelOutTex =
+      std::make_unique<GLImage>(C_4 * 4, OC_4, KH * KW, getTexFormat());
 
   auto p =
       getShader("KO4C4HW_to_tex_glsl", at::native::vulkan::KO4C4HW_to_tex_glsl);
@@ -782,25 +719,6 @@ std::unique_ptr<GLTexture> conv2d_kernel_tex_from_hostCHW(
   compute(C_4, OC_4, KH * KW, "hK2dTex", 1, 1, 1);
   GL_CHECK_ERROR;
   return kernelOutTex;
-}
-
-void conv2d(
-    GLTensor& output,
-    const GLTensor& input,
-    const GLTensor& weight,
-    const float* bias,
-    int64_t SY,
-    int64_t SX,
-    int64_t PY,
-    int64_t PX,
-    int64_t DY,
-    int64_t DX,
-    int64_t G) {
-  assert(false);
-  // weights are repacked on gpu to texture in special format that does not
-  // match VTensor format, do not want to mix in VTensor at the moment -
-  // processing through CPU as a hack IKTODO: how to handle/store kernel in
-  // special format?
 }
 
 void conv2d(
@@ -831,8 +749,8 @@ void conv2d(
   const int64_t KHE = (KH - 1) * DY + 1;
   const int64_t OW = ((W - KWE + 2 * PX) / SX) + 1;
   const int64_t OH = ((H - KHE + 2 * PY) / SY) + 1;
-  assert(osizes[2] == OH);
-  assert(osizes[3] == OW);
+  TORCH_INTERNAL_ASSERT(osizes[2] == OH);
+  TORCH_INTERNAL_ASSERT(osizes[3] == OW);
 
   auto biasBuf =
       GLBuffer::from(bias, sizeof(float) * ALIGN_UP4(OC), sizeof(float) * OC);
@@ -874,11 +792,7 @@ void conv2d(
   GL_CHECK_ERROR;
 }
 
-void clamp(
-    GLTensor& output,
-    const GLTensor& input,
-    float min,
-    float max) {
+void clamp(GLTensor& output, const GLTensor& input, float min, float max) {
   TORCH_INTERNAL_ASSERT(false, "clamp not implemented for GLES");
 }
 
@@ -900,6 +814,117 @@ bool is_available() {
   return initGLContextOnce();
 }
 
+class GLTensor::Impl {
+ public:
+  Impl(std::vector<int64_t> sizes) : sizes_(std::move(sizes)) {
+    numel_ = std::accumulate(
+        std::begin(sizes_), std::end(sizes_), 1, std::multiplies<int64_t>());
+  }
+
+  std::vector<int64_t> sizes() const {
+    return sizes_;
+  }
+
+  inline int64_t dim() const {
+    return sizes_.size();
+  }
+
+  inline int64_t numel() const {
+    return numel_;
+  }
+
+  void setDataFromHost(const float* data) {
+    int N = sizes_[0];
+    int C = sizes_[1];
+    int H = sizes_[2];
+    int W = sizes_[3];
+    int C_4 = UP_DIV(C, 4);
+
+    auto tex = std::make_unique<GLImage>(W, H, C_4, getTexFormat());
+    hostCHW_to_deviceTex(tex->id(), data, C, H, W);
+    tex_ = std::move(tex);
+  }
+
+  void copyDataToHost(float* output) {
+    int N = sizes_[0];
+    int C = sizes_[1];
+    int H = sizes_[2];
+    int W = sizes_[3];
+    int C_4 = UP_DIV(C, 4);
+
+    deviceTex2hostCHW(tex_->id(), output, W, H, C);
+  }
+
+  void allocateStorage() {
+    int N = sizes_[0];
+    int C = sizes_[1];
+    int H = sizes_[2];
+    int W = sizes_[3];
+    int C_4 = UP_DIV(C, 4);
+
+    auto tex = std::make_unique<GLImage>(W, H, C_4, getTexFormat());
+    tex_ = std::move(tex);
+  }
+
+  bool hasImage() const {
+    return static_cast<bool>(tex_);
+  }
+
+  int texId() const {
+    TORCH_INTERNAL_ASSERT(tex_);
+    return tex_->id();
+  }
+
+ private:
+  std::vector<int64_t> sizes_;
+  int64_t numel_;
+  std::unique_ptr<GLImage> tex_;
+}; // class GLTensor::Impl
+
+std::shared_ptr<GLTensor::Impl> GLTensor::impl() {
+  return pImpl;
+}
+
+std::shared_ptr<const GLTensor::Impl> GLTensor::impl() const {
+  return pImpl;
+}
+
+std::vector<int64_t> GLTensor::sizes() const {
+  return impl()->sizes();
+}
+
+int64_t GLTensor::dim() const {
+  return impl()->dim();
+}
+
+int64_t GLTensor::numel() const {
+  return impl()->numel();
+}
+
+bool GLTensor::hasStorage() const {
+  return impl()->hasImage();
+}
+
+void GLTensor::allocateStorage() {
+  impl()->allocateStorage();
+}
+
+void GLTensor::setDataFromHost(const float* inputData) {
+  impl()->setDataFromHost(inputData);
+}
+
+void GLTensor::copyDataToHost(float* outputData) {
+  impl()->copyDataToHost(outputData);
+}
+
+int GLTensor::texId() const {
+  return impl()->texId();
+}
+
+GLTensor::GLTensor(std::vector<int64_t> sizes)
+    : pImpl(std::make_shared<Impl>(std::move(sizes))) {
+  TORCH_CHECK(initGLContextOnce(), "Failed to create GLES Context");
+}
 } // namespace gl
 } // namespace details
 } // namespace vulkan

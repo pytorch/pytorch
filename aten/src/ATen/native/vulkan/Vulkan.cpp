@@ -2,6 +2,8 @@
 #include <unistd.h>
 #include <cstring>
 #include <iostream>
+#include <functional>
+#include <numeric>
 
 #include <c10/util/Exception.h>
 

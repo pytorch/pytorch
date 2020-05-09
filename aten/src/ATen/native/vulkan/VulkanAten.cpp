@@ -22,7 +22,7 @@
 namespace at {
 namespace native {
 
-bool _vulkan_available() {
+bool is_vulkan_available() {
   return at::native::vulkan::details::VULKAN_GL::is_available();
 }
 

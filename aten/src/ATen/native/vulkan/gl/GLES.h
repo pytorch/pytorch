@@ -19,17 +19,44 @@ namespace gl {
 
 bool is_available();
 
-class GLTexture {
+class GLImage;
+class GLTensor : public c10::intrusive_ptr_target {
+  class Impl;
+
  public:
-  ~GLTexture();
-  GLTexture(
-      int w,
-      int h,
-      int d,
-      GLenum texFormat,
-      GLenum target = GL_TEXTURE_3D);
-  GLTexture(const GLTexture&) = delete;
-  GLTexture& operator=(const GLTexture&) = delete;
+  GLTensor(std::vector<int64_t> sizes);
+
+  ~GLTensor() = default;
+
+  GLTensor(GLTensor&&) = default;
+  GLTensor& operator=(GLTensor&&) = default;
+
+  GLTensor(const GLTensor&) = default;
+  GLTensor& operator=(const GLTensor&) = default;
+
+  std::vector<int64_t> sizes() const;
+  int64_t dim() const;
+  int64_t numel() const;
+
+  bool hasStorage() const;
+  void allocateStorage();
+  void setDataFromHost(const float* inputData);
+  void copyDataToHost(float* outputData);
+
+  int texId() const;
+
+ private:
+  std::shared_ptr<Impl> impl();
+  std::shared_ptr<const Impl> impl() const;
+  std::shared_ptr<Impl> pImpl;
+}; // class GLTensor
+
+class GLImage {
+ public:
+  ~GLImage();
+  GLImage(int w, int h, int d, GLenum texFormat);
+  GLImage(const GLImage&) = delete;
+  GLImage& operator=(const GLImage&) = delete;
 
   unsigned int id() const;
 
@@ -40,38 +67,6 @@ class GLTexture {
   unsigned int id_;
   GLenum target_;
   GLenum texFormat_{GL_RGBA32F};
-};
-
-class GLTensor : public c10::intrusive_ptr_target {
- public:
-  GLTensor(std::vector<int64_t> sizes);
-
-  ~GLTensor() = default;
-
-  GLTensor(GLTensor&&) = default;
-  GLTensor& operator=(GLTensor&&) = default;
-
-  GLTensor(const GLTensor&) = delete;
-  GLTensor& operator=(const GLTensor&) = delete;
-
-  std::vector<int64_t> sizes() const {
-    return sizes_;
-  }
-
-  void setDataFromHost(const float* data);
-  void copyDataToHost(float* data);
-
-  bool hasStorage() {
-    return static_cast<bool>(tex_);
-  }
-  void allocateStorage();
-
-  // IKTODO: avoid exposing these internals?
-  int texId() const;
-
- private:
-  std::vector<int64_t> sizes_;
-  std::unique_ptr<GLTexture> tex_;
 };
 
 void upsample_nearest2d(
@@ -107,11 +102,7 @@ void conv2d(
     int64_t DX,
     int64_t G);
 
-void clamp(
-    GLTensor& output,
-    const GLTensor& input,
-    float min,
-    float max);
+void clamp(GLTensor& output, const GLTensor& input, float min, float max);
 
 void addmm(
     GLTensor& output,
