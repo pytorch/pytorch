@@ -1,4 +1,5 @@
 import warnings
+from abc import ABC, abstractmethod, abstractproperty
 from collections import OrderedDict
 from torch._six import container_abcs
 from itertools import islice
@@ -458,7 +459,119 @@ class ParameterList(Module):
         raise RuntimeError('ParameterList should not be called.')
 
 
-class ParameterDict(Module):
+class _DictContainer(ABC):
+
+    @abstractmethod
+    def _register(self, key, value):
+        pass
+
+    @abstractproperty
+    def _items(self):
+        pass
+
+    def __getitem__(self, key):
+        return self._items[key]
+
+    def __setitem__(self, key, item):
+        self._register(key, item)
+
+    def __delitem__(self, key):
+        del self._items[key]
+
+    def __len__(self):
+        return len(self._items)
+
+    def __iter__(self):
+        return iter(self._items.keys())
+
+    def __contains__(self, key):
+        return key in self._items
+
+    def clear(self):
+        """Remove all items from the ParameterDict.
+        """
+        self._items.clear()
+
+    def pop(self, key):
+        r"""Remove key from the ParameterDict and return its parameter.
+
+        Arguments:
+            key (string): key to pop from the ParameterDict
+        """
+        v = self[key]
+        del self[key]
+        return v
+
+    def keys(self):
+        r"""Return an iterable of the ParameterDict keys.
+        """
+        return self._items.keys()
+
+    def items(self):
+        r"""Return an iterable of the ParameterDict key/value pairs.
+        """
+        return self._items.items()
+
+    def values(self):
+        r"""Return an iterable of the ParameterDict values.
+        """
+        return self._items.values()
+
+    def update(self, items):
+        r"""Update the :class:`~torch.nn.ParameterDict` with the key-value pairs from a
+        mapping or an iterable, overwriting existing keys.
+
+        .. note::
+            If :attr:`parameters` is an ``OrderedDict``, a :class:`~torch.nn.ParameterDict`, or
+            an iterable of key-value pairs, the order of new elements in it is preserved.
+
+        Arguments:
+            parameters (iterable): a mapping (dictionary) from string to
+                :class:`~torch.nn.Parameter`, or an iterable of
+                key-value pairs of type (string, :class:`~torch.nn.Parameter`)
+        """
+        clsname = self.__class__.__name__
+        if not isinstance(items, container_abcs.Iterable):
+            raise TypeError("{}.update should be called with an ".format(clsname) +
+                            "iterable of key/value pairs, but got " +
+                            type(items).__name__)
+
+        if isinstance(items, container_abcs.Mapping):
+            if isinstance(items, (OrderedDict, self.__class__)):
+                for key, item in items.items():
+                    self[key] = item
+            else:
+                for key, item in sorted(items.items()):
+                    self[key] = item
+        else:
+            for j, p in enumerate(items):
+                if not isinstance(p, container_abcs.Iterable):
+                    raise TypeError("{} update sequence element ".format(clsname) +
+                                    "#" + str(j) + " should be Iterable; is" +
+                                    type(p).__name__)
+                if not len(p) == 2:
+                    raise ValueError("{} update sequence element ".format(clsname) +
+                                     "#" + str(j) + " has length " + str(len(p)) +
+                                     "; 2 is required")
+                self[p[0]] = p[1]
+
+    def extra_repr(self):
+        child_lines = []
+        itemname = self.__class__.__name__.replace("Dict", "")
+        for k, p in self._items.items():
+            size_str = 'x'.join(str(size) for size in p.size())
+            device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+            parastr = '{} containing: [{} of size {}{}]'.format(
+                itemname, torch.typename(p), size_str, device_str)
+            child_lines.append('  (' + k + '): ' + parastr)
+        tmpstr = '\n'.join(child_lines)
+        return tmpstr
+
+    def __call__(self, input):
+        raise RuntimeError(self.__class__.__name__ + ' should not be called.')
+
+
+class ParameterDict(Module, _DictContainer):
     r"""Holds parameters in a dictionary.
 
     ParameterDict can be indexed like a regular Python dictionary, but parameters it
@@ -497,105 +610,64 @@ class ParameterDict(Module):
     """
 
     def __init__(self, parameters=None):
-        super(ParameterDict, self).__init__()
+        super().__init__()
         if parameters is not None:
             self.update(parameters)
 
-    def __getitem__(self, key):
-        return self._parameters[key]
+    def _register(self, key, value):
+        self.register_parameter(key, value)
 
-    def __setitem__(self, key, parameter):
-        self.register_parameter(key, parameter)
+    @property
+    def _items(self):
+        return self._parameters
 
-    def __delitem__(self, key):
-        del self._parameters[key]
 
-    def __len__(self):
-        return len(self._parameters)
+class BufferDict(Module, _DictContainer):
+    r"""Holds buffers in a dictionary.
 
-    def __iter__(self):
-        return iter(self._parameters.keys())
+    BufferDict can be indexed like a regular Python dictionary, but buffers it
+    contains are properly registered, and will be visible by all Module methods.
 
-    def __contains__(self, key):
-        return key in self._parameters
+    :class:`~torch.nn.BufferDict` is an **ordered** dictionary that respects
 
-    def clear(self):
-        """Remove all items from the ParameterDict.
-        """
-        self._parameters.clear()
+    * the order of insertion, and
 
-    def pop(self, key):
-        r"""Remove key from the ParameterDict and return its parameter.
+    * in :meth:`~torch.nn.BufferDict.update`, the order of the merged ``OrderedDict``
+      or another :class:`~torch.nn.BufferDict` (the argument to
+      :meth:`~torch.nn.BufferDict.update`).
 
-        Arguments:
-            key (string): key to pop from the ParameterDict
-        """
-        v = self[key]
-        del self[key]
-        return v
+    Note that :meth:`~torch.nn.BufferDict.update` with other unordered mapping
+    types (e.g., Python's plain ``dict``) does not preserve the order of the
+    merged mapping.
 
-    def keys(self):
-        r"""Return an iterable of the ParameterDict keys.
-        """
-        return self._parameters.keys()
+    Arguments:
+        buffers (iterable, optional): a mapping (dictionary) of
+            (string : :class:`~torch.Tensor`) or an iterable of key-value pairs
+            of type (string, :class:`~torch.Tensor`)
 
-    def items(self):
-        r"""Return an iterable of the ParameterDict key/value pairs.
-        """
-        return self._parameters.items()
+    Example::
 
-    def values(self):
-        r"""Return an iterable of the ParameterDict values.
-        """
-        return self._parameters.values()
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.buffers = nn.BufferDict({
+                        'left': torch.randn(5, 10),
+                        'right': torch.randn(5, 10)
+                })
 
-    def update(self, parameters):
-        r"""Update the :class:`~torch.nn.ParameterDict` with the key-value pairs from a
-        mapping or an iterable, overwriting existing keys.
+            def forward(self, x, choice):
+                x = self.buffers[choice].mm(x)
+                return x
+    """
 
-        .. note::
-            If :attr:`parameters` is an ``OrderedDict``, a :class:`~torch.nn.ParameterDict`, or
-            an iterable of key-value pairs, the order of new elements in it is preserved.
+    def __init__(self, buffers=None):
+        super().__init__()
+        if buffers is not None:
+            self.update(buffers)
 
-        Arguments:
-            parameters (iterable): a mapping (dictionary) from string to
-                :class:`~torch.nn.Parameter`, or an iterable of
-                key-value pairs of type (string, :class:`~torch.nn.Parameter`)
-        """
-        if not isinstance(parameters, container_abcs.Iterable):
-            raise TypeError("ParametersDict.update should be called with an "
-                            "iterable of key/value pairs, but got " +
-                            type(parameters).__name__)
+    def _register(self, key, value):
+        self.register_buffer(key, value)
 
-        if isinstance(parameters, container_abcs.Mapping):
-            if isinstance(parameters, (OrderedDict, ParameterDict)):
-                for key, parameter in parameters.items():
-                    self[key] = parameter
-            else:
-                for key, parameter in sorted(parameters.items()):
-                    self[key] = parameter
-        else:
-            for j, p in enumerate(parameters):
-                if not isinstance(p, container_abcs.Iterable):
-                    raise TypeError("ParameterDict update sequence element "
-                                    "#" + str(j) + " should be Iterable; is" +
-                                    type(p).__name__)
-                if not len(p) == 2:
-                    raise ValueError("ParameterDict update sequence element "
-                                     "#" + str(j) + " has length " + str(len(p)) +
-                                     "; 2 is required")
-                self[p[0]] = p[1]
-
-    def extra_repr(self):
-        child_lines = []
-        for k, p in self._parameters.items():
-            size_str = 'x'.join(str(size) for size in p.size())
-            device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
-            parastr = 'Parameter containing: [{} of size {}{}]'.format(
-                torch.typename(p), size_str, device_str)
-            child_lines.append('  (' + k + '): ' + parastr)
-        tmpstr = '\n'.join(child_lines)
-        return tmpstr
-
-    def __call__(self, input):
-        raise RuntimeError('ParameterDict should not be called.')
+    @property
+    def _items(self):
+        return self._buffers

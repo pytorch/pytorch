@@ -10,7 +10,7 @@ These are the basic building block for graphs
     :depth: 2
     :local:
     :backlinks: top
-    
+
 
 .. currentmodule:: torch.nn
 
@@ -36,6 +36,7 @@ Containers
     ModuleDict
     ParameterList
     ParameterDict
+    BufferDict
 
 .. currentmodule:: torch
 
