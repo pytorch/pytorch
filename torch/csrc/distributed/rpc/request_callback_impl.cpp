@@ -336,7 +336,7 @@ void RequestCallbackImpl::processRpc(
         // Our response is satisfied when the rpc.remote() request
         // finishes executing on the owner.
         whenValueSet->addCallback([responseFuture, messageId, rref](
-                                      const FutureMessage& whenValueSet) {
+                                      const FutureIValue& whenValueSet) {
           if (whenValueSet.hasError()) {
             responseFuture->setError(*whenValueSet.error());
             return;
@@ -378,7 +378,7 @@ void RequestCallbackImpl::processRpc(
         // Our response is satisfied when the the rpc.remote() request
         // finishes executing on the owner.
         whenValueSet->addCallback([responseFuture, messageId, rref](
-                                      const FutureMessage& whenValueSet) {
+                                      const FutureIValue& whenValueSet) {
           if (whenValueSet.hasError()) {
             responseFuture->setError(*whenValueSet.error());
             return;

@@ -5,8 +5,7 @@ import unittest
 import torch
 
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
-                                                  TEST_NUMPY, numpy_to_torch_dtype_dict,
-                                                  torch_to_numpy_dtype_dict)
+                                                  TEST_NUMPY, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
                                                         dtypes, onlyCPU)
 
@@ -163,14 +162,10 @@ class TestTypePromotion(TestCase):
     @float_double_default_dtype
     def test_half(self, device):
         half = torch.tensor(5.5, dtype=torch.float16, device=device)
-        if(self.device_type == 'cpu'):
-            self.assertRaisesRegex(RuntimeError, "not implemented for 'Half'",
-                                   lambda: half + 2.2)
-        else:
-            self.assertEqual((half + 2.2).dtype, torch.float16)
-            self.assertEqual((half + 100000).dtype, torch.float16)  # inf
-            default_tensor = torch.tensor(100000.0, device=device)
-            self.assertEqual((half + default_tensor).dtype, torch.get_default_dtype())
+        self.assertEqual((half + 2.2).dtype, torch.float16)
+        self.assertEqual((half + 100000).dtype, torch.float16)  # inf
+        default_tensor = torch.tensor(100000.0, device=device)
+        self.assertEqual((half + default_tensor).dtype, torch.get_default_dtype())
 
     @float_double_default_dtype
     def test_alternate_result(self, device):
@@ -824,19 +819,6 @@ class TestTypePromotion(TestCase):
                 if np_first and op is operator.add:
                     undesired_failure = True
                 if op is torch.add:
-                    undesired_failure = True
-
-                # float16 x bool, uint, int, and float16 interactions are not
-                # working as intended.
-                # See https://github.com/pytorch/pytorch/issues/36058.
-                float16_failures = (torch.bool, torch.uint8,
-                                    torch.int8, torch.int16, torch.int32, torch.int64,
-                                    torch.float16)
-                if torch_type is torch.float16 and \
-                        numpy_to_torch_dtype_dict[np_type] in float16_failures:
-                    undesired_failure = True
-
-                if torch_type in float16_failures and np_type is np.float16:
                     undesired_failure = True
 
                 # Expects the same result if undesired_failure is false
