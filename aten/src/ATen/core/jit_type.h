@@ -1607,16 +1607,6 @@ enum ATTRIBUTE_KIND_ENUM {
   REGULAR_ATTRIBUTE
 };
 
-static const std::string attribute_name_from_enum(ATTRIBUTE_KIND_ENUM ake) {
-  switch (ake) {
-  case BUFFER: return "BUFFER";
-  case PARAMETER: return "PARAMETER";
-  case REGULAR_ATTRIBUTE: return "REGULAR_ATTRIBUTE";
-  }
-  TORCH_CHECK(false, "Unexpeted attribute kind");
-  return std::string();
-}
-
 struct CAFFE2_API AttributeKind {
   public:
   AttributeKind(ATTRIBUTE_KIND_ENUM kind,
@@ -1636,15 +1626,6 @@ struct CAFFE2_API AttributeKind {
 
   std::string getName() const {
     return attributeName_;
-  }
-
-  std::string python_str_impl(TypePrinter printer = nullptr) const {
-    std::stringstream ss;
-    ss << "Attribute: ";
-    ss << "Type: [" << getType()->python_str(printer) << "]";
-    ss << "Name: [" << getName() << "]";
-    ss << " Kind: [" << attribute_name_from_enum(getKind()) << "]";
-    return ss.str();
   }
 
   bool operator==(const AttributeKind& user_rhs) const {
