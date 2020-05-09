@@ -564,6 +564,14 @@ void ivalue::Object::resizeObject(size_t slot) {
   slots_.resize(type()->numAttributes());
 }
 
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy() const {
+  auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
+  for (auto i = 0; i < slots_.size(); ++i) {
+    object->setSlot(i, slots_[i]);
+  }
+  return object;
+}
+
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
   IValue::HashAliasedIValueMap memo;
   return deepcopy(memo);
