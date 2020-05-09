@@ -4,6 +4,7 @@
 #include <pytorch_qnnpack.h>
 #include <qnnpack_common.h>
 #include <qnnpack_func.h>
+#include <ATen/native/quantized/cpu/conv_packed_params.h>
 
 using QnnpackOperatorDeleter = qnnpack::QnnpackDeleter;
 
