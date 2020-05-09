@@ -43,24 +43,24 @@ void UnrollPass::handle(Expr* expr) {
 }
 
 namespace {
-Int* getPredicate(TensorView* tv, std::vector<Val*> inds) {
+Bool* getPredicate(TensorView* tv, std::vector<Val*> inds) {
   if (tv->nDims() > inds.size()) {
     for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
       if (tv->axis(i)->isReduction())
         inds.insert(inds.begin() + i, new Int(0));
     }
   }
-  std::vector<Int*> all_preds = PredicateCompute::computePredicates(
+  std::vector<Bool*> all_preds = PredicateCompute::computePredicates(
       new TensorIndex(tv, IndexCompute::get(tv->domain(), inds)));
 
-  std::vector<Int*> preds;
+  std::vector<Bool*> preds;
 
-  for (Int* pred : all_preds)
-    if (!pred->isOneInt())
+  for (Bool* pred : all_preds)
+    if (!(pred->isConst()) || !(pred->isConst() && pred->value().value()))
       preds.push_back(pred);
 
   if (preds.size() == 0)
-    return new Int(1);
+    return new Bool(true);
 
   Val* cond = preds[0];
 
@@ -70,10 +70,10 @@ Int* getPredicate(TensorView* tv, std::vector<Val*> inds) {
 
   TORCH_INTERNAL_ASSERT(
       cond->getValType().value() == ValType::Scalar &&
-          cond->getDataType().value() == DataType::Int,
-      "Error computing predicate, should be returning an Int, but returning ",
-      cond);
-  return static_cast<Int*>(cond);
+          cond->getDataType().value() == DataType::Bool,
+      "Error computing predicate, should be returning a Bool, but returning ",
+      cond->getDataType().value());
+  return static_cast<Bool*>(cond);
 }
 } // namespace
 
@@ -138,7 +138,7 @@ void UnrollPass::handle(ForLoop* fl) {
     }
 
     // Make predicates for the unrolling, and the epilogue
-    Int* unroll_predicate = getPredicate(out, unroll_pred_inds);
+    Bool* unroll_predicate = getPredicate(out, unroll_pred_inds);
 
     // Make the IfThenElse controlling the unrolling
     IfThenElse* unroll_ite =
@@ -166,7 +166,7 @@ void UnrollPass::handle(ForLoop* fl) {
         continue;
 
       // Setup the expressions that need predicates around them.
-      Int* inline_predicate = getPredicate(out, ir_utils::indices(for_loops));
+      Bool* inline_predicate = getPredicate(out, ir_utils::indices(for_loops));
 
       IfThenElse* inline_ite =
           new IfThenElse(inline_predicate, {expr}, {}, inner_most_inlined_loop);
@@ -188,10 +188,11 @@ void UnrollPass::handle(ForLoop* fl) {
       TensorView* out = ir_utils::asTV(ir_utils::asExpr(expr)->outputs()[0]);
 
       if (has_global) {
-        Int* pred = getPredicate(out, ir_utils::indices(for_loops));
+        Bool* pred = getPredicate(out, ir_utils::indices(for_loops));
 
         // If we need a predicate, put expr inside an if then else
-        if (!pred->isOneInt()) {
+      
+        if (!(pred->isConst()) || !(pred->isConst() && pred->value().value())) {
           IfThenElse* inline_ite =
               new IfThenElse(pred, {expr}, {}, for_loops.back());
           for_loops.back()->body().insert_before(expr, inline_ite);

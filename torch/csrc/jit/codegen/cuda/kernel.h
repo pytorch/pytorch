@@ -36,6 +36,9 @@ struct KernelArgsReq {
 
 class CudaKernel {
  public:
+  std::deque<Val*> inputs;
+  std::deque<Val*> outputs;
+
   CudaKernel() = default;
 
   CUmodule& getModule() {

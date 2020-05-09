@@ -144,7 +144,8 @@ std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
              << code_template_tensor_struct << "\n"
              << code_fp16_support << "\n"
              << code_random_number_gen << "\n"
-             << code_helper_funcs << "\n";
+             << code_helper_funcs << "\n"
+             << code_template_block_reduction << "\n";
   std::stringstream cdg;
   GPULower gpulw(&fusion);
   gpulw.printKernel(str_stream, KERNEL_NAME);
@@ -173,6 +174,13 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
   std::string code;
   std::string func_name;
   std::tie(func_name, code) = codeGeneration(fusion);
+
+  // Keep input and output reference to validate/line up arguments
+  for (auto inp : fusion.inputs())
+    entry->inputs.push_back(inp);
+
+  for (auto out : fusion.outputs())
+    entry->outputs.push_back(out);
 
   // vvv NVRTC COMPILATION vvv
 
@@ -324,12 +332,16 @@ void runTestKernel(
 
   // TODO: Proper API to establish reasonable launch configurations;
   // Naive launch config;
+  TORCH_INTERNAL_ASSERT(!outputs.empty(), "No outputs set for test kernel.");
   size_t numel = outputs[0].numel();
 
   // TODO: we can't randomly clap down this until we got striding.
   const auto nBlocks = ceilDiv(numel, 128 * entry->unroll_factor_);
 
   KernelArgumentHolder kernel_args;
+
+  auto exprs = entry->outputs[0]->fusion()->exprs(true);
+  bool has_reduction = std::any_of(exprs.begin(), exprs.end(), [](Expr* expr){return expr->getExprType() == ExprType::ReductionOp;});
 
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different
@@ -339,14 +351,19 @@ void runTestKernel(
       TORCH_INTERNAL_ASSERT(
           input.toTensor().device().index() == entry->device_,
           "input to kernel on device that is not compiled for");
-      kernel_args.push(input.toTensor(), outputs[0].sizes());
+      TORCH_INTERNAL_ASSERT(!entry->outputs.empty(), "No output found for this kernel, aborting.");
+      if (has_reduction) {
+        kernel_args.push(input.toTensor());
+      } else {
+        kernel_args.push(input.toTensor(), outputs[0].sizes());
+      }
     } else {
       kernel_args.push(input);
     }
   }
 
   for (auto& output : outputs) {
-    kernel_args.push(output);
+      kernel_args.push(output);
   }
 
   // TODO: this probably won't work for us.

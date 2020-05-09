@@ -525,7 +525,7 @@ struct TORCH_CUDA_API ForLoop : public Expr {
 struct TORCH_CUDA_API IfThenElse : public Expr {
   ~IfThenElse() = default;
   IfThenElse(
-      Int* _cond,
+      Bool* _cond,
       const std::vector<Expr*>& _if_body = {},
       const std::vector<Expr*>& _else_body = {},
       Expr* _parent_scope = nullptr);
@@ -536,7 +536,7 @@ struct TORCH_CUDA_API IfThenElse : public Expr {
   IfThenElse(IfThenElse&& other) = delete;
   IfThenElse& operator=(IfThenElse&& other) = delete;
 
-  Int* cond() const noexcept {
+  Bool* cond() const noexcept {
     return cond_;
   }
 
@@ -567,7 +567,7 @@ struct TORCH_CUDA_API IfThenElse : public Expr {
   }
 
  private:
-  Int* const cond_;
+  Bool* const cond_;
   Scope body_;
   Scope else_body_;
   Expr* parent_scope_;

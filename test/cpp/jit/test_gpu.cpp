@@ -89,17 +89,6 @@ void testGPU_FusionSimpleTypePromote() {
   TORCH_CHECK(f5->getDataType() == DataType::Float);
 }
 
-void testGPU_FusionCastOp() {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  Float* f3_test = new Float{3.f};
-  Int* i3 = new Int{3};
-  auto f3 = castOp(DataType::Float, i3);
-
-  TORCH_CHECK(f3->getDataType().value() == f3_test->getDataType().value());
-}
-
 class ZeroMutator : public OptOutMutator {
  public:
   Statement* mutate(Float* f) {
@@ -557,11 +546,7 @@ void testGPU_FusionParser() {
   fuser::cuda::parseJitIR(g, fusion, &prog);
 
   std::stringstream ref;
-  ref << "__device__ int ceilDiv(const int a, const int b) {\n"
-      << "  return (a + b - 1) / b;\n"
-      << "}\n"
-      << "\n"
-      << "__global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3){\n"
+  ref << "__global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3){\n"
       << "  float T2[4];\n"
       << "  if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T1.size[0] ) ) { \n"
       << "    for(size_t i128 = 0; i128 < 4; ++i128 ) {\n"
@@ -1304,17 +1289,17 @@ void testGPU_FusionScalarInputs() {
   prog.grid(blocks);
   prog.block(128);
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
-
+  at::Scalar test(fl0);
+  
   torch::jit::fuser::cuda::runTestKernel(
       &prog,
-      {at::Scalar(fl0),
+      {t0,
+       t1,
+       at::Scalar(fl0),
        at::Scalar(fl1),
        at::Scalar(fl2),
-       at::Scalar(fl3),
-       t0,
-       t1,
-       t2,
-       t3},
+       at::Scalar(fl3)
+       },
       {kernel_tv4});
 
   GPULower gpulw(&fusion);

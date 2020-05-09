@@ -424,6 +424,7 @@ bool isTVOp(const Expr* expr) {
   if (expr->nOutputs() == 1 && isTV(expr->output(0)) &&
       (expr->getExprType().value() == ExprType::BinaryOp ||
        expr->getExprType().value() == ExprType::UnaryOp ||
+       expr->getExprType().value() == ExprType::TernaryOp ||
        expr->getExprType().value() == ExprType::ReductionOp))
     return true;
   return false;

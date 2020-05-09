@@ -586,7 +586,7 @@ bool ForLoop::sameAs(const ForLoop* other) const {
 }
 
 IfThenElse::IfThenElse(
-    Int* _cond,
+    Bool* _cond,
     const std::vector<Expr*>& _if_body,
     const std::vector<Expr*>& _else_body,
     Expr* _parent_scope)
