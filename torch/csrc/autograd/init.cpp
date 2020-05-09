@@ -163,7 +163,7 @@ static PyObject * is_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
 
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
-  {"set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
+  {"_set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
   {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, nullptr},
   {"set_autocast_enabled", (PyCFunction)set_autocast_enabled, METH_O, nullptr},
   {"is_autocast_enabled", (PyCFunction)is_autocast_enabled, METH_NOARGS, nullptr},
