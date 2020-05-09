@@ -56,5 +56,4 @@ REGISTER_DISPATCH(addcdiv_stub, &addcdiv_cuda_kernel);
 REGISTER_DISPATCH(addcmul_stub, &addcmul_cuda_kernel);
 REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cuda_kernel);
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cuda_kernel);
-
 }} // namespace at::native

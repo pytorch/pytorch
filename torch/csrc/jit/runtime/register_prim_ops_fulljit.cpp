@@ -1016,23 +1016,6 @@ RegisterOperators reg2({
     CREATE_COPY_OP(float, double),
 #undef CREATE_COPY_OP
 
-    // Pass in two ops for handling int and float separately as % in C++ only
-    // works for int The modulus calculation is different between C++ and Python
-    // (on negative), we preserve the python behavior as it's more common and
-    // match python syntax, hence the conversion.
-    DEFINE_GENERIC_OP(
-        aten::remainder,
-        (b + (a % b)) % b,
-        fmod((b + fmod(a, b)), b),
-        int,
-        float),
-    DEFINE_INT_FLOAT_OP(aten::remainder, fmod((b + fmod(a, b)), b), float),
-    DEFINE_SCALAR_BINARY_OP(
-        aten::remainder,
-        (b + (a % b)) % b,
-        fmod((b + fmod(a, b)), b),
-        Scalar),
-
     // only used in loop unrolling, not exposed to end users
     DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b),
 
