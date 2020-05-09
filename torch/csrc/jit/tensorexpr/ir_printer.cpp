@@ -167,7 +167,7 @@ void IRPrinter::visit(const CompareSelect* v) {
     }
     e->accept(this);
     if (prec >= self_prec) {
-      os() << "(";
+      os() << ")";
     }
   };
   withParens(v->ret_val1());
