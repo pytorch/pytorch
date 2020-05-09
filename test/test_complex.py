@@ -33,5 +33,11 @@ class TestComplexTensor(TestCase):
         self.assertEqual(complex_tensor.copy_real(), real + 1j * 0)
         self.assertEqual(complex_tensor.copy_imag(), 0 + 1j * imag)
 
+    def test_dtype_inference(self):
+        # issue: https://github.com/pytorch/pytorch/issues/36834
+        torch.set_default_dtype(torch.double)
+        x = torch.tensor([3., 3. + 5.j])
+        self.assertEqual(x.dtype, torch.cdouble)
+
 if __name__ == '__main__':
     run_tests()
