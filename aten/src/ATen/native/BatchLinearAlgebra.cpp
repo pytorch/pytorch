@@ -1,3 +1,4 @@
+#include <iostream>
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
@@ -1140,6 +1141,11 @@ Tensor& lu_solve_out(Tensor& result, const Tensor& self, const Tensor& LU_data, 
   Tensor result_tmp = at::lu_solve(self, LU_data, LU_pivots);
   result.resize_as_(result_tmp).copy_(result_tmp);
   return result;
+}
+
+std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
+  std::cout << "Andrzej" << std::endl;
+  return std::tuple<Tensor, Tensor>();
 }
 
 }}  // namespace at::native

@@ -4960,7 +4960,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_gels
+    CPU: lstsq
     CUDA: legacy::cuda::_th_gels
 
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
