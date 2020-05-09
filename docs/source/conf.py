@@ -54,7 +54,6 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinxcontrib.katex',
     'sphinx.ext.autosectionlabel',
-    'javasphinx',
 ]
 
 # build the templated autosummary files

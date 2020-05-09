@@ -151,7 +151,7 @@ struct conv_param_t {
 
     for (int i = 0; i < groups * group_output_channels; ++i) {
       if (requantization_scales[i] <= 0.0f ||
-          !isnormal(requantization_scales[i])) {
+          !std::isnormal(requantization_scales[i])) {
         pytorch_qnnp_log_error(
             "failed to create fully connected operator with %.7g requantization scale: scale must be finite and positive",
             requantization_scales[i]);

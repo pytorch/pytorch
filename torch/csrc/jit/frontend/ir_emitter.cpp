@@ -700,7 +700,7 @@ struct to_ir {
   // see [setstate type]
   static TypePtr getTypeForSetStateArg(const Def& def, const Self* self) {
     TORCH_CHECK(self, "Expected __setstate__ to have a `self` argument");
-    auto getstate = self->getClassType()->getMethod("__getstate__");
+    auto getstate = self->getClassType()->findMethod("__getstate__");
     if (!getstate) {
       throw ErrorReport(def.range())
           << "`__setstate__` defined but not `__getstate__`. "
@@ -711,7 +711,7 @@ struct to_ir {
     getstate->ensure_defined();
     return self->getClassType()
         ->getMethod("__getstate__")
-        ->getSchema()
+        .getSchema()
         .returns()
         .at(0)
         .type();
@@ -1884,9 +1884,9 @@ struct to_ir {
       // __iadd__ is not present)
       auto type = lhs->type()->expect<ClassType>();
       std::string magic_method_name;
-      if (type->getMethod(in_place_method_name)) {
+      if (type->findMethod(in_place_method_name)) {
         magic_method_name = in_place_method_name;
-      } else if (type->getMethod(out_of_place_method_name)) {
+      } else if (type->findMethod(out_of_place_method_name)) {
         magic_method_name = out_of_place_method_name;
       } else {
         throw ErrorReport(stmt.range())
@@ -2207,10 +2207,41 @@ struct to_ir {
         if (stmt.type().present()) {
           type = typeParser_.parseTypeFromExpr(stmt.type().get());
         }
+        auto rhs_sugared_val = emitSugaredExpr(rhs, 1, type);
+        // START BC HACK
+        //
+        // For old serialized quantized RNN modules, switch
+        // quantized::linear_prepack to quantized::linear_prepack_legacy. We
+        // changed linear_prepack to return a TorchBind class and not a
+        // cpp_custom_type_hack tensor anymore, but the old serialized models
+        // are tightly coupled with the type_hack version. If we still create a
+        // Tensor here, then the quantized_lstm.legacy overload can kick in in
+        // forward_impl(), and the module will still run correctly.
+        if (method.qualname() ==
+            "__torch__.torch.nn.quantized.dynamic.modules.rnn.PackedParameter.__setstate__") {
+          if (auto sv =
+                  std::dynamic_pointer_cast<SimpleValue>(rhs_sugared_val)) {
+            Node* rhs_node = sv->getValue()->node();
+            if (rhs_node->kind() ==
+                Symbol::fromQualString("quantized::linear_prepack")) {
+              std::vector<NamedValue> inputs;
+              for (Value* i : rhs_node->inputs()) {
+                inputs.emplace_back(i);
+              }
+              Value* new_val = rhs_node->owningGraph()->insert(
+                  Symbol::fromQualString("quantized::linear_prepack_legacy"),
+                  inputs,
+                  {},
+                  rhs_node->sourceRange());
+              rhs_sugared_val = std::make_shared<SimpleValue>(new_val);
+            }
+          }
+        }
+        // END BC HACK
         environment_stack->setSugaredVar(
             v.range(),
             v.name().name(),
-            emitSugaredExpr(rhs, 1, type),
+            std::move(rhs_sugared_val),
             /*annotated_type=*/type);
       } break;
       case TK_TUPLE_LITERAL:

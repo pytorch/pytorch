@@ -1020,7 +1020,7 @@ void LoopNest::splitWithTail(
         Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
     *tail = new For(i_tail, new IntImm(0), tail_size, body_tail);
 
-    p->append_stmt(*tail);
+    p->insert_stmt_after(*tail, *outer);
   } else {
     *tail = nullptr;
   }
