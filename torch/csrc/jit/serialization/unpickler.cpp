@@ -410,9 +410,11 @@ PickleOpCode Unpickler::readInstruction() {
       }
       at::DataPtr storage_ptr = read_record_(key);
       int64_t numel = args.at(4).toInt();
+      caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
       at::Storage storage(
-          at::CPU(type).typeMeta(),
-          numel,
+          c10::Storage::use_byte_size_t(),
+          dtype,
+          numel * dtype.itemsize(),
           std::move(storage_ptr),
           /*allocator=*/nullptr,
           /*resizable=*/false); // NB: we didn't set any allocator for the
