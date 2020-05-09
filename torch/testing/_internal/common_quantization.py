@@ -8,6 +8,7 @@ checking quantization api and properties of resulting modules.
 """
 
 import io
+import functools
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
@@ -17,6 +18,7 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert
 from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
+import unittest
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -111,6 +113,22 @@ def _make_conv_test_input(
             W, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
 
     return (X, X_q, W, W_q, b if use_bias else None)
+
+def skipIfNoFBGEMM(fn):
+    reason = 'Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs with instruction set support AVX2 or newer.'
+    if isinstance(fn, type) and 'fbgemm' not in torch.backends.quantized.supported_engines:
+        fn.__unittest_skip__ = True
+        fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
@@ -221,9 +239,9 @@ class SingleLayerLinearModel(torch.nn.Module):
         return x
 
 class AnnotatedSingleLayerLinearModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine='fbgemm'):
         super().__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.fc1 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
 
     def forward(self, x):
@@ -260,9 +278,9 @@ class ConvModel(torch.nn.Module):
         return x
 
 class AnnotatedConvModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
@@ -301,9 +319,9 @@ class AnnotatedConvBnModel(torch.nn.Module):
         return x
 
 class AnnotatedConvBnReLUModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine='fbgemm'):
         super(AnnotatedConvBnReLUModel, self).__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
         self.bn = torch.nn.BatchNorm2d(5).to(dtype=torch.float)
         self.relu = nn.ReLU(inplace=True)
@@ -357,9 +375,9 @@ class ActivationsTestModel(torch.nn.Module):
         return x
 
 class ActivationsQATTestModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.quant = torch.quantization.QuantStub()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
@@ -407,14 +425,17 @@ class NestedModel(torch.nn.Module):
         return x
 
 class AnnotatedNestedModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
         self.sub1 = LinearReluModel()
         self.sub2 = TwoLayerLinearModel()
         self.fc3 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
         self.fc3.qconfig = default_qconfig
         self.sub2.fc1 = QuantWrapper(self.sub2.fc1)
-        self.sub2.fc1.qconfig = default_per_channel_qconfig
+        if qengine == 'fbgemm':
+            self.sub2.fc1.qconfig = default_per_channel_qconfig
+        else:
+            self.sub2.fc1.qconfig = default_qconfig
 
     def forward(self, x):
         x = self.sub1(x)
@@ -505,9 +526,9 @@ class AnnotatedSkipQuantModel(torch.nn.Module):
     r"""We can skip quantization by explicitly
     setting qconfig of a submodule to None
     """
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.sub = QuantWrapper(InnerModule())
         self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
         # don't quantize this fc
@@ -534,9 +555,9 @@ class QuantStubModel(torch.nn.Module):
 class ManualLinearQATModel(torch.nn.Module):
     r"""A Module with manually inserted `QuantStub` and `DeQuantStub`
     """
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qat_qconfig("fbgemm")
+        self.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)

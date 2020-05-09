@@ -47,18 +47,7 @@ class CudaPrinter : public IRPrinter {
     }
   }
 
-  void visit(const Cast* v) override {
-    auto dtype = v->dtype();
-    if (dtype == kHalf) {
-      os() << "half";
-    } else {
-      os() << dtype;
-    }
-    os() << "(";
-    v->src_value()->accept(this);
-    os() << ")";
-  }
-
+  void visit(const Cast* v) override;
   void visit(const Intrinsics* v) override;
   void visit(const For* v) override;
 

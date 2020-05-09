@@ -339,7 +339,10 @@ class TORCH_API OwnerRRef final : public RRef {
       TypePtr type,
       c10::optional<IValue> value)
       : RRef(ownerId, rrefId, std::move(type)) {
-    value_ = std::move(value);
+    future_ = std::make_shared<FutureIValue>();
+    if (value.has_value()) {
+      future_->markCompleted(value.value());
+    }
   }
 
   inline bool isOwner() const override {
@@ -366,16 +369,12 @@ class TORCH_API OwnerRRef final : public RRef {
   // Has a value or error been set?
   bool hasValue() const;
   // Gets a future that is satisfied when the value or error is set.
-  std::shared_ptr<FutureMessage> getFuture();
+  std::shared_ptr<FutureIValue> getFuture();
 
  private:
   friend class RRefContext;
 
-  c10::optional<IValue> value_;
-  c10::optional<std::string> error_;
-  mutable std::mutex mutex_;
-  mutable std::condition_variable valueCV_;
-  std::shared_ptr<FutureMessage> future_;
+  std::shared_ptr<FutureIValue> future_;
 };
 
 } // namespace rpc

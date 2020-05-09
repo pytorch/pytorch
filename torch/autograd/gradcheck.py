@@ -96,8 +96,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                     outb = fn(input).clone()
                     x_value[x_idx] = orig
                     r = (outb - outa) / (2 * eps)
-                    if is_complex:
-                        r = r.abs()
                     d_tensor[d_idx] = r.detach().reshape(-1)
         elif x_tensor.layout == torch._mkldnn:
             # Use .data here to get around the version check
@@ -120,8 +118,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 outb = fn([x_tensor_mkl])
 
                 r = (outb - outa) / (2 * eps)
-                if is_complex:
-                    r = r.abs()
                 d_tensor[d_idx] = r.detach().reshape(-1)
         else:
             # Use .data here to get around the version check
@@ -134,8 +130,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 outb = fn(input).clone()
                 x_tensor[x_idx] = orig
                 r = (outb - outa) / (2 * eps)
-                if is_complex:
-                    r = r.abs()
                 d_tensor[d_idx] = r.detach().reshape(-1)
 
     return jacobian
@@ -393,7 +387,8 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         # If grad_outputs is not specified, create random Tensors of the same
         # shape, type, and device as the outputs
         def randn_like(x):
-            y = torch.testing.randn_like(x if x.is_floating_point() else x.double(), memory_format=torch.legacy_contiguous_format)
+            y = torch.testing.randn_like(
+                x if (x.is_floating_point() or x.is_complex()) else x.double(), memory_format=torch.legacy_contiguous_format)
             if gen_non_contig_grad_outputs:
                 y = torch.testing.make_non_contiguous(y)
             return y.requires_grad_()
