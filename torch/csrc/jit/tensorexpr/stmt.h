@@ -131,6 +131,24 @@ class TORCH_API Block : public StmtNode<Block> {
     stmts_.push_back(s);
     set_parent(s, this);
   }
+
+  void insert_stmt_after(Stmt* s, Stmt* after) {
+    if (s->get_parent()) {
+      throw malformed_input("Block append Stmt with existing parent", s);
+    }
+
+    auto pos = std::find(stmts_.begin(), stmts_.end(), after);
+    if (pos == stmts_.end()) {
+      throw malformed_input(
+          "Inserting after statement that is not in block", s);
+    }
+
+    ++pos;
+
+    stmts_.insert(pos, s);
+    set_parent(s, this);
+  }
+
   bool replace_stmt(Stmt* old_stmt, Stmt* new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
@@ -159,10 +177,6 @@ class TORCH_API Block : public StmtNode<Block> {
     return true;
   }
 
-  std::list<Stmt*> stmts() const {
-    return stmts_;
-  }
-
   explicit Block(const std::vector<Stmt*>& stmts) {
     for (Stmt* s : stmts) {
       if (s->get_parent()) {
@@ -173,6 +187,49 @@ class TORCH_API Block : public StmtNode<Block> {
       stmts_.push_back(s);
       set_parent(s, this);
     }
+  }
+
+  typedef std::list<Stmt*>::iterator iterator;
+  typedef std::list<Stmt*>::const_iterator const_iterator;
+
+  iterator begin() {
+    return stmts_.begin();
+  }
+
+  const_iterator begin() const {
+    return stmts_.begin();
+  }
+
+  iterator end() {
+    return stmts_.end();
+  }
+
+  const_iterator end() const {
+    return stmts_.end();
+  }
+
+  Stmt* front() {
+    return stmts_.front();
+  }
+
+  const Stmt* front() const {
+    return stmts_.front();
+  }
+
+  Stmt* back() {
+    return stmts_.back();
+  }
+
+  const Stmt* back() const {
+    return stmts_.back();
+  }
+
+  void splice(Block::iterator it, Block* other) {
+    for (Stmt* s : *other) {
+      set_parent(s, this);
+    }
+
+    stmts_.splice(it, other->stmts_);
   }
 
  private:
@@ -350,7 +407,7 @@ class TORCH_API LoopOptions {
     return gpu_block_index_ != -1;
   }
 
-  bool gpu_block_index() const {
+  int gpu_block_index() const {
     return gpu_block_index_;
   }
 
