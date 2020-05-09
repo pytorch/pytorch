@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
+#include <ATen/native/quantized/cpu/packed_params.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
@@ -22,7 +23,7 @@ inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
   // boxing code currently does not support this. Instead, exclude the Profiler
   // dispatch key and go through unboxed dispatch, avoiding boxing altogether
   c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
-  return c10::Dispatcher::singleton().template callUnboxed<Result, Args...>(
+  return c10::Dispatcher::singleton().template call<Result, Args...>(
       op, std::forward<Args>(args)...);
 }
 
@@ -182,7 +183,7 @@ void unpackQuantizedWeightsHelper(
     c10::optional<int64_t> groups;
 
     if (itr->second.isTuple()) {
-      // Pre-unpacked weights. Comes from Conv weights which are
+      // Pre-unpacked weights. Comes from Conv/Linear weights which are
       // stored as bound C++ classes.
       auto ser_tup = itr->second.toTuple();
       unpacked_weight = ser_tup->elements()[0].toTensor();

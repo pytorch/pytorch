@@ -1004,9 +1004,6 @@ def method_def(name, declarations, is_python_method, module):
         pycfunc_voidcast = '(void(*)(void))'
         flags = 'METH_VARARGS | METH_KEYWORDS'
 
-    if module == "torch":
-        flags += ' | METH_STATIC'
-
     if name in BINARY_OP_NAMES:
         def_template = PY_VARIABLE_METHOD_BINOP_DEF
     else:
