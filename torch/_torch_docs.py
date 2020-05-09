@@ -4902,8 +4902,8 @@ remainder(input, other, out=None) -> Tensor
 
 Computes the element-wise remainder of division.
 
-The divisor and dividend may contain both for integer and floating point
-numbers. The remainder has the same sign as the divisor.
+The dividend and divisor may contain both for integer and floating point
+numbers. The remainder has the same sign as the divisor :attr:`other`.
 
 When :attr:`other` is a tensor, the shapes of :attr:`input` and
 :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.

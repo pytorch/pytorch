@@ -1716,7 +1716,8 @@ struct CAFFE2_API ClassType : public NamedType {
   size_t addAttribute(
       const std::string& name,
       const TypePtr& type,
-      bool is_parameter = false);
+      bool is_parameter = false,
+      bool allow_any = false);
 
   // [Internal Only] Remove attribute from the ClassType,
   // caller is responsible to make sure the modification is safe:
@@ -1731,10 +1732,11 @@ struct CAFFE2_API ClassType : public NamedType {
   size_t addOrCheckAttribute(
       const std::string& name,
       TypePtr ty,
-      bool is_parameter = false) {
+      bool is_parameter = false,
+      bool allow_any = false) {
     auto slot_idx = findAttributeSlot(name);
     if (!slot_idx) {
-      return addAttribute(name, ty, is_parameter);
+      return addAttribute(name, ty, is_parameter, allow_any);
     }
 
     TORCH_CHECK(
