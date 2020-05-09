@@ -339,7 +339,10 @@ class TORCH_API OwnerRRef final : public RRef {
       TypePtr type,
       c10::optional<IValue> value)
       : RRef(ownerId, rrefId, std::move(type)) {
-    value_ = std::move(value);
+    future_ = std::make_shared<FutureIValue>();
+    if (value.has_value()) {
+      future_->markCompleted(value.value());
+    }
   }
 
   inline bool isOwner() const override {
@@ -371,11 +374,6 @@ class TORCH_API OwnerRRef final : public RRef {
  private:
   friend class RRefContext;
 
-  // See #32608 for dicussion on whether value_ should be merged into future_
-  c10::optional<IValue> value_;
-  c10::optional<std::string> error_;
-  mutable std::mutex mutex_;
-  mutable std::condition_variable valueCV_;
   std::shared_ptr<FutureIValue> future_;
 };
 

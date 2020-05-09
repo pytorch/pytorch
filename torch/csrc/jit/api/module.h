@@ -131,8 +131,9 @@ struct TORCH_API Module : public Object {
       const std::string& name,
       const TypePtr t,
       IValue v,
-      bool is_param = false) {
-    type()->addOrCheckAttribute(name, t, is_param);
+      bool is_param = false,
+      bool allow_any = false) {
+    type()->addOrCheckAttribute(name, t, is_param, allow_any);
     _ivalue()->setAttr(name, std::move(v));
   }
   void register_module(const std::string& name, const Module& module) {
