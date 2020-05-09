@@ -702,6 +702,9 @@ const Expr* PolynomialTransformer::isRoundOff(
   }
 
   if (div->rhs()->isConstant() && other->isConstant()) {
+    if (immediateEquals(div->rhs(), 0) || immediateEquals(other, 0)) {
+      return nullptr;
+    }
     // If they are both scalar we may be able to find a common factor.
     if (immediateEquals(evaluateOp(new Mod(other, div->rhs())), 0)) {
       Expr* scalar = evaluateOp(new Div(other, div->rhs()));
