@@ -22,6 +22,7 @@ class DeterminationTest(unittest.TestCase):
         "test_cpp_extensions_aot_no_ninja",
         "test_utils",
         "test_determination",
+        "test_quantization",
     ]
 
     @classmethod
@@ -70,6 +71,17 @@ class DeterminationTest(unittest.TestCase):
         self.assertEqual(
             self.determined_tests(["test/distributed/rpc/test_rpc_spawn.py"]),
             ["distributed/rpc/test_rpc_spawn"],
+        )
+        self.assertEqual(
+            self.determined_tests(["test/quantization/test_quantize.py"]),
+            ["test_quantization"],
+        )
+
+    def test_test_internal_file(self):
+        """testing/_internal files trigger dependent tests"""
+        self.assertEqual(
+            self.determined_tests(["torch/testing/_internal/common_quantization.py"]),
+            ["test_quantization"],
         )
 
     def test_torch_file(self):
