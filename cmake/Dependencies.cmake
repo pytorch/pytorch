@@ -299,7 +299,7 @@ endif()
 # that allows us to hijack pthreadpool interface.
 # Thus not doing this ends up building pthreadpool as well as
 # the internal implemenation of pthreadpool which results in symbol conflicts.
-if(USE_XNNPACK)
+if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
   if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
     set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
     set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
@@ -430,7 +430,7 @@ if(USE_NNPACK)
 endif()
 
 # ---[ XNNPACK
-if(USE_XNNPACK)
+if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
   if(NOT DEFINED XNNPACK_SOURCE_DIR)
     set(XNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/XNNPACK" CACHE STRING "XNNPACK source directory")
   endif()
@@ -462,6 +462,15 @@ if(USE_XNNPACK)
   endif()
 
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
+  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
+elseif(NOT TARGET XNNPACK AND USE_SYSTEM_XNNPACK)
+  add_library(XNNPACK SHARED IMPORTED)
+  find_library(XNNPACK_LIBRARY XNNPACK)
+  set_property(TARGET XNNPACK PROPERTY IMPORTED_LOCATION "${XNNPACK_LIBRARY}")
+  if(NOT XNNPACK_LIBRARY)
+    message(FATAL_ERROR "Cannot find XNNPACK")
+  endif()
+  message("-- Found XNNPACK: ${XNNPACK_LIBRARY}")
   list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
 endif()
 
@@ -617,7 +626,7 @@ if(USE_FBGEMM)
   caffe2_update_option(USE_FBGEMM ON)
 else()
   caffe2_update_option(USE_FBGEMM OFF)
-  message(WARNING 
+  message(WARNING
     "Turning USE_FAKELOWP off as it depends on USE_FBGEMM.")
   caffe2_update_option(USE_FAKELOWP OFF)
 endif()
@@ -789,12 +798,16 @@ if(BUILD_PYTHON)
   endif()
 
   # Check that Python works
+  set(PYTHON_VERSION)
   if(DEFINED PYTHON_EXECUTABLE)
     execute_process(
         COMMAND "${PYTHON_EXECUTABLE}" "--version"
-        RESULT_VARIABLE _exitcode)
+        RESULT_VARIABLE _exitcode OUTPUT_VARIABLE PYTHON_VERSION)
     if(NOT ${_exitcode} EQUAL 0)
       message(FATAL_ERROR "The Python executable ${PYTHON_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
+    endif()
+    if(PYTHON_VERSION)
+      string(REGEX MATCH "([0-9]+)\\.([0-9]+)" PYTHON_VERSION ${PYTHON_VERSION})
     endif()
   endif()
 
@@ -832,7 +845,7 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5)
+  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7 3.6 3.5)
   find_package(PythonInterp 3.0)
   find_package(PythonLibs 3.0)
 
@@ -868,9 +881,11 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-find_package(pybind11 CONFIG)
-if(NOT pybind11_FOUND)
-  find_package(pybind11)
+if(NOT ${pybind11_PREFER_third_party})
+  find_package(pybind11 CONFIG)
+  if(NOT pybind11_FOUND)
+    find_package(pybind11)
+  endif()
 endif()
 
 if(pybind11_FOUND)
@@ -881,6 +896,9 @@ else()
     install(DIRECTORY ${pybind11_INCLUDE_DIRS}
             DESTINATION ${CMAKE_INSTALL_PREFIX}
             FILES_MATCHING PATTERN "*.h")
+    set(pybind11_PREFER_third_party ON CACHE BOOL
+        "Use the third_party/pybind11 submodule, instead of looking for system
+        installation of pybind11")
 endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
@@ -1112,7 +1130,12 @@ if(USE_ROCM)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
+endif()
 
+# ---[ ROCm
+if(USE_ROCM)
+  # We check again for USE_ROCM because it might have been set to OFF
+  # in the if above
   include_directories(SYSTEM ${HIP_PATH}/include)
   include_directories(SYSTEM ${ROCBLAS_PATH}/include)
   include_directories(SYSTEM ${ROCFFT_PATH}/include)
@@ -1203,6 +1226,26 @@ if(USE_GLOO)
   endif()
 endif()
 
+if(USE_DISTRIBUTED AND USE_TENSORPIPE)
+  if(MSVC)
+    message(WARNING "Tensorpipe cannot be used on Windows.")
+  else()
+    set(__PYTORCH_BUILD ${PYTORCH_BUILD})
+    set(PYTORCH_BUILD ON)
+    set(__BUILD_TESTING ${BUILD_TESTING})
+    set(BUILD_TESTING OFF)
+    set(TP_BUILD_PYTHON OFF)
+    set(TP_BUILD_LIBUV ON)
+
+    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
+
+    set(PYTORCH_BUILD ${__PYTORCH_BUILD})
+    set(BUILD_TESING ${__BUILD_TESTING})
+
+    list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
+  endif()
+endif()
+
 # ---[ profiling
 if(USE_PROF)
   find_package(htrace)
@@ -1276,20 +1319,39 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   add_definitions(-DONNXIFI_ENABLE_EXT=1)
   # Add op schemas in "ai.onnx.pytorch" domain
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
+  if(NOT USE_SYSTEM_ONNX)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
+  endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi EXCLUDE_FROM_ALL)
 
-  include_directories(${ONNX_INCLUDE_DIRS})
-  include_directories(${FOXI_INCLUDE_DIRS})
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
-  # In mobile build we care about code size, and so we need drop
-  # everything (e.g. checker, optimizer) in onnx but the pb definition.
-  if(ANDROID OR IOS)
-    caffe2_interface_library(onnx_proto onnx_library)
+  if(NOT USE_SYSTEM_ONNX)
+    include_directories(${ONNX_INCLUDE_DIRS})
+    # In mobile build we care about code size, and so we need drop
+    # everything (e.g. checker, optimizer) in onnx but the pb definition.
+    if(ANDROID OR IOS)
+      caffe2_interface_library(onnx_proto onnx_library)
+    else()
+      caffe2_interface_library(onnx onnx_library)
+    endif()
+    list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
   else()
-    caffe2_interface_library(onnx onnx_library)
+    add_library(onnx SHARED IMPORTED)
+    find_library(ONNX_LIBRARY onnx)
+    if(NOT ONNX_LIBRARY)
+      message(FATAL_ERROR "Cannot find onnx")
+    endif()
+    set_property(TARGET onnx PROPERTY IMPORTED_LOCATION ${ONNX_LIBRARY})
+    add_library(onnx_proto SHARED IMPORTED)
+    find_library(ONNX_PROTO_LIBRARY onnx_proto)
+    if(NOT ONNX_PROTO_LIBRARY)
+      message(FATAL_ERROR "Cannot find onnx")
+    endif()
+    set_property(TARGET onnx_proto PROPERTY IMPORTED_LOCATION ${ONNX_PROTO_LIBRARY})
+    message("-- Found onnx: ${ONNX_LIBRARY} ${ONNX_PROTO_LIBRARY}")
+    list(APPEND Caffe2_DEPENDENCY_LIBS onnx_proto onnx)
   endif()
-  list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
+  include_directories(${FOXI_INCLUDE_DIRS})
   list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
@@ -1586,3 +1648,16 @@ endif()
 #
 # End ATen checks
 #
+
+add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/fmt)
+
+# Disable compiler feature checks for `fmt`.
+#
+# CMake compiles a little program to check compiler features. Some of our build
+# configurations (notably the mobile build analyzer) will populate
+# CMAKE_CXX_FLAGS in ways that break feature checks. Since we already know
+# `fmt` is compatible with a superset of the compilers that PyTorch is, it
+# shouldn't be too bad to just disable the checks.
+set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
+
+list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)

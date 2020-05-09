@@ -123,6 +123,8 @@ struct complex;
 
 template<typename T>
 struct alignas(sizeof(T) * 2) complex_common {
+  using value_type = T;
+
   T storage[2];
 
   constexpr complex_common(): storage{T(), T()} {}
@@ -231,8 +233,8 @@ struct alignas(sizeof(T) * 2) complex_common {
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
   template<typename U>
-  explicit operator thrust::complex<U>() const {
-    return thrust::complex<U>(thrust::complex<T>(real(), imag()));
+  C10_HOST_DEVICE explicit operator thrust::complex<U>() const {
+    return static_cast<thrust::complex<U>>(thrust::complex<T>(real(), imag()));
   }
 #endif
 
@@ -290,7 +292,6 @@ constexpr complex<double> operator"" _id(unsigned long long imag) {
 
 } // namespace complex_literals
 
-} // namespace c10
 
 template<typename T>
 constexpr c10::complex<T> operator+(const c10::complex<T>& val) {
@@ -416,6 +417,8 @@ std::basic_istream<CharT, Traits>& operator>>(std::basic_istream<CharT, Traits>&
   return is;
 }
 
+} // namespace c10
+
 // std functions
 //
 // The implementation of these functions also follow the design of C++20
@@ -434,13 +437,29 @@ constexpr T imag(const c10::complex<T>& z) {
 
 template<typename T>
 C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
-  return std::hypot(std::real(z), std::imag(z));
+  // Algorithm reference:
+  //   https://www.johndcook.com/blog/2010/06/02/whats-so-hard-about-finding-a-hypotenuse/
+  //   https://en.wikipedia.org/wiki/Hypot#Implementation
+  auto r = std::abs(std::real(z));
+  auto i = std::abs(std::imag(z));
+  auto max = r > i ? r : i;
+  auto min = r > i ? i : r;
+  auto rr = min / max;
+  return max * std::sqrt(1 + rr * rr);
 }
+
+#ifdef __HIP_PLATFORM_HCC__
+#define ROCm_Bug(x)
+#else
+#define ROCm_Bug(x) x
+#endif
 
 template<typename T>
 C10_HOST_DEVICE T arg(const c10::complex<T>& z) {
-  return std::atan2(std::imag(z), std::real(z));
+  return ROCm_Bug(std)::atan2(std::imag(z), std::real(z));
 }
+
+#undef ROCm_Bug
 
 template<typename T>
 constexpr T norm(const c10::complex<T>& z) {
@@ -483,3 +502,5 @@ C10_HOST_DEVICE c10::complex<T> polar(const T& r, const T& theta = T()) {
 
 // math functions are included in a separate file
 #include <c10/util/complex_math.h>
+// utilities for complex types
+#include <c10/util/complex_utils.h>
