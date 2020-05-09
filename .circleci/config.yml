@@ -3011,11 +3011,6 @@ workflows:
           requires:
             - setup
       - binary_windows_build:
-          name: binary_windows_libtorch_3_7_cu102_debug_build
-          build_environment: "libtorch 3.7 cu102 debug"
-          requires:
-            - setup
-      - binary_windows_build:
           name: binary_windows_libtorch_3_7_cpu_release_build
           build_environment: "libtorch 3.7 cpu release"
           requires:
