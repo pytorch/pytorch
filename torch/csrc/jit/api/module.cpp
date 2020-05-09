@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/api/module.h>
+#include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -268,7 +268,7 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   }
   // Note: following Python, `__init__()` modifies its first parameter in-place
   // and returns nothing.
-  classType->getMethod("__init__")->operator()(std::move(stackWithSelf));
+  classType->getMethod("__init__").operator()(std::move(stackWithSelf));
 
   return obj;
 }

@@ -304,7 +304,7 @@ class TestNN(NNTestCase):
         args = input_tuple + (target,) + extra_args
         if gradOutput is None:
             gradOutput = torch.ones(())
-        criterion(*args).backward(gradOutput.type_as(input_tuple[0]))
+        criterion(*args).backward(gradOutput.to(input_tuple[0]))
         if isinstance(input, tuple):
             return tuple(map(lambda i: i.grad.data, input))
         else:
@@ -908,6 +908,55 @@ class TestNN(NNTestCase):
         self.assertEqual(m.buffer_name, buffer2)
         m.register_buffer('buffer_name', buffer3)
         self.assertEqual(m.buffer_name, buffer3)
+
+    def test_buffer_not_persistent(self):
+        m = nn.Module()
+        m.register_buffer('buf', torch.rand(5), persistent=False)
+        self.assertTrue(len(list(m.buffers())) == 1)
+        self.assertTrue(len(m.state_dict()) == 0)
+
+    def test_buffer_not_persistent_del(self):
+        m = nn.Module()
+        m.register_buffer('buf', torch.rand(5), persistent=False)
+        del m.buf
+        self.assertTrue(len(list(m.buffers())) == 0)
+
+    def test_buffer_not_persistent_overwrite(self):
+        m = nn.Module()
+        m.register_buffer('buf', torch.rand(5), persistent=False)
+        m.register_buffer('buf', torch.rand(5))
+
+        # can we overwrite a non-persistent buffer with a persistent one?
+        self.assertTrue(len(list(m.buffers())) == 1)
+        self.assertTrue(len(m.state_dict()) == 1)
+
+        # can we overwrite a persistent buffer with a non-persistent one?
+        m.register_buffer('buf', torch.rand(5), persistent=False)
+        self.assertTrue(len(list(m.buffers())) == 1)
+        self.assertTrue(len(m.state_dict()) == 0)
+
+    def test_buffer_not_persistent_assign(self):
+        m = nn.Module()
+        m.register_buffer('buf', torch.rand(5), persistent=False)
+
+        # Assigning None removes the buffer but if we then assign a new Tensor
+        # to the same property, it should still be marked as a buffer.
+        m.buf = None
+        self.assertTrue(len(list(m.buffers())) == 0)
+        self.assertTrue(len(m.state_dict()) == 0)
+        m.buf = torch.rand(5)
+        self.assertTrue(len(list(m.buffers())) == 1)
+        self.assertTrue(len(m.state_dict()) == 0)
+
+        # Assigning a Parameter removes the buffer.
+        m.buf = nn.Parameter(torch.rand(5))
+        self.assertTrue(len(list(m.buffers())) == 0)
+        self.assertTrue(len(m.state_dict()) == 1)
+
+    def test_buffer_not_persistent_load(self):
+        m = nn.Module()
+        m.register_buffer('buf', torch.rand(5), persistent=False)
+        m.load_state_dict({})
 
     def test_register_parameter_raises_error_if_name_is_not_string(self):
         m = nn.Module()
@@ -1565,14 +1614,14 @@ class TestNN(NNTestCase):
         self.assertIsInstance(l.weight.data, torch.HalfTensor)
         self.assertIsInstance(l.bias.data, torch.HalfTensor)
         self.assertIsInstance(net.indices, torch.LongTensor)
-        net.type(torch.FloatTensor)
+        net.to(torch.float)
         self.assertIsInstance(l.weight.data, torch.FloatTensor)
         self.assertIsInstance(l.bias.data, torch.FloatTensor)
         net.to(torch.DoubleTensor(1))
         self.assertIsInstance(l.weight.data, torch.DoubleTensor)
         self.assertIsInstance(l.bias.data, torch.DoubleTensor)
         if TEST_CUDA:
-            net.type(torch.cuda.FloatTensor)
+            net.to(device='cuda', dtype=torch.float)
             self.assertIsInstance(l.weight.data, torch.cuda.FloatTensor)
             self.assertIsInstance(l.bias.data, torch.cuda.FloatTensor)
 
@@ -3101,7 +3150,7 @@ class TestNN(NNTestCase):
               [batch_size, max_src_len]
             """
             max_srclen = src_lengths.max()
-            src_indices = torch.arange(0, max_srclen).unsqueeze(0).type_as(src_lengths)
+            src_indices = torch.arange(0, max_srclen).unsqueeze(0).to(src_lengths)
             src_indices = src_indices.expand(batch_size, max_srclen)
             src_lengths = src_lengths.unsqueeze(dim=1).expand(batch_size, max_srclen)
             # returns [batch_size, max_seq_len]
@@ -6144,7 +6193,7 @@ class TestNN(NNTestCase):
         thnn_output = m(input)
         thnn_output.sum().backward()
         thnn_input_grad = input.grad.data.clone()
-        self.assertEqual(thnn_output.type(), input.type())
+        self.assertEqualTypeString(thnn_output, input)
         # cuDNN
         if TEST_CUDNN:
             input.grad = None
@@ -6152,7 +6201,7 @@ class TestNN(NNTestCase):
             cudnn_output = m(input)
             cudnn_output.sum().backward()
             cudnn_input_grad = input.grad.data.clone()
-            self.assertEqual(cudnn_output.type(), input.type())
+            self.assertEqualTypeString(cudnn_output, input)
             self.assertEqual(cudnn_output, thnn_output)
             self.assertAlmostEqual(cudnn_input_grad, thnn_input_grad, delta=1e-3)
 
@@ -6161,10 +6210,10 @@ class TestNN(NNTestCase):
         input = torch.randn(16, 3, 24, 24, dtype=torch.half, device="cuda")
         m = nn.BatchNorm2d(3, affine=False).cuda().float()  # keep running stats in FP32
         output = m(input)
-        self.assertEqual(output.type(), input.type())
+        self.assertEqualTypeString(output, input)
         m.eval()
         output = m(input)
-        self.assertEqual(output.type(), input.type())
+        self.assertEqualTypeString(output, input)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types([torch.float, torch.half])
@@ -7420,7 +7469,7 @@ class TestNN(NNTestCase):
 
     def test_upsamplingBicubic2d(self):
         # test output against known input: align_corners=False result must match opencv
-        in_t = torch.arange(8).view(1, 2, 2, 2).type(torch.FloatTensor)
+        in_t = torch.arange(8.).view(1, 2, 2, 2)
         expected_out_t = torch.Tensor(
             [[[[-0.31641, 0.01562, 0.56250, 0.89453],
               [0.34766, 0.67969, 1.22656, 1.55859],
@@ -7454,7 +7503,7 @@ class TestNN(NNTestCase):
 
     def test_upsampling_not_recompute_scale_factor(self):
         # test output against known input: result must match opencv
-        in_t = torch.arange(8).view(1, 2, 2, 2).type(torch.FloatTensor)
+        in_t = torch.arange(8.).view(1, 2, 2, 2)
         expected_out_t = torch.Tensor(
             [[[[-0.32725, -0.08843, 0.37933, 0.79744],
               [0.15039, 0.38921, 0.85697, 1.27508],
@@ -7479,7 +7528,7 @@ class TestNN(NNTestCase):
                   [5.92212, 6.16094, 6.62870, 7.04680]]]])
         out_t = F.interpolate(in_t, scale_factor=2.3, mode='bicubic', align_corners=False, recompute_scale_factor=False)
         torch.set_printoptions(precision=5)
-        self.assertEqual(out_t, expected_out_t, atol=1e-5)
+        self.assertEqual(out_t, expected_out_t, atol=1e-4)
 
         device_list = ['cpu']
         if TEST_CUDA:
@@ -8716,6 +8765,10 @@ for test_params in module_tests + new_module_tests:
             return input_func
 
         def reference_fn(i, p, m):
+            # For bad reasons this would create LongTensors that requires gradients
+            # Remove requires_grad to avoid this
+            for p in m.parameters():
+                p.requires_grad_(False)
             m._apply(lambda t: t.long())
             input = i.long()
             out = m.forward(input)
@@ -9071,7 +9124,7 @@ class TestNNDeviceType(NNTestCase):
         thnn_output = m(input)
         thnn_output.sum().backward()
         thnn_input_grad = input.grad.data.clone()
-        self.assertEqual(thnn_output.type(), input.type())
+        self.assertEqualTypeString(thnn_output, input)
         # cuDNN
         if TEST_CUDNN:
             input.grad = None
@@ -9079,7 +9132,7 @@ class TestNNDeviceType(NNTestCase):
             cudnn_output = m(input)
             cudnn_output.sum().backward()
             cudnn_input_grad = input.grad.data.clone()
-            self.assertEqual(cudnn_output.type(), input.type())
+            self.assertEqualTypeString(cudnn_output, input)
             self.assertAlmostEqual(cudnn_output, thnn_output, delta=1e-4)
             self.assertAlmostEqual(cudnn_input_grad, thnn_input_grad, delta=1e-3)
 
@@ -9132,7 +9185,7 @@ class TestNNDeviceType(NNTestCase):
         m = nn.LayerNorm([3, 2]).to(device, torch.half)
         output = m(input)
         output.sum().backward()
-        self.assertEqual(output.type(), input.type())
+        self.assertEqualTypeString(output, input)
 
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
@@ -9188,7 +9241,7 @@ class TestNNDeviceType(NNTestCase):
         m = nn.GroupNorm(2, 4).to("cuda", torch.half)
         output = m(input)
         output.sum().backward()
-        self.assertEqual(output.type(), input.type())
+        self.assertEqualTypeString(output, input)
 
     def _test_module_empty_input(self, module, inp, check_size=True):
         inp.requires_grad_(True)
@@ -9961,17 +10014,17 @@ class TestNNDeviceType(NNTestCase):
         F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device=device))
         F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
 
-    def _ordered_sequence(self, tensor_type):
+    def _ordered_sequence(self, device, dtype):
         """Create ordered list of random sequences"""
-        seqs = [tensor_type(random.randint(1, 6))
+        seqs = [torch.empty(random.randint(1, 6), device=device, dtype=dtype)
                 for _ in range(5)]
         seqs = [s.random_(-128, 128) for s in seqs]
         ordered = sorted(seqs, key=len, reverse=True)
         return ordered
 
-    def _padded_sequence(self, tensor_type):
+    def _padded_sequence(self, device, dtype):
         """Create Tensor of random padded sequences"""
-        ordered = self._ordered_sequence(tensor_type)
+        ordered = self._ordered_sequence(device, dtype)
         lengths = list(map(len, ordered))
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
@@ -9979,16 +10032,15 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     def test_device_mask(self, device):
         for enforce_sorted in [True, False]:
-            tensor_type = torch.FloatTensor
-            cuda_type_str = 'torch.cuda.FloatTensor'
-            padded, lengths = self._padded_sequence(tensor_type)
+            padded, lengths = self._padded_sequence('cpu', torch.float)
             packed = rnn_utils.pack_padded_sequence(
                 padded, lengths, enforce_sorted=enforce_sorted)
             self.assertFalse(packed.is_cuda)
             packed = packed.to(device)
             self.assertTrue(packed.is_cuda)
             unpacked, _ = rnn_utils.pad_packed_sequence(packed)
-            self.assertEqual(unpacked.type(), cuda_type_str)
+            self.assertTrue(unpacked.is_cuda)
+            self.assertEqual(unpacked.dtype, torch.float)
 
     @onlyCUDA
     def test_overwrite_module_params_on_conversion_cpu_device(self, device):

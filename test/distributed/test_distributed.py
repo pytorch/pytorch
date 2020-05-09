@@ -249,10 +249,10 @@ def _lock():
             lf.close()
 
 
-def _build_tensor(size, value=None):
+def _build_tensor(size, value=None, dtype=torch.float):
     if value is None:
         value = size
-    return torch.FloatTensor(size, size, size).fill_(value)
+    return torch.empty(size, size, size, dtype=dtype).fill_(value)
 
 
 def _build_multidim_tensor(dim, dim_size, value=None):
@@ -654,25 +654,25 @@ class _DistTestBase(object):
     def _test_broadcast_helper(
         self, group, group_id, rank, cuda=False, rank_to_GPU=None
     ):
-        for ttype, value, requires_cuda in [
-            ("torch.FloatTensor", -1e-10, False),
-            ("torch.DoubleTensor", -1e-100, False),
-            ("torch.HalfTensor", -0.1, True),
-            ("torch.CharTensor", -2, False),
-            ("torch.ByteTensor", 129, False),
-            ("torch.IntTensor", -1e5, False),
-            ("torch.LongTensor", -1e15, False),
+        for dtype, value, requires_cuda in [
+            (torch.float, -1e-10, False),
+            (torch.double, -1e-100, False),
+            (torch.half, -0.1, True),
+            (torch.int8, -2, False),
+            (torch.uint8, 129, False),
+            (torch.int, -1e5, False),
+            (torch.long, -1e15, False),
         ]:
             if requires_cuda and not cuda:
                 continue
             for src in group:
-                expected_tensor = _build_tensor(src + 1, value).type(ttype)
+                expected_tensor = _build_tensor(src + 1, value, dtype)
                 if cuda:
                     expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                 if rank == src:
                     dist.broadcast(expected_tensor, src, group_id)
                 else:
-                    tensor = _build_tensor(src + 1, -1).type(ttype)
+                    tensor = _build_tensor(src + 1, -1, dtype)
                     if cuda:
                         tensor = tensor.cuda(rank_to_GPU[rank][0])
                     dist.broadcast(tensor, src, group_id)
