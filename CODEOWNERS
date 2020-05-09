@@ -27,6 +27,10 @@
 /torch/distributed/autograd @mrshenli @pritamdamania87 @zhaojuanmao
 /torch/distributed/optim @mrshenli @pritamdamania87 @zhaojuanmao @aazzolini
 
+# Tensorpipe RPC Agent.
+/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
+/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw @beauby
+
 # Distributed tests
 /test/distributed @mrshenli @pritamdamania87 @zhaojuanmao
 /torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao

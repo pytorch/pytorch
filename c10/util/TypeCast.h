@@ -58,15 +58,6 @@ struct static_cast_with_inter_type<uint8_t, src_t> {
   }
 };
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
-template <typename dest_value_t, typename src_value_t>
-  struct static_cast_with_inter_type<std::complex<dest_value_t>, std::complex<src_value_t>> {
-    C10_HOST_DEVICE static inline std::complex<dest_value_t> apply(std::complex<src_value_t> src) {
-      return std::complex<dest_value_t>(src.real(), src.imag());
-    }
-};
-#endif
-
 #if defined(__CUDACC__)
 template <typename dest_value_t, typename src_value_t>
   struct static_cast_with_inter_type<thrust::complex<dest_value_t>, c10::complex<src_value_t>> {
