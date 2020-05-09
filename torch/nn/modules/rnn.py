@@ -392,8 +392,10 @@ class RNN(RNNBase):
         self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
         if self.nonlinearity == 'tanh':
             mode = 'RNN_TANH'
+            self.activation = _VF.rnn_tanh
         elif self.nonlinearity == 'relu':
             mode = 'RNN_RELU'
+            self.activation = _VF.rnn_relu
         else:
             raise ValueError("Unknown nonlinearity '{}'".format(self.nonlinearity))
         super(RNN, self).__init__(mode, *args, **kwargs)
@@ -434,20 +436,12 @@ class RNN(RNNBase):
             hx = self.permute_hidden(hx, sorted_indices)
 
         self.check_forward_args(input, hx, batch_sizes)
-        if self.mode == "RNN_TANH":
-            if batch_sizes is None:
-                result = _VF.rnn_tanh(input, hx, self._flat_weights, self.bias, self.num_layers,
-                                      self.dropout, self.training, self.bidirectional, self.batch_first)
-            else:
-                result = _VF.rnn_tanh(input, batch_sizes, hx, self._flat_weights, self.bias,
-                                      self.num_layers, self.dropout, self.training, self.bidirectional)
+        if batch_sizes is None:
+            result = self.activation(input, hx, self._flat_weights, self.bias, self.num_layers,
+                                     self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            if batch_sizes is None:
-                result = _VF.rnn_relu(input, hx, self._flat_weights, self.bias, self.num_layers,
-                                      self.dropout, self.training, self.bidirectional, self.batch_first)
-            else:
-                result = _VF.rnn_relu(input, batch_sizes, hx, self._flat_weights, self.bias,
-                                      self.num_layers, self.dropout, self.training, self.bidirectional)
+            result = self.activation(input, batch_sizes, hx, self._flat_weights, self.bias,
+                                     self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1]
 
