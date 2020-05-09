@@ -1047,6 +1047,12 @@ class TestCase(expecttest.TestCase):
                 pass
             super().assertNotEqual(x, y, message)
 
+    def assertEqualTypeString(self, x, y):
+        # This API is used simulate deprecated x.type() == y.type()
+        self.assertEqual(x.device, y.device)
+        self.assertEqual(x.dtype, y.dtype)
+        self.assertEqual(x.is_sparse, y.is_sparse)
+
     def assertObjectIn(self, obj, iterable):
         for elem in iterable:
             if id(obj) == id(elem):
@@ -1299,7 +1305,7 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
 
 
 # Decorator to retry upon certain Exceptions.
-def retry(ExceptionToCheck, tries=3, delay=3):
+def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
     def deco_retry(f):
         @wraps(f)
         def f_retry(*args, **kwargs):
@@ -1312,7 +1318,10 @@ def retry(ExceptionToCheck, tries=3, delay=3):
                     print(msg)
                     time.sleep(mdelay)
                     mtries -= 1
-            return f(*args, **kwargs)
+            try:
+                return f(*args, **kwargs)
+            except ExceptionToCheck as e:
+                raise unittest.SkipTest(f"Skipping after {tries} consecutive {str(e)}") from e if skip_after_retries else e
         return f_retry  # true decorator
     return deco_retry
 
