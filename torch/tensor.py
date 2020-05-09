@@ -327,6 +327,10 @@ class Tensor(torch._C._TensorBase):
         r"""See :func:`torch.norm`"""
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
+    def isfinite(self):
+        r"""See :func:`torch.isfinite`"""
+        return torch.isfinite(self)
+
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa

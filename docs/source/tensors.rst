@@ -313,6 +313,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: inverse
    .. automethod:: irfft
    .. automethod:: isclose
+   .. automethod:: isfinite
    .. automethod:: is_contiguous
    .. automethod:: is_complex
    .. automethod:: is_floating_point
