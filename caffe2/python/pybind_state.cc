@@ -19,6 +19,7 @@
 #include "caffe2/observers/time_observer.h"
 #include "caffe2/onnx/backend.h"
 #include "caffe2/onnx/helper.h"
+#include "caffe2/onnx/offline_tensor.h"
 #include "caffe2/onnx/onnx_exporter.h"
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/fusion.h"
@@ -1570,6 +1571,33 @@ void addGlobalMethods(py::module& m) {
       py::arg("name"),
       py::arg("arg"),
       py::arg("device_option") = py::none());
+  m.def(
+      "create_offline_blob",
+      [](const std::string& name,
+         py::object arg, // dummy array that carries dtype info
+         std::vector<int> dims) {
+#ifdef USE_NUMPY
+        CAFFE_ENFORCE(PyArray_Check(arg.ptr()));
+
+        PyArrayObject* original_array =
+            reinterpret_cast<PyArrayObject*>(arg.ptr());
+        PyArrayObject* array = PyArray_GETCONTIGUOUS(original_array);
+        auto g = MakeGuard([&]() { Py_XDECREF(array); });
+
+        const auto npy_type = PyArray_TYPE(array);
+        const TypeMeta& caffe2_dtype = NumpyTypeToCaffe(npy_type);
+        auto* b = gWorkspace->CreateLocalBlob(name);
+        auto* offline = b->GetMutable<OfflineTensor>();
+        offline->setShapeAndType(dims, CPU, caffe2_dtype);
+#else
+        CAFFE_THROW("Caffe2 compiled without NumPy support.");
+#endif // USE_NUMPY
+      },
+      "",
+      py::arg("name"),
+      py::arg("original_array"),
+      py::arg("dims"));
+
   m.def("deserialize_blob", [](const string& content) {
     return python_detail::deserializeBlob(content);
   });
