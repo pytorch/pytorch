@@ -8,7 +8,7 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <torch/library.h>
 
 namespace {
 
@@ -95,7 +95,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return at::copy_sparse_to_sparse_(self, src, non_blocking);
   } else if (self.is_sparse() || src.is_sparse()) {
     AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ",
-             self.type(), " and src type = ", src.type());
+             self.toString(), " and src type = ", src.toString());
   }
 
   if (self.is_same(src)) {
@@ -112,7 +112,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 
   if (self.is_quantized() && !src.is_quantized()) {
-    return quantized_copy_from_float_(self, src);
+    return quantized_copy_from_float_cpu_(self, src);
   }
 
   if (self.is_quantized() && src.is_quantized()) {
@@ -120,6 +120,10 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
                 "Quantized Copy only works with same qscheme");
     TORCH_CHECK(self.scalar_type() == src.scalar_type());
     self.set_quantizer_(src.quantizer());
+  }
+
+  if (!self.is_quantized() && src.is_quantized()) {
+    TORCH_CHECK(false, "Copying from quantized Tensor to non-quantized Tensor is not allowed, please use dequantize to get a float Tensor from a quantized Tensor");
   }
 
   auto iter = TensorIterator();
@@ -139,7 +143,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     device_type = kCUDA;
   }
 
-  if (device_type == kCPU && copy_transpose_valid(self, src)) {
+  // TODO: if we need to, we can also enable this path for quantized tensor
+  if (device_type == kCPU && copy_transpose_valid(self, src) && !self.is_quantized()) {
     copy_same_type_transpose_(self, src);
     return self;
   }
@@ -149,19 +154,16 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 }
 
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
-#ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_broadcast_outnames(self, src);
+  auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
     NoNamesGuard guard;
-#endif
     copy_impl(self, src, non_blocking);
-#ifdef BUILD_NAMEDTENSOR
   }
-  namedinference::propagate_names(self, std::move(outnames), /*validate_names=*/false);
-#endif
+  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 
+TORCH_LIBRARY_IMPL(aten, CatchAll, m) { m.impl_UNBOXED("copy_", copy_); }
 DEFINE_DISPATCH(copy_stub);
 
 } // namespace native

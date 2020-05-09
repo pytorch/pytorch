@@ -1,16 +1,15 @@
 #pragma once
 
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
-#include <cerrno>
+#include <fstream>
 #include <istream>
 #include <ostream>
-#include <fstream>
 
 #include <c10/core/Allocator.h>
 #include <c10/core/Backend.h>
 
-#include "caffe2/core/logging.h"
 #include "caffe2/serialize/istream_adapter.h"
 #include "caffe2/serialize/read_adapter_interface.h"
 
@@ -34,10 +33,12 @@ typedef struct mz_zip_archive mz_zip_archive;
 //          ...
 //        # code entries will only exist for modules that have methods attached
 //        code/
-//          archive_name.py # serialized torch script code (python syntax, using PythonPrint)
-//          archive_name_my_submodule.py # submodules have separate files
+//          archive_name.py # serialized torch script code (python syntax, using
+//          PythonPrint) archive_name_my_submodule.py # submodules have separate
+//          files
 //
-// The PyTorchStreamWriter also ensures additional useful properties for these files
+// The PyTorchStreamWriter also ensures additional useful properties for these
+// files
 // 1. All files are stored uncompressed.
 // 2. All files in the archive are aligned to 64 byte boundaries such that
 //    it is possible to mmap the entire file and get an aligned pointer to
@@ -49,8 +50,8 @@ typedef struct mz_zip_archive mz_zip_archive;
 //    zip tools. This means that even though our writer doesn't compress files,
 //    the reader can still read files that were compressed.
 // 2. It provides a getRecordOffset function which returns the offset into the
-//    raw file where file data lives. If the file was written with PyTorchStreamWriter
-//    it is guarenteed to be 64 byte aligned.
+//    raw file where file data lives. If the file was written with
+//    PyTorchStreamWriter it is guaranteed to be 64 byte aligned.
 
 // PyTorchReader/Writer handle checking the version number on the archive format
 // and ensure that all files are written to a archive_name directory so they
@@ -75,9 +76,9 @@ typedef struct mz_zip_archive mz_zip_archive;
 //         not put any indicies into the header to fulfill this constraint.
 
 // The model.json, which contains all the metadata information,
-// should be written as the last file. One reason is that the size of tensor data is
-// usually stable. As long as the shape and type of the tensor do not change,
-// the size of the data won't change. On the other sied, the size of the
+// should be written as the last file. One reason is that the size of tensor
+// data is usually stable. As long as the shape and type of the tensor do not
+// change, the size of the data won't change. On the other sied, the size of the
 // serialized model is likely to change, so we store it as the last record, and
 // we don't need to move previous records when updating the model data.
 
@@ -90,7 +91,13 @@ namespace caffe2 {
 namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0x1L;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0x3L;
+
+// Versions (i.e. why was the version number bumped?)
+// 1. Initial version
+// 2. Removed op_version_set version numbers
+// 3. Added type tags to pickle serialization of container types
+constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 
 // Writer-specific constants
 constexpr uint64_t kFieldAlignment = 64;
@@ -105,8 +112,12 @@ class CAFFE2_API PyTorchStreamReader final {
   std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
   size_t getRecordOffset(const std::string& name);
   bool hasRecord(const std::string& name);
+  std::vector<std::string> getAllRecords();
 
   ~PyTorchStreamReader();
+  uint64_t version() const {
+    return version_;
+  }
 
  private:
   void init();
@@ -118,16 +129,22 @@ class CAFFE2_API PyTorchStreamReader final {
   istream_read_func(void* pOpaque, uint64_t file_ofs, void* pBuf, size_t n);
   std::unique_ptr<mz_zip_archive> ar_;
   std::string archive_name_;
+  std::string archive_name_plus_slash_;
   std::unique_ptr<ReadAdapterInterface> in_;
+  int64_t version_;
 };
 
 class CAFFE2_API PyTorchStreamWriter final {
  public:
-  PyTorchStreamWriter(std::string archive_name, std::ostream* out=nullptr);
-  PyTorchStreamWriter(std::ostream* out)
-  : PyTorchStreamWriter("archive", out) {}
+  explicit PyTorchStreamWriter(std::string archive_name);
+  explicit PyTorchStreamWriter(
+      const std::function<size_t(const void*, size_t)>& writer_func);
 
-  void writeRecord(const std::string& name, const void* data, size_t size, bool compress = false);
+  void writeRecord(
+      const std::string& name,
+      const void* data,
+      size_t size,
+      bool compress = false);
   void writeEndOfFile();
 
   bool finalized() const {
@@ -141,13 +158,17 @@ class CAFFE2_API PyTorchStreamWriter final {
   ~PyTorchStreamWriter();
 
  private:
+  void setup(const std::string& file_name);
   void valid(const char* what, const char* info = "");
   size_t current_pos_ = 0;
   std::unique_ptr<mz_zip_archive> ar_;
   std::string archive_name_;
-  std::ostream* out_;
+  std::string archive_name_plus_slash_;
+  std::string padding_;
   std::ofstream file_stream_;
+  std::function<size_t(const void*, size_t)> writer_func_;
   bool finalized_ = false;
+  bool err_seen_ = false;
   friend size_t ostream_write_func(
       void* pOpaque,
       uint64_t file_ofs,

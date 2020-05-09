@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from ....modules.linear import Linear as NNLinear
 import torch.nn.quantized as nnq
+from torch.nn.quantized.modules.utils import _quantize_weight
 
 class Linear(nnq.Linear):
     r"""
@@ -17,8 +18,6 @@ class Linear(nnq.Linear):
                          shape :math:`(\text{out\_features}, \text{in\_features})`.
         bias (Tensor): the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized to zero.
-        scale: `scale` parameter of weight Quantized Tensor, type: double
-        zero_point: `zero_point` parameter for weight Quantized Tensor, type: long
 
     Examples::
 
@@ -29,8 +28,8 @@ class Linear(nnq.Linear):
         torch.Size([128, 30])
     """
 
-    def __init__(self, in_features, out_features, bias_=True):
-        super(Linear, self).__init__(in_features, out_features, bias_)
+    def __init__(self, in_features, out_features, bias_=True, dtype=torch.qint8):
+        super(Linear, self).__init__(in_features, out_features, bias_, dtype=dtype)
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
         # Serialization logic is explicitly handled in the below serialization and
@@ -38,12 +37,26 @@ class Linear(nnq.Linear):
 
     def forward(self, x):
         # Note that we can handle self.bias == None case.
-        Y = torch.ops.quantized.linear_dynamic(
-            x, self._packed_params)
+        if self._packed_params.dtype == torch.qint8:
+            Y = torch.ops.quantized.linear_dynamic(
+                x, self._packed_params._packed_params)
+        elif self._packed_params.dtype == torch.float16:
+            Y = torch.ops.quantized.linear_dynamic_fp16(
+                x, self._packed_params._packed_params)
+        else:
+            raise RuntimeError('Unsupported dtype on dynamic quantized linear!')
         return Y.to(x.dtype)
 
     def _get_name(self):
         return 'DynamicQuantizedLinear'
+
+    def extra_repr(self):
+        extra_repr_str = 'in_features={}, out_features={}, dtype={}'.format(
+            self.in_features, self.out_features, self._packed_params.dtype
+        )
+        if self._packed_params.dtype == torch.qint8:
+            extra_repr_str += ', qscheme={}'.format(self.weight().qscheme())
+        return extra_repr_str
 
     @classmethod
     def from_float(cls, mod):
@@ -61,12 +74,17 @@ class Linear(nnq.Linear):
             # We have the circular import issues if we import the qconfig in the beginning of this file:
             # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
             # import until we need it.
-            from torch.quantization.QConfig import default_dynamic_qconfig
+            from torch.quantization.qconfig import default_dynamic_qconfig
             weight_observer = default_dynamic_qconfig.weight()
-        assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
+        dtype = weight_observer.dtype
+        assert dtype in [torch.qint8, torch.float16], 'The only supported dtypes for dynamic quantized linear are qint8 and float16'
         weight_observer(mod.weight)
-        wt_scale, wt_zp = weight_observer.calculate_qparams()
-        qweight = torch.quantize_per_tensor(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
-        qlinear = Linear(mod.in_features, mod.out_features)
+        if dtype == torch.qint8:
+            qweight = _quantize_weight(mod.weight.float(), weight_observer)
+        elif dtype == torch.float16:
+            qweight = mod.weight.float()
+        else:
+            raise RuntimeError('Unsupported dtype specified for dynamic quantized Linear!')
+        qlinear = Linear(mod.in_features, mod.out_features, dtype=dtype)
         qlinear.set_weight_bias(qweight, mod.bias)
         return qlinear

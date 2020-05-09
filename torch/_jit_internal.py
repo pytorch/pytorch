@@ -7,13 +7,40 @@ circular dependency problems
 import inspect
 import weakref
 import warnings
-import torch._C
+import torch
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
+from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic  # noqa: F401
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
 boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
+
+
+def createResolutionCallbackFromEnv(lookup_base):
+    """
+    Creates a resolution callback that will look up qualified names in an
+    environment, starting with `lookup_base` for the base of any qualified
+    names, then proceeding down the lookup chain with the resolved object.
+
+    You should not use this directly, it should only be used from the other
+    createResolutionCallbackFrom* functions.
+    """
+    def env(qualified_name, module):
+        # We may need to resolve a qualified name, something like `torch.device`
+        # or `a.b.c.d`. We first look up `torch` or `a` in the function's closed
+        # over scope, then proceed to use the looked-up value to go down the
+        # chain.
+        if '.' in qualified_name:
+            parts = qualified_name.split('.')
+            base = parts[0]
+            remainding_pieces = '.'.join(parts[1:])
+            module_value = getattr(module, base)
+            return env(remainding_pieces, module_value)
+        else:
+            return getattr(module, qualified_name)
+
+    return lambda key: env(key, lookup_base)
 
 
 def createResolutionCallbackFromFrame(frames_up=0):
@@ -52,15 +79,14 @@ def createResolutionCallbackFromFrame(frames_up=0):
     f_locals = frame.f_locals
     f_globals = frame.f_globals
 
-    def env(key):
-        if key in f_locals:
-            return f_locals[key]
-        elif key in f_globals:
-            return f_globals[key]
-        elif hasattr(builtins, key):
-            return getattr(builtins, key)
+    class env(object):
+        def __getattr__(self, key):
+            if key in f_locals:
+                return f_locals[key]
+            elif key in f_globals:
+                return f_globals[key]
 
-    return env
+    return createResolutionCallbackFromEnv(env())
 
 
 def get_closure(fn):
@@ -105,7 +131,7 @@ def get_closure(fn):
 # because it is used as a variable inside the body of the function, and we
 # can resolve it using the captures returned from `get_closure`. However,
 # the type annotations are not captured by the closure. In Python
-# 3.0--3.9, the _value_ of MyClass and MyGlobalClass will be availiable as
+# 3.0--3.9, the _value_ of MyClass and MyGlobalClass will be available as
 # annotations on `eg``, but starting in Python 4.0, they will represented as
 # strings and no longer present. Furthermore, since the body of `eg` does
 # not reference those names, they do not appear in the list of closed over
@@ -125,14 +151,17 @@ def createResolutionCallbackFromClosure(fn):
     """
     closure = get_closure(fn)
 
-    def env(key):
-        if key in closure:
-            return closure[key]
-        elif hasattr(builtins, key):
-            return getattr(builtins, key)
-        return None
+    class closure_lookup(object):
+        # This is a class since `closure` is a dict and it's easier in
+        # `env_helper` if everything just works with `getattr` calls
+        def __getattr__(self, key):
+            if key in closure:
+                return closure[key]
+            elif hasattr(builtins, key):
+                return getattr(builtins, key)
+            return None
 
-    return env
+    return createResolutionCallbackFromEnv(closure_lookup())
 
 
 def can_compile_class(cls):
@@ -140,7 +169,8 @@ def can_compile_class(cls):
     # be compiled and is probably a builtin / bound from C
     if is_ignored_fn(cls):
         return False
-    fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
+    names = cls.__dict__
+    fns = [getattr(cls, name) for name in names if inspect.isroutine(getattr(cls, name, None))]
     has_code = [hasattr(fn, '__code__') for fn in fns]
     return all(has_code)
 
@@ -216,15 +246,18 @@ class FunctionModifiers(object):
     IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
     EXPORT = "export (compile this function even if nothing calls it)"
     DEFAULT = "default (compile if called from a exported function / forward)"
+    COPY_TO_SCRIPT_WRAPPER = \
+        "if this method is not scripted, copy the python method onto the scripted model"
 
 
 def export(fn):
     """
-    This decorator indicates that a method is used as an entry point into a
-    ``ScriptModule`` and should be compiled. ``forward`` implicitly is assumbed to be an
-    entry point, so it does not need this decorator. Functions and methods
-    called from ``forward`` are compiled as they are seen, so they do not need
-    this decorator either.
+    This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
+    :class:`ScriptModule` and should be compiled.
+
+    ``forward`` implicitly is assumed to be an entry point, so it does not need this decorator.
+    Functions and methods called from ``forward`` are compiled as they are seen
+    by the compiler, so they do not need this decorator either.
 
     Example (using ``@torch.jit.export`` on a method):
 
@@ -307,8 +340,9 @@ def ignore(drop=False, **kwargs):
     """
     This decorator indicates to the compiler that a function or method should
     be ignored and left as a Python function. This allows you to leave code in
-    your model that is not yet TorchScript compatible. Models with ignored
-    functions cannot be exported; use torch.jit.unused instead.
+    your model that is not yet TorchScript compatible. If called from TorchScript,
+    ignored functions will dispatch the call to the Python interpreter. Models with ignored
+    functions cannot be exported; use :func:`@torch.jit.unused <torch.jit.unused>` instead.
 
     Example (using ``@torch.jit.ignore`` on a method)::
 
@@ -380,12 +414,12 @@ def ignore(drop=False, **kwargs):
     drop_on_export = kwargs.pop("drop_on_export", None)
     if drop_on_export:
         warnings.warn("ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the function "
-                      "call on compilation. Use torch.jit.unused now. {}", category=DeprecationWarning)
+                      "call on compilation. Use torch.jit.unused now. {}", category=FutureWarning)
 
         drop = drop_on_export
     elif drop:
         warnings.warn("ignore(True) has been deprecated. TorchScript will now drop the function "
-                      "call on compilation. Use torch.jit.unused now. {}", category=DeprecationWarning)
+                      "call on compilation. Use torch.jit.unused now. {}", category=FutureWarning)
 
     def decorator(fn):
         if drop:
@@ -395,6 +429,10 @@ def ignore(drop=False, **kwargs):
         return fn
     return decorator
 
+
+def _copy_to_script_wrapper(fn):
+    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
+    return fn
 
 def module_has_exports(mod):
     for name in dir(mod):
@@ -415,7 +453,6 @@ def is_ignored_fn(fn):
     mod = get_torchscript_modifier(fn)
     return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
 
-
 def get_torchscript_modifier(fn):
     if not callable(fn):
         return None
@@ -423,18 +460,11 @@ def get_torchscript_modifier(fn):
         fn = fn.__func__
     return getattr(fn, '_torchscript_modifier', FunctionModifiers.DEFAULT)
 
-
-def _parameter_list(parameter_names_fn):
-    """
-    Decorator to denote that a function returns a list of all the parameters
-    in a module
-    """
-    def decorator(fn):
-        fn._parameter_names_fn = parameter_names_fn
-        return fn
-
-    return decorator
-
+def copy_torchscript_modifier(orig, new):
+    attr = get_torchscript_modifier(orig)
+    if attr is None:
+        return
+    new._torchscript_modifier = attr
 
 # overloading registration
 # overloads get registered in this file, and compiled in torch/jit/__init__.py
@@ -527,111 +557,74 @@ def _get_overloaded_methods(method, mod_class):
         raise Exception("Overloads are not useable when a module is redeclared within the same file: " + str(method))
     return overloads
 
-try:
-    import typing
-    from typing import Tuple, List, Dict, Optional
 
-    def is_tuple(ann):
-        # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
-        return ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.Tuple or
-             getattr(ann, '__origin__', None) is tuple)
+def is_tuple(ann):
+    # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
+    if not hasattr(ann, '__module__'):
+        return False
+    return ann.__module__ == 'typing' and \
+        (getattr(ann, '__origin__', None) is Tuple or
+            getattr(ann, '__origin__', None) is tuple)
 
-    def is_list(ann):
-        return ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.List or
-             getattr(ann, '__origin__', None) is list)
+def is_list(ann):
+    if not hasattr(ann, '__module__'):
+        return False
+    return ann.__module__ == 'typing' and \
+        (getattr(ann, '__origin__', None) is List or
+            getattr(ann, '__origin__', None) is list)
 
-    def is_dict(ann):
-        return ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.Dict or
-             getattr(ann, '__origin__', None) is dict)
+def is_dict(ann):
+    if not hasattr(ann, '__module__'):
+        return False
+    return ann.__module__ == 'typing' and \
+        (getattr(ann, '__origin__', None) is Dict or
+            getattr(ann, '__origin__', None) is dict)
 
-    def is_optional(ann):
-        # Optional[T] is just shorthand for Union[T, None], so check for both
-        def safe_is_subclass(the_type, super_type):
-            # Don't throw if `the_type` isn't a class type (e.g. if it is
-            # another type annotation instance)
-            if not inspect.isclass(the_type):
-                return False
-            return issubclass(the_type, super_type)
+def is_optional(ann):
+    # Optional[T] is just shorthand for Union[T, None], so check for both
+    def safe_is_subclass(the_type, super_type):
+        # Don't throw if `the_type` isn't a class type (e.g. if it is
+        # another type annotation instance)
+        if not inspect.isclass(the_type):
+            return False
+        return issubclass(the_type, super_type)
 
-        union_optional = False
-        if ann.__module__ == 'typing' and \
-           (getattr(ann, '__origin__', None) is typing.Union):
-            args = getattr(ann, '__args__', ())
-            if len(args) == 2:
-                union_optional = (safe_is_subclass(args[1], type(None)) and not safe_is_subclass(args[0], type(None))) \
-                    or (safe_is_subclass(args[0], type(None)) and not safe_is_subclass(args[1], type(None)))
+    if not hasattr(ann, '__module__'):
+        return False
 
-        optional = ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.Optional)
+    union_optional = False
+    if ann.__module__ == 'typing' and \
+       (getattr(ann, '__origin__', None) is Union):
+        args = getattr(ann, '__args__', ())
+        if len(args) == 2:
+            union_optional = (safe_is_subclass(args[1], type(None)) and not safe_is_subclass(args[0], type(None))) \
+                or (safe_is_subclass(args[0], type(None)) and not safe_is_subclass(args[1], type(None)))
 
-        return optional or union_optional
+    optional = ann.__module__ == 'typing' and \
+        (getattr(ann, '__origin__', None) is Optional)
 
-except ImportError:
-    # A minimal polyfill for versions of Python that don't have typing.
-    # Note that this means that they also don't support the fancy annotation syntax, so
-    # those instances will only be used in our tiny `type: ` comment interpreter.
+    return optional or union_optional
 
-    # The __getitem__ in typing is implemented using metaclasses, but I'm too lazy for that.
-    class TupleCls(object):
-        def __getitem__(self, types):
-            return TupleInstance(types)
+# fake Python container type for Future/RRef
+T = TypeVar('T')
 
-    class TupleInstance(object):
-        __slots__ = ['__args__']
+class Future(Generic[T]):
+    __slots__ = ['__args__']
 
-        def __init__(self, types):
-            self.__args__ = types
+    def __init__(self, types):
+        self.__args__ = types
 
-    class ListInstance(object):
-        __slots__ = ['__args__']
+class RRef(Generic[T]):
+    __slots__ = ['__args__']
 
-        def __init__(self, types):
-            self.__args__ = types
+    def __init__(self, types):
+        self.__args__ = types
 
-    class ListCls(object):
-        def __getitem__(self, types):
-            return TupleInstance(types)
+def is_future(ann):
+    return getattr(ann, "__origin__", None) is Future
 
-    class DictInstance(object):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    class DictCls(object):
-        def __getitem__(self, types):
-            return DictInstance(types)
-
-    class OptionalInstance(object):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    class OptionalCls(object):
-        def __getitem__(self, types):
-            return OptionalInstance(types)
-
-    Tuple = TupleCls()  # noqa: T484
-    List = ListCls()  # noqa: T484
-    Dict = DictCls()  # noqa: T484
-    Optional = DictCls()  # noqa: T484
-
-    def is_tuple(ann):
-        return isinstance(ann, TupleInstance)
-
-    def is_list(ann):
-        return isinstance(ann, ListInstance)
-
-    def is_dict(ann):
-        return isinstance(ann, DictInstance)
-
-    def is_optional(ann):
-        return isinstance(ann, OptionalInstance)
-
+def is_rref(ann):
+    return getattr(ann, "__origin__", None) is RRef
 
 try:
     import typing_extensions
@@ -657,7 +650,6 @@ except ImportError:
     def is_final(ann):
         return isinstance(ann, FinalInstance)
 
-
 # allows BroadcastingList instance to be subscriptable
 class BroadcastingListCls(object):
     def __getitem__(self, types):
@@ -671,8 +663,17 @@ for i in range(2, 7):
 
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
 def _qualified_name(obj):
+    # This special case allows us to override the qualified name on a type.
+    # It's currently used in conjunction with tracing, where we create a
+    # fake module to filter only supported attributes. However, since this
+    # new type is defined as a local class, we need a mechanism to override
+    # its qualname so it appears correctly in the TorchScript system. This,
+    # we set '_jit_override_qualname' with the original traced module's
+    # qualified name, which is picked up here
+    if hasattr(obj, '_jit_override_qualname'):
+        return obj._jit_override_qualname
     # short-circuit in cases where the object already has a known qualified name
-    if isinstance(obj, torch.jit.ScriptFunction):
+    if isinstance(obj, torch._C.ScriptFunction):
         return obj.qualified_name
 
     name = obj.__name__
@@ -708,3 +709,15 @@ def _qualified_name(obj):
                            "'{}' is not a valid identifier".format(name, name))
 
     return module_name + "." + name
+
+
+# Thin wrapper around SourceRangeFactory to store extra metadata
+# about the function-to-be-compiled.
+class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
+    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
+        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
+        self.uses_true_division = uses_true_division
+
+
+def fake_range():
+    return SourceContext('', None, 0, 0).make_raw_range(0, 1)

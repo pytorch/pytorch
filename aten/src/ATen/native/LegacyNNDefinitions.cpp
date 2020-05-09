@@ -31,15 +31,6 @@ Tensor nll_loss2d(const Tensor & self, const Tensor & target, const Tensor & wei
   return std::get<0>(at::nll_loss2d_forward(self, target, weight, reduction, ignore_index));
 }
 
-Tensor & log_sigmoid_out(Tensor & output, const Tensor & self) {
-  Tensor buffer = at::empty({0}, self.options());
-  return std::get<0>(at::log_sigmoid_forward_out(output, buffer, self));
-}
-
-Tensor log_sigmoid(const Tensor & self) {
-  return std::get<0>(at::log_sigmoid_forward(self));
-}
-
 Tensor & thnn_conv2d_out(Tensor & output, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding) {
   Tensor finput = at::empty({0}, self.options());
   Tensor fgrad_input = at::empty({0}, self.options());
@@ -50,22 +41,12 @@ Tensor thnn_conv2d(const Tensor & self, const Tensor & weight, IntArrayRef kerne
   return std::get<0>(at::thnn_conv2d_forward(self, weight, kernel_size, bias, stride, padding));
 }
 
-Tensor & thnn_conv3d_out(Tensor & output, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding) {
-  Tensor finput = at::empty({0}, self.options());
-  Tensor fgrad_input = at::empty({0}, self.options());
-  return std::get<0>(at::thnn_conv3d_forward_out(output, finput, fgrad_input, self, weight, kernel_size, bias, stride, padding));
-}
-
 Tensor & thnn_conv_depthwise2d_out(Tensor & output, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
   return at::thnn_conv_depthwise2d_forward_out(output, self, weight, kernel_size, bias, stride, padding, dilation);
 }
 
 Tensor thnn_conv_depthwise2d(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
   return at::thnn_conv_depthwise2d_forward(self, weight, kernel_size, bias, stride, padding, dilation);
-}
-
-Tensor thnn_conv3d(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding) {
-  return std::get<0>(at::thnn_conv3d_forward(self, weight, kernel_size, bias, stride, padding));
 }
 
 }} // namespace at::native

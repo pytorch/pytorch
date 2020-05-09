@@ -8,7 +8,7 @@ package caffe2;
 // (2) We do not use extension because that used to create quite some conflicts
 //     in Caffe's protobuf design.
 // (3) We have not used any proto3 specific features, such as Any or Map. This
-//     is mainly for backward compability purposes but we may consider using
+//     is mainly for backward compatibility purposes but we may consider using
 //     those in the future.
 
 // ExternalDataProto stores the pointer to the content of TensorProto
@@ -62,6 +62,8 @@ message TensorProto {
     INT64 = 10;    // int64_t
     FLOAT16 = 12;  // at::Half
     DOUBLE = 13;   // double
+
+    ZERO_COLLISION_HASH = 14;  // zero-collision hash state
   }
   optional DataType data_type = 2 [default = FLOAT];
 
@@ -156,6 +158,40 @@ message TensorShape {
 
 message TensorShapes {
   repeated TensorShape shapes = 1;
+}
+
+// TensorBoundShape is used to save bound shape inference result for a tensor.
+// TensorBoundShape.shape is inferred shape for this tensor.
+// TensorBoundShape.dimType contains dim_type for every dimension.
+// eg: for dimension i, shape.dims[i] is the inferred shape and
+// dim_type[i] is corresponding dim_type.
+message TensorBoundShape {
+  optional TensorShape shape = 1;
+  enum DimType {
+    UNKNOWN = 0;   // unknown
+    CONSTANT  = 1; // constant
+    // batch, corresponding dimension is batch_size
+    BATCH = 2;
+    // batch_of_feature_max,
+    // corresponding shape is inferred_feature_length * batch_size
+    BATCH_OF_FEATURE_MAX = 3;
+    // batch_of_feature_max_default
+    // corresponding shape is default_feature_length * batch_size
+    BATCH_OF_FEATURE_MAX_DEFAULT = 4;
+    // feature_max, corresponding shape is inferred_feature_length
+    FEATURE_MAX = 5;
+    // feature_max_default, corresponding shape is default_feature_length
+    FEATURE_MAX_DEFAULT = 6;
+
+  }
+  repeated DimType dim_type = 2;  // dim_type.size() == shape.dims.size()
+  optional string name = 3;
+}
+
+message TensorBoundShapes {
+  repeated TensorBoundShape shapes = 1;
+  optional int64 max_batch_size = 2;
+  optional int64 max_feature_len = 3;
 }
 
 // A named argument containing either singular float, integer and string
@@ -280,6 +316,38 @@ message OperatorDef {
   optional int64 op_version = 12;
 }
 
+// MapFieldEntry follows the pattern for cross-proto-version maps.
+// See https://developers.google.com/protocol-buffers/docs/proto3#maps
+message MapFieldEntry {
+  required string key = 1;
+  required string val = 2;
+};
+
+// Used to hold backend-specific options.
+message BackendOptions {
+  // Name of the backend that the specified options apply to.
+  required string backend_name = 1;
+  // Flexible map for passing in the options.
+  repeated MapFieldEntry option = 2;
+};
+
+// Partition definition.
+message PartitionInfo {
+  // Name of the partition.
+  required string name = 1;
+
+  // A list of logic device ID, indicating which devices this partition
+  // can be executed on. If empty, it means the partition won't run on
+  // device but on host CPU instead.
+  repeated int32 device_id = 2;
+
+  // Extra debug info.
+  optional string extra_info = 3;
+
+  // Flexible map for passing options specific to a backend.
+  repeated BackendOptions backend_options = 4;
+}
+
 // Network definition.
 message NetDef {
   optional string name = 1; // the network's name
@@ -320,7 +388,11 @@ message NetDef {
   // blobs' contents may be overwritten.
   repeated string external_input = 7;
   repeated string external_output = 8;
+
+  // Partitioning info, indexed by partition names.
+  repeated PartitionInfo partition_info = 9;
 }
+
 
 // ExecutionStep is actually a sort-of-hacky way we simulate iteration right
 // now.
@@ -361,7 +433,7 @@ message ExecutionStep {
   optional int64 run_every_ms = 11;
 
   // If false or not set, execute sub-steps serially.
-  // If true, execute all substeps concurrently, each one in a separte thread.
+  // If true, execute all substeps concurrently, each one in a separate thread.
   optional bool concurrent_substeps = 6;
 
   // Name of a scalar boolean tensor.

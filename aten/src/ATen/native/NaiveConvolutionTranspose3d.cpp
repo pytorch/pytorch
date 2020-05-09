@@ -8,6 +8,10 @@
 
 namespace at {
 namespace native {
+
+template<typename scalar_t>
+bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
+
 namespace {
 
 static inline void slow_conv_transpose3d_shape_check(
@@ -811,7 +815,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
 
             // Do GEMV (note: this is a bit confusing because gemv assumes
             // column-major matrices)
-            THBlas_gemv<scalar_t>(
+            native::gemv<scalar_t>(
                 't',
                 k_,
                 m_,
@@ -848,8 +852,8 @@ Tensor& slow_conv_transpose3d_out_cpu(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
-  Tensor finput = at::empty_like(input);
-  Tensor fgrad = at::empty_like(input);
+  Tensor finput = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor fgrad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   slow_conv_transpose3d_out_cpu_template(
       output,
@@ -876,9 +880,9 @@ Tensor slow_conv_transpose3d_cpu(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
-  Tensor output = at::empty_like(input);
-  Tensor finput = at::empty_like(input);
-  Tensor fgrad = at::empty_like(input);
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor finput = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor fgrad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   slow_conv_transpose3d_out_cpu_template(
       output,

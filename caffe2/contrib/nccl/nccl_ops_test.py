@@ -20,7 +20,7 @@ dyndep.InitOpsLibrary('@/caffe2/caffe2/contrib/nccl:nccl_ops')
 
 def gpu_device(i):
     device_option = caffe2_pb2.DeviceOption()
-    device_option.device_type = caffe2_pb2.CUDA
+    device_option.device_type = workspace.GpuDeviceType
     device_option.device_id = i
     return device_option
 
@@ -38,9 +38,9 @@ def benchmark(ws, net, warmups=5, iters=100):
     return after - before
 
 
-@unittest.skipIf(not workspace.has_cuda_support, "NCCL only on CUDA GPU")
+@unittest.skipIf(not workspace.has_gpu_support, "NCCL/RCCL only on CUDA/HIP GPU")
 class NCCLOpsTest(hu.HypothesisTestCase):
-    @given(n=st.integers(min_value=2, max_value=workspace.NumCudaDevices()),
+    @given(n=st.integers(min_value=2, max_value=workspace.NumGpuDevices()),
            m=st.integers(min_value=1, max_value=1000),
            in_place=st.booleans())
     def test_nccl_allreduce(self, n, m, in_place):
@@ -63,10 +63,10 @@ class NCCLOpsTest(hu.HypothesisTestCase):
             np.testing.assert_array_equal(outputs[0], output)
             self.assertEqual(outputs[0].tobytes(), output.tobytes())
 
-    @given(n=st.integers(min_value=2, max_value=workspace.NumCudaDevices()),
+    @given(n=st.integers(min_value=2, max_value=workspace.NumGpuDevices()),
            m=st.integers(min_value=1, max_value=1000),
            root=st.integers(min_value=0,
-                            max_value=workspace.NumCudaDevices() - 1))
+                            max_value=workspace.NumGpuDevices() - 1))
     def test_nccl_broadcast(self, n, m, root):
         assume(root < n)
         xs = [np.random.randn(m).astype(np.float32) for i in range(n)]
@@ -82,7 +82,7 @@ class NCCLOpsTest(hu.HypothesisTestCase):
             hu.gpu_do, op, [xs[i] for i, _ in enumerate(inputs)],
             broadcast, input_device_options)
 
-    @given(n=st.integers(min_value=2, max_value=workspace.NumCudaDevices()),
+    @given(n=st.integers(min_value=2, max_value=workspace.NumGpuDevices()),
            m=st.integers(min_value=1, max_value=1000),
            # NCCL Reduce seems to deadlock for non-zero roots.
            root=st.integers(min_value=0, max_value=0),
@@ -104,7 +104,7 @@ class NCCLOpsTest(hu.HypothesisTestCase):
             hu.gpu_do, op, [xs[i] for i, _ in enumerate(inputs)],
             reduce, input_device_options)
 
-    @given(n=st.integers(min_value=2, max_value=workspace.NumCudaDevices()),
+    @given(n=st.integers(min_value=2, max_value=workspace.NumGpuDevices()),
            m=st.integers(min_value=1, max_value=1000))
     def test_nccl_allgather(self, n, m):
         xs = [np.random.randn(m).astype(np.float32) for i in range(n)]
@@ -124,7 +124,7 @@ class NCCLOpsTest(hu.HypothesisTestCase):
             np.testing.assert_array_equal(outputs[0], output)
             self.assertEqual(outputs[0].tobytes(), output.tobytes())
 
-    @given(n=st.integers(min_value=2, max_value=workspace.NumCudaDevices()),
+    @given(n=st.integers(min_value=2, max_value=workspace.NumGpuDevices()),
            m=st.integers(min_value=1, max_value=1000))
     def test_nccl_reduce_scatter(self, n, m):
         xs = [np.random.randn(n, m).astype(np.float32) for i in range(n)]
@@ -144,7 +144,7 @@ class NCCLOpsTest(hu.HypothesisTestCase):
             hu.gpu_do, op, [xs[i] for i, _ in enumerate(inputs)],
             reduce_scatter, input_device_options)
 
-    @given(n=st.integers(min_value=2, max_value=workspace.NumCudaDevices()),
+    @given(n=st.integers(min_value=2, max_value=workspace.NumGpuDevices()),
            m=st.integers(min_value=100000, max_value=100000),
            iters=st.integers(min_value=1, max_value=100),
            net_type=st.sampled_from(["dag", "async_dag", "simple"]))
@@ -170,7 +170,7 @@ class NCCLOpsTest(hu.HypothesisTestCase):
 
     @unittest.skipIf(not os.environ.get("CAFFE2_BENCHMARK"), "Benchmark")
     def test_timings(self):
-        for n in range(2, workspace.NumCudaDevices()):
+        for n in range(2, workspace.NumGpuDevices()):
             for in_place in [False, True]:
                 xs = [np.random.randn(1e7).astype(np.float32)
                       for i in range(n)]

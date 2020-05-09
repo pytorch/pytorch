@@ -6,8 +6,19 @@ import inspect
 import string
 from textwrap import dedent
 from torch._six import PY2
-from torch._C._jit_tree_views import *
+from torch._C._jit_tree_views import (
+    ClassDef, Ident, Stmt, Decl, Def, Var,
+    EmptyTypeAnnotation, Param, ExprStmt, Assign,
+    Delete, Return, Raise, Assert, AugAssign, While,
+    For, If, Pass, Break, Continue, Apply, Dots, Select,
+    TrueLiteral, FalseLiteral, NoneLiteral, Starred,
+    ListLiteral, TupleLiteral, DictLiteral, Const,
+    StringLiteral, ListComp, Attribute, BinOp, UnaryOp,
+    SliceExpr, Subscript, TernaryIf
+)
 from torch._utils_internal import get_source_lines_and_file
+
+from torch._jit_internal import SourceContext
 
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
@@ -51,36 +62,21 @@ node_start_tokens = {
     ast.Continue: "continue",
 }
 
-if PY2:
-    pretty_node_names.update({
-        ast.Print: "print statements",
-        ast.TryExcept: "try blocks",
-        ast.TryFinally: "try blocks",
-        ast.Exec: "exec statements",
-    })
+pretty_node_names.update({
+    ast.AsyncFunctionDef: "async function definitions",
+    ast.AsyncFor: "async for loops",
+    ast.AsyncWith: "async with statements",
+    ast.Try: "try blocks",
+    ast.Nonlocal: "nonlocal variables",
+})
 
-    node_start_tokens.update({
-        ast.Print: "print",
-        ast.TryExcept: "try",
-        ast.TryFinally: "try",
-        ast.Exec: "exec",
-    })
-else:
-    pretty_node_names.update({
-        ast.AsyncFunctionDef: "async function definitions",
-        ast.AsyncFor: "async for loops",
-        ast.AsyncWith: "async with statements",
-        ast.Try: "try blocks",
-        ast.Nonlocal: "nonlocal variables",
-    })
-
-    node_start_tokens.update({
-        ast.AsyncFunctionDef: "async def",
-        ast.AsyncFor: "async for",
-        ast.AsyncWith: "async with",
-        ast.Try: "try",
-        ast.Nonlocal: "nonlocal",
-    })
+node_start_tokens.update({
+    ast.AsyncFunctionDef: "async def",
+    ast.AsyncFor: "async for",
+    ast.AsyncWith: "async with",
+    ast.Try: "try",
+    ast.Nonlocal: "nonlocal",
+})
 
 if sys.version_info >= (3, 6):
     pretty_node_names.update({
@@ -107,7 +103,7 @@ class NotSupportedError(FrontendError):
 
 
 class UnsupportedNodeError(NotSupportedError):
-    def __init__(self, ctx, offending_node):
+    def __init__(self, ctx, offending_node, reason=''):
         # If we don't have a specific token, we default to length of 1
         node_type = type(offending_node)
         range_len = len(node_start_tokens.get(node_type, ' '))
@@ -115,7 +111,7 @@ class UnsupportedNodeError(NotSupportedError):
                                       offending_node.col_offset,
                                       offending_node.col_offset + range_len)
         feature_name = pretty_node_names.get(node_type, node_type.__name__)
-        msg = "{} aren't supported".format(feature_name)
+        msg = "{} {}aren't supported".format(feature_name, reason + ' ' if reason else '')
         super(UnsupportedNodeError, self).__init__(source_range, msg)
 
 
@@ -141,13 +137,15 @@ def _uses_true_division(fn):
 
 
 def get_jit_class_def(cls, self_name):
-    # Get defs for each method independently
+    # Get defs for each method within the current class independently
+    # TODO: proper overriding analysis when implementing class inheritance
     methods = inspect.getmembers(
-        cls, predicate=lambda m: inspect.ismethod(m) or inspect.isfunction(m))
+        cls, predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m)) and m.__name__ in cls.__dict__)
+
     method_defs = [get_jit_def(method[1],
                    self_name=self_name) for method in methods]
 
-    sourcelines, file_lineno, filename = get_source_lines_and_file(cls)
+    sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C.ErrorReport.call_stack())
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
@@ -157,7 +155,7 @@ def get_jit_class_def(cls, self_name):
 
 
 def get_jit_def(fn, self_name=None):
-    sourcelines, file_lineno, filename = get_source_lines_and_file(fn)
+    sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C.ErrorReport.call_stack())
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
@@ -167,14 +165,6 @@ def get_jit_def(fn, self_name=None):
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
     return build_def(ctx, py_ast.body[0], type_line, self_name)
-
-
-# Thin wrapper around SourceRangeFactory to store extra metadata
-# about the function-to-be-compiled.
-class SourceContext(SourceRangeFactory):
-    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
-        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
-        self.uses_true_division = uses_true_division
 
 
 class Builder(object):
@@ -193,7 +183,8 @@ def build_class_def(ctx, py_def, methods, self_name):
 
 def build_def(ctx, py_def, type_line, self_name=None):
     body = py_def.body
-    r = ctx.make_range(py_def.lineno, py_def.col_offset,
+    r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
+                       py_def.col_offset,
                        py_def.col_offset + len("def"))
     param_list = build_param_list(ctx, py_def.args, self_name)
     return_type = None
@@ -222,18 +213,21 @@ def build_param_list(ctx, py_args, self_name):
         expr = py_args.vararg
         ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
         raise NotSupportedError(ctx_range, _vararg_kwarg_err)
-    if not PY2 and py_args.kw_defaults:
-        raise NotSupportedError(ctx_range, _vararg_kwarg_err)
+    if len(py_args.kw_defaults) > 0:
+        # kw_defaults is a list of the values for the kwargs (which default to None),
+        # so they don't actually have line numbers.
+        for arg in py_args.kw_defaults:
+            if arg is not None:
+                ctx_range = build_expr(ctx, arg).range()
+                raise NotSupportedError(ctx_range, _vararg_kwarg_err)
     result = [build_param(ctx, arg, self_name, False) for arg in py_args.args]
-    if not PY2:
-        result += [build_params(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]
+    result += [build_param(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]
     return result
 
 
 def build_param(ctx, py_arg, self_name, kwarg_only):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
-    #     In Python2 py_arg is a Name (Expr subclass)
-    name = py_arg.id if PY2 else py_arg.arg
+    name = py_arg.arg
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
     if getattr(py_arg, 'annotation', None) is not None:
         annotation_expr = build_expr(ctx, py_arg.annotation)
@@ -245,19 +239,15 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
 
 
 def get_default_args(fn):
-    if PY2:
-        argspec = inspect.getargspec(fn)
-        if argspec.defaults is not None:
-            return dict(zip(argspec.args[-len(argspec.defaults):], argspec.defaults))
-        else:
-            return {}
-    else:
-        signature = inspect.signature(fn)
-        return {
-            k: v.default
-            for k, v in signature.parameters.items()
-            if v.default is not inspect.Parameter.empty
-        }
+    if fn is None:
+        return {}
+
+    signature = inspect.signature(fn)
+    return {
+        k: v.default
+        for k, v in signature.parameters.items()
+        if v.default is not inspect.Parameter.empty
+    }
 
 
 class StmtBuilder(Builder):
@@ -286,10 +276,21 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_AnnAssign(ctx, stmt):
+        if stmt.value is None:
+            raise UnsupportedNodeError(ctx, stmt, reason='without assigned value')
         rhs = build_expr(ctx, stmt.value)
         lhs = build_expr(ctx, stmt.target)
         the_type = build_expr(ctx, stmt.annotation)
         return Assign([lhs], rhs, the_type)
+
+    @staticmethod
+    def build_Delete(ctx, stmt):
+        if len(stmt.targets) > 1:
+            source_range = ctx.make_range(stmt.lineno, stmt.col_offset,
+                                          stmt.col_offset + len("del"))
+            raise NotSupportedError(
+                source_range, 'del with more than one operand is not supported')
+        return Delete(build_expr(ctx, stmt.targets[0]))
 
     @staticmethod
     def build_Return(ctx, stmt):
@@ -299,13 +300,7 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_Raise(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("raise"))
-        if PY2:
-            if stmt.tback:
-                raise NotSupportedError(r, "tracebacks with exceptions is not supported")
-            # TODO use stmt.type once instantiating exceptions is supported
-            expr = build_expr(ctx, stmt.inst) if stmt.inst else None
-        else:
-            expr = build_expr(ctx, stmt.exc)
+        expr = build_expr(ctx, stmt.exc)
         return Raise(r, expr)
 
     @staticmethod
@@ -387,10 +382,11 @@ class ExprBuilder(Builder):
         ast.BitAnd: '&',
         ast.BitXor: '^',
         ast.BitOr: '|',
+        ast.LShift: '<<',
+        ast.RShift: '>>',
     }
 
-    if not PY2:
-        binop_map[ast.MatMult] = '@'
+    binop_map[ast.MatMult] = '@'
 
     unop_map = {
         ast.Not: 'not',
@@ -424,10 +420,7 @@ class ExprBuilder(Builder):
         source = ctx.source.encode('utf-8')
 
         def get_char(index):
-            if PY2:
-                return source[index]
-            else:
-                return chr(source[index])
+            return chr(source[index])
 
         start_pos = base.range().end + 1
         while get_char(start_pos) in string.whitespace:  # Skip whitespace
@@ -592,7 +585,9 @@ class ExprBuilder(Builder):
         base = build_expr(ctx, expr.value)
         sub_type = type(expr.slice)
         if sub_type is ast.Index:
-            if isinstance(expr.slice.value, ast.Tuple) or isinstance(expr.slice.value, ast.List):
+            if isinstance(expr.slice.value, ast.Tuple):
+                # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
+                # XXX: Indexing using a list is **different**! It triggers advanced indexing.
                 indices = []
                 for index_expr in expr.slice.value.elts:
                     indices.append(build_expr(ctx, index_expr))

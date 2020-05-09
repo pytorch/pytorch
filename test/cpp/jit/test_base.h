@@ -2,8 +2,8 @@
 
 // This file defines assertion macros that work in both gtest and non-gtest
 // builds, and has some common includes.
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/ir/ir.h"
+#include "torch/csrc/jit/runtime/operator.h"
 
 #if defined(USE_GTEST)
 #include <gtest/gtest.h>

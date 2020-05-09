@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/nn/modules/container/any_module_holder.h>
+#include <torch/nn/modules/container/any_value.h>
 #include <torch/nn/pimpl.h>
 #include <torch/ordered_dict.h>
 #include <torch/serialize/archive.h>
@@ -412,6 +414,9 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// implementation of your `Module`. Registering it makes it available to
   /// methods such as `parameters()`, `clone()` or `to().`
   ///
+  /// Note that registering an undefined Tensor (e.g. `module.register_parameter("param", Tensor())`)
+  /// is allowed, and is equivalent to `module.register_parameter("param", None)` in Python API.
+  ///
   /// \rst
   /// .. code-block:: cpp
   ///
@@ -508,11 +513,39 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// with `name` an exception is thrown.
   void unregister_module(const std::string& name);
 
+ protected:
+  /// The following three functions allow a module with default arguments in its
+  /// forward method to be used in a Sequential module.
+  /// You should NEVER override these functions manually. Instead, you should use the
+  /// `FORWARD_HAS_DEFAULT_ARGS` macro.
+  virtual bool _forward_has_default_args() {
+    return false;
+  }
+
+  virtual unsigned int _forward_num_required_args() {
+    TORCH_CHECK(
+      false,
+      "torch::nn::Module subclass that has default arguments in `forward` method ",
+      "must override `_forward_num_required_args` method. Please use ",
+      "`FORWARD_HAS_DEFAULT_ARGS` macro to do so.");
+  }
+
+  virtual std::vector<AnyValue> _forward_populate_default_args(std::vector<AnyValue>&& arguments) {
+    TORCH_CHECK(
+      false,
+      "torch::nn::Module subclass that has default arguments in `forward` method ",
+      "must override `_forward_populate_default_args` method. Please use ",
+      "`FORWARD_HAS_DEFAULT_ARGS` macro to do so.");
+  }
+
  private:
   // Friend classes.
 
   template <typename Derived>
   friend class Cloneable;
+
+  template <typename ModuleType, typename... ArgumentTypes>
+  friend struct AnyModuleHolder;
 
   /// Pretty prints the given `Module` into the `ostream`.
   TORCH_API friend std::ostream& operator<<(
@@ -645,11 +678,11 @@ void Module::to_impl(Ts&&... ts) {
     child.value()->to(ts...);
   }
   // Then move every parameter to the new dtype/device.
-  for (auto& parameter : parameters_) {
+  for (auto& parameter : named_parameters(/*recurse=*/false)) {
     parameter->set_data(autograd::Variable(*parameter).to(ts...));
   }
   // Then move every buffer to the new dtype/device.
-  for (auto& buffer : buffers_) {
+  for (auto& buffer : named_buffers(/*recurse=*/false)) {
     buffer->set_data(autograd::Variable(*buffer).to(ts...));
   }
 }

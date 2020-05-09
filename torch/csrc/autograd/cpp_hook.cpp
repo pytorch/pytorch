@@ -32,7 +32,7 @@ variable_list CppFunctionPreHook::operator()(const variable_list& values) {
       // Don't change gradient
       continue;
     }
-    check_single_result(value, res, std::to_string(i));
+    check_single_result(value, res, c10::to_string(i));
     value = res;
   }
   variable_list results(values);

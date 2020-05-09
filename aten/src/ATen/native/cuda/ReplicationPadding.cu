@@ -1,13 +1,14 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/Utils.h"
-#include "c10/util/Exception.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/Utils.h>
+#include <c10/util/Exception.h>
+#include <THC/THCAtomics.cuh>
 #include <THC/THCGeneral.h>
-#include "THC/THCNumerics.cuh"
-#include "THC/THCDeviceUtils.cuh"
+#include <THC/THCNumerics.cuh>
+#include <THC/THCDeviceUtils.cuh>
 
 #include <algorithm>
 #include <cfloat>
@@ -68,7 +69,7 @@ __global__ void replication_pad_backward_kernel(
   int inputPointX = imin(imax(padL, outputPointX), gradInput.size(2) + padL - 1) - oStartX + iStartX;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointX];
-  atomicAdd(&gradInput[batch][plane][inputPointX], valueToCopy);
+  gpuAtomicAdd(&gradInput[batch][plane][inputPointX], valueToCopy);
 }
 
 template <typename scalar_t>
@@ -122,7 +123,7 @@ __global__ void replication_pad_backward_kernel(
   int inputPointY = imin(imax(padT, outputPointY), gradInput.size(2) + padT - 1) - oStartY + iStartY;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointY][outputPointX];
-  atomicAdd(&gradInput[batch][plane][inputPointY][inputPointX], valueToCopy);
+  gpuAtomicAdd(&gradInput[batch][plane][inputPointY][inputPointX], valueToCopy);
 }
 
 template <typename scalar_t>
@@ -196,7 +197,7 @@ __global__ void replication_pad_backward_kernel(
 
   scalar_t valueToCopy =
     gradOutput[batch][plane][outputPointZ][outputPointY][outputPointX];
-  atomicAdd(&gradInput[batch][plane][inputPointZ][inputPointY][inputPointX],
+  gpuAtomicAdd(&gradInput[batch][plane][inputPointZ][inputPointY][inputPointX],
       valueToCopy);
 }
 
@@ -744,7 +745,7 @@ Tensor replication_pad1d_backward_cuda(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   replication_pad1d_backward_out_cuda_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
@@ -786,7 +787,7 @@ Tensor replication_pad2d_backward_cuda(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   replication_pad2d_backward_out_cuda_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
@@ -828,7 +829,7 @@ Tensor replication_pad3d_backward_cuda(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   replication_pad3d_backward_out_cuda_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;

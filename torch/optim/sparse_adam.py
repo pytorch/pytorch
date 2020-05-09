@@ -34,6 +34,7 @@ class SparseAdam(Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps)
         super(SparseAdam, self).__init__(params, defaults)
 
+    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -43,13 +44,14 @@ class SparseAdam(Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
                     continue
-                grad = p.grad.data
+                grad = p.grad
                 if not grad.is_sparse:
                     raise RuntimeError('SparseAdam does not support dense gradients, please consider Adam instead')
 
@@ -59,9 +61,9 @@ class SparseAdam(Optimizer):
                 if len(state) == 0:
                     state['step'] = 0
                     # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p.data)
+                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p.data)
+                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
                 state['step'] += 1
 
@@ -99,6 +101,6 @@ class SparseAdam(Optimizer):
                 bias_correction2 = 1 - beta2 ** state['step']
                 step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
 
-                p.data.add_(make_sparse(-step_size * numer.div_(denom)))
+                p.add_(make_sparse(-step_size * numer.div_(denom)))
 
         return loss

@@ -6,7 +6,7 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 from caffe2.python import core, dyndep, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
-from dnnlowp_test_utils import (
+from caffe2.quantization.server.dnnlowp_test_utils import (
     check_quantized_results_close,
     generate_conv_inputs,
     generate_convnd_inputs,
@@ -138,10 +138,14 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                     "Int8ConvPackWeight",
                     inputs,
                     ["W_packed"],
-                    group=group,
+                    stride=stride,
+                    kernel=kernel,
+                    dilation=dilation,
+                    pad=pad,
                     preserve_weight_sparsity=preserve_weight_sparsity,
-                    in_scale=x_q_param.scale,
                     engine=engine,
+                    group=group,
+                    in_scale=x_q_param.scale,
                 )
                 init_net.Proto().op.extend([pack])
 
@@ -382,9 +386,13 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                     "Int8ConvPackWeight",
                     inputs,
                     ["W_packed"],
+                    strides=[stride] * ndim,
+                    kernels=kernels,
+                    dilations=[dilation] * ndim,
+                    pads=[pad] * (ndim * 2),
+                    engine=engine,
                     group=group,
                     in_scale=x_q_param.scale,
-                    engine=engine,
                 )
                 init_net.Proto().op.extend([pack])
 

@@ -16,8 +16,7 @@ class Linear(nn.Linear):
     default.
 
     Attributes:
-        observer: fake quant module for output activation, it's called observer
-            to align with post training flow
+        activation_post_process: fake quant module for output activation
         weight: fake quant module for weight
     """
     _FLOAT_MODULE = nn.Linear
@@ -27,11 +26,12 @@ class Linear(nn.Linear):
         super(Linear, self).__init__(in_features, out_features, bias)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
-        self.observer = qconfig.activation()
+        self.activation_post_process = qconfig.activation()
         self.weight_fake_quant = qconfig.weight()
 
     def forward(self, input):
-        return self.observer(F.linear(input, self.weight_fake_quant(self.weight), self.bias))
+        return self.activation_post_process(
+            F.linear(input, self.weight_fake_quant(self.weight), self.bias))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):

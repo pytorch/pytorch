@@ -34,12 +34,7 @@ class BatchMSELoss(ModelLayer):
             self.get_next_blob_reference('output'))
 
     def add_ops(self, net):
-        prediction = net.Squeeze(
-            self.input_record.prediction(),
-            net.NextScopedBlob('squeezed_prediction'),
-            dims=[1]
-        )
-
+        prediction = self.input_record.prediction()
         label = self.input_record.label.field_blobs()
         if self.input_record.label.field_type().base != (
                 self.input_record.prediction.field_type().base):
@@ -51,6 +46,8 @@ class BatchMSELoss(ModelLayer):
                     self.input_record.prediction.field_type()
                 )
             )
+
+        label = net.ExpandDims(label, 1, dims=[1])
 
         label = net.StopGradient(
             label,

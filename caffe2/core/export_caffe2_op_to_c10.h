@@ -2,11 +2,12 @@
 
 #include <c10/macros/Macros.h>
 
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 #include <ATen/core/function_schema.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <torch/csrc/jit/script/function_schema_parser.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <vector>
 
 namespace caffe2 {
@@ -78,25 +79,42 @@ inline void _call_caffe2_op_from_c10(
 
   outputs = (*call_op)(schema, std::move(inputs), std::move(outputs));
 
-  for (size_t i = 0; i < outputs.size(); ++i) {
-    torch::jit::push(*stack, outputs.extract(i));
+  bool return_tensor_list = false;
+  if (schema.returns().size() == 1) {
+    auto type = schema.returns()[0].type();
+    if (c10::ListTypePtr list_type = type->cast<c10::ListType>()) {
+      if (list_type->getElementType()->kind() == c10::TypeKind::TensorType) {
+        return_tensor_list = true;
+      }
+    }
+  }
+  if (return_tensor_list) {
+    // We should not unwrap the list if we expect tensor list in the schema.
+    torch::jit::push(*stack, outputs);
+  } else {
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      torch::jit::push(*stack, outputs.extract(i));
+    }
   }
 
   // postcondition: All inputs are cleared from the stack, there's now one
   //                IValue for each output which holds the result. This
-  //                might reuse one of the preallocated tensors but doesn't have to.
+  //                might reuse one of the preallocated tensors but doesn't have
+  //                to.
 }
 
 template <const c10::FunctionSchema& (*Schema)(), class Caffe2Operator>
 void call_caffe2_op_from_c10(
-    c10::OperatorKernel* functor,
+    const c10::OperatorHandle& /*opHandle*/,
     c10::Stack* stack) {
   _call_caffe2_op_from_c10(stack, Schema(), &_call_caffe2_op<Caffe2Operator>);
 }
 
 inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
-#if defined(CAFFE2_IS_XPLAT_BUILD) || defined(C10_MOBILE)
-  throw std::logic_error("We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
+#if !defined(EXPOSE_C2_OPS) && \
+    (defined(CAFFE2_IS_XPLAT_BUILD) || defined(C10_MOBILE))
+  throw std::logic_error(
+      "We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
 #else
   c10::FunctionSchema parsed_schema = torch::jit::parseSchema(schema_str);
   std::vector<c10::Argument> arguments = parsed_schema.arguments();
@@ -107,19 +125,17 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
       IValue());
 
   return FunctionSchema(
-    parsed_schema.name(),
-    parsed_schema.overload_name(),
-    std::move(arguments),
-    parsed_schema.returns(),
-    parsed_schema.is_vararg(),
-    parsed_schema.is_varret()
-  );
+      parsed_schema.name(),
+      parsed_schema.overload_name(),
+      std::move(arguments),
+      parsed_schema.returns(),
+      parsed_schema.is_vararg(),
+      parsed_schema.is_varret());
 #endif
 }
 
-}
-}
-
+} // namespace detail
+} // namespace caffe2
 
 /**
  * To register a caffe2 operator caffe2::MyOperator with the c10 dispatcher,
@@ -127,17 +143,18 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
  *
  * In caffe2/operators/MyOperator.h:
  *
- * > C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(C10MyOperator) // C10MyOperator is the name
+ * > C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(C10MyOperator) // C10MyOperator is the
+ * name
  *                                              // used by c10 for this operator
  *
  * In caffe2/operators/MyOperator.cc
  *
  * > C10_EXPORT_CAFFE2_OP_TO_C10_CPU (
  * >    C10MyOperator,
- * >    "_caffe2::C10MyOperator(Tensor input1, int argument2, float argument3) -> (Tensor output1, Tensor output2)"
- * >    caffe2::MyOperator<caffe2::CPUContext> // This is the caffe2 operator
- * >                                           // class template
- * > )
+ * >    "_caffe2::C10MyOperator(Tensor input1, int argument2, float argument3)
+ * -> (Tensor output1, Tensor output2)" > caffe2::MyOperator<caffe2::CPUContext>
+ * // This is the caffe2 operator >                                           //
+ * class template > )
  *
  * In caffe2/operators/MyOperator.cu
  *
@@ -158,35 +175,40 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
  * - If your operator has a variable number of input tensors, make the first (!)
  *   input an input of type TensorList. There must be no other tensor inputs.
  */
-#define C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(OperatorName)          \
-  namespace caffe2 {                                               \
-  namespace _c10_ops {                                             \
-  CAFFE2_API const FunctionSchema& schema_##OperatorName();        \
-  }                                                                \
+#define C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(OperatorName)   \
+  namespace caffe2 {                                        \
+  namespace _c10_ops {                                      \
+  CAFFE2_API const FunctionSchema& schema_##OperatorName(); \
+  }                                                         \
   }
 
-#define C10_EXPORT_CAFFE2_OP_TO_C10_CPU(                                     \
-    OperatorName, OperatorSchema, OperatorClass)                             \
-  /* Register the op schema with the c10 dispatcher */                       \
-  namespace caffe2 {                                                         \
-  namespace _c10_ops {                                                       \
-  C10_EXPORT const FunctionSchema& schema_##OperatorName() {                 \
-    static const FunctionSchema schema =                                     \
-        ::caffe2::detail::make_function_schema_for_c10(OperatorSchema);      \
-    return schema;                                                           \
-  }                                                                          \
-  }                                                                          \
-  }                                                                          \
+#define C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(OperatorName, OperatorSchema) \
+  /* Register the op schema with the c10 dispatcher */                        \
+  namespace caffe2 {                                                          \
+  namespace _c10_ops {                                                        \
+  C10_EXPORT const FunctionSchema& schema_##OperatorName() {                  \
+    static const FunctionSchema schema =                                      \
+        ::caffe2::detail::make_function_schema_for_c10(OperatorSchema);       \
+    return schema;                                                            \
+  }                                                                           \
+  }                                                                           \
+  }
+
+#define C10_EXPORT_CAFFE2_OP_TO_C10_CPU_KERNEL_ONLY(                         \
+    OperatorName, OperatorClass)                                             \
   /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
   static auto registry_##OperatorName##_##__COUNTER__ =                      \
       ::c10::RegisterOperators().op(                                         \
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::RegisterOperators::options()                                \
-              .kernel(                                                       \
-                  ::c10::TensorTypeId::CPUTensorId,                          \
-                  &::caffe2::detail::call_caffe2_op_from_c10<                \
-                      ::caffe2::_c10_ops::schema_##OperatorName,             \
-                      OperatorClass>));
+              .kernel<&::caffe2::detail::call_caffe2_op_from_c10<            \
+                  ::caffe2::_c10_ops::schema_##OperatorName,                 \
+                  OperatorClass>>(::c10::DispatchKey::CPU));
+
+#define C10_EXPORT_CAFFE2_OP_TO_C10_CPU(                                \
+    OperatorName, OperatorSchema, OperatorClass)                        \
+  C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(OperatorName, OperatorSchema) \
+  C10_EXPORT_CAFFE2_OP_TO_C10_CPU_KERNEL_ONLY(OperatorName, OperatorClass)
 
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(OperatorName, OperatorClass)        \
   /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
@@ -194,11 +216,9 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
       ::c10::RegisterOperators().op(                                         \
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::RegisterOperators::options()                                \
-              .kernel(                                                       \
-                  ::c10::TensorTypeId::CUDATensorId,                         \
-                  &::caffe2::detail::call_caffe2_op_from_c10<                \
-                      ::caffe2::_c10_ops::schema_##OperatorName,             \
-                      OperatorClass>));
+              .kernel<&::caffe2::detail::call_caffe2_op_from_c10<            \
+                  ::caffe2::_c10_ops::schema_##OperatorName,                 \
+                  OperatorClass>>(::c10::DispatchKey::CUDA));
 
 // You should never manually call the C10_EXPORT_CAFFE2_OP_TO_C10_HIP macro .
 // The C10_EXPORT_CAFFE2_OP_TO_C10_CUDA macro from above will be automatically
@@ -208,17 +228,19 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
   static auto registry_##OperatorName##_##__COUNTER__ =                      \
       ::c10::RegisterOperators().op(                                         \
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
-          ::c10::RegisterOperators().options()                               \
-              .kernel(                                                       \
-                  ::c10::TensorTypeId::HIPTensorId,                          \
-                  &::caffe2::detail::call_caffe2_op_from_c10<                \
-                      ::caffe2::_c10_ops::schema_##OperatorName,             \
-                      OperatorClass>));
+          ::c10::RegisterOperators()                                         \
+              .options()                                                     \
+              .kernel<&::caffe2::detail::call_caffe2_op_from_c10<            \
+                  ::caffe2::_c10_ops::schema_##OperatorName,                 \
+                  OperatorClass>>(::c10::DispatchKey::HIP));
 
 #else
 // Don't use c10 dispatcher on mobile because of binary size
 #define C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(OperatorName)
-#define C10_EXPORT_CAFFE2_OP_TO_C10_CPU(OperatorName, OperatorSchema, OperatorClass)
+#define C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(OperatorName, OperatorSchema)
+#define C10_EXPORT_CAFFE2_OP_TO_C10_CPU_KERNEL_ONLY(OperatorName, OperatorClass)
+#define C10_EXPORT_CAFFE2_OP_TO_C10_CPU( \
+    OperatorName, OperatorSchema, OperatorClass)
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(OperatorName, OperatorClass)
 #define C10_EXPORT_CAFFE2_OP_TO_C10_HIP(OperatorName, OperatorClass)
 #endif

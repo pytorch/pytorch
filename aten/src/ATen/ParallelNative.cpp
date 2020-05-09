@@ -125,13 +125,15 @@ void _parallel_run(
   std::tie(num_tasks, chunk_size) =
       internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
 
-  std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
-  std::exception_ptr eptr;
-  std::vector<std::shared_ptr<c10::ivalue::Future>> futures(num_tasks);
-  for (size_t task_id = 0; task_id < num_tasks; ++task_id) {
-    futures[task_id] = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
-  }
-  auto task = [f, &eptr, &err_flag, &futures, begin, end, chunk_size]
+  struct {
+    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
+    std::exception_ptr eptr;
+    std::mutex mutex;
+    volatile size_t remaining;
+    std::condition_variable cv;
+  } state;
+
+  auto task = [f, &state, begin, end, chunk_size]
       (int /* unused */, size_t task_id) {
     int64_t local_start = begin + task_id * chunk_size;
     if (local_start < end) {
@@ -140,21 +142,30 @@ void _parallel_run(
         ParallelRegionGuard guard(task_id);
         f(local_start, local_end, task_id);
       } catch (...) {
-        if (!err_flag.test_and_set()) {
-          eptr = std::current_exception();
+        if (!state.err_flag.test_and_set()) {
+          state.eptr = std::current_exception();
         }
       }
     }
-    futures[task_id]->markCompleted();
+    {
+      std::unique_lock<std::mutex> lk(state.mutex);
+      if (--state.remaining == 0) {
+        state.cv.notify_one();
+      }
+    }
   };
+  state.remaining = num_tasks;
   _run_with_pool(task, num_tasks);
 
   // Wait for all tasks to finish.
-  for (size_t task_id = 0; task_id < num_tasks; ++task_id) {
-    futures[task_id]->wait();
+  {
+    std::unique_lock<std::mutex> lk(state.mutex);
+    if (state.remaining != 0) {
+      state.cv.wait(lk);
+    }
   }
-  if (eptr) {
-    std::rethrow_exception(eptr);
+  if (state.eptr) {
+    std::rethrow_exception(state.eptr);
   }
 }
 
@@ -178,10 +189,21 @@ void set_num_threads(int nthreads) {
 #ifndef C10_MOBILE
   TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
   int no_value = NOT_SET;
-  TORCH_CHECK(num_intraop_threads.compare_exchange_strong(no_value, nthreads),
-      "Error: cannot set number of intraop threads "
-      "after parallel work has started or after set_num_threads call "
-      "when using native parallel backend");
+  if (!num_intraop_threads.compare_exchange_strong(no_value, nthreads)) {
+    // num_intraop_threads either stores a positive integer or CONSUMED,
+    // check that requested size is the same as the current one
+    int stored_nthreads = num_intraop_threads.load();
+    if (stored_nthreads <= 0) {
+      // plus one because of master thread
+      stored_nthreads = _get_intraop_pool().size() + 1;
+    }
+    if (stored_nthreads != nthreads) {
+      TORCH_WARN(
+        "Cannot set number of intraop threads "
+        "after parallel work has started or after set_num_threads call "
+        "when using native parallel backend");
+    }
+  }
 #else
   TORCH_CHECK(false, "set_num_threads is not supported for mobile.");
 #endif // C10_MOBILE
@@ -203,7 +225,7 @@ int get_num_threads() {
 #else
   caffe2::ThreadPool* pool = caffe2::mobile_threadpool();
   // caffe2::ThreadPool::getNumThreads() counts the current thread.
-  return !pool ? 1 /* current thread */ : pool->getNumThreads();
+  return !pool || in_parallel_region() ? 1 /* current thread */ : pool->getNumThreads();
 #endif // C10_MOBILE
 }
 

@@ -15,7 +15,10 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
 
   std::ostringstream oss;
   // write records through writers
-  PyTorchStreamWriter writer(&oss);
+  PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
+    oss.write(static_cast<const char*>(b), n);
+    return oss ? n : 0;
+  });
   std::array<char, 127> data1;
 
   for (int i = 0; i < data1.size(); ++i) {

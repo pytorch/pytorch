@@ -4,10 +4,10 @@
   #define NAN (nan(NULL))
 #endif
 
-#define HYPER_TH_OMP_OVERHEAD_THRESHOLD 2000
-#define ORDIN_TH_OMP_OVERHEAD_THRESHOLD 20000
-#define UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD 50000
-#define TH_OMP_OVERHEAD_THRESHOLD 100000
+#define HYPER_TH_OMP_OVERHEAD_THRESHOLD (at::internal::GRAIN_SIZE / 16)
+#define ORDIN_TH_OMP_OVERHEAD_THRESHOLD (at::internal::GRAIN_SIZE / 4)
+#define UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD (at::internal::GRAIN_SIZE / 2)
+#define TH_OMP_OVERHEAD_THRESHOLD (at::internal::GRAIN_SIZE)
 
 #define TH_CHECK_SAME_SIZE(TENSOR1, TENSOR2) \
 { \
@@ -61,7 +61,11 @@ if (std::isnan(val)) break;
 #define th_isnan_break(val)
 #endif
 
-#ifdef _MSC_VER
+#if defined(__clang__)
+#define PRAGMA(P) _Pragma(#P)
+#define PRAGMA_IVDEP      // Noop
+#define PRAGMA_SIMD       // Noop
+#elif defined(_MSC_VER)
 #define PRAGMA(P)         __pragma(P)
 # if _MSC_VER < 1920
 // MSVC < 2019 doesn't support loop pragmas.

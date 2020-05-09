@@ -853,6 +853,7 @@ class RecurrentNetworkParallelTest(TestCase):
 
         return workspace.FetchBlob("{}_0/partest/i2h_w".format(model._device_prefix))
 
+    @unittest.skip("Test is flaky: https://github.com/pytorch/pytorch/issues/10322")
     def test_equiv_recurrent(self):
         '''
         Test that the model produces exactly same results given

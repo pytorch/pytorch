@@ -1,7 +1,5 @@
 #pragma once
-#include <ATen/core/EnableNamedTensor.h>
 
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/interned_strings.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
@@ -37,8 +35,6 @@ struct CAFFE2_API Dimname {
 
 using DimnameList = c10::ArrayRef<Dimname>;
 
-static Symbol kWildcard = Symbol::dimname("*");
-
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Dimname& dimname);
 
 inline bool operator==(const Dimname& lhs, const Dimname& rhs) {
@@ -50,4 +46,3 @@ inline bool operator!=(const Dimname& lhs, const Dimname& rhs) {
 }
 
 } // namespace at
-#endif

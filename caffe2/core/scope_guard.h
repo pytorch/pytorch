@@ -112,7 +112,7 @@ using ScopeGuardImplDecay = ScopeGuardImpl<typename std::decay<F>::type>;
 /**
  * ScopeGuard is a general implementation of the "Initialization is
  * Resource Acquisition" idiom.  Basically, it guarantees that a function
- * is executed upon leaving the currrent scope unless otherwise told.
+ * is executed upon leaving the current scope unless otherwise told.
  *
  * The MakeGuard() function is used to create a new ScopeGuard object.
  * It can be instantiated with a lambda function, a std::function<void()>,

@@ -49,7 +49,7 @@ inline PyObject* wrap(THPDtype *dtype) {
 }
 
 inline PyObject* wrap(at::ScalarType scalarType) {
-  return wrap(getDtype(scalarType));
+  return wrap(getTHPDtype(scalarType));
 }
 
 inline PyObject* wrap(THPLayout *layout) {
@@ -57,12 +57,16 @@ inline PyObject* wrap(THPLayout *layout) {
   return (PyObject*)layout;
 }
 
+inline PyObject* wrap(at::Layout layout) {
+  return wrap(getTHPLayout(layout));
+}
+
 inline PyObject* wrap(at::Tensor tensor) {
   return THPVariable_Wrap(Variable(std::move(tensor)));
 }
 
 inline PyObject* wrap(at::Scalar scalar) {
-  return wrap(make_variable(scalar_to_tensor(scalar)));
+  return wrap(scalar_to_tensor(scalar));
 }
 
 inline PyObject* wrap(at::QScheme qscheme) {
@@ -125,6 +129,28 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, float, int64_t> tensors
   return r.release();
 }
 
+inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, int64_t> tensors) {
+  auto r = THPObjectPtr{PyTuple_New(5)};
+  if (!r) throw python_error();
+  PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 1, wrap(std::move(std::get<1>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 2, wrap(std::move(std::get<2>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 3, wrap(std::move(std::get<3>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 4, wrap(std::get<4>(tensors)));
+  return r.release();
+}
+
+inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, float, at::Tensor, int64_t> tensors) {
+  auto r = THPObjectPtr{PyTuple_New(5)};
+  if (!r) throw python_error();
+  PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 1, wrap(std::move(std::get<1>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 2, wrap(std::move(std::get<2>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 3, wrap(std::move(std::get<3>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 4, wrap(std::move(std::get<4>(tensors))));
+  return r.release();
+}
+
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
   auto r = THPObjectPtr{PyTuple_New(4)};
   if (!r) throw python_error();
@@ -163,4 +189,13 @@ inline PyObject* wrap(at::IntArrayRef list) {
   }
   return r.release();
 }
+
+inline PyObject* wrap(std::tuple<float, int64_t> tensors) {
+  auto r = THPObjectPtr{PyTuple_New(2)};
+  if (!r) throw python_error();
+  PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 1, wrap(std::move(std::get<1>(tensors))));
+  return r.release();
+}
+
 }}} // namespace torch::autograd::utils

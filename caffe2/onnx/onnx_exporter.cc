@@ -185,7 +185,7 @@ void ssaRewriteForIfOp(
     OperatorDef* op,
     std::unordered_map<std::string, int>* blob_versions,
     std::set<std::string>* is_initialized_tensor) {
-  // Get all the "external" inputs and outpus of the subnet
+  // Get all the "external" inputs and outputs of the subnet
   // Since then_net and else_net has same external input/output, we only collect
   // external input/output from one of its subnet And perform the rewrite to
   // both then_net and else_net
@@ -371,7 +371,8 @@ OnnxExporter::get_renamed_operators() const {
       {"MaxPool3D", "MaxPool"},
       {"AveragePool1D", "AveragePool"},
       {"AveragePool2D", "AveragePool"},
-      {"AveragePool3D", "AveragePool"}};
+      {"AveragePool3D", "AveragePool"},
+      {"Copy", "Identity"}};
   return kRenamedOperators;
 }
 

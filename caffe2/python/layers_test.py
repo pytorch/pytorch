@@ -243,6 +243,86 @@ class TestLayers(LayersTestCase):
         predict_net = self.get_predict_net()
         self.assertNetContainOps(predict_net, [mat_mul_spec])
 
+    def testFCWithBootstrap(self):
+        output_dims = 1
+        fc_with_bootstrap = self.model.FCWithBootstrap(
+            self.model.input_feature_schema.float_features,
+            output_dims=output_dims,
+            num_bootstrap=2,
+            max_fc_size=-1
+        )
+        self.model.output_schema = fc_with_bootstrap
+
+
+        self.assertEqual(len(fc_with_bootstrap), 4)
+
+        # must be in this order
+        assert (
+            core.BlobReference("fc_with_bootstrap/bootstrap_iteration_0/indices") == fc_with_bootstrap[0].field_blobs()[0]
+        )
+        assert (
+            core.BlobReference("fc_with_bootstrap/bootstrap_iteration_0/preds") == fc_with_bootstrap[1].field_blobs()[0]
+        )
+        assert (
+            core.BlobReference("fc_with_bootstrap/bootstrap_iteration_1/indices") == fc_with_bootstrap[2].field_blobs()[0]
+        )
+        assert (
+            core.BlobReference("fc_with_bootstrap/bootstrap_iteration_1/preds") == fc_with_bootstrap[3].field_blobs()[0]
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+        predict_net = layer_model_instantiator.generate_predict_net(self.model)
+
+        train_proto = train_net.Proto()
+        eval_proto = predict_net.Proto()
+
+        train_ops = train_proto.op
+        eval_ops = eval_proto.op
+
+        master_train_ops = [
+            "Shape",
+            "GivenTensorInt64Fill",
+            "Gather",
+            "GivenTensorIntFill",
+            "GivenTensorIntFill",
+            "Cast",
+            "Sub",
+            "UniformIntFill",
+            "Gather",
+            "FC",
+            "UniformIntFill",
+            "Gather",
+            "FC",
+        ]
+
+        master_eval_ops = [
+            "Shape",
+            "GivenTensorInt64Fill",
+            "Gather",
+            "GivenTensorIntFill",
+            "GivenTensorIntFill",
+            "Cast",
+            "Sub",
+            "UniformIntFill",
+            "FC",
+            "UniformIntFill",
+            "FC",
+        ]
+
+        assert len(train_ops) == len(master_train_ops)
+        assert len(eval_ops) == len(master_eval_ops)
+
+        assert train_proto.external_input == eval_proto.external_input
+        assert train_proto.external_output == list()
+
+        # make sure all the ops are present and unchanged for train_net and eval_net
+        for idx, op in enumerate(master_train_ops):
+            assert train_ops[idx].type == op
+
+        for idx, op in enumerate(master_eval_ops):
+            assert eval_ops[idx].type == op
+
+
     def testFCwithAxis2(self):
         input_dim = 10
         output_dim = 30
@@ -260,6 +340,49 @@ class TestLayers(LayersTestCase):
         self.assertEqual(
             schema.Scalar((np.float32, (max_length, output_dim))),
             fc_out
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
+    def testFCTransposed(self):
+        input_dim = 10
+        output_dim = 30
+        max_length = 20
+        input_record = self.new_record(
+            schema.Struct(
+                ('history_sequence', schema.Scalar((np.float32, (max_length,
+                    input_dim)))),
+            )
+        )
+        fc_transposed_out = self.model.FC(
+            input_record.history_sequence, output_dim,
+            axis=2, transposed=True)
+        self.model.output_schema = fc_transposed_out
+        self.assertEqual(
+            schema.Scalar((np.float32, (max_length, output_dim))),
+            fc_transposed_out
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
+    def testFCTransposedWithMaxFCSize(self):
+        input_dim = 10
+        output_dim = 30
+        max_length = 20
+        input_record = self.new_record(
+            schema.Struct(
+                ('history_sequence', schema.Scalar((np.float32, (max_length,
+                    input_dim)))),
+            )
+        )
+        fc_transposed_out = self.model.FC(
+            input_record.history_sequence, output_dim,
+            max_fc_size=input_dim * output_dim // 2,
+            axis=2, transposed=True)
+        self.model.output_schema = fc_transposed_out
+        self.assertEqual(
+            schema.Scalar((np.float32, (max_length, output_dim))),
+            fc_transposed_out
         )
 
         train_init_net, train_net = self.get_training_nets()

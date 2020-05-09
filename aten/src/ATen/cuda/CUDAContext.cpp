@@ -1,5 +1,5 @@
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCGeneral.hpp>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <ATen/cuda/CUDAConfig.h>
 #include <mutex>
@@ -29,6 +29,10 @@ void initDeviceProperty(DeviceIndex device_index) {
 
 } // anonymous namespace
 
+// We need this function to force the linking against torch_cuda on Windows.
+// If you need to modify this function, please specify a new function and apply the changes
+// according to https://github.com/pytorch/pytorch/pull/34288.
+// Related issue: https://github.com/pytorch/pytorch/issues/31611.
 /* Device info */
 int warp_size() {
   return getCurrentDeviceProperties()->warpSize;
@@ -48,16 +52,7 @@ cudaDeviceProp* getDeviceProperties(int64_t device) {
 }
 
 Allocator* getCUDADeviceAllocator() {
-  return at::globalContext().getTHCState()->cudaDeviceAllocator;
-}
-
-/* Handles */
-cusparseHandle_t getCurrentCUDASparseHandle() {
-  return THCState_getCurrentSparseHandle(at::globalContext().getTHCState());
-}
-
-cublasHandle_t getCurrentCUDABlasHandle() {
-  return THCState_getCurrentBlasHandle(at::globalContext().getTHCState());
+  return c10::cuda::CUDACachingAllocator::get();
 }
 
 } // namespace cuda

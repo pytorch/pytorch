@@ -121,6 +121,35 @@ TEST(AutogradAPITests, GradUnreachableTest) {
 
   ASSERT_VARIABLE_EQ(grad_res[0], x * 2);
   ASSERT_FALSE(grad_res[1].defined());
+
+  // allow_unused=False, but grads contains None inside, should throw
+  ASSERT_THROWS_WITH(grad({x * 2}, {x, y}, {}, {}, false, false), "Set allow_unused=True");
+}
+
+TEST(AutogradAPITests, RetainGrad) {
+  auto input = torch::rand({1, 3}, torch::requires_grad());
+  auto h1 = input * 3;
+  auto out = (h1 * h1).sum();
+
+  // It should be possible to call retain_grad() multiple times
+  h1.retain_grad();
+  h1.retain_grad();
+
+  // Gradient should be accumulated
+  out.backward({}, /*keep_graph=*/true);
+  ASSERT_VARIABLE_EQ(h1 * 2, h1.grad());
+  out.backward({}, /*keep_graph=*/true);
+  ASSERT_VARIABLE_EQ(h1 * 4, h1.grad());
+
+  {
+    torch::NoGradGuard no_grad;
+    input.grad().zero_();
+  }
+  // It should be a no-op for leaves
+  input.retain_grad();
+  input.retain_grad();
+  out.backward();
+  ASSERT_VARIABLE_EQ(input * 18, input.grad());
 }
 
 TEST(CustomAutogradTest, CustomFunction) {
@@ -185,6 +214,30 @@ TEST(CustomAutogradTest, NoGradCustomFunction) {
     auto y = MyOp::apply(x);
     ASSERT_FALSE(y.requires_grad());
  }
+}
+
+TEST(CustomAutogradTest, MarkDirty) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(AutogradContext *ctx, Variable v) {
+      // Change the value inplace
+      auto v_data = v.data_ptr<float>();
+      v_data[0] = 2;
+      ctx->mark_dirty({v});
+      return v;
+    }
+
+    static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
+      return { (grad_output[0]*2.0) };
+    }
+  };
+
+  // Clone here because modifying leafs inplace is not allowed
+  auto x = torch::randn({5,5}, torch::requires_grad()).clone();
+  auto version_before = x._version();
+  auto out = MyFunction::apply(x);
+  auto version_after = x._version();
+  ASSERT_TRUE(version_after >= (version_before + 1));
+  out.sum().backward();
 }
 
 TEST(CustomAutogradTest, MarkNonDifferentiable) {
@@ -455,6 +508,9 @@ TEST(CustomAutogradTest, Reentrant) {
   ASSERT_VARIABLE_EQ(x.grad(), y_data);
 }
 
+
+// NOTE: If this fails for apparently unrelated reasons in TSAN be aware of
+// the TSAN limit on mutex: https://github.com/google/sanitizers/issues/950
 TEST(CustomAutogradTest, DeepReentrant) {
   struct DeepReenter : public Function<DeepReenter> {
     static Variable forward(AutogradContext *ctx, Variable x) {
@@ -478,7 +534,7 @@ TEST(CustomAutogradTest, DeepReentrant) {
   };
 
   // This should not stack overflow
-  auto v = torch::tensor(8193, torch::requires_grad());
+  auto v = torch::tensor({8193}, torch::dtype(torch::kFloat).requires_grad(true));
   DeepReenter::apply(v).sum().backward();
 }
 
@@ -518,8 +574,8 @@ TEST(CustomAutogradTest, ReentrantPriority) {
     }
   };
 
-  auto a = MyFunction::apply(torch::tensor(6, torch::requires_grad()));
-  auto b = Reenter::apply(torch::tensor(9, torch::requires_grad()));
+  auto a = MyFunction::apply(torch::tensor({6}, torch::dtype(torch::kFloat).requires_grad(true)));
+  auto b = Reenter::apply(torch::tensor({9}, torch::dtype(torch::kFloat).requires_grad(true)));
   auto v = a*b;
   v.backward();
 

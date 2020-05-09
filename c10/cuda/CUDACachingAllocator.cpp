@@ -278,7 +278,7 @@ class THCCachingAllocator {
         // Note that at this point cuda_malloc_with_retry has already returned all
         // possible "cached" memory to the driver. The only remaining "cached"
         // memory is split from a larger block that is partially in-use.
-        AT_ERROR(
+        TORCH_CHECK_WITH(CUDAOutOfMemoryError, false,
           "CUDA out of memory. Tried to allocate ", format_size(alloc_size),
           " (GPU ", device, "; ",
           format_size(device_total), " total capacity; ",
@@ -388,25 +388,32 @@ class THCCachingAllocator {
     return basePtr;
   }
 
-  void recordStream(void* ptr, cuda::CUDAStream stream) {
+  void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) {
     // Empty tensor's storage().data() might be a null ptr. As there is no
     // blocks associated with those tensors, it is fine to do nothing here.
-    if (!ptr) {
+    if (!ptr.get()) {
       return;
     }
 
+    // If a tensor is not allocated by this instance, simply skip
+    // This usually happens when CUDA tensors are shared across processes,
+    // we have implemented reference counting based sharing mechanism to
+    // guarantee tensors won't be accidentally freed by one process while
+    // they are still being used in another
+    if (ptr.get_deleter() != &raw_delete)
+      return;
+
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    Block* block = find_allocated_block(ptr);
-    // block could be nullptr in some cases, e.g., tensor loaded from blob, or
-    // shared from another process, or not pointing to a CUDA tensor.
-    if (block) {
-      if (stream.stream() == block->stream) {
-        // ignore uses on the allocation stream, since those don't require any
-        // special synchronization
-        return;
-      }
-      block->stream_uses.insert(stream);
+
+    Block* block = find_allocated_block(ptr.get());
+    // block must not be null reaching here
+    TORCH_INTERNAL_ASSERT(block != nullptr, "No allocated block can be found");
+    if (stream.stream() == block->stream) {
+      // ignore uses on the allocation stream, since those don't require any
+      // special synchronization
+      return;
     }
+    block->stream_uses.insert(stream);
   }
 
   /** returns cached blocks to the system allocator **/
@@ -420,6 +427,11 @@ class THCCachingAllocator {
   /** Retrieves info (total size + largest block) of the memory cache **/
   void cacheInfo(int dev_id, size_t* total, size_t* largest) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (*largest == 0) {  // make an initial guess if a zero *largest is passed in
+      size_t tmp_bytes;
+      cudaMemGetInfo(largest,  // Use free memory as an optimistic initial guess of *largest
+                     &tmp_bytes);
+    }
     cache_info_aux(large_blocks, dev_id, total, largest);
     cache_info_aux(small_blocks, dev_id, total, largest);
   }
@@ -819,10 +831,6 @@ class THCCachingAllocator {
 
 THCCachingAllocator caching_allocator;
 
-static void CudaCachingDeleter(void* ptr) {
-  caching_allocator.free(ptr);
-}
-
 // NB: I decided not to fold this into THCCachingAllocator, because the latter
 // has a lot more methods and it wasn't altogether clear that they should
 // actually be publicly exposed
@@ -834,10 +842,10 @@ struct CudaCachingAllocator : public Allocator {
     if (size != 0) {
       caching_allocator.malloc(&r, size, cuda::getCurrentCUDAStream(device));
     }
-    return {r, r, &CudaCachingDeleter, Device(DeviceType::CUDA, device)};
+    return {r, r, &raw_delete, Device(DeviceType::CUDA, device)};
   }
   DeleterFnPtr raw_deleter() const override {
-    return &CudaCachingDeleter;
+    return &raw_delete;
   }
 };
 
@@ -861,7 +869,7 @@ void* getBaseAllocation(void *ptr, size_t *size)
   return caching_allocator.getBaseAllocation(ptr, size);
 }
 
-void recordStream(void *ptr, cuda::CUDAStream stream)
+void recordStream(const DataPtr& ptr, cuda::CUDAStream stream)
 {
   caching_allocator.recordStream(ptr, stream);
 }
@@ -957,6 +965,15 @@ void* raw_alloc(size_t nbytes) {
   C10_CUDA_CHECK(cudaGetDevice(&device));
   void* r = nullptr;
   caching_allocator.malloc(&r, nbytes, cuda::getCurrentCUDAStream(device));
+  return r;
+}
+
+void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
+  if (nbytes == 0) {
+    return nullptr;
+  }
+  void* r = nullptr;
+  caching_allocator.malloc(&r, nbytes, stream);
   return r;
 }
 

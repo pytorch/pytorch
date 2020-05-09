@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/node_hashing.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/node_hashing.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
 
 #include <unordered_map>
 
@@ -54,10 +54,8 @@ void EliminateCommonSubexpression(
     auto parent_lookup = parent_lookup_fn(node);
     auto g_out = node->owningGraph()->outputs();
     if (parent_lookup) {
-      // since the graph outputs may be mutated after they are returned,
-      // don't introduce new aliasing among graph outputs
-      if (aliasDb.mayContainAlias(node->outputs(), g_out) &&
-          aliasDb.mayContainAlias(parent_lookup->outputs(), g_out)) {
+      if (!aliasDb.safeToChangeAliasingRelationship(
+              node->outputs(), parent_lookup->outputs())) {
         continue;
       }
 
@@ -89,7 +87,7 @@ void EliminateCommonSubexpression(
 }
 } // namespace
 
-void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
+void EliminateCommonSubexpression(const std::shared_ptr<Graph>& graph) {
   AliasDb aliasDb(graph);
   GRAPH_DUMP("Before CSE", graph);
   EliminateCommonSubexpression(

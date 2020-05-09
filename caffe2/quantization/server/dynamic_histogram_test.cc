@@ -43,7 +43,6 @@ TEST(DynamicHistogram, HistSimilar) {
   }
 
   stringstream ss;
-  static_hist.Finalize();
   for (int i = 0; i < nbins; ++i) {
     ss << (*static_hist.GetHistogram())[i] << " ";
   }

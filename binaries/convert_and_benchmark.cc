@@ -62,7 +62,7 @@ C10_DEFINE_string(
     "Report the conversion stage time to screen. "
     "The format of the string is <type>|<identifier>. "
     "The valid type is 'json'. "
-    "The valid identifier is nothing or an identifer that prefix every line");
+    "The valid identifier is nothing or an identifier that prefix every line");
 C10_DEFINE_string(
     scale,
     "-1,-1",
@@ -438,10 +438,10 @@ TensorProtos convertValues(std::string& file_name) {
 void observerConfig() {
   caffe2::ClearGlobalNetObservers();
   caffe2::AddGlobalNetObserverCreator([](caffe2::NetBase* subject) {
-    return caffe2::make_unique<caffe2::PerfNetObserver>(subject);
+    return std::make_unique<caffe2::PerfNetObserver>(subject);
   });
   caffe2::ObserverConfig::setReporter(
-      caffe2::make_unique<caffe2::NetObserverReporterPrint>());
+      std::make_unique<caffe2::NetObserverReporterPrint>());
 }
 
 bool backendCudaSet(const string& backend) {
@@ -501,7 +501,7 @@ void fillInputBlob(
     if (blob == nullptr) {
       blob = workspace->CreateBlob(tensor_kv.first);
     }
-    // todo: support gpu and make this function a tempalte
+    // todo: support gpu and make this function a template
     int protos_size = tensor_kv.second.protos_size();
     if (protos_size == 1 && iteration > 0) {
       // Do not override the input data if there is only one input data,

@@ -7,9 +7,15 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/${Generator}.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 ${th_headers}
 ${extra_cuda_headers}
+
+namespace {
+static const char* named_tensors_unsupported_error =
+  " is not yet supported with named tensors. Please drop names via "
+  "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
+  "and set names on the result of the operation.";
+}
 
 namespace at {
 namespace native {
@@ -28,8 +34,7 @@ namespace {
   TensorOptions options(ScalarType s) {
     return TensorOptions().dtype(s)
                           .device(DeviceType::${DeviceType})
-                          .layout(kStrided)
-                          .is_variable(false);
+                          .layout(kStrided);
   }
 
   Allocator* allocator() {

@@ -3,11 +3,9 @@ import torch.utils.hooks
 from torch._namedtensor_internals import check_serializing_named_tensor
 import os
 import threading
-import errno
 import multiprocessing
 from multiprocessing.util import register_after_fork
 from multiprocessing.reduction import ForkingPickler
-import sys
 try:
     # Early load resource_sharer to prevent a partially initialized instance
     # from being inherited in a forked child process. The reduce_storage method
@@ -175,7 +173,7 @@ def reduce_tensor(tensor):
     # the old ones alives.
     # See [https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html]
     #
-    # This is fine, because all we need to do is to save our position in the allocaiton,
+    # This is fine, because all we need to do is to save our position in the allocation,
     # and reconstruct storage and tensor from it.
     # 0xA000 ->  -------CUDA Allocation------
     #           |                            |
@@ -208,7 +206,7 @@ def reduce_tensor(tensor):
     # On receiver side:
     #   1. Get the devPtr of the MemHandle to access the memory, reconstruct a storage
     #      of the same type using (basePtr, offset, size).
-    #   2. we can reconstruct the tensor on top of the recontructed storage
+    #   2. we can reconstruct the tensor on top of the reconstructed storage
     #   Tensor(size=0x040, offset=0x020, storage=Storage(data=basePtr+0xA100, size=0x0100))
     #
     # This strategy has a few implications:
@@ -281,17 +279,7 @@ def storage_from_cache(cls, key):
 
 
 def rebuild_storage_fd(cls, df, size):
-    if sys.version_info[0] == 2:
-        while True:
-            try:
-                fd = multiprocessing.reduction.rebuild_handle(df)
-                break
-            except OSError as e:
-                # Retry on EINTR for platforms that support it
-                if e.errno != getattr(errno, 'EINTR', None):
-                    raise
-    else:
-        fd = df.detach()
+    fd = df.detach()
     try:
         storage = storage_from_cache(cls, fd_id(fd))
         if storage is not None:
@@ -331,10 +319,7 @@ def reduce_storage(storage):
         return (rebuild_storage_empty, (type(storage),))
     else:
         fd, size = storage._share_fd_()
-        if sys.version_info[0] == 2:
-            df = multiprocessing.reduction.reduce_handle(fd)
-        else:
-            df = multiprocessing.reduction.DupFd(fd)
+        df = multiprocessing.reduction.DupFd(fd)
         cache_key = fd_id(fd)
         metadata = (df, size)
         rebuild = rebuild_storage_fd

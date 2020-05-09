@@ -1,5 +1,5 @@
-from common_utils import TestCase, run_tests
-from common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA
 import torch
 from torch import tensor
 import unittest
@@ -79,9 +79,27 @@ class TestIndexing(TestCase):
         mask = torch.zeros(size=(10, ), dtype=torch.uint8, device=device)
         y = torch.ones(size=(10, 10), device=device)
         with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             y.index_put_((mask, ), y[mask], accumulate=True)
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
             self.assertEquals(len(w), 2)
+
+    def test_index_put_accumulate_large_tensor(self, device):
+        # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
+        N = (1 << 31) + 5
+        dt = torch.int8
+        a = torch.ones(N, dtype=dt, device=device)
+        indices = torch.LongTensor([0, 1, -2, -1])
+        values = torch.tensor([10, 11, 12, 13], dtype=dt, device=device)
+
+        a.index_put_((indices, ), values, accumulate=True)
+
+        self.assertEqual(a[0], 11)
+        self.assertEqual(a[1], 12)
+        self.assertEqual(a[2], 1)
+        self.assertEqual(a[-100], 1)
+        self.assertEqual(a[-2], 13)
+        self.assertEqual(a[-1], 14)
 
     def test_multiple_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
@@ -89,6 +107,7 @@ class TestIndexing(TestCase):
         mask1 = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
         mask2 = torch.ByteTensor([1, 1, 1]).to(device)
         with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
             self.assertEquals(len(w), 2)
 
@@ -104,6 +123,28 @@ class TestIndexing(TestCase):
         self.assertEqual(v[[0, 4, 2]].shape, (3, 7, 3))
         self.assertEqual(v[:, [0, 4, 2]].shape, (5, 3, 3))
         self.assertEqual(v[:, [[0, 1], [4, 3]]].shape, (5, 2, 2, 3))
+
+    @dtypes(torch.float, torch.bfloat16, torch.long, torch.bool)
+    @dtypesIfCPU(torch.float, torch.long, torch.bool, torch.bfloat16)
+    @dtypesIfCUDA(torch.half, torch.long, torch.bool)
+    def test_index_put_src_datatype(self, device, dtype):
+        src = torch.ones(3, 2, 4, device=device, dtype=dtype)
+        vals = torch.ones(3, 2, 4, device=device, dtype=dtype)
+        indices = (torch.tensor([0, 2, 1]),)
+        res = src.index_put_(indices, vals, accumulate=True)
+        self.assertEqual(res.shape, src.shape)
+
+    @dtypes(torch.float, torch.bfloat16, torch.long, torch.bool)
+    @dtypesIfCPU(torch.float, torch.long, torch.bfloat16, torch.bool)
+    @dtypesIfCUDA(torch.half, torch.long, torch.bfloat16, torch.bool)
+    def test_index_src_datatype(self, device, dtype):
+        src = torch.ones(3, 2, 4, device=device, dtype=dtype)
+        # test index
+        res = src[[0, 2, 1], :, :]
+        self.assertEqual(res.shape, src.shape)
+        # test index_put, no accum
+        src[[0, 2, 1], :, :] = res
+        self.assertEqual(res.shape, src.shape)
 
     def test_int_indices2d(self, device):
         # From the NumPy indexing example
@@ -349,6 +390,15 @@ class TestIndexing(TestCase):
 
         self.assertRaisesRegex(IndexError, 'invalid index', runner)
 
+    @onlyCUDA
+    def test_invalid_device(self, device):
+        idx = torch.tensor([0, 1])
+        b = torch.zeros(5, device=device)
+        c = torch.tensor([1., 2.], device="cpu")
+
+        for accumulate in [True, False]:
+            self.assertRaisesRegex(RuntimeError, 'expected device', lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate))
+
 
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:
@@ -489,11 +539,9 @@ class NumpyTests(TestCase):
         index = tensor([False] * 6, device=device)
         self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
 
-        with warnings.catch_warnings(record=True) as w:
-            index = torch.ByteTensor(4, 4).to(device).zero_()
-            self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
-            self.assertRaisesRegex(IndexError, 'mask', lambda: arr[(slice(None), index)])
-            self.assertEquals(len(w), 2)
+        index = torch.ByteTensor(4, 4).to(device).zero_()
+        self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
+        self.assertRaisesRegex(IndexError, 'mask', lambda: arr[(slice(None), index)])
 
     def test_boolean_indexing_onedim(self, device):
         # Indexing a 2-dimensional array with

@@ -164,7 +164,7 @@ by name to a specified ordering. This is useful for performing "broadcasting by 
         return input * scale.align_as(input)
 
     >>> num_channels = 3
-    >>> scale = torch.randn(num_channels, names='C')
+    >>> scale = torch.randn(num_channels, names=('C',))
     >>> imgs = torch.rand(3, 3, 3, num_channels, names=('N', 'H', 'W', 'C'))
     >>> more_imgs = torch.rand(3, num_channels, 3, 3, names=('N', 'C', 'H', 'W'))
     >>> videos = torch.randn(3, num_channels, 3, 3, 3, names=('N', 'C', 'H', 'W', 'D')
@@ -187,7 +187,7 @@ mentioning all of them as in required by :meth:`~Tensor.permute`.
     # Move the F (dim 5) and E dimension (dim 4) to the front while keeping
     # the rest in the same order
     >>> tensor.permute(5, 4, 0, 1, 2, 3)
-    >>> named_tensor.align_to('F', 'E', ...)  # Use '...' instead in Python 2
+    >>> named_tensor.align_to('F', 'E', ...)
 
 Use :meth:`~Tensor.flatten` and :meth:`~Tensor.unflatten` to flatten and unflatten
 dimensions, respectively. These methods are more verbose than :meth:`~Tensor.view`
@@ -301,6 +301,7 @@ operators, see :ref:`name_inference_reference-doc`.
 
    .. automethod:: unflatten
    .. py:method:: flatten(dims, out_dim) -> Tensor
+      :noindex:
 
       Flattens :attr:`dims` into a single dimension with name :attr:`out_dim`.
 
@@ -316,4 +317,3 @@ operators, see :ref:`name_inference_reference-doc`.
 
       .. warning::
           The named tensor API is experimental and subject to change.
-

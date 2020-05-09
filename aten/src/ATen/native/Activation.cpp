@@ -6,16 +6,163 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
-
+#include <ATen/core/DistributionsHelper.h>
 
 namespace at { namespace native {
 
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
+DEFINE_DISPATCH(elu_stub);
+DEFINE_DISPATCH(elu_backward_stub);
+DEFINE_DISPATCH(softplus_stub);
+DEFINE_DISPATCH(softplus_backward_stub);
+DEFINE_DISPATCH(log_sigmoid_cpu_stub);
+DEFINE_DISPATCH(log_sigmoid_backward_cpu_stub);
 DEFINE_DISPATCH(threshold_stub);
-DEFINE_DISPATCH(hardshrink_cpu_stub);
-DEFINE_DISPATCH(hardshrink_backward_cpu_stub);
+DEFINE_DISPATCH(hardtanh_backward_stub);
+DEFINE_DISPATCH(hardsigmoid_stub);
+DEFINE_DISPATCH(hardsigmoid_backward_stub);
+DEFINE_DISPATCH(hardswish_stub);
+DEFINE_DISPATCH(hardswish_backward_stub);
+DEFINE_DISPATCH(hardshrink_stub);
+DEFINE_DISPATCH(softshrink_stub);
+DEFINE_DISPATCH(shrink_backward_stub);
+DEFINE_DISPATCH(leaky_relu_stub);
+DEFINE_DISPATCH(leaky_relu_backward_stub);
+
+Tensor hardtanh(const Tensor& self, Scalar min, Scalar max) {
+  return at::clamp(self, min, max);
+}
+
+Tensor& hardtanh_out(Tensor& result, const Tensor& self, Scalar min, Scalar max) {
+  return at::clamp_out(result, self, min, max);
+}
+
+Tensor& hardtanh_(Tensor& self, Scalar min, Scalar max) {
+  return at::clamp_(self, min, max);
+}
+
+Tensor& hardtanh_backward_out(Tensor& grad_input,
+    const Tensor& grad_output, const Tensor& self, Scalar min, Scalar max) {
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, self);
+  hardtanh_backward_stub(iter.device_type(), iter, min, max);
+  return grad_input;
+}
+
+Tensor hardtanh_backward(const Tensor& grad_output, const Tensor& self, Scalar min, Scalar max) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, grad_output, self);
+  hardtanh_backward_stub(iter.device_type(), iter, min, max);
+  return iter.output();
+}
+
+Tensor hardsigmoid(const Tensor& self) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, self);
+  hardsigmoid_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& hardsigmoid_out(Tensor& result, const Tensor& self) {
+  auto iter = TensorIterator::unary_op(result, self);
+  hardsigmoid_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor& hardsigmoid_(Tensor& self) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(self, self);
+  hardsigmoid_stub(iter.device_type(), iter);
+  return self;
+}
+
+Tensor hardsigmoid_backward(const Tensor& grad_output, const Tensor& self) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, grad_output, self);
+  hardsigmoid_backward_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& elu_out(
+    Tensor& result,
+    const Tensor& self,
+    Scalar alpha,
+    Scalar scale,
+    Scalar input_scale) {
+  auto iter = TensorIterator::unary_op(result, self);
+  elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
+  return result;
+}
+
+Tensor elu(
+    const Tensor& self,
+    Scalar alpha,
+    Scalar scale,
+    Scalar input_scale) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, self);
+  elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
+  return iter.output();
+}
+
+Tensor & elu_(
+    Tensor & self,
+    Scalar alpha,
+    Scalar scale,
+    Scalar input_scale) {
+  return at::elu_out(self, self, alpha, scale, input_scale);
+}
+
+Tensor& elu_backward_out(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    Scalar alpha,
+    Scalar scale,
+    Scalar input_scale,
+    const Tensor& output) {
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
+  elu_backward_stub(iter.device_type(), iter, alpha, scale, input_scale);
+  return grad_input;
+}
+
+Tensor elu_backward(
+    const Tensor& grad_output,
+    Scalar alpha,
+    Scalar scale,
+    Scalar input_scale,
+    const Tensor& output) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, grad_output, output);
+  elu_backward_stub(iter.device_type(), iter, alpha, scale, input_scale);
+  return iter.output();
+}
+
+Tensor hardswish(const Tensor& self) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, self);
+  hardswish_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& hardswish_out(Tensor& result, const Tensor& self) {
+  auto iter = TensorIterator::unary_op(result, self);
+  hardswish_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor& hardswish_(Tensor& self) {
+  auto iter = TensorIterator::unary_op(self, self);
+  hardswish_stub(iter.device_type(), iter);
+  return self;
+}
+
+Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
+  Tensor grad_input;
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, self);
+  hardswish_backward_stub(iter.device_type(), iter);
+  return iter.output();
+}
 
 Tensor relu(const Tensor & self) {
   return at::threshold(self, 0, 0);
@@ -43,12 +190,144 @@ Tensor & celu_(Tensor & self, Scalar alpha) {
   return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
-Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
-  return at::rrelu_with_noise(self, at::empty_like(self), lower, upper, training, generator);
+
+template <typename scalar_t>
+inline void _rrelu_with_noise_train(
+    Tensor& output,
+    const Tensor& input,
+    const Tensor& noise,
+    Scalar lower_,
+    Scalar upper_,
+    c10::optional<Generator> generator) {
+  scalar_t lower = lower_.to<scalar_t>();
+  scalar_t upper = upper_.to<scalar_t>();
+  Tensor tmp_tensor = output.contiguous();
+  scalar_t* output_data = tmp_tensor.data_ptr<scalar_t>();
+  scalar_t* input_data = input.data_ptr<scalar_t>();
+  scalar_t* noise_data = noise.data_ptr<scalar_t>();
+  auto gen  = at::get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
+  std::lock_guard<std::mutex> lock(gen->mutex_);
+  for (int64_t i = 0; i < input.numel(); i++) {
+    if (input_data[i] <= 0) {
+      at::uniform_real_distribution<double> uniform(lower, upper);
+      const scalar_t r = (scalar_t)uniform(gen);
+      output_data[i] = input_data[i] * r;
+      noise_data[i] = r;
+    } else {
+      noise_data[i] = 1;
+      output_data[i] = input_data[i];
+    }
+  }
+  if (!output.is_contiguous()) {
+    output.copy_(tmp_tensor);
+  }
 }
 
-Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
-  return at::rrelu_with_noise_(self, at::empty_like(self), lower, upper, training, generator);
+Tensor& rrelu_with_noise_out_cpu(
+    Tensor& output,
+    const Tensor& self,
+    const Tensor& noise,
+    Scalar lower,
+    Scalar upper,
+    bool training,
+    c10::optional<Generator> generator) {
+  if (training) {
+    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
+      _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
+    });
+    return output;
+  } else {
+    auto lower_tensor = scalar_to_tensor(lower, self.device());
+    auto upper_tensor = scalar_to_tensor(upper, self.device());
+    auto negative = (lower_tensor + upper_tensor) / 2;
+    Scalar negative_slope = negative.item();
+    return at::leaky_relu_out(output, self, negative_slope);
+  }
+}
+
+Tensor rrelu_with_noise_cpu(
+    const Tensor& self,
+    const Tensor& noise,
+    Scalar lower,
+    Scalar upper,
+    bool training,
+    c10::optional<Generator> generator) {
+  auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return at::native::rrelu_with_noise_out_cpu(output, self, noise, lower, upper, training, generator);
+}
+
+Tensor& rrelu_with_noise_cpu_(
+    Tensor& self,
+    const Tensor& noise,
+    Scalar lower,
+    Scalar upper,
+    bool training,
+    c10::optional<Generator> generator) {
+  return at::native::rrelu_with_noise_out_cpu(self, self, noise, lower, upper, training, generator);
+}
+
+Tensor rrelu_with_noise_backward(
+    const Tensor& grad_output,
+    const Tensor& self_or_result,
+    const Tensor& noise,
+    Scalar lower,
+    Scalar upper,
+    bool training,
+    bool is_result) {
+  auto lower_tensor = scalar_to_tensor(lower, grad_output.device());
+  auto upper_tensor = scalar_to_tensor(upper, grad_output.device());
+  if (training && (upper_tensor - lower_tensor).item().to<float>() > 1E-6) {
+    return grad_output.mul(noise);
+  } else {
+    auto negative = (lower_tensor + upper_tensor) / 2;
+    Scalar negative_slope = negative.item();
+    return at::leaky_relu_backward(grad_output, self_or_result, negative_slope, is_result);
+  }
+}
+
+Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, c10::optional<Generator> generator) {
+  return at::rrelu_with_noise(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
+}
+
+Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, c10::optional<Generator> generator) {
+  return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
+}
+
+Tensor & softplus_out(Tensor& result, const Tensor& self, Scalar beta, Scalar threshold) {
+  auto iter = TensorIterator::unary_op(result, self);
+  softplus_stub(iter.device_type(), iter, beta, threshold);
+  return result;
+}
+
+Tensor softplus(const Tensor& self, Scalar beta, Scalar threshold) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, self);
+  softplus_stub(iter.device_type(), iter, beta, threshold);
+  return iter.output();
+}
+
+Tensor & softplus_backward_out(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    const Tensor& self,
+    Scalar beta,
+    Scalar threshold,
+    const Tensor& output) {
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
+  softplus_backward_stub(iter.device_type(), iter, beta, threshold);
+  return grad_input;
+}
+
+Tensor softplus_backward(
+    const Tensor& grad_output,
+    const Tensor& self,
+    Scalar beta,
+    Scalar threshold,
+    const Tensor& output) {
+  Tensor grad_input;
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
+  softplus_backward_stub(iter.device_type(), iter, beta, threshold);
+  return iter.output();
 }
 
 // computes `result = self <= threshold ? value : other`
@@ -152,7 +431,7 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
   TORCH_CHECK(weight.is_contiguous());
 
   int64_t weight_num = weight.numel();
-  Tensor result = at::empty_like(input);
+  Tensor result = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto strides = input.strides();
 
   // case1: shared weight for all channels
@@ -284,9 +563,9 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
   auto strides = input.strides();
   auto dims = input.dim();
 
-  Tensor input_grad = at::empty_like(input);
-  Tensor weight_grad = at::empty_like(weight);
-  Tensor weight_grad_collector = at::empty_like(input);
+  Tensor input_grad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor weight_grad = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor weight_grad_collector = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   // case1: shared parameter for all channels
   if (weight_num == 1) {
@@ -337,45 +616,171 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
 // -----------------------------------
 // hardshrink
 // -----------------------------------
-Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
-  auto out_tensor = at::empty_like(self);
+Tensor hardshrink(const Tensor & self, Scalar lambd) {
+  auto out_tensor = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto iter = TensorIterator::unary_op(out_tensor, self);
-  hardshrink_cpu_stub(kCPU, iter, lambd);
+  hardshrink_stub(iter.device_type(), iter, lambd);
   return out_tensor;
 }
 
-Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar lambd) {
-  auto out_tensor = at::empty_like(self);
+Tensor hardshrink_backward(const Tensor & grad, const Tensor & self, Scalar lambd) {
+  auto out_tensor = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto iter = TensorIterator::binary_op(out_tensor, grad, self);
-  hardshrink_backward_cpu_stub(kCPU, iter, lambd);
+  shrink_backward_stub(iter.device_type(), iter, lambd);
   return out_tensor;
 }
 
+static inline void softshrink_check(Scalar lambd) {
+  double lamb = lambd.to<double>();
+  TORCH_CHECK(lamb >= 0, "lambda must be greater or equal to 0, but found to be ", lamb, ".");
+}
+
+Tensor& softshrink_out(Tensor& result, const Tensor & self, Scalar lambd) {
+  softshrink_check(lambd);
+  auto iter = TensorIterator::unary_op(result, self);
+  softshrink_stub(iter.device_type(), iter, lambd);
+  return result;
+}
+
+Tensor softshrink(const Tensor & self, Scalar lambd) {
+  softshrink_check(lambd);
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, self);
+  softshrink_stub(iter.device_type(), iter, lambd);
+  return iter.output();
+}
+
+Tensor& softshrink_backward_out(Tensor& grad_input, const Tensor & grad, const Tensor & self, Scalar lambd) {
+  auto iter = TensorIterator::binary_op(grad_input, grad, self);
+  shrink_backward_stub(iter.device_type(), iter, lambd);
+  return grad_input;
+}
+
+Tensor softshrink_backward(const Tensor & grad, const Tensor & self, Scalar lambd) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, grad, self);
+  shrink_backward_stub(iter.device_type(), iter, lambd);
+  return iter.output();
+}
 
 Tensor gelu_cpu(const Tensor& self) {
-  const auto X = self.contiguous();
-  Tensor Y = at::native::empty_like(X);
-  GeluKernel(kCPU, X, &Y);
-  return Y;
-}
-
-Tensor gelu_cuda(const Tensor& self) {
-  Tensor Y = at::native::empty_like(self);
-  GeluKernel(kCUDA, self, &Y);
+  Tensor Y = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto it = TensorIterator::unary_op(Y, self);
+  GeluKernel(kCPU, it);
   return Y;
 }
 
 Tensor gelu_backward_cpu(const Tensor& grad, const Tensor& self) {
-  const auto X = self.contiguous();
-  Tensor dX = at::native::empty_like(X);
-  GeluBackwardKernel(kCPU, grad.contiguous(), X, &dX);
+  Tensor dX = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto it = TensorIterator::binary_op(dX, grad, self);
+  GeluBackwardKernel(kCPU, it);
   return dX;
 }
 
-Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
-  Tensor dX = at::native::empty_like(self);
-  GeluBackwardKernel(kCUDA, grad, self, &dX);
-  return dX;
+Tensor& leaky_relu_out(
+    Tensor& result,
+    const Tensor& self,
+    Scalar negval) {
+  auto iter = TensorIterator::unary_op(result, self);
+  leaky_relu_stub(iter.device_type(), iter, negval);
+  return result;
+}
+
+Tensor leaky_relu(
+    const Tensor& self,
+    Scalar negval) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, self);
+  leaky_relu_stub(iter.device_type(), iter, negval);
+  return iter.output();
+}
+
+Tensor & leaky_relu_(
+    Tensor & self,
+    Scalar neg_val) {
+  return at::leaky_relu_out(self, self, neg_val);
+}
+
+// Note: leakyReLu backward calculation doesn't support in-place call with negative slope.
+// The reason is that for in-place forward call, the forward result will be saved into autograd
+// node instead of the input itself, when calculating backward gradient, there is no way to know
+// whether the original input for current node is positive or not if the input slope is
+// negative. eg. forward is 2, slope is -0.2, the original input for this node could be
+// either 2, or -10, so no way to get a correct backward gradient in this case.
+Tensor leaky_relu_backward(
+    const Tensor& grad_output,
+    const Tensor& self_or_result,
+    Scalar negval,
+    bool is_result) {
+  TORCH_CHECK(
+    !is_result || negval.to<double>() >= 0.0,
+    "In-place leakyReLu backward calculation is triggered with a negative slope which is not supported. "
+    "This is caused by calling in-place forward function with a negative slope, "
+    "please call out-of-place version instead. File an issue at https://github.com/pytorch/pytorch if you do "
+    "require supporting in-place leakRelu backward calculation with negative slope");
+
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self_or_result, grad_output);
+  leaky_relu_backward_stub(iter.device_type(), iter, negval);
+  return iter.output();
+}
+
+std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
+  // FIXME: do these actually need to be zeros_like or can they be empty_like?
+  auto result = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  auto buffer = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  log_sigmoid_cpu_stub(kCPU, result, buffer, input.contiguous());
+  return std::make_tuple(result, buffer);
+}
+
+std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(Tensor& result, Tensor& buffer, const Tensor& input) {
+  result.resize_as_(input);
+  buffer.resize_as_(input, at::MemoryFormat::Contiguous);
+  TORCH_CHECK(buffer.is_contiguous(), "Contiguous buffer required for log_sigmoid with out parameter");
+  Tensor result_tmp = result.is_contiguous() ? result : at::empty_like(result, at::MemoryFormat::Contiguous);
+  log_sigmoid_cpu_stub(kCPU, result_tmp, buffer, input.contiguous());
+  if (!result.is_contiguous()) {
+    result.copy_(result_tmp);
+  }
+  return std::forward_as_tuple(result, buffer);
+}
+
+Tensor & log_sigmoid_out(Tensor & output, const Tensor & self) {
+  Tensor buffer = at::empty({0}, self.options());
+  return std::get<0>(at::log_sigmoid_forward_out(output, buffer, self));
+}
+
+Tensor log_sigmoid(const Tensor & self) {
+  return std::get<0>(at::log_sigmoid_forward(self));
+}
+
+Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
+  Tensor grad_input;
+  auto iter = at::TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(grad_input);
+  iter.add_input(input);
+  iter.add_input(buffer);
+  iter.add_input(grad_output);
+  iter.build();
+  log_sigmoid_backward_cpu_stub(kCPU, iter);
+  return iter.output();
+}
+
+Tensor& log_sigmoid_backward_out_cpu(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& buffer) {
+  auto iter = at::TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(grad_input);
+  iter.add_input(input);
+  iter.add_input(buffer);
+  iter.add_input(grad_output);
+  iter.build();
+  log_sigmoid_backward_cpu_stub(kCPU, iter);
+  return grad_input;
 }
 
 DEFINE_DISPATCH(GeluKernel);

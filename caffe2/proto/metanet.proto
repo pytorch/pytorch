@@ -42,4 +42,7 @@ message MetaNetDef {
   optional ModelInfo modelInfo = 3;
   repeated PlansMap plans = 4;
   repeated StringMap applicationSpecificInfo = 5;
+  repeated string blobsOrder = 6;
+  repeated string preLoadBlobs = 7;
+  optional TensorBoundShapes tensorBoundShapes = 8;
 }

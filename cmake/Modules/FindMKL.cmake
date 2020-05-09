@@ -29,11 +29,27 @@ SET(MKL_CDFT_LIBRARIES)
 INCLUDE(CheckTypeSize)
 INCLUDE(CheckFunctionExists)
 
+# Set default value of INTEL_COMPILER_DIR and INTEL_MKL_DIR
+IF (WIN32)
+  IF(DEFINED ENV{MKLProductDir})
+    SET(DEFAULT_INTEL_COMPILER_DIR $ENV{MKLProductDir})
+  ELSE()
+    SET(DEFAULT_INTEL_COMPILER_DIR
+     "C:/Program Files (x86)/IntelSWTools/compilers_and_libraries/windows")
+  ENDIF()
+  SET(DEFAULT_INTEL_MKL_DIR "${INTEL_COMPILER_DIR}/mkl")
+ELSE (WIN32)
+  SET(DEFAULT_INTEL_COMPILER_DIR "/opt/intel")
+  SET(DEFAULT_INTEL_MKL_DIR "/opt/intel/mkl")
+ENDIF (WIN32)
+
 # Intel Compiler Suite
-SET(INTEL_COMPILER_DIR "/opt/intel" CACHE STRING
+SET(INTEL_COMPILER_DIR "${DEFAULT_INTEL_COMPILER_DIR}" CACHE STRING
   "Root directory of the Intel Compiler Suite (contains ipp, mkl, etc.)")
-SET(INTEL_MKL_DIR "/opt/intel/mkl" CACHE STRING
+SET(INTEL_MKL_DIR "${DEFAULT_INTEL_MKL_DIR}" CACHE STRING
   "Root directory of the Intel MKL (standalone)")
+SET(INTEL_OMP_DIR "${DEFAULT_INTEL_MKL_DIR}" CACHE STRING
+  "Root directory of the Intel OpenMP (standalone)")
 SET(MKL_THREADING "OMP" CACHE STRING "MKL flavor: SEQ, TBB or OMP (default)")
 
 IF (NOT "${MKL_THREADING}" STREQUAL "SEQ" AND
@@ -90,13 +106,6 @@ SET(mklseq)
 SET(saved_CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH})
 SET(saved_CMAKE_INCLUDE_PATH ${CMAKE_INCLUDE_PATH})
 IF(WIN32)
-  # Set default MKLRoot for Windows
-  IF($ENV{MKLProductDir})
-    SET(INTEL_COMPILER_DIR $ENV{MKLProductDir})
-  ELSE()
-    SET(INTEL_COMPILER_DIR
-     "C:/Program Files (x86)/IntelSWTools/compilers_and_libraries/windows")
-  ENDIF()
   # Change mklvers and iccvers when we are using MSVC instead of ICC
   IF(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
     SET(mklvers "${mklvers}_win")
@@ -111,6 +120,10 @@ IF (EXISTS ${INTEL_COMPILER_DIR})
     SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
       "${INTEL_COMPILER_DIR}/compiler/lib/${iccvers}")
   ENDIF()
+  IF (APPLE)
+    SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
+      "${INTEL_COMPILER_DIR}/lib")
+  ENDIF()
   IF (NOT EXISTS ${INTEL_MKL_DIR})
     SET(INTEL_MKL_DIR "${INTEL_COMPILER_DIR}/mkl")
   ENDIF()
@@ -124,6 +137,34 @@ IF (EXISTS ${INTEL_MKL_DIR})
   IF (MSVC)
     SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
       "${INTEL_MKL_DIR}/lib/${iccvers}")
+    IF ("${SIZE_OF_VOIDP}" EQUAL 8)
+      SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
+        "${INTEL_MKL_DIR}/win-x64")
+    ENDIF ()
+  ENDIF()
+  IF (APPLE)
+    SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
+      "${INTEL_MKL_DIR}/lib")
+  ENDIF()
+ENDIF()
+
+IF (EXISTS ${INTEL_OMP_DIR})
+  # TODO: diagnostic if dir does not exist
+  SET(CMAKE_INCLUDE_PATH ${CMAKE_INCLUDE_PATH}
+    "${INTEL_OMP_DIR}/include")
+  SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
+    "${INTEL_OMP_DIR}/lib/${mklvers}")
+  IF (MSVC)
+    SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
+      "${INTEL_OMP_DIR}/lib/${iccvers}")
+    IF ("${SIZE_OF_VOIDP}" EQUAL 8)
+      SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
+        "${INTEL_OMP_DIR}/win-x64")
+    ENDIF ()
+  ENDIF()
+  IF (APPLE)
+    SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
+      "${INTEL_OMP_DIR}/lib")
   ENDIF()
 ENDIF()
 
@@ -197,7 +238,8 @@ MACRO(CHECK_ALL_LIBRARIES LIBRARIES OPENMP_TYPE OPENMP_LIBRARY _name _list _flag
         # Separately handling compiled TBB
         SET(_found_tbb TRUE)
       ELSE()
-        FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${_library})
+        SET(lib_names ${_library})
+        FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${lib_names})
       ENDIF()
       MARK_AS_ADVANCED(${_prefix}_${_library}_LIBRARY)
       IF(NOT (${_library} STREQUAL "tbb"))
@@ -333,20 +375,6 @@ IF (MKL_LIBRARIES)
   ENDFOREACH(mkl64)
 ENDIF (MKL_LIBRARIES)
 
-# LibIRC: intel compiler always links this;
-# gcc does not; but mkl kernels sometimes need it.
-IF (MKL_LIBRARIES)
-  IF (CMAKE_COMPILER_IS_GNUCC)
-    FIND_LIBRARY(MKL_KERNEL_libirc "irc")
-  ELSEIF (CMAKE_C_COMPILER_ID AND NOT CMAKE_C_COMPILER_ID STREQUAL "Intel")
-    FIND_LIBRARY(MKL_KERNEL_libirc "irc")
-  ENDIF (CMAKE_COMPILER_IS_GNUCC)
-  MARK_AS_ADVANCED(MKL_KERNEL_libirc)
-  IF (MKL_KERNEL_libirc)
-    SET(MKL_LIBRARIES ${MKL_LIBRARIES} ${MKL_KERNEL_libirc})
-  ENDIF (MKL_KERNEL_libirc)
-ENDIF (MKL_LIBRARIES)
-
 # Final
 SET(CMAKE_LIBRARY_PATH ${saved_CMAKE_LIBRARY_PATH})
 SET(CMAKE_INCLUDE_PATH ${saved_CMAKE_INCLUDE_PATH})
@@ -367,7 +395,8 @@ ENDIF (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
 
 # Standard termination
 IF(NOT MKL_FOUND AND MKL_FIND_REQUIRED)
-  MESSAGE(FATAL_ERROR "MKL library not found. Please specify library location")
+  MESSAGE(FATAL_ERROR "MKL library not found. Please specify library location \
+    by appending the root directory of the MKL installation to the environment variable CMAKE_PREFIX_PATH.")
 ENDIF(NOT MKL_FOUND AND MKL_FIND_REQUIRED)
 IF(NOT MKL_FIND_QUIETLY)
   IF(MKL_FOUND)

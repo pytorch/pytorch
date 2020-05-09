@@ -7,7 +7,8 @@
 
 // See Note [hip-clang differences to hcc]
 
-#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__) || \
+    (defined(__clang__) && defined(__CUDA__))
 #define FIXED_DIVISOR_DECL inline __host__ __device__
 #else
 #define FIXED_DIVISOR_DECL inline

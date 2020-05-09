@@ -9,8 +9,8 @@
 #include <THC/THCDeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 #elif defined(__HIPCC__)
-#include <THH/THHDeviceUtils.cuh>
-#include <ATen/native/hip/DeviceSqrt.cuh>
+#include <aten/src/THH/THHDeviceUtils.cuh>
+#include <aten/src/ATen/native/hip/DeviceSqrt.cuh>
 #endif
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #include <thrust/tuple.h>
@@ -23,14 +23,17 @@
 #define MAX(X, Y) ::max(X,Y)
 #define MIN(X, Y) ::min(X,Y)
 #else
-#define MAX(X, Y) std::max(X,Y)
-#define MIN(X, Y) std::min(X,Y)
+#define MAX(X, Y) max_impl(X,Y)
+#define MIN(X, Y) min_impl(X,Y)
 #endif
 
 // ROCM hcc doesn't work well with using std:: in kernel functions
-#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
+#if defined(__CUDA_ARCH__)
 #include <c10/cuda/CUDAMathCompat.h>
 #define compat_pow c10::cuda::compat::pow
+#elif defined(__HIPCC__)
+#include <c10/hip/HIPMathCompat.h>
+#define compat_pow c10::hip::compat::pow
 #else
 #define compat_pow std::pow
 #endif
@@ -99,6 +102,11 @@ struct WelfordOps {
 #endif
     return results;
   }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline __device__ acc_t warp_shfl_down(acc_t acc, int offset) const {
     return {
@@ -130,6 +138,10 @@ struct MeanOps {
     return a * factor;
   }
 
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
     return WARP_SHFL_DOWN(data, offset);
@@ -144,7 +156,7 @@ template <typename acc_t>
 struct AbsMinOps {
 
   inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
-    return MIN(acc, std::abs(data));
+    return MIN(acc, acc_t(std::abs(data)));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -153,6 +165,10 @@ struct AbsMinOps {
 
   inline C10_DEVICE acc_t project(acc_t a) const {
     return a;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -166,7 +182,7 @@ template <typename acc_t>
 struct AbsMaxOps {
 
   inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
-    return MAX(acc, std::abs(data));
+    return MAX(acc, acc_t(std::abs(data)));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -175,6 +191,10 @@ struct AbsMaxOps {
 
   inline C10_DEVICE acc_t project(acc_t a) const {
     return a;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -186,10 +206,10 @@ struct AbsMaxOps {
 
 template <typename acc_t>
 struct NormOps {
-  acc_t norm;
+  acc_t norm_;
 
   inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
-    return acc + compat_pow(std::abs(data), norm);
+    return acc + compat_pow(std::abs(data), norm_);
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -197,7 +217,11 @@ struct NormOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a) const {
-    return compat_pow(a, acc_t(1.0)/norm);
+    return compat_pow(a, acc_t(1.0)/norm_);
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -206,7 +230,7 @@ struct NormOps {
   }
 #endif
 
-  NormOps(acc_t norm): norm(norm) {
+  NormOps(acc_t norm_): norm_(norm_) {
   }
 };
 
@@ -223,6 +247,11 @@ struct NormZeroOps {
   inline C10_DEVICE acc_t project(acc_t a) const {
     return a;
   }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
@@ -243,6 +272,35 @@ struct NormOneOps {
 
   inline C10_DEVICE acc_t project(acc_t a) const {
     return a;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
+    return WARP_SHFL_DOWN(data, offset);
+  }
+#endif
+};
+
+template <typename acc_t>
+struct NormTwoOps {
+  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
+    return acc + data * data;
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return a + b;
+  }
+
+  inline C10_DEVICE acc_t project(acc_t a) const {
+    return device_sqrt(a);
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -290,6 +348,10 @@ struct ArgReductionOps {
 
   static C10_DEVICE arg_t combine(arg_t a, arg_t b) {
     return comp_t{}(a.first, b.first) ? a : b;
+  }
+
+  static C10_DEVICE arg_t translate_idx(arg_t a, int64_t base_idx) {
+    return {a.first, a.second + base_idx};
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)

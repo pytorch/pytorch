@@ -74,7 +74,7 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
         in_block_size,
         outputSize,
         indices_size,
-        N, // embeding table length
+        N, // embedding table length
         input_data,
         indices,
         lengths,

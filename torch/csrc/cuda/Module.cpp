@@ -1,5 +1,3 @@
-#include <torch/csrc/python_headers.h>
-
 #include <array>
 #include <unordered_map>
 #include <thread>
@@ -8,26 +6,49 @@
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #ifdef USE_NCCL
-#include <nccl.h>
+#include <torch/csrc/cuda/python_nccl.h>
 #endif
 
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/cuda/python_comm.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/Generator.h>
+#include <torch/csrc/python_headers.h>
+
+#ifndef WIN32
+#include <pthread.h>
+#endif
 
 using namespace torch;
 
-THCState *state;
+THCState *state = nullptr;
+static bool in_bad_fork = false;  // True for children forked after cuda init
+
+#ifndef WIN32
+// Called in the forked child if cuda has already been initialized
+static void forked_child() {
+  in_bad_fork = true;
+  torch::utils::set_run_yet_variable_to_false();
+  state = nullptr;
+}
+#endif
+
+// Should be called before the first cuda call.
+// Note: This is distinct from initExtension because a stub cuda implementation
+// has some working functions (e.g. device_count) but cannot fully initialize.
+static void poison_fork() {
+#ifndef WIN32
+  static std::once_flag flag;
+  std::call_once(flag, []{ pthread_atfork(nullptr, nullptr, forked_child); });
+#endif
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA management methods
@@ -64,16 +85,14 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs)
 PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  //torch::utils::cuda_lazy_init();
+  poison_fork();
   return PyLong_FromLong(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_set_run_yet_variable_to_false_wrap(PyObject *self, PyObject *noargs)
-{
+static PyObject * THCPModule_isInBadFork(PyObject *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
-  torch::utils::set_run_yet_variable_to_false();
-  Py_RETURN_NONE;
+  return PyBool_FromLong(in_bad_fork);
   END_HANDLE_TH_ERRORS
 }
 
@@ -154,6 +173,34 @@ PyObject * THCPModule_cudaHostAllocator(PyObject *_unused, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_cudaCachingAllocator_raw_alloc(PyObject *_unused, PyObject *args){
+  HANDLE_TH_ERRORS
+  PyObject* size_o = nullptr;
+  PyObject* stream_o = nullptr;
+  if(!PyArg_ParseTuple(args, "OO", &size_o, &stream_o)) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "caching_allocator_alloc",
+        1,
+        "(ssize_t size, intptr_t stream);");
+    return nullptr;
+  }
+  ssize_t size = PyLong_AsSsize_t(size_o);
+  cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
+  void* mem = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
+  return PyLong_FromVoidPtr(mem);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_cudaCachingAllocator_raw_delete(PyObject *_unused, PyObject *obj){
+  HANDLE_TH_ERRORS
+  void* mem_ptr = PyLong_AsVoidPtr(obj);
+  c10::cuda::CUDACachingAllocator::raw_delete(mem_ptr);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject * THCPModule_cudaSynchronize(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
@@ -198,7 +245,7 @@ PyObject * THCPModule_cudaLockMutex(PyObject *module, PyObject *noargs)
     if (mutex->try_lock())
       break;
     {
-      AutoNoGIL no_gil;
+      pybind11::gil_scoped_release no_gil;
       std::this_thread::sleep_for(std::chrono::microseconds(10));
     }
   }
@@ -376,6 +423,8 @@ static void bindCudaDeviceProperties(PyObject* module) {
 static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  TORCH_INTERNAL_ASSERT(!in_bad_fork);  // Handled at python level
+  poison_fork();
   state = at::globalContext().lazyInitCUDA();
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
@@ -392,6 +441,8 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   THCPByteStorage_postInit(m);
   THCPBoolStorage_postInit(m);
   THCPBFloat16Storage_postInit(m);
+  THCPComplexDoubleStorage_postInit(m);
+  THCPComplexFloatStorage_postInit(m);
 
   bool has_half = true;
 
@@ -425,21 +476,10 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
-#ifdef USE_NCCL
-#include <torch/csrc/cuda/python_nccl.h>
-
-void THCPModule_useNccl()
-{
-  // Use NCCL to ensure that the symbols are loaded
-  ncclUniqueId uniqueId;
-  ncclGetUniqueId(&uniqueId);
-}
-#endif
-
 PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   return PyLong_FromVoidPtr(handle);
   END_HANDLE_TH_ERRORS
 }
@@ -449,8 +489,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       nullptr},
   {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  nullptr},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, nullptr},
-  {"_cuda_set_run_yet_variable_to_false",
-    (PyCFunction)THCPModule_set_run_yet_variable_to_false_wrap, METH_NOARGS, nullptr},
+  {"_cuda_isInBadFork", (PyCFunction)THCPModule_isInBadFork, METH_NOARGS, nullptr},
   {"_cuda_getCurrentStream",
     (PyCFunction)THCPModule_getCurrentStream_wrap, METH_O, nullptr},
   {"_cuda_getDefaultStream",
@@ -467,6 +506,8 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_resetPeakMemoryStats", (PyCFunction) THCPModule_resetPeakMemoryStats, METH_O,  nullptr},
   {"_cuda_memorySnapshot", (PyCFunction) THCPModule_memorySnapshot, METH_NOARGS, nullptr},
   {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, nullptr},
+  {"_cuda_cudaCachingAllocator_raw_alloc", (PyCFunction)THCPModule_cudaCachingAllocator_raw_alloc, METH_VARARGS, nullptr},
+  {"_cuda_cudaCachingAllocator_raw_delete", (PyCFunction)THCPModule_cudaCachingAllocator_raw_delete, METH_O, nullptr},
   {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
   {"_cuda_ipc_collect", (PyCFunction)THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
   {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, nullptr},
@@ -491,8 +532,25 @@ PyMethodDef* THCPModule_methods() {
 
 namespace torch { namespace cuda {
 
+namespace shared {
+
+void initCudartBindings(PyObject* module);
+void initNvtxBindings(PyObject* module);
+#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
+void initCudnnBindings(PyObject* module);
+#endif
+
+} // namespace shared
+
 void initModule(PyObject *module) {
   python::initCommMethods(module);
+  // As weird as it seems, this file is also compiled for ROCm,
+  // so this condition might not always be true...
+  shared::initCudartBindings(module);
+  shared::initNvtxBindings(module);
+#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
+  shared::initCudnnBindings(module);
+#endif
 }
 
 }}

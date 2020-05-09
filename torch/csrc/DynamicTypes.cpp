@@ -32,7 +32,7 @@ THPDtype* dtype_registry
   [static_cast<int>(at::ScalarType::NumOptions)] = {};
 
 THPLayout* layout_registry
-  [static_cast<int>(at::Backend::NumOptions)] = {};
+  [static_cast<int>(at::Layout::NumOptions)] = {};
 
 at::Backend get_backend(bool is_cuda, bool is_sparse) {
   if (is_cuda) {
@@ -54,15 +54,15 @@ at::DeprecatedTypeProperties* get_type(at::Backend backend, at::ScalarType scala
   if (isSparse(backend) && scalarType == at::kHalf) {
     return nullptr;
   }
-  return &at::getNonVariableDeprecatedTypeProperties(backend, scalarType);
+  return &at::getDeprecatedTypeProperties(backend, scalarType);
 }
 
 PyTypeObject* getPyTypeObject(const at::Storage& storage)
 {
   at::ScalarType scalarType = at::typeMetaToScalarType(storage.dtype());
   at::TensorOptions options = at::TensorOptions(storage.device_type()).dtype(scalarType);
-  auto attype = &at::getNonVariableDeprecatedTypeProperties(
-      at::tensorTypeIdToBackend(at::computeTensorTypeId(options)),
+  auto attype = &at::getDeprecatedTypeProperties(
+      at::dispatchKeyToBackend(at::computeDispatchKey(options)),
       scalarType);
   auto it = attype_to_py_storage_type.find(attype);
   if (it != attype_to_py_storage_type.end()) {
@@ -84,11 +84,11 @@ void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType) {
   dtype_registry[static_cast<int>(scalarType)] = dtype;
 }
 
-void registerLayoutObject(THPLayout *layout, at::Backend backend) {
-  layout_registry[static_cast<int>(backend)] = layout;
+void registerLayoutObject(THPLayout *thp_layout, at::Layout layout) {
+  layout_registry[static_cast<int>(layout)] = thp_layout;
 }
 
-THPDtype* getDtype(at::ScalarType scalarType) {
+THPDtype* getTHPDtype(at::ScalarType scalarType) {
   auto dtype = dtype_registry[static_cast<int>(scalarType)];
   if (!dtype) {
     throw std::invalid_argument("unsupported scalarType");
@@ -96,12 +96,12 @@ THPDtype* getDtype(at::ScalarType scalarType) {
   return dtype;
 }
 
-THPLayout* getLayout(at::Backend backend) {
-  auto layout = layout_registry[static_cast<int>(backend)];
-  if (!layout) {
-    throw std::invalid_argument("unsupported at::Backend");
+THPLayout* getTHPLayout(at::Layout layout) {
+  auto thp_layout = layout_registry[static_cast<int>(layout)];
+  if (!thp_layout) {
+    throw std::invalid_argument("unsupported at::Layout");
   }
-  return layout;
+  return thp_layout;
 }
 
 PyObject* createPyObject(const at::Storage& storage)

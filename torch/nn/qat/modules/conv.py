@@ -1,8 +1,8 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-from torch.nn import Conv2d as NNConv2d
+import torch.nn as nn
 from torch.nn.intrinsic import ConvReLU2d
 
-class Conv2d(NNConv2d):
+class Conv2d(nn.Conv2d):
     r"""
     A Conv2d module attached with FakeQuantize modules for both output
     activation and weight, used for quantization aware training.
@@ -15,11 +15,10 @@ class Conv2d(NNConv2d):
     default.
 
     Attributes:
-        observer: fake quant module for output activation, it's called observer
-            to align with post training flow
+        activation_post_process: fake quant module for output activation
         weight_fake_quant: fake quant module for weight
     """
-    _FLOAT_MODULE = NNConv2d
+    _FLOAT_MODULE = nn.Conv2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
@@ -29,12 +28,12 @@ class Conv2d(NNConv2d):
                                      groups=groups, bias=bias, padding_mode=padding_mode)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
-        self.observer = qconfig.activation()
+        self.activation_post_process = qconfig.activation()
         self.weight_fake_quant = qconfig.weight()
 
     def forward(self, input):
-        return self.observer(
-            self.conv2d_forward(input, self.weight_fake_quant(self.weight)))
+        return self.activation_post_process(
+            self._conv_forward(input, self.weight_fake_quant(self.weight)))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):

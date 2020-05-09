@@ -2,17 +2,14 @@
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/qualified_name.h>
-#include <torch/csrc/jit/import_source.h>
-#include <torch/csrc/jit/script/resolver.h>
+#include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/torch.h>
 
 namespace torch {
 namespace jit {
 
-using namespace torch::jit::script;
-
 static const auto classSrcs1 = R"JIT(
-op_version_set = 1
 class FooNestedTest:
     def __init__(self, y):
         self.y = y
@@ -30,7 +27,6 @@ class FooTest:
 )JIT";
 
 static const auto classSrcs2 = R"JIT(
-op_version_set = 1
 class FooTest:
     def __init__(self, x):
       self.dx = x
@@ -44,10 +40,9 @@ static void import_libs(
   SourceImporter si(
       cu,
       &tensor_table,
-      [&](const std::string& name) -> std::shared_ptr<Source> {
-        return src;
-      });
-  si.loadNamedType(QualifiedName(class_name));
+      [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
+      /*version=*/2);
+  si.loadType(QualifiedName(class_name));
 }
 
 void testClassImport() {
@@ -90,12 +85,12 @@ void testScriptObject() {
   Module m2("m2");
   std::vector<at::Tensor> constantTable;
   import_libs(
-      m1.class_compilation_unit(),
+      m1._ivalue()->compilation_unit(),
       "__torch__.FooTest",
       std::make_shared<Source>(classSrcs1),
       constantTable);
   import_libs(
-      m2.class_compilation_unit(),
+      m2._ivalue()->compilation_unit(),
       "__torch__.FooTest",
       std::make_shared<Source>(classSrcs2),
       constantTable);
@@ -126,17 +121,36 @@ void testClassDerive() {
   auto methods = cu->define("foo.bar", methodSrc, nativeResolver(), &self);
   auto method = methods[0];
   cls->addAttribute("attr", TensorType::get());
-  cls->addMethod(method);
-  ASSERT_TRUE(cls->getMethod(method->name()));
+  ASSERT_TRUE(cls->findMethod(method->name()));
 
   // Refining a new class should retain attributes and methods
   auto newCls = cls->refine({TensorType::get()});
   ASSERT_TRUE(newCls->hasAttribute("attr"));
-  ASSERT_TRUE(newCls->getMethod(method->name()));
+  ASSERT_TRUE(newCls->findMethod(method->name()));
 
   auto newCls2 = cls->withContained({TensorType::get()})->expect<ClassType>();
   ASSERT_TRUE(newCls2->hasAttribute("attr"));
-  ASSERT_TRUE(newCls2->getMethod(method->name()));
+  ASSERT_TRUE(newCls2->findMethod(method->name()));
+}
+
+static const auto torchbindSrc = R"JIT(
+class FooBar1234(Module):
+  __parameters__ = []
+  f : __torch__.torch.classes._TorchScriptTesting._StackString
+  training : bool
+  def forward(self: __torch__.FooBar1234) -> str:
+    return (self.f).top()
+)JIT";
+
+void testSaveLoadTorchbind() {
+  auto cu1 = std::make_shared<CompilationUnit>();
+  std::vector<at::Tensor> constantTable;
+  // Import different versions of FooTest into two namespaces.
+  import_libs(
+      cu1,
+      "__torch__.FooBar1234",
+      std::make_shared<Source>(torchbindSrc),
+      constantTable);
 }
 
 } // namespace jit

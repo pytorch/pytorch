@@ -4,14 +4,6 @@ set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-# TODO: Migrate all centos jobs to use proper devtoolset
-if [[ "$BUILD_ENVIRONMENT" == *py2-cuda9.0-cudnn7-centos7* ]]; then
-  # There is a bug in pango packge on Centos7 that causes undefined
-  # symbols, upgrading glib2 to >=2.56.1 solves the issue. See
-  # https://bugs.centos.org/view.php?id=15495
-  sudo yum install -y -q glib2-2.56.1
-fi
-
 # CMAKE_ARGS are only passed to 'cmake' and the -Dfoo=bar does not work with
 # setup.py, so we build a list of foo=bars and then either convert it to
 # -Dfoo=bars or export them before running setup.py
@@ -112,7 +104,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   build_args+=("BUILD_TEST=ON")
   build_args+=("USE_OBSERVERS=ON")
   build_args+=("USE_ZSTD=ON")
-  "${ROOT_DIR}/scripts/build_android.sh" $(build_to_cmake ${build_args[@]}) "$@"
+  BUILD_CAFFE2_MOBILE=1 "${ROOT_DIR}/scripts/build_android.sh" $(build_to_cmake ${build_args[@]}) "$@"
   exit 0
 fi
 
@@ -138,7 +130,7 @@ if [[ $BUILD_ENVIRONMENT == *py2-cuda9.0-cudnn7-ubuntu16.04* ]]; then
   # removing http:// duplicate in favor of nvidia-ml.list
   # which is https:// version of the same repo
   sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
-  curl -o ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+  curl --retry 3 -o ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
   sudo dpkg -i ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
   sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
   sudo apt-get -qq update
@@ -169,7 +161,6 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   export PATH="/usr/local/cuda/bin:$PATH"
 fi
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
-  build_args+=("USE_ROCM=ON")
   # This is needed to enable ImageInput operator in resnet50_trainer
   build_args+=("USE_OPENCV=ON")
   # This is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
@@ -184,18 +175,12 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_amd.py"
 fi
 
-# building bundled nccl in this config triggers a bug in nvlink. For
-# more, see https://github.com/pytorch/pytorch/issues/14486
-if [[ "${BUILD_ENVIRONMENT}" == *-cuda8*-cudnn7* ]]; then
-    build_args+=("USE_SYSTEM_NCCL=ON")
-fi
-
 # Try to include Redis support for Linux builds
 if [ "$(uname)" == "Linux" ]; then
   build_args+=("USE_REDIS=ON")
 fi
 
-# Use a speciallized onnx namespace in CI to catch hardcoded onnx namespace
+# Use a specialized onnx namespace in CI to catch hardcoded onnx namespace
 build_args+=("ONNX_NAMESPACE=ONNX_NAMESPACE_FOR_C2_CI")
 
 ###############################################################################

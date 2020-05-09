@@ -16,7 +16,10 @@ Currently implemented and planned for implementation operators are below:
 - [x] 2D Average Pooling
 - [x] Global Average Pooling
 - [x] Sigmoid
+- [x] TanH
 - [x] Leaky ReLU
+- [x] Hardsigmoid
+- [x] Hardswish
 - [x] Clamp (can be used for ReLU, ReLU6 if it is not fused in another operator)
 - [x] SoftArgMax (aka SoftMax)
 - [ ] Group Normalization

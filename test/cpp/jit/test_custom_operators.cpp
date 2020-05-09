@@ -1,10 +1,10 @@
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 
-#include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/jit/irparser.h"
-#include "torch/csrc/jit/passes/alias_analysis.h"
+#include "torch/csrc/jit/ir/alias_analysis.h"
+#include "torch/csrc/jit/ir/irparser.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
 #include "torch/jit.h"
 
 namespace torch {
@@ -12,7 +12,8 @@ namespace jit {
 
 void testCustomOperators() {
   {
-    torch::RegisterOperators reg("foo::bar", [](double a, at::Tensor b) { return a + b; });
+    torch::RegisterOperators reg(
+        "foo::bar", [](double a, at::Tensor b) { return a + b; });
     auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::bar"));
     ASSERT_EQ(ops.size(), 1);
 
@@ -28,15 +29,16 @@ void testCustomOperators() {
     ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
     Stack stack;
-    push(stack, 2.0f, autograd::make_variable(at::ones(5)));
+    push(stack, 2.0f, at::ones(5));
     op->getOperation()(stack);
     at::Tensor output;
     pop(stack, output);
 
-    ASSERT_TRUE(output.allclose(autograd::make_variable(at::full(5, 3.0f))));
+    ASSERT_TRUE(output.allclose(at::full(5, 3.0f)));
   }
   {
-    torch::RegisterOperators reg("foo::bar_with_schema(float a, Tensor b) -> Tensor",
+    torch::RegisterOperators reg(
+        "foo::bar_with_schema(float a, Tensor b) -> Tensor",
         [](double a, at::Tensor b) { return a + b; });
 
     auto& ops =
@@ -56,12 +58,12 @@ void testCustomOperators() {
     ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
     Stack stack;
-    push(stack, 2.0f, autograd::make_variable(at::ones(5)));
+    push(stack, 2.0f, at::ones(5));
     op->getOperation()(stack);
     at::Tensor output;
     pop(stack, output);
 
-    ASSERT_TRUE(output.allclose(autograd::make_variable(at::full(5, 3.0f))));
+    ASSERT_TRUE(output.allclose(at::full(5, 3.0f)));
   }
   {
     // Check that lists work well.
@@ -95,7 +97,7 @@ void testCustomOperators() {
     Stack stack;
     push(stack, c10::List<int64_t>({1, 2}));
     push(stack, c10::List<double>({1.0, 2.0}));
-    push(stack, c10::List<at::Tensor>({autograd::make_variable(at::ones(5))}));
+    push(stack, c10::List<at::Tensor>({at::ones(5)}));
     op->getOperation()(stack);
     c10::List<double> output;
     pop(stack, output);
@@ -125,13 +127,13 @@ void testCustomOperators() {
         op->schema().returns()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
     Stack stack;
-    push(stack, c10::List<at::Tensor>({autograd::make_variable(at::ones(5))}));
+    push(stack, c10::List<at::Tensor>({at::ones(5)}));
     op->getOperation()(stack);
     c10::List<at::Tensor> output;
     pop(stack, output);
 
     ASSERT_EQ(output.size(), 1);
-    ASSERT_TRUE(output.get(0).allclose(autograd::make_variable(at::ones(5))));
+    ASSERT_TRUE(output.get(0).allclose(at::ones(5)));
   }
 }
 
@@ -145,7 +147,7 @@ void testCustomOperatorAliasing() {
 
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%x: Tensor, %y: Tensor):
   %ret : Tensor = foo::aliasing(%x, %y)
@@ -172,7 +174,7 @@ graph(%x: Tensor, %y: Tensor):
   %ret : Tensor = foo::aliasing(%x, %y)
   return (%x)
   )IR";
-    script::parseIR(text, graph.get());
+    parseIR(text, graph.get());
     EliminateDeadCode(graph);
 
     testing::FileCheck().run(text, *graph);

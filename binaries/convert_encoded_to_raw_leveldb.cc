@@ -47,8 +47,6 @@ C10_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
 
 namespace caffe2 {
 
-using std::string;
-using std::unique_ptr;
 
 void ConvertToRawDataset(
     const string& input_db_name, const string& output_db_name) {

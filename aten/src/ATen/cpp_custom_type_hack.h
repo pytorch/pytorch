@@ -13,6 +13,13 @@ namespace at {
 namespace cpp_custom_type_hack {
 
 template <typename T>
+bool isa(const Tensor& packed) {
+  return (packed.scalar_type() == kByte) &&
+      (packed.storage().data_ptr().get_deleter() ==
+       caffe2::TypeMeta::Make<T>().deleteFn());
+}
+
+template <typename T>
 T& cast(const Tensor& packed) {
   TORCH_CHECK(
       packed.scalar_type() == kByte, "Expected temporary cpp type wrapper");
@@ -26,6 +33,9 @@ T& cast(const Tensor& packed) {
 
 template <typename T>
 Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
+  // None of this should trace, so turn off Variable handling
+  at::AutoNonVariableTypeMode guard;
+
   // We store this instance away in a Tensor and register a deleter function
   // so that we do not leak memory. On the other side, we pull out the storage's
   // data_ptr and get the right typed pointer.

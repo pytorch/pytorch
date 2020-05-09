@@ -2,14 +2,14 @@ import bisect
 import warnings
 
 from torch._utils import _accumulate
-from torch import randperm
+from torch import randperm, default_generator
 
 
 class Dataset(object):
     r"""An abstract class representing a :class:`Dataset`.
 
     All datasets that represent a map from keys to data samples should subclass
-    it. All subclasses should overrite :meth:`__getitem__`, supporting fetching a
+    it. All subclasses should overwrite :meth:`__getitem__`, supporting fetching a
     data sample for a given key. Subclasses could also optionally overwrite
     :meth:`__len__`, which is expected to return the size of the dataset by many
     :class:`~torch.utils.data.Sampler` implementations and the default options
@@ -38,7 +38,7 @@ class IterableDataset(Dataset):
     All datasets that represent an iterable of data samples should subclass it.
     Such form of datasets is particularly useful when data come from a stream.
 
-    All subclasses should overrite :meth:`__iter__`, which would return an
+    All subclasses should overwrite :meth:`__iter__`, which would return an
     iterator of samples in this dataset.
 
     When a subclass is used with :class:`~torch.utils.data.DataLoader`, each
@@ -260,16 +260,20 @@ class Subset(Dataset):
         return len(self.indices)
 
 
-def random_split(dataset, lengths):
+def random_split(dataset, lengths, generator=default_generator):
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
+    Optionally fix the generator for reproducible results, e.g.:
+
+    >>> random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(42))
 
     Arguments:
         dataset (Dataset): Dataset to be split
         lengths (sequence): lengths of splits to be produced
+        generator (Generator): Generator used for the random permutation.
     """
     if sum(lengths) != len(dataset):
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
-    indices = randperm(sum(lengths)).tolist()
-    return [Subset(dataset, indices[offset - length:offset]) for offset, length in zip(_accumulate(lengths), lengths)]
+    indices = randperm(sum(lengths), generator=generator).tolist()
+    return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(_accumulate(lengths), lengths)]

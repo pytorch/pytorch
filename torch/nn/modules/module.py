@@ -1,11 +1,11 @@
 from collections import OrderedDict, namedtuple
 import functools
 import itertools
+import warnings
 
 import torch
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
-
 
 class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])):
     def __repr__(self):
@@ -14,6 +14,14 @@ class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpec
         return super(_IncompatibleKeys, self).__repr__()
 
     __str__ = __repr__
+
+
+class ModuleAttributeError(AttributeError):
+    """ When `__getattr__` raises AttributeError inside a property,
+    AttributeError is raised with the property name instead of the
+    attribute that initially raised AttributeError, making the error
+    message uninformative. Using `ModuleAttributeError` instead
+    fixes this issue."""
 
 
 def _addindent(s_, numSpaces):
@@ -76,6 +84,7 @@ class Module(object):
         self.training = True
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
+        self._persistent_buffers_set = set()
         self._backward_hooks = OrderedDict()
         self._forward_hooks = OrderedDict()
         self._forward_pre_hooks = OrderedDict()
@@ -96,12 +105,17 @@ class Module(object):
         """
         raise NotImplementedError
 
-    def register_buffer(self, name, tensor):
-        r"""Adds a persistent buffer to the module.
+    def register_buffer(self, name, tensor, persistent=True):
+        r"""Adds a buffer to the module.
 
         This is typically used to register a buffer that should not to be
         considered a model parameter. For example, BatchNorm's ``running_mean``
-        is not a parameter, but is part of the persistent state.
+        is not a parameter, but is part of the module's state. Buffers, by
+        default, are persistent and will be saved alongside parameters. This
+        behavior can be changed by setting :attr:`persistent` to ``False``. The
+        only difference between a persistent buffer and a non-persistent buffer
+        is that the latter will not be a part of this module's
+        :attr:`state_dict`.
 
         Buffers can be accessed as attributes using given names.
 
@@ -109,6 +123,8 @@ class Module(object):
             name (string): name of the buffer. The buffer can be accessed
                 from this module using the given name
             tensor (Tensor): buffer to be registered.
+            persistent (bool): whether the buffer is part of this module's
+                :attr:`state_dict`.
 
         Example::
 
@@ -133,6 +149,10 @@ class Module(object):
                             .format(torch.typename(tensor), name))
         else:
             self._buffers[name] = tensor
+            if persistent:
+                self._persistent_buffers_set.add(name)
+            else:
+                self._persistent_buffers_set.discard(name)
 
     def register_parameter(self, name, param):
         r"""Adds a parameter to the module.
@@ -249,7 +269,7 @@ class Module(object):
     def apply(self, fn):
         r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
         as well as self. Typical use includes initializing the parameters of a model
-        (see also :ref:`torch-nn-init`).
+        (see also :ref:`nn-init-doc`).
 
         Args:
             fn (:class:`Module` -> None): function to be applied to each submodule
@@ -259,10 +279,11 @@ class Module(object):
 
         Example::
 
+            >>> @torch.no_grad()
             >>> def init_weights(m):
             >>>     print(m)
             >>>     if type(m) == nn.Linear:
-            >>>         m.weight.data.fill_(1.0)
+            >>>         m.weight.fill_(1.0)
             >>>         print(m.weight)
             >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
             >>> net.apply(init_weights)
@@ -347,6 +368,14 @@ class Module(object):
         """
         return self._apply(lambda t: t.half() if t.is_floating_point() else t)
 
+    def bfloat16(self):
+        r"""Casts all floating point parameters and buffers to ``bfloat16`` datatype.
+
+        Returns:
+            Module: self
+        """
+        return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
+
     def to(self, *args, **kwargs):
         r"""Moves and/or casts the parameters and buffers.
 
@@ -357,6 +386,8 @@ class Module(object):
         .. function:: to(dtype, non_blocking=False)
 
         .. function:: to(tensor, non_blocking=False)
+
+        .. function:: to(memory_format=torch.channels_last)
 
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
         floating point desired :attr:`dtype` s. In addition, this method will
@@ -379,6 +410,9 @@ class Module(object):
                 the floating point parameters and buffers in this module
             tensor (torch.Tensor): Tensor whose dtype and device are the desired
                 dtype and device for all parameters and buffers in this module
+            memory_format (:class:`torch.memory_format`): the desired memory
+                format for 4D parameters and buffers in this module (keyword
+                only argument)
 
         Returns:
             Module: self
@@ -413,7 +447,7 @@ class Module(object):
 
         """
 
-        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
+        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
         if dtype is not None:
             if not dtype.is_floating_point:
@@ -421,12 +455,23 @@ class Module(object):
                                 'dtypes, but got desired dtype={}'.format(dtype))
 
         def convert(t):
+            if convert_to_format is not None and t.dim() == 4:
+                return t.to(device, dtype if t.is_floating_point() else None, non_blocking, memory_format=convert_to_format)
             return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
 
         return self._apply(convert)
 
     def register_backward_hook(self, hook):
         r"""Registers a backward hook on the module.
+
+        .. warning ::
+
+            The current implementation will not have the presented behavior
+            for complex :class:`Module` that perform many operations.
+            In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
+            contain the gradients for a subset of the inputs and outputs.
+            For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
+            directly on a specific input or output to get the required gradients.
 
         The hook will be called every time the gradients with respect to module
         inputs are computed. The hook should have the following signature::
@@ -437,21 +482,13 @@ class Module(object):
         module has multiple inputs or outputs. The hook should not modify its
         arguments, but it can optionally return a new gradient with respect to
         input that will be used in place of :attr:`grad_input` in subsequent
-        computations.
+        computations. :attr:`grad_input` will only correspond to the inputs given
+        as positional arguments.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
-
-        .. warning ::
-
-            The current implementation will not have the presented behavior
-            for complex :class:`Module` that perform many operations.
-            In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
-            contain the gradients for a subset of the inputs and outputs.
-            For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
-            directly on a specific input or output to get the required gradients.
 
         """
         handle = hooks.RemovableHandle(self._backward_hooks)
@@ -466,6 +503,8 @@ class Module(object):
 
             hook(module, input) -> None or modified input
 
+        The input contains only the positional arguments given to the module.
+        Keyword arguments won't be passed to the hooks and only to the ``forward``.
         The hook can modify the input. User can either return a tuple or a
         single modified value in the hook. We will wrap the value into a tuple
         if a single value is returned(unless that value is already a tuple).
@@ -487,6 +526,8 @@ class Module(object):
 
             hook(module, input, output) -> None or modified output
 
+        The input contains only the positional arguments given to the module.
+        Keyword arguments won't be passed to the hooks and only to the ``forward``.
         The hook can modify the output. It can modify the input inplace but
         it will not have effect on forward since this is called after
         :func:`forward` is called.
@@ -500,32 +541,24 @@ class Module(object):
         self._forward_hooks[handle.id] = hook
         return handle
 
-    def _tracing_name(self, tracing_state):
-        if not tracing_state._traced_module_stack:
-            return None
-        module = tracing_state._traced_module_stack[-1]
-        for name, child in module.named_children():
-            if child is self:
-                return name
-        return None
 
     def _slow_forward(self, *input, **kwargs):
         tracing_state = torch._C._get_tracing_state()
-        if not tracing_state:
+        if not tracing_state or isinstance(self.forward, torch._C.ScriptMethod):
             return self.forward(*input, **kwargs)
-        if not hasattr(tracing_state, '_traced_module_stack'):
-            tracing_state._traced_module_stack = []
-        name = self._tracing_name(tracing_state)
-        if name:
-            tracing_state.push_scope('%s[%s]' % (self._get_name(), name))
-        else:
-            tracing_state.push_scope(self._get_name())
-        tracing_state._traced_module_stack.append(self)
+        recording_scopes = torch.jit._trace_module_map is not None
+        if recording_scopes:
+            name = torch.jit._trace_module_map[self] if self in torch.jit._trace_module_map else None
+            if name:
+                cur_scope_name = tracing_state.current_scope()
+                tracing_state.push_scope(name)
+            else:
+                recording_scopes = False
         try:
             result = self.forward(*input, **kwargs)
         finally:
-            tracing_state.pop_scope()
-            tracing_state._traced_module_stack.pop()
+            if recording_scopes:
+                tracing_state.pop_scope()
         return result
 
     def __call__(self, *input, **kwargs):
@@ -581,21 +614,24 @@ class Module(object):
             modules = self.__dict__['_modules']
             if name in modules:
                 return modules[name]
-        raise AttributeError("'{}' object has no attribute '{}'".format(
+        raise ModuleAttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
     def __setattr__(self, name, value):
-        def remove_from(*dicts):
-            for d in dicts:
+        def remove_from(*dicts_or_sets):
+            for d in dicts_or_sets:
                 if name in d:
-                    del d[name]
+                    if isinstance(d, dict):
+                        del d[name]
+                    else:
+                        d.discard(name)
 
         params = self.__dict__.get('_parameters')
         if isinstance(value, Parameter):
             if params is None:
                 raise AttributeError(
                     "cannot assign parameters before Module.__init__() call")
-            remove_from(self.__dict__, self._buffers, self._modules)
+            remove_from(self.__dict__, self._buffers, self._modules, self._persistent_buffers_set)
             self.register_parameter(name, value)
         elif params is not None and name in params:
             if value is not None:
@@ -609,7 +645,7 @@ class Module(object):
                 if modules is None:
                     raise AttributeError(
                         "cannot assign module before Module.__init__() call")
-                remove_from(self.__dict__, self._parameters, self._buffers)
+                remove_from(self.__dict__, self._parameters, self._buffers, self._persistent_buffers_set)
                 modules[name] = value
             elif modules is not None and name in modules:
                 if value is not None:
@@ -633,6 +669,7 @@ class Module(object):
             del self._parameters[name]
         elif name in self._buffers:
             del self._buffers[name]
+            self._persistent_buffers_set.discard(name)
         elif name in self._modules:
             del self._modules[name]
         else:
@@ -664,10 +701,10 @@ class Module(object):
         """
         for name, param in self._parameters.items():
             if param is not None:
-                destination[prefix + name] = param if keep_vars else param.data
+                destination[prefix + name] = param if keep_vars else param.detach()
         for name, buf in self._buffers.items():
-            if buf is not None:
-                destination[prefix + name] = buf if keep_vars else buf.data
+            if buf is not None and name in self._persistent_buffers_set:
+                destination[prefix + name] = buf if keep_vars else buf.detach()
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         r"""Returns a dictionary containing a whole state of the module.
@@ -745,8 +782,9 @@ class Module(object):
         for hook in self._load_state_dict_pre_hooks.values():
             hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
-        local_name_params = itertools.chain(self._parameters.items(), self._buffers.items())
-        local_state = {k: v.data for k, v in local_name_params if v is not None}
+        persistent_buffers = {k: v for k, v in self._buffers.items() if k in self._persistent_buffers_set}
+        local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
+        local_state = {k: v for k, v in local_name_params if v is not None}
 
         for name, param in local_state.items():
             key = prefix + name
@@ -764,16 +802,15 @@ class Module(object):
                                       .format(key, input_param.shape, param.shape))
                     continue
 
-                if isinstance(input_param, Parameter):
-                    # backwards compatibility for serialized parameters
-                    input_param = input_param.data
                 try:
-                    param.copy_(input_param)
-                except Exception:
+                    with torch.no_grad():
+                        param.copy_(input_param)
+                except Exception as ex:
                     error_msgs.append('While copying the parameter named "{}", '
                                       'whose dimensions in the model are {} and '
-                                      'whose dimensions in the checkpoint are {}.'
-                                      .format(key, param.size(), input_param.size()))
+                                      'whose dimensions in the checkpoint are {}, '
+                                      'an exception occured : {}.'
+                                      .format(key, param.size(), input_param.size(), ex.args))
             elif strict:
                 missing_keys.append(key)
 
@@ -868,9 +905,9 @@ class Module(object):
         Example::
 
             >>> for param in model.parameters():
-            >>>     print(type(param.data), param.size())
-            <class 'torch.FloatTensor'> (20L,)
-            <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+            >>>     print(type(param), param.size())
+            <class 'torch.Tensor'> (20L,)
+            <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
         for name, param in self.named_parameters(recurse=recurse):
@@ -916,9 +953,9 @@ class Module(object):
         Example::
 
             >>> for buf in model.buffers():
-            >>>     print(type(buf.data), buf.size())
-            <class 'torch.FloatTensor'> (20L,)
-            <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+            >>>     print(type(buf), buf.size())
+            <class 'torch.Tensor'> (20L,)
+            <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
         for name, buf in self.named_buffers(recurse=recurse):
@@ -1102,6 +1139,13 @@ class Module(object):
 
     def zero_grad(self):
         r"""Sets gradients of all model parameters to zero."""
+        if getattr(self, '_is_replica', False):
+            warnings.warn(
+                "Calling .zero_grad() from a module created with nn.DataParallel() has no effect. "
+                "The parameters are copied (in a differentiable manner) from the original module. "
+                "This means they are not leaf nodes in autograd and so don't accumulate gradients. "
+                "If you need gradients in your forward method, consider using autograd.grad instead.")
+
         for p in self.parameters():
             if p.grad is not None:
                 p.grad.detach_()
@@ -1159,3 +1203,16 @@ class Module(object):
         keys = [key for key in keys if not key[0].isdigit()]
 
         return sorted(keys)
+
+    def _replicate_for_data_parallel(self):
+        replica = self.__new__(type(self))
+        replica.__dict__ = self.__dict__.copy()
+
+        # replicas do not have parameters themselves, the replicas reference the original
+        # module.
+        replica._parameters = OrderedDict()
+        replica._buffers = replica._buffers.copy()
+        replica._modules = replica._modules.copy()
+        replica._is_replica = True
+
+        return replica

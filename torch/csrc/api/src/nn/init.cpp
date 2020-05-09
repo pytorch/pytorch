@@ -12,22 +12,6 @@
 #include <tuple>
 
 namespace torch {
-
-const nn::init::Nonlinearity kLinear = nn::init::Nonlinearity::Linear;
-const nn::init::Nonlinearity kConv1D = nn::init::Nonlinearity::Conv1D;
-const nn::init::Nonlinearity kConv2D = nn::init::Nonlinearity::Conv2D;
-const nn::init::Nonlinearity kConv3D = nn::init::Nonlinearity::Conv3D;
-const nn::init::Nonlinearity kConvTranspose1D = nn::init::Nonlinearity::ConvTranspose1D;
-const nn::init::Nonlinearity kConvTranspose2D = nn::init::Nonlinearity::ConvTranspose2D;
-const nn::init::Nonlinearity kConvTranspose3D = nn::init::Nonlinearity::ConvTranspose3D;
-const nn::init::Nonlinearity kSigmoid = nn::init::Nonlinearity::Sigmoid;
-const nn::init::Nonlinearity kTanh = nn::init::Nonlinearity::Tanh;
-const nn::init::Nonlinearity kReLU = nn::init::Nonlinearity::ReLU;
-const nn::init::Nonlinearity kLeakyReLU = nn::init::Nonlinearity::LeakyReLU;
-
-const nn::init::FanMode kFanIn = nn::init::FanMode::FanIn;
-const nn::init::FanMode kFanOut = nn::init::FanMode::FanOut;
-
 namespace nn {
 namespace init {
 namespace {
@@ -54,13 +38,14 @@ struct Fan {
 double calculate_kaiming_std(
     Tensor tensor,
     double a,
-    FanMode mode,
-    Nonlinearity nonlinearity) {
+    FanModeType mode,
+    NonlinearityType nonlinearity) {
   NoGradGuard guard;
   Fan fan(tensor);
   const auto gain = calculate_gain(nonlinearity, a);
   double std = 0.0;
-  if (mode == torch::kFanIn) {
+
+  if (c10::get_if<enumtype::kFanIn>(&mode)) {
     std = gain / std::sqrt(fan.in);
   } else {
     std = gain / std::sqrt(fan.out);
@@ -69,12 +54,12 @@ double calculate_kaiming_std(
 }
 } // namespace
 
-double calculate_gain(Nonlinearity nonlinearity, double param) {
-  if (nonlinearity == torch::kTanh) {
+double calculate_gain(NonlinearityType nonlinearity, double param) {
+  if (c10::get_if<enumtype::kTanh>(&nonlinearity)) {
     return 5.0 / 3.0;  // NOLINT
-  } else if (nonlinearity == torch::kReLU) {
+  } else if (c10::get_if<enumtype::kReLU>(&nonlinearity)) {
     return std::sqrt(2.0);  // NOLINT
-  } else if (nonlinearity == torch::kLeakyReLU) {
+  } else if (c10::get_if<enumtype::kLeakyReLU>(&nonlinearity)) {
     return std::sqrt(2.0 / (1 + pow(param, 2)));  // NOLINT
   }
 
@@ -194,8 +179,8 @@ Tensor uniform_(Tensor tensor, double low, double high) {
 Tensor kaiming_uniform_(
     Tensor tensor,
     double a,
-    FanMode mode,
-    Nonlinearity nonlinearity) {
+    FanModeType mode,
+    NonlinearityType nonlinearity) {
   NoGradGuard guard;
   auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
   // Calculate uniform bounds from standard deviation
@@ -206,8 +191,8 @@ Tensor kaiming_uniform_(
 Tensor kaiming_normal_(
     Tensor tensor,
     double a,
-    FanMode mode,
-    Nonlinearity nonlinearity) {
+    FanModeType mode,
+    NonlinearityType nonlinearity) {
   NoGradGuard guard;
 
   auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
@@ -234,6 +219,29 @@ Tensor xavier_uniform_(Tensor tensor, double gain) {
 Tensor zeros_(Tensor tensor) {
   NoGradGuard guard;
   return tensor.zero_();
+}
+
+std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(const Tensor& tensor) {
+  const auto dimensions = tensor.dim();
+  TORCH_CHECK(dimensions >= 2,
+    "Fan in and fan out can not be computed "
+    "for tensor with fewer than 2 dimensions")
+
+  int64_t fan_in, fan_out;
+  if (dimensions == 2) { // Linear
+    fan_in = tensor.size(1);
+    fan_out = tensor.size(0);
+  } else {
+    const auto num_input_fmaps = tensor.size(1);
+    const auto num_output_fmaps = tensor.size(0);
+    auto receptive_field_size = 1;
+    if (tensor.dim() > 2) {
+      receptive_field_size = tensor[0][0].numel();
+    }
+    fan_in = num_input_fmaps * receptive_field_size;
+    fan_out = num_output_fmaps * receptive_field_size;
+  }
+  return std::tie(fan_in, fan_out);
 }
 
 } // namespace init

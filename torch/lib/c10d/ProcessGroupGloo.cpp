@@ -1,5 +1,7 @@
 #include <c10d/ProcessGroupGloo.hpp>
 
+#include <c10d/GlooDeviceFactory.hpp>
+
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -30,28 +32,6 @@
 #include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
-
-#if GLOO_HAVE_TRANSPORT_TCP
-#include <gloo/transport/tcp/device.h>
-#endif
-
-#if GLOO_HAVE_TRANSPORT_UV
-#include <gloo/transport/uv/device.h>
-#endif
-
-// On Linux, check that the tcp transport is available.
-#ifdef __linux__
-#if !GLOO_HAVE_TRANSPORT_TCP
-#error "Expected the tcp transport to be available on Linux."
-#endif
-#endif
-
-// On macOS, check that the uv transport is available.
-#ifdef __APPLE__
-#if !GLOO_HAVE_TRANSPORT_UV
-#error "Expected the uv transport to be available on macOS."
-#endif
-#endif
 
 #define GENERATE_ALL_TYPES(type, func, args...)        \
   switch (type) {                                      \
@@ -242,8 +222,10 @@ void setOutput(O& opts, at::Tensor& tensor, std::vector<size_t>& counts) {
 at::Tensor pinnedLike(at::Tensor& tensor) {
   auto* allocator = at::cuda::getPinnedMemoryAllocator();
   auto storage = c10::Storage(
+      c10::Storage::use_byte_size_t(),
       tensor.dtype(),
-      at::detail::computeStorageSize(tensor.sizes(), tensor.strides()),
+      at::detail::computeStorageNbytes(
+          tensor.sizes(), tensor.strides(), tensor.dtype().itemsize()),
       allocator,
       /*resizable=*/false);
   return at::empty({0}, tensor.options().device(at::kCPU))
@@ -279,9 +261,9 @@ void initializeStreamsEvents(
     if (tensors[i].is_sparse()) {
       if (tensors[i].is_coalesced()) {
         c10::cuda::CUDACachingAllocator::recordStream(
-            tensors[i].indices().storage().data(), streams[i]);
+            tensors[i].indices().storage().data_ptr(), streams[i]);
         c10::cuda::CUDACachingAllocator::recordStream(
-            tensors[i].values().storage().data(), streams[i]);
+            tensors[i].values().storage().data_ptr(), streams[i]);
       } else {
         // We will need to coalesce first, which means new tensors will
         // be allocated on the streams we just allocated, and there
@@ -289,7 +271,7 @@ void initializeStreamsEvents(
       }
     } else {
       c10::cuda::CUDACachingAllocator::recordStream(
-          tensors[i].storage().data(), streams[i]);
+          tensors[i].storage().data_ptr(), streams[i]);
     }
   }
 }
@@ -335,7 +317,7 @@ void initializeStreamsEvents(
       // new streams in this Work to prevent being freed before the Work
       // finishes.
       c10::cuda::CUDACachingAllocator::recordStream(
-          tensor.storage().data(), streams[i]);
+          tensor.storage().data_ptr(), streams[i]);
     }
   }
 }
@@ -351,18 +333,27 @@ ProcessGroupGloo::SendWork::SendWork(
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
     : tensor_(tensor), buffer_(std::move(buffer)) {}
 
-void ProcessGroupGloo::SendWork::wait() {
-  std::unique_lock<std::mutex> lock(mutex_);
+bool ProcessGroupGloo::SendWork::wait() {
+  bool sendCompleted = false;
+  std::exception_ptr exception{nullptr};
   try {
-    buffer_->waitSend();
+    sendCompleted = buffer_->waitSend();
   } catch (...) {
-    exception_ = std::current_exception();
+    exception = std::current_exception();
   }
-
+  // Lock to write completed_ and exception_, and throw if there is an
+  // exception.
+  std::lock_guard<std::mutex> lock(mutex_);
   completed_ = true;
+  exception_ = exception;
   if (exception_) {
     std::rethrow_exception(exception_);
   }
+  return sendCompleted;
+}
+
+void ProcessGroupGloo::SendWork::abort() {
+  buffer_->abortWaitSend();
 }
 
 ProcessGroupGloo::RecvWork::RecvWork(
@@ -375,18 +366,27 @@ int ProcessGroupGloo::RecvWork::sourceRank() const {
   return srcRank_;
 }
 
-void ProcessGroupGloo::RecvWork::wait() {
-  std::unique_lock<std::mutex> lock(mutex_);
+bool ProcessGroupGloo::RecvWork::wait() {
+  bool recvCompleted = false;
+  std::exception_ptr exception{nullptr};
   try {
-    buffer_->waitRecv(&srcRank_);
+    recvCompleted = buffer_->waitRecv(&srcRank_);
   } catch (...) {
-    exception_ = std::current_exception();
+    exception = std::current_exception();
   }
-
+  // Lock to write completed_ and exception_, and throw if there is an
+  // exception.
+  std::lock_guard<std::mutex> lock(mutex_);
   completed_ = true;
+  exception_ = exception;
   if (exception_) {
     std::rethrow_exception(exception_);
   }
+  return recvCompleted;
+}
+
+void ProcessGroupGloo::RecvWork::abort() {
+  buffer_->abortWaitRecv();
 }
 
 ProcessGroupGloo::Options::Options()
@@ -428,70 +428,40 @@ bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
 
 } // namespace
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForInterface(const std::string& interface) {
-  ::gloo::transport::tcp::attr attr;
-  attr.iface = interface;
-  return ::gloo::transport::tcp::CreateDevice(attr);
+  return ::c10d::GlooDeviceFactory::makeDeviceForInterface(interface);
 }
 #endif
 
-#ifdef __APPLE__
-std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
-    createDeviceForInterface(const std::string& interface) {
-  ::gloo::transport::uv::attr attr;
-  attr.iface = interface;
-  return ::gloo::transport::uv::CreateDevice(attr);
-}
-#endif
-
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForHostname(const std::string& hostname) {
-  ::gloo::transport::tcp::attr attr;
-  attr.hostname = hostname;
   TORCH_CHECK(
-      doesHostnameResolveToUsableAddress(attr.hostname),
+      doesHostnameResolveToUsableAddress(hostname),
       "Cannot resolve ",
       hostname,
       " to a (local) address");
-  return ::gloo::transport::tcp::CreateDevice(attr);
-}
-#endif
-
-#ifdef __APPLE__
-std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
-    createDeviceForHostname(const std::string& hostname) {
-  ::gloo::transport::uv::attr attr;
-  attr.hostname = hostname;
-  TORCH_CHECK(
-      doesHostnameResolveToUsableAddress(attr.hostname),
-      "Cannot resolve ",
-      hostname,
-      " to a (local) address");
-  return ::gloo::transport::uv::CreateDevice(attr);
+  return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname);
 }
 #endif
 
 #ifdef __linux__
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDefaultDevice() {
-  ::gloo::transport::tcp::attr attr;
-
   // Use the hostname to resolve the network address to
   // use. Note: if the hostname does not resolve to an address (e.g.
   // because of misconfigured /etc/hosts file), this will not work.
-  std::array<char, HOST_NAME_MAX> buffer{};
-  auto rv = gethostname(buffer.data(), buffer.size());
+  std::array<char, HOST_NAME_MAX> hostname{};
+  auto rv = gethostname(hostname.data(), HOST_NAME_MAX);
   if (rv != 0) {
     throw std::system_error(errno, std::system_category());
   }
-  attr.hostname = buffer.data();
 
   // Use this machine's hostname if it resolves to an address.
-  if (doesHostnameResolveToUsableAddress(attr.hostname)) {
-    return ::gloo::transport::tcp::CreateDevice(attr);
+  if (doesHostnameResolveToUsableAddress(hostname.data())) {
+    return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname.data());
   }
 
   // Otherwise, use the loopback address.
@@ -506,22 +476,19 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
 #ifdef __APPLE__
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDefaultDevice() {
-  ::gloo::transport::uv::attr attr;
-
   // Use the hostname to resolve the network address to
   // use. Note: if the hostname does not resolve to an address (e.g.
   // because of misconfigured /etc/hosts file), this will not work.
   const auto hostNameMax = sysconf(_SC_HOST_NAME_MAX);
-  auto buffer = std::unique_ptr<char[]>(new char[hostNameMax]);
-  auto rv = gethostname(buffer.get(), hostNameMax);
+  auto hostname = std::unique_ptr<char[]>(new char[hostNameMax]);
+  auto rv = gethostname(hostname.get(), hostNameMax);
   if (rv != 0) {
     throw std::system_error(errno, std::system_category());
   }
-  attr.hostname = buffer.get();
 
   // Use this machine's hostname if it resolves to an address.
-  if (doesHostnameResolveToUsableAddress(attr.hostname)) {
-    return ::gloo::transport::uv::CreateDevice(attr);
+  if (doesHostnameResolveToUsableAddress(hostname.get())) {
+    return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname.get());
   }
 
   // Otherwise, use the loopback address.
@@ -989,7 +956,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
           continue;
         }
         const auto actual = metadata[i].sizes();
-        AT_CHECK(actual == expected, "Sparse dimensions do not match");
+        TORCH_CHECK(actual == expected, "Sparse dimensions do not match");
       }
     }
 
@@ -1017,7 +984,12 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Copy back to input tensors.
     outputs.reserve(inputs.size());
     for (size_t i = 0; i < inputs.size(); i++) {
-      outputs.push_back(output.clone());
+      inputs[i].copy_(output);
+      if (output.is_sparse()) {
+        outputs.push_back(output.clone());
+      } else {
+        outputs.push_back(output.clone(at::MemoryFormat::Contiguous));
+      }
     }
   }
 
@@ -1247,6 +1219,12 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
       guard.set_index(inputs[i].device().index());
       events[i].block(at::cuda::getCurrentCUDAStream());
     }
+
+    // Copy outputs back to inputs after synchronization, so that users can
+    // access all reduce results from input tensors
+    for (size_t i = 0; i < inputs.size(); i++) {
+      inputs[i].copy_(outputs[i]);
+    }
   }
 
   std::vector<at::Tensor> tmp;
@@ -1334,7 +1312,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
   // tensors must have the same device, layout and type.
   assertLayoutMatch(invalidArgument, tensors);
   if (!std::all_of(tensors.begin(), tensors.end(), [&](at::Tensor& t) {
-        return t.type() == tensors[0].type();
+        return t.options().type_equal(tensors[0].options());
       })) {
     invalidArgument("tensors must all have the same type");
   }
@@ -1707,11 +1685,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   assertDense(invalidArgument, inputs);
 
   // Expect all input/output tensors to have the same type and sizes
-  const auto& type = inputs[0].type();
+  const auto& options = inputs[0].options();
   const auto& sizes = inputs[0].sizes();
-  assertTypeAndSizesMatch(invalidArgument, inputs, type, sizes);
+  assertTypeAndSizesMatch(invalidArgument, inputs, options, sizes);
   for (size_t i = 0; i < outputs.size(); i++) {
-    assertTypeAndSizesMatch(invalidArgument, outputs[i], type, sizes);
+    assertTypeAndSizesMatch(invalidArgument, outputs[i], options, sizes);
   }
 
   const auto& device = inputs[0].device();
@@ -1741,6 +1719,134 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   }
   enqueue(work);
   return work;
+}
+
+namespace {
+
+class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
+ public:
+  AsyncAllgatherCoalescedWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<std::vector<at::Tensor>>& output_lists,
+      std::vector<at::Tensor>& input_list,
+      uint32_t tag)
+      : context(context),
+        output_lists(output_lists),
+        input_list(input_list),
+        tag(tag) {}
+
+  std::shared_ptr<gloo::Context> context;
+  std::vector<std::vector<at::Tensor>> output_lists;
+  std::vector<at::Tensor> input_list;
+  const uint32_t tag;
+
+  void allgather_coalesced() {
+    assert(!output_lists.empty());
+    assert(!output_lists[0].empty());
+    assert(!input_list.empty());
+
+    const auto& scalarType = input_list[0].scalar_type();
+    gloo::AllgatherOptions opts(context);
+    opts.setTag(tag);
+
+    // Use single flattened input tensor.
+    at::Tensor flatInputTensor = flattenDenseTensors(input_list);
+    GENERATE_ALL_TYPES(scalarType, setInput, opts, flatInputTensor);
+
+    // Compute total number of elements we need to allocate for all tensors
+    // requested.
+    int64_t output_numel = 0;
+    for (const auto& t : output_lists[0]) {
+      output_numel += t.numel();
+    }
+    output_numel *= output_lists.size();
+    // Use single flat output tensor.
+    at::Tensor flatOutputTensor =
+        at::empty({output_numel}, output_lists[0][0].options());
+    GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
+    gloo::allgather(opts);
+
+    int64_t current_element = 0;
+    for (auto& output_list : output_lists) {
+      for (auto& output_tensor : output_list) {
+        output_tensor.copy_(
+            flatOutputTensor.narrow(0, current_element, output_tensor.numel())
+                .reshape(output_tensor.sizes()),
+            true);
+        current_element += output_tensor.numel();
+      }
+    }
+  }
+
+  void run() override {
+    allgather_coalesced();
+  }
+};
+
+} // namespace
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
+    std::vector<std::vector<at::Tensor>>& output_lists,
+    std::vector<at::Tensor>& input_list,
+    const AllgatherOptions& /* unused */) {
+  static auto invalidArgument = [](const std::string& msg) {
+    throw std::invalid_argument(
+        "ProcessGroupGloo::allgather_coalesced: " + msg);
+  };
+
+  if (input_list.empty()) {
+    invalidArgument("requires non-empty input tensor list");
+  }
+
+  if (output_lists.size() != getSize()) {
+    invalidArgument("output lists should be equal to world size");
+  }
+
+  assertSameDevice(invalidArgument, input_list);
+
+  // Expect i'th tensor of each list from 'output_lists' match i'th tensor
+  // from 'input_list' in type and size.
+  for (const auto& output_list : output_lists) {
+    if (output_list.size() != input_list.size()) {
+      invalidArgument(
+          "invalid output size: (expected length " +
+          std::to_string(input_list.size()) + ", got " +
+          std::to_string(output_list.size()) + ")");
+    }
+    for (int i = 0; i < output_list.size(); ++i) {
+      const auto expected = input_list[i].sizes();
+      const auto actual = output_list[i].sizes();
+      if (actual != expected) {
+        invalidArgument(
+            "invalid size of output tensor at index " + std::to_string(i) +
+            " (expected length " + toString(expected) + ", got " +
+            toString(actual) + ")");
+      }
+      if (!input_list[i].options().type_equal(output_list[i].options())) {
+        invalidArgument(
+            "invalid tensor type at index " + std::to_string(i) +
+            " (expected " + input_list[i].toString() + ", got " +
+            output_list[i].toString() + ")");
+      }
+    }
+  }
+
+  assertDense(invalidArgument, input_list);
+
+  auto tag = nextTag();
+  auto context = getContext(tag);
+  auto work = std::make_shared<AsyncAllgatherCoalescedWork>(
+      std::move(context), output_lists, input_list, tag);
+  enqueue(work);
+  return work;
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_base(
+    at::Tensor& /*unused */,
+    at::Tensor& /*unused */,
+    const AllgatherOptions& /*unused */) {
+  throw std::runtime_error(
+      "no support for allgather_base in Gloo process group");
 }
 
 namespace {
@@ -1909,9 +2015,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
       invalidArgument(ss.str());
     }
 
-    const auto& type = inputs[0].type();
+    const auto& options = inputs[0].options();
     const auto& sizes = inputs[0].sizes();
-    assertTypeAndSizesMatch(invalidArgument, outputs[0], type, sizes);
+    assertTypeAndSizesMatch(invalidArgument, outputs[0], options, sizes);
   } else {
     if (outputs.size() != 0) {
       invalidArgument("requires empty output on non-root");
@@ -2083,15 +2189,21 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   assertDense(invalidArgument, outputs);
 
   if (getRank() == opts.rootRank) {
-    if (inputs.size() != 1 ||
-        inputs[0].size() != static_cast<size_t>(getSize())) {
-      invalidArgument(
-          "requires a single-element input list "
-          "containing a list with <size> tensors");
+    if (inputs.size() != 1) {
+      std::stringstream ss;
+      ss << "requires a single-element input list containing a list with "
+         << getSize() << " tensors";
+      invalidArgument(ss.str());
+    } else if (inputs[0].size() != static_cast<size_t>(getSize())) {
+      std::stringstream ss;
+      ss << "Incorrect input list size " << inputs[0].size()
+         << ". Input list size should be " << getSize()
+         << ", same as size of the process group.";
+      invalidArgument(ss.str());
     }
-    const auto& type = outputs[0].type();
+    const auto& options = outputs[0].options();
     const auto& sizes = outputs[0].sizes();
-    assertTypeAndSizesMatch(invalidArgument, inputs[0], type, sizes);
+    assertTypeAndSizesMatch(invalidArgument, inputs[0], options, sizes);
   } else {
     if (inputs.size() != 0) {
       invalidArgument("requires empty input on non-root");

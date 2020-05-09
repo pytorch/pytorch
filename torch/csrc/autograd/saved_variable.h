@@ -9,7 +9,7 @@
 
 namespace torch { namespace autograd {
 
-struct Variable;
+using Variable = at::Tensor;
 struct Node;
 
 TORCH_API extern const char* ERR_BACKWARD_TWICE;

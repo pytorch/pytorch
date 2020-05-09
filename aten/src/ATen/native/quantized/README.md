@@ -6,17 +6,18 @@ This document serves as an entry point for quantized kernel implementation.
 
 ## Implementing native quantized ops
 
-The new quantized ops are almost always located under the `ATen/native/quantized/cpu` folder.
-For the sake of an example, let us implement an element-wise quantized logical AND operation under `ATen/native/quantized/cpu/qand.cpp`.
+The new quantized ops are almost always located under the `ATen/native/quantized/cpu` folder. For
+the sake of an example, let us implement an element-wise quantized [logical XAND](https://en.wiktionary.org/wiki/XAND)
+operation under `ATen/native/quantized/cpu/qxand.cpp`.
 
 ### Step 0. Implement the quantized function
 
 Before writing the quantized kernel and registering it, let us implement a quantized function.
 That would assist in any further discussion.
-The snippet below shows the implementation of a quantized AND operator, with the support of all implemented quantized types.
+The snippet below shows the implementation of a quantized XAND operator, with the support of all implemented quantized types.
 
 ```c++
-Tensor quantized_and(Tensor qa, Tensor qb) {
+Tensor quantized_xand(Tensor qa, Tensor qb) {
   // Some type checks for qa and qb should be here...
   Tensor qc;
   double scale = qa.q_scale();
@@ -24,7 +25,7 @@ Tensor quantized_and(Tensor qa, Tensor qb) {
 
   auto iter = TensorIterator::binary_op(qc, qa, qb);
 
-  AT_DISPATCH_QINT_TYPES(qa.scalar_type(), "quantized_and", [&]() {
+  AT_DISPATCH_QINT_TYPES(qa.scalar_type(), "quantized_xand", [&]() {
     Tensor qc = at::_empty_affine_quantized(
         qa.sizes(), at::device(kCPU).dtype(SCALAR_TYPE), scale, zero_point);
     cpu_kernel(iter, [&](scalar_t a_value, scalar_t b_value) -> scalar_t {
@@ -54,42 +55,31 @@ In the example above, the resulting tensor will be the same as the `qa.scalar_ty
 3. Implementation lambda. The main implementation should sit in the body of this lambda.
 it should also use the aliases for the quantized data types instead of the explicit data types.
 
-### Step 1. Create the kernel
+### Step 1. Define the schema
 
-All kernels must be classes inheriting from `torch::OperatorKernel`.
-The implementation itself should be under the `operator()` method.
-In the `qand.cpp` file, we create the following
+Update `aten/src/ATen/native/quantized/library.cpp` and add
+a `def` for your new operator:
 
 ```c++
-class QuantizedAnd final : public torch::OperatorKernel {
- public:
-  Tensor operator(Tensor qa, Tensor qb) {
-    return quantized_and(qa, qb);
+TORCH_LIBRARY(quantized, m) {
+  // ... the existing definitions ... 
+  m.def("quantized::xand(Tensor qa, Tensor qb) -> Tensor");
 }
-}
-;
 ```
 
-    ## #Step 2a. Register the kernel
+Def takes a **function schema string**: This schema describes the usage of the op.
+In the example above the schema is `"quantized::xand(Tensor qa, Tensor qb) -> Tensor"`.
+This translates to `torch._ops.ops.quantized.xand` function in Python of the appropriate signature.
 
-        The registration is done using the `torch::RegisterOperators()
-            .op(...)`.
+### Step 2. Register the implementation
 
-```c++ static auto registry = torch::RegisterOperators().op(
-    "quantized::and(Tensor qa, Tensor qb) -> Tensor",
-    torch::RegisterOperators::options().kernel<QuantizedAnd>(
-        QuantizedCPUTensorId()));
+The registration is done using `TORCH_LIBRARY_IMPL`.
+
+```c++
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("xand", quantized_xand);
+}
 ```
-
-The registry takes two arguments:
-
-1. **Function schema string**: This schema describes the usage of the op.
-In the example above the schema is `"quantized::and(Tensor qa, Tensor qb) -> Tensor"`.
-This translates to `torch._ops.ops.quantized.and` function in Python of the appropriate signature.
-**Note:** The arguments signature in the schema is optional, and can also be written as `"quantized::and"` (without args).
-2. **Registration options** should be of type `torch::RegisterOperators::options()`.
-To attach a kernel to it, use `.kernel<KERNEL_CLASS>(DISPATCH_KEY)`.
-In quantized ops you almost always want to use the `QuantizedCPUTensorId()` dispatcher.
 
 ### Step 2b. [Optional] Registering the operation with the `native_functions.yaml`
 
@@ -99,63 +89,49 @@ A detailed explanation on this file can be found [here](https://github.com/pytor
 **If adding a new entry to the `native_functions.yaml`:**
 
 ```yaml
-- func: quantized_and(Tensor qa, Tensor qb) -> Tensor
+- func: quantized_xand(Tensor qa, Tensor qb) -> Tensor
   dispatch:
-    QuantizedCPU: quantized_and
+    QuantizedCPU: quantized_xand
 ```
 
 **If adding to an existing entry in the `native_functions.yaml`:**
 
 If you find an entry in the yaml file, and would like to add a quantized kernel to it, you can just add a new dispatch entry for it.
-For example, let's assume there existed a `logical_and` function in the YAML file.
+For example, let's assume there existed a `xand` function in the YAML file.
 In that case, modification would look as:
 
 ```yaml
-- func: logical_and(Tensor a, Tensor b) -> Tensor
+- func: xand(Tensor a, Tensor b) -> Tensor
   dispatch:
-    CPU: _logical_and_cpu    # Assume this existed
-    CUDA: _logical_and_cuda  # Assume this existed
-    QuantizedCPU: quantized_and  # We add this line
+    CPU: _xand_cpu     # Assume this existed
+    CUDA: _xand_cuda   # Assume this existed
+    QuantizedCPU: quantized_xand
 ```
 
 ### Putting it all together
 
-The final file `ATen/native/quantized/cpu/qand.cpp` would look as follows
+The final file `ATen/native/quantized/cpu/qxand.cpp` would look as follows
 
 ```c++
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h> // Need that for the `native_functions.yaml`
 #include <ATen/core/Type.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 
 namespace at {
   namespace native {
-  Tensor quantized_and(Tensor qa, Tensor qb) {
+  Tensor quantized_xand(Tensor qa, Tensor qb) {
     // The awesome op implementation...
     return qc;
   }
 
-  namespace {
-  class QuantizedAnd final : public torch::OperatorKernel {
-   public:
-    Tensor operator(Tensor qa, Tensor qb) {
-      return quantized_and(qa, qb);
-    }
-  };
-
-  static auto registry = torch::RegisterOperators().op(
-      "quantized::and(Tensor qa, Tensor qb) -> Tensor",
-      torch::RegisterOperators::options().kernel<QuantizedAnd>(
-          QuantizedCPUTensorId()));
-
-  } // namespace
-  }}  // namespace at::native
+  TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+    m.impl("xand", quantized_xand);
+  }
+}}  // namespace at::native
 ```
-
-Notice that we try to keep all the kernels in the anonymous namespace.
-The reason for that is that we access the kernels only through the `torch` namespace and this prevents symbol clashes in the linker.
 
 ### Step 3. Administrative stuff
 
@@ -190,9 +166,9 @@ To implement the python quantized function using our kernel, you can do the foll
 ```python
 from torch._ops import ops
 
-def quantized_and(qa, qb):
-#Notice the schema changed from `quantized::and` to `quantized.and`
-  return ops.quantized.and(qa, qb)
+def quantized_xand(qa, qb):
+#Notice the schema changed from `quantized::xand` to `quantized.xand`
+  return ops.quantized.xand(qa, qb)
 ```
 
 **Note:** If writing new pytorch functions that use quantized kernels, it is strongly encouraged to place them in the `torch/nn/quantized/functional.py`.
@@ -237,8 +213,8 @@ namespace at {
   } // dispatch_tools
 
   // This is your new function
-  Tensor quantized_and(Tensor qa, Tensor qb) {
-    return dispatch_tools::callOp("quantized::and", "", qa, qb);
+  Tensor quantized_xand(Tensor qa, Tensor qb) {
+    return dispatch_tools::callOp("quantized::xand", "", qa, qb);
   }
   }}  // namespace at::native
 ```

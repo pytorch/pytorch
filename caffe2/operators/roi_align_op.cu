@@ -103,7 +103,7 @@ __global__ void RoIAlignForward(
 
     T roi_width = roi_end_w - roi_start_w;
     T roi_height = roi_end_h - roi_start_h;
-    if (!continuous_coordinate) { // backward compatiblity
+    if (!continuous_coordinate) { // backward compatibility
       // Force malformed ROIs to be 1x1
       roi_width = c10::cuda::compat::max(roi_width, (T)1.);
       roi_height = c10::cuda::compat::max(roi_height, (T)1.);
@@ -156,17 +156,14 @@ bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
 
   if (R.numel() == 0) {
     // Handle empty rois
-    Output(
-        0, {0, X.dim32(1), pooled_height_, pooled_width_}, at::dtype<float>());
+    Output(0, {0, X.dim32(1), pooled_h_, pooled_w_}, at::dtype<float>());
     return true;
   }
 
   assert(sampling_ratio_ >= 0);
 
   auto* Y = Output(
-      0,
-      {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_},
-      at::dtype<float>());
+      0, {R.dim32(0), X.dim32(1), pooled_h_, pooled_w_}, at::dtype<float>());
   int output_size = Y->numel();
   RoIAlignForward<float>
       <<<CAFFE_GET_BLOCKS(output_size),
@@ -179,8 +176,8 @@ bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
           X.dim32(1),
           X.dim32(2),
           X.dim32(3),
-          pooled_height_,
-          pooled_width_,
+          pooled_h_,
+          pooled_w_,
           sampling_ratio_,
           R.data<float>(),
           R.dim32(1),

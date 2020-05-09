@@ -1,5 +1,5 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <algorithm>
 
@@ -949,7 +949,7 @@ Tensor replication_pad1d_backward_cpu(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   replication_pad1d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
@@ -991,7 +991,7 @@ Tensor replication_pad2d_backward_cpu(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   replication_pad2d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
@@ -1033,7 +1033,7 @@ Tensor replication_pad3d_backward_cpu(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   replication_pad3d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;

@@ -72,12 +72,12 @@ tensor filled with values from a unit normal distribution by writing:
 .. code-block:: cpp
 
   torch::Tensor tensor = torch::randn({3, 4, 5});
-  assert(tensor.sizes() == torch::IntArrayRef{3, 4, 5});
+  assert(tensor.sizes() == std::vector<int64_t>{3, 4, 5});
 
-Notice how we use ``tensor.sizes()`` to get back an ``IntArrayRef`` containing the
-sizes we passed to the tensor. You can also write ``tensor.size(i)`` to access
-a single dimension, which is equivalent to but preferred over
-``tensor.sizes()[i]``.
+``tensor.sizes()`` returns an ``IntArrayRef`` which can be compared against an
+``std::vector<int64_t>``, and we can see that it contains the sizes we passed
+to the tensor. You can also write ``tensor.size(i)`` to access a single dimension,
+which is equivalent to but preferred over ``tensor.sizes()[i]``.
 
 Passing Function-Specific Parameters
 ************************************
@@ -281,7 +281,9 @@ change one property, this is quite practical.
 In conclusion, we can now compare how ``TensorOptions`` defaults, together with
 the abbreviated API for creating ``TensorOptions`` using free functions, allow
 tensor creation in C++ with the same convenience as in Python. Compare this
-call in Python::
+call in Python:
+
+.. code-block:: python
 
   torch.randn(3, 4, dtype=torch.float32, device=torch.device('cuda', 1), requires_grad=True)
 

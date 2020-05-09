@@ -326,7 +326,8 @@ namespace {
       return at::mkldnn_adaptive_avg_pool2d(input, output_size);
     }
 
-    if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {
+    // TODO: fastpath for Channels_last should be explored later;
+    if (input.suggest_memory_format() == at::MemoryFormat::Contiguous && !input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {
       // in this case, adaptive pooling is just computing mean over hw
       // dimensions, which can be done more efficiently
       int64_t mean_size = input.size(-1) * input.size(-2);
@@ -353,7 +354,7 @@ namespace {
     const Tensor& gradOutput,
     const Tensor& input)
   {
-    auto gradInput = at::zeros_like(input);
+    auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     adaptive_avg_pool2d_backward_out_cpu_template(
       gradInput, gradOutput, input);
     return gradInput;

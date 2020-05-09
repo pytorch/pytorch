@@ -178,7 +178,7 @@ bool TensorRTOp::RunOnDevice() {
   }
 
   // We need to do the binding at RunOnDevice time because we only know the
-  // exact shapes of the tensors now. In addtion, since TensorRT engine has
+  // exact shapes of the tensors now. In addition, since TensorRT engine has
   // max_batch_size, we need to call that multiple times if input batch size
   // exceeeds this limit.
   CAFFE_ENFORCE_EQ(is_input_.size(), nv_dims_.size());

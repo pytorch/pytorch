@@ -1,84 +1,81 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
-from .QConfig import QConfig
-
-class PackedParams(torch.nn.Module):
-    def __init__(self):
-        super(PackedParams, self).__init__()
-        w = torch.rand((5, 5), dtype=torch.float)
-        wq = torch.quantize_per_tensor(w, 2.0, 0, torch.qint8)
-        self.set_weight_bias(wq, torch.rand(5))
-
-    @torch.jit.export
-    def set_weight_bias(self, weight, bias):
-        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        self._packed_params = torch.ops.quantized.linear_prepack(weight, bias)
-
-    @torch.jit.export
-    def _weight_bias(self):
-        return torch.ops.quantized.linear_unpack(self._packed_params)
-
-    def forward(self, x):
-        return x
-
-    @torch.jit.export
-    def __getstate__(self):
-        return self._weight_bias(), self.training
-
-    @torch.jit.export
-    def __setstate__(self, state):
-        # type: (Tuple[Tuple[Tensor, Optional[Tensor]], bool]) -> None
-        self.set_weight_bias(state[0][0], state[0][1])
-        self.training = state[1]
+from .qconfig import QConfig
+from torch.jit._recursive import wrap_cpp_module
 
 def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):
         raise ValueError('input must be a script module, got: ' + str(type(model)))
 
-def prepare_script(model, qconfig_dict, inplace=False):
-    _check_is_script_module(model)
-    if not inplace:
-        model = model.copy()
-    torch._C._jit_pass_insert_observers(model._c,
-                                        'forward',
-                                        qconfig_dict,
-                                        True)
-    return model
+def _check_forward_method(model):
+    if not model._c._has_method('forward'):
+        raise ValueError('input script module does not have forward method')
 
-def convert_script(model, inplace=False):
-    _check_is_script_module(model)
-    if not inplace:
-        model = model.copy()
-    torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', True)
-    if 'fbgemm' in torch.backends.quantized.supported_engines:
-        _packed_params_scripted = torch.jit.script(PackedParams())._c
-        torch._C._jit_pass_insert_prepack_unpack(model._c)
-        torch._C._jit_pass_fold_prepack(model._c, _packed_params_scripted)
-    return model
-
-# TODO: non-scriptable QConfig will be supported later
 def script_qconfig(qconfig):
     return QConfig(
         activation=torch.jit.script(qconfig.activation())._c,
         weight=torch.jit.script(qconfig.weight())._c)
 
-def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
+def script_qconfig_dict(qconfig_dict):
+    return {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
+
+def _prepare_script(model, qconfig_dict, is_dynamic):
     _check_is_script_module(model)
-    if not model._c._has_method('forward'):
-        raise ValueError('input script module does not have forward method')
+    if any(map(lambda x : not isinstance(x, str), qconfig_dict.keys())):
+        raise ValueError('qconfig_dict should contain names(str) as keys.')
+    scripted_qconfig_dict = script_qconfig_dict(qconfig_dict)
+    return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
+                                                               'forward',
+                                                               scripted_qconfig_dict,
+                                                               False,
+                                                               is_dynamic))
+
+def prepare_script(model, qconfig_dict, inplace=False):
+    if not inplace:
+        model = model.copy()
+    return _prepare_script(model, qconfig_dict, is_dynamic=False)
+
+def prepare_dynamic_script(model, qconfig_dict):
+    return _prepare_script(model, qconfig_dict, is_dynamic=True)
+
+def _convert_script(model, is_dynamic, debug=False):
+    _check_is_script_module(model)
+    model.eval()
+    model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', False, is_dynamic))
+    if not debug:
+        model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c, is_dynamic))
+    return model
+
+def convert_script(model, inplace=False, debug=False):
+    if not inplace:
+        model = model.copy()
+    return _convert_script(model, is_dynamic=False, debug=debug)
+
+def convert_dynamic_script(model, debug=False):
+    return _convert_script(model, is_dynamic=True, debug=debug)
+
+def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, is_dynamic=False, debug=False):
+    _check_is_script_module(model)
+    _check_forward_method(model)
+    torch._C._jit_pass_dedup_module_uses(model._c)
+    model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
+    if is_dynamic:
+        model = prepare_dynamic_script(model, qconfig_dict)
+        model(*run_args)
+        model = convert_dynamic_script(model, debug)
+    else:
+        model = prepare_script(model, qconfig_dict, True)
+        run_fn(model._c._get_method('forward'), *run_args)
+        model = convert_script(model, True, debug)
+
+    return model
+
+def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False, debug=False):
     assert not inplace, "We don't support inplace right now"
     if not inplace:
         model = model.copy()
-    scripted_qconfig_dict = {k: script_qconfig(v) for k, v in qconfig_dict.items()}
-    torch._C._jit_pass_fold_convbn(model._c)
-    prepare_script(model, scripted_qconfig_dict, True)
-    run_fn(model._c._get_method('forward'), *run_args)
-    # When we mutating graph we didn't create a new ClassType
-    # and the graph executor will run an out dated version
-    # of the graph if we do inplace graph mutation, therefore
-    # we copy the model here
-    # [TODO] This will be fixed later when we figure out
-    # how to properly mutate types
-    model = convert_script(model, False)
-    return model
+    return _quantize_script(model, qconfig_dict, run_fn, run_args, is_dynamic=False, debug=debug)
+
+def quantize_dynamic_script(model, qconfig_dict, sample_model_inputs, debug=False):
+    return _quantize_script(model, qconfig_dict, run_args=sample_model_inputs, is_dynamic=True, debug=debug)

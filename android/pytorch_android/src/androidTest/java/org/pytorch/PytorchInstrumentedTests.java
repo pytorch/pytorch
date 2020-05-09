@@ -1,17 +1,14 @@
 package org.pytorch;
 
 import android.content.Context;
-
-import org.junit.runner.RunWith;
-
+import androidx.test.InstrumentationRegistry;
+import androidx.test.runner.AndroidJUnit4;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-
-import androidx.test.ext.junit.runners.AndroidJUnit4;
-import androidx.test.platform.app.InstrumentationRegistry;
+import org.junit.runner.RunWith;
 
 @RunWith(AndroidJUnit4.class)
 public class PytorchInstrumentedTests extends PytorchTestBase {

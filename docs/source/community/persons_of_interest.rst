@@ -63,8 +63,7 @@ Distributed
 
 -  Pieter Noordhuis (`pietern <https://github.com/pietern>`__)
 -  Shen Li (`mrshenli <https://github.com/mrshenli>`__)
-..
- -  (proposed) Pritam Damania
+-  (proposed) Pritam Damania
    (`pritamdamania87 <https://github.com/pritamdamania87>`__)
 
 Multiprocessing and DataLoaders
@@ -95,14 +94,6 @@ MKLDNN
 
 -  Junjie Bai (`bddppq <https://github.com/bddppq>`__)
 -  Yinghai Lu (`yinghai <https://github.com/yinghai>`__)
-
-XLA
-~~~
-
--  Ailing Zhang (`ailzhang <https://github.com/ailzhang>`__)
--  Gregory Chanan (`gchanan <https://github.com/gchanan>`__)
--  Davide Libenzi (`dlibenzi <https://github.com/dlibenzi>`__)
--  Alex Suhan (`asuhan <https://github.com/asuhan>`__)
 
 AMD/ROCm/HIP
 ~~~~~~~~~~~~
@@ -139,6 +130,9 @@ ONNX <-> PyTorch
 ~~~~~~~~~~~~~~~~
 
 -  Lu Fang (`houseroad <https://github.com/houseroad>`__)
+-  Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
+-  Spandan Tiwari (`spandantiwari <https://github.com/spandantiwari>`__)
+-  Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
 
 Windows
 ~~~~~~~
@@ -149,3 +143,40 @@ PowerPC
 ~~~~~~~
 
 -  Alfredo Mendoza (`avmgithub <https://github.com/avmgithub>`__)
+
+Library-level maintainers
+-------------------------
+
+XLA
+~~~
+
+-  Ailing Zhang (`ailzhang <https://github.com/ailzhang>`__)
+-  Gregory Chanan (`gchanan <https://github.com/gchanan>`__)
+-  Davide Libenzi (`dlibenzi <https://github.com/dlibenzi>`__)
+-  Alex Suhan (`asuhan <https://github.com/asuhan>`__)
+
+TorchServe
+~~~~~~~~~~
+
+- Manoj Rao (`mycpuorg <https://github.com/mycpuorg>`__)
+- Vamshi Dantu (`vdantu <https://github.com/vdantu>`__)
+- Dhanasekar Karuppasamy (`dhanainme <https://github.com/dhanainme>`__)
+
+TorchVision
+~~~~~~~~~~~
+
+- Francisco Massa (`fmassa <https://github.com/fmassa>`__)
+
+TorchText
+~~~~~~~~~
+
+- Guanheng George Zhang (`zhangguanheng66 <https://github.com/zhangguanheng66>`__)
+- Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+
+TorchAudio
+~~~~~~~~~~
+
+- Vincent QB (`vincentqb <https://github.com/vincentqb>`__)
+
+
+

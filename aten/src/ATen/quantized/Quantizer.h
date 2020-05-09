@@ -8,11 +8,11 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 
+#include <ATen/Tensor.h>
+#include <ATen/TensorUtils.h>
+
 #include <cmath>
 #include <memory>
-
-// TODO: move to c10 namespace after we
-// unified caffe2::Tensor and at::Tensor
 
 namespace at {
 
@@ -51,7 +51,7 @@ struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
   explicit Quantizer(ScalarType scalar_type) : scalar_type_(scalar_type) {}
   virtual ~Quantizer();
 
-  // Copied from torch/csrc/jit/scope.h
+  // Copied from torch/csrc/jit/ir/scope.h
   QuantizerPtr intrusive_from_this() {
     c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
                                            // from a raw `this` pointer
@@ -177,8 +177,8 @@ struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
 struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
   explicit PerChannelAffineQuantizer(
       ScalarType scalar_type,
-      const std::vector<double>& scales,
-      const std::vector<int64_t>& zero_points,
+      Tensor scales,
+      Tensor zero_points,
       int64_t axis)
       : AffineQuantizer(scalar_type),
         scales_(scales),
@@ -189,11 +189,11 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
     return kPerChannelAffine;
   }
 
-  std::vector<double> scales() const {
+  Tensor scales() const {
     return scales_;
   }
 
-  std::vector<int64_t> zero_points() const {
+  Tensor zero_points() const {
     return zero_points_;
   }
 
@@ -211,14 +211,14 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
     auto* other_per_channel_affine =
         static_cast<PerChannelAffineQuantizer*>(other.get());
     return scalar_type() == other_per_channel_affine->scalar_type() &&
-        scales() == other_per_channel_affine->scales() &&
-        zero_points() == other_per_channel_affine->zero_points() &&
+        scales().equal(other_per_channel_affine->scales()) &&
+        zero_points().equal(other_per_channel_affine->zero_points()) &&
         axis() == other_per_channel_affine->axis();
   }
 
  private:
-  const std::vector<double> scales_;
-  const std::vector<int64_t> zero_points_;
+  Tensor scales_;
+  Tensor zero_points_;
   const int64_t axis_;
 };
 
@@ -229,33 +229,12 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
 // This may be called repeatedly, so make sure it's pretty cheap.
 CAFFE2_API QTensorImpl* get_qtensorimpl(const Tensor& self);
 
-// Quantize a float value into a uint value given scale and zero_point
-template <typename T>
-CAFFE2_API T quantize_val(double scale, int64_t zero_point, float value);
-template <typename T, int precision=8>
-void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, size_t count=8);
-template <typename T>
-CAFFE2_API Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
-template <typename T>
-CAFFE2_API float dequantize_val(double scale, int64_t zero_point, T value);
-template <typename T>
-CAFFE2_API float dequantize_vec(double scale, int64_t zero_point, const T* src, float* dst, size_t count=8);
-template <typename T>
-CAFFE2_API Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point);
-template <typename SRC_T, typename DST_T>
-CAFFE2_API DST_T requantize_val(double, int64_t, double, int64_t, SRC_T src);
-
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions
 CAFFE2_API QuantizerPtr
 make_per_tensor_affine_quantizer(
     double scale, int64_t zero_point, ScalarType scalar_type);
 
-CAFFE2_API QuantizerPtr
-make_per_channel_affine_quantizer(
-    const std::vector<double>& scales, const std::vector<int64_t>& zero_points,
-    int64_t axis, ScalarType scalar_type);
-// variant that unpacks scales and zero points from tensors
 CAFFE2_API QuantizerPtr make_per_channel_affine_quantizer(
     const Tensor& scales,
     const Tensor& zero_points,
@@ -263,10 +242,9 @@ CAFFE2_API QuantizerPtr make_per_channel_affine_quantizer(
     ScalarType scalar_type);
 
 // Create a Quantized Tensor given arguments for normal Tensor and a quantizer
-CAFFE2_API Tensor new_qtensor_cpu(
+CAFFE2_API Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
-    QuantizerPtr quantizer,
-    MemoryFormat memory_format);
+    QuantizerPtr quantizer);
 
 } // namespace at

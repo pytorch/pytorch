@@ -103,8 +103,11 @@ A tensor can be created with :attr:`requires_grad=True` so that
             [ 2.0000,  2.0000]])
 
 Each tensor has an associated :class:`torch.Storage`, which holds its data.
-The tensor class provides multi-dimensional, `strided <https://en.wikipedia.org/wiki/Stride_of_an_array>`_
+The tensor class also provides multi-dimensional, `strided <https://en.wikipedia.org/wiki/Stride_of_an_array>`_
 view of a storage and defines numeric operations on it.
+
+.. note::
+   For more information on tensor views, see :ref:`tensor-view-doc`.
 
 .. note::
    For more information on the :class:`torch.dtype`, :class:`torch.device`, and
@@ -146,13 +149,17 @@ view of a storage and defines numeric operations on it.
    .. automethod:: new_zeros
 
    .. autoattribute:: is_cuda
+   .. autoattribute:: is_quantized
    .. autoattribute:: device
    .. autoattribute:: grad
+      :noindex:
    .. autoattribute:: ndim
    .. autoattribute:: T
 
    .. automethod:: abs
    .. automethod:: abs_
+   .. automethod:: absolute
+   .. automethod:: absolute_
    .. automethod:: acos
    .. automethod:: acos_
    .. automethod:: add
@@ -183,6 +190,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: atan2_
    .. automethod:: atan_
    .. automethod:: backward
+      :noindex:
    .. automethod:: baddbmm
    .. automethod:: baddbmm_
    .. automethod:: bernoulli
@@ -191,6 +199,12 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bincount
    .. automethod:: bitwise_not
    .. automethod:: bitwise_not_
+   .. automethod:: bitwise_and
+   .. automethod:: bitwise_and_
+   .. automethod:: bitwise_or
+   .. automethod:: bitwise_or_
+   .. automethod:: bitwise_xor
+   .. automethod:: bitwise_xor_
    .. automethod:: bmm
    .. automethod:: bool
    .. automethod:: byte
@@ -215,6 +229,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cpu
    .. automethod:: cross
    .. automethod:: cuda
+   .. automethod:: cummax
+   .. automethod:: cummin
    .. automethod:: cumprod
    .. automethod:: cumsum
    .. automethod:: data_ptr
@@ -222,7 +238,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: det
    .. automethod:: dense_dim
    .. automethod:: detach
+      :noindex:
    .. automethod:: detach_
+      :noindex:
    .. automethod:: diag
    .. automethod:: diag_embed
    .. automethod:: diagflat
@@ -261,6 +279,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: float
    .. automethod:: floor
    .. automethod:: floor_
+   .. automethod:: floor_divide
+   .. automethod:: floor_divide_
    .. automethod:: fmod
    .. automethod:: fmod_
    .. automethod:: frac
@@ -278,7 +298,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: hardshrink
    .. automethod:: histc
    .. automethod:: ifft
-   .. automethod:: imag
    .. automethod:: index_add_
    .. automethod:: index_add
    .. automethod:: index_copy_
@@ -293,20 +312,26 @@ view of a storage and defines numeric operations on it.
    .. automethod:: int_repr
    .. automethod:: inverse
    .. automethod:: irfft
+   .. automethod:: isclose
    .. automethod:: is_contiguous
+   .. automethod:: is_complex
    .. automethod:: is_floating_point
-   .. automethod:: is_leaf
+   .. autoattribute:: is_leaf
+      :noindex:
    .. automethod:: is_pinned
    .. automethod:: is_set_to
    .. automethod:: is_shared
    .. automethod:: is_signed
-   .. automethod:: is_sparse
+   .. autoattribute:: is_sparse
+   .. automethod:: istft
    .. automethod:: item
    .. automethod:: kthvalue
    .. automethod:: le
    .. automethod:: le_
    .. automethod:: lerp
    .. automethod:: lerp_
+   .. automethod:: lgamma
+   .. automethod:: lgamma_
    .. automethod:: log
    .. automethod:: log_
    .. automethod:: logdet
@@ -318,8 +343,12 @@ view of a storage and defines numeric operations on it.
    .. automethod:: log2_
    .. automethod:: log_normal_
    .. automethod:: logsumexp
+   .. automethod:: logical_and
+   .. automethod:: logical_and_
    .. automethod:: logical_not
    .. automethod:: logical_not_
+   .. automethod:: logical_or
+   .. automethod:: logical_or_
    .. automethod:: logical_xor
    .. automethod:: logical_xor_
    .. automethod:: long
@@ -328,6 +357,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lt_
    .. automethod:: lu
    .. automethod:: lu_solve
+   .. automethod:: as_subclass
    .. automethod:: map_
    .. automethod:: masked_scatter_
    .. automethod:: masked_scatter
@@ -366,6 +396,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: permute
    .. automethod:: pin_memory
    .. automethod:: pinverse
+   .. automethod:: polygamma
+   .. automethod:: polygamma_
    .. automethod:: pow
    .. automethod:: pow_
    .. automethod:: prod
@@ -382,20 +414,22 @@ view of a storage and defines numeric operations on it.
    .. automethod:: reciprocal_
    .. automethod:: record_stream
    .. automethod:: register_hook
+      :noindex:
    .. automethod:: remainder
    .. automethod:: remainder_
-   .. automethod:: real
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat
    .. automethod:: repeat_interleave
-   .. automethod:: requires_grad
+   .. autoattribute:: requires_grad
+      :noindex:
    .. automethod:: requires_grad_
    .. automethod:: reshape
    .. automethod:: reshape_as
    .. automethod:: resize_
    .. automethod:: resize_as_
    .. automethod:: retain_grad
+      :noindex:
    .. automethod:: rfft
    .. automethod:: roll
    .. automethod:: rot90
@@ -428,6 +462,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sparse_dim
    .. automethod:: sqrt
    .. automethod:: sqrt_
+   .. automethod:: square
+   .. automethod:: square_
    .. automethod:: squeeze
    .. automethod:: squeeze_
    .. automethod:: std
@@ -462,6 +498,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tril_
    .. automethod:: triu
    .. automethod:: triu_
+   .. automethod:: true_divide
+   .. automethod:: true_divide_
    .. automethod:: trunc
    .. automethod:: trunc_
    .. automethod:: type

@@ -1,6 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <c10/macros/Macros.h>
 
 #include <array>
 #include <cctype>
@@ -15,7 +17,13 @@ Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, bias);
   }
-
+// Disable the xnnpack operators for both iOS and macOS temporarily due to the crash in pthreadpool
+// TODO:T66297472 remove `!defined(__APPLE__)` once we figure out the root cause of the crash.
+#if defined(C10_MOBILE) && !defined(__APPLE__)
+  if (xnnpack::use_linear(input, weight, bias)) {
+    return xnnpack::linear(input, weight, bias);
+  }
+#endif
   if (input.dim() == 2 && bias.defined()) {
     // Fused op is marginally faster.
     return at::addmm(bias, input, weight.t());
@@ -151,7 +159,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   // The internal representation of the left hand side fo the equation (with ellipsis expanded) is stored in input_op_idxes.
   // For each operand, we have a vector mapping each dimension to an internal index.
   // We also keep track of the number of occurrences for each letter (to infer a right hand side if not given) and
-  // of the last occurence of each index.
+  // of the last occurrence of each index.
   std::vector<std::vector<int64_t>> input_op_idxes;                   // the parsed operand indices
   std::array<std::int64_t, number_of_letters> num_letter_occurrences; // number of occurrence in the equation of this letter
   num_letter_occurrences.fill(0);
@@ -330,7 +338,8 @@ Tensor einsum(std::string eqn, TensorList tensors) {
         preprocessed_op = preprocessed_op.unsqueeze(dim);
       }
     }
-    preprocessed_operands.push_back(preprocessed_op);
+
+    preprocessed_operands.push_back(std::move(preprocessed_op));
   }
 
   // now we reduce the indices from left to right
@@ -338,7 +347,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   // algorithms (see eigen_path in numpy docs)
   // we start with the leftmost operator and reduce indices that
   // appear only there
-  Tensor result = preprocessed_operands[0];
+  Tensor result = std::move(preprocessed_operands[0]);
   for (int64_t idx = 0; idx < num_total_idxes; idx++) {
     if ((last_idx_occurrence[idx] == 0)
         && (idxes_to_preprocessed_dims[idx]>=num_output_dims)) {
@@ -355,7 +364,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
         sum_dims.push_back(idxes_to_preprocessed_dims[idx]);
       }
     }
-    result = at::native::sumproduct_pair(result, preprocessed_operands[i], sum_dims, true);
+    result = at::native::sumproduct_pair(result, std::move(preprocessed_operands[i]), sum_dims, true);
   }
   // finally, we squeeze out all non-result dimensions
   auto sizes = result.sizes().vec();

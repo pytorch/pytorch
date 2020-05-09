@@ -1,5 +1,6 @@
 #include <torch/csrc/cuda/python_nccl.h>
 
+#include <pybind11/pybind11.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -30,7 +31,7 @@ PyObject* THCPModule_nccl_version(PyObject* self, PyObject* args) {
 PyObject* THCPModule_nccl_unique_id(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   ncclUniqueId id;
-  NCCL_CHECK(ncclGetUniqueId(&id));
+  get_unique_id(id);
   return PyBytes_FromStringAndSize((char*)&id, NCCL_UNIQUE_ID_BYTES);
   END_HANDLE_TH_ERRORS
 }
@@ -44,19 +45,12 @@ static ncclComm_t unpack_nccl_comm(PyObject* capsule) {
 }
 
 static void destroy_nccl_comm(PyObject* capsule) {
-  /*
-   * TODO(T30279827) Temporarily disable calling ncclCommDestroy
-   * Calling ncclCommDestroy while program exiting is undefined
-   * according to Nvidia, and lead to segfault in NCCL 2
-   * (whether it is called before or after the CUDA runtime destructor).
-   * Temporarily disable it in destructor to avoid segfault.
-   * Following up with Nvidia for long term solution.
-   */
-  return;
-
   HANDLE_TH_ERRORS
   ncclComm_t comm = unpack_nccl_comm(capsule);
-  with_no_gil([&] { ncclCommDestroy(comm); });
+  {
+    pybind11::gil_scoped_release no_gil;
+    comm_destroy(comm);
+  }
   END_HANDLE_TH_ERRORS_RET()
 }
 
@@ -118,8 +112,10 @@ PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
   ncclUniqueId commId;
   memcpy(&commId, id, NCCL_UNIQUE_ID_BYTES);
   ncclComm_t comm;
-  with_no_gil(
-      [&] { NCCL_CHECK(ncclCommInitRank(&comm, nranks, commId, rank)); });
+  {
+    pybind11::gil_scoped_release no_gil;
+    comm = comm_init_rank(nranks, commId, rank);
+  }
   return PyCapsule_New(comm, COMM_CAPSULE_NAME, &destroy_nccl_comm);
   END_HANDLE_TH_ERRORS
 }
@@ -153,9 +149,10 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
   std::vector<c10::optional<at::cuda::CUDAStream>> streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  with_no_gil([&] {
+  {
+    pybind11::gil_scoped_release no_gil;
     torch::cuda::nccl::reduce(inputs, outputs, root, op, streams, user_comms);
-  });
+  }
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -184,33 +181,10 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  with_no_gil([&] {
-    check_inputs(inputs, outputs, 1, 1);
-    size_t len = inputs.size();
-
-    ncclDataType_t data_type = get_data_type(inputs[0]);
-
-    int64_t count = inputs[0].numel();
-    AutoNcclGroup nccl_group_guard;
-    auto comms = user_comms.empty() ? get_communicators(inputs)
-                                    : ArrayRef<ncclComm_t>(user_comms);
-    at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < len; i++) {
-      int device = inputs[i].get_device();
-      device_guard.set_index(device);
-      auto stream = !streams[i]
-          ? at::cuda::getCurrentCUDAStream(device).stream()
-          : streams[i]->stream();
-      NCCL_CHECK(ncclAllReduce(
-          inputs[i].data_ptr(),
-          outputs[i].data_ptr(),
-          count,
-          data_type,
-          (ncclRedOp_t)op,
-          comms[i],
-          stream));
-    }
-  });
+  {
+    pybind11::gil_scoped_release no_gil;
+    all_reduce(inputs, outputs, op, streams, user_comms);
+  }
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -236,8 +210,10 @@ PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  with_no_gil(
-      [&] { torch::cuda::nccl::broadcast(inputs, streams, user_comms); });
+  {
+    pybind11::gil_scoped_release no_gil;
+    torch::cuda::nccl::broadcast(inputs, streams, user_comms);
+  }
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -263,42 +239,10 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  with_no_gil([&] {
-    size_t len = inputs.size();
-    check_inputs(inputs, outputs, len, 1);
-
-    ncclDataType_t data_type = get_data_type(inputs[0]);
-
-    int64_t count = inputs[0].numel();
-    AutoNcclGroup nccl_group_guard;
-    auto comms = user_comms.empty() ? get_communicators(inputs)
-                                    : ArrayRef<ncclComm_t>(user_comms);
-    at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < len; i++) {
-      int device = inputs[i].get_device();
-      device_guard.set_index(device);
-      auto stream = !streams[i]
-          ? at::cuda::getCurrentCUDAStream(device).stream()
-          : streams[i]->stream();
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-      NCCL_CHECK(ncclAllGather(
-          inputs[i].data_ptr(),
-          outputs[i].data_ptr(),
-          count,
-          data_type,
-          comms[i],
-          stream));
-#else
-      NCCL_CHECK(ncclAllGather(
-          inputs[i].data_ptr(),
-          count,
-          data_type,
-          outputs[i].data_ptr(),
-          comms[i],
-          stream));
-#endif
-    }
-  });
+  {
+    pybind11::gil_scoped_release no_gil;
+    all_gather(inputs, outputs, streams, user_comms);
+  }
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -325,33 +269,10 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  with_no_gil([&] {
-    size_t len = inputs.size();
-    check_inputs(inputs, outputs, 1, len);
-
-    ncclDataType_t data_type = get_data_type(inputs[0]);
-
-    int64_t count = inputs[0].numel() / len;
-    AutoNcclGroup nccl_group_guard;
-    auto comms = user_comms.empty() ? get_communicators(inputs)
-                                    : ArrayRef<ncclComm_t>(user_comms);
-    at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < len; i++) {
-      int device = inputs[i].get_device();
-      device_guard.set_index(device);
-      auto stream = !streams[i]
-          ? at::cuda::getCurrentCUDAStream(device).stream()
-          : streams[i]->stream();
-      NCCL_CHECK(ncclReduceScatter(
-          inputs[i].data_ptr(),
-          outputs[i].data_ptr(),
-          count,
-          data_type,
-          (ncclRedOp_t)op,
-          comms[i],
-          stream));
-    }
-  });
+  {
+    pybind11::gil_scoped_release no_gil;
+    reduce_scatter(inputs, outputs, op, streams, user_comms);
+  }
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

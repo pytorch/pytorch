@@ -15,12 +15,12 @@ namespace nn {
 ///
 ///   torch::nn::ModuleList mlist(
 ///     torch::nn::Linear(3, 4),
-///     torch::nn::BatchNorm(4),
+///     torch::nn::BatchNorm1d(4),
 ///     torch::nn::Dropout(0.5)
 ///   );
 ///
-///   for (const auto &module : mlist) {
-///     module.pretty_print();
+///   for (const auto &module : *mlist) {
+///     module->pretty_print(std::cout);
 ///   }
 ///
 /// \endrst
@@ -39,7 +39,7 @@ namespace nn {
 ///
 ///   torch::nn::ModuleList mlist(
 ///     torch::nn::Linear(3, 4),
-///     torch::nn::BatchNorm(4),
+///     torch::nn::BatchNorm1d(4),
 ///     torch::nn::Dropout(0.5)
 ///   );
 ///
@@ -74,7 +74,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
     for (const auto& module : modules_) {
       clone->push_back(module->clone(device));
     }
-    return std::move(clone);
+    return clone;
   }
 
   /// `reset()` is empty for `ModuleList`, since it does not have parameters of
@@ -89,7 +89,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
   void push_back(std::shared_ptr<Module> module) {
     modules_.push_back(std::move(module));
     const auto index = modules_.size() - 1;
-    register_module(std::to_string(index), modules_[index]);
+    register_module(c10::to_string(index), modules_[index]);
   }
 
   /// Adds a new `Module` to the `ModuleList` container, moving or copying
@@ -207,8 +207,8 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
           std::move(module));
 
       for (size_t i = index; i < size() - 1; ++i)
-        replace_module(std::to_string(index), modules_[index]);
-      register_module(std::to_string(size() - 1), modules_.back());
+        replace_module(c10::to_string(index), modules_[index]);
+      register_module(c10::to_string(size() - 1), modules_.back());
     }
   }
 

@@ -16,14 +16,6 @@
 #include <numeric>
 #include <memory>
 
-#if defined(__clang__)
-#define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
-#define __ubsan_ignore_vptr__ __attribute__((no_sanitize("vptr")))
-#else
-#define __ubsan_ignore_float_divide_by_zero__
-#define __ubsan_ignore_vptr__
-#endif
-
 #define AT_DISALLOW_COPY_AND_ASSIGN(TypeName) \
   TypeName(const TypeName&) = delete; \
   void operator=(const TypeName&) = delete
@@ -31,39 +23,6 @@
 namespace at {
 
 CAFFE2_API int _crash_if_asan(int);
-
-static inline const Storage& checked_storage(
-    const Storage& expr,
-    const char* name,
-    int pos,
-    DeviceType device_type,
-    caffe2::TypeMeta dtype) {
-  if (expr.device_type() != device_type) {
-    AT_ERROR(
-        "Expected object of device type ",
-        device_type,
-        " but got device type ",
-        expr.data_ptr().device().type(),
-        " for argument #",
-        pos,
-        " '",
-        name,
-        "'");
-  }
-  if (expr.dtype() != dtype) {
-    AT_ERROR(
-        "Expected object of data type ",
-        dtype,
-        " but got data type ",
-        expr.dtype().id(),
-        " for argument #",
-        pos,
-        " '",
-        name,
-        "'");
-  }
-  return expr;
-}
 
 // TODO: This unwrapping code is ONLY used for TH bindings; once TH goes
 // away, we can delete this function
@@ -83,29 +42,28 @@ static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const 
     AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
              " for argument #", pos, " '", name, "' in call to ", api);
   }
-  if (expr.is_variable()) {  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
-    AT_ERROR("Expected Tensor (not Variable) for argument #", pos, " '", name, "' in call to ", api);
-  }
   return expr.unsafeGetTensorImpl();
 }
 
 // Converts a TensorList (i.e. ArrayRef<Tensor> to vector of TensorImpl*)
-static inline std::vector<TensorImpl*> checked_tensor_list_unwrap(ArrayRef<Tensor> tensors, const char * name, int pos, Backend backend, ScalarType scalar_type) {
+// NB: This is ONLY used by legacy TH bindings, and ONLY used by cat.
+// Once cat is ported entirely to ATen this can be deleted!
+static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef<Tensor> tensors, const char * name, int pos, DeviceType device_type, ScalarType scalar_type) {
   std::vector<TensorImpl*> unwrapped;
   unwrapped.reserve(tensors.size());
   for (unsigned int i = 0; i < tensors.size(); ++i) {
     const auto& expr = tensors[i];
-    if (tensorTypeIdToBackend(impl::dispatchTypeId(expr.type_set())) != backend) {
-      AT_ERROR("Expected object of backend ", backend, " but got backend ", tensorTypeIdToBackend(impl::dispatchTypeId(expr.type_set())),
-               " for sequence element ", i, " in sequence argument at position #", pos, " '", name, "'");
+    if (expr.layout() != Layout::Strided) {
+      AT_ERROR("Expected dense tensor but got ", expr.layout(),
+               " for sequence element ", i , " in sequence argument at position #", pos, " '", name, "'");
+    }
+    if (expr.device().type() != device_type) {
+      AT_ERROR("Expected object of device type ", device_type, " but got device type ", expr.device().type(),
+               " for sequence element ", i , " in sequence argument at position #", pos, " '", name, "'");
     }
     if (expr.scalar_type() != scalar_type) {
       AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
                " for sequence element ", i , " in sequence argument at position #", pos, " '", name, "'");
-    }
-    if (expr.is_variable()) {  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
-      AT_ERROR("Expected Tensor (not Variable) for sequence element ",
-               i , " in sequence argument at position #", pos, " '", name, "'");
     }
     unwrapped.emplace_back(expr.unsafeGetTensorImpl());
   }
@@ -140,32 +98,26 @@ inline int64_t prod_intlist(ArrayRef<int64_t> list) {
 }
 
 /**
- * Utility function used in tensor implementations, which
- * supplies the default generator to tensors, if an input generator
- * is not supplied. The input Generator* is also static casted to
- * the backend generator type (CPU/CUDAGenerator etc.)
+ * Utility function to static cast input Generator* to
+ * the backend generator type (CPU/CUDAGeneratorImpl etc.)
  */
 template <typename T>
-static inline T * get_generator_or_default(Generator * expr, Generator * defaultValue) {
-  if (!expr) {
-    expr = defaultValue;
-  }
-  if (T::device_type() == expr->device().type()) {
-    return static_cast<T*>(expr);
-  }
-  AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found '", expr->device().type(), "'");
+static inline T * check_generator(c10::optional<Generator> gen) {
+  TORCH_CHECK(gen.has_value(), "Expected Generator but received nullopt");
+  TORCH_CHECK(gen->defined(), "Generator with undefined implementation is not allowed");
+  TORCH_CHECK(T::device_type() == gen->device().type(), "Expected a '", T::device_type(), "' device type for generator but found '", gen->device().type(), "'");
+  return gen->get<T>();
 }
 
 /**
- * Utility function to static cast input Generator* to
- * the backend generator type (CPU/CUDAGenerator etc.)
+ * Utility function used in tensor implementations, which
+ * supplies the default generator to tensors, if an input generator
+ * is not supplied. The input Generator* is also static casted to
+ * the backend generator type (CPU/CUDAGeneratorImpl etc.)
  */
 template <typename T>
-static inline T * check_generator(Generator * expr) {
-  if (T::device_type() == expr->device().type()) {
-    return static_cast<T*>(expr);
-  }
-  AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found '", expr->device().type(), "'");
+static inline T* get_generator_or_default(const c10::optional<Generator>& gen, const Generator& default_gen) {
+  return gen.has_value() && gen->defined() ? check_generator<T>(gen) : check_generator<T>(default_gen);
 }
 
 } // at

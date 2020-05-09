@@ -16,31 +16,12 @@ set -eux -o pipefail
 # Expect actual code to be written to this file
 chmod +x /home/circleci/project/ci_test_script.sh
 
+VOLUME_MOUNTS="-v /home/circleci/project/:/circleci_stuff -v /home/circleci/project/final_pkgs:/final_pkgs -v ${PYTORCH_ROOT}:/pytorch -v ${BUILDER_ROOT}:/builder"
 # Run the docker
 if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
-  export id=$(docker run --runtime=nvidia -t -d "${DOCKER_IMAGE}")
+  export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia ${VOLUME_MOUNTS} -t -d "${DOCKER_IMAGE}")
 else
-  export id=$(docker run -t -d "${DOCKER_IMAGE}")
-fi
-
-# Copy the envfile and script with all the code to run into the docker.
-docker cp /home/circleci/project/. "$id:/circleci_stuff"
-
-# Copy built packages into the docker to test. This should only exist on the
-# binary test jobs. The package should've been created from a binary build job,
-# whhich persisted the package to a CircleCI workspace, which this job then
-# copies into a GPU enabled docker for testing
-if [[ -d "/home/circleci/project/final_pkgs" ]]; then
-  docker cp /home/circleci/project/final_pkgs "$id:/final_pkgs"
-fi
-
-# Copy the needed repos into the docker. These do not exist in the smoke test
-# jobs, since the smoke test jobs do not need the Pytorch source code.
-if [[ -d "$PYTORCH_ROOT" ]]; then
-  docker cp "$PYTORCH_ROOT" "$id:/pytorch"
-fi
-if [[ -d "$BUILDER_ROOT" ]]; then
-  docker cp "$BUILDER_ROOT" "$id:/builder"
+  export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined ${VOLUME_MOUNTS} -t -d "${DOCKER_IMAGE}")
 fi
 
 # Execute the test script that was populated by an earlier section

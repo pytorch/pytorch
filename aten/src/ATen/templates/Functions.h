@@ -13,9 +13,7 @@
 #include <ATen/core/Reduction.h>
 #include <c10/util/Optional.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/core/ATenDispatch.h>
 #include <ATen/Context.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 
@@ -29,6 +27,7 @@ inline Tensor from_blob(
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
+  AutoNonVariableTypeMode guard;
   auto device = globalContext().getDeviceFromPtr(data, options.device().type());
   if (options.device().has_index()) {
     TORCH_CHECK(
@@ -37,10 +36,10 @@ inline Tensor from_blob(
         " does not match device of data ", device);
   }
   auto storage = Storage(
+      Storage::use_byte_size_t(),
       options.dtype(),
-      detail::computeStorageSize(sizes, strides),
-      InefficientStdFunctionContext::makeDataPtr(
-          data, deleter, device),
+      detail::computeStorageNbytes(sizes, strides, options.dtype().itemsize()),
+      InefficientStdFunctionContext::makeDataPtr(data, deleter, device),
       /*allocator=*/nullptr,
       /*resizable=*/false);
   return empty({0}, options).set_(storage, 0, sizes, strides);
@@ -59,14 +58,29 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     IntArrayRef strides,
     const TensorOptions& options = {}) {
-  return from_blob(data, sizes, strides, [](void*) {}, options);
+  AutoNonVariableTypeMode guard;
+  auto device = globalContext().getDeviceFromPtr(data, options.device().type());
+  if (options.device().has_index()) {
+    TORCH_CHECK(
+        options.device() == device,
+        "Specified device ", options.device(),
+        " does not match device of data ", device);
+  }
+  auto storage = Storage(
+      Storage::use_byte_size_t(),
+      options.dtype(),
+      detail::computeStorageNbytes(sizes, strides, options.dtype().itemsize()),
+      DataPtr(data, nullptr, [](void*) {}, device),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
+  return empty({0}, options).set_(storage, 0, sizes, strides);
 }
 
 inline Tensor from_blob(
     void* data,
     IntArrayRef sizes,
     const TensorOptions& options = {}) {
-  return from_blob(data, sizes, detail::defaultStrides(sizes), [](void*) {}, options);
+  return from_blob(data, sizes, detail::defaultStrides(sizes), options);
 }
 
 inline int64_t numel(const Tensor& tensor) {

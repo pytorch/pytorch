@@ -1,13 +1,13 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <torch/library.h>
 
 #include <algorithm>
 
@@ -16,6 +16,7 @@ namespace native {
 
 DEFINE_DISPATCH(qrelu_stub);
 DEFINE_DISPATCH(qrelu6_stub);
+DEFINE_DISPATCH(qrelu_leaky_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_relu(Tensor input) {
@@ -109,6 +110,25 @@ Tensor& quantized_relu_(Tensor& qx) {
   return qx;
 }
 
+Tensor& quantized_leaky_relu_out(Tensor& result, const Tensor& self,
+                                 Scalar negval) {
+  qrelu_leaky_stub(self.device().type(), result, self, negval);
+  return result;
+}
+
+Tensor quantized_leaky_relu(const Tensor& self, Scalar negval) {
+  const auto qx = self.contiguous();
+  auto qy = at::_empty_affine_quantized(qx.sizes(), self.options(),
+                                        qx.q_scale(), qx.q_zero_point());
+  qrelu_leaky_stub(self.device().type(), qy, qx, negval);
+  return qy;
+}
+
+Tensor& quantized_leaky_relu_(Tensor& self, Scalar negval) {
+  qrelu_leaky_stub(self.device().type(), self, self, negval);
+  return self;
+}
+
 namespace {
 Tensor quantized_relu6(const Tensor& qx) {
   Tensor qy;
@@ -116,16 +136,44 @@ Tensor quantized_relu6(const Tensor& qx) {
   return qy;
 }
 
-class QRelu6 final : public c10::OperatorKernel {
+Tensor quantized_relu6_(Tensor& qx) {
+  const auto zero_point = qx.q_zero_point();
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu6_", [&]() {
+    using Vec = Vec256<scalar_t>;
+    auto iter = TensorIterator::unary_op(qx, qx);
+    auto zero_point_vec = Vec(scalar_t(zero_point));
+    scalar_t six = at::native::quantize_val<scalar_t>(
+        qx.q_scale(),
+        qx.q_zero_point(),
+        /*value=*/6.0);
+    auto six_vec = Vec(six);
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value) -> scalar_t {
+          underlying_t relu_val = std::max<underlying_t>(value.val_,
+                                                         zero_point);
+          return scalar_t(std::min<underlying_t>(relu_val, six.val_));
+        },
+        [&](Vec value) -> Vec { return value.relu6(zero_point_vec, six_vec); });
+  });
+  return qx;
+}
+
+class QRelu6 final {
  public:
-  Tensor operator()(Tensor qx) {
-    return quantized_relu6(qx);
+  static Tensor run(Tensor qx, bool inplace) {
+    if (inplace) {
+      return quantized_relu6_(qx);
+    } else {
+      return quantized_relu6(qx);
+    }
   }
 };
 
-static auto registry = c10::RegisterOperators()
-.op("quantized::relu6(Tensor qx) -> Tensor",
-    c10::RegisterOperators::options().kernel<QRelu6>(TensorTypeId::QuantizedCPUTensorId));
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("relu6", QRelu6::run);
+}
+
 } // namespace
 
 }}  // namespace at::native

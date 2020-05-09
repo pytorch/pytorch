@@ -8,15 +8,15 @@ from .. import functional as F
 from .. import init
 
 
-class _BatchNorm(Module):
+class _NormBase(Module):
+    """Common base of _InstanceNorm and _BatchNorm"""
     _version = 2
-    __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
-                     'running_mean', 'running_var', 'num_batches_tracked',
+    __constants__ = ['track_running_stats', 'momentum', 'eps',
                      'num_features', 'affine']
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
-        super(_BatchNorm, self).__init__()
+        super(_NormBase, self).__init__()
         self.num_features = num_features
         self.eps = eps
         self.momentum = momentum
@@ -53,31 +53,6 @@ class _BatchNorm(Module):
     def _check_input_dim(self, input):
         raise NotImplementedError
 
-    def forward(self, input):
-        self._check_input_dim(input)
-
-        # exponential_average_factor is set to self.momentum 
-        # (when it is available) only so that if gets updated
-        # in ONNX graph when this node is exported to ONNX.
-        if self.momentum is None:
-            exponential_average_factor = 0.0
-        else:
-            exponential_average_factor = self.momentum
-
-        if self.training and self.track_running_stats:
-            # TODO: if statement only here to tell the jit to skip emitting this when it is None
-            if self.num_batches_tracked is not None:
-                self.num_batches_tracked += 1
-                if self.momentum is None:  # use cumulative moving average
-                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
-                else:  # use exponential moving average
-                    exponential_average_factor = self.momentum
-
-        return F.batch_norm(
-            input, self.running_mean, self.running_var, self.weight, self.bias,
-            self.training or not self.track_running_stats,
-            exponential_average_factor, self.eps)
-
     def extra_repr(self):
         return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
                'track_running_stats={track_running_stats}'.format(**self.__dict__)
@@ -93,15 +68,49 @@ class _BatchNorm(Module):
             if num_batches_tracked_key not in state_dict:
                 state_dict[num_batches_tracked_key] = torch.tensor(0, dtype=torch.long)
 
-        super(_BatchNorm, self)._load_from_state_dict(
+        super(_NormBase, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
+
+
+class _BatchNorm(_NormBase):
+
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
+                 track_running_stats=True):
+        super(_BatchNorm, self).__init__(
+            num_features, eps, momentum, affine, track_running_stats)
+
+    def forward(self, input):
+        self._check_input_dim(input)
+
+        # exponential_average_factor is set to self.momentum
+        # (when it is available) only so that it gets updated
+        # in ONNX graph when this node is exported to ONNX.
+        if self.momentum is None:
+            exponential_average_factor = 0.0
+        else:
+            exponential_average_factor = self.momentum
+
+        if self.training and self.track_running_stats:
+            # TODO: if statement only here to tell the jit to skip emitting this when it is None
+            if self.num_batches_tracked is not None:
+                self.num_batches_tracked = self.num_batches_tracked + 1
+                if self.momentum is None:  # use cumulative moving average
+                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
+                else:  # use exponential moving average
+                    exponential_average_factor = self.momentum
+
+        return F.batch_norm(
+            input, self.running_mean, self.running_var, self.weight, self.bias,
+            self.training or not self.track_running_stats,
+            exponential_average_factor, self.eps)
 
 
 class BatchNorm1d(_BatchNorm):
     r"""Applies Batch Normalization over a 2D or 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -159,9 +168,6 @@ class BatchNorm1d(_BatchNorm):
         >>> m = nn.BatchNorm1d(100, affine=False)
         >>> input = torch.randn(20, 100)
         >>> output = m(input)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def _check_input_dim(self, input):
@@ -173,7 +179,8 @@ class BatchNorm1d(_BatchNorm):
 class BatchNorm2d(_BatchNorm):
     r"""Applies Batch Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -231,9 +238,6 @@ class BatchNorm2d(_BatchNorm):
         >>> m = nn.BatchNorm2d(100, affine=False)
         >>> input = torch.randn(20, 100, 35, 45)
         >>> output = m(input)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def _check_input_dim(self, input):
@@ -245,7 +249,8 @@ class BatchNorm2d(_BatchNorm):
 class BatchNorm3d(_BatchNorm):
     r"""Applies Batch Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -304,9 +309,6 @@ class BatchNorm3d(_BatchNorm):
         >>> m = nn.BatchNorm3d(100, affine=False)
         >>> input = torch.randn(20, 100, 35, 45, 10)
         >>> output = m(input)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def _check_input_dim(self, input):
@@ -318,7 +320,8 @@ class BatchNorm3d(_BatchNorm):
 class SyncBatchNorm(_BatchNorm):
     r"""Applies Batch Normalization over a N-Dimensional input (a mini-batch of [N-2]D inputs
     with additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -396,9 +399,6 @@ class SyncBatchNorm(_BatchNorm):
         >>>                         sync_bn_network,
         >>>                         device_ids=[args.local_rank],
         >>>                         output_device=args.local_rank)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
@@ -410,8 +410,8 @@ class SyncBatchNorm(_BatchNorm):
         self.ddp_gpu_size = None
 
     def _check_input_dim(self, input):
-        if input.dim() <= 2:
-            raise ValueError('expected at least 3D input (got {}D input)'
+        if input.dim() < 2:
+            raise ValueError('expected at least 2D input (got {}D input)'
                              .format(input.dim()))
 
     def _specify_ddp_gpu_num(self, gpu_size):
@@ -426,8 +426,8 @@ class SyncBatchNorm(_BatchNorm):
 
         self._check_input_dim(input)
 
-        # exponential_average_factor is set to self.momentum 
-        # (when it is available) only so that if gets updated
+        # exponential_average_factor is set to self.momentum
+        # (when it is available) only so that it gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
             exponential_average_factor = 0.0
@@ -435,7 +435,7 @@ class SyncBatchNorm(_BatchNorm):
             exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
-            self.num_batches_tracked += 1
+            self.num_batches_tracked = self.num_batches_tracked + 1
             if self.momentum is None:  # use cumulative moving average
                 exponential_average_factor = 1.0 / self.num_batches_tracked.item()
             else:  # use exponential moving average
@@ -497,9 +497,10 @@ class SyncBatchNorm(_BatchNorm):
                                                    module.track_running_stats,
                                                    process_group)
             if module.affine:
-                module_output.weight.data = module.weight.data.clone().detach()
-                module_output.bias.data = module.bias.data.clone().detach()
-                # keep reuqires_grad unchanged
+                with torch.no_grad():
+                    module_output.weight.copy_(module.weight)
+                    module_output.bias.copy_(module.bias)
+                # keep requires_grad unchanged
                 module_output.weight.requires_grad = module.weight.requires_grad
                 module_output.bias.requires_grad = module.bias.requires_grad
             module_output.running_mean = module.running_mean

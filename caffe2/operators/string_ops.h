@@ -11,7 +11,7 @@ namespace caffe2 {
  * into the elementwise Functor provided, and gathers the results of each
  * call into the resulting array. Use it as an adaptor if you want to create
  * a UnaryElementwiseOp that acts on each element of the tensor per function
- * call -- this is resonable for complex types where vectorization wouldn't
+ * call -- this is reasonable for complex types where vectorization wouldn't
  * be much of a gain, performance-wise.
  */
 template <typename Functor>

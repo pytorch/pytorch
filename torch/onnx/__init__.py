@@ -2,6 +2,7 @@ import torch._C as _C
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
+TrainingMode = _C._onnx.TrainingMode
 PYTORCH_ONNX_CAFFE2_BUNDLE = _C._onnx.PYTORCH_ONNX_CAFFE2_BUNDLE
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
@@ -9,9 +10,10 @@ ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 # TODO: Update these variables when there
 # is a new ir_version and producer_version
 # and use these values in the exporter
-ir_version = 4
+ir_version = _C._onnx.IR_VERSION
 producer_name = "pytorch"
-producer_version = "1.3"
+producer_version = _C._onnx.PRODUCER_VERSION
+constant_folding_opset_versions = [9, 10, 11, 12]
 
 
 class ExportTypes:
@@ -27,16 +29,17 @@ def _export(*args, **kwargs):
     return result
 
 
-def export(model, args, f, export_params=True, verbose=False, training=False,
+def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=False, example_outputs=None, strip_doc_string=True,
-           dynamic_axes=None, keep_initializers_as_inputs=None):
+           do_constant_folding=True, example_outputs=None, strip_doc_string=True,
+           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
+           enable_onnx_checker=True, use_external_data_format=False):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
     at the moment, it supports a limited set of dynamic models (e.g., RNNs.)
-    See also: :ref:`onnx-export`
+
     Arguments:
         model (torch.nn.Module): the model to be exported.
         args (tuple of arguments): the inputs to
@@ -57,9 +60,11 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             as arguments, the ordering as specified by ``model.state_dict().values()``
         verbose (bool, default False): if specified, we will print out a debug
             description of the trace being exported.
-        training (bool, default False): export the model in training mode.  At
-            the moment, ONNX is oriented towards exporting models for inference
-            only, so you will generally not need to set this to True.
+        training (enum, default TrainingMode.EVAL):
+            TrainingMode.EVAL: export the model in inference mode.
+            TrainingMode.PRESERVE: export the model in inference mode if model.training is
+            False and to a training friendly mode if model.training is True.
+            TrainingMode.TRAINING: export the model in a training friendly mode.
         input_names(list of strings, default empty list): names to assign to the
             input nodes of the graph, in order
         output_names(list of strings, default empty list): names to assign to the
@@ -72,8 +77,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
         operator_export_type (enum, default OperatorExportTypes.ONNX):
             OperatorExportTypes.ONNX: all ops are exported as regular ONNX ops.
             OperatorExportTypes.ONNX_ATEN: all ops are exported as ATen ops.
-            OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing,
-                                                    fall back on ATen op.
+            OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing, fall back on ATen op.
             OperatorExportTypes.RAW: export raw ir.
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
@@ -85,25 +89,28 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             optimization is applied to the model during export. Constant-folding
             optimization will replace some of the ops that have all constant
             inputs, with pre-computed constant nodes.
-        example_outputs (tuple of Tensors, default None): example_outputs must be provided
-            when exporting a ScriptModule or TorchScript Function.
+        example_outputs (tuple of Tensors, default None): Model's example outputs being exported.
+            example_outputs must be provided when exporting a ScriptModule or TorchScript Function.
         strip_doc_string (bool, default True): if True, strips the field
             "doc_string" from the exported model, which information about the stack
             trace.
-        example_outputs: example outputs of the model that is being exported.
         dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
             a dictionary to specify dynamic axes of input/output, such that:
             - KEY:  input and/or output names
             - VALUE: index of dynamic axes for given key and potentially the name to be used for
             exported dynamic axes. In general the value is defined according to one of the following
             ways or a combination of both:
-            (1). A list of integers specifiying the dynamic axes of provided input. In this scenario
+            (1). A list of integers specifying the dynamic axes of provided input. In this scenario
             automated names will be generated and applied to dynamic axes of provided input/output
             during export.
             OR (2). An inner dictionary that specifies a mapping FROM the index of dynamic axis in
             corresponding input/output TO the name that is desired to be applied on such axis of
             such input/output during export.
+
             Example. if we have the following shape for inputs and outputs:
+
+            .. code-block:: none
+
                 shape(input_1) = ('b', 3, 'w', 'h')
                 and shape(input_2) = ('b', 4)
                 and shape(output)  = ('b', 'd', 5)
@@ -132,7 +139,28 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             then the behavior is chosen automatically as follows. If operator_export_type
             is OperatorExportTypes.ONNX, the behavior is equivalent to setting this
             argument to False. For other values of operator_export_type, the behavior is
-            equivalent to setting this argument to True.
+            equivalent to setting this argument to True. Note that for ONNX opset version < 9,
+            initializers MUST be part of graph inputs. Therefore, if opset_version argument is
+            set to a 8 or lower, this argument will be ignored.
+        custom_opsets (dict<string, int>, default empty dict): A dictionary to indicate
+            custom opset domain and version at export. If model contains a custom opset,
+            it is optional to specify the domain and opset version in the dictionary:
+            - KEY: opset domain name
+            - VALUE: opset version
+            If the custom opset is not provided in this dictionary, opset version is set
+            to 1 by default.
+        enable_onnx_checker (bool, default True): If True the onnx model checker will be run
+            as part of the export, to ensure the exported model is a valid ONNX model.
+        external_data_format (bool, default False): If True, then the model is exported
+            in ONNX external data format, in which case some of the model parameters are stored
+            in external binary files and not in the ONNX model file itself. See link for format
+            details: 
+            https://github.com/onnx/onnx/blob/8b3f7e2e7a0f2aba0e629e23d89f07c7fc0e6a5e/onnx/onnx.proto#L423
+            Also, in this case,  argument 'f' must be a string specifying the location of the model.
+            The external binary files will be stored in the same location specified by the model 
+            location 'f'. If False, then the model is stored in regular format, i.e. model and
+            parameters are all in one file. This argument is ignored for all export types other
+            than ONNX. 
     """
 
     from torch.onnx import utils
@@ -140,7 +168,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
                         input_names, output_names, aten, export_raw_ir,
                         operator_export_type, opset_version, _retain_param_name,
                         do_constant_folding, example_outputs,
-                        strip_doc_string, dynamic_axes, keep_initializers_as_inputs)
+                        strip_doc_string, dynamic_axes, keep_initializers_as_inputs,
+                        custom_opsets, enable_onnx_checker, use_external_data_format)
 
 
 def export_to_pretty_string(*args, **kwargs):
@@ -153,20 +182,22 @@ def _export_to_pretty_string(*args, **kwargs):
     return utils._export_to_pretty_string(*args, **kwargs)
 
 
-def _optimize_trace(trace, operator_export_type):
+def _optimize_trace(graph, operator_export_type):
     from torch.onnx import utils
-    trace.set_graph(utils._optimize_graph(trace.graph(), operator_export_type))
+    return utils._optimize_graph(graph, operator_export_type)
 
 
-def set_training(model, mode):
+def select_model_mode_for_export(model, mode):
     r"""
     A context manager to temporarily set the training mode of 'model'
     to 'mode', resetting it when we exit the with-block.  A no-op if
     mode is None.
+
+    In version 1.6 changed to this from set_training
     """
 
     from torch.onnx import utils
-    return utils.set_training(model, mode)
+    return utils.select_model_mode_for_export(model, mode)
 
 
 def _run_symbolic_function(*args, **kwargs):

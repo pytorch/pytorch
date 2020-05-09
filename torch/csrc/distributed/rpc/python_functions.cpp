@@ -1,28 +1,55 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
-#include <c10/util/C++17.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
-#include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/python_udf_call.h>
-#include <torch/csrc/distributed/rpc/python_udf_resp.h>
-#include <torch/csrc/distributed/rpc/utils.h>
 
+#include <c10/util/C++17.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
+#include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
+#include <torch/csrc/distributed/rpc/python_resp.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
-#include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
-
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/distributed/rpc/torchscript_functions.h>
+#include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/utils/python_compat.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
 namespace {
+
+py::object toPyObj(const Message& message) {
+  MessageType msgType = message.type();
+  auto response = deserializeResponse(message, msgType);
+  switch (msgType) {
+    case MessageType::SCRIPT_RET: {
+      auto& ret = static_cast<ScriptResp&>(*response);
+      Stack stack;
+      stack.push_back(ret.value());
+      {
+        pybind11::gil_scoped_acquire ag;
+        // The createPyObjectForStack does not acquire GIL, but creating a new
+        // py::object requires GIL.
+        return torch::jit::createPyObjectForStack(std::move(stack));
+      }
+    }
+    case MessageType::PYTHON_RET: {
+      // TODO: Try to avoid a copy here.
+      auto& resp = static_cast<PythonResp&>(*response);
+      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+      py::object ret = pythonRpcHandler.deserialize(resp.serializedPyObj());
+      return ret;
+    }
+    default: {
+      TORCH_CHECK(false, "Unrecognized response message type ", msgType);
+    }
+  }
+}
 
 std::shared_ptr<Operator> matchBuiltinOp(
     const std::string& opName,
@@ -37,7 +64,6 @@ std::shared_ptr<Operator> matchBuiltinOp(
         // ``createStackForSchema`` to avoid throwing an error.
         stack = torch::jit::createStackForSchema(
             op->schema(), args, kwargs, c10::nullopt);
-
       } catch (std::runtime_error& e) {
         VLOG(1) << "Couldn't match schema: " << op->schema()
                 << " to args: " << args << " and kwargs: " << kwargs
@@ -50,7 +76,8 @@ std::shared_ptr<Operator> matchBuiltinOp(
     }
   }
 
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "Failed to match operator name ",
       opName,
       " and arguments "
@@ -61,151 +88,256 @@ std::shared_ptr<Operator> matchBuiltinOp(
       ") to a builtin operator");
 }
 
-void finishAcceptUserRRef(const Message& message) {
-  RRefContext::handleException(message);
-  auto rr = RemoteRet::fromMessage(message);
-  auto& ctx = RRefContext::getInstance();
-  ctx->delPendingUser(rr->forkId());
+std::shared_ptr<FutureMessage> sendPythonRemoteCall(
+    const WorkerInfo& dst,
+    SerializedPyObj serializedPyObj,
+    const IValue& rrefId,
+    const IValue& forkId) {
+  auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
+      std::move(serializedPyObj), rrefId, forkId);
+
+  // set forceGradRecording to true as even if the args does not contain any
+  // tensor, the return value might still contain tensors.
+  auto agent = RpcAgent::getCurrentRpcAgent();
+  return torch::distributed::autograd::sendMessageWithAutograd(
+      *agent,
+      dst,
+      std::move(*pythonRemoteCall).toMessage(),
+      true /*forceGradRecording*/);
 }
 
 } // namespace
 
 using namespace torch::distributed::autograd;
 
-py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
-  switch (messageType) {
-    case MessageType::SCRIPT_RET: {
-      auto& ret = static_cast<ScriptResp&>(rpc);
-      Stack stack;
-      stack.push_back(ret.value());
-      {
-        AutoGIL ag;
-        // The createPyObjectForStack does not acquire GIL, but creating a new
-        // py::object requires GIL.
-        return torch::jit::createPyObjectForStack(std::move(stack));
-      }
-    }
-    case MessageType::PYTHON_RET: {
-      // TODO: Try to avoid a copy here.
-      auto& resp = static_cast<PythonUDFResp&>(rpc);
+c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
+    const std::shared_ptr<FutureMessage>& futureResponseMessage,
+    bool hasValue) {
+  if (hasValue) {
+    c10::intrusive_ptr<JitFuture> jitFuture =
+        c10::make_intrusive<JitFuture>(PyObjectType::get());
 
-      return PythonRpcHandler::getInstance().loadPythonUDFResult(
-          resp.pickledPayload(), resp.tensors());
-    }
-    case MessageType::MESSAGE_WITH_AUTOGRAD_RESP: {
-      auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
+    futureResponseMessage->addCallback(
+        [jitFuture](const FutureMessage& futureResponseMessage) {
+          // Don't need to acquire GIL here, as toPyObj acquires GIL
+          // when creating the py::object
+          if (futureResponseMessage.hasError()) {
+            jitFuture->setError(futureResponseMessage.error()->what());
+          } else {
+            jitFuture->markCompleted(jit::toIValue(
+                toPyObj(futureResponseMessage.constValue()),
+                PyObjectType::get()));
+          }
+        });
 
-      // Attach 'recv' autograd function.
-      addRecvRpcBackward(
-          rpcWithAutograd.autogradMetadata(), rpcWithAutograd.tensors());
+    return jitFuture;
+  } else {
+    c10::intrusive_ptr<JitFuture> jitFuture =
+        c10::make_intrusive<JitFuture>(NoneType::get());
 
-      // Handle the original RPC.
-      auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
-      return toPyObjInternal(rpcWithAutograd.wrappedRpc(), wrappedMessageType);
-    }
-    default: {
-      AT_ERROR("Unrecognized response message type ", messageType);
-    }
+    futureResponseMessage->addCallback(
+        [jitFuture](const FutureMessage& futureResponseMessage) {
+          if (futureResponseMessage.hasError()) {
+            jitFuture->setError(futureResponseMessage.error()->what());
+          } else {
+            jitFuture->markCompleted(IValue());
+          }
+        });
+
+    return jitFuture;
   }
 }
 
-py::object toPyObj(const Message& message) {
-  return toPyObjInternal(*deserializeResponse(message), message.type());
-}
-
-std::shared_ptr<FutureMessage> pyRpcBuiltin(
-    RpcAgent& agent,
+c10::intrusive_ptr<JitFuture> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
     const py::args& args,
-    const py::kwargs& kwargs) {
+    const py::kwargs& kwargs,
+    const float rpcTimeoutSeconds) {
+  DCHECK(PyGILState_Check());
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
-  auto scriptCall = c10::guts::make_unique<ScriptCall>(op, std::move(stack));
-  auto& autogradContainer = DistAutogradContainer::getInstance();
-  if (autogradContainer.hasValidContext()) {
-    // Retrieve the appropriate context to modify.
-    auto& autogradContext = autogradContainer.currentContext();
+  // Release GIL since args and kwargs processing is done.
+  py::gil_scoped_release release;
+  auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
+  auto agent = RpcAgent::getCurrentRpcAgent();
+  return wrapFutureMessageInJitFuture(sendMessageWithAutograd(
+      *agent,
+      dst,
+      std::move(*scriptCall).toMessage(),
+      false,
+      rpcTimeoutSeconds));
+}
 
-    // Wrap the original rpc with autograd information.
-    AutogradMetadata autogradMetadata(
-        autogradContext.context_id(), autogradContainer.newAutogradMessageId());
-    RpcWithAutograd rpcWithAutograd(
-        MessageType::MESSAGE_WITH_AUTOGRAD_REQ,
-        autogradMetadata,
-        std::move(scriptCall));
+c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
+    const WorkerInfo& dst,
+    std::string& pickledPythonUDF,
+    std::vector<torch::Tensor>& tensors,
+    const float rpcTimeoutSeconds) {
+  DCHECK(!PyGILState_Check());
+  auto serializedPyObj =
+      SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
+  auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
 
-    // Record autograd information for 'send'.
-    addSendRpcBackward(
-        autogradContext, autogradMetadata, rpcWithAutograd.tensors());
+  auto agent = RpcAgent::getCurrentRpcAgent();
+  return wrapFutureMessageInJitFuture(sendMessageWithAutograd(
+      *agent,
+      dst,
+      std::move(*pythonCall).toMessage(),
+      true /*forceGradRecording*/,
+      rpcTimeoutSeconds));
+}
 
-    return agent.send(dst, std::move(rpcWithAutograd).toMessage());
-  } else {
-    return agent.send(dst, std::move(*scriptCall).toMessage());
+c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
+    const std::string& dstWorkerName,
+    const std::string& qualifiedNameStr,
+    const py::tuple& argsTuple,
+    const py::dict& kwargsDict,
+    const float rpcTimeoutSeconds) {
+  // No need to catch exception here, if function can not be found,
+  // exception will be thrown in get_function() call; if args do not match
+  // with function schema, exception will be thrown in
+  // createStackForSchema() call.
+  DCHECK(!PyGILState_Check());
+  const c10::QualifiedName qualifiedName(qualifiedNameStr);
+  auto functionSchema = PythonRpcHandler::getInstance()
+                            .jitCompilationUnit()
+                            ->get_function(qualifiedName)
+                            .getSchema();
+  Stack stack;
+  {
+    // Acquire GIL for py::args and py::kwargs processing.
+    py::gil_scoped_acquire acquire;
+    stack = torch::jit::createStackForSchema(
+        functionSchema,
+        argsTuple.cast<py::args>(),
+        kwargsDict.cast<py::kwargs>(),
+        c10::nullopt);
   }
+  DCHECK(!PyGILState_Check());
+  c10::intrusive_ptr<c10::ivalue::Future> fut = rpcTorchscript(
+      dstWorkerName, qualifiedName, functionSchema, stack, rpcTimeoutSeconds);
+  return fut;
 }
 
 PyRRef pyRemoteBuiltin(
-    RpcAgent& agent,
     const WorkerInfo& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs) {
+  DCHECK(PyGILState_Check());
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
+  // Release GIL since args and kwargs processing is done.
+  py::gil_scoped_release release;
+  TypePtr returnType = op->schema().returns()[0].type();
 
   auto& ctx = RRefContext::getInstance();
-  // TODO: support creating RRefs on a local object.
-  TORCH_INTERNAL_ASSERT(
-      ctx->getWorkerId() != dst.id_,
-      "Does not support creating RRef on self yet.");
-  auto userRRef = ctx->createUserRRef<IValue>(dst.id_);
-  auto fm = agent.send(
-      dst,
-      ScriptRemoteCall(
-          op, std::move(stack), userRRef->rrefId(), userRRef->forkId())
-          .toMessage());
+  auto agent = RpcAgent::getCurrentRpcAgent();
 
-  ctx->addPendingUser(userRRef->forkId(), userRRef);
-  fm->addCallback(finishAcceptUserRRef);
-  return PyRRef(userRRef);
-}
+  if (ctx.getWorkerId() != dst.id_) {
+    auto userRRef = ctx.createUserRRef(dst.id_, returnType);
 
-std::shared_ptr<FutureMessage> pyRpcPythonUdf(
-    RpcAgent& agent,
-    const WorkerInfo& dst,
-    std::string& pickledPythonUDF,
-    std::vector<torch::Tensor>& tensors) {
-  return agent.send(
-      dst,
-      PythonUDFCall(
-          std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
-          tensors)
-          .toMessage());
+    auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
+        op, std::move(stack), userRRef->rrefId(), userRRef->forkId());
+
+    auto fm = sendMessageWithAutograd(
+        *agent, dst, std::move(*scriptRemoteCall).toMessage(), false);
+
+    userRRef->registerOwnerCreationFuture(fm);
+    ctx.addPendingUser(userRRef->forkId(), userRRef);
+    fm->addCallback([forkId{userRRef->forkId()}](const FutureMessage& fm) {
+      callback::confirmPendingUser(fm, forkId);
+    });
+    return PyRRef(userRRef);
+  } else {
+    auto ownerRRef = ctx.createOwnerRRef(returnType);
+    // prevent this owner RRef being deleted due to other forks
+    ctx.addSelfAsFork(ownerRRef);
+
+    auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
+        op, std::move(stack), ownerRRef->rrefId(), ownerRRef->rrefId());
+    auto fm = sendMessageWithAutograd(
+        *agent, dst, std::move(*scriptRemoteCall).toMessage(), false);
+
+    ownerRRef->registerOwnerCreationFuture(fm);
+
+    // Builtin operators does not return py::object, and hence does not require
+    // GIL for destructing the potentially deleted OwerRRef.
+    fm->addCallback(
+        [](const FutureMessage& fm) { callback::finishCreatingOwnerRRef(fm); });
+    return PyRRef(ownerRRef);
+  }
 }
 
 PyRRef pyRemotePythonUdf(
-    RpcAgent& agent,
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors) {
+  DCHECK(!PyGILState_Check());
   auto& ctx = RRefContext::getInstance();
-  // TODO: support creating RRefs on a local object.
-  TORCH_INTERNAL_ASSERT(
-      ctx->getWorkerId() != dst.id_,
-      "Does not support creating RRef on self yet.");
-  auto userRRef = ctx->createUserRRef<py::object>(dst.id_);
-  auto fm = agent.send(
-      dst,
-      PythonRemoteCall(
-          SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors)),
-          userRRef->rrefId().toIValue(),
-          userRRef->forkId().toIValue())
-          .toMessage());
+  auto serializedPyObj =
+      SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
+  if (ctx.getWorkerId() != dst.id_) {
+    auto userRRef = ctx.createUserRRef(dst.id_, PyObjectType::get());
+    auto fm = sendPythonRemoteCall(
+        dst,
+        std::move(serializedPyObj),
+        userRRef->rrefId().toIValue(),
+        userRRef->forkId().toIValue());
 
-  ctx->addPendingUser(userRRef->forkId(), userRRef);
-  fm->addCallback(finishAcceptUserRRef);
-  return PyRRef(userRRef);
+    userRRef->registerOwnerCreationFuture(fm);
+
+    ctx.addPendingUser(userRRef->forkId(), userRRef);
+    fm->addCallback([forkId{userRRef->forkId()}](const FutureMessage& fm) {
+      callback::confirmPendingUser(fm, forkId);
+    });
+    return PyRRef(userRRef);
+  } else {
+    auto ownerRRef = ctx.createOwnerRRef(PyObjectType::get());
+    // prevent this owner RRef being deleted due to other forks
+    ctx.addSelfAsFork(ownerRRef);
+    auto fm = sendPythonRemoteCall(
+        dst,
+        std::move(serializedPyObj),
+        ownerRRef->rrefId().toIValue(),
+        ownerRRef->rrefId().toIValue());
+
+    ownerRRef->registerOwnerCreationFuture(fm);
+
+    fm->addCallback([](const FutureMessage& fm) {
+      auto deletedRRef = callback::finishCreatingOwnerRRef(fm);
+      if (deletedRRef && deletedRRef->isPyObj()) {
+        pybind11::gil_scoped_acquire ag;
+        deletedRRef.reset();
+      }
+    });
+    return PyRRef(ownerRRef);
+  }
+}
+
+PyRRef pyRemoteTorchscript(
+    const std::string& dstWorkerName,
+    const std::string& qualifiedNameStr,
+    const py::args& args,
+    const py::kwargs& kwargs) {
+  DCHECK(!PyGILState_Check());
+  auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
+  auto functionSchema = PythonRpcHandler::getInstance()
+                            .jitCompilationUnit()
+                            ->get_function(qualifiedName)
+                            .getSchema();
+  Stack stack;
+  {
+    // Acquire GIL for py::args and py::kwargs processing.
+    pybind11::gil_scoped_acquire ag;
+    stack = torch::jit::createStackForSchema(
+        functionSchema, args, kwargs, c10::nullopt);
+  }
+  DCHECK(!PyGILState_Check());
+  auto rrefPtr =
+      remoteTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
+  return PyRRef(rrefPtr);
 }
 
 } // namespace rpc

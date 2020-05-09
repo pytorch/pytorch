@@ -68,7 +68,7 @@
  * The following example shows a general use case for the C++
  * bindings, including support for the optional exception feature and
  * also the supplied vector and string classes, see following sections for
- * decriptions of these features.
+ * descriptions of these features.
  *
  * \code
  * #define __CL_ENABLE_EXCEPTIONS

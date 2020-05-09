@@ -86,9 +86,7 @@ OPERATOR_SCHEMA(Print)
         "limit",
         "(int, default 0) If set, prints the first `limit` elements of tensor. "
         "If 0, prints the first `k_limit_default`(1000) elements of tensor")
-    .Arg(
-        "every_n",
-        "(int, default 1) Print tensor every `every_n` runs")
+    .Arg("every_n", "(int, default 1) Print tensor every `every_n` runs")
     .Input(0, "tensor", "The tensor to print.");
 
 OPERATOR_SCHEMA(LengthsToShape)
@@ -222,7 +220,10 @@ output:
 
 )DOC")
     .Input(0, "input", "A tensor of rank >= 1.")
-    .Output(0, "output", "A tensor of rank 1 (vector) with the contents of the input tensor.");
+    .Output(
+        0,
+        "output",
+        "A tensor of rank 1 (vector) with the contents of the input tensor.");
 
 OPERATOR_SCHEMA(Alias)
     .NumInputs(1)
@@ -247,11 +248,11 @@ similar to multi-thread computation before you use it explicitly.
 OPERATOR_SCHEMA(ResizeLike)
     .NumInputs(2)
     .NumOutputs(1)
-    .TensorInferenceFunction([](const OperatorDef& /*def*/,
+    .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out(1);
-      out.push_back(in[1]);
-      out[0].set_data_type(in[0].data_type());
+      out.at(0) = in.at(1);
+      out.at(0).set_data_type(in.at(0).data_type());
       return out;
     })
     .SetDoc(R"DOC(
@@ -344,6 +345,12 @@ OPERATOR_SCHEMA(ScatterAssign)
     .NumInputs(3)
     .NumOutputs(1)
     .EnforceInplace({{0, 0}})
+    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      out[0] = in[0];
+      return out;
+    })
     .SetDoc(R"DOC(
 Update slices of the tensor in-place by overriding current value.
 
@@ -399,15 +406,13 @@ Currently only works on CPU because of access to INDICES.
         "UPDATES",
         "Update slices, with shape len(INDICES) + shape(X_0)[1:]")
     .Output(0, "OUTPUT", "The updated output.")
-    .Arg(
-        "axis",
-        "*(type: int; default: 1)* Which dimension to scatter on.");
+    .Arg("axis", "*(type: int; default: 1)* Which dimension to scatter on.");
 
 OPERATOR_SCHEMA(HasElements)
-    .NumInputs(1)
+    .NumInputs(1, INT_MAX)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-The *HasElements* op accepts a single input $tensor$, and produces a single boolean output $has\_elements$. The output is *True* if and only if $tensor$ has size > 0. Note, this op is the opposite of the *IsEmpty* op.
+The *HasElements* op accepts a single or multiple input tensors, and produces a single boolean output $has\_elements$. The output is *True* if and only if any of the input tensor has size > 0. Note, this op is the opposite of the *IsEmpty* op.
 
 Github Links:
 
@@ -465,8 +470,14 @@ has_elements:  False
 </details>
 
 )DOC")
-    .Input(0, "tensor", "Input data tensor to check for elements.")
-    .Output(0, "has_elements", "Output scalar boolean tensor. True if input has size > 0.");
+    .Input(
+        0,
+        "X1, X2, ...",
+        "List of input data tensors to check for elements.")
+    .Output(
+        0,
+        "has_elements",
+        "Output scalar boolean tensor. True if input has size > 0.");
 
 OPERATOR_SCHEMA(GatherRanges)
     .NumInputs(2)
@@ -676,8 +687,6 @@ weights derived by lengths. i.e 1/pow(length, power)
     .Input(0, "lengths", "1-D int32_t or int64_t tensor of lengths")
     .Output(0, "a vector of weights", "1-D float tensor of weights by length");
 
-
-
 SHOULD_NOT_DO_GRADIENT(WallClockTime);
 
 OPERATOR_SCHEMA(EnsureDense)
@@ -872,9 +881,13 @@ REGISTER_CPU_OPERATOR(IsNaN, IsNanOp<CPUContext>);
 OPERATOR_SCHEMA(IsNaN)
     .NumInputs(1)
     .NumOutputs(1)
-    .SetDoc("Returns a new tensor with boolean elements representing if each element is NaN or not.")
+    .SetDoc(
+        "Returns a new tensor with boolean elements representing if each element is NaN or not.")
     .Input(0, "tensor", "Tensor to check for nan")
-    .Output(0, "output", "Tensor containing a 1 at each location of NaN elements."); 
+    .Output(
+        0,
+        "output",
+        "Tensor containing a 1 at each location of NaN elements.");
 
 OPERATOR_SCHEMA(Size)
     .NumInputs(1)
@@ -938,7 +951,10 @@ size: 24
 </details>
 
       )DOC")
-    .Input(0, "X", "*(type: Tensor)* Input tensor to calculate number of elements.")
+    .Input(
+        0,
+        "X",
+        "*(type: Tensor)* Input tensor to calculate number of elements.")
     .Output(
         0,
         "size",
@@ -1019,8 +1035,14 @@ output: [ 4  6  8 10 12 14 16]
         0,
         "start",
         "(*Tensor*): [OPTIONAL] scalar or 1-element tensor containing the start of the interval (inclusive) (default=0)")
-    .Input(1, "stop", "(*Tensor*): scalar or 1-element tensor containing the end of the interval (exclusive)")
-    .Input(2, "step", "(*Tensor*): [OPTIONAL] scalar or 1-element tensor specifying the spacing between values (default=1)")
+    .Input(
+        1,
+        "stop",
+        "(*Tensor*): scalar or 1-element tensor containing the end of the interval (exclusive)")
+    .Input(
+        2,
+        "step",
+        "(*Tensor*): [OPTIONAL] scalar or 1-element tensor specifying the spacing between values (default=1)")
     .Output(
         0,
         "output",
@@ -1046,3 +1068,8 @@ OPERATOR_SCHEMA(Fail).NumInputs(0).NumOutputs(0);
 SHOULD_NOT_DO_GRADIENT(Fail);
 
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    GatherRanges,
+    "_caffe2::GatherRanges(Tensor data, Tensor ranges) -> (Tensor, Tensor)",
+    caffe2::GatherRangesOp<caffe2::CPUContext>)

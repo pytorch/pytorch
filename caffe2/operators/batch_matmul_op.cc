@@ -92,7 +92,7 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
 OpSchema::Cost CostInferenceForBatchMatMul(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
-  CAFFE_ENFORCE_EQ(in.size(), 2, "BatchMatMul requires two inputs");
+  CAFFE_ENFORCE_EQ(in.size(), 2U, "BatchMatMul requires two inputs");
 
   ArgumentHelper helper(def);
   struct OpSchema::Cost c;
@@ -126,7 +126,7 @@ OPERATOR_SCHEMA(BatchMatMul)
 Batch Matrix multiplication Yi = Ai * Bi, where A has shape (dim0, dim1, ... M, K),
 B has shape (dim0, dim1, ... K, N), Y has shape (dim0, dim1, ... M, N) and i ranges
 from 0 to (dim0 * dim1 ...) - 1. rank(A) == rank(B) >= 2. In case of A and B being
-two diemnsional, it behaves like normal matrix multiplication.
+two dimensional, it behaves like normal matrix multiplication.
 )DOC")
     .Input(0, "A", "tensor of shape (dim0, dim1 ... M, K)")
     .Input(1, "B", "tensor of shape (dim0, dim1 ... K, N)")

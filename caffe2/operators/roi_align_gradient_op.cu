@@ -114,7 +114,7 @@ __global__ void RoIAlignBackwardFeature(
 
     T roi_width = roi_end_w - roi_start_w;
     T roi_height = roi_end_h - roi_start_h;
-    if (!continuous_coordinate) { // backward compatiblity
+    if (!continuous_coordinate) { // backward compatibility
       // Force malformed ROIs to be 1x1
       roi_width = c10::cuda::compat::max(roi_width, (T)1.);
       roi_height = c10::cuda::compat::max(roi_height, (T)1.);
@@ -231,4 +231,12 @@ bool RoIAlignGradientOp<float, CUDAContext>::RunOnDevice() {
 REGISTER_CUDA_OPERATOR(
     RoIAlignGradient,
     RoIAlignGradientOp<float, CUDAContext>);
+
+template <typename T>
+using RoIAlignGradientCUDAOp = RoIAlignGradientOp<T, CUDAContext>;
+
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(
+    RoIAlignGradient,
+    caffe2::RoIAlignGradientCUDAOp<float>);

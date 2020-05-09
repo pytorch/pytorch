@@ -10,7 +10,7 @@ AsyncTaskFuture::AsyncTaskFuture() : completed_(false), failed_(false) {}
 AsyncTaskFuture::AsyncTaskFuture(const std::vector<AsyncTaskFuture*>& futures)
     : completed_(false), failed_(false) {
   if (futures.size() > 1) {
-    parent_counter_ = caffe2::make_unique<ParentCounter>(futures.size());
+    parent_counter_ = std::make_unique<ParentCounter>(futures.size());
     for (auto future : futures) {
       future->SetCallback([this](const AsyncTaskFuture* f) {
         if (f->IsFailed()) {
