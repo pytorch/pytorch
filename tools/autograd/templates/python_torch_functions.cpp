@@ -25,8 +25,6 @@
 
 #include <ATen/ATen.h>
 
-#include <pybind11/pybind11.h>
-
 #include <functional>
 #include <initializer_list>
 #include <stdexcept>
@@ -46,8 +44,6 @@ using at::Generator;
 using at::TensorList;
 using at::Dimname;
 using at::DimnameList;
-
-namespace py = pybind11;
 
 using namespace torch::autograd::utils;
 
@@ -486,46 +482,83 @@ static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, P
 // Any new ops added here should be accompanied with a comment why they are not
 // being registered through native_functions.yaml, and be tagged cpp / JIT
 static PyMethodDef torch_functions[] = {
-  {"arange", (PyCFunction)(void(*)(void))THPVariable_arange, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"as_tensor", (PyCFunction)(void(*)(void))THPVariable_as_tensor, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"dsmm", (PyCFunction)(void(*)(void))THPVariable_mm, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_O, NULL},
-  {"full", (PyCFunction)(void(*)(void))THPVariable_full, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"hsmm", (PyCFunction)(void(*)(void))THPVariable_hspmm, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"nonzero", (PyCFunction)(void(*)(void))THPVariable_nonzero, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"randint", (PyCFunction)(void(*)(void))THPVariable_randint, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"range", (PyCFunction)(void(*)(void))THPVariable_range, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"saddmm", (PyCFunction)(void(*)(void))THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"sparse_coo_tensor", (PyCFunction)(void(*)(void))THPVariable_sparse_coo_tensor, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"spmm", (PyCFunction)(void(*)(void))THPVariable_mm, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"tensor", (PyCFunction)(void(*)(void))THPVariable_tensor, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"get_device", (PyCFunction)(void(*)(void))THPVariable_get_device, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"numel", (PyCFunction)(void(*)(void))THPVariable_numel, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"arange", (PyCFunction)(void(*)(void))THPVariable_arange, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"as_tensor", (PyCFunction)(void(*)(void))THPVariable_as_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"dsmm", (PyCFunction)(void(*)(void))THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
+  {"full", (PyCFunction)(void(*)(void))THPVariable_full, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"hsmm", (PyCFunction)(void(*)(void))THPVariable_hspmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"nonzero", (PyCFunction)(void(*)(void))THPVariable_nonzero, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"randint", (PyCFunction)(void(*)(void))THPVariable_randint, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"range", (PyCFunction)(void(*)(void))THPVariable_range, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"saddmm", (PyCFunction)(void(*)(void))THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"sparse_coo_tensor", (PyCFunction)(void(*)(void))THPVariable_sparse_coo_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"spmm", (PyCFunction)(void(*)(void))THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"tensor", (PyCFunction)(void(*)(void))THPVariable_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"get_device", (PyCFunction)(void(*)(void))THPVariable_get_device, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"numel", (PyCFunction)(void(*)(void))THPVariable_numel, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   ${py_method_defs}
   {NULL}
 };
 
+static PyTypeObject THPVariableFunctions = {
+  PyVarObject_HEAD_INIT(NULL, 0)
+  "torch._C._VariableFunctionsClass",    /* tp_name */
+  0,                                     /* tp_basicsize */
+  0,                                     /* tp_itemsize */
+  0,                                     /* tp_dealloc */
+  0,                                     /* tp_vectorcall_offset */
+  0,                                     /* tp_getattr */
+  0,                                     /* tp_setattr */
+  0,                                     /* tp_reserved */
+  0,                                     /* tp_repr */
+  0,                                     /* tp_as_number */
+  0,                                     /* tp_as_sequence */
+  0,                                     /* tp_as_mapping */
+  0,                                     /* tp_hash  */
+  0,                                     /* tp_call */
+  0,                                     /* tp_str */
+  0,                                     /* tp_getattro */
+  0,                                     /* tp_setattro */
+  0,                                     /* tp_as_buffer */
+  Py_TPFLAGS_DEFAULT,                    /* tp_flags */
+  NULL,                                  /* tp_doc */
+  0,                                     /* tp_traverse */
+  0,                                     /* tp_clear */
+  0,                                     /* tp_richcompare */
+  0,                                     /* tp_weaklistoffset */
+  0,                                     /* tp_iter */
+  0,                                     /* tp_iternext */
+  torch_functions,                       /* tp_methods */
+  0,                                     /* tp_members */
+  0,                                     /* tp_getset */
+  0,                                     /* tp_base */
+  0,                                     /* tp_dict */
+  0,                                     /* tp_descr_get */
+  0,                                     /* tp_descr_set */
+  0,                                     /* tp_dictoffset */
+  0,                                     /* tp_init */
+  0,                                     /* tp_alloc */
+  0                                      /* tp_new */
+};
+
 void initTorchFunctions(PyObject* module) {
-  static struct PyModuleDef def = {
-    PyModuleDef_HEAD_INIT,
-    "torch._C._VariableFunctions",
-    NULL,
-    -1,
-    torch_functions
-  };
-  THPVariableFunctionsModule = PyModule_Create(&def);
-  if (!THPVariableFunctionsModule) {
+  if (PyType_Ready(&THPVariableFunctions) < 0) {
     throw python_error();
   }
-  // steals a reference
+  Py_INCREF(&THPVariableFunctions);
+
+  // Steals
+  Py_INCREF(&THPVariableFunctions);
+  if (PyModule_AddObject(module, "_VariableFunctionsClass", reinterpret_cast<PyObject*>(&THPVariableFunctions)) < 0) {
+    throw python_error();
+  }
+  // PyType_GenericNew returns a new reference
+  THPVariableFunctionsModule = PyType_GenericNew(&THPVariableFunctions, Py_None, Py_None);
+  // PyModule_AddObject steals a reference
   if (PyModule_AddObject(module, "_VariableFunctions", THPVariableFunctionsModule) < 0) {
     throw python_error();
   }
-  // h/t Jason Fried for this trick.  Without this, if you
-  // 'import torch._C._VariableFunctions' you will get
-  // "No module named 'torch._C._VariableFunctions'; 'torch._C' is not a package".
-  // Manually registering the module in sys.modules bypasses this mechanism
-  py::module::import("sys").attr("modules")["torch._C._VariableFunctions"] = THPVariableFunctionsModule;
 }
 
 // generated methods start here
