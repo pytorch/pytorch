@@ -699,7 +699,6 @@ void testSimplifyMuls() {
     // But not for Float since nan * 0 = nan.
     ExprHandle body = ExprHandle(1.f) * (x * ExprHandle(0.f));
     ExprHandle simplified = IRSimplifier::simplify(body);
-    std::cout << simplified << "\n";
 
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
     IS_NODE_WITH_NAME(Cast, mul->lhs(), cast);
