@@ -2646,7 +2646,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # Run `forward` function with torch.no_grad()
         with torch.no_grad():
             output = model(input)
-            self.assertTrue(torch.is_tensor(output))
+            self.assertTrue(isinstance(output, torch.Tensor))
 
         # No parameter should have their gradient set.
         check_no_grads()
@@ -2999,18 +2999,18 @@ class ReducerTest(TestCase):
     def test_multi_dtype_multi_bucket(self):
         model = self._create_mixed_precision_model()
         parameters = [list(model.parameters())]
-        group_by_type = groupby(
+        group_by_dtype = groupby(
             range(len(parameters[0])),
-            key=lambda i: parameters[0][i].type())
-        buckets = [list(indices) for _, indices in group_by_type]
+            key=lambda i: parameters[0][i].dtype)
+        buckets = [list(indices) for _, indices in group_by_dtype]
         dist.Reducer(parameters, buckets, self.process_group)
 
     def _create_reducer_for_models(self, models):
         parameters = [list(model.parameters()) for model in models]
-        group_by_type = groupby(
+        group_by_dtype = groupby(
             range(len(parameters[0])),
-            key=lambda i: parameters[0][i].type())
-        buckets = [list(indices) for _, indices in group_by_type]
+            key=lambda i: parameters[0][i].dtype)
+        buckets = [list(indices) for _, indices in group_by_dtype]
         return dist.Reducer(parameters, buckets, self.process_group)
 
     def test_forward_backward_single_replica(self):

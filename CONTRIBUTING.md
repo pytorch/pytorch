@@ -129,7 +129,7 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
   you'll have a lot of missing functionality if you try to use it
   directly.)
 * [aten](aten) - C++ tensor library for PyTorch (no autograd support)
-  * [src](aten/src)
+  * [src](aten/src) - [README](aten/src/README.md)
     * [TH](aten/src/TH)
       [THC](aten/src/THC)
       [THCUNN](aten/src/THCUNN) - Legacy library code from the original
@@ -159,6 +159,7 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
           [miopen](aten/src/ATen/native/miopen) [cudnn](aten/src/ATen/native/cudnn)
           - implementations of operators which simply bind to some
             backend library.
+        * [quantized](aten/src/ATen/native/quantized/) - Quantized tensor (i.e. QTensor) operation implementations. [README](aten/src/ATen/native/quantized/README.md) contains details including how to implement native quantized operations.
 * [torch](torch) - The actual PyTorch library. Everything that is not
   in [csrc](torch/csrc) is a Python module, following the PyTorch Python
   frontend module structure.
@@ -166,11 +167,10 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
     in this directory tree are a mix of Python binding code, and C++
     heavy lifting. Consult `setup.py` for the canonical list of Python
     binding files; conventionally, they are often prefixed with
-    `python_`.
+    `python_`. [README](torch/csrc/README.md)
     * [jit](torch/csrc/jit) - Compiler and frontend for TorchScript JIT
-      frontend.
-    * [autograd](torch/csrc/autograd) - Implementation of reverse-mode automatic
-      differentiation.
+      frontend. [README](torch/csrc/jit/README.md)
+    * [autograd](torch/csrc/autograd) - Implementation of reverse-mode automatic differentiation. [README](torch/csrc/autograd/README.md)
     * [api](torch/csrc/api) - The PyTorch C++ frontend.
     * [distributed](torch/csrc/distributed) - Distributed training
       support for PyTorch.
@@ -187,6 +187,9 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
     and TorchScript.
   * ...
   * [cpp](test/cpp) - C++ unit tests for PyTorch C++ frontend.
+    * [api](test/cpp/api) - [README](test/cpp/api/README.md)
+    * [jit](test/cpp/jit) - [README](test/cpp/jit/README.md)
+    * [tensorexpr](test/cpp/tensorexpr) - [README](test/cpp/tensorexpr/README.md)
   * [expect](test/expect) - Automatically generated "expect" files
     which are used to compare against expected output.
   * [onnx](test/onnx) - Tests for ONNX export functionality,
@@ -197,6 +200,7 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
   * [operators](caffe2/operators) - Operators of Caffe2.
   * [python](caffe2/python) - Python bindings to Caffe2.
   * ...
+* [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
 
 ## Unit testing
 
