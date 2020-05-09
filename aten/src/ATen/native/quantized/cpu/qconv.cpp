@@ -455,7 +455,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_relu(
     const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<false>(input, output_scale, output_zero_point);
+  return apply_impl<true>(input, output_scale, output_zero_point);
 }
 
 template <int kSpatialDim>
@@ -516,7 +516,8 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     int8_t* w_data =
         reinterpret_cast<int8_t*>(weight_contig.template data_ptr<c10::qint8>());
 
-    uint8_t* weight_zp_data = (uint8_t*)w_zero_points.data_ptr<c10::quint8>();
+    uint8_t* weight_zp_data =
+        reinterpret_cast<uint8_t*>(w_zero_points.data_ptr<c10::quint8>());
     float* weight_scales_data = w_scales.data_ptr<float>();
     // We calculate requant scale here as the vector holding the requant scale
     // is owned by this module. The pointer is then passed to qnnpack backend.
@@ -537,7 +538,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     // Original bias was float, so we requantize it here.
-    auto bias = at::quantize_per_tensor(
+    auto qbias = at::quantize_per_tensor(
         bias_fp32, weight_scales_data[0] * act_input_scale, 0, c10::kQInt32);
 
     conv_p = qnnpack::conv_param_t(
@@ -562,8 +563,14 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     w = std::make_unique<qnnpack::PrePackConvWeights>(
         conv_p,
         reinterpret_cast<uint8_t*>(qnnp_w_data),
-        reinterpret_cast<int32_t*>(bias.template data_ptr<c10::qint32>()));
+        reinterpret_cast<int32_t*>(qbias.template data_ptr<c10::qint32>()));
     pack_w = w.get();
+    if (at::globalContext().releaseWeightsWhenPrepacking()) {
+        // On mobile, we release the original weight by resetting the intrusive_ptr.
+        // Calling unpack after this will throw an assertion.
+        orig_weight.reset();
+        bias.reset();
+    }
   }
 
   TORCH_CHECK(

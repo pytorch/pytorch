@@ -6,6 +6,7 @@
 #include <qnnpack_func.h>
 
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/cpu/packed_params.h>
 
 #include <utility>
 
@@ -16,22 +17,69 @@ struct QnnpackOperatorDeleter {
 };
 
 // PackedWeight struct for QNNPACK stores the original Weight and Bias as
-// QNNPACK currently does not support an unpack function. Possible optimization
-// - For PyTorch Mobile, once the model is scripted and serialized we don't need
-// to call unpack, so we can save some memory by checking for this case.
+// QNNPACK currently does not support an unpack function.
+// For PyTorch Mobile, once the model is scripted and serialized we don't need
+// to call unpack, so we can save some memory by checking for this case and free
+// the original weights after packing.
 // Input scale is set to null in pre-pack step. QNNPACK needs bias quantized
 // with input scale which is available at runtime in pytorch. During runtime if
 // input scale value changes then we requantize bias with the updated scale. For
 // inference we expect the graph to be static so the input scale should not
 // change across consecutive inference calls.
-struct PackedLinearWeightsQnnp {
+struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
+  PackedLinearWeightsQnnp(
+      std::unique_ptr<qnnpack::PackBMatrix> w,
+      at::Tensor orig_weight,
+      at::Tensor bias,
+      c10::optional<double> input_scale,
+      at::Tensor w_scales,
+      at::Tensor w_zps)
+      : w(std::move(w)),
+        orig_weight(std::move(orig_weight)),
+        bias_(std::move(bias)),
+        input_scale(std::move(input_scale)),
+        w_scales(w_scales),
+        w_zero_points(w_zps) {}
+
   std::unique_ptr<qnnpack::PackBMatrix> w;
   at::Tensor orig_weight;
-  at::Tensor bias;
+  at::Tensor bias_;
   c10::optional<double> input_scale;
   at::Tensor w_scales;
   at::Tensor w_zero_points;
   std::vector<float> requantization_scale;
+
+  at::Tensor apply(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+  at::Tensor apply_relu(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+
+  at::Tensor apply_dynamic(at::Tensor input) override;
+  at::Tensor apply_dynamic_relu(at::Tensor input) override;
+
+  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+
+  c10::optional<at::Tensor> bias() override {
+    return bias_;
+  }
+
+  static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
+      at::Tensor weight,
+      c10::optional<at::Tensor> bias);
+
+ private:
+  template <bool ReluFused>
+  at::Tensor apply_impl(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point);
+
+  template <bool ReluFused>
+  at::Tensor apply_dynamic_impl(at::Tensor input);
 };
 
 template <int kSpatialDim = 2>

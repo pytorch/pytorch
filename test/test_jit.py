@@ -8,6 +8,7 @@ import torch
 from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
 from jit.test_type_sharing import TestTypeSharing  # noqa: F401
 from jit.test_logging import TestLogging  # noqa: F401
+from jit.test_backends import TestBackends  # noqa: F401
 from jit.test_list_dict import TestList, TestDict  # noqa: F401
 from jit.test_async import TestAsync  # noqa: F401
 from jit.test_data_parallel import TestDataParallel  # noqa: F401
@@ -593,6 +594,51 @@ class TestJit(JitTestCase):
         s = str(fn.graph)
         torch._C._jit_pass_peephole(fn.graph)
         self.assertEqual(s, str(fn.graph))
+
+    def test_peephole_list_ops(self):
+        @torch.jit.script
+        def foo(x, y, z):
+            return len([x, y, z])
+
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check("value=3").check_next("return").run(foo.graph)
+
+        @torch.jit.script
+        def foo(x, y, z):
+            li = [x, y, z]
+            for i in range(len(x)):
+                li.append(x)
+            return len([x, y, z])
+
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check_not("aten::len").run(foo.graph)
+
+        @torch.jit.script
+        def foo(x, y, z):
+            li = [x, y, z]
+            return li[1], li[-2]
+
+        FileCheck().check("aten::__getitem__").run(foo.graph)
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check_not("aten::__getitem__").run(foo.graph)
+
+        @torch.jit.script
+        def foo(x, y, z):
+            li = [x, y, z]
+            return li[-7]
+
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check("aten::__getitem__").run(foo.graph)
+
+        @torch.jit.script
+        def foo(x, y, z):
+            li = [x, y, z]
+            for i in range(len(x)):
+                li.append(x)
+            return li[-2]
+
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check("aten::__getitem__").run(foo.graph)
 
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_peephole_cuda(self):
@@ -6629,7 +6675,7 @@ a")
         def test_integral_shape_inference(a):
             return a / a
         ''')
-        inputs = [torch.ones(10, 10).type(torch.LongTensor)]
+        inputs = [torch.ones(10, 10, dtype=torch.long)]
         outputs = torch.ones(10, 10)
 
         self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
@@ -17477,8 +17523,7 @@ a")
                 qweight = torch._empty_affine_quantized(
                     [out_features, in_features], scale=1, zero_point=0,
                     dtype=torch.qint8)
-                self.register_buffer('_packed_weight',
-                                     torch.ops.quantized.linear_prepack(qweight))
+                self._packed_weight = torch.ops.quantized.linear_prepack(qweight)
 
             @torch.jit.export
             def __getstate__(self):
@@ -17489,8 +17534,7 @@ a")
 
             @torch.jit.export
             def __setstate__(self, state):
-                self._packed_weight.set_(
-                    torch.ops.quantized.linear_prepack(state[0]))
+                self._packed_weight = torch.ops.quantized.linear_prepack(state[0])
                 self.training = state[1]
 
             @property
