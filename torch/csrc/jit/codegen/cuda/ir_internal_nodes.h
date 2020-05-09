@@ -99,6 +99,50 @@ struct TORCH_CUDA_API BinaryOp : public Expr {
 };
 
 /*
+ * A specialization for Ternary operations.
+ * There are 3 inputs and 1 output
+ * Examples include:
+ *  1) Threshold
+ *  2) Where
+ */
+struct TORCH_CUDA_API TernaryOp : public Expr {
+  ~TernaryOp() = default;
+  TernaryOp(TernaryOpType _type, Val* _out, Val* _in1, Val* _in2, Val* _in3);
+
+  TernaryOp(const TernaryOp& other) = delete;
+  TernaryOp& operator=(const TernaryOp& other) = delete;
+
+  TernaryOp(TernaryOp&& other) = delete;
+  TernaryOp& operator=(TernaryOp&& other) = delete;
+
+  Val* out() const noexcept {
+    return out_;
+  }
+  Val* in1() const noexcept {
+    return in1_;
+  }
+  Val* in2() const noexcept {
+    return in2_;
+  }
+  Val* in3() const noexcept {
+    return in3_;
+  }
+
+  TernaryOpType getTernaryOpType() const noexcept {
+    return ternary_op_type_;
+  }
+
+  bool sameAs(const TernaryOp* other) const;
+
+ private:
+  const TernaryOpType ternary_op_type_;
+  Val* const out_;
+  Val* const in1_;
+  Val* const in2_;
+  Val* const in3_;
+};
+
+/*
  * Simply a representation of an annotated 1D iterable from start to extent.
  * TensorDomains which represent how to iterate over a tensor is made up of
  * IterDomains to form an ND iterable. We directly set parallization strategies

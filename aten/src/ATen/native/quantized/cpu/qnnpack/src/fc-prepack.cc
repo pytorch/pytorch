@@ -70,7 +70,7 @@ PackBMatrix::PackBMatrix(
     const int32_t* bias) {
   if (requantization_scale <= 0.0f || !std::isnormal(requantization_scale)) {
     pytorch_qnnp_log_error(
-        "failed to create fully connected operator with %.7g requant scale: "
+        "failed to create fully connected operator with %.7g requantization scale: "
         "scale must be finite and positive",
         requantization_scale);
     assert("QNNPACK Runtime Error.");
