@@ -338,15 +338,14 @@ TensorView* TensorView::split(int axis, int factor) {
   if (axis < 0)
     axis += domain()->nDims();
 
-  TORCH_CHECK(
-      axis >= 0 && axis < domain()->nDims(),
-      "Trying to split axis outside of TensorView's range.");
-
-  TORCH_CHECK(factor >= 0, "Cannot split by a factor less than 1.");
-
   if (getComputeAtView() != nullptr)
     if (axis < getComputeAtAxis())
-      TORCH_CHECK(false, "Cannot split axis within compute at range.");
+      TORCH_CHECK(
+          false,
+          "Cannot split axis within compute at range. Axis = ",
+          axis,
+          " computeAtAxis = ",
+          getComputeAtAxis());
 
   setDomain(domain()->split(axis, factor));
   return this;
@@ -357,93 +356,21 @@ TensorView* TensorView::merge(int axis) {
   if (axis < 0)
     axis += domain()->nDims();
 
-  TORCH_CHECK(
-      axis >= 0 && axis + 1 < domain()->nDims(),
-      "Trying to merge axis outside of TensorView's range.");
-
   if (getComputeAtView() != nullptr)
     if (axis + 1 < getComputeAtAxis())
-      TORCH_CHECK(false, "Cannot merge axis within compute at range.");
+      TORCH_CHECK(
+          false,
+          "Cannot merge axis within compute at range. Axis = ",
+          axis,
+          " computeAtAxis = ",
+          getComputeAtAxis());
 
   setDomain(domain()->merge(axis));
   return this;
 }
 
-// Reorder axes according to map[old_pos] = new_pos
 TensorView* TensorView::reorder(const std::unordered_map<int, int>& old2new_) {
-  // START VALIDATION CHECKS
-  // adjust based on negative values (any negative values gets nDims added to
-  // it)
-  std::unordered_map<int, int> old2new;
-  auto ndims = nDims();
-  std::transform(
-      old2new_.begin(),
-      old2new_.end(),
-      std::inserter(old2new, old2new.begin()),
-      [ndims](std::unordered_map<int, int>::value_type entry) {
-        return std::unordered_map<int, int>::value_type({
-            entry.first < 0 ? entry.first + ndims : entry.first,
-            entry.second < 0 ? entry.second + ndims : entry.second,
-        });
-      });
-
-  // Check if any adjusted values are < 0, or >= nDims, which are invalid
-  bool out_of_range = std::any_of(
-      old2new.begin(),
-      old2new.end(),
-      [ndims](std::unordered_map<int, int>::value_type entry) {
-        return entry.first < 0 || entry.first >= ndims || entry.second < 0 ||
-            entry.second >= ndims;
-      });
-
-  TORCH_CHECK(
-      !out_of_range,
-      "TensorView reorder axes are outside the number of dimensions in the TensorView.")
-
-  // Going to use sets, to see if any duplicate values are in the map.
-
-  std::set<int> old_pos_set;
-  std::transform(
-      old2new.begin(),
-      old2new.end(),
-      std::inserter(old_pos_set, old_pos_set.begin()),
-      [](std::unordered_map<int, int>::value_type entry) {
-        return entry.first;
-      });
-
-  std::set<int> new_pos_set;
-  std::transform(
-      old2new.begin(),
-      old2new.end(),
-      std::inserter(new_pos_set, new_pos_set.begin()),
-      [](std::unordered_map<int, int>::value_type entry) {
-        return entry.first;
-      });
-
-  // Error out if duplicate values are found.
-  TORCH_CHECK(
-      old_pos_set.size() == old2new.size() &&
-          new_pos_set.size() == old2new.size(),
-      "Duplicate entries in transformation map sent to TensorView reorder.");
-
-  // Check if we're trying to reorder any values outside of the computeAt axis
-
-  if (hasComputeAt()) {
-    auto compute_at_axis = getComputeAtAxis();
-    bool outside_computeat = std::any_of(
-        old2new.begin(),
-        old2new.end(),
-        [compute_at_axis](std::unordered_map<int, int>::value_type entry) {
-          return entry.first < compute_at_axis ||
-              entry.second < compute_at_axis;
-        });
-    TORCH_CHECK(
-        !outside_computeat,
-        "Cannot reorder dimensions that are outside computeAt axis.");
-  }
-  // END VALIDATION CHECKS
   setDomain(domain()->reorder(old2new_));
-
   return this;
 }
 
@@ -466,6 +393,8 @@ TensorView* TensorView::rFactor(const std::vector<int> axes) {
       "Error rfactoring ",
       this,
       " its origin is either a nullptr or not a reduction.");
+  TORCH_CHECK(
+      !domain()->hasRFactor(), "Cannot call rfactor on the same view twice.");
   ReductionOp* this_origin = static_cast<ReductionOp*>(origin_expr);
 
   TensorView* producer =

@@ -395,7 +395,9 @@ TensorDomain* TensorDomain::reorder(
 
   TORCH_CHECK(
       !out_of_range,
-      "TensorView reorder axes are outside the number of dimensions in the TensorView.")
+      "Reorder axes are not within the number of dimensions of this domain, ",
+      this,
+      ".");
 
   // Going to use sets, to see if any duplicate values are in the map.
 
@@ -485,6 +487,9 @@ TensorDomain* TensorDomain::reorder(
 std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
     const std::vector<int> axes) {
   std::set<int> axes_set(axes.begin(), axes.end());
+  TORCH_CHECK(
+      !hasRFactor(), "Cannot call rfactor on the same tensor domain twice.");
+
   bool rfactor_found = false;
   bool reduction_found = false;
   for (decltype(nDims()) i{0}; i < nDims(); i++) {
