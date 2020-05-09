@@ -12,7 +12,10 @@ namespace {
 
 template <typename iscalar_t>
 iscalar_t get_nvalues(const std::vector<iscalar_t>& sizes, const int64_t sparse_dim) {
-  /* Return the number of elements of sparse values entries.
+  /* Return the number of entries in the dense part of a sparse tensor.
+
+     `sizes` is a vector of sparse tensor dimensions.
+     `sparse_dim` is the dimension of the sparse part of a sparse tensor.
    */
   iscalar_t nvalues = 1;
   for (auto it = sizes.begin() + sparse_dim; it != sizes.end(); ++it) {
@@ -24,8 +27,8 @@ iscalar_t get_nvalues(const std::vector<iscalar_t>& sizes, const int64_t sparse_
 template <typename iscalar_t>
 std::vector<iscalar_t> get_offsets(const Tensor& indices, const std::vector<iscalar_t>& sizes, const int64_t dim) {
   /*
-    Given the indices of a sparse tensor return a vector of offsets
-    for the entries in the corresponding dense tensor:
+    Given the indices of a sparse tensor, return a vector of offsets
+    for the entries in the equivalent dense tensor:
 
       If
         offsets = get_offsets(A._indices(), A.sizes(), -1)
@@ -36,11 +39,30 @@ std::vector<iscalar_t> get_offsets(const Tensor& indices, const std::vector<isca
     `indices` must be a contiguous 2-d tensor with iscalar_t entries.
     `sizes` must be a vector with at least ndim entries.
 
-    `dim` is an integer. When >= 0 and < ndim, all entries in the
-    given dimension will be mapped to the first entry. Otherwise, the
-    value is ignored.
+    `dim` is an integer. When >= 0 and < ndim, the indices of all
+    entries in the given dimension will be mapped to the index of the
+    first entry before computing the offset. Otherwise, the value is
+    ignored.
 
-    The items in the returned vector are in increasing order.
+    For example, consider a sparse tensor
+
+      11 ** ** 14 15
+      ** 22 ** 24 **
+
+    with
+
+      indices = [[0, 0, 0, 1, 1],
+                 [0, 3, 4, 1, 3]]
+
+    then
+
+      get_offsets(indices, (2, 5), -1) -> [0, 3, 4, 6, 8]
+      get_offsets(indices, (2, 5), 0) -> [0, 3, 4, 1, 3]
+      get_offsets(indices, (2, 5), 1) -> [0, 0, 0, 5, 5]
+
+    This function together with `get_dense_offsets` defined below are
+    used to compute the indices mapping required in the sparse softmax
+    algorithm (see below).
   */
   auto ndim = indices.size(0);
   auto nnz = indices.size(1);
@@ -76,6 +98,13 @@ std::vector<iscalar_t> get_dense_offsets(iscalar_t &mx, const std::vector<iscala
         pool.size() == offsets.size()
         pool[i] == pool[j] iff offsets[i] == offsets[j]
         set(pool) == set(range(mx))
+
+    and the size of the pool via changing `mx` argument in-place.
+
+    This function remaps a list of integers to a dense list of
+    integers. For example,
+
+      get_dense_offsets([0, 3, 4, 1, 3]) -> [0, 1, 2, 3, 1]
   */
   auto n = offsets.size();
   std::vector<iscalar_t> pool(n, 0);
@@ -101,7 +130,140 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
     See test/test_sparse.py:test_softmax:sparse_softmax for the Python
     prototype of the sparse softmax algorithm that this implementation
     is based on.
-   */
+
+    Derivation of the sparse softmax algorithm with an example
+    ----------------------------------------------------------
+
+    Consider the following 2-D sparse tensor with 0-D dense part as an
+    example, denote it by X:
+
+      11 ** ** 14 15
+      ** 22 ** 24 **
+
+    where `**` represent unspecified entries. The COO sparse tensor
+    representation of X is:
+
+      indices = [[0, 1, 0, 1, 0],
+                 [0, 1, 3, 3, 4]]
+      values = [11, 22, 14, 24, 15]
+
+    that after coalescing becomes
+
+      indices = [[0, 0, 0, 1, 1],
+                 [0, 3, 4, 1, 3]]
+      values = [11, 14, 15, 22, 24]
+
+    The softmax of X along the given dimension d is defined as
+
+      S_d[i, j] = exp(X[i, j]) / sum(exp(X[I_d[k]]), k=0..X.shape[d]-1)
+
+    where the index tuple I_d[k] is defined as
+
+      I_0[k] = k, j
+      I_1[k] = i, k
+
+    For sparse tensors, the unspecified entries are skipped in the
+    softmax sum of exponents so that the result will be sparse tensor
+    with the same indices as the input. Mathematically, this
+    corresponds to the case where the unspecified entries are
+    interpreted as negative infinities rather than zeros.
+
+    To minimize the defects from numerical evaluation of exponents
+    with very large or small arguments, the softmax implementation
+    uses the following a numerically stable definition:
+
+      S_d[i, j] = exp(X[i, j] - maxX_d) / sum(exp(X[I_d[k]] - maxX_d), k=0...X.shape[d]-1)
+
+    where
+
+      maxX_d = max(X[I_d[k]], k=0...X.shape[d]-1)
+
+    is the maximum tensor along the direction d (it has dimensionality
+    `maxX_d.ndim = X.ndim - 1`).
+
+    For the example sparse tensor X, we have:
+
+      S_0._indices() == S_1._indices() == X._indices()
+
+      maxX_0 = [11, 22, -inf, 24, 15]
+      maxX_1 = [15, 24]
+
+      S_0._values() = [exp(11 - maxX_0[0]) / exp(11 - maxX_0[0]),
+                       exp(14 - maxX_0[3]) / (exp(14 - maxX_0[3]) + exp(24 - maxX_0[3])),
+                       exp(15 - maxX_0[4]) / exp(15 - maxX_0[4]),
+                       exp(22 - maxX_0[1]) / exp(22 - maxX_0[1]),
+                       exp(24 - maxX_0[3]) / (exp(14 - maxX_0[3]) + exp(24 - maxX_0[3]))]
+                    = [1, exp(-10)/(exp(-10) + 1), 1, 1, 1/(exp(-10) + 1)]
+
+      (note that `maxX_0[2] == -inf` not used to obtain S_0)
+
+      S_1._values() = [exp(11 - maxX_1[0]) / (exp(11 - maxX_1[0]) + exp(14 - maxX_1[0]) + exp(15 - maxX_1[0])),
+                       exp(14 - maxX_1[0]) / (exp(11 - maxX_1[0]) + exp(14 - maxX_1[0]) + exp(15 - maxX_1[0])),
+                       exp(15 - maxX_1[0]) / (exp(11 - maxX_1[0]) + exp(14 - maxX_1[0]) + exp(15 - maxX_1[0])),
+                       exp(22 - maxX_1[1]) / (exp(22 - maxX_1[1]) + exp(24 - maxX_1[1])),
+                       exp(24 - maxX_1[1]) / (exp(22 - maxX_1[1]) + exp(24 - maxX_1[1]))]
+                    = [exp(-4) / (exp(-4) + exp(-1) + 1),
+                       exp(-1) / (exp(-4) + exp(-1) + 1),
+                       1 / (exp(-4) + exp(-1) + 1),
+                       exp(-2) / (exp(-2) + 1),
+                       1 / (exp(-2) + 1)]
+
+    To obtain the above via the for-loop over
+    `nnz(=len(X._values()))`, we introduce the indices mapping `pool`
+    as follows:
+
+      indices = X._indices()
+      for i in range(nnz):
+          for j in range(nnz):
+              if indices[d, i] == indices[d, j]:
+                  assert pool_d[i] == pool_d[j]
+              else:
+                  assert pool_d[i] != pool_d[j]
+
+    that is, the entries with values indices i and j are in the same
+    pool iff their locations in the grid of tensor indices align with
+    the direction along which the softmax is calculated. The `pool`
+    mapping maps the X._values() indices to the corresponding pool
+    index.
+
+    To save memory and processor resources, we pre-compute the entries
+    of maxX tensor and the sums of exponents as follows:
+
+      mx_d = [max(values[i] for i in range(nnz) if pool_0[i] == k) for k in pool_d]
+      exp_sum_d = [sum(exp(values[i] - mx_d[k]) for i in range(nnz) if pool_d[i] == k) for k in pool_d]
+
+    For example, if
+
+      pool_0 = [0, 1, 2, 3, 1]
+      pool_1 = [0, 0, 0, 1, 1]
+
+    then
+
+      mx_0 = [11, 24, 15, 22]
+      mx_1 = [15, 24]
+      exp_sum_0 = [1, (exp(-10) + 1), 1, 1]
+      exp_sum_1 = [(exp(-4) + exp(-1) + 1), (exp(-2) + 1)]
+
+    and
+
+      S_0._values() = [exp(11 - mx_0[pool_0[0]]) / exp_sum_0[pool_0[0]]
+                       exp(14 - mx_0[pool_0[1]]) / exp_sum_0[pool_0[1]]
+                       exp(15 - mx_0[pool_0[2]]) / exp_sum_0[pool_0[2]]
+                       exp(22 - mx_0[pool_0[3]]) / exp_sum_0[pool_0[3]]
+                       exp(24 - mx_0[pool_0[4]]) / exp_sum_0[pool_0[4]]
+
+    or in general,
+
+      S_d._values() = [exp(values[i] - mx_d[pool_d[i]]) / exp_sum_d[pool_d[i] for i in range(nnz)]
+
+    The above algorithm can be easily extended for cases with
+    non-scalar dense part of the sparse tensor where all scalar
+    operations become element-wise tensor operations.
+
+    The implementation below has more optimizations such as that
+    minimize the calls to exp functions as well as reuse of softmax
+    implementation for log_softmax.
+  */
   auto sparse_dim = input.sparse_dim();
   auto indices = input._indices().contiguous();
   auto values = input._values().contiguous();
