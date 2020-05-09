@@ -1612,7 +1612,7 @@ struct CAFFE2_API AttributeKind {
   TypePtr attributeType,
   std::string attributeName) :
     kind_(kind),
-    attributeType_(std::move(attributeType)),
+    attributeType_(attributeType),
     attributeName_(std::move(attributeName)) {}
 
   ATTRIBUTE_KIND_ENUM getKind() const {
@@ -1625,31 +1625,6 @@ struct CAFFE2_API AttributeKind {
 
   std::string getName() const {
     return attributeName_;
-  }
-
-  bool operator==(const AttributeKind& user_rhs) const {
-      const auto& lhs_name = getName();
-      const auto& rhs_name = user_rhs.getName();
-
-      if (lhs_name != rhs_name) {
-        return false;
-      }
-
-      const auto& lhs_type = getType();
-      const auto& rhs_type = user_rhs.getType();
-
-      if (lhs_type != rhs_type) {
-        return false;
-      }
-
-      const auto& lhs_kind = getKind();
-      const auto& rhs_kind = user_rhs.getKind();
-
-      if (lhs_kind != rhs_kind) {
-        return false;
-      }
-
-      return true;
   }
 
   private:
@@ -1739,7 +1714,7 @@ struct CAFFE2_API ClassType : public NamedType {
   c10::optional<size_t> findAttributeSlot(const std::string& name) const {
     size_t slot = 0;
     for (const auto& attr : attributes_) {
-      if (name == attr.getName()) {
+      if (name.compare(attr.getName()) == 0) {
         return slot;
       }
       slot++;
@@ -1767,19 +1742,15 @@ struct CAFFE2_API ClassType : public NamedType {
   }
   
   at::ArrayRef<TypePtr> containedTypes() const override {
-    std::vector<TypePtr> typeVec;
-    for (const auto& a : attributes_) {
-      typeVec.push_back(a.getType());
-    }
-    return typeVec;
+    return attributeTypes_;
   }
 
   size_t addAttribute(
       const std::string& name,
       const TypePtr& type,
       bool is_parameter = false,
-      bool was_registered_as_buffer = false,
-      bool allow_any = false);
+      bool allow_any = false,
+      bool was_registered_as_buffer = false);
 
   // [Internal Only] Remove attribute from the ClassType,
   // caller is responsible to make sure the modification is safe:
@@ -1795,11 +1766,11 @@ struct CAFFE2_API ClassType : public NamedType {
       const std::string& name,
       TypePtr ty,
       bool is_parameter = false,
-      bool was_registered_as_buffer = false,
-      bool allow_any = false) {
+      bool allow_any = false,
+      bool was_registered_as_buffer = false) {
     auto slot_idx = findAttributeSlot(name);
     if (!slot_idx) {
-      return addAttribute(name, ty, is_parameter, was_registered_as_buffer, allow_any);
+      return addAttribute(name, ty, is_parameter, allow_any, was_registered_as_buffer);
     }
 
     TORCH_CHECK(
@@ -1962,6 +1933,8 @@ struct CAFFE2_API ClassType : public NamedType {
     return n.qualifiedName();
   }
 
+  void provideNewAttributeKind(AttributeKind attributeKind);
+
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module
   // TODO: once modules support arbitrary ivalue attributes, we don't need this
@@ -1977,6 +1950,9 @@ struct CAFFE2_API ClassType : public NamedType {
 
   // Holds all atrributes, attribute details are found on AttributeKind
   std::vector<AttributeKind> attributes_;
+  // Construct mirroring attributes_, only around due to the fact that `containedTypes()` method returns an ArrayRef.
+  // Never fill this without using the appropriate provideNewAttributeKind method
+  std::vector<TypePtr> attributeTypes_;
 
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;

@@ -1138,16 +1138,20 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
   }
 }
 
+void ClassType::provideNewAttributeKind(AttributeKind attributeKind) {
+    attributes_.push_back(attributeKind);
+    attributeTypes_.push_back(attributeKind.getType());
+}
+
 size_t ClassType::addAttribute(
     const std::string& name,
     const TypePtr& type,
     bool is_parameter,
-    bool was_registered_as_buffer,
-    bool allow_any) {
+    bool allow_any,
+    bool was_registered_as_buffer) {
 
   std::string what = is_parameter ? "parameter" : "attribute";
   what += (was_registered_as_buffer? "buffer" : "not buffer");
-
   checkNotExist(name, what);
   if (!allow_any) {
     checkNoAny(*this, what.c_str(), name, type);
@@ -1164,7 +1168,7 @@ size_t ClassType::addAttribute(
 
   AttributeKind attributeKind(kind, type, name);
 
-  attributes_.push_back(attributeKind);
+  provideNewAttributeKind(attributeKind);
 
   if (is_parameter) {
     TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter to a non module");
@@ -1254,8 +1258,10 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
 
 static bool containsAny(const TypePtr& type) {
   std::vector<TypePtr> to_scan = { type };
+  int i = 0;
   while (!to_scan.empty()) {
-    TypePtr typ = to_scan.back();
+    i = i + 1;
+    const auto typ = to_scan.back();
     to_scan.pop_back();
     if (typ->kind() == AnyType::Kind) {
       return true;
