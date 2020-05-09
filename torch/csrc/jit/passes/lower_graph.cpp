@@ -131,7 +131,10 @@ static std::vector<IValue> loadTensors(const std::vector<Slot>& slots) {
                "__torch__.torch.classes.quantized.Conv2dPackedParamsBase")) ||
               (type ==
                getCustomClass(
-                   "__torch__.torch.classes.quantized.Conv3dPackedParamsBase")),
+                   "__torch__.torch.classes.quantized.Conv3dPackedParamsBase")) ||
+              (type ==
+               getCustomClass(
+                   "__torch__.torch.classes.quantized.LinearPackedParamsBase")),
           "Unknown type ",
           type->python_str(),
           " encountered in graph lowering. This type is not supported in ONNX export.");

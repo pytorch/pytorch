@@ -12,30 +12,6 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestFreezing(JitTestCase):
-    def test_fold_quantize_freeze(self):
-        class M(nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.weight = nn.Parameter(torch.tensor([2], dtype=torch.float))
-
-            def forward(self, x):
-                return torch.quantize_per_tensor(self.weight, 2.0, 0, torch.quint8)
-
-        m = torch.jit.script(M())
-        m.eval()
-        torch._C._jit_pass_fold_quantize(m._c, 'forward')
-        m._c = torch._C._freeze_module(m._c)
-        self.assertFalse(m._c.hasattr('_quantized_weight'))
-        FileCheck().check_not('GetAttr[name=') \
-                   .run(m._c._get_method('forward').graph)
-        buffer = io.BytesIO()
-        torch.jit.save(m, buffer)
-        buffer.seek(0)
-        m_l = torch.jit.load(buffer)
-        self.assertFalse(m_l._c.hasattr('_quantized_weight'))
-        FileCheck().check_not('GetAttr[name=') \
-                   .run(m_l._c._get_method('forward').graph)
-
     def test_freeze_module(self):
         class M(nn.Module):
             def __init__(self):

@@ -214,7 +214,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
 
 void IRPrinter::visit(const Cast* v) {
   auto dtype = v->dtype();
-  os() << dtype << "(";
+  os() << dtype.ToCppString() << "(";
   v->src_value()->accept(this);
   os() << ")";
 }
@@ -426,7 +426,7 @@ void IRPrinter::visit(const Block* v) {
 
 void IRPrinter::visit(const Allocate* v) {
   emitIndent();
-  os() << "Allocate(" << *v->buffer_var() << ", " << v->dtype();
+  os() << "Allocate(" << *v->buffer_var() << ", " << v->dtype().ToCppString();
   os() << ", {";
   const std::vector<const Expr*>& dims = v->dims();
   for (size_t i = 0; i < dims.size(); i++) {
