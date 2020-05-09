@@ -2907,6 +2907,9 @@ graph(%Ra, %Rb):
             x, lengths, h0 = torch.randn(7, 4, 10), torch.LongTensor([7, 3, 2, 1]), torch.randn(2, 4, 20)
             self.assertEqual(traced(x, lengths, h0), imported(x, lengths, h0))
 
+            scripted = torch.jit.script(test)
+            self.assertEqual(scripted(x, lengths, h0), imported(x, lengths, h0))
+
     def test_export_lstm(self):
         class LSTMTest(torch.nn.Module):
             def __init__(self):
