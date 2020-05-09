@@ -225,33 +225,6 @@ void IRPrinter::visit(const Var* v) {
   os() << name_manager_.get_unique_name(v);
 }
 
-void IRPrinter::visit(const Let* v) {
-  int self_prec = getPrecedence(v->expr_type());
-  int value_prec = getPrecedence(v->value()->expr_type());
-  int body_prec = getPrecedence(v->body()->expr_type());
-  os() << "let ";
-  v->var()->accept(this);
-  os() << " = ";
-
-  if (value_prec >= self_prec) {
-    os() << "(";
-  }
-  v->value()->accept(this);
-  if (value_prec >= self_prec) {
-    os() << ")";
-  }
-
-  os() << " in ";
-
-  if (body_prec >= self_prec) {
-    os() << "(";
-  }
-  v->body()->accept(this);
-  if (body_prec >= self_prec) {
-    os() << ")";
-  }
-}
-
 void IRPrinter::visit(const Ramp* v) {
   os() << "Ramp(" << *v->base() << ", " << *v->stride() << ", " << v->lanes()
        << ")";
@@ -387,15 +360,6 @@ void IRPrinter::visit(const Store* v) {
   os() << std::endl;
 }
 
-void IRPrinter::visit(const LetStmt* v) {
-  emitIndent();
-  const Var* var = v->var();
-  os() << var->dtype().ToCppString() << " " << *var << " = " << *v->value()
-       << "; " << std::endl;
-  v->body()->accept(this);
-  os() << std::endl;
-}
-
 void IRPrinter::visit(const For* v) {
   const Var* var = v->var();
   VarHandle vv(var);
@@ -418,6 +382,15 @@ void IRPrinter::visit(const For* v) {
 void IRPrinter::visit(const Block* v) {
   os() << "{" << std::endl;
   indent_++;
+
+  for (const auto& pair : v->varBindings()) {
+    const Var* var = pair.first;
+    const Expr* val = pair.second;
+    emitIndent();
+    os() << var->dtype().ToCppString() << " " << *var << " = " << *val << "; "
+         << std::endl;
+  }
+
   for (Stmt* s : *v) {
     os() << *s;
   }
