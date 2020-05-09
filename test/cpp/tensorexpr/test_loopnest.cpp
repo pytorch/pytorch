@@ -1155,7 +1155,7 @@ void testLoopNestComputeAt_3() {
 }
 
 void testLoopNestComputeAt_4() {
-  // Verify that loops produced by compute_at can by transformed like other
+  // Verify that loops produced by compute_at can be transformed like other
   // loops
   KernelScope kernel_scope;
   VarHandle N("N", kInt), M("M", kInt);
