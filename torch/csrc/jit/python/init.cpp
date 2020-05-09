@@ -1,6 +1,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
@@ -17,6 +18,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
+#include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -37,7 +39,10 @@
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/peephole.h>
-#include <torch/csrc/jit/passes/quantization.h>
+#include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
+#include <torch/csrc/jit/passes/quantization/finalize.h>
+#include <torch/csrc/jit/passes/quantization/insert_observers.h>
+#include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -216,12 +221,6 @@ void initJITBindings(PyObject* module) {
           [](Module& module) { return freeze_module(module); },
           py::arg("module"))
       .def("_jit_pass_fuse_linear", &FuseLinear)
-      .def(
-          "_jit_pass_fold_quantize",
-          [](Module& module, const std::string& method_name) {
-            FoldQuantizeCallIntoBuffer(module, method_name);
-          })
-      .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
       .def("_jit_pass_swap_dequantize", &PropagateQuantizationOps)
@@ -258,11 +257,6 @@ void initJITBindings(PyObject* module) {
             SubgraphRewriter subgraph_rewriter;
             subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
             subgraph_rewriter.runOnGraph(g);
-          })
-      .def(
-          "_jit_pass_fold_quant_inputs",
-          [](std::shared_ptr<Graph>& g) {
-            return FoldQuantNodesIntoInputsOutputs(g);
           })
       .def(
           "_jit_pass_remove_inplace_ops",
@@ -558,7 +552,10 @@ void initJITBindings(PyObject* module) {
                       "__torch__.torch.classes.quantized.Conv2dPackedParamsBase") ||
               i->type() ==
                   getCustomClass(
-                      "__torch__.torch.classes.quantized.Conv3dPackedParamsBase")) {
+                      "__torch__.torch.classes.quantized.Conv3dPackedParamsBase") ||
+              i->type() ==
+                  getCustomClass(
+                      "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
             // Dummy CompleteTensorType to appease ONNX validator.
             i->setType(TensorType::create(
                 at::kQInt8,
@@ -905,6 +902,7 @@ void initJITBindings(PyObject* module) {
   tracer::initPythonTracerBindings(module);
   initTreeViewBindings(module);
   initJitScriptBindings(module);
+  initJitBackendBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
