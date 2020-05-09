@@ -761,15 +761,15 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors)
     }
   }
 
-  std::vector<Stmt*> loops;
+  std::vector<Stmt*> top_level_loops;
   for (Tensor* t : tensors_to_compute) {
-    Stmt* loop = lowerToStmt(t);
-    loops.push_back(loop);
+    std::vector<For*> loops_for_t = lowerToStmt(t);
+    top_level_loops.push_back(loops_for_t[0]);
   }
-  root_stmt_ = new Block(loops);
+  root_stmt_ = new Block(top_level_loops);
 }
 
-Stmt* LoopNest::lowerToStmt(Tensor* t) {
+std::vector<For*> LoopNest::lowerToStmt(Tensor* t) {
   Function* f = t->function();
   // TODO: Support multiple-output functions
   Stmt* body = f->ElementStmt(0);
@@ -778,19 +778,17 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
   tensor_to_stmt_[t] = body;
 
   if (f->ndim() == 0) {
-    return body;
-  }
-
-  if (f->ndim() == 0) {
     throw malformed_input("Tensor lowered to zero dimensions");
   }
 
+  std::vector<For*> new_loops;
   for (size_t i = 0; i < f->ndim(); i++) {
     // Going in reverse order: from innermost loop to the outermost
     size_t dim_index = f->ndim() - i - 1;
     body = new For(f->arg(dim_index), new IntImm(0), f->dim(dim_index), body);
+    new_loops.push_back(static_cast<For*>(body));
   }
-  return body;
+  return std::vector<For*>(new_loops.rbegin(), new_loops.rend());
 }
 
 void LoopNest::computeInline(Stmt* s) {
@@ -1428,12 +1426,11 @@ static std::vector<const Var*> getOuterLoopIndexes(Stmt* s) {
  *   `temp` instead of `producer`. The indices in the corresponding accesses
  *   also need to be offset.
  */
-void LoopNest::computeAt(Stmt* s, For* f) {
-  Store* st = getStoreStmtOfProducer(s);
-  if (!st) {
-    return;
-  }
-
+void LoopNest::computeAt(
+    Tensor* t,
+    For* f,
+    Tensor** new_tensor_ptr,
+    std::vector<For*>& new_loops) {
   // Infer bounds info for all accesses that we make in the loop
   auto loop_bounds_info = inferBounds(f->body());
 
@@ -1443,7 +1440,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   TensorAccessBoundsInfo store_bounds_info;
   bool found = false;
   for (const TensorAccessBoundsInfo& p : loop_bounds_info) {
-    if (p.buf == st->buf()) {
+    if (p.buf == t->buf()) {
       store_bounds_info = p;
       found = true;
     }
@@ -1461,11 +1458,8 @@ void LoopNest::computeAt(Stmt* s, For* f) {
     dims.push_back(dim);
   }
 
-  // TODO: Use name-hint of the producer instead of "temp"
-  const Buf* temp_buf = new Buf("temp", dims, st->value()->dtype());
-
   // Generate index variables for 'temp'
-  std::vector<const Expr*> temp_indices(dims.size());
+  std::vector<const Var*> temp_indices(dims.size());
   for (size_t i = 0; i < dims.size(); i++) {
     // TODO: Use name-hint of the producer indices instead of 'idx'
     temp_indices[i] = new Var(std::string("idx") + c10::to_string(i), kInt);
@@ -1473,52 +1467,47 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
   // Prepare substitute rules for constructing the temp statement from the prod
   // statement
-  // TODO: Instead of going up the loop nest we should go through the indices in
-  // the original tensor expression. The loops in the nest might've been
-  // modified (e.g. split or merged) so that the loop indices no longer
-  // correspond to the indices of the original expression and even their number
-  // might be different. In that case, the loop below would crash.
-  std::vector<const Var*> prod_indices = getOuterLoopIndexes(s);
+  std::vector<const Var*> prod_indices = t->args();
   std::vector<std::pair<const Var*, const Expr*>> rewrite_indices_map;
   for (size_t i = 0; i < prod_indices.size(); i++) {
     const Expr* offset = store_bounds_info.start[i];
     rewrite_indices_map.push_back(
         {prod_indices[i], new Add(temp_indices[i], offset)});
   }
-  // Construct the temp statement
-  Stmt* bd = new Store(
-      temp_buf,
-      temp_indices,
-      Substitute(st->value(), rewrite_indices_map),
-      st->mask());
-
-  // Construct the loop nest for the temp computation
-  for (size_t i = 0; i < dims.size(); i++) {
-    // We're creating loops from innermost to outermost, so we need to access
-    // dimensions in reversed order.
-    size_t dim_idx = dims.size() - 1 - i;
-    bd = new For(
-        dynamic_cast<const Var*>(temp_indices[dim_idx]),
-        new IntImm(0),
-        dims[dim_idx],
-        bd);
+  const Expr* temp_func_body = Substitute(t->body(), rewrite_indices_map);
+  // TODO: Use name-hint of the producer instead of "temp"
+  Function* temp_func =
+      new Function("temp", dims, temp_indices, temp_func_body);
+  const Buf* temp_buf = temp_func->func_var(0);
+  Tensor* temp_tensor = new Tensor(temp_buf, temp_func, 0);
+  if (new_tensor_ptr) {
+    *new_tensor_ptr = temp_tensor;
   }
 
-  // Add constructed stmts to the consumer loop
-  f->body()->prepend_stmt(bd);
+  // Construct the temp statement
+  new_loops = lowerToStmt(temp_tensor);
 
   // Rewrite accesses to producer in consumer with accesses to temp
   LoopComputeAtRewriter lr(
       store_bounds_info.buf, temp_buf, store_bounds_info.start);
-  Stmt* new_f = f->accept_mutator(&lr);
+  For* new_f = dynamic_cast<For*>(f->accept_mutator(&lr));
   if (f != new_f) {
     Block* bb = dynamic_cast<Block*>(f->get_parent());
     bb->replace_stmt(f, new_f);
   }
 
+  // Add constructed stmts to the consumer loop
+  new_f->body()->prepend_stmt(new_loops[0]);
+
   // Mark the new temp buffer as requiring an alloc (it will be inserted as a
   // part of prepareForCodegen).
   temp_bufs_.emplace_back(temp_buf);
+}
+
+void LoopNest::computeAt(Tensor* t, For* f) {
+  Tensor* temp;
+  std::vector<For*> new_loops;
+  computeAt(t, f, &temp, new_loops);
 }
 
 class SwapReduce : public IRMutator {

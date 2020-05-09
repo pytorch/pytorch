@@ -904,7 +904,7 @@ void testLoopNestComputeAt_1() {
       "B", {{N, "i_b"}}, [&](const VarHandle& i_b) { return A->call(i_b); });
   LoopNest l({B});
   std::vector<For*> loops = l.getLoopStmtsFor(B);
-  l.computeAt(l.getLoopBodyFor(A), loops[0]);
+  l.computeAt(A, loops[0]);
   l.prepareForCodegen();
   Stmt* s = l.root_stmt();
 
@@ -976,7 +976,7 @@ void testLoopNestComputeAt_2() {
     // First let's try to compute P at axis cy (the outer loop)
     LoopNest l({c});
     std::vector<For*> loops = l.getLoopStmtsFor(c);
-    l.computeAt(l.getLoopBodyFor(p), loops[0]);
+    l.computeAt(p, loops[0]);
     l.prepareForCodegen();
     Stmt* s = l.root_stmt();
 
@@ -1007,7 +1007,7 @@ void testLoopNestComputeAt_2() {
     // Now let's try to compute P at axis cx (the inner loop)
     LoopNest l({c});
     std::vector<For*> loops = l.getLoopStmtsFor(c);
-    l.computeAt(l.getLoopBodyFor(p), loops[1]);
+    l.computeAt(p, loops[1]);
     l.prepareForCodegen();
     Stmt* s = l.root_stmt();
 
@@ -1084,7 +1084,7 @@ void testLoopNestComputeAt_3() {
     // First let's try to compute A at axis dy (the outer loop)
     LoopNest l({D});
     std::vector<For*> loops = l.getLoopStmtsFor(D);
-    l.computeAt(l.getLoopBodyFor(A), loops[0]);
+    l.computeAt(A, loops[0]);
     l.prepareForCodegen();
     Stmt* s = l.root_stmt();
 
@@ -1120,7 +1120,7 @@ void testLoopNestComputeAt_3() {
     // Now let's try to compute A at axis dx (the inner loop)
     LoopNest l({D});
     std::vector<For*> loops = l.getLoopStmtsFor(D);
-    l.computeAt(l.getLoopBodyFor(A), loops[1]);
+    l.computeAt(A, loops[1]);
     l.prepareForCodegen();
     Stmt* s = l.root_stmt();
 
@@ -1155,7 +1155,59 @@ void testLoopNestComputeAt_3() {
 }
 
 void testLoopNestComputeAt_4() {
-  // TODO: Verify that computeAt works with reduction axis
+  // Verify that loops produced by compute_at can by transformed like other
+  // loops
+  KernelScope kernel_scope;
+  VarHandle N("N", kInt), M("M", kInt);
+  Tensor* A = Compute(
+      "A",
+      {{N, "i_a"}, {M, "j_a"}},
+      [&](const VarHandle& i_a, const VarHandle& j_a) { return i_a * j_a; });
+  Tensor* B = Compute(
+      "B",
+      {{N, "i_b"}, {M, "j_b"}},
+      [&](const VarHandle& i_b, const VarHandle& j_b) {
+        return A->call(i_b, j_b);
+      });
+  LoopNest l({B});
+  std::vector<For*> loops = l.getLoopStmtsFor(B);
+  Tensor* temp_tensor;
+  std::vector<For*> temp_loops;
+  l.computeAt(A, loops[0], &temp_tensor, temp_loops);
+  For *outer, *inner, *tail;
+  l.splitWithTail(temp_loops[1], 16, &outer, &inner, &tail);
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  std::ostringstream oss;
+  oss << *s;
+
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK:   for (int i_b = 0; i_b < N; i_b++)
+# CHECK:     for (int idx1_outer = 0; idx1_outer < M / 16; idx1_outer++)
+# CHECK:       for (int idx1_inner = 0; idx1_inner < 16; idx1_inner++)
+# CHECK:         temp[16 * idx1_outer + idx1_inner] = i_b * idx1_inner + 16 * (i_b * idx1_outer);
+# CHECK:     for (int idx1_tail = 0; idx1_tail < M % 16; idx1_tail++)
+# CHECK:       temp[(M / 16) * 16 + idx1_tail] = ((M / 16) * 16) * i_b + i_b * idx1_tail;
+# CHECK:     for (int j_b = 0; j_b < M; j_b++)
+# CHECK:       B[j_b + i_b * M] = temp[j_b])IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // Now check that the loop still produces the correct result.
+  std::vector<int> b_data(10 * 10, 0);
+  SimpleIREvaluator cg(s, {B, N, M});
+  cg.call({b_data, 10, 10});
+
+  std::vector<int> b_ref(10 * 10, 0);
+  for (int i = 0; i < 10; i++) {
+    for (int j = 0; j < 10; j++) {
+      b_ref[i * 10 + j] = i * j;
+    }
+  }
+  assertAllEqual(b_data, b_ref);
 }
 
 class LoopOrderHelper : public IRVisitor {

@@ -43,11 +43,18 @@ class TORCH_API LoopNest {
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
 
-  // Insert a temporary computation of statement S in the scope of loop AT.
-  // S is assumed to be a Store or a Block containing a Store. Along with the
-  // computation itself, this transformation inserts Alloc/Free statements for
-  // the temporary buffer used in the computation.
-  void computeAt(Stmt* s, For* at);
+  // Insert a temporary computation of tensor T in the scope of loop AT.
+  // The transformation creates a new tensor which is returned through the
+  // argument NEW_TENSOR_PTR, and the loops generated for this tensor are
+  // returned through the argument NEW_LOOPS.
+  void computeAt(
+      Tensor* t,
+      For* at,
+      Tensor** new_tensor_ptr,
+      std::vector<For*>& new_loops);
+  // A version of computeAt that doesnt return tensor and vector of generated
+  // loops.
+  void computeAt(Tensor* t, For* at);
   void rfactor(
       const Expr* f,
       const Var* reduction_var,
@@ -56,7 +63,7 @@ class TORCH_API LoopNest {
  private:
   std::vector<Tensor*> findAllNeededTensors(
       const std::vector<Tensor*>& tensors);
-  Stmt* lowerToStmt(Tensor* t);
+  std::vector<For*> lowerToStmt(Tensor* t);
   Stmt* insertAllocFree(Stmt* stmt);
 
   std::unordered_set<Function*> inlined_functions_;
