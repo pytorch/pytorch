@@ -62,7 +62,7 @@ size_t getDefaultNumThreads();
 
 PThreadPool* pthreadpool() {
   static std::unique_ptr<PThreadPool> threadpool =
-      std::make_unique< PThreadPool>(getDefaultNumThreads());
+      std::make_unique<PThreadPool>(getDefaultNumThreads());
   return threadpool.get();
 }
 

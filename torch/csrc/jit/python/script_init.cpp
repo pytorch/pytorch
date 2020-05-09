@@ -443,14 +443,13 @@ static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
     // Leave packed param types alone. This is needed for downstream passes
     // (like alias analysis) to work properly. This will be unpacked later
     // in unpackQuantizedWeights.
-    if ((v->type() ==
-         getCustomClass(
-             "__torch__.torch.classes.quantized.Conv2dPackedParamsBase")) ||
-        (v->type() ==
-         getCustomClass(
-             "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"))) {
-      s_iter++;
-      continue;
+    if (auto named_type = v->type()->cast<c10::NamedType>()) {
+      if (auto qualname = named_type->name()) {
+        if (getCustomClass(qualname->qualifiedName())) {
+          s_iter++;
+          continue;
+        }
+      }
     }
     if (v->type()->kind() == TupleType::Kind) {
       AT_ASSERT(v->node()->kind() == prim::Param);

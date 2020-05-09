@@ -13,6 +13,7 @@ namespace at {
 enum class DebugInfoKind : uint8_t {
   PRODUCER_INFO = 0,
   MOBILE_RUNTIME_INFO,
+  PROFILER_STATE,
 
   TEST_INFO, // used only in tests
   TEST_INFO_2, // used only in tests
@@ -34,16 +35,21 @@ class CAFFE2_API ThreadLocalDebugInfo {
  public:
   static std::shared_ptr<DebugInfoBase> get(DebugInfoKind kind);
 
-  // Internal, used to propagate across thread boundaries;
-  // use DebugInfoGuard instead
-  static std::shared_ptr<ThreadLocalDebugInfo> _current();
+  // Get current ThreadLocalDebugInfo
+  static std::shared_ptr<ThreadLocalDebugInfo> current();
 
   // Internal, use DebugInfoGuard/ThreadLocalStateGuard
   static void _forceCurrentDebugInfo(
       const std::shared_ptr<ThreadLocalDebugInfo>& info);
 
+  // Push debug info struct of a given kind
+  static void _push(DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
+  // Pop debug info, throws in case the last pushed
+  // debug info is not of a given kind
+  static std::shared_ptr<DebugInfoBase> _pop(DebugInfoKind kind);
+
  private:
-  std::shared_ptr<DebugInfoBase> debug_info_;
+  std::shared_ptr<DebugInfoBase> info_;
   DebugInfoKind kind_;
   std::shared_ptr<ThreadLocalDebugInfo> parent_info_;
 
