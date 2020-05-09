@@ -18,6 +18,10 @@
 // linear algebra function uses that routine
 #ifdef USE_LAPACK
 
+// gels
+extern "C" void dgels_(char *trans, int *m, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, double *work, int *lwork, int *info);
+extern "C" void sgels_(char *trans, int *m, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, float *work, int *lwork, int *info);
+
 // gesv
 extern "C" void zgesv_(int *n, int *nrhs, std::complex<double> *a, int *lda, int *ipiv, std::complex<double> *b, int *ldb, int *info);
 extern "C" void cgesv_(int *n, int *nrhs, std::complex<float> *a, int *lda, int *ipiv, std::complex<float> *b, int *ldb, int *info);
@@ -1145,7 +1149,11 @@ Tensor& lu_solve_out(Tensor& result, const Tensor& self, const Tensor& LU_data, 
 
 std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
   std::cout << "Andrzej" << std::endl;
-  return std::tuple<Tensor, Tensor>();
+  auto B_working = B.clone();
+  auto A_working = A.clone();
+  
+  // std::cout << sgels_ << std::endl;
+  return std::tuple<Tensor, Tensor>(B_working, A_working);
 }
 
 }}  // namespace at::native
