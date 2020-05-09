@@ -113,7 +113,9 @@ class Q8GEMM : public benchmark::Fixture {
 #endif
         k(),
         b(),
+#if PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
         kernel_zero_points.data(),
+#endif
         w());
     c_.resize(mc() * nc());
     std::fill(c_.begin(), c_.end(), 0xA5);

@@ -13,10 +13,9 @@
 namespace at { namespace native {
 
 void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, iter.common_dtype(), "add_cuda/sub_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-    auto alpha = thrust_t(alpha_scalar.to<scalar_t>());
-    gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
+  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(kHalf, kBool, kBFloat16, iter.common_dtype(), "add_cuda/sub_cuda", [&]() {
+    auto alpha = alpha_scalar.to<scalar_t>();
+    gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return a + alpha * b;
     });
   });
@@ -40,9 +39,8 @@ void div_kernel_cuda(TensorIterator& iter) {
       });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
-      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
+    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a / b;
       });
     });
@@ -56,9 +54,8 @@ void mul_kernel_cuda(TensorIterator& iter) {
       return a && b;
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
-      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
+    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a * b;
       });
     });
