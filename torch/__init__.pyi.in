@@ -1,6 +1,6 @@
 # ${generated_comment}
 
-from typing import List, Tuple, Optional, Union, Any, ContextManager, Callable, overload, Iterator, Sequence
+from typing import List, Tuple, Optional, Union, Any, ContextManager, Callable, overload, Iterator, NamedTuple, Sequence
 from torch._six import inf
 
 import builtins
@@ -46,6 +46,8 @@ class layout: ...
 
 strided : layout = ...
 
+sparse_coo : layout = ...
+
 class memory_format: ...
 
 contiguous_format: memory_format = ...
@@ -84,6 +86,8 @@ _layout = layout
 
 # Meta-type for "numeric" things; matches our docs
 Number = Union[builtins.int, builtins.float, builtins.bool]
+
+${namedtuple_defs}
 
 class Generator:
     device: _device = ...

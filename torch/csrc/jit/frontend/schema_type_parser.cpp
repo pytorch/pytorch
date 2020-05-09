@@ -158,11 +158,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       num_dims++;
     });
     ptr = at::TensorType::create(
-        dtype,
-        at::DeviceType::CPU,
-        c10::VaryingShape(num_dims),
-        c10::VaryingShape(num_dims),
-        c10::nullopt);
+        dtype, at::DeviceType::CPU, num_dims, c10::nullopt);
   } else {
     std::vector<int64_t> dims;
     bool seen_strides = false;
@@ -189,13 +185,17 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
             << "Strides info is specified for some but not for all dimensions";
       }
       ptr = at::TensorType::create(
-          dtype, at::DeviceType::CPU, dims_ref, strides_ref);
+          dtype,
+          at::DeviceType::CPU,
+          c10::VaryingShape<int64_t>(dims),
+          c10::VaryingShape<int64_t>(strides),
+          c10::nullopt);
     } else {
       ptr = at::TensorType::create(
           dtype,
           at::DeviceType::CPU,
-          c10::VaryingShape(dims_ref),
-          c10::VaryingShape(),
+          c10::VaryingShape<int64_t>(dims_ref),
+          c10::VaryingShape<int64_t>(dims.size()),
           c10::nullopt);
     }
   }
