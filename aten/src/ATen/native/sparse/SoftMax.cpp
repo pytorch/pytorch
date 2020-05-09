@@ -10,22 +10,22 @@ namespace at {
 namespace native {
 namespace {
 
-template <typename iscalar_t>
-iscalar_t get_nvalues(const std::vector<iscalar_t>& sizes, const int64_t sparse_dim) {
+template <typename index_t>
+index_t get_nvalues(const std::vector<index_t>& sizes, const int64_t sparse_dim) {
   /* Return the number of entries in the dense part of a sparse tensor.
 
      `sizes` is a vector of sparse tensor dimensions.
      `sparse_dim` is the dimension of the sparse part of a sparse tensor.
    */
-  iscalar_t nvalues = 1;
+  index_t nvalues = 1;
   for (auto it = sizes.begin() + sparse_dim; it != sizes.end(); ++it) {
     nvalues *= *it;
   }
   return nvalues;
 }
 
-template <typename iscalar_t>
-std::vector<iscalar_t> get_offsets(const Tensor& indices, const std::vector<iscalar_t>& sizes, const int64_t dim) {
+template <typename index_t>
+std::vector<index_t> get_offsets(const Tensor& indices, const std::vector<index_t>& sizes, const int64_t dim) {
   /*
     Given the indices of a sparse tensor, return a vector of offsets
     for the entries in the equivalent dense tensor:
@@ -36,7 +36,7 @@ std::vector<iscalar_t> get_offsets(const Tensor& indices, const std::vector<isca
       then
         data[offsets[n]] == A._values()[n]
 
-    `indices` must be a contiguous 2-d tensor with iscalar_t entries.
+    `indices` must be a contiguous 2-d tensor with index_t entries.
     `sizes` must be a vector with at least ndim entries.
 
     `dim` is an integer. When >= 0 and < ndim, the indices of all
@@ -66,9 +66,9 @@ std::vector<iscalar_t> get_offsets(const Tensor& indices, const std::vector<isca
   */
   auto ndim = indices.size(0);
   auto nnz = indices.size(1);
-  std::vector<iscalar_t> offsets(nnz, 0);
-  std::vector<iscalar_t> strides(ndim, 1);
-  iscalar_t* indices_data_base = indices.data_ptr<iscalar_t>();
+  std::vector<index_t> offsets(nnz, 0);
+  std::vector<index_t> strides(ndim, 1);
+  auto indices_accessor = indices.accessor<index_t, 2>();
 
   if (ndim > 1) {
     for (int64_t i=ndim - 2; i >= 0; i--) {
@@ -78,8 +78,10 @@ std::vector<iscalar_t> get_offsets(const Tensor& indices, const std::vector<isca
 
   for (int64_t j=0; j < ndim; j++) {
     if (j != dim) {
+      auto indices_row = indices_accessor[j];
+      auto stride = strides[j];
       for (int64_t i=0; i < nnz; i++) {
-        offsets[i] += strides[j] * indices_data_base[j * nnz + i];
+        offsets[i] += stride * indices_row[i];
       }
     }
   }
@@ -87,8 +89,8 @@ std::vector<iscalar_t> get_offsets(const Tensor& indices, const std::vector<isca
   return offsets;
 }
 
-template <typename iscalar_t>
-std::vector<iscalar_t> get_dense_offsets(iscalar_t &mx, const std::vector<iscalar_t>& offsets) {
+template <typename index_t>
+std::vector<index_t> get_dense_offsets(index_t &mx, const std::vector<index_t>& offsets) {
   /*
     Return the dense set of offsets:
 
@@ -107,12 +109,12 @@ std::vector<iscalar_t> get_dense_offsets(iscalar_t &mx, const std::vector<iscala
       get_dense_offsets([0, 3, 4, 1, 3]) -> [0, 1, 2, 3, 1]
   */
   auto n = offsets.size();
-  std::vector<iscalar_t> pool(n, 0);
-  std::map<iscalar_t, iscalar_t> i2p;
+  std::vector<index_t> pool(n, 0);
+  std::map<index_t, index_t> i2p;
   for (int64_t i=0; i < n; i++) {
     auto c = offsets[i];
     auto it = i2p.find(c);
-    iscalar_t p = i2p.size();
+    index_t p = i2p.size();
     if (it == i2p.end()) {
       i2p.emplace(std::make_pair(c, p));
     } else {
@@ -124,7 +126,7 @@ std::vector<iscalar_t> get_dense_offsets(iscalar_t &mx, const std::vector<iscala
   return pool;
 }
 
-template <typename scalar_t, typename iscalar_t, bool LogSoftMax>
+template <typename scalar_t, typename index_t, bool LogSoftMax>
 void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t dim) {
   /*
     See test/test_sparse.py:test_softmax:sparse_softmax for the Python
@@ -285,92 +287,112 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
   }
 
   auto nnz = values.size(0);
-  scalar_t* values_data_base = values.data_ptr<scalar_t>();
-  iscalar_t* indices_data_base = indices.data_ptr<iscalar_t>();
-  scalar_t* out_values_data_base = out_values.data_ptr<scalar_t>();
   auto sizes = input.sizes().vec();
   auto nvalues = get_nvalues(sizes, sparse_dim);
 
   /* Compute pool indices */
-  std::vector<iscalar_t> offsets = get_offsets<iscalar_t>(indices, sizes, dim);
-  iscalar_t mx_p;
-  std::vector<iscalar_t> pool = get_dense_offsets<iscalar_t>(mx_p, offsets);
+  std::vector<index_t> offsets = get_offsets<index_t>(indices, sizes, dim);
+  int64_t npools;
+  std::vector<index_t> pool = get_dense_offsets<index_t>(npools, offsets);
 
-  /* Compute mx - a max tensor along sparse dimension */
-  std::vector<int64_t> mx_sizes(sizes.begin() + sparse_dim - 1, sizes.end());
-  mx_sizes[0] = mx_p;
-  at::Tensor mx = at::empty(mx_sizes, values.options());
-  scalar_t* mx_data_base = mx.data_ptr<scalar_t>();
+  /* Prepare scratch space and accessors */
+  auto values_2 = values.view({nnz, nvalues});
+  auto values_accessor = values_2.accessor<scalar_t, 2>();
+
+  auto out_values_2 = out_values.view({nnz, nvalues});
+  auto out_values_accessor = out_values_2.accessor<scalar_t, 2>();
+
+  Tensor mx = at::empty({npools, nvalues}, values.options());
+  auto mx_accessor = mx.accessor<scalar_t, 2>();
+
+  Tensor exp_sums = at::zeros_like(mx);
+  auto exp_sums_accessor = exp_sums.accessor<scalar_t, 2>();
+
+  /* Compute mx tensor */
   {
     auto ninf = -std::numeric_limits<scalar_t>::infinity();
-    for (int64_t j=0; j < nvalues * mx_p; j++) {
-      mx_data_base[j] = ninf;
-    }
-  }
-
-  for (int64_t i=0; i < nnz; i++) {
-    auto p = pool[i];
-    scalar_t* mx_data = mx_data_base + p * nvalues;
-    scalar_t* values_data = values_data_base + i * nvalues;
-    for (int64_t j=0; j < nvalues; j++) {
-      mx_data[j] = std::max(mx_data[j], values_data[j]);
-    }
-  }
-
-  /* apply exp to (v - mx) and sum the results */
-  at::Tensor exp_sums = at::zeros_like(mx);
-  scalar_t* exp_sums_data_base = exp_sums.data_ptr<scalar_t>();
-  for (int64_t i=0; i < nnz; i++) {
-    auto p = pool[i];
-    scalar_t* mx_data = mx_data_base + p * nvalues;
-    scalar_t* values_data = values_data_base + i * nvalues;
-    scalar_t* out_values_data = out_values_data_base + i * nvalues;
-    scalar_t* exp_sums_data = exp_sums_data_base + p * nvalues;
-    for (int64_t j=0; j < nvalues; j++) {
-      auto v = std::exp(values_data[j] - mx_data[j]);
-      if (!LogSoftMax) {
-        out_values_data[j] = v;
+    for (int64_t i=0; i < npools; i++) {
+      auto mx_row = mx_accessor[i];
+      for (int64_t j=0; j < nvalues; j++) {
+        mx_row[j] = ninf;
       }
-      exp_sums_data[j] += v;
     }
   }
 
-  for (int64_t j=0; j < nvalues * mx_p; j++) {
-    if (LogSoftMax) {
-      mx_data_base[j] += std::log(exp_sums_data_base[j]);
-    } else {
-      exp_sums_data_base[j] = 1.0 / exp_sums_data_base[j];
-    }
-  }
-
-  /* normalize with the sum of exponents */
   for (int64_t i=0; i < nnz; i++) {
     auto p = pool[i];
-    scalar_t* values_data = values_data_base + i * nvalues;
-    scalar_t* out_values_data = out_values_data_base + i * nvalues;
-    scalar_t* exp_sums_data = exp_sums_data_base + p * nvalues;
-    scalar_t* mx_data = mx_data_base + p * nvalues;
+    auto mx_row = mx_accessor[p];
+    auto values_row = values_accessor[i];
+    for (int64_t j=0; j < nvalues; j++) {
+      mx_row[j] = std::max(mx_row[j], values_row[j]);
+    }
+  }
+
+  /* Apply exp to (v - mx) and sum the results */
+  for (int64_t i=0; i < nnz; i++) {
+    auto p = pool[i];
+    auto mx_row = mx_accessor[p];
+    auto exp_sums_row = exp_sums_accessor[p];
+    auto values_row = values_accessor[i];
+    auto out_values_row = out_values_accessor[i];
+    for (int64_t j=0; j < nvalues; j++) {
+      auto v = std::exp(values_row[j] - mx_row[j]);
+      if (!LogSoftMax) {
+        out_values_row[j] = v;
+      }
+      exp_sums_row[j] += v;
+    }
+  }
+
+  for (int64_t i=0; i < npools; i++) {
+    auto mx_row = mx_accessor[i];
+    auto exp_sums_row = exp_sums_accessor[i];
     for (int64_t j=0; j < nvalues; j++) {
       if (LogSoftMax) {
-        out_values_data[j] = values_data[j] - mx_data[j];
+        mx_row[j] += std::log(exp_sums_row[j]);
       } else {
-        out_values_data[j] *= exp_sums_data[j];
+        exp_sums_row[j] = 1.0 / exp_sums_row[j];
+      }
+    }
+  }
+
+  /* Normalize with the sum of exponents */
+  for (int64_t i=0; i < nnz; i++) {
+    auto p = pool[i];
+    auto mx_row = mx_accessor[p];
+    auto exp_sums_row = exp_sums_accessor[p];
+    auto values_row = values_accessor[i];
+    auto out_values_row = out_values_accessor[i];
+    for (int64_t j=0; j < nvalues; j++) {
+      if (LogSoftMax) {
+        out_values_row[j] = values_row[j] - mx_row[j];
+      } else {
+        out_values_row[j] *= exp_sums_row[j];
       }
     }
   }
 
 }
 
-template <typename scalar_t, typename iscalar_t, bool LogSoftMax>
+template <typename scalar_t, typename index_t, bool LogSoftMax>
 void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, const Tensor& output, const int64_t dim) {
   /*
-    gI_i = sum_j d<output_i>/d<input_j> * grad_j = sum_j output_i * (1[i==j] - output_j) * grad_j
-         = output_i * (grad_i - sum_j output_j * grad_j)
 
-    i, j in range(shape[dim])
-    x_i = x[..., i_dim, ...]
+    If LogSoftMax == false, then
 
-    assuming output.sparse_dim() == grad.sparse_dim(), TODO: impl check
+      gI_i = sum_j d<output_j>/d<input_i> * grad_j = sum_j output_i * (1[i==j] - output_j) * grad_j
+           = output_i * (grad_i - sum_j output_j * grad_j)
+
+    else
+
+      gI_i = (1-exp(output_i)) * grad_i - sum_{j} 1[i!=j] * exp(output_i) * grad_j
+           = grad_i - exp(output_i) * sum_j grad_j.
+
+    where
+
+      i, j in range(shape[dim])
+      x_i = x[..., i_dim, ...]
+      output.sparse_dim() == grad.sparse_dim()
   */
   auto sparse_dim = output.sparse_dim();
   auto sizes = output.sizes().vec();
@@ -409,37 +431,43 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
     return;
   }
 
-  std::vector<iscalar_t> offsets = get_offsets<iscalar_t>(out_indices, sizes, dim);
-  iscalar_t mx_p;
-  std::vector<iscalar_t> pool = get_dense_offsets<iscalar_t>(mx_p, offsets);
-  std::vector<int64_t> tmp_sizes(sizes.begin() + sparse_dim - 1, sizes.end());
-  tmp_sizes[0] = mx_p;
-  at::Tensor tmp = at::empty(tmp_sizes, out_values.options());
-  tmp.zero_();
-  scalar_t* tmp_data_base = tmp.data_ptr<scalar_t>();
-  scalar_t* out_values_data_base = out_values.data_ptr<scalar_t>();
-  iscalar_t* out_indices_data_base = out_indices.data_ptr<iscalar_t>();
-  scalar_t* grad_values_data_base = grad_values.data_ptr<scalar_t>();
-  iscalar_t* grad_indices_data_base = grad_indices.data_ptr<iscalar_t>();
-  scalar_t* values_data_base = values.data_ptr<scalar_t>();
-  iscalar_t* indices_data_base = indices.data_ptr<iscalar_t>();
-
+  auto nnz = values.size(0);
   auto nvalues = get_nvalues(sizes, sparse_dim);
+
+  /* Compute pool indices */
+  std::vector<index_t> offsets = get_offsets<index_t>(out_indices, sizes, dim);
+  index_t npools;
+  std::vector<index_t> pool = get_dense_offsets<index_t>(npools, offsets);
+
+  /* Prepare scratch space and accessors */
+
+  Tensor tmp = at::empty({npools, nvalues}, out_values.options());
+  tmp.zero_();
+  auto tmp_accessor = tmp.accessor<scalar_t, 2>();
+
+  auto values_2 = values.view({nnz, nvalues});
+  auto values_accessor = values_2.accessor<scalar_t, 2>();
+
+  auto out_values_2 = out_values.view({out_nnz, nvalues});
+  auto out_values_accessor = out_values_2.accessor<scalar_t, 2>();
+
+  auto grad_values_2 = grad_values.view({grad_nnz, nvalues});
+  auto grad_values_accessor = grad_values_2.accessor<scalar_t, 2>();
 
   /* Compute tmp = - sum_j output_j * grad_j */
   for (int64_t i=0; i<out_nnz; i++) {
     auto p = pool[i];
     auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
     auto j = low - grad_offsets.begin();
-    scalar_t* tmp_data = tmp_data_base + p * nvalues;
-    scalar_t* out_values_data = out_values_data_base + i * nvalues;
+    auto tmp_row = tmp_accessor[p];
+    auto out_values_row = out_values_accessor[i];
     if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
-      scalar_t* grad_values_data = grad_values_data_base + j * nvalues;
+      auto grad_values_row = grad_values_accessor[j];
       for (int64_t k=0; k<nvalues; k++) {
         if (LogSoftMax) {
-          tmp_data[k] -= grad_values_data[k];
+          tmp_row[k] -= grad_values_row[k];
         } else {
-          tmp_data[k] -= out_values_data[k] * grad_values_data[k];
+          tmp_row[k] -= out_values_row[k] * grad_values_row[k];
         }
       }
     }
@@ -450,24 +478,24 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
     auto p = pool[i];
     auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
     auto j = low - grad_offsets.begin();
-    scalar_t* tmp_data = tmp_data_base + p * nvalues;
-    scalar_t* out_values_data = out_values_data_base + i * nvalues;
-    scalar_t* values_data = values_data_base + i * nvalues;
+    auto tmp_row = tmp_accessor[p];
+    auto out_values_row = out_values_accessor[i];
+    auto values_row = values_accessor[i];
     if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
-      scalar_t* grad_values_data = grad_values_data_base + j * nvalues;
+      auto grad_values_row = grad_values_accessor[j];
       for (int64_t k=0; k<nvalues; k++) {
         if (LogSoftMax) {
-          values_data[k] = grad_values_data[k] + std::exp(out_values_data[k]) * tmp_data[k];
+          values_row[k] = grad_values_row[k] + std::exp(out_values_row[k]) * tmp_row[k];
         } else {
-          values_data[k] = out_values_data[k] * (grad_values_data[k] + tmp_data[k]);
+          values_row[k] = out_values_row[k] * (grad_values_row[k] + tmp_row[k]);
         }
       }
     } else {
       for (int64_t k=0; k<nvalues; k++) {
         if (LogSoftMax) {
-          values_data[k] = std::exp(out_values_data[k]) * tmp_data[k];
+          values_row[k] = std::exp(out_values_row[k]) * tmp_row[k];
         } else {
-          values_data[k] = out_values_data[k] * (tmp_data[k]);
+          values_row[k] = out_values_row[k] * (tmp_row[k]);
         }
       }
     }
@@ -488,7 +516,6 @@ Tensor softmax_sparse_cpu(const Tensor& input_, const int64_t dim_, const bool h
   TORCH_CHECK(dim_ >= 0 && dim_ < input.dim(),
               "dim must be non-negative and less than input dimensions");
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "softmax", [&] {
-      // assuming that the type of input._indices() entries is int64_t
       cpu_sparse_coo_softmax<scalar_t, int64_t, false>(output, input, dim_);
   });
   return output;
@@ -505,7 +532,6 @@ Tensor log_softmax_sparse_cpu(const Tensor& input_, const int64_t dim_, const bo
   TORCH_CHECK(dim_ >= 0 && dim_ < input.dim(),
               "dim must be non-negative and less than input dimensions");
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "log_softmax", [&] {
-      // assuming that the type of input._indices() entries is int64_t
       cpu_sparse_coo_softmax<scalar_t, int64_t, true>(output, input, dim_);
   });
   return output;
@@ -535,7 +561,6 @@ Tensor softmax_backward_sparse_cpu(
               grad.sparse_dim() == output.sparse_dim(),
       "grad and output sparse dimensions must be equal");
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
-      // assuming that the type of input._indices() entries is int64_t
       cpu_sparse_coo_softmax_backward<scalar_t, int64_t, false>(grad_input, grad, output, dim);
   });
   return grad_input;
@@ -565,7 +590,6 @@ Tensor log_softmax_backward_sparse_cpu(
               grad.sparse_dim() == output.sparse_dim(),
       "grad and output sparse dimensions must be equal");
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
-      // assuming that the type of input._indices() entries is int64_t
       cpu_sparse_coo_softmax_backward<scalar_t, int64_t, true>(grad_input, grad, output, dim);
   });
   return grad_input;
