@@ -1766,8 +1766,8 @@ struct CAFFE2_API ClassType : public NamedType {
                [&](const AttributeKind& attr) { return attr.getName() == name; }) !=
         attributes_.cend();
   }
-
-  at::ArrayRef<TypePtr> containedTypes() const override {	
+  
+  at::ArrayRef<TypePtr> containedTypes() const override {
     std::vector<TypePtr> typeVec;
     for (const auto& a : attributes_) {
       typeVec.push_back(a.getType());
