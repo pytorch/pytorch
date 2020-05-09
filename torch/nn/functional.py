@@ -1051,6 +1051,25 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
 
 def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
     # type: (Tensor, float, bool, bool) -> Tensor
+    r"""
+    Randomly masks out entire channels (a channel is a feature map, 
+    e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input 
+    is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of 
+    setting activations to zero, as in regular Dropout, the activations are set 
+    to the negative saturation value of the SELU activation function.
+
+    Each element will be masked independently on every forward call with
+    probability :attr:`p` using samples from a Bernoulli distribution.
+    The elements to be masked are randomized on every forward call, and scaled
+    and shifted to maintain zero mean and unit variance.
+
+    See :class:`~torch.nn.FeatureAlphaDropout` for details.
+
+    Args:
+        p: dropout probability of a channel to be zeroed. Default: 0.5
+        training: apply dropout if is ``True``. Default: ``True``
+        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+    """
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
