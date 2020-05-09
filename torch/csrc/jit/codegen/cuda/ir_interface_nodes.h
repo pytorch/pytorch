@@ -17,6 +17,41 @@ namespace jit {
 namespace fuser {
 
 /*
+ * A Bool value.
+ * This value can be a symbolic value (defined after the kernel
+ * is compiled) or a constant value (inlined into the kernel definition).
+ */
+struct TORCH_CUDA_API Bool : public Val {
+  ~Bool() = default;
+
+  Bool() : Val(ValType::Scalar, DataType::Bool), maybe_value_{c10::nullopt} {}
+
+  Bool(bool _value)
+      : Val(ValType::Scalar, DataType::Bool), maybe_value_{_value} {}
+
+  Bool(const Bool& other) = delete;
+  Bool& operator=(const Bool& other) = delete;
+
+  Bool(Bool&& other) = delete;
+  Bool& operator=(Bool&& other) = delete;
+
+  bool isSymbolic() const {
+    return !(maybe_value_.has_value());
+  }
+  bool isConst() const {
+    return maybe_value_.has_value();
+  }
+  c10::optional<bool> value() const noexcept {
+    return maybe_value_;
+  }
+
+  bool sameAs(const Bool* const other) const;
+
+ private:
+  const c10::optional<bool> maybe_value_;
+};
+
+/*
  * A Float32 value. For now we don't have any other type besides
  * Float32. This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).
@@ -46,6 +81,41 @@ struct TORCH_CUDA_API Float : public Val {
   }
 
   bool sameAs(const Float* const other) const;
+
+ private:
+  const c10::optional<float> maybe_value_;
+};
+
+/*
+ * An IEEE 754 Float16 value.
+ * This value can be a symbolic value (defined after the kernel
+ * is compiled) or a constant value (inlined into the kernel definition).
+ */
+struct TORCH_CUDA_API Half : public Val {
+  ~Half() = default;
+
+  Half() : Val(ValType::Scalar, DataType::Half), maybe_value_{c10::nullopt} {}
+
+  Half(float _value)
+      : Val(ValType::Scalar, DataType::Half), maybe_value_{_value} {}
+
+  Half(const Half& other) = delete;
+  Half& operator=(const Half& other) = delete;
+
+  Half(Half&& other) = delete;
+  Half& operator=(Half&& other) = delete;
+
+  bool isSymbolic() const {
+    return !(maybe_value_.has_value());
+  }
+  bool isConst() const {
+    return maybe_value_.has_value();
+  }
+  c10::optional<float> value() const noexcept {
+    return maybe_value_;
+  }
+
+  bool sameAs(const Half* const other) const;
 
  private:
   const c10::optional<float> maybe_value_;
@@ -162,6 +232,11 @@ struct TORCH_CUDA_API TensorView : public Val {
 
   // Compute this TensorView relative to another tensor at axis
   TensorView* computeAt(TensorView* consumer, int axis);
+
+  void clearComputeAt() {
+    compute_at_axis_ = -1;
+    compute_at_view_ = nullptr;
+  }
 
   // Split "axis" into 2 axes where the inner axes is size of "factor"
   // and outer axis is size axis.size() / factor

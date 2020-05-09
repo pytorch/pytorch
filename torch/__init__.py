@@ -171,6 +171,11 @@ def typename(o):
 def is_tensor(obj):
     r"""Returns True if `obj` is a PyTorch tensor.
 
+    Note that this function is simply doing ``isinstance(obj, Tensor)``.
+    Using that ``isinstance`` check is better for typechecking with mypy,
+    and more explicit - so it's recommended to use that instead of
+    ``is_tensor``.
+
     Args:
         obj (Object): Object to test
     """
