@@ -70,6 +70,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
+    ${TORCH_ROOT}/third_party/tensorpipe
     ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
@@ -82,7 +83,8 @@ list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
     torch_library
-    shm)
+    shm
+    fmt::fmt-header-only)
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
