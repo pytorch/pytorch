@@ -48,7 +48,9 @@ template <typename KeyType, typename ValType>
 using _enum_unordered_map =
     std::unordered_map<KeyType, ValType, _enum_class_hash<KeyType>>;
 static _enum_unordered_map<DataType, std::string> data_type_string_map{
+    {DataType::Bool, "bool"},
     {DataType::Float, "float"},
+    {DataType::Half, "__half"},
     {DataType::Int, "size_t"}};
 static _enum_unordered_map<ValType, std::string> val_type_string_map{
     {ValType::TensorIndex, "TensorIndex"},
@@ -61,6 +63,7 @@ static _enum_unordered_map<ValType, std::string> val_type_string_map{
 static _enum_unordered_map<ExprType, std::string> expr_type_string_map{
     {ExprType::UnaryOp, "UnaryOp"},
     {ExprType::BinaryOp, "BinaryOp"},
+    {ExprType::TernaryOp, "TernaryOp"},
     {ExprType::ForLoop, "ForLoop"},
     {ExprType::IfThenElse, "IfThenElse"},
     {ExprType::Allocate, "Allocate"},
@@ -68,29 +71,91 @@ static _enum_unordered_map<ExprType, std::string> expr_type_string_map{
     {ExprType::Merge, "Merge"},
     {ExprType::Reorder, "Reorder"}};
 static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
-    {UnaryOpType::Neg, "Neg"},
-    {UnaryOpType::Cast, "Cast"},
-    {UnaryOpType::Set, "Set"}};
+    {UnaryOpType::Abs, "fabs"},
+    {UnaryOpType::Acos, "acosf"},
+    {UnaryOpType::Asin, "asinf"},
+    {UnaryOpType::Atan, "atanf"},
+    {UnaryOpType::Atanh, "atanhf"},
+    //{UnaryOpType::Cast,       "cast"},
+    {UnaryOpType::Ceil, "ceilf"},
+    {UnaryOpType::Cos, "cosf"},
+    {UnaryOpType::Cosh, "coshf"},
+    {UnaryOpType::Exp, "expf"},
+    {UnaryOpType::Expm1, "expm1f"},
+    {UnaryOpType::Erf, "erff"},
+    {UnaryOpType::Erfc, "erfcf"},
+    {UnaryOpType::FloatToHalf, "__float2half"},
+    {UnaryOpType::Floor, "floorf"},
+    {UnaryOpType::Frac, "frac"},
+    {UnaryOpType::Gelu, "gelu"},
+    {UnaryOpType::HalfToFloat, "__half2float"},
+    {UnaryOpType::Lgamma, "lgammaf"},
+    {UnaryOpType::Log, "logf"},
+    {UnaryOpType::Log10, "log10f"},
+    {UnaryOpType::Log1p, "log1pf"},
+    {UnaryOpType::Log2, "log2f"},
+    {UnaryOpType::Neg, "neg"},
+    {UnaryOpType::RandLike, "randLike"},
+    {UnaryOpType::Reciprocal, "reciprocal"},
+    {UnaryOpType::Relu, "relu"},
+    {UnaryOpType::Rsqrt, "rsqrtf"},
+    {UnaryOpType::Round, "roundf"},
+    {UnaryOpType::Set, "set"},
+    {UnaryOpType::Sigmoid, "sigmoid"},
+    {UnaryOpType::Sin, "sinf"},
+    {UnaryOpType::Sinh, "sinhf"},
+    {UnaryOpType::Sqrt, "sqrtf"},
+    {UnaryOpType::Tan, "tanf"},
+    {UnaryOpType::Tanh, "tanhf"},
+    {UnaryOpType::Trunc, "truncf"}};
 static _enum_unordered_map<UnaryOpType, std::string>
-    unary_op_type_inline_op_string_map{{UnaryOpType::Neg, "~"},
-                                       {UnaryOpType::Set, ""}};
+    unary_op_type_inline_op_string_map{
+      {UnaryOpType::Neg, "-"},
+      {UnaryOpType::Set, ""}
+      };
 static _enum_unordered_map<BinaryOpType, std::string> binary_op_type_string_map{
-    {BinaryOpType::Add, "Add"},
-    {BinaryOpType::Sub, "Sub"},
-    {BinaryOpType::Mul, "Mul"},
-    {BinaryOpType::Div, "Div"},
-    {BinaryOpType::Mod, "Mod"},
-    {BinaryOpType::LT, "LessThan"},
+    {BinaryOpType::Add, "add"},
+    {BinaryOpType::Atan2, "atan2f"},
+    {BinaryOpType::Div, "div"},
+    {BinaryOpType::Fmod, "fmodf"},
+    {BinaryOpType::Max, "fmaxf"},
+    {BinaryOpType::Min, "fminf"},
+    {BinaryOpType::Mul, "mul"},
+    {BinaryOpType::Pow, "powf"},
+    {BinaryOpType::Remainder, "remainder"},
+    {BinaryOpType::Sub, "sub"},
+    //{BinaryOpType::TypeAs,
+
+    // Logical Ops
+    {BinaryOpType::Mod, "mod"},
     {BinaryOpType::CeilDiv, "ceilDiv"},
-    {BinaryOpType::And, "And"}};
+    {BinaryOpType::And, "and"},
+    {BinaryOpType::Eq, "equal"},
+    {BinaryOpType::GE, "greaterThanOrEqual"},
+    {BinaryOpType::GT, "greaterThan"},
+    {BinaryOpType::LE, "lessThanOrEqual"},
+    {BinaryOpType::LT, "lessThan"},
+    {BinaryOpType::NE, "notEqual"}};
+
 static _enum_unordered_map<BinaryOpType, std::string>
     binary_op_type_inline_op_string_map{{BinaryOpType::Add, "+"},
-                                        {BinaryOpType::Sub, "-"},
-                                        {BinaryOpType::Mul, "*"},
                                         {BinaryOpType::Div, "/"},
                                         {BinaryOpType::Mod, "%"},
+                                        {BinaryOpType::Mul, "*"},
+                                        {BinaryOpType::Sub, "-"},
+
+                                        // Logical Ops
+                                        {BinaryOpType::And, "&&"},
+                                        {BinaryOpType::Eq, "=="},
+                                        {BinaryOpType::GE, ">="},
+                                        {BinaryOpType::GT, ">"},
+                                        {BinaryOpType::LE, "<="},
                                         {BinaryOpType::LT, "<"},
-                                        {BinaryOpType::And, "&&"}};
+                                        {BinaryOpType::NE, "!="}};
+static _enum_unordered_map<TernaryOpType, std::string>
+    ternary_op_type_string_map{{TernaryOpType::Clamp, "clamp"},
+                               {TernaryOpType::Threshold, "threshold"},
+                               {TernaryOpType::Where, "where"}};
 
 static _enum_unordered_map<ParallelType, std::string> parallel_type_string_map{
     {ParallelType::BIDz, "blockIdx.z"},
@@ -109,7 +174,9 @@ static _enum_unordered_map<MemoryType, std::string> memory_type_string_map{
     {MemoryType::Global, "global"}};
 
 static _enum_unordered_map<at::ScalarType, DataType> at_type_map{
+    {at::ScalarType::Bool, DataType::Bool},
     {at::ScalarType::Float, DataType::Float},
+    {at::ScalarType::Half, DataType::Half},
     {at::ScalarType::Int, DataType::Int}};
 
 static _enum_unordered_map<ParallelType, std::string> thread_size_string_map{
@@ -119,6 +186,19 @@ static _enum_unordered_map<ParallelType, std::string> thread_size_string_map{
     {ParallelType::TIDz, "blockDim.z"},
     {ParallelType::TIDy, "blockDim.y"},
     {ParallelType::TIDx, "blockDim.x"}};
+
+static std::unordered_set<BinaryOpType, _enum_class_hash<BinaryOpType>>
+    logical_binary_ops{BinaryOpType::And,
+                       BinaryOpType::Eq,
+                       BinaryOpType::GE,
+                       BinaryOpType::GT,
+                       BinaryOpType::LE,
+                       BinaryOpType::LT,
+                       BinaryOpType::NE};
+
+bool is_logical_op(const BinaryOpType& bot) {
+  return logical_binary_ops.count(bot) > 0;
+}
 
 DataType aten_to_data_type(const at::ScalarType& scalar_type) {
   TORCH_INTERNAL_ASSERT(
@@ -168,17 +248,31 @@ TORCH_CUDA_API std::ostream& operator<<(
   return out << binary_op_type_string_map[botype];
 }
 
-std::string stringify(const ParallelType ptype) {
+TORCH_CUDA_API std::ostream& operator<<(
+    std::ostream& out,
+    const TernaryOpType totype) {
   TORCH_INTERNAL_ASSERT(
-      parallel_type_string_map.count(ptype) != 0,
-      "No string found for parallel type.");
-  return parallel_type_string_map[ptype];
+      ternary_op_type_string_map.count(totype) != 0,
+      "No string found for TernaryOp type.");
+  return out << ternary_op_type_string_map[totype];
 }
 
 TORCH_CUDA_API std::ostream& operator<<(
     std::ostream& out,
     const ParallelType ptype) {
-  return out << stringify(ptype);
+  TORCH_INTERNAL_ASSERT(
+      parallel_type_string_map.count(ptype) != 0,
+      "No string found for provided parallel type.");
+  return out << parallel_type_string_map[ptype];
+}
+
+TORCH_CUDA_API std::ostream& operator<<(
+    std::ostream& out,
+    const MemoryType mtype) {
+  TORCH_INTERNAL_ASSERT(
+      memory_type_string_map.count(mtype) != 0,
+      "No string found for provided memory type.");
+  return out << memory_type_string_map[mtype];
 }
 
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(
