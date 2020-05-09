@@ -349,11 +349,8 @@ ForLoop* openFor(Expr* scope, IterDomain* id) {
   if (id->isThread()) {
     std::stringstream ss;
     ss << id->parallel_method();
-    new_scope = new ForLoop(
-        new NamedScalar(ss.str(), DataType::Int),
-        id,
-        {},
-        scope);
+    new_scope =
+        new ForLoop(new NamedScalar(ss.str(), DataType::Int), id, {}, scope);
   } else {
     new_scope = new ForLoop(new Int(), id, {}, scope);
   }

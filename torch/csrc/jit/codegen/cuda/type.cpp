@@ -32,7 +32,6 @@ ValType promote_type(const ValType& t1, const ValType& t2) {
 }
 
 c10::optional<UnaryOpType> cast_type(const DataType& t1, const DataType& t2) {
- 
   c10::optional<UnaryOpType> cast = c10::nullopt;
 
   if ((DataType::Half == t1) && (DataType::Float == t2))
@@ -46,7 +45,6 @@ c10::optional<UnaryOpType> cast_type(const DataType& t1, const DataType& t2) {
   // In theory there could be stronger real check here in the future
   return cast;
 }
-
 
 template <typename T>
 struct _enum_class_hash {
@@ -119,10 +117,8 @@ static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
     {UnaryOpType::Tanh, "tanhf"},
     {UnaryOpType::Trunc, "truncf"}};
 static _enum_unordered_map<UnaryOpType, std::string>
-    unary_op_type_inline_op_string_map{
-      {UnaryOpType::Neg, "-"},
-      {UnaryOpType::Set, ""}
-      };
+    unary_op_type_inline_op_string_map{{UnaryOpType::Neg, "-"},
+                                       {UnaryOpType::Set, ""}};
 static _enum_unordered_map<BinaryOpType, std::string> binary_op_type_string_map{
     {BinaryOpType::Add, "add"},
     {BinaryOpType::Atan2, "atan2f"},

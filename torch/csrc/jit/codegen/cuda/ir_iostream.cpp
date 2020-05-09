@@ -347,7 +347,7 @@ void IRPrinter::handle(const ReductionOp* const rop) {
   os << rop->out() << " = reduction( " << rop->in()
      << ", op = " << rop->getReductionOpType()
      << ", initial value = " << rop->init() << " )\n";
-  }
+}
 
 void IRPrinter::handle(const ForLoop* const fl) {
   if (fl->iter_domain()->isThread()) {
@@ -410,7 +410,7 @@ void IRPrinter::handle(const Allocate* const a) {
   os << a->buf_type();
   if (a->buffer()->getValType() == ValType::TensorView) {
     os << " T" << a->buffer()->name() << "[";
-  print_inline(a->extent());
+    print_inline(a->extent());
     os << "];\n";
   } else {
     if (a->extent()->isOneInt()) {

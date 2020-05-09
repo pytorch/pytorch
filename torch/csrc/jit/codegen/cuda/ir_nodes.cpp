@@ -148,7 +148,6 @@ bool TernaryOp::sameAs(const TernaryOp* other) const {
   return true;
 }
 
-
 ReductionOp::ReductionOp(
     BinaryOpType _reduction_op_type,
     Val* _init,

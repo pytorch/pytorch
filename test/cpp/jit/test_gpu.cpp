@@ -747,8 +747,7 @@ void testGPU_FusionCodeGen2() {
   at::Tensor output = at::empty_like(input1);
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
-  torch::jit::fuser::cuda::runTestKernel(
-      &prog, {input1, input2}, {output});
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input1, input2}, {output});
 
   at::Tensor tv2_ref = input2 + 2.0;
   at::Tensor output_ref = input1 + tv2_ref;
@@ -809,8 +808,7 @@ void testGPU_FusionSimplePWise() {
   at::Tensor output = at::empty_like(input1);
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
-  torch::jit::fuser::cuda::runTestKernel(
-      &prog, {input1, input2}, {output});
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input1, input2}, {output});
 
   at::Tensor tv2_ref = input2 + 2.0;
   at::Tensor output_ref = input1 + tv2_ref;
@@ -867,14 +865,12 @@ void testGPU_FusionExecKernel() {
   at::Tensor output = at::empty_like(input1);
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
-  torch::jit::fuser::cuda::runTestKernel(
-      &prog, {input1, input2}, {output});
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input1, input2}, {output});
 
   at::Tensor check = at::full({1, 128}, 4, options);
   ;
   TORCH_CHECK(output.equal(check));
 }
-
 
 int ceilDiv_(int a, int b) {
   return (a + b - 1) / b;
@@ -1118,8 +1114,7 @@ void testGPU_FusionAdvancedComputeAt() {
     prog.grid(blocks);
     prog.block(128);
     torch::jit::fuser::cuda::compileKernel(fusion, &prog);
-    torch::jit::fuser::cuda::runTestKernel(
-        &prog, {t0, t1}, {kernel_tv3});
+    torch::jit::fuser::cuda::runTestKernel(&prog, {t0, t1}, {kernel_tv3});
 
     GPULower gpulw(&fusion);
     std::stringstream cdg;
@@ -1290,7 +1285,7 @@ void testGPU_FusionScalarInputs() {
   prog.block(128);
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
   at::Scalar test(fl0);
-  
+
   torch::jit::fuser::cuda::runTestKernel(
       &prog,
       {t0,
@@ -1298,8 +1293,7 @@ void testGPU_FusionScalarInputs() {
        at::Scalar(fl0),
        at::Scalar(fl1),
        at::Scalar(fl2),
-       at::Scalar(fl3)
-       },
+       at::Scalar(fl3)},
       {kernel_tv4});
 
   GPULower gpulw(&fusion);
@@ -1361,13 +1355,11 @@ void testGPU_FusionLoopUnroll() {
   at::Tensor output = at::empty_like(input1);
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
-  torch::jit::fuser::cuda::runTestKernel(
-      &prog, {input1, input2}, {output});
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input1, input2}, {output});
 
   at::Tensor check = at::full({inp_size}, 4, options);
 
   TORCH_CHECK(output.equal(check));
-
 }
 
 void testGPU_FusionForLoop() {
@@ -1908,7 +1900,6 @@ void testGPU_FusionCastOps() {
       "\n");
 }
 
-
 // We want split/merge/reorder all tested both on and off rfactor domains, also
 // want compute at into the rfactor domain, and into its consumer
 void testGPU_FusionRFactorReplay() {
@@ -1997,7 +1988,7 @@ void testGPU_FusionRFactorReplay() {
               dom2.end(),
               [](IterDomain* id) { return id->isReduction(); }),
       "Error in rFactor, there seems to be something wrong in root domain.");
-  }
+}
 
 void testGPU_FusionSimpleReduction() {
   Fusion fusion;
@@ -2055,7 +2046,6 @@ void testGPU_FusionSimpleReduction() {
   // GPULower lower(&fusion);
   // lower.printKernel(std::cout);
 }
-
 
 } // namespace jit
 } // namespace torch

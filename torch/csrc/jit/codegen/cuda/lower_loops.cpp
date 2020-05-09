@@ -191,7 +191,7 @@ void UnrollPass::handle(ForLoop* fl) {
         Bool* pred = getPredicate(out, ir_utils::indices(for_loops));
 
         // If we need a predicate, put expr inside an if then else
-      
+
         if (!(pred->isConst()) || !(pred->isConst() && pred->value().value())) {
           IfThenElse* inline_ite =
               new IfThenElse(pred, {expr}, {}, for_loops.back());

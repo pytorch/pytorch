@@ -192,7 +192,7 @@ Val* reductionOp(
     if (axis < 0)
       axis += int(tv->nDims());
 
-  TORCH_CHECK(
+    TORCH_CHECK(
         axis >= 0 && axis < tv->nDims(),
         "Reduction on invalid axis, recieved: ",
         axis,
@@ -201,7 +201,7 @@ Val* reductionOp(
         " dims.");
 
     uint_axes.push_back((unsigned int)axis);
-}
+  }
 
   Val* out = tv->newForReduction(uint_axes);
   if (init->getDataType().value() != v1->getDataType().value())

@@ -341,7 +341,9 @@ void runTestKernel(
   KernelArgumentHolder kernel_args;
 
   auto exprs = entry->outputs[0]->fusion()->exprs(true);
-  bool has_reduction = std::any_of(exprs.begin(), exprs.end(), [](Expr* expr){return expr->getExprType() == ExprType::ReductionOp;});
+  bool has_reduction = std::any_of(exprs.begin(), exprs.end(), [](Expr* expr) {
+    return expr->getExprType() == ExprType::ReductionOp;
+  });
 
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different
@@ -351,7 +353,9 @@ void runTestKernel(
       TORCH_INTERNAL_ASSERT(
           input.toTensor().device().index() == entry->device_,
           "input to kernel on device that is not compiled for");
-      TORCH_INTERNAL_ASSERT(!entry->outputs.empty(), "No output found for this kernel, aborting.");
+      TORCH_INTERNAL_ASSERT(
+          !entry->outputs.empty(),
+          "No output found for this kernel, aborting.");
       if (has_reduction) {
         kernel_args.push(input.toTensor());
       } else {
@@ -363,7 +367,7 @@ void runTestKernel(
   }
 
   for (auto& output : outputs) {
-      kernel_args.push(output);
+    kernel_args.push(output);
   }
 
   // TODO: this probably won't work for us.

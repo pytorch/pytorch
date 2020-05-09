@@ -93,7 +93,7 @@ class IrParser {
       out->split(0, nthreads);
       // Split by another 4 which will be our unroll factor
       auto ur_factor = disable_unroll ? 1 : unroll_factor;
-      if(!disable_unroll){
+      if (!disable_unroll) {
         out->split(0, ur_factor);
         cuda_kernel_->unroll_factor_ = ur_factor;
       }
@@ -102,14 +102,14 @@ class IrParser {
     // Run through outputs, grab all inputs of outputs
     // squeeze with computeAt to set overall structure.
     for (auto output : fusion_->outputs()) {
-      if(output->getValType() != ValType::TensorView)
+      if (output->getValType() != ValType::TensorView)
         continue;
       TensorView* out_tv = static_cast<TensorView*>(output);
       for (Val* inp : fusion_->inputsOf(output)) {
         if (inp->getValType().value() == ValType::TensorView)
           static_cast<TensorView*>(inp)->computeAt(out_tv, 1);
       }
-      out_tv->axis(0)->parallelize(ParallelType::BIDx); 
+      out_tv->axis(0)->parallelize(ParallelType::BIDx);
     }
 
     // Run through intermediates, unroll, and bind their axes
@@ -123,9 +123,8 @@ class IrParser {
       if (!disable_unroll && tv->nDims() == 3) {
         tv->axis(-2)->parallelize(ParallelType::Unroll);
         tv->axis(-1)->parallelize(ParallelType::TIDx);
-      }
-      else{
-        if(tv->nDims() == 2)
+      } else {
+        if (tv->nDims() == 2)
           tv->axis(-1)->parallelize(ParallelType::TIDx);
       }
     }
