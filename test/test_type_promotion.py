@@ -177,8 +177,7 @@ class TestTypePromotion(TestCase):
         d = torch.tensor([1, 1, 1, 1], dtype=torch.double, device=device)
         torch.add(f, f, out=d)
         self.assertEqual(d.dtype, torch.double)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(f + f, d)
+        self.assertEqual((f + f).to(torch.double), d)
 
     @float_double_default_dtype
     def test_mixed_type_backward(self, device):
