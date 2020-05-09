@@ -69,8 +69,7 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - arg: THTensor* self
-      broadcast: mask fallback types:Byte
+    - THTensor* self
     - THByteTensor* mask
 ]]
 [[
@@ -86,8 +85,7 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - arg: THTensor* self
-      broadcast: mask fallback types:Bool
+    - THTensor* self
     - THBoolTensor* mask
 ]]
 [[
@@ -215,6 +213,7 @@
   cname: equal
   cpu_bool: True
   cpu_bfloat16: True
+  cpu_half: True
   cuda_bool: True
   variants:
     - function
@@ -302,6 +301,7 @@
 [[
   name: _th_sort
   cname: sort
+  cpu_half: True
   variants:
     - function
   return: argument 0,1
@@ -349,50 +349,8 @@
     - THTensor* self
 ]]
 [[
-  name: _th_cos
-  cname: cos
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_tan
-  cname: tan
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_atan
   cname: atan
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_erf
-  cname: erf
   types:
     - floating_point
   backends:
@@ -558,8 +516,7 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - arg: THTensor* self
-          broadcast: other fallback
+        - THTensor* self
         - THTensor* other
 ]]
 [[
@@ -577,54 +534,14 @@
     - cname: cfmod
       arguments:
         - THTensor* self
-        - arg: THTensor* self
-          broadcast: other inplace fallback
+        - THTensor* self
         - THTensor* other
-]]
-[[
-  name: _th_clamp
-  cname: clamp
-  variants: function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real min
-    - real max
-]]
-[[
-  name: _th_clamp_min
-  cname: cmaxValue
-  variants: function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real min
-]]
-[[
-  name: _th_clamp_max
-  cname: cminValue
-  variants: function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real max
 ]]
 [[
   name: _th_dot
   backend_types: {CUDA: [floating_point], CPU: [all]}
   cname: dot
+  cpu_half: True
   variants: function
   return: accreal
   arguments:
@@ -672,8 +589,7 @@
     - arguments:
       - arg: THTensor* result
         output: True
-      - arg: THTensor* self
-        broadcast: mat1,mat2 dims:mat1.dim0,mat2.dim1
+      - THTensor* self
       - THTensor* mat1
       - THTensor* mat2
       - real beta
@@ -705,8 +621,7 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - arg: THTensor* self
-      broadcast: vec1,vec2 dims:vec1.dim0,vec2.dim0
+    - THTensor* self
     - THTensor* vec1
     - THTensor* vec2
     - real beta
@@ -740,7 +655,6 @@
   arguments:
     - arg: THTensor* result
       output: True
-      resize: [ [self,0], [self,1], [mat2,2] ]
     - argument 0
     - THTensor* self
     - THTensor* mat2
@@ -757,8 +671,7 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - arg: THTensor* self
-      broadcast: batch1,batch2 dims:batch1.dim1,batch2.dim2
+    - THTensor* self
     - THTensor* batch1
     - THTensor* batch2
     - real beta
@@ -791,7 +704,6 @@
     - arg: THTensor* result
       output: True
     - arg: THTensor* self
-      broadcast: batch1,batch2 dims:batch1.dim0,batch1.dim1,batch2.dim2
     - THTensor* batch1
     - THTensor* batch2
     - real beta
