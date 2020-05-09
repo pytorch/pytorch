@@ -291,22 +291,31 @@ PyObject* rpc_init(PyObject* /* unused */) {
                       >>> rref.remote().view(1, 4).to_here()  # returns tensor([[1., 1., 1., 1.]])
               )")
           .def(
-              "__getstate__",
-              [](const PyRRef& /* unused */) {
-                TORCH_CHECK(
-                    false,
-                    "Can not pickle rref in python pickler, rref can only be "
-                    "pickled when using RPC");
-              },
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "__setstate__",
-              [](const PyRRef& /* unused */, const py::tuple& /* unused */) {
-                TORCH_CHECK(
-                    false,
-                    "Can not unpickle rref in python pickler, rref can only be "
-                    "unpickled when using RPC");
-              },
+              py::pickle(
+                  /* __getstate__ */
+                  [](const PyRRef& /* unused */) {
+                    TORCH_CHECK(
+                        false,
+                        "Can not pickle rref in python pickler, rref can only be "
+                        "pickled when using RPC");
+                    // Note that this return has no meaning since we always
+                    // throw, it's only here to satisfy Pybind API's
+                    // requirement.
+                    return py::make_tuple();
+                  },
+                  /* __setstate__ */
+                  [](py::tuple /* unused */) { // NOLINT
+                    TORCH_CHECK(
+                        false,
+                        "Can not unpickle rref in python pickler, rref can only be "
+                        "unpickled when using RPC");
+                    // Note that this return has no meaning since we always
+                    // throw, it's only here to satisfy PyBind's API
+                    // requirement.
+                    return PyRRef(
+                        py::cast<py::none>(Py_None),
+                        py::cast<py::none>(Py_None));
+                  }),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_serialize",
