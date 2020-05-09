@@ -19,6 +19,7 @@ struct DistAccumType {  };
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template <> struct DistAccumType<half> { using type = float; };
 #endif
+template <> struct DistAccumType<BFloat16> { using type = float; };
 template <> struct DistAccumType<Half> { using type = float; };
 template <> struct DistAccumType<float> { using type = float; };
 template <> struct DistAccumType<double> { using type = double; };
