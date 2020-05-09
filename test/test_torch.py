@@ -10243,6 +10243,9 @@ class TestTorchDeviceType(TestCase):
 
     @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_log_normal(self, device, dtype):
+        if IS_WINDOWS and device.startswith('cpu') and dtype == torch.bfloat16:
+            return
+
         a = torch.tensor([10], dtype=dtype, device=device).log_normal_()
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
@@ -10256,6 +10259,9 @@ class TestTorchDeviceType(TestCase):
 
     @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_exponential(self, device, dtype):
+        if IS_WINDOWS and device.startswith('cpu') and dtype == torch.bfloat16:
+            return
+
         a = torch.tensor([10], dtype=dtype, device=device).exponential_(0.5)
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
@@ -10302,6 +10308,9 @@ class TestTorchDeviceType(TestCase):
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
     @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_lognormal_kstest(self, device, dtype):
+        if IS_WINDOWS and device.startswith('cpu') and dtype == torch.bfloat16:
+            return
+
         from scipy import stats
         size = 1000
         for mean in [-3, 0, 7]:
@@ -10316,6 +10325,9 @@ class TestTorchDeviceType(TestCase):
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
     @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_exponential_kstest(self, device, dtype):
+        if IS_WINDOWS and device.startswith('cpu') and dtype == torch.bfloat16:
+            return
+
         from scipy import stats
         size = 1000
         for lambd in [0.5, 1.0, 5.0]:
@@ -10326,6 +10338,9 @@ class TestTorchDeviceType(TestCase):
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
     @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_cauchy_kstest(self, device, dtype):
+        if IS_WINDOWS and device.startswith('cpu') and dtype == torch.bfloat16:
+            return
+
         from scipy import stats
         size = 1000
         for median in [-10, 0, 50]:
