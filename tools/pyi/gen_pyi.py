@@ -121,7 +121,7 @@ def type_to_python(typename, size=None):
         typename += '[]'
 
     typename = {
-        'Device': 'Union[_device, str, None]',
+        'Device': 'Device',
         'Generator': 'Generator',
         'IntegerTensor': 'Tensor',
         'Scalar': 'Number',
