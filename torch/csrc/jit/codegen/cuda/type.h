@@ -29,6 +29,7 @@ enum class ExprType {
   UnaryOp,
   BinaryOp,
   TernaryOp,
+  ReductionOp,
   ForLoop,
   IfThenElse,
   Allocate,
@@ -43,7 +44,7 @@ enum class UnaryOpType {
   Asin,
   Atan,
   Atanh,
-  // Cast,
+  Cast,
   Ceil,
   Cos,
   Cosh,
@@ -67,6 +68,7 @@ enum class UnaryOpType {
   Relu,
   Rsqrt,
   Round,
+  Set,
   Sigmoid,
   Sin,
   Sinh,
@@ -118,6 +120,8 @@ enum class ParallelType {
   Unroll,
   Serial
 };
+
+enum class MemoryType { Local, Shared, Global };
 
 ValType promote_type(const ValType& t1, const ValType& t2);
 DataType promote_type(const DataType& t1, const DataType& t2);
