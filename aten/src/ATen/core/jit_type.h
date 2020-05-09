@@ -1995,12 +1995,7 @@ struct CAFFE2_API ClassType : public NamedType {
   // Holds method attributes
   std::weak_ptr<CompilationUnit> compilation_unit_;
 
-  // if present, this class inherits from torch.nn.Module
-  // and these are the indices of the attributes which are parameters
-  // std::shared_ptr<std::vector<bool>> parameterSlots_;
-  // TODO - a comment
-  // std::shared_ptr<std::vector<bool>> bufferWrittenSlots_;
-
+  // Holds all atrributes, attribute details are found on AttributeKind
   std::vector<AttributeKind> attributes_;
 
   // List of methods associated with this class.
