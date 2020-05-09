@@ -10163,8 +10163,7 @@ class TestTorchDeviceType(TestCase):
         else:
             helper(self, device, dtype, lambda x: x, lambda t: t, lambda mean: mean)
 
-    @dtypes(torch.float, torch.double)
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_from_to(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
@@ -10242,19 +10241,20 @@ class TestTorchDeviceType(TestCase):
             torch.rand(size, size, out=res2)
             self.assertEqual(res1, res2)
 
-    @dtypes(torch.float, torch.double, torch.half)
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_log_normal(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).log_normal_()
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
 
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float, torch.double, torch.half, torch.bfloat16)
     def test_geometric(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).geometric_(0.5)
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
 
-    @dtypes(torch.float, torch.double, torch.half)
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_exponential(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).exponential_(0.5)
         self.assertEqual(a.dtype, dtype)
@@ -10271,8 +10271,7 @@ class TestTorchDeviceType(TestCase):
             torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
 
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double, torch.half)
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_kstest(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
@@ -10301,8 +10300,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertTrue(res.statistic < 0.1)
 
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double, torch.half)
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_lognormal_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -10316,8 +10314,7 @@ class TestTorchDeviceType(TestCase):
                     self.assertTrue(res.statistic < 0.1)
 
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double, torch.half)
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_exponential_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -10327,8 +10324,7 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(res.statistic < 0.1)
 
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double, torch.half)
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_cauchy_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -10341,9 +10337,7 @@ class TestTorchDeviceType(TestCase):
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float, torch.double, torch.half)
-    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-                  torch.float, torch.double, torch.half, torch.bfloat16)
+            torch.float, torch.double, torch.half, torch.bfloat16)
     def test_geometric_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
