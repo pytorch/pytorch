@@ -74,6 +74,24 @@ class TestBuiltins(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "hasattr"):
             torch.jit.script(Mod())
 
+    def test_del_multiple_operands(self):
+
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
+                                    "with more than one operand"):
+            @torch.jit.script
+            def del_list_multiple_operands(x):
+                # type: (List[int]) -> List[int]
+                del x[0], x[1]
+                return x
+
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
+                                    "with more than one operand"):
+            @torch.jit.script
+            def del_dict_multiple_operands(x):
+                # type: (Dict[str, int]) -> Dict[str, int]
+                del x['hi'], x['there']
+                return x
+
 
 class TestTensorBuiltins(JitTestCase):
     def test_tensor_properties(self):
