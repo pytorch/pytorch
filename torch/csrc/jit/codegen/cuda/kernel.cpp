@@ -187,7 +187,8 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
   int debug_fusion = debug_env ? atoi(debug_env) : 0;
 
   if (debug_fusion) {
-    std::cout << "==== kernel id: " << compiled_kernel_id++ << " ====\n" << code << std::endl;
+    std::cout << "==== kernel id: " << compiled_kernel_id++ << " ====\n"
+              << code << std::endl;
   }
 
   // vvv NVRTC COMPILATION vvv
@@ -255,12 +256,10 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
   // has an impact on generated binary.
   const char* prefix_env = getenv("PYTORCH_CUDA_FUSER_CUBIN");
   if (prefix_env) {
-
     // Output ptx file
     std::stringstream ptx_file_name;
     ptx_file_name << prefix_env << "_" << compiled_kernel_id << ".ptx";
-    std::ofstream myPtxFile(ptx_file_name.str().c_str(),
-        std::ios::out);
+    std::ofstream myPtxFile(ptx_file_name.str().c_str(), std::ios::out);
     if (myPtxFile.is_open()) {
       myPtxFile.write(ptx.data(), ptx.size());
       myPtxFile.close();
@@ -268,18 +267,24 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
 
     CUlinkState linkState;
     AT_CUDA_DRIVER_CHECK(nvrtc().cuLinkCreate(0, 0, 0, &linkState));
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuLinkAddData(linkState, CU_JIT_INPUT_PTX,
-                                 ptx.data(), ptx_size, "compiling PTX",
-                                 0, 0, 0));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuLinkAddData(
+        linkState,
+        CU_JIT_INPUT_PTX,
+        ptx.data(),
+        ptx_size,
+        "compiling PTX",
+        0,
+        0,
+        0));
     size_t cubinSize;
-    void *cubin;
+    void* cubin;
     AT_CUDA_DRIVER_CHECK(nvrtc().cuLinkComplete(linkState, &cubin, &cubinSize));
 
     // Output binary file
     std::stringstream cubin_file_name;
     cubin_file_name << prefix_env << "_" << compiled_kernel_id << ".cubin";
-    std::ofstream myCubinFile(cubin_file_name.str().c_str(),
-        std::ios::out | std::ios::binary);
+    std::ofstream myCubinFile(
+        cubin_file_name.str().c_str(), std::ios::out | std::ios::binary);
     if (myCubinFile.is_open()) {
       myCubinFile.write(static_cast<const char*>(cubin), cubinSize);
       myCubinFile.close();
@@ -289,7 +294,8 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
     AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&(entry->module_), cubin));
   } else {
     // load ptx directly
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&(entry->module_), ptx.data()));
+    AT_CUDA_DRIVER_CHECK(
+        nvrtc().cuModuleLoadData(&(entry->module_), ptx.data()));
   }
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleGetFunction(
       &(entry->function_), entry->module_, lowered_kernel_name));

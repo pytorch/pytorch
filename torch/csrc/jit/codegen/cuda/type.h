@@ -140,7 +140,8 @@ std::string stringifyThreadSize(const ParallelType);
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(const UnaryOpType);
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(const BinaryOpType);
 
-TORCH_CUDA_API c10::optional<std::string> cast_func_str(const std::pair<DataType,DataType>&);
+TORCH_CUDA_API c10::optional<std::string> cast_func_str(
+    const std::pair<DataType, DataType>&);
 
 } // namespace fuser
 } // namespace jit

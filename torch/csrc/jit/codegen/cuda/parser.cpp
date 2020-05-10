@@ -95,8 +95,8 @@ class IrParser {
 
       // demote output dtype to be match PyTorch JIT graph.
       auto tensor_type = jit_output->type()->cast<TensorType>();
-      TORCH_INTERNAL_ASSERT(tensor_type,
-          "output of fusion group is not TensorType.");
+      TORCH_INTERNAL_ASSERT(
+          tensor_type, "output of fusion group is not TensorType.");
       if (tensor_type->scalarType() == at::ScalarType::Half) {
         // No need to update value_map_ after this point.
         out = static_cast<TensorView*>(castOp(DataType::Half, out));

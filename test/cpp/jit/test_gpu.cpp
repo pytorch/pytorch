@@ -2043,7 +2043,7 @@ void testGPU_FusionSimpleReduction() {
   prog.block(128);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input = at::rand({513, 1025}, options);
+  at::Tensor input = at::rand({513 * 512, 1025}, options);
   at::Tensor cg_output = at::empty({129}, options);
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);

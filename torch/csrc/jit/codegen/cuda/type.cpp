@@ -192,11 +192,13 @@ struct _enum_pair_hash {
   }
 };
 template <typename KeyType, typename ValType>
-using _enum_pair_unordered_map =
-    std::unordered_map<std::pair<KeyType,KeyType>, ValType, _enum_pair_hash<KeyType>>;
-static _enum_pair_unordered_map<DataType, std::string> supported_casts {
-    {{DataType::Float, DataType::Half }, "__float2half"},
-    {{DataType::Half,  DataType::Float}, "__half2float"}};
+using _enum_pair_unordered_map = std::unordered_map<
+    std::pair<KeyType, KeyType>,
+    ValType,
+    _enum_pair_hash<KeyType>>;
+static _enum_pair_unordered_map<DataType, std::string> supported_casts{
+    {{DataType::Float, DataType::Half}, "__float2half"},
+    {{DataType::Half, DataType::Float}, "__half2float"}};
 
 bool is_logical_op(const BinaryOpType& bot) {
   return logical_binary_ops.count(bot) > 0;
@@ -306,7 +308,7 @@ std::string stringifyThreadSize(const ParallelType ptype) {
 }
 
 TORCH_CUDA_API c10::optional<std::string> cast_func_str(
-    const std::pair<DataType, DataType> &cast) {
+    const std::pair<DataType, DataType>& cast) {
   if (supported_casts.count(cast) == 0) {
     return c10::nullopt;
   } else {
