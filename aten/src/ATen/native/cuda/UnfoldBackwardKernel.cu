@@ -3,7 +3,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/cuda/zmath.cuh>
 
 #include <vector>
 
@@ -178,8 +177,7 @@ void unfold_backward_cuda_kernel(
     at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(),
     "unfold_backward_cuda", [&] {
-      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-      _unfold_backward_internal_kernel<thrust_t>(
+      _unfold_backward_internal_kernel<scalar_t>(
         iter,
         size,
         step,

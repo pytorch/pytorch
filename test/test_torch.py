@@ -10163,7 +10163,8 @@ class TestTorchDeviceType(TestCase):
         else:
             helper(self, device, dtype, lambda x: x, lambda t: t, lambda mean: mean)
 
-    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_from_to(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
@@ -10241,11 +10242,9 @@ class TestTorchDeviceType(TestCase):
             torch.rand(size, size, out=res2)
             self.assertEqual(res1, res2)
 
-    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_log_normal(self, device, dtype):
-        if IS_WINDOWS and device.startswith('cpu') and dtype == torch.bfloat16:
-            return
-
         a = torch.tensor([10], dtype=dtype, device=device).log_normal_()
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
@@ -10257,7 +10256,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
 
-    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_exponential(self, device, dtype):
         if IS_WINDOWS and device.startswith('cpu') and dtype == torch.bfloat16:
             return
@@ -10277,7 +10277,8 @@ class TestTorchDeviceType(TestCase):
             torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
 
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_kstest(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
@@ -10306,11 +10307,9 @@ class TestTorchDeviceType(TestCase):
                 self.assertTrue(res.statistic < 0.1)
 
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_lognormal_kstest(self, device, dtype):
-        if IS_WINDOWS and device.startswith('cpu') and dtype == torch.bfloat16:
-            return
-
         from scipy import stats
         size = 1000
         for mean in [-3, 0, 7]:
@@ -10323,11 +10322,9 @@ class TestTorchDeviceType(TestCase):
                     self.assertTrue(res.statistic < 0.1)
 
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_exponential_kstest(self, device, dtype):
-        if IS_WINDOWS and device.startswith('cpu') and dtype == torch.bfloat16:
-            return
-
         from scipy import stats
         size = 1000
         for lambd in [0.5, 1.0, 5.0]:
@@ -10336,11 +10333,9 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(res.statistic < 0.1)
 
     @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_cauchy_kstest(self, device, dtype):
-        if IS_WINDOWS and device.startswith('cpu') and dtype == torch.bfloat16:
-            return
-
         from scipy import stats
         size = 1000
         for median in [-10, 0, 50]:
