@@ -9,8 +9,6 @@
 #include <GLES3/gl31.h>
 #include <GLES3/gl32.h>
 
-#include <c10/util/intrusive_ptr.h>
-
 namespace at {
 namespace native {
 namespace vulkan {
@@ -20,7 +18,7 @@ namespace gl {
 bool is_available();
 
 class GLImage;
-class GLTensor : public c10::intrusive_ptr_target {
+class GLTensor {
   class Impl;
 
  public:

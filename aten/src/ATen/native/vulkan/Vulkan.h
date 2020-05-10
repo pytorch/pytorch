@@ -22,8 +22,6 @@
 #define ROUND_UP(x, y) (((x) + (y) - (1)) / (y) * (y))
 #define ALIGN_UP4(x) ROUND_UP((x), 4)
 
-#include <c10/util/intrusive_ptr.h>
-
 namespace at {
 namespace native {
 namespace vulkan {
@@ -84,12 +82,12 @@ const VContext& context();
 // copyFromImageToBuffer first.
 class VBuffer;
 class VImage;
-class VulkanTensor final : public c10::intrusive_ptr_target {
+class VulkanTensor final {
   class Impl;
 
  public:
   VulkanTensor(){};
-  VulkanTensor(std::vector<int64_t> sizes);
+  explicit VulkanTensor(std::vector<int64_t> sizes);
   ~VulkanTensor() = default;
 
   VulkanTensor(VulkanTensor&&) = default;
@@ -202,7 +200,7 @@ class VBuffer final {
           VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
       VkDescriptorType descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
-  ~VBuffer() noexcept;
+  ~VBuffer();
 
   VBuffer(const VBuffer&) = delete;
   VBuffer& operator=(const VBuffer&) = delete;
@@ -262,7 +260,7 @@ class VImage final {
 
   explicit VImage(uint32_t W, uint32_t H, uint32_t C);
 
-  ~VImage() noexcept;
+  ~VImage();
   VImage(const VImage&) = delete;
   VImage& operator=(const VImage&) = delete;
   VImage(VImage&&) = default;
