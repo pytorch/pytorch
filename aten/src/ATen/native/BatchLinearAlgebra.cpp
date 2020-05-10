@@ -4,6 +4,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/native/ResizeCommon.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cpu/zmath.h>
@@ -97,6 +98,10 @@ namespace native {
 #ifdef USE_LAPACK
 // Define the per-batch functions to be used in the main implementation of the batched
 // linear algebra operations
+
+template<class scalar_t>
+void lapackGels(char trans, int m, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, scalar_t *work, int lwork, int *info);
+
 template<class scalar_t>
 void lapackSolve(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
 
@@ -138,6 +143,14 @@ template<> void lapackSolve<std::complex<double>>(int n, int nrhs, std::complex<
 
 template<> void lapackSolve<std::complex<float>>(int n, int nrhs, std::complex<float> *a, int lda, int *ipiv, std::complex<float> *b, int ldb, int *info) {
   cgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+}
+
+template<> void lapackGels<double>(char trans, int m, int n, int nrhs, double *a, int lda, double *b, int ldb, double *work, int lwork, int *info) {
+  dgels_(&trans, &m, &n, &nrhs, a, &lda, b, &ldb, work, &lwork, info);
+}
+
+template<> void lapackGels<float>(char trans, int m, int n, int nrhs, float *a, int lda, float *b, int ldb, float*work, int lwork, int *info) {
+  sgels_(&trans, &m, &n, &nrhs, a, &lda, b, &ldb, work, &lwork, info);
 }
 
 template<> void lapackSolve<double>(int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
@@ -374,6 +387,35 @@ std::tuple<Tensor&,Tensor&> solve_out(Tensor& solution, Tensor& lu, const Tensor
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
+  std::cout << "Andrzej" << std::endl;
+  Tensor B_working = B.clone().t().contiguous().t();
+  Tensor A_working = A.clone().t().contiguous().t();
+  
+  // change it into template later on
+  int m, n, nrhs, lda, ldb, info, lwork;
+  float wkopt = 0.0;
+  lwork = -1; // work length 
+  m = A_working.size(0); 
+  n = A_working.size(1);
+  nrhs = B_working.size(1);
+  info = 0;
+  lda = m;
+  ldb = (m > n) ? m : n;
+  
+  auto B_data = B_working.data_ptr<float>();
+  auto A_data = A_working.data_ptr<float>();
+  
+  lapackGels('N', m, n, nrhs, A_data, lda, B_data, ldb, &wkopt, lwork, &info);
+  lwork = (int)wkopt;
+  Tensor Work_tensor = at::empty({lwork}, A.options().dtype());
+  
+  auto work = Work_tensor.data_ptr<float>();
+  lapackGels('N', m, n, nrhs, A_data, lda, B_data, ldb, work, lwork, &info);
+  std::cout << Work_tensor << std::endl;
+  return std::tuple<Tensor, Tensor>(B_working, A_working);
+}
 
 template <typename scalar_t>
 static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
@@ -1147,13 +1189,6 @@ Tensor& lu_solve_out(Tensor& result, const Tensor& self, const Tensor& LU_data, 
   return result;
 }
 
-std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
-  std::cout << "Andrzej" << std::endl;
-  auto B_working = B.clone();
-  auto A_working = A.clone();
-  
-  // std::cout << sgels_ << std::endl;
-  return std::tuple<Tensor, Tensor>(B_working, A_working);
-}
+
 
 }}  // namespace at::native
