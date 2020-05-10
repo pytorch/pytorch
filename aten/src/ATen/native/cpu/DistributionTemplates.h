@@ -229,7 +229,7 @@ struct UniformKernel {
 // ==================================================== Cauchy ========================================================
 
 template<typename scalar_t, typename RNG>
-inline auto cauchy_lambda(TensorIterator& iter, double median_, double sigma_, RNG generator) {
+inline auto cauchy_lambda(TensorIterator& iter, double median_, double sigma_, RNG& generator) {
   return [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -263,7 +263,7 @@ struct CauchyKernel {
 // ================================================== LogNormal =======================================================
 
 template<typename scalar_t, typename RNG>
-inline auto log_normal_lambda(TensorIterator& iter, double mean_, double std_, RNG generator) {
+inline auto log_normal_lambda(TensorIterator& iter, double mean_, double std_, RNG& generator) {
   return [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -319,7 +319,7 @@ struct GeometricKernel {
 // ================================================== Exponential =====================================================
 
 template<typename scalar_t, typename RNG>
-inline auto exponential_lambda(TensorIterator& iter, double lambda_, RNG generator) {
+inline auto exponential_lambda(TensorIterator& iter, double lambda_, RNG& generator) {
   return [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     std::lock_guard<std::mutex> lock(generator->mutex_);
