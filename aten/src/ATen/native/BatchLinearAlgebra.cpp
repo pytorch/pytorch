@@ -421,6 +421,11 @@ std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
       "dimensions, but has ", B.dim());
   TORCH_CHECK(A.size(0) == B.size(0), "Expected A and B to have same size "
       "at dim 0, but A has ", A.size(0), " rows and B has ", B.size(0), " rows");
+
+  
+  if(B.dim() == 1) {
+    B.unsqueeze_(1);
+  }
   // lapackGels is working on column major matrixes
   // Tensors are row major by default
   Tensor B_working = B.clone().t().contiguous().t();
