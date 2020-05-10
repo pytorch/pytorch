@@ -323,8 +323,8 @@ inline auto exponential_lambda(TensorIterator& iter, double lambda_, RNG& genera
   return [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    auto lambda = static_cast<accscalar_t>(lambda_);
-    at::exponential_distribution<accscalar_t> exponential(lambda);
+    // auto lambda = static_cast<accscalar_t>(lambda_);
+    at::exponential_distribution<double> exponential(lambda_);
     cpu_serial_kernel(iter, [&exponential, generator]() -> scalar_t {
       return static_cast<scalar_t>(exponential(generator));
     });
