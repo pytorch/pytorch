@@ -1183,9 +1183,10 @@ size_t ClassType::addAttribute(
         toString(type));
   }
   if (was_registered_as_buffer) {
-      // TODO: Check is_module
-      // TODO: check type is tensor
-      // TODO: Check is not also parameter
+      TORCH_INTERNAL_ASSERT(is_module(), "attempting to register a buffer on a non module");
+    TORCH_CHECK((type->kind() == TensorType::Kind),
+        "Expecting registered buffer to be a Tensor, but got: ",
+        toString(type));
   }
 
   return slot;
@@ -1261,9 +1262,7 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
 
 static bool containsAny(const TypePtr& type) {
   std::vector<TypePtr> to_scan = { type };
-  int i = 0;
   while (!to_scan.empty()) {
-    i = i + 1;
     const auto typ = to_scan.back();
     to_scan.pop_back();
     if (typ->kind() == AnyType::Kind) {
