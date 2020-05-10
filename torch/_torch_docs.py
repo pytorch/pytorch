@@ -7762,15 +7762,15 @@ searchsorted(sorted_sequence, values, out_int32=False, right=False, out=None) ->
 Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the 
 corresponding values in :attr:`values` were inserted before the indices, the order of the 
 corresponding *innermost* dimension within :attr:`sorted_sequence` would be preserved. 
-Return a new tensor, same size as :attr:`input`. The returned index satifies the following rules: 
+Return a new tensor, same size as :attr:`input`. The returned index satisfies the following rules: 
 
 .. list-table:: 
    :widths: 12 10 78 
    :header-rows: 1
-   
+
    * - :attr:`sorted_sequence`
      - :attr:`right`
-     - *returned index satifies*
+     - *returned index satisfies*
    * - 1-D
      - False
      - ``sorted_sequence[i-1] <= values[m][n]...[l][x] < sorted_sequence[i]``
@@ -7834,14 +7834,14 @@ bucketize(input, boundaries, out_int32=False, right=False, out=None) -> Tensor
 
 Find the indices from the sorted 1-D tensor :attr:`boundaries` such that, if the corresponding values 
 in :attr:`input` were inserted before the indices, the order of :attr:`boundaries` would be preserved. 
-Return a new tensor, same size as :attr:`input`. The returned index satifies the following rules:
+Return a new tensor, same size as :attr:`input`. The returned index satisfies the following rules:
 
 .. list-table:: 
    :widths: 15 85 
    :header-rows: 1
-   
+
    * - :attr:`right`
-     - *returned index satifies*
+     - *returned index satisfies*
    * - False
      - ``boundaries[i-1] <= input[m][n]...[l][x] < boundaries[i]``
    * - True
