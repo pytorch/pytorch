@@ -77,7 +77,7 @@ C10_HOST_DEVICE inline dist_acctype<T> uniform_real(V val, T from, T to) {
 }
 
 /**
- * Transforms normally distributed `val` with mean 0.0 and standard deviation 1.0 to 
+ * Transforms normally distributed `val` with mean 0.0 and standard deviation 1.0 to
  * normally distributed with `mean` and standard deviation `std`.
  */
 template <typename T>
@@ -105,7 +105,7 @@ C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val
 
 /**
  * Transforms uniformly distributed `val` between 0.0 and 1.0 to
- * geometricaly distributed with success probability `p`. 
+ * geometricaly distributed with success probability `p`.
  */
 template <typename T>
 C10_HOST_DEVICE inline T geometric(T val, T p) {
@@ -113,7 +113,7 @@ C10_HOST_DEVICE inline T geometric(T val, T p) {
 }
 
 /**
- * Transforms normally distributed `val` with mean 0.0 and standard deviation 1.0 to 
+ * Transforms normally distributed `val` with mean 0.0 and standard deviation 1.0 to
  * log-normally distributed with `mean` and standard deviation `std`.
  */
 template <typename T>
