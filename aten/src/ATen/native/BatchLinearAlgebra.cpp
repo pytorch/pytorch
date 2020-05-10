@@ -415,7 +415,7 @@ static void apply_lstsq(Tensor& B, Tensor& A) {
 }
 
 std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
-  TORCH_CHECK(A.dim() == 1 || A.dim() == 2, "A should have 1 or 2 "
+  TORCH_CHECK(A.dim() == 2, "A should have 1 or 2 "
       "dimensions, but has ", A.dim());
   TORCH_CHECK(B.dim() == 1 || B.dim() == 2, "B should have 1 or 2 "
       "dimensions, but has ", B.dim());
