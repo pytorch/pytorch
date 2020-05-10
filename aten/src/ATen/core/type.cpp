@@ -1141,6 +1141,7 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
 void ClassType::provideNewAttributeKind(AttributeKind attributeKind) {
     attributes_.push_back(attributeKind);
     attributeTypes_.push_back(attributeKind.getType());
+    AT_ASSERT(attributes_.size() == attributeTypes_.size());
 }
 
 size_t ClassType::addAttribute(
@@ -1193,6 +1194,8 @@ size_t ClassType::addAttribute(
 void ClassType::unsafeRemoveAttribute(const std::string& name) {
   auto slot = getAttributeSlot(name);
   attributes_.erase(attributes_.begin() + slot);
+  attributeTypes_.erase(attributeTypes_.begin() + slot);
+  AT_ASSERT(attributes_.size() == attributeTypes_.size());
 }
 
 size_t ClassType::addConstant(const std::string& name, const IValue& value) {
