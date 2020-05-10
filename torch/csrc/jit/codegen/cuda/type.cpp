@@ -191,11 +191,13 @@ struct _enum_pair_hash {
     return static_cast<size_t>(p.first) ^ static_cast<size_t>(p.second);
   }
 };
+
 template <typename KeyType, typename ValType>
 using _enum_pair_unordered_map = std::unordered_map<
     std::pair<KeyType, KeyType>,
     ValType,
     _enum_pair_hash<KeyType>>;
+
 static _enum_pair_unordered_map<DataType, std::string> supported_casts{
     {{DataType::Float, DataType::Half}, "__float2half"},
     {{DataType::Half, DataType::Float}, "__half2float"}};
