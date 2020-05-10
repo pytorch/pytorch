@@ -1,6 +1,10 @@
 from .module import Module
 from .. import functional as F
 
+from torch import Tensor
+from typing import Optional
+from ..common_types import _size_2_t, _ratio_2_t, _size_any_t, _ratio_any_t
+
 
 class Upsample(Module):
     r"""Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
@@ -115,8 +119,14 @@ class Upsample(Module):
                   [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000]]]])
     """
     __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name']
+    name: str
+    size: _size_any_t
+    scale_factor: _ratio_any_t
+    mode: str
+    align_corners: bool
 
-    def __init__(self, size=None, scale_factor=None, mode='nearest', align_corners=None):
+    def __init__(self, size: Optional[_size_any_t] = None, scale_factor: Optional[_ratio_any_t] = None,
+                 mode: str = 'nearest', align_corners: Optional[bool] = None):
         super(Upsample, self).__init__()
         self.name = type(self).__name__
         self.size = size
@@ -127,10 +137,10 @@ class Upsample(Module):
         self.mode = mode
         self.align_corners = align_corners
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         if self.scale_factor is not None:
             info = 'scale_factor=' + str(self.scale_factor)
         else:
@@ -180,7 +190,7 @@ class UpsamplingNearest2d(Upsample):
                   [ 3.,  3.,  4.,  4.],
                   [ 3.,  3.,  4.,  4.]]]])
     """
-    def __init__(self, size=None, scale_factor=None):
+    def __init__(self, size: Optional[_size_2_t] = None, scale_factor: Optional[_ratio_2_t] = None) -> None:
         super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
 
 
@@ -226,5 +236,5 @@ class UpsamplingBilinear2d(Upsample):
                   [ 2.3333,  2.6667,  3.0000,  3.3333],
                   [ 3.0000,  3.3333,  3.6667,  4.0000]]]])
     """
-    def __init__(self, size=None, scale_factor=None):
+    def __init__(self, size: Optional[_size_2_t] = None, scale_factor: Optional[_ratio_2_t] = None) -> None:
         super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)

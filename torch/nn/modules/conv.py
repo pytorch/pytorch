@@ -9,7 +9,9 @@ from .. import functional as F
 from .. import init
 from .module import Module
 from .utils import _single, _pair, _triple, _repeat_tuple
-from ..._jit_internal import List, Optional
+
+from ..common_types import _size_1_t, _size_2_t, _size_3_t
+from typing import Optional, List, Tuple
 
 
 class _ConvNd(Module):
@@ -18,6 +20,19 @@ class _ConvNd(Module):
                      'padding_mode', 'output_padding', 'in_channels',
                      'out_channels', 'kernel_size']
     __annotations__ = {'bias': Optional[torch.Tensor]}
+
+    _in_channels: int
+    out_channels: int
+    kernel_size: Tuple[int, ...]
+    stride: Tuple[int, ...]
+    padding: Tuple[int, ...]
+    dilation: Tuple[int, ...]
+    transposed: bool
+    output_padding: Tuple[int, ...]
+    groups: int
+    padding_mode: str
+    weight: Tensor
+    bias: Tensor
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
@@ -54,7 +69,7 @@ class _ConvNd(Module):
             self.register_parameter('bias', None)
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
@@ -200,9 +215,18 @@ class Conv1d(_ConvNd):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros'):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: _size_1_t,
+        stride: _size_1_t = 1,
+        padding: _size_1_t = 0,
+        dilation: _size_1_t = 1,
+        groups: int = 1,
+        bias: bool = True,
+        padding_mode: str = 'zeros'  # TODO: refine this type
+    ):
         kernel_size = _single(kernel_size)
         stride = _single(stride)
         padding = _single(padding)
@@ -211,7 +235,7 @@ class Conv1d(_ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias, padding_mode)
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         if self.padding_mode != 'zeros':
             return F.conv1d(F.pad(input, self._padding_repeated_twice, mode=self.padding_mode),
                             self.weight, self.bias, self.stride,
@@ -350,9 +374,18 @@ class Conv2d(_ConvNd):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros'):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: _size_2_t,
+        stride: _size_2_t = 1,
+        padding: _size_2_t = 0,
+        dilation: _size_2_t = 1,
+        groups: int = 1,
+        bias: bool = True,
+        padding_mode: str = 'zeros'  # TODO: refine this type
+    ):
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
         padding = _pair(padding)
@@ -369,7 +402,7 @@ class Conv2d(_ConvNd):
         return F.conv2d(input, weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return self._conv_forward(input, self.weight)
 
 class Conv3d(_ConvNd):
@@ -492,9 +525,18 @@ class Conv3d(_ConvNd):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros'):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: _size_3_t,
+        stride: _size_3_t = 1,
+        padding: _size_3_t = 0,
+        dilation: _size_3_t = 1,
+        groups: int = 1,
+        bias: bool = True,
+        padding_mode: str = 'zeros'
+    ):
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
         padding = _triple(padding)
@@ -503,7 +545,7 @@ class Conv3d(_ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias, padding_mode)
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         if self.padding_mode != 'zeros':
             return F.conv3d(F.pad(input, self._padding_repeated_twice, mode=self.padding_mode),
                             self.weight, self.bias, self.stride, _triple(0),
@@ -657,9 +699,19 @@ class ConvTranspose1d(_ConvTransposeNd):
                          :math:`k = \frac{groups}{C_\text{out} * \text{kernel\_size}}`
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True,
-                 dilation=1, padding_mode='zeros'):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: _size_1_t,
+        stride: _size_1_t = 1,
+        padding: _size_1_t = 0,
+        output_padding: _size_1_t = 0,
+        groups: int = 1,
+        bias: bool = True,
+        dilation: _size_1_t = 1,
+        padding_mode: str = 'zeros'
+    ):
         kernel_size = _single(kernel_size)
         stride = _single(stride)
         padding = _single(padding)
@@ -669,8 +721,7 @@ class ConvTranspose1d(_ConvTransposeNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode)
 
-    def forward(self, input, output_size=None):
-        # type: (Tensor, Optional[List[int]]) -> Tensor
+    def forward(self, input: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose1d')
 
@@ -810,9 +861,19 @@ class ConvTranspose2d(_ConvTransposeNd):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True,
-                 dilation=1, padding_mode='zeros'):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: _size_2_t,
+        stride: _size_2_t = 1,
+        padding: _size_2_t = 0,
+        output_padding: _size_2_t = 0,
+        groups: int = 1,
+        bias: bool = True,
+        dilation: int = 1,
+        padding_mode: str = 'zeros'
+    ):
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
         padding = _pair(padding)
@@ -822,8 +883,7 @@ class ConvTranspose2d(_ConvTransposeNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode)
 
-    def forward(self, input, output_size=None):
-        # type: (Tensor, Optional[List[int]]) -> Tensor
+    def forward(self, input: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose2d')
 
@@ -960,9 +1020,19 @@ class ConvTranspose3d(_ConvTransposeNd):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True,
-                 dilation=1, padding_mode='zeros'):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: _size_3_t,
+        stride: _size_3_t = 1,
+        padding: _size_3_t = 0,
+        output_padding: _size_3_t = 0,
+        groups: int = 1,
+        bias: bool = True,
+        dilation: _size_3_t = 1,
+        padding_mode: str = 'zeros'
+    ):
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
         padding = _triple(padding)
@@ -972,8 +1042,7 @@ class ConvTranspose3d(_ConvTransposeNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode)
 
-    def forward(self, input, output_size=None):
-        # type: (Tensor, Optional[List[int]]) -> Tensor
+    def forward(self, input: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose3d')
 

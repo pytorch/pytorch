@@ -28,10 +28,21 @@ import textwrap
 import warnings
 import weakref
 
+from typing import TypeVar, Generic
+
+# See https://github.com/python/typing/issues/449
+try:
+    # Python 3.6 and earlier
+    from typing import GenericMeta
+except ImportError:
+    GenericMeta = type
+
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method
 from torch._jit_internal import ignore, export, unused
+
+T_co = TypeVar('T_co', covariant=True)
 
 def _parse_env(name, default, true_message, false_message):
     value = os.environ.get(name)
@@ -1485,8 +1496,10 @@ class OrderedModuleDict(OrderedDictWrapper):
 #     run. This has to occur after the user-defined __init__ so that submodules and
 #     parameters are initialized _before_ the script compiler resolve references to
 #     `self.param` or `self.module`.
-class ScriptMeta(type):
-    def __init__(cls, name, bases, attrs):
+# This inherits from GenericMeta because it's used to metaclass Module (which is
+# generic).  This is not necessary in Python 3.7 and later.
+class ScriptMeta(GenericMeta):
+    def __init__(cls, name, bases, attrs):  # noqa: B902
         # Aggregate all the ScriptMethods and constants from superclasses
         cls._methods = {}
         cls._constants_set = set(getattr(cls, '__constants__', ()))

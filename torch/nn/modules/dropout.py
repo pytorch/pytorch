@@ -1,11 +1,15 @@
 from .module import Module
 from .. import functional as F
 
+from torch import Tensor
+
 
 class _DropoutNd(Module):
     __constants__ = ['p', 'inplace']
+    p: float
+    inplace: bool
 
-    def __init__(self, p=0.5, inplace=False):
+    def __init__(self, p: float = 0.5, inplace: bool = False):
         super(_DropoutNd, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
@@ -13,7 +17,7 @@ class _DropoutNd(Module):
         self.p = p
         self.inplace = inplace
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'p={}, inplace={}'.format(self.p, self.inplace)
 
 
@@ -50,7 +54,7 @@ class Dropout(_DropoutNd):
         detectors: https://arxiv.org/abs/1207.0580
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.dropout(input, self.p, self.training, self.inplace)
 
 
@@ -92,7 +96,7 @@ class Dropout2d(_DropoutNd):
        http://arxiv.org/abs/1411.4280
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.dropout2d(input, self.p, self.training, self.inplace)
 
 
@@ -134,7 +138,7 @@ class Dropout3d(_DropoutNd):
        http://arxiv.org/abs/1411.4280
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.dropout3d(input, self.p, self.training, self.inplace)
 
 
@@ -176,7 +180,7 @@ class AlphaDropout(_DropoutNd):
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.alpha_dropout(input, self.p, self.training)
 
 
@@ -225,5 +229,5 @@ class FeatureAlphaDropout(_DropoutNd):
        http://arxiv.org/abs/1411.4280
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.feature_alpha_dropout(input, self.p, self.training)

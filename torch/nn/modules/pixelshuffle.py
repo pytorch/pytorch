@@ -1,6 +1,8 @@
 from .module import Module
 from .. import functional as F
 
+from torch import Tensor
+
 
 class PixelShuffle(Module):
     r"""Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)`
@@ -34,13 +36,14 @@ class PixelShuffle(Module):
         https://arxiv.org/abs/1609.05158
     """
     __constants__ = ['upscale_factor']
+    upscale_factor: int
 
-    def __init__(self, upscale_factor):
+    def __init__(self, upscale_factor: int):
         super(PixelShuffle, self).__init__()
         self.upscale_factor = upscale_factor
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.pixel_shuffle(input, self.upscale_factor)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'upscale_factor={}'.format(self.upscale_factor)
