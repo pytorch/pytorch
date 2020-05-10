@@ -321,7 +321,7 @@ struct GeometricKernel {
 template<typename scalar_t, typename RNG>
 inline auto exponential_lambda(TensorIterator& iter, double lambda_, RNG& generator) {
   return [&]() {
-    using accscalar_t = at::acc_type<scalar_t, false>;
+    // using accscalar_t = at::acc_type<scalar_t, false>;
     std::lock_guard<std::mutex> lock(generator->mutex_);
     // auto lambda = static_cast<accscalar_t>(lambda_);
     at::exponential_distribution<double> exponential(lambda_);
