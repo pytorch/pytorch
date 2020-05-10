@@ -353,9 +353,77 @@ void IRPrinter::handle(const TernaryOp* const top) {
 }
 
 void IRPrinter::handle(const ReductionOp* const rop) {
-  os << rop->out() << " = reduction( " << rop->in()
-     << ", op = " << rop->getReductionOpType()
-     << ", initial value = " << rop->init() << " )\n";
+  // Check if we've lowered yet.
+
+  bool lowered = rop->out()->getValType() == ValType::TensorIndex;
+
+  if (!lowered) {
+    os << rop->out() << " = reduction( " << rop->in()
+       << ", op = " << rop->getReductionOpType()
+       << ", initial value = " << rop->init() << " )\n";
+  }
+
+  TensorIndex* out = static_cast<TensorIndex*>(rop->out());
+  auto vec_domain = out->view()->domain()->domain();
+
+  IterDomain *tidx = nullptr, *tidy = nullptr, *tidz = nullptr;
+  bool is_thread_reduce = std::any_of(
+      vec_domain.begin(),
+      vec_domain.end(),
+      [&tidx, &tidy, &tidz](IterDomain* id) {
+        if (id->isThreadDim() && id->isReduction()) {
+          switch (id->parallel_method()) {
+            case (ParallelType::TIDz):
+              tidz = id;
+              break;
+            case (ParallelType::TIDy):
+              tidy = id;
+              break;
+            case (ParallelType::TIDx):
+              tidx = id;
+              break;
+            default:
+              TORCH_INTERNAL_ASSERT(
+                  false, "Did not recognize parallel type for reduction.");
+          }
+          return true;
+        }
+        return false;
+      });
+
+  if (!is_thread_reduce) {
+    handle(new BinaryOp(rop->getReductionOpType(), out, out, rop->in()));
+    return;
+  }
+  auto d_type = rop->out()->getDataType().value();
+  auto op_type = rop->getReductionOpType();
+  indent();
+  // Thread all reduce.
+  os << "blockReduce< ";
+  if (tidx != nullptr) {
+    print_inline(tidx->extent());
+  } else {
+    os << 0;
+  }
+  os << ", ";
+  if (tidy != nullptr) {
+    print_inline(tidy->extent());
+  } else {
+    os << 0;
+  }
+  os << ", ";
+  if (tidz != nullptr) {
+    print_inline(tidz->extent());
+  } else {
+    os << 0;
+  }
+  os << " > ( ";
+  handle(rop->out());
+  os << ", ";
+  handle(rop->in());
+  os << ", ";
+  os << "reduction_" << op_type << "_" << d_type;
+  os << ");\n";
 }
 
 void IRPrinter::handle(const ForLoop* const fl) {
@@ -458,11 +526,52 @@ void IRPrinter::handle(const Reorder* const ro) {
   os << "\n";
 }
 
+namespace {
+
+struct ReductionOps : OptOutDispatch {
+  std::set<std::pair<BinaryOpType, DataType>> rops;
+  void handle(ReductionOp* rop) override {
+    rops.emplace(std::pair<BinaryOpType, DataType>{
+        rop->getReductionOpType(), rop->in()->getDataType().value()});
+  }
+
+  using OptOutDispatch::handle;
+
+  static std::set<std::pair<BinaryOpType, DataType>> get(Fusion* fusion) {
+    ReductionOps ROPs;
+    for (auto expr : fusion->exprs(true)) {
+      ROPs.handle(expr);
+    }
+    return ROPs.rops;
+  }
+};
+} // namespace
+
+void IRPrinter::printReductionOps(Fusion* fusion) {
+  auto a = new NamedScalar("a", DataType::Null);
+  auto b = new NamedScalar("b", DataType::Null);
+  for (auto rop_pair : ReductionOps::get(fusion)) {
+    auto op_type = rop_pair.first;
+    auto d_type = rop_pair.second;
+
+    indent();
+    os << "void reduction_" << op_type << "_" << d_type << "(" << d_type
+       << "& a, "
+       << "const " << d_type << " b) {\n";
+    indent_size++;
+    handle(new BinaryOp(op_type, a, a, b));
+    indent_size--;
+    indent();
+    os << "}\n";
+  }
+}
+
 void IRPrinter::printKernel(
     const std::vector<Expr*>& exprs,
     const std::string& kernel_name) {
   Fusion* fusion = FusionGuard::getCurFusion();
 
+  printReductionOps(fusion);
   printHeader(fusion, kernel_name);
   for (auto* expr : exprs) {
     handle(expr);

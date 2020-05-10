@@ -239,7 +239,7 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
     nvrtc().nvrtcGetProgramLog(program, log.data());
 
     TORCH_INTERNAL_ASSERT(
-        false, "CUDA NVRTC compile error: ", log.data(), "\n", code.c_str());
+        false, code.c_str(), "\nCUDA NVRTC compile error: ", log.data());
   }
   const char* lowered_kernel_name;
   nvrtc().nvrtcGetLoweredName(program, func_name.c_str(), &lowered_kernel_name);

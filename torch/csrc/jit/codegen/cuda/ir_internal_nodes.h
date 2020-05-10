@@ -588,7 +588,9 @@ struct TORCH_CUDA_API TensorIndex : public Val {
   TensorIndex& operator=(TensorIndex&& other) = delete;
 
   TensorIndex(const TensorView* const _view, std::vector<Val*> _indices)
-      : Val(ValType::TensorIndex), view_(_view), indices_(_indices) {
+      : Val(ValType::TensorIndex, _view->getDataType().value()),
+        view_(_view),
+        indices_(_indices) {
     TORCH_INTERNAL_ASSERT(
         std::all_of(
             _indices.begin(),

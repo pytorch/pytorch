@@ -170,6 +170,12 @@ __device__ float randLike(Philox rnd) {
 };
 )";
 
+/*
+ *  EXAMPLE USAGE:
+ *  blockReduceSum<X_THREADS, Y_THREADS, Z_THREADS>
+ *    (output[output_index], inputs[input_index], [] __device__ (T& a, const T
+ * b) { a += b; } );
+ */
 static auto code_template_block_reduction = R"(
 // [Z,Y,X]_THREADS is the number of participating threads in the z, y, x
 // dimension of the block. If set to 0 it means that dimension doesn't
@@ -178,7 +184,7 @@ static auto code_template_block_reduction = R"(
 // may actually be slower.
 template<int X_THREADS, int Y_THREADS, int Z_THREADS, typename T, typename Func>
 __inline__ __device__
-void blockReduce(const T inp_val, T& out, Func reduction_op) {
+void blockReduce(T& out, const T inp_val, Func reduction_op) {
 
   static constexpr int X_STRIDE = (X_THREADS > 0 ? X_THREADS: 1);
   static constexpr int Y_STRIDE = (Y_THREADS > 0 ? Y_THREADS: 1);

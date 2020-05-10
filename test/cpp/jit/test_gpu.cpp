@@ -2028,13 +2028,22 @@ void testGPU_FusionSimpleReduction() {
   tv2->axis(2)->parallelize(ParallelType::Unroll);
   tv3->axis(0)->parallelize(ParallelType::BIDx);
 
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // for(auto expr : fusion.exprs(true))
+  // std::cout<<expr<<std::endl;
+  // GPULower lower(&fusion);
+  // lower.printKernel(std::cout);
+
   torch::jit::fuser::cuda::CudaKernel prog;
   prog.device_ = 0;
   prog.grid(129);
-  prog.block(1);
+  prog.block(128);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input = at::rand({129, 32}, options);
+  at::Tensor input = at::rand({513, 1025}, options);
   at::Tensor cg_output = at::empty({129}, options);
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
@@ -2042,9 +2051,6 @@ void testGPU_FusionSimpleReduction() {
 
   auto aten_output = input.sum({1});
   TORCH_CHECK(aten_output.allclose(cg_output));
-
-  // GPULower lower(&fusion);
-  // lower.printKernel(std::cout);
 }
 
 } // namespace jit
