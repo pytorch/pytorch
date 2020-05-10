@@ -1103,6 +1103,7 @@ Stmt* PolynomialTransformer::mutate(const For* v) {
 }
 
 Stmt* PolynomialTransformer::mutate(const Block* v) {
+  auto vars = v->varBindings();
   std::vector<Stmt*> stmts;
   for (Stmt* stmt : *v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
@@ -1111,6 +1112,10 @@ Stmt* PolynomialTransformer::mutate(const Block* v) {
     }
 
     if (auto* subBlock = dynamic_cast<Block*>(stmt_new)) {
+      for (auto& pair : subBlock->varBindings()) {
+        vars.emplace_back(pair.first, pair.second);
+      }
+
       for (Block::iterator I = subBlock->begin(), E = subBlock->end();
            I != E;) {
         // Be careful to avoid invalidating the iterator.
@@ -1123,7 +1128,7 @@ Stmt* PolynomialTransformer::mutate(const Block* v) {
     }
   }
 
-  return new Block(stmts);
+  return new Block(vars, stmts);
 }
 
 // TermExpander
