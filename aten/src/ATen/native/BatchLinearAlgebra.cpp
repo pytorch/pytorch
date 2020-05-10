@@ -386,7 +386,8 @@ std::tuple<Tensor&,Tensor&> solve_out(Tensor& solution, Tensor& lu, const Tensor
   return std::tuple<Tensor&, Tensor&>(solution, lu);
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 template <typename scalar_t>
 static void apply_lstsq(Tensor& B, Tensor& A) {
 
@@ -436,6 +437,8 @@ std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
 
   return std::tuple<Tensor, Tensor>(B_working, A_working);
 }
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
 static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
