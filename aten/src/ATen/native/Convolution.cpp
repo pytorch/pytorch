@@ -9,6 +9,9 @@
 #if AT_NNPACK_ENABLED()
 #include "nnpack.h"
 #endif
+#if defined(USE_VULKAN) || defined(USE_GLES)
+#include <ATen/native/vulkan/VulkanAten.h>
+#endif
 
 constexpr int MIOPEN_DIM_MAX = 5;
 
@@ -241,13 +244,17 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 }
 
 auto ConvParams::use_vulkan(
-				const at::Tensor &input, const at::Tensor& weight) const -> bool {
+        const at::Tensor &input, const at::Tensor& weight) const -> bool {
+#if defined(USE_VULKAN) || defined(USE_GLES)
   if (!(input.is_vulkan() && input.scalar_type() == kFloat &&
         !transposed && input.ndimension() == 4)) {
     return false;
   }
   return (groups == 1) || (input.size(1) == groups && groups > 1 &&
                            weight.size(0) % input.size(1) == 0);
+#else
+  return false;
+#endif
 }
 
 // We currently only have depthwise support for the case where groups ==
@@ -646,11 +653,13 @@ at::Tensor _convolution(
         output = at::miopen_depthwise_convolution(
             input.contiguous(), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
+#if defined(USE_VULKAN) || defined(USE_GLES)
       } else if (params.use_vulkan(input, weight)) {
-				output = at::vulkan_convolution(
-						input, weight, bias,
-						params.padding, params.stride, params.dilation, params.groups);
-			} else {
+        output = at::native::vulkan_convolution(
+            input, weight, bias,
+            params.padding, params.stride, params.dilation, params.groups);
+#endif
+      } else {
           output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
       }
   } else if (params.use_cudnn(input, weight)) {
@@ -710,10 +719,12 @@ at::Tensor _convolution(
                                       params.padding, params.stride, params.dilation, params.groups);
     }
 #endif
+#if defined(USE_VULKAN) || defined(USE_GLES)
   } else if (params.use_vulkan(input, weight)) {
-    output = at::vulkan_convolution(
+    output = at::native::vulkan_convolution(
         input, weight, bias,
         params.padding, params.stride, params.dilation, params.groups);
+#endif
   } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
     if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
       output = convolution_depthwise3x3_winograd_stub(

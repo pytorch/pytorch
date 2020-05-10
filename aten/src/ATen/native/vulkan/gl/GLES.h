@@ -24,8 +24,8 @@ class GLTensor : public c10::intrusive_ptr_target {
   class Impl;
 
  public:
+  GLTensor(){};
   GLTensor(std::vector<int64_t> sizes);
-
   ~GLTensor() = default;
 
   GLTensor(GLTensor&&) = default;
@@ -33,6 +33,10 @@ class GLTensor : public c10::intrusive_ptr_target {
 
   GLTensor(const GLTensor&) = default;
   GLTensor& operator=(const GLTensor&) = default;
+
+  bool defined() const {
+    return static_cast<bool>(impl_);
+  }
 
   std::vector<int64_t> sizes() const;
   int64_t dim() const;
@@ -48,7 +52,7 @@ class GLTensor : public c10::intrusive_ptr_target {
  private:
   std::shared_ptr<Impl> impl();
   std::shared_ptr<const Impl> impl() const;
-  std::shared_ptr<Impl> pImpl;
+  std::shared_ptr<Impl> impl_;
 }; // class GLTensor
 
 class GLImage {

@@ -882,11 +882,11 @@ class GLTensor::Impl {
 }; // class GLTensor::Impl
 
 std::shared_ptr<GLTensor::Impl> GLTensor::impl() {
-  return pImpl;
+  return impl_;
 }
 
 std::shared_ptr<const GLTensor::Impl> GLTensor::impl() const {
-  return pImpl;
+  return impl_;
 }
 
 std::vector<int64_t> GLTensor::sizes() const {
@@ -922,7 +922,7 @@ int GLTensor::texId() const {
 }
 
 GLTensor::GLTensor(std::vector<int64_t> sizes)
-    : pImpl(std::make_shared<Impl>(std::move(sizes))) {
+    : impl_(std::make_shared<Impl>(std::move(sizes))) {
   TORCH_CHECK(initGLContextOnce(), "Failed to create GLES Context");
 }
 } // namespace gl

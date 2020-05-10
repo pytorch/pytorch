@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <cstring>
-#include <iostream>
 #include <functional>
+#include <iostream>
 #include <numeric>
 
 #include <c10/util/Exception.h>
@@ -1079,11 +1079,11 @@ class VulkanTensor::Impl {
 };
 
 std::shared_ptr<VulkanTensor::Impl> VulkanTensor::impl() {
-  return pImpl;
+  return impl_;
 }
 
 std::shared_ptr<const VulkanTensor::Impl> VulkanTensor::impl() const {
-  return pImpl;
+  return impl_;
 }
 
 std::vector<int64_t> VulkanTensor::sizes() const {
@@ -1139,7 +1139,7 @@ VImage& VulkanTensor::image() {
 }
 
 VulkanTensor::VulkanTensor(std::vector<int64_t> sizes)
-    : pImpl(std::make_shared<Impl>(std::move(sizes))) {
+    : impl_(std::make_shared<Impl>(std::move(sizes))) {
   TORCH_CHECK(
       initVulkanContextOnce(), "Vulkan Failed to create Vulkan Context");
 }

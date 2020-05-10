@@ -36,17 +36,15 @@ using VTensor = at::native::vulkan::details::gl::GLTensor;
 
 #endif
 
-using VTensorPtr = c10::intrusive_ptr<VTensor>;
-using VulkanTensorImpl = OpaqueTensorImpl<VTensorPtr>;
+using VulkanTensorImpl = OpaqueTensorImpl<VTensor>;
 
 at::Tensor new_with_vtensor_vulkan(VTensor&& vt, const TensorOptions& options) {
   auto dims = vt.sizes();
-  VTensorPtr handle = c10::make_intrusive<VTensor>(std::move(vt));
   return detail::make_tensor<VulkanTensorImpl>(
       DispatchKeySet(DispatchKey::VulkanTensorId),
       options.dtype(),
       at::Device(at::kVulkan),
-      handle,
+      std::move(vt),
       std::vector<int64_t>(dims.begin(), dims.end()));
 }
 
@@ -55,7 +53,7 @@ VTensor& vtensor_from_vulkan(const at::Tensor& tensor) {
       tensor.is_vulkan(), "vtensor_from_vulkan expects Vulkan tensor input");
   VulkanTensorImpl* impl =
       static_cast<VulkanTensorImpl*>(tensor.unsafeGetTensorImpl());
-  return *(impl->unsafe_opaque_handle());
+  return impl->unsafe_opaque_handle();
 }
 
 at::Tensor empty_vulkan(

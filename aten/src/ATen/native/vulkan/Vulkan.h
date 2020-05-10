@@ -88,6 +88,7 @@ class VulkanTensor final : public c10::intrusive_ptr_target {
   class Impl;
 
  public:
+  VulkanTensor(){};
   VulkanTensor(std::vector<int64_t> sizes);
   ~VulkanTensor() = default;
 
@@ -96,6 +97,10 @@ class VulkanTensor final : public c10::intrusive_ptr_target {
 
   VulkanTensor(const VulkanTensor&) = default;
   VulkanTensor& operator=(const VulkanTensor&) = default;
+
+  bool defined() const {
+    return static_cast<bool>(impl_);
+  }
 
   std::vector<int64_t> sizes() const;
   int64_t dim() const;
@@ -116,7 +121,7 @@ class VulkanTensor final : public c10::intrusive_ptr_target {
  private:
   std::shared_ptr<Impl> impl();
   std::shared_ptr<const Impl> impl() const;
-  std::shared_ptr<Impl> pImpl;
+  std::shared_ptr<Impl> impl_;
 };
 
 class VContext final {
