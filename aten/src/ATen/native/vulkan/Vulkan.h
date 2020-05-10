@@ -110,11 +110,13 @@ class VulkanTensor final {
   void copyDataToHost(float* outputData);
 
   bool hasBuffer() const;
-  VBuffer& buffer();
+  VBuffer* buffer();
+  const VBuffer* buffer() const;
+
   bool canBeImage() const;
   bool hasImage() const;
-  VImage& image();
-  VImage& image() const;
+  VImage* image();
+  const VImage* image() const;
 
  private:
   std::shared_ptr<Impl> impl();
@@ -220,13 +222,13 @@ class VBuffer final {
   void copyFromDeviceToHost(void* outputData, int64_t size);
   void copyFromHostToDevice(void* data, int64_t size);
 
-  VkDescriptorBufferInfo makeDescriptorBufferInfo();
+  VkDescriptorBufferInfo makeDescriptorBufferInfo() const;
   VkWriteDescriptorSet makeWriteDescriptorSet(
       VkDescriptorSet descriptorSet,
       uint32_t binding,
-      const VkDescriptorBufferInfo* bufferInfo);
+      const VkDescriptorBufferInfo* bufferInfo) const;
 
-  void bind(VkDescriptorSet descriptorSet, uint32_t binding);
+  void bind(VkDescriptorSet descriptorSet, uint32_t binding) const;
 
   inline VkDeviceSize sizeBytes() const {
     return bufferSizeBytes_;
@@ -235,7 +237,7 @@ class VBuffer final {
   void addBufferMemoryBarrier(
       VkCommandBuffer commandBuffer,
       VkDeviceSize offset,
-      VkDeviceSize size);
+      VkDeviceSize size) const;
 
  private:
   VkDeviceSize bufferSizeBytes_;
@@ -306,9 +308,11 @@ class VImage final {
   void addImageMemoryBarrier(
       VkCommandBuffer commandBuffer,
       VkImageLayout oldLayout,
-      VkImageLayout newLayout);
-  void addImageMemoryBarrierUndefinedToGeneral(VkCommandBuffer commandBuffer);
-  void addImageMemoryBarrierGeneralToShaderRead(VkCommandBuffer commandBuffer);
+      VkImageLayout newLayout) const;
+  void addImageMemoryBarrierUndefinedToGeneral(
+      VkCommandBuffer commandBuffer) const;
+  void addImageMemoryBarrierGeneralToShaderRead(
+      VkCommandBuffer commandBuffer) const;
 
  private:
   uint32_t W_;
@@ -323,9 +327,9 @@ class VImage final {
 
 }; // class VImage
 
-void copyFromBufferToImage(VBuffer& buffer, VImage& image);
+void copyFromBufferToImage(const VBuffer& buffer, VImage& image);
 
-void copyFromImageToBuffer(VImage& image, VBuffer& buffer);
+void copyFromImageToBuffer(const VImage& image, VBuffer& buffer);
 
 VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(
     uint32_t binding,

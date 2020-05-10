@@ -318,7 +318,7 @@ VBuffer::VBuffer(
   VK_CHECK(vkBindBufferMemory(device, buffer_, bufferMemory_, 0));
 }
 
-VBuffer::~VBuffer() noexcept {
+VBuffer::~VBuffer() {
   vkFreeMemory(context().device(), bufferMemory_, nullptr);
   vkDestroyBuffer(context().device(), buffer_, nullptr);
 }
@@ -335,7 +335,7 @@ void VBuffer::copyFromHostToDevice(void* data, int64_t size) {
   ::memcpy(mm.ptr(), data, size);
 }
 
-VkDescriptorBufferInfo VBuffer::makeDescriptorBufferInfo() {
+VkDescriptorBufferInfo VBuffer::makeDescriptorBufferInfo() const {
   VkDescriptorBufferInfo info{};
   info.buffer = buffer_;
   info.offset = 0;
@@ -346,7 +346,7 @@ VkDescriptorBufferInfo VBuffer::makeDescriptorBufferInfo() {
 VkWriteDescriptorSet VBuffer::makeWriteDescriptorSet(
     VkDescriptorSet descriptorSet,
     uint32_t binding,
-    const VkDescriptorBufferInfo* bufferInfo) {
+    const VkDescriptorBufferInfo* bufferInfo) const {
   VkWriteDescriptorSet writeSet{};
   writeSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   writeSet.pNext = nullptr;
@@ -361,7 +361,7 @@ VkWriteDescriptorSet VBuffer::makeWriteDescriptorSet(
   return writeSet;
 }
 
-void VBuffer::bind(VkDescriptorSet descriptorSet, uint32_t binding) {
+void VBuffer::bind(VkDescriptorSet descriptorSet, uint32_t binding) const {
   auto descrBufferInfo = makeDescriptorBufferInfo();
   auto writeDescrSet =
       makeWriteDescriptorSet(descriptorSet, binding, &descrBufferInfo);
@@ -371,7 +371,7 @@ void VBuffer::bind(VkDescriptorSet descriptorSet, uint32_t binding) {
 void VBuffer::addBufferMemoryBarrier(
     VkCommandBuffer commandBuffer,
     VkDeviceSize offset,
-    VkDeviceSize size) {
+    VkDeviceSize size) const {
   VkBufferMemoryBarrier barrier;
   barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
   barrier.buffer = buffer_;
@@ -443,7 +443,7 @@ VImage::VImage(uint32_t W, uint32_t H, uint32_t C)
   VkSamplerCreateInfo samplerCreateInfo = makeSamplerCreateInfo();
   VK_CHECK(vkCreateSampler(device, &samplerCreateInfo, nullptr, &sampler_));
 }
-VImage::~VImage() noexcept {
+VImage::~VImage() {
   vkFreeMemory(context().device(), imageMemory_, nullptr);
   vkDestroySampler(context().device(), sampler_, nullptr);
   vkDestroyImageView(context().device(), imageView_, nullptr);
@@ -542,7 +542,7 @@ void VImage::bindStorageImage(VkDescriptorSet descriptorSet, uint32_t binding)
 void VImage::addImageMemoryBarrier(
     VkCommandBuffer commandBuffer,
     VkImageLayout oldLayout,
-    VkImageLayout newLayout) {
+    VkImageLayout newLayout) const {
   VkImageMemoryBarrier barrier{};
   barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -589,13 +589,13 @@ void VImage::addImageMemoryBarrier(
 }
 
 void VImage::addImageMemoryBarrierUndefinedToGeneral(
-    VkCommandBuffer commandBuffer) {
+    VkCommandBuffer commandBuffer) const {
   addImageMemoryBarrier(
       commandBuffer, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 }
 
 void VImage::addImageMemoryBarrierGeneralToShaderRead(
-    VkCommandBuffer commandBuffer) {
+    VkCommandBuffer commandBuffer) const {
   addImageMemoryBarrier(
       commandBuffer,
       VK_IMAGE_LAYOUT_GENERAL,
@@ -845,7 +845,7 @@ VBuffer makeUniformConstBuffer(void* ptr, VkDeviceSize size) {
 }
 
 // VBuffer <-> VImage
-void copyFromBufferToImage(VBuffer& buffer, VImage& image) {
+void copyFromBufferToImage(const VBuffer& buffer, VImage& image) {
   auto device = context().device();
   auto physicalDevice = context().physicalDevice();
   struct ConstBlock {
@@ -901,7 +901,7 @@ void copyFromBufferToImage(VBuffer& buffer, VImage& image) {
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
 }
 
-void copyFromImageToBuffer(VImage& image, VBuffer& buffer) {
+void copyFromImageToBuffer(const VImage& image, VBuffer& buffer) {
   auto device = context().device();
   auto physicalDevice = context().physicalDevice();
   TORCH_INTERNAL_ASSERT(
@@ -987,10 +987,13 @@ class VulkanTensor::Impl {
     return static_cast<bool>(buffer_);
   }
 
-  inline VBuffer& buffer() {
-    return *(buffer_.get());
+  inline VBuffer* buffer() {
+    return buffer_.get();
   }
 
+  const VBuffer* buffer() const {
+    return buffer_.get();
+  }
   inline bool canBeImage() const {
     return dim() <= 4;
   }
@@ -1003,7 +1006,7 @@ class VulkanTensor::Impl {
     return hasBuffer();
   }
 
-  VImage& image() {
+  VImage* image() {
     auto d = dim();
     TORCH_INTERNAL_ASSERT(
         d <= 4,
@@ -1032,10 +1035,10 @@ class VulkanTensor::Impl {
       image_ = std::make_unique<VImage>(W, H, C);
       copyFromBufferToImage(*buffer_, *image_);
     }
-    return *(image_.get());
+    return image_.get();
   }
 
-  VImage& image() const {
+  const VImage* image() const {
     return const_cast<VulkanTensor::Impl*>(this)->image();
   }
 
@@ -1064,9 +1067,9 @@ class VulkanTensor::Impl {
     buffer_->copyFromHostToDevice((void*)inputData, sizeof(float) * numel_);
   }
 
-  void copyDataToHost(float* outputData) {
+  void copyDataToHost(float* outputData) const {
     if (hasImage()) {
-      copyFromImageToBuffer(image(), buffer());
+      copyFromImageToBuffer(*image(), *(const_cast<VBuffer*>(buffer())));
     }
     buffer_->copyFromDeviceToHost(outputData, sizeof(float) * numel_);
   }
@@ -1118,7 +1121,11 @@ bool VulkanTensor::hasBuffer() const {
   return impl()->hasBuffer();
 }
 
-VBuffer& VulkanTensor::buffer() {
+VBuffer* VulkanTensor::buffer() {
+  return impl()->buffer();
+}
+
+const VBuffer* VulkanTensor::buffer() const {
   return impl()->buffer();
 }
 
@@ -1130,11 +1137,11 @@ bool VulkanTensor::hasImage() const {
   return impl()->hasImage();
 }
 
-VImage& VulkanTensor::image() const {
+VImage* VulkanTensor::image() {
   return impl()->image();
 }
 
-VImage& VulkanTensor::image() {
+const VImage* VulkanTensor::image() const {
   return impl()->image();
 }
 

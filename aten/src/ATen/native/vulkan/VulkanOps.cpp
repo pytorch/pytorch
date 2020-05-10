@@ -51,8 +51,8 @@ void upsample_nearest2d(
       &descriptorPool,
       &descriptorSet);
 
-  output.image().bindStorageImage(descriptorSet, 0);
-  input.image().bindShaderRead(descriptorSet, 1);
+  output.image()->bindStorageImage(descriptorSet, 0);
+  input.image()->bindShaderRead(descriptorSet, 1);
   constBuffer.bind(descriptorSet, 2);
 
   WorkGroupSize workGroupSize{8, 8, 1};
@@ -61,7 +61,7 @@ void upsample_nearest2d(
       descriptorSetLayout,
       workGroupSize};
   computeUnit.createCommandBuffer(descriptorSet);
-  input.image().addImageMemoryBarrierGeneralToShaderRead(
+  input.image()->addImageMemoryBarrierGeneralToShaderRead(
       computeUnit.commandBuffer());
   computeUnit.dispatchCommandBuffer(OW, OH, C, workGroupSize);
   computeUnit.runCommandBuffer();
@@ -114,9 +114,9 @@ void add(
       &descriptorPool,
       &descriptorSet);
 
-  output.image().bindStorageImage(descriptorSet, 0);
-  input0.image().bindShaderRead(descriptorSet, 1);
-  input1.image().bindShaderRead(descriptorSet, 2);
+  output.image()->bindStorageImage(descriptorSet, 0);
+  input0.image()->bindShaderRead(descriptorSet, 1);
+  input1.image()->bindShaderRead(descriptorSet, 2);
   constBuffer.bind(descriptorSet, 3);
 
   WorkGroupSize workGroupSize{8, 8, 1};
@@ -125,9 +125,9 @@ void add(
                           workGroupSize};
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
-  output.image().addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
-  input0.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
-  input1.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
+  output.image()->addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
+  input0.image()->addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
+  input1.image()->addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
   computeUnit.dispatchCommandBuffer(W, H, C, workGroupSize);
   computeUnit.runCommandBuffer();
   vkDestroyDescriptorPool(device, descriptorPool, nullptr);
@@ -300,9 +300,9 @@ void conv2dDepthWise(
       &descriptorPool,
       &descriptorSet);
 
-  output.image().bindStorageImage(descriptorSet, 0);
-  input.image().bindShaderRead(descriptorSet, 1);
-  kernel.image().bindShaderRead(descriptorSet, 2);
+  output.image()->bindStorageImage(descriptorSet, 0);
+  input.image()->bindShaderRead(descriptorSet, 1);
+  kernel.image()->bindShaderRead(descriptorSet, 2);
   biasBuffer.bind(descriptorSet, 3);
   constBuffer.bind(descriptorSet, 4);
 
@@ -313,9 +313,9 @@ void conv2dDepthWise(
                   workGroupSize};
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
-  output.image().addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
-  input.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
-  kernel.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
+  output.image()->addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
+  input.image()->addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
+  kernel.image()->addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
   computeUnit.dispatchCommandBuffer(OW, OH, OC_4, workGroupSize);
   computeUnit.runCommandBuffer();
 
@@ -405,12 +405,12 @@ void conv2d(
       &descriptorPool,
       &descriptorSet);
 
-  output.image().bind(
+  output.image()->bind(
       descriptorSet,
       0,
       VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
       VK_IMAGE_LAYOUT_GENERAL);
-  input.image().bindShaderRead(descriptorSet, 1);
+  input.image()->bindShaderRead(descriptorSet, 1);
   kernelImage.bindShaderRead(descriptorSet, 2);
   biasBuffer.bind(descriptorSet, 3);
   constBuffer.bind(descriptorSet, 4);
@@ -421,8 +421,8 @@ void conv2d(
                           workGroupSize};
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
-  output.image().addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
-  input.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
+  output.image()->addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
+  input.image()->addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
   kernelImage.addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
   computeUnit.dispatchCommandBuffer(
       UP_DIV(OW, 4 * workGroupSize.x),
@@ -472,8 +472,8 @@ void clamp(
       &descriptorPool,
       &descriptorSet);
 
-  output.image().bindStorageImage(descriptorSet, 0);
-  input.image().bindShaderRead(descriptorSet, 1);
+  output.image()->bindStorageImage(descriptorSet, 0);
+  input.image()->bindShaderRead(descriptorSet, 1);
   constBuffer.bind(descriptorSet, 2);
 
   WorkGroupSize workGroupSize{8, 8, 1};
@@ -482,8 +482,8 @@ void clamp(
                           workGroupSize};
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
-  output.image().addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
-  input.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
+  output.image()->addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
+  input.image()->addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
   computeUnit.dispatchCommandBuffer(W, H, C, workGroupSize);
   computeUnit.runCommandBuffer();
   vkDestroyDescriptorPool(device, descriptorPool, nullptr);
@@ -557,10 +557,10 @@ void addmm(
       &descriptorPool,
       &descriptorSet);
 
-  output.image().bindStorageImage(descriptorSet, 0);
-  m1.image().bindShaderRead(descriptorSet, 1);
-  m2.image().bindShaderRead(descriptorSet, 2);
-  t.image().bindShaderRead(descriptorSet, 3);
+  output.image()->bindStorageImage(descriptorSet, 0);
+  m1.image()->bindShaderRead(descriptorSet, 1);
+  m2.image()->bindShaderRead(descriptorSet, 2);
+  t.image()->bindShaderRead(descriptorSet, 3);
   constBuffer.bind(descriptorSet, 4);
 
   WorkGroupSize workGroupSize{8, 8, 1};
@@ -569,10 +569,10 @@ void addmm(
                           workGroupSize};
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
-  output.image().addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
-  m1.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
-  m2.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
-  t.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
+  output.image()->addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
+  m1.image()->addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
+  m2.image()->addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
+  t.image()->addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
   computeUnit.dispatchCommandBuffer(OW, OH, C_4, workGroupSize);
   computeUnit.runCommandBuffer();
   vkDestroyDescriptorPool(device, descriptorPool, nullptr);
@@ -612,8 +612,8 @@ void mean(VulkanTensor& output, const VulkanTensor& input) {
       &descriptorPool,
       &descriptorSet);
 
-  output.image().bindStorageImage(descriptorSet, 0);
-  input.image().bindShaderRead(descriptorSet, 1);
+  output.image()->bindStorageImage(descriptorSet, 0);
+  input.image()->bindShaderRead(descriptorSet, 1);
   constBuffer.bind(descriptorSet, 2);
 
   WorkGroupSize workGroupSize{1, 1, 1};
@@ -622,8 +622,8 @@ void mean(VulkanTensor& output, const VulkanTensor& input) {
                           workGroupSize};
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
-  output.image().addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
-  input.image().addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
+  output.image()->addImageMemoryBarrierUndefinedToGeneral(commandBuffer);
+  input.image()->addImageMemoryBarrierGeneralToShaderRead(commandBuffer);
   computeUnit.dispatchCommandBuffer(1, 1, C_4, workGroupSize);
   computeUnit.runCommandBuffer();
   vkDestroyDescriptorPool(device, descriptorPool, nullptr);
