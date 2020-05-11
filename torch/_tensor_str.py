@@ -281,7 +281,7 @@ def _str(self):
         suffixes.append('device=\'' + str(self.device) + '\'')
 
     # TODO: add an API to map real -> complex dtypes
-    _default_complex_dtype = torch.cfloat if torch.get_default_dtype() == torch.float else torch.cdouble
+    _default_complex_dtype = torch.cdouble if torch.get_default_dtype() == torch.double else torch.cfloat
     has_default_dtype = self.dtype in (torch.get_default_dtype(), _default_complex_dtype, torch.int64, torch.bool)
     if self.is_sparse:
         suffixes.append('size=' + str(tuple(self.shape)))
