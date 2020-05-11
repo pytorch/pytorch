@@ -175,7 +175,7 @@ class QConv1dUnpackWeightsInt8 final {
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
       TORCH_CHECK(
           kSpatialDim == 2,
-          "quantized::conv2d_unpack (qnnpack): QNNPACK only supports Conv2d "
+          "quantized::conv1d_unpack (qnnpack): QNNPACK only supports Conv1d/Conv2d "
           "now.");
       std::tie(weight, bias) = packed_weight->unpack();
       weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
@@ -185,7 +185,7 @@ class QConv1dUnpackWeightsInt8 final {
 
     TORCH_CHECK(
         false,
-        "Didn't find engine for operation quantized::conv2d_unpack ",
+        "Didn't find engine for operation quantized::conv1d_unpack ",
         toString(ctx.qEngine()));
   }
 };
