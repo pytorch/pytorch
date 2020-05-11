@@ -8,6 +8,7 @@ checking quantization api and properties of resulting modules.
 """
 
 import io
+import functools
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
@@ -17,6 +18,7 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert
 from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
+import unittest
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -58,6 +60,75 @@ def convert_dynamic(module):
 
 def prepare_dynamic(model, qconfig_dict=None):
     propagate_qconfig_(model, qconfig_dict)
+
+def _make_conv_test_input(
+    batch_size, in_channels_per_group, input_feature_map_size,
+    out_channels_per_group, groups, kernel_size, X_scale, X_zero_point, W_scale,
+    W_zero_point, use_bias, use_channelwise,
+):
+    in_channels = in_channels_per_group * groups
+    out_channels = out_channels_per_group * groups
+
+    (X_value_min, X_value_max) = (0, 4)
+    X_init = torch.randint(
+        X_value_min, X_value_max,
+        (batch_size, in_channels,) + input_feature_map_size)
+    X = X_scale * (X_init - X_zero_point).float()
+    X_q = torch.quantize_per_tensor(
+        X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
+
+    W_scale = W_scale * out_channels
+    W_zero_point = W_zero_point * out_channels
+    # Resize W_scale and W_zero_points arrays equal to out_channels
+    W_scale = W_scale[:out_channels]
+    W_zero_point = W_zero_point[:out_channels]
+    # For testing, we use small values for weights and for activations so that
+    # no overflow occurs in vpmaddubsw instruction. If the overflow occurs in
+    # qconv implementation and if there is no overflow.
+    # In reference we can't exactly match the results with reference.
+    # Please see the comment in qconv implementation file
+    #   aten/src/ATen/native/quantized/cpu/qconv.cpp for more details.
+    (W_value_min, W_value_max) = (-5, 5)
+    # The operator expects them in the format
+    # (out_channels, in_channels/groups,) + kernel_size
+    W_init = torch.randint(
+        W_value_min, W_value_max,
+        (out_channels, in_channels_per_group,) + kernel_size)
+    b_init = torch.randint(0, 10, (out_channels,))
+
+    if use_channelwise:
+        W_shape = (-1, 1) + (1,) * len(kernel_size)
+        W_scales_tensor = torch.tensor(W_scale, dtype=torch.float)
+        W_zero_points_tensor = torch.tensor(W_zero_point, dtype=torch.float)
+        W = W_scales_tensor.reshape(*W_shape) * (
+            W_init.float() - W_zero_points_tensor.reshape(*W_shape)).float()
+        b = X_scale * W_scales_tensor * b_init.float()
+        W_q = torch.quantize_per_channel(
+            W, W_scales_tensor, W_zero_points_tensor.long(), 0,
+            dtype=torch.qint8)
+    else:
+        W = W_scale[0] * (W_init - W_zero_point[0]).float()
+        b = X_scale * W_scale[0] * b_init.float()
+        W_q = torch.quantize_per_tensor(
+            W, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
+
+    return (X, X_q, W, W_q, b if use_bias else None)
+
+def skipIfNoFBGEMM(fn):
+    reason = 'Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs with instruction set support AVX2 or newer.'
+    if isinstance(fn, type) and 'fbgemm' not in torch.backends.quantized.supported_engines:
+        fn.__unittest_skip__ = True
+        fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
@@ -168,9 +239,9 @@ class SingleLayerLinearModel(torch.nn.Module):
         return x
 
 class AnnotatedSingleLayerLinearModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine='fbgemm'):
         super().__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.fc1 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
 
     def forward(self, x):
@@ -207,9 +278,9 @@ class ConvModel(torch.nn.Module):
         return x
 
 class AnnotatedConvModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
@@ -248,9 +319,9 @@ class AnnotatedConvBnModel(torch.nn.Module):
         return x
 
 class AnnotatedConvBnReLUModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine='fbgemm'):
         super(AnnotatedConvBnReLUModel, self).__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
         self.bn = torch.nn.BatchNorm2d(5).to(dtype=torch.float)
         self.relu = nn.ReLU(inplace=True)
@@ -304,9 +375,9 @@ class ActivationsTestModel(torch.nn.Module):
         return x
 
 class ActivationsQATTestModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.quant = torch.quantization.QuantStub()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
@@ -354,14 +425,17 @@ class NestedModel(torch.nn.Module):
         return x
 
 class AnnotatedNestedModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
         self.sub1 = LinearReluModel()
         self.sub2 = TwoLayerLinearModel()
         self.fc3 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
         self.fc3.qconfig = default_qconfig
         self.sub2.fc1 = QuantWrapper(self.sub2.fc1)
-        self.sub2.fc1.qconfig = default_per_channel_qconfig
+        if qengine == 'fbgemm':
+            self.sub2.fc1.qconfig = default_per_channel_qconfig
+        else:
+            self.sub2.fc1.qconfig = default_qconfig
 
     def forward(self, x):
         x = self.sub1(x)
@@ -452,9 +526,9 @@ class AnnotatedSkipQuantModel(torch.nn.Module):
     r"""We can skip quantization by explicitly
     setting qconfig of a submodule to None
     """
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.sub = QuantWrapper(InnerModule())
         self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
         # don't quantize this fc
@@ -481,9 +555,9 @@ class QuantStubModel(torch.nn.Module):
 class ManualLinearQATModel(torch.nn.Module):
     r"""A Module with manually inserted `QuantStub` and `DeQuantStub`
     """
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qat_qconfig("fbgemm")
+        self.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)

@@ -3,7 +3,6 @@ import sys
 import time
 import unittest
 from collections import namedtuple
-from datetime import timedelta
 from unittest import mock
 
 import torch
@@ -396,8 +395,8 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_rref_proxy_reuse(self):
         rref = rpc.remote(
-            worker_name((self.rank + 1) % self.world_size), 
-            my_function, 
+            worker_name((self.rank + 1) % self.world_size),
+            my_function,
             args=(torch.ones(2, 2), 1, 3)
         )
         expected = torch.ones(2, 2) + 1 + 3
@@ -435,41 +434,41 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(expected.get_value(), rref.remote().get_value().to_here())
 
         self.assertEqual(
-            expected.my_instance_method(2), 
+            expected.my_instance_method(2),
             rref.rpc_sync().my_instance_method(2)
         )
         self.assertEqual(
-            expected.my_instance_method(3), 
+            expected.my_instance_method(3),
             rref.rpc_async().my_instance_method(3).wait()
         )
         self.assertEqual(
-            expected.my_instance_method(4), 
+            expected.my_instance_method(4),
             rref.remote().my_instance_method(4).to_here()
         )
 
         self.assertEqual(
-            expected.my_static_method(9), 
+            expected.my_static_method(9),
             rref.rpc_sync().my_static_method(9)
         )
         self.assertEqual(
-            expected.my_static_method(10), 
+            expected.my_static_method(10),
             rref.rpc_async().my_static_method(10).wait()
         )
         self.assertEqual(
-            expected.my_static_method(11), 
+            expected.my_static_method(11),
             rref.remote().my_static_method(11).to_here()
         )
 
         self.assertEqual(
-            expected.my_class_method(2, torch.zeros(2, 2)), 
+            expected.my_class_method(2, torch.zeros(2, 2)),
             rref.rpc_sync().my_class_method(2, torch.zeros(2, 2))
         )
         self.assertEqual(
-            expected.my_class_method(2, torch.ones(3, 3)), 
+            expected.my_class_method(2, torch.ones(3, 3)),
             rref.rpc_async().my_class_method(2, torch.ones(3, 3)).wait()
         )
         self.assertEqual(
-            expected.my_class_method(2, torch.ones(4, 4)), 
+            expected.my_class_method(2, torch.ones(4, 4)),
             rref.remote().my_class_method(2, torch.ones(4, 4)).to_here()
         )
 
@@ -868,12 +867,14 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_event_idx = next(i for i, event in enumerate(events) if rpc_exec_mode.value in event.name)
                 self.assertLess(foo_event_ix, rpc_event_idx)
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_sync_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_sync_rpc_builtin(self):
         self._profiler_test_with_rpc(
@@ -884,12 +885,14 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_async_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_async_rpc_builtin(self):
         self._profiler_test_with_rpc(
@@ -900,12 +903,14 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_remote_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_remote_builtin(self):
         self._profiler_test_with_rpc(
@@ -916,6 +921,7 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_script_async_rpc(self):
         self._profiler_test_with_rpc(
@@ -928,6 +934,7 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_script_sync_rpc(self):
         self._profiler_test_with_rpc(
@@ -940,6 +947,7 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_script_remote_rpc(self):
         self._profiler_test_with_rpc(
@@ -952,6 +960,7 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_async_record_function_double_end_callbacks(self):
         num_sleep_seconds = 1
@@ -969,6 +978,7 @@ class RpcTest(RpcAgentTestFixture):
                         rf._call_end_callbacks_on_future(fut)
                 fut.wait()
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_async_record_function_cbs_jit_call(self):
         if self.rank == 1:
@@ -1715,19 +1725,19 @@ class RpcTest(RpcAgentTestFixture):
             rref = rpc.remote(worker_name(1), torch.add, args=(1, 1))
             rref.to_here()
             fut = rref._get_future()
-            self.assertIsInstance(fut, torch.distributed.rpc.Future)
+            self.assertIsInstance(fut, torch._C.Future)
 
             # UDF
             rref = rpc.remote(worker_name(1), foo_add, args=())
             rref.to_here()
             fut = rref._get_future()
-            self.assertIsInstance(fut, torch.distributed.rpc.Future)
+            self.assertIsInstance(fut, torch._C.Future)
 
             # Script
             rref = rpc.remote(worker_name(1), my_script_func, args=(torch.tensor(1), ))
             rref.to_here()
             fut = rref._get_future()
-            self.assertIsInstance(fut, torch.distributed.rpc.Future)
+            self.assertIsInstance(fut, torch._C.Future)
 
 
     @dist_init
@@ -1943,7 +1953,7 @@ class RpcTest(RpcAgentTestFixture):
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
         )
-        rpc._set_rpc_timeout(timedelta(seconds=10))
+        rpc._set_rpc_timeout(10)
         # This barrier is needed to ensure that some workers do not exit before
         # others have been brought up, for non ProcessGroupAgent backends.
         initialize_pg(self.init_method, self.rank, self.world_size)
@@ -1989,8 +1999,8 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown(graceful=False)
 
     @dist_init(setup_rpc=False)
-    def test_get_rpc_timeout(self):
-        timeout = timedelta(seconds=1)
+    def test_set_and_get_default_rpc_timeout(self):
+        timeout = 0.5
 
         # A new `RpcBackendOptions` is constructed
         # when accessing `self.rpc_backend_options`.
@@ -2028,6 +2038,41 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(int(info["agent.thread_pool_size"]), NUM_THREADS)
         rpc.shutdown()
 
+    @dist_init(setup_rpc=False)
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_process_group_set_default_timeout(self):
+        timeout = 0.5
+        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
+            init_method=self.rpc_backend_options.init_method,
+            num_send_recv_threads=self.rpc_backend_options.num_send_recv_threads,
+            rpc_timeout=timeout
+        )
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        default_timeout = rpc.get_rpc_timeout()
+        self.assertEqual(default_timeout, timeout)
+        rpc.shutdown()
+
+    @dist_init(setup_rpc=False)
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_process_group_options_throw_on_timedelta_timeout(self):
+        from datetime import timedelta
+
+        timeout = timedelta()
+        # Ensure that constructing ProcessGroupRpcBackendOptions with timedelta fails
+        with self.assertRaisesRegex(TypeError, "incompatible constructor arguments"):
+            rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
+                init_method=self.rpc_backend_options.init_method,
+                num_send_recv_threads=self.rpc_backend_options.num_send_recv_threads,
+                rpc_timeout=timeout,
+            )
+
     @dist_init
     def test_default_timeout_used(self):
         """
@@ -2035,7 +2080,7 @@ class RpcTest(RpcAgentTestFixture):
         default timeout is used.
         """
         dst_rank = (self.rank + 1) % self.world_size
-        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        rpc._set_rpc_timeout(0.001)  # 1 ms
         # futures should time out and be marked with an exception indicating it as such.
         futs = [
             rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=())
@@ -2047,11 +2092,11 @@ class RpcTest(RpcAgentTestFixture):
                 fut.wait()
 
         # ensure that if a new timeout is set old futures don't time out but new ones do.
-        rpc._set_rpc_timeout(timedelta(seconds=200))
+        rpc._set_rpc_timeout(200)  # 200 seconds
         # create a longstanding RPC.
         fut1 = rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=(1,))
         # now, set a short timeout.
-        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        rpc._set_rpc_timeout(0.001)
         # fut2 should time out, fut1 should not.
         fut2 = rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=(1,))
         with self.assertRaisesRegex(RuntimeError, expected_error):
@@ -2059,11 +2104,11 @@ class RpcTest(RpcAgentTestFixture):
         fut1.wait()
 
         # Zero timeout means infinity, so future should run to completion.
-        rpc._set_rpc_timeout(timedelta(seconds=0))
+        rpc._set_rpc_timeout(0)
         rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=()).wait()
 
         # reset to default timeout so shutdown messages can process cleanly.
-        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT)
+        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
 
     @dist_init
     def test_rpc_timeouts(self):
@@ -2091,7 +2136,7 @@ class RpcTest(RpcAgentTestFixture):
 
         # If we set a default timeout for RPCs, it should be respected, though
         # still overridden if we pass in a different timeout to the APIs.
-        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        rpc._set_rpc_timeout(0.001)
         fut = rpc.rpc_async(dst_worker, my_sleep_func, args=(1,))
         with self.assertRaisesRegex(RuntimeError, expected_error):
             fut.wait()
@@ -2105,7 +2150,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=0).wait()
         rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=0)
         # Reset for clean shutdown
-        rpc._set_rpc_timeout(timedelta(seconds=60))
+        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
 
 
     def test_requires_process_group_agent_decorator(self):
@@ -2326,7 +2371,7 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
 
     # no faulty_messages defined so this fails all retryable messages - see
     # faulty_rpc_agent_test_fixture.py for the list of retryable messages.
-    @dist_init
+    @dist_init(messages_to_delay={})
     def test_check_failed_messages(self):
         if self.rank == 0:
             dst_worker_b = worker_name((self.rank + 1) % self.world_size)
@@ -2347,3 +2392,104 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
         self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
         self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)
+        self.assertEqual(len(self.rpc_backend_options.messages_to_delay), 2)
+        self.assertEqual(self.rpc_backend_options.rpc_timeout, rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
+
+    @dist_init(faulty_messages=["RREF_FORK_REQUEST", "RREF_CHILD_ACCEPT"])
+    def test_custom_faulty_messages(self):
+        self.assertEqual(
+            set(["RREF_FORK_REQUEST", "RREF_CHILD_ACCEPT"]),
+            set(self.rpc_backend_options.messages_to_fail),
+        )
+
+    @dist_init(faulty_messages=[])
+    def test_no_faulty_messages(self):
+        self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 0)
+
+    @dist_init(messages_to_delay={"SCRIPT_CALL": 1.5})
+    def test_custom_messages_to_delay(self):
+        self.assertEqual(self.rpc_backend_options.messages_to_delay, {"SCRIPT_CALL": 1.5})
+
+    @dist_init(faulty_messages=[])
+    def test_rpc_builtin_timeout(self):
+        next_rank = (self.rank + 1) % self.world_size
+        dst_worker = worker_name(next_rank)
+        expected_error = get_timeout_error_regex(
+            dist_utils.TEST_CONFIG.rpc_backend_name
+        )
+        # PYTHON_CALL message types which correspond to Python UDF over RPC
+        # by default get a delay (see faulty_rpc_agent_test_fixture)
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            rpc.rpc_sync(
+                dst_worker,
+                torch.add,
+                args=(torch.tensor(1), torch.tensor(1)),
+                timeout=1,
+            )
+
+        fut = rpc.rpc_async(
+            dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1)), timeout=1
+        )
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            fut.wait()
+
+        # Ensure that the currently set default timeout is large enough such
+        # that RPCs with delays still complete.
+        self.assertEqual(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC, rpc.get_rpc_timeout())
+        fut = rpc.rpc_async(
+            dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
+        )
+        fut.wait()
+
+        # Ensure timeout if we set a new default and don't override
+        rpc._set_rpc_timeout(0.001)
+        fut = rpc.rpc_async(
+            dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
+        )
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            fut.wait()
+
+        # Ensure run to completion if we specify timeout of 0
+        fut = rpc.rpc_async(
+            dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1)), timeout=0
+        )
+        fut.wait()
+        # Reset for clean shutdown
+        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
+
+    @dist_init(faulty_messages=[], messages_to_delay={"SCRIPT_CALL": 1.5})
+    def test_rpc_script_timeout(self):
+        next_rank = (self.rank + 1) % self.world_size
+        dst_worker = worker_name(next_rank)
+        expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            rpc.rpc_sync(dst_worker, my_script_func, args=(torch.tensor(1),), timeout=1)
+
+        fut = rpc.rpc_async(dst_worker, my_script_func, args=(torch.tensor(1),), timeout=1)
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            fut.wait()
+
+        # Ensure that the currently set default timeout is large enough such
+        # that RPCs with delays still complete.
+        self.assertEqual(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC, rpc.get_rpc_timeout())
+        fut = rpc.rpc_async(
+            dst_worker, my_script_func, args=(torch.tensor(1),)
+        )
+        fut.wait()
+
+        # Ensure timeout if we set a new default and don't override
+        rpc._set_rpc_timeout(0.001)
+        fut = rpc.rpc_async(
+            dst_worker, my_script_func, args=(torch.tensor(1),)
+        )
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            fut.wait()
+
+        # Ensure run to completion if we specify timeout of 0
+        rpc._set_rpc_timeout(0.001)
+        fut = rpc.rpc_async(
+            dst_worker, my_script_func, args=(torch.tensor(1),), timeout=0
+        )
+        fut.wait()
+        # Reset for clean shutdown
+        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)

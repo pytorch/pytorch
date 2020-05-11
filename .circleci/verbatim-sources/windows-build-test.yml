@@ -300,3 +300,29 @@
           requires:
             - setup
             - pytorch_windows_vs2019_py36_cpu_build
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2019_py36_cuda10.1_on_cpu_test1
+          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
+          test_name: pytorch-windows-test1
+          cuda_version: "10"
+          python_version: "3.6"
+          vc_version: ""
+          vc_year: "2019"
+          vc_product: "Community"
+          use_cuda: "0"
+          requires:
+            - setup
+            - pytorch_windows_vs2019_py36_cuda10.1_build
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2019_py36_cuda10.1_on_cpu_test2
+          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
+          test_name: pytorch-windows-test2
+          cuda_version: "10"
+          python_version: "3.6"
+          vc_version: ""
+          vc_year: "2019"
+          vc_product: "Community"
+          use_cuda: "0"
+          requires:
+            - setup
+            - pytorch_windows_vs2019_py36_cuda10.1_build
