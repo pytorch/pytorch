@@ -23,6 +23,8 @@ from ._utils_internal import get_file_path, prepare_multiprocessing_environment,
 from .version import __version__
 from ._six import string_classes as _string_classes
 
+from typing import Set, Type
+
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
@@ -114,10 +116,10 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
     if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
         try:
             # next try if DLFCN exists
-            import DLFCN as _dl_flags
+            import DLFCN as _dl_flags  # type: ignore
         except ImportError:
             # as a last attempt, use compile-time constants
-            import torch._dl as _dl_flags
+            import torch._dl as _dl_flags  # type: ignore
     old_flags = sys.getdlopenflags()
     sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
     from torch._C import *
@@ -138,6 +140,11 @@ else:
     if USE_GLOBAL_DEPS:
         _load_global_deps()
     from torch._C import *
+
+# Appease the type checker; ordinarily this binding is inserted by the
+# torch._C module initialization code in C
+if False:
+    import torch._C as _C
 
 __all__ += [name for name in dir(_C)
             if name[0] != '_' and
@@ -311,7 +318,7 @@ _storage_classes = {
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
-_tensor_classes = set()
+_tensor_classes: Set[Type] = set()
 
 
 ################################################################################
@@ -331,6 +338,13 @@ def manager_path():
 # Shared memory manager needs to know the exact location of manager executable
 _C._initExtension(manager_path())
 del manager_path
+
+# Appease the type checker: it can't deal with direct setting of globals().
+# Note that we will see "too many" functions when reexporting this way; there
+# is not a good way to fix this problem.  Perhaps, try to redesign VariableFunctions
+# so that this import is good enough
+if False:
+    from torch._C._VariableFunctions import *
 
 for name in dir(_C._VariableFunctions):
     if name.startswith('__'):
