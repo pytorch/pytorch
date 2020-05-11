@@ -270,7 +270,7 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
 
 static void check_convert(Scalar scalar, ScalarType scalarType) {
   // Validate that is possible to convert scalar to tensor dtype without overflow
-  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, scalarType, "check_convert", [&]{
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, scalarType, "check_convert", [&]{
     scalar.to<scalar_t>();
   });
 }
