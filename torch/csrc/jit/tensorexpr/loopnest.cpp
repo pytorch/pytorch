@@ -239,18 +239,6 @@ class Vectorizer : public IRMutator {
     return v;
   }
 
-  const Expr* mutate(const Let* v) override {
-    const Expr* var = v->var();
-    const Expr* value = v->value();
-    const Expr* body = v->body();
-
-    std::vector<const Expr*> inputs = {body};
-    return try_vectorize(v, inputs, [&]() {
-      return Let::make(
-          ExprHandle(var), ExprHandle(value), ExprHandle(inputs[0]));
-    });
-  }
-
   const Expr* mutate(const Ramp* v) override {
     const Expr* base = v->base();
     const Expr* stride = v->stride();
@@ -647,12 +635,21 @@ class RandomInliner : public FunctionInliner {
  private:
   // Emit let statements for all encountered random vars, thenclear them.
   Stmt* bind_random_vars(Stmt* s) {
+    if (random_vars_.empty()) {
+      return s;
+    }
+
+    Block* b = dynamic_cast<Block*>(s);
+    if (!b) {
+      b = new Block({s});
+    }
+
     for (auto const& p : random_vars_) {
       Var* v = p.second;
-      s = new LetStmt(v, new Intrinsics(kRand, v->dtype()), s);
+      b->add_var_binding(v, new Intrinsics(kRand, v->dtype()));
     }
     random_vars_.clear();
-    return s;
+    return b;
   }
 
   // Track the function currently being inlined.
@@ -841,7 +838,7 @@ std::unordered_map<const Buf*, std::vector<BufUse>> findUses(Stmt* s) {
 
 class ContainedStmtsFinder : public IRVisitor {
  public:
-  // Simply list all Stores and LetStmts that are children of the given stmt
+  // Simply list all Stores and Block that are children of the given stmt
   const std::unordered_set<Stmt*>& findContainedStmts(Stmt* s) {
     contained_.clear();
     s->accept(this);
@@ -853,7 +850,7 @@ class ContainedStmtsFinder : public IRVisitor {
     contained_.insert((Stmt*)v);
     IRVisitor::visit(v);
   }
-  void visit(const LetStmt* v) override {
+  void visit(const Block* v) override {
     contained_.insert((Stmt*)v);
     IRVisitor::visit(v);
   }
@@ -1141,7 +1138,7 @@ void LoopNest::reorderAxis(For* a, For* b) {
   CHECK(root);
 
   // Do a shallow copy of the inner blocks.
-  Block* body = new Block({});
+  Block* body = new Block(inner->body()->varBindings(), {});
   body->splice(body->end(), inner->body());
 
   For* before{outer};
