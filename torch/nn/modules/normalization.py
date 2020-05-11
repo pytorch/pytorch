@@ -174,7 +174,7 @@ class LayerNorm(Module):
             'elementwise_affine={elementwise_affine}'.format(**self.__dict__)
 
 
-class GroupNorm(Module[Tensor]):
+class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs as described in
     the paper `Group Normalization <https://arxiv.org/abs/1803.08494>`__
 

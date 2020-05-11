@@ -600,7 +600,7 @@ class Module(Generic[T_co]):
                 tracing_state.pop_scope()
         return result
 
-    def __call__(self, *input: Any, **kwargs: Any) -> T_co:
+    def _call_impl(self, *input, **kwargs):
         for hook in self._forward_pre_hooks.values():
             result = hook(self, input)
             if result is not None:
@@ -629,6 +629,8 @@ class Module(Generic[T_co]):
                     functools.update_wrapper(wrapper, hook)
                     grad_fn.register_hook(wrapper)
         return result
+
+    __call__ : Callable[..., T_co] = _call_impl
 
     def __setstate__(self, state):
         self.__dict__.update(state)

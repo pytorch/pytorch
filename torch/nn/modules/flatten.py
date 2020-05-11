@@ -2,7 +2,7 @@ from .module import Module
 
 from torch import Tensor
 
-class Flatten(Module[Tensor]):
+class Flatten(Module):
     r"""
     Flattens a contiguous range of dims into a tensor. For use with :class:`~nn.Sequential`.
     Args:
