@@ -1402,7 +1402,6 @@ class TestDistributions(TestCase):
         high.grad.zero_()
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-
     def test_vonmises_sample(self):
         for loc in [0.0, math.pi / 2.0]:
             for concentration in [0.03, 0.3, 1.0, 10.0, 100.0]:
