@@ -4824,6 +4824,14 @@ def foo(x):
         foo = torch.classes._TorchScriptTesting._StackString(["foo", "bar", "baz"])
         self.assertEqual(str(foo), "[foo, bar, baz]")
 
+    def test_module_str(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+
+        f = torch.jit.script(Foo())
+        self.assertEqual('ScriptObject', str(f._c))
+
     @skipIfRocm
     def test_torchbind_magic_unimplemented(self):
         foo = torch.classes._TorchScriptTesting._StackString(["foo", "bar", "baz"])
