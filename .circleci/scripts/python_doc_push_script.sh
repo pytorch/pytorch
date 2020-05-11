@@ -71,7 +71,19 @@ cp -a ../vision/docs/source source/torchvision
 # Build the docs
 pip -q install -r requirements.txt || true
 if [ "$is_master_doc" = true ]; then
+  # export SPHINXOPTS="-WT --keep-going"
   make html
+  make coverage
+  lines=$(wc -l build/coverage/python.txt 2>/dev/null |cut -f1 -d' ')
+  undocumented=$(($lines - 2))
+  if [ $undocumented -lt 0 ]; then
+    echo coverage output not found
+    exit 1
+  elif [ $undocumented -gt 0 ]; then
+    echo undocumented objects found:
+    cat build/coverage/python.txt
+    exit 1
+  fi
 else
   make html-stable
 fi
