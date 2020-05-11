@@ -621,7 +621,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("timeout") = std::chrono::milliseconds(10 * 1000));
+          py::arg("timeout") = std::chrono::milliseconds(10 * 1000)); // NOLINT
 #endif
 
 #ifdef USE_C10D_NCCL
@@ -682,9 +682,9 @@ They are used in specifying strategies for reduction collectives, e.g.,
       // for the tensor list argument, but still pass it to the underlying
       // function as a c10::ArrayRef.
       [](std::shared_ptr<::c10d::ProcessGroup> process_group,
-         std::vector<at::Tensor> tensors,
+         std::vector<at::Tensor> tensors, // NOLINT
          size_t buffer_size) {
-        broadcast_coalesced(process_group, tensors, buffer_size);
+        broadcast_coalesced(std::move(process_group), tensors, buffer_size);
       },
       py::arg("process_group"),
       py::arg("tensors"),
@@ -749,7 +749,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
 } // namespace
 
 // c10d methods on torch._C
-static PyMethodDef methods[] = {
+static PyMethodDef methods[] = { // NOLINT
     {"_c10d_init", (PyCFunction)c10d_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 

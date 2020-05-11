@@ -12,7 +12,7 @@ std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::get(
   auto cur = debug_info;
   while (cur) {
     if (cur->kind_ == kind) {
-      return cur->debug_info_;
+      return cur->info_;
     }
     cur = cur->parent_info_;
   }
@@ -20,7 +20,7 @@ std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::get(
 }
 
 /* static */
-std::shared_ptr<ThreadLocalDebugInfo> ThreadLocalDebugInfo::_current() {
+std::shared_ptr<ThreadLocalDebugInfo> ThreadLocalDebugInfo::current() {
   return debug_info;
 }
 
@@ -30,17 +30,35 @@ void ThreadLocalDebugInfo::_forceCurrentDebugInfo(
   debug_info = info;
 }
 
+/* static */
+void ThreadLocalDebugInfo::_push(
+    DebugInfoKind kind,
+    std::shared_ptr<DebugInfoBase> info) {
+  auto prev_info = debug_info;
+  debug_info = std::make_shared<ThreadLocalDebugInfo>();
+  debug_info->parent_info_ = prev_info;
+  debug_info->kind_ = kind;
+  debug_info->info_ = info;
+}
+
+/* static */
+std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_pop(DebugInfoKind kind) {
+  TORCH_CHECK(
+      debug_info && debug_info->kind_ == kind,
+      "Expected debug info of type ", (size_t)kind);
+  auto res = debug_info;
+  debug_info = debug_info->parent_info_;
+  return res->info_;
+}
+
+
 DebugInfoGuard::DebugInfoGuard(
     DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info) {
   if (!info) {
     return;
   }
-  TORCH_CHECK(!ThreadLocalDebugInfo::get(kind), "Debug info is already set");
   prev_info_ = debug_info;
-  debug_info = std::make_shared<ThreadLocalDebugInfo>();
-  debug_info->parent_info_ = prev_info_;
-  debug_info->kind_ = kind;
-  debug_info->debug_info_ = info;
+  ThreadLocalDebugInfo::_push(kind, info);
   active_ = true;
 }
 
