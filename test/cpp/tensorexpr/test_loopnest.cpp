@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/tensorexpr/function.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/testing/file_check.h>
@@ -120,6 +121,52 @@ void testExprSimple02() {
 
     ExpectAllNear(f_v, f_ref, 1e-5);
   }
+}
+
+void testExprSplitWithTail() {
+  KernelScope kernel_scope;
+  auto func = [](const ExprHandle& x) {
+    return ExprHandle(1.0f) + cast<float>(x);
+  };
+  Tensor* tensor = Compute("f", {{199, "x"}}, func);
+  LoopNest l({tensor});
+  For* x_outer;
+  For* x_inner;
+  For* x_tail;
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+  l.splitWithTail(loops[0], 17, &x_outer, &x_inner, &x_tail);
+
+  For* a;
+  For* b;
+  For* c;
+  l.splitWithTail(x_outer, 7, &a, &b, &c);
+
+  Stmt* stmt = l.root_stmt();
+  Stmt* simplified = IRSimplifier::simplify(stmt);
+  Block* body = dynamic_cast<Block*>(simplified);
+  ASSERT_EQ(body->nstmts(), 3);
+  auto biter = body->begin();
+
+  // Verify that the split loops are ordered correctly.
+  For* loop = dynamic_cast<For*>(*biter);
+  ++biter;
+  ASSERT_NE(loop, nullptr);
+  const IntImm* bound = dynamic_cast<const IntImm*>(loop->stop());
+  ASSERT_NE(bound, nullptr);
+  ASSERT_EQ(bound->value(), 7);
+
+  loop = dynamic_cast<For*>(*biter);
+  ++biter;
+  ASSERT_NE(loop, nullptr);
+  bound = dynamic_cast<const IntImm*>(loop->stop());
+  ASSERT_NE(bound, nullptr);
+  ASSERT_EQ(bound->value(), 4);
+
+  loop = dynamic_cast<For*>(*biter);
+  ASSERT_NE(loop, nullptr);
+  bound = dynamic_cast<const IntImm*>(loop->stop());
+  ASSERT_NE(bound, nullptr);
+  ASSERT_EQ(bound->value(), 12);
 }
 
 void testExprSplitWithTailNone() {

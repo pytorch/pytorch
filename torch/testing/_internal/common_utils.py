@@ -35,7 +35,7 @@ import __main__
 import errno
 
 from torch.testing._internal import expecttest
-from torch.testing import _compare_tensors_internal, is_integral
+from torch.testing import _compare_tensors_internal
 
 import torch
 import torch.cuda
@@ -689,20 +689,10 @@ def check_disabled(test_name):
             "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
             " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
 
-# Helper that returns the maximum value a dtype can represent
-def _get_width(dtype):
-    if dtype is torch.complex128:
-        return torch.finfo(torch.float64).bits
-    elif dtype is torch.complex64:
-        return torch.finfo(torch.float32).bits
-    elif dtype is torch.bool:
-        return 1
-    elif is_integral(dtype):
-        return torch.iinfo(dtype).bits
-    return torch.finfo(dtype).bits
 
-# Returns a dtype suitable for comparing tensors a and b.
-# NOTE: Dtypes for Comparing Tensors in the Test Framework
+# Data structures and a function for returning the appropriate dtype to
+# compare two tensors in.
+# NOTE: dtypes for Comparing Tensors in the Test Framework
 # When two tensors are compared they may be of different dtypes.
 # In PyTorch, the typical type promotion rules are biased towards float
 # types, so tensors with dtypes float16 and int64 produce tensors of
@@ -713,83 +703,89 @@ def _get_width(dtype):
 # For example, torch.tensor((50000), dtype=torch.long) would be "equal" to
 # torch.tensor(49984., dtype=torch.float16), regardless of the rtol and atol.
 # These cases are admittedly, unlikely, but the test framework is not intended
-# to reflect only "likely" scenarios.
-# To preserve numerical accuracy, instead of following PyTorch's type
-# promotion rules this function follows NumPy's, which are intended to preserve
-# numerics. It special-cases bfloat16 since NumPy doesn't support bfloat16.
+# to reflect only likely or common scenarios.
+# In an attempt to better preserve numerical accuracy, the following
+# returns a comparison dtype that - when possible - preserves the numerical
+# values in each tensor. For example, when float16 and bfloat16 values
+# are compared the comparison_dtype is float32, since float32 can
+# represent all float16 and bfloat16 values.
+# It is not always possible, however, to preserve all possible values
+# in each tensor type. In these cases the "maximally preserving" dtype is
+# returned. For example, there is no PyTorch dtype that can preserve
+# all possible int64 and float32 values, but float64 at least preserves all
+# float32 values and more int64 values than comparing in float32 would.
+
 # TODO: if we take a NumPy dependency then this function can be greatly
 # simplified.
+# TODO: we may want to implement this casting as a casting rule
+
+# Short-hand for dtypes map
+b = torch.bool
+ui8 = torch.uint8
+i8 = torch.int8
+i16 = torch.int16
+i32 = torch.int32
+i64 = torch.int64
+f16 = torch.float16
+bf16 = torch.bfloat16
+f32 = torch.float32
+f64 = torch.float64
+c64 = torch.complex64
+c128 = torch.complex128
+
+_dtype_to_num = {
+    b    : 0,
+    ui8  : 1,
+    i8   : 2,
+    i16  : 3,
+    i32  : 4,
+    i64  : 5,
+    f16  : 6,
+    bf16 : 7,
+    f32  : 8,
+    f64  : 9,
+    c64  : 10,
+    c128 : 11
+}
+
+#    b     ui8   i8    i16   i32   i64   f16   bf16  f32   f64   c64   c128
+_preserving_comparison_dtypes_map = [
+    [b,    ui8,  i8,   i16,  i32,  i64,  f16,  bf16, f32,  f64,  c64,  c128],  # b     # noqa: E241
+    [ui8,  ui8,  i16,  i16,  i32,  i64,  f16,  bf16, f32,  f64,  c64,  c128],  # ui8   # noqa: E241
+    [i8,   i16,  i8,   i16,  i32,  i64,  f16,  bf16, f32,  f64,  c64,  c128],  # i8    # noqa: E241
+    [i16,  i16,  i16,  i16,  i32,  i64,  f32,  f32,  f32,  f64,  c64,  c128],  # i16   # noqa: E241
+    [i32,  i32,  i32,  i32,  i32,  i64,  f64,  f64,  f64,  f64,  c128, c128],  # i32   # noqa: E241
+    [i64,  i64,  i64,  i64,  i64,  i64,  f64,  f64,  f64,  f64,  c128, c128],  # i64   # noqa: E241
+    [f16,  f16,  f16,  f32,  f64,  f64,  f16,  f32,  f32,  f64,  c64,  c128],  # f16   # noqa: E241
+    [bf16, bf16, bf16, f32,  f64,  f64,  f32,  bf16, f32,  f64,  c64,  c128],  # bf16  # noqa: E241
+    [f32,  f32,  f32,  f32,  f64,  f64,  f32,  f32,  f32,  f64,  c64,  c128],  # f32   # noqa: E241
+    [f64,  f64,  f64,  f64,  f64,  f64,  f64,  f64,  f64,  f64,  c128, c128],  # f64   # noqa: E241
+    [c64,  c64,  c64,  c64,  c128, c128, c64,  c64,  c64,  c128, c64,  c128],  # c64   # noqa: E241
+    [c128, c128, c128, c128, c128, c128, c128, c128, c128, c128, c128, c128]   # c128  # noqa: E241
+]
+
+# Acquires the "preserving" comparison dtype
+# (see Note: dtypes for Comparing Tensors in the Test Framework)
+# NOTE: Remaps bfloat16 to float32 since neither the CPU or CUDA device types
+#  support needed bfloat16 comparison methods.
+# NOTE: Remaps float16 to float32 on CPU since the CPU device type doesn't
+#   support needed float16 comparison methods.
+# TODO: Update this once bfloat16 and float16 are better supported.
 def get_comparison_dtype(a, b):
-    class _TypeMeta:
-        __slots__ = ['rank', 'kind', 'width']
-
-        def __init__(self, rank, kind, width):
-            self.rank = rank
-            self.kind = kind
-            self.width = width
-
-    # Maps torch dtypes to their rank, kind and width
-    type_meta = {
-        torch.complex128 : _TypeMeta(11, 'complex', 64),
-        torch.complex64  : _TypeMeta(10, 'complex', 32),
-        torch.float64    : _TypeMeta(9, 'float', 64),
-        torch.float32    : _TypeMeta(8, 'float', 32),
-        torch.bfloat16   : _TypeMeta(7, 'float', 16),
-        torch.float16    : _TypeMeta(6, 'float', 16),
-        torch.int64      : _TypeMeta(5, 'int', 64),
-        torch.int32      : _TypeMeta(4, 'int', 32),
-        torch.int16      : _TypeMeta(3, 'int', 16),
-        torch.int8       : _TypeMeta(2, 'int', 8),
-        torch.uint8      : _TypeMeta(1, 'uint', 8),
-        torch.bool       : _TypeMeta(0, 'uint', 1),
-    }
-
-    # Acquires common meta and acquires widest width
-    a_meta = type_meta[a.dtype]
-    b_meta = type_meta[b.dtype]
-    high_meta = a_meta if a_meta.rank >= b_meta.rank else b_meta
-    low_meta = b_meta if high_meta is a_meta else a_meta
-
-    # Short-circuits for boolean comparisons
-    if high_meta.rank == 0:
-        return torch.bool
-
-    # Acquires width
-    width = max(high_meta.width, low_meta.width)
-
-    # Adjusts width
-    # Doubles int width when upcasting
-    if ((high_meta.kind == 'float' or high_meta.kind == 'complex') and
-       low_meta.kind == 'int'):
-        width = min(64, max(low_meta.width * 2, high_meta.width))
-
-    # Doubles uint width when upcasting
-    if high_meta.kind != 'uint' and low_meta.kind == 'uint':
-        width = min(64, max(low_meta.width * 2, high_meta.width))
-
-    # Accounts for complex types being represented as double width
-    if high_meta.kind == 'complex':
-        width *= 2
-
-    # Accounts for bfloat16 x float16
-    if high_meta.rank == 7 and low_meta.rank == 6:
-        width = 32
-
-    # Acquires common dtype
-    common_dtype = getattr(torch, high_meta.kind + str(width))
+    compare_dtype = _preserving_comparison_dtypes_map[_dtype_to_num[a.dtype]][_dtype_to_num[b.dtype]]
 
     # TODO: update this when isclose is implemented for CPU/CUDA bfloat16
-    if common_dtype is torch.bfloat16:
-        common_dtype = torch.float32
+    if compare_dtype is torch.bfloat16:
+        compare_dtype = torch.float32
 
     # non-CUDA (CPU, for example) float16 -> float32
     # TODO: update this when isclose is implemented for CPU float16
-    if (common_dtype is torch.float16 and
+    if (compare_dtype is torch.float16 and
         (a.device != b.device or a.device.type != 'cuda' or
             b.device.type != 'cuda')):
-        common_dtype = torch.float32
+        compare_dtype = torch.float32
 
-    return common_dtype
+    return compare_dtype
 
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
@@ -1002,11 +998,16 @@ class TestCase(expecttest.TestCase):
 
         return _compare_tensors_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
+
+    def assertEqualIgnoreType(self, *args, **kwargs):
+        # If you are seeing this function used, that means test is written wrongly
+        # and deserves detailed investigation
+        return self.assertEqual(*args, exact_dtype=False, **kwargs)
+
     # Compares x and y
     # TODO: make message kwarg-only
-    # TODO: default exact_dtype to True
     def assertEqual(self, x, y, message=None, *, atol=None, rtol=None, equal_nan=True,
-                    exact_dtype=None, exact_device=False):
+                    exact_dtype=True, exact_device=False):
         # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
         if isinstance(message, Number):
             self.assertIsNone(atol, "don't combine positional prec and atol")
@@ -1174,6 +1175,12 @@ class TestCase(expecttest.TestCase):
     def assertNotEqual(self, x, y, message=None, *, atol=None):
         with self.assertRaises(AssertionError):
             self.assertEqual(x, y, message=message, atol=atol)
+
+    def assertEqualTypeString(self, x, y):
+        # This API is used simulate deprecated x.type() == y.type()
+        self.assertEqual(x.device, y.device)
+        self.assertEqual(x.dtype, y.dtype)
+        self.assertEqual(x.is_sparse, y.is_sparse)
 
     def assertObjectIn(self, obj, iterable):
         for elem in iterable:
@@ -1427,7 +1434,7 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
 
 
 # Decorator to retry upon certain Exceptions.
-def retry(ExceptionToCheck, tries=3, delay=3):
+def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
     def deco_retry(f):
         @wraps(f)
         def f_retry(*args, **kwargs):
@@ -1440,7 +1447,10 @@ def retry(ExceptionToCheck, tries=3, delay=3):
                     print(msg)
                     time.sleep(mdelay)
                     mtries -= 1
-            return f(*args, **kwargs)
+            try:
+                return f(*args, **kwargs)
+            except ExceptionToCheck as e:
+                raise unittest.SkipTest(f"Skipping after {tries} consecutive {str(e)}") from e if skip_after_retries else e
         return f_retry  # true decorator
     return deco_retry
 

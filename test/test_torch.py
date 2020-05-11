@@ -189,7 +189,7 @@ class _TestTorchMixin(object):
                        'sparse_resize_and_clear_',
                        )
         test_namespace(torch.nn)
-        test_namespace(torch.nn.functional, 'assert_int_or_pair', 'feature_alpha_dropout')
+        test_namespace(torch.nn.functional, 'assert_int_or_pair')
         # TODO: add torch.* tests when we have proper namespacing on ATen functions
         # test_namespace(torch)
 
@@ -3317,6 +3317,13 @@ class _TestTorchMixin(object):
         self.assertTrue(isinstance(b, torch.Size))
         self.assertEqual(a, b)
 
+    def test_pickle_function(self):
+        # https://github.com/pytorch/pytorch/issues/37703
+        a = torch.tanh
+        serialized = pickle.dumps(a)
+        b = pickle.loads(serialized)
+        self.assertEqual(a, b)
+
     def test_norm_fastpaths(self):
         x = torch.randn(3, 5)
 
@@ -5306,8 +5313,8 @@ class TestTorchDeviceType(TestCase):
     def test_get_comparison_dtype(self, device, dtypes):
         a = torch.empty(0, device=device, dtype=dtypes[0])
         b = torch.empty(0, device=device, dtype=dtypes[1])
+
         torch_compare_dtype = get_comparison_dtype(a, b)
-        print(torch_compare_dtype)
         np_compare_dtype = np.promote_types(
             torch_to_numpy_dtype_dict[dtypes[0]],
             torch_to_numpy_dtype_dict[dtypes[1]])
@@ -5319,17 +5326,18 @@ class TestTorchDeviceType(TestCase):
 
         # Special-cases float16 inputs on non-CUDA devices
         if np_compare_dtype is np.float16 and self.device_type != 'cuda':
-            self.assertTrue(torch_compare_dtype is torch.float32)
+            self.assertEqual(torch_compare_dtype, torch.float32)
             return
 
         # Checks that float16 and bfloat16 have the same promotion on CPU
+        # NOTE: on CUDA float16 is an allowable comparison type while bfloat16
+        #   is not.
         if self.device_type == 'cpu' and dtypes[0] is torch.float16:
             c = torch.empty(0, device=device, dtype=torch.bfloat16)
             bfloat16_type = get_comparison_dtype(c, b)
-            self.assertTrue(torch_compare_dtype is bfloat16_type)
+            self.assertEqual(torch_compare_dtype, bfloat16_type)
 
-        self.assertTrue(torch_compare_dtype ==
-                        numpy_to_torch_dtype_dict[np_compare_dtype])
+        self.assertEqual(torch_compare_dtype, numpy_to_torch_dtype_dict[np_compare_dtype])
 
     # Checks that compareTensors provides the correct debug info
     @onlyOnCPUAndCUDA
@@ -13914,7 +13922,7 @@ class TestTorchDeviceType(TestCase):
 
     def _test_unique_with_expects(self, device, dtype, f, x, expected_unique, expected_inverse, expected_counts, additional_shape):
         def ensure_tuple(x):
-            if torch.is_tensor(x):
+            if isinstance(x, torch.Tensor):
                 return (x,)
             return x
 
@@ -13943,7 +13951,7 @@ class TestTorchDeviceType(TestCase):
             return  # CPU does not have half support
 
         def ensure_tuple(x):
-            if torch.is_tensor(x):
+            if isinstance(x, torch.Tensor):
                 return (x,)
             return x
 
@@ -14788,6 +14796,24 @@ class TestTorchDeviceType(TestCase):
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
         self.assertEqual(X, Xhat, atol=1e-8, message='VeV\' wrong')
 
+        # test invalid input
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should be 2 dimensional',
+            lambda: torch.eig(torch.ones((2))))
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should be square',
+            lambda: torch.eig(torch.ones((2, 3))))
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should not contain infs or NaNs',
+            lambda: torch.eig(np.inf * torch.ones((2, 2))))
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should not contain infs or NaNs',
+            lambda: torch.eig(np.nan * torch.ones((2, 2))))
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
@@ -15610,6 +15636,27 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 long_res1 = long_m1.clone()
                 long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
 
+    # remove onlyCUDA after CPU impl of remainder_kernel be fixed
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    def test_remainder_fmod_large_dividend(self, device, dtype):
+        alarge = 1e9
+        pi = 3.14159265358979
+        for avalue in [alarge, -alarge]:
+            for bvalue in [pi, -pi]:
+                a = torch.tensor([avalue], dtype=dtype, device=device)
+                b = torch.tensor([bvalue], dtype=dtype, device=device)
+                c = torch.remainder(a, b)
+                d = torch.fmod(a, b)
+                self.assertTrue((b[0] > 0) == (c[0] > 0))  # remainder has same sign as divisor
+                self.assertTrue((a[0] > 0) == (d[0] > 0))  # fmod has same sign as dividend
+                self.assertTrue(abs(c[0]) < abs(b[0]))     # remainder is within range of divisor
+                self.assertTrue(abs(d[0]) < abs(b[0]))     # fmod is within range of divisor
+                if ((a[0] > 0) == (b[0] > 0)):
+                    self.assertTrue(c[0] == d[0])   # remainder is same as fmod
+                else:
+                    self.assertTrue(abs(c[0] - d[0]) == abs(b[0]))  # differ by one divisor
+
     @dtypes(torch.int64, torch.float64)
     def test_remainder_edge_cases(self, device, dtype):
         # Test variations of negative values used as input
@@ -16421,6 +16468,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     # dtype's dynamic range. This can (and should) cause undefined behavior
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy has the same behavior.
+    @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):
@@ -17879,13 +17927,13 @@ def generate_test_function(cls,
 
         # Converts CPU tensors to device tensors
         device_tensor = cpu_tensor.to(dtype=dtype, device=device)
-        device_args = [arg.to(device=device) if torch.is_tensor(arg) else arg for arg in cpu_args]
+        device_args = [arg.to(device=device) if isinstance(arg, torch.Tensor) else arg for arg in cpu_args]
 
         # Converts float device tensors to half/bfloat16 when the dtype is half/bfloat16
         # Note: CPU half tensors don't support many operations.
         if dtype in {torch.half, torch.bfloat16}:
             device_args = [arg.to(dtype=dtype) if
-                           (torch.is_tensor(arg) and arg.dtype == torch.float) else arg
+                           (isinstance(arg, torch.Tensor) and arg.dtype == torch.float) else arg
                            for arg in device_args]
 
         # Runs the tensor op on CPU and device
