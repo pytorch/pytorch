@@ -569,6 +569,7 @@ def _unique_impl(input, sorted=True, return_inverse=False, return_counts=False, 
             return handle_torch_function(
                 unique, (input,), input, sorted=sorted, return_inverse=return_inverse,
                 return_counts=return_counts, dim=dim)
+
     if dim is not None:
         output, inverse_indices, counts = _VF.unique_dim(
             input,
@@ -589,16 +590,31 @@ def _unique_impl(input, sorted=True, return_inverse=False, return_counts=False, 
 
 def _return_counts(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
     # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return _unique_impl(input, sorted, return_inverse, return_counts, dim)
+
     output, _, counts = _unique_impl(input, sorted, return_inverse, return_counts, dim)
     return output, counts
 
 def _return_output(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
     # type: (Tensor, bool, bool, bool, Optional[int]) -> Tensor
+
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return _unique_impl(input, sorted, return_inverse, return_counts, dim)
+
     output, _, _ = _unique_impl(input, sorted, return_inverse, return_counts, dim)
     return output
 
 def _return_inverse(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
     # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return _unique_impl(input, sorted, return_inverse, return_counts, dim)
+
     output, inverse_indices, _ = _unique_impl(input, sorted, return_inverse, return_counts, dim)
     return output, inverse_indices
 
