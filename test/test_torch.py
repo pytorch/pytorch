@@ -14235,10 +14235,14 @@ class TestTorchDeviceType(TestCase):
         samples1 = torch.multinomial(freqs, n_sample, replacement=True)
         samples2 = torch.multinomial(freqs, n_sample, replacement=True)
         samples = torch.cat([samples1, samples2])
-        print(samples.unique().size(0))
         # expect no more than 1 repeating elements generated in 2 attempts
         # the probability of at least element being repeated is surprisingly large, 18%
         self.assertLessEqual(2 * n_sample - samples.unique().size(0), 2)
+        samples1 = torch.multinomial(freqs, n_sample, replacement=False)
+        samples2 = torch.multinomial(freqs, n_sample, replacement=False)
+        samples = torch.cat([samples1, samples2])
+        # expect no more than 1 repeating elements generated in 2 attempts
+        self.assertLessEqual(2 * n_sample - samples.unique().size(0), 1)
 
     def test_var_unbiased(self, device):
         tensor = torch.randn(100, device=device)
