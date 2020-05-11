@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
@@ -307,6 +308,7 @@ c10::optional<script::Module> optimizeForMobile(const script::Module& m) {
   insertPrePackedOps(cloned_module);
   cloned_module = freeze_module(cloned_module);
   FoldPrePackingOps(cloned_module);
+  removeDropout(cloned_module);
   return cloned_module;
 }
 
