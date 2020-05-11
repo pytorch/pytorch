@@ -1,10 +1,10 @@
+#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <ATen/core/alias_info.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
-#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <torch/custom_class.h>
 #include <string>
 
@@ -21,10 +21,10 @@ using c10::ListType;
 using c10::NoneType;
 using c10::NumberType;
 using c10::OptionalType;
+using c10::QSchemeType;
 using c10::RRefType;
 using c10::StringType;
 using c10::Symbol;
-using c10::QSchemeType;
 using c10::TensorType;
 using c10::TupleType;
 using c10::VarType;
@@ -158,25 +158,46 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       num_dims++;
     });
     ptr = at::TensorType::create(
-        dtype,
-        at::DeviceType::CPU,
-        c10::VaryingShape(num_dims),
-        c10::VaryingShape(num_dims),
-        c10::nullopt);
+        dtype, at::DeviceType::CPU, num_dims, c10::nullopt);
   } else {
     std::vector<int64_t> dims;
+    bool seen_strides = false;
+    std::vector<int64_t> strides;
     parseList(TK_NOTHING, ',', ')', [&] {
       const std::string& num = L.expect(TK_NUMBER).text();
       std::string::size_type num_len;
       size_t dim = c10::stoi(num, &num_len);
-      AT_ASSERTM(
-          num_len == num.size(),
-          "Bad tensor dimension size. Strides not yet supported in parsing",
-          num);
       dims.push_back(dim);
+      if (seen_strides || L.cur().kind == ':') {
+        L.expect(':');
+        seen_strides = true;
+        const std::string& num = L.expect(TK_NUMBER).text();
+        std::string::size_type num_len;
+        size_t stride = c10::stoi(num, &num_len);
+        strides.push_back(stride);
+      }
     });
     at::IntArrayRef dims_ref(dims);
-    ptr = at::TensorType::create(dtype, at::DeviceType::CPU, dims_ref, false);
+    if (seen_strides) {
+      at::IntArrayRef strides_ref(strides);
+      if (strides.size() != dims.size()) {
+        throw ErrorReport(L.cur())
+            << "Strides info is specified for some but not for all dimensions";
+      }
+      ptr = at::TensorType::create(
+          dtype,
+          at::DeviceType::CPU,
+          c10::VaryingShape<int64_t>(dims),
+          c10::VaryingShape<int64_t>(strides),
+          c10::nullopt);
+    } else {
+      ptr = at::TensorType::create(
+          dtype,
+          at::DeviceType::CPU,
+          c10::VaryingShape<int64_t>(dims_ref),
+          c10::VaryingShape<int64_t>(dims.size()),
+          c10::nullopt);
+    }
   }
   return ptr;
 }

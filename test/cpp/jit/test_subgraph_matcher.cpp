@@ -25,13 +25,14 @@ graph(%0):
 void testTrivial2() {
   Graph graph;
   auto* g_in = graph.addInput();
-  auto* g_tanh = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/ 1));
+  auto* g_tanh = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/1));
   g_tanh->addInput(g_in);
   graph.registerOutput(g_tanh->output());
 
   Graph pattern;
   auto* p_in = pattern.addInput();
-  auto* p_tanh = pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/ 1));
+  auto* p_tanh =
+      pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/1));
   p_tanh->addInput(p_in);
   pattern.registerOutput(p_tanh->output());
 
@@ -67,7 +68,7 @@ void testTrivial4() {
   Graph graph;
   auto* g_in0 = graph.addInput();
   auto* g_in1 = graph.addInput();
-  auto* g_mul = graph.insertNode(graph.create(aten::mul, /*num_outputs =*/ 1));
+  auto* g_mul = graph.insertNode(graph.create(aten::mul, /*num_outputs =*/1));
   g_mul->addInput(g_in0);
   g_mul->addInput(g_in1);
   graph.registerOutput(g_mul->output());
@@ -75,7 +76,8 @@ void testTrivial4() {
   Graph pattern;
   auto* p_in0 = pattern.addInput();
   auto* p_in1 = pattern.addInput();
-  auto* p_mul = pattern.insertNode(pattern.create(aten::mul, /*num_outputs =*/ 1));
+  auto* p_mul =
+      pattern.insertNode(pattern.create(aten::mul, /*num_outputs =*/1));
   p_mul->addInput(p_in0);
   p_mul->addInput(p_in1);
   pattern.registerOutput(p_mul->output());
@@ -116,10 +118,11 @@ void testLinear2() {
   Graph graph;
   auto* g_in = graph.addInput();
 
-  auto* g_tanh = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/ 1));
+  auto* g_tanh = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/1));
   g_tanh->addInput(g_in);
 
-  auto* g_tanh2 = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/ 1));
+  auto* g_tanh2 =
+      graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/1));
   g_tanh2->addInput(g_tanh->output());
 
   graph.registerOutput(g_tanh2->output());
@@ -127,10 +130,12 @@ void testLinear2() {
   Graph pattern;
   auto* p_in = pattern.addInput();
 
-  auto* p_tanh = pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/ 1));
+  auto* p_tanh =
+      pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/1));
   p_tanh->addInput(p_in);
 
-  auto* p_tanh2 = pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/ 1));
+  auto* p_tanh2 =
+      pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/1));
   p_tanh2->addInput(p_tanh->output());
 
   pattern.registerOutput(p_tanh2->output());
@@ -214,22 +219,25 @@ void testDiamond2() {
   Graph graph;
   auto* g_in = graph.addInput();
 
-  auto* g_chunk = graph.insertNode(graph.create(prim::ConstantChunk, /*num_outputs =*/ 2));
+  auto* g_chunk =
+      graph.insertNode(graph.create(prim::ConstantChunk, /*num_outputs =*/2));
   g_chunk->i_(attr::chunks, 2)->i_(attr::dim, 0);
   g_chunk->addInput(g_in);
 
-  auto* g_mul = graph.insertNode(graph.create(aten::mul, /*num_outputs =*/ 1));
+  auto* g_mul = graph.insertNode(graph.create(aten::mul, /*num_outputs =*/1));
   g_mul->addInput(g_chunk->outputs()[0]);
   g_mul->addInput(g_chunk->outputs()[1]);
   graph.registerOutput(g_mul->output());
 
   Graph pattern;
   auto* p_in = pattern.addInput();
-  auto* p_chunk = pattern.insertNode(pattern.create(prim::ConstantChunk, /*num_outputs =*/ 2));
+  auto* p_chunk = pattern.insertNode(
+      pattern.create(prim::ConstantChunk, /*num_outputs =*/2));
   p_chunk->i_(attr::chunks, 2)->i_(attr::dim, 0);
   p_chunk->addInput(p_in);
 
-  auto* p_mul = pattern.insertNode(pattern.create(aten::mul, /*num_outputs =*/ 1));
+  auto* p_mul =
+      pattern.insertNode(pattern.create(aten::mul, /*num_outputs =*/1));
   p_mul->addInput(p_chunk->outputs()[0]);
   p_mul->addInput(p_chunk->outputs()[1]);
   pattern.registerOutput(p_mul->output());

@@ -1,4 +1,4 @@
-if (UNIX)
+if(UNIX)
   # prevent Unknown CMake command "check_function_exists".
   include(CheckFunctionExists)
 endif()
@@ -37,7 +37,7 @@ if(EXISTS "/etc/os-release")
   endif()
 endif()
 
-if (NOT INTERN_BUILD_MOBILE)
+if(NOT INTERN_BUILD_MOBILE)
   # ---[ Check that our programs run.  This is different from the native CMake
   # compiler check, which just tests if the program compiles and links.  This is
   # important because with ASAN you might need to help the compiled library find
@@ -46,7 +46,7 @@ if (NOT INTERN_BUILD_MOBILE)
   CHECK_C_SOURCE_RUNS("
   int main() { return 0; }
   " COMPILER_WORKS)
-  if (NOT COMPILER_WORKS)
+  if(NOT COMPILER_WORKS)
     # Force cmake to retest next time around
     unset(COMPILER_WORKS CACHE)
     message(FATAL_ERROR
@@ -59,7 +59,7 @@ if (NOT INTERN_BUILD_MOBILE)
   cmake_pop_check_state()
 endif()
 
-if (NOT INTERN_BUILD_MOBILE)
+if(NOT INTERN_BUILD_MOBILE)
   # ---[ Check if certain std functions are supported. Sometimes
   # _GLIBCXX_USE_C99 macro is not defined and some functions are missing.
   cmake_push_check_state(RESET)
@@ -75,7 +75,7 @@ if (NOT INTERN_BUILD_MOBILE)
 
     return 0;
     }" SUPPORT_GLIBCXX_USE_C99)
-  if (NOT SUPPORT_GLIBCXX_USE_C99)
+  if(NOT SUPPORT_GLIBCXX_USE_C99)
     # Force cmake to retest next time around
     unset(SUPPORT_GLIBCXX_USE_C99 CACHE)
     message(FATAL_ERROR
@@ -103,7 +103,7 @@ CHECK_CXX_SOURCE_COMPILES(
       }
     }" CAFFE2_EXCEPTION_PTR_SUPPORTED)
 
-if (CAFFE2_EXCEPTION_PTR_SUPPORTED)
+if(CAFFE2_EXCEPTION_PTR_SUPPORTED)
   message(STATUS "std::exception_ptr is supported.")
   set(CAFFE2_USE_EXCEPTION_PTR 1)
 else()
@@ -132,9 +132,9 @@ endif()
 cmake_pop_check_state()
 
 # ---[ Check if the compiler has AVX/AVX2 support. We only check AVX2.
-if (NOT INTERN_BUILD_MOBILE)
+if(NOT INTERN_BUILD_MOBILE)
   cmake_push_check_state(RESET)
-  if (MSVC)
+  if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set(CMAKE_REQUIRED_FLAGS "/arch:AVX2")
   else()
     set(CMAKE_REQUIRED_FLAGS "-mavx2")
@@ -150,7 +150,7 @@ if (NOT INTERN_BUILD_MOBILE)
         _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
         return 0;
       }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
-  if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+  if(CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
     message(STATUS "Current compiler supports avx2 extension. Will build perfkernels.")
     # Also see CMakeLists.txt under caffe2/perfkernels.
     set(CAFFE2_PERF_WITH_AVX 1)
@@ -160,7 +160,7 @@ if (NOT INTERN_BUILD_MOBILE)
 endif()
 # ---[ Check if the compiler has AVX512 support.
 cmake_push_check_state(RESET)
-if (MSVC)
+if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   # We could've used MSVC's hidden option /arch:AVX512 that defines __AVX512F__,
   # __AVX512DQ__, and __AVX512VL__, and /arch:AVX512F that defines __AVX512F__.
   # But, we chose not to do that not to rely on hidden options.
@@ -194,7 +194,7 @@ CHECK_CXX_SOURCE_COMPILES(
        __mmask16 m = _mm512_cmp_epi32_mask(a, a, _MM_CMPINT_EQ);
        __m512i r = _mm512_andnot_si512(a, a);
      }" CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
-if (CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
+if(CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
   message(STATUS "Current compiler supports avx512f extension. Will build fbgemm.")
   # Also see CMakeLists.txt under caffe2/perfkernels.
   set(CAFFE2_PERF_WITH_AVX512 1)
@@ -204,7 +204,7 @@ cmake_pop_check_state()
 # ---[ Checks if compiler supports -fvisibility=hidden
 check_cxx_compiler_flag("-fvisibility=hidden" COMPILER_SUPPORTS_HIDDEN_VISIBILITY)
 check_cxx_compiler_flag("-fvisibility-inlines-hidden" COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY)
-if (${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY})
+if(${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY})
   set(CAFFE2_VISIBILITY_FLAG "-fvisibility-inlines-hidden")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_VISIBILITY_FLAG}")
 endif()
@@ -214,7 +214,7 @@ endif()
 # -table. We need this to get symbols when generating backtrace at
 # -runtime.
 check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
-if (${COMPILER_SUPPORTS_RDYNAMIC})
+if(${COMPILER_SUPPORTS_RDYNAMIC})
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -rdynamic")
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
 endif()
@@ -225,7 +225,7 @@ endif()
 # a third party library (like Protobuf), mention it in the comment as
 # "THIRD_PARTY_NAME related"
 # From https://docs.microsoft.com/en-us/cpp/error-messages/compiler-warnings/
-if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
+if(${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
   add_compile_options(
       ##########################################
       # Protobuf related. Cannot remove.
@@ -306,7 +306,7 @@ endif()
 # Also, we will turn off deprecated-declarations
 # due to protobuf.
 
-if (IOS)
+if(IOS)
   add_definitions("-mfpu=neon-fp16")
   add_definitions("-Wno-deprecated-declarations")
 endif()
@@ -314,7 +314,7 @@ endif()
 # ---[ If we use asan, turn on the flags.
 # TODO: This only works with new style gcc and clang (not the old -faddress-sanitizer).
 # Change if necessary on old platforms.
-if (USE_ASAN)
+if(USE_ASAN)
   set(CAFFE2_ASAN_FLAG "-fsanitize=address -fPIE -pie")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_ASAN_FLAG}")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_ASAN_FLAG}")
@@ -323,7 +323,7 @@ if (USE_ASAN)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_ASAN_FLAG}")
 endif()
 
-if (USE_TSAN)
+if(USE_TSAN)
   set(CAFFE2_TSAN_FLAG "-fsanitize=thread -fPIE -pie")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_TSAN_FLAG}")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_TSAN_FLAG}")
@@ -335,9 +335,9 @@ endif()
 # ---[ Create CAFFE2_BUILD_SHARED_LIBS for macros.h.in usage.
 set(CAFFE2_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 
-if (USE_NATIVE_ARCH)
+if(USE_NATIVE_ARCH)
   check_cxx_compiler_flag("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)
-  if (COMPILER_SUPPORTS_MARCH_NATIVE)
+  if(COMPILER_SUPPORTS_MARCH_NATIVE)
     add_definitions("-march=native")
   else()
     message(

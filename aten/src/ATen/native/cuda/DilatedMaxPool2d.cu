@@ -56,10 +56,10 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
       wstart += dilation_w;
     accscalar_t maxval = at::numeric_limits<accscalar_t>::lower_bound(); // -Infinity
     int maxidx = hstart * width + wstart;
-    bottom_data += (n * channels + c) * height * width;
+    const scalar_t* btm_data = bottom_data + (n * channels + c) * height * width;
     for (int h = hstart; h < hend; h += dilation_h) {
       for (int w = wstart; w < wend; w += dilation_w) {
-        scalar_t val = bottom_data[h * width + w];
+        scalar_t val = btm_data[h * width + w];
         if ((ScalarConvert<scalar_t, accscalar_t>::to(val) > maxval) || THCNumerics<scalar_t>::isnan(val)) {
           maxidx = h * width + w;
           maxval = ScalarConvert<scalar_t, accscalar_t>::to(val);
@@ -358,7 +358,7 @@ void max_pool2d_with_indices_out_cuda_template(
 
   Tensor input = input_.contiguous(memory_format);
 
-  const int64_t in_stride_n = input.stride(-4);
+  const int64_t in_stride_n = input_.ndimension() == 4 ? input.stride(-4) : 0;
   const int64_t in_stride_c = input.stride(-3);
   const int64_t in_stride_h = input.stride(-2);
   const int64_t in_stride_w = input.stride(-1);
@@ -506,7 +506,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);
 
-  const int64_t in_stride_n = input.stride(-4);
+  const int64_t in_stride_n = input.ndimension() == 4 ? input.stride(-4) : 0;
   const int64_t in_stride_c = input.stride(-3);
   const int64_t in_stride_h = input.stride(-2);
   const int64_t in_stride_w = input.stride(-1);

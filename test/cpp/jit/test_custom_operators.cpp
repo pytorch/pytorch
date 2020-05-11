@@ -1,10 +1,10 @@
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 
-#include "torch/csrc/jit/runtime/custom_operator.h"
-#include "torch/csrc/jit/ir/irparser.h"
 #include "torch/csrc/jit/ir/alias_analysis.h"
+#include "torch/csrc/jit/ir/irparser.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
 #include "torch/jit.h"
 
 namespace torch {
@@ -12,7 +12,8 @@ namespace jit {
 
 void testCustomOperators() {
   {
-    torch::RegisterOperators reg("foo::bar", [](double a, at::Tensor b) { return a + b; });
+    torch::RegisterOperators reg(
+        "foo::bar", [](double a, at::Tensor b) { return a + b; });
     auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::bar"));
     ASSERT_EQ(ops.size(), 1);
 
@@ -36,7 +37,8 @@ void testCustomOperators() {
     ASSERT_TRUE(output.allclose(at::full(5, 3.0f)));
   }
   {
-    torch::RegisterOperators reg("foo::bar_with_schema(float a, Tensor b) -> Tensor",
+    torch::RegisterOperators reg(
+        "foo::bar_with_schema(float a, Tensor b) -> Tensor",
         [](double a, at::Tensor b) { return a + b; });
 
     auto& ops =

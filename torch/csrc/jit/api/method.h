@@ -1,7 +1,7 @@
 
+#include <ATen/core/function.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
-#include <ATen/core/function.h>
 #include <torch/csrc/jit/api/function_impl.h>
 
 namespace torch {
@@ -64,7 +64,7 @@ namespace script {
 // We once had a `script::` namespace that was deleted. This is for backcompat
 // of the public API; new code should not use this type alias.
 using Method = ::torch::jit::Method;
-}
+} // namespace script
 
 } // namespace jit
 } // namespace torch

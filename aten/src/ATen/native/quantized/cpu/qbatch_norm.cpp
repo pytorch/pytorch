@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 
 #include <algorithm>
@@ -40,7 +40,7 @@ void compute_fused_params(
 }
 
 template <bool ReluFused>
-Tensor q_batch_norm_impl(
+Tensor q_batch_norm2d_impl(
     Tensor qx,
     Tensor weight,
     Tensor bias,
@@ -82,10 +82,12 @@ Tensor q_batch_norm_impl(
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast);
   Tensor qy = at::_empty_affine_quantized(
       oSizes,
-      at::device(kCPU).dtype(qx_nhwc.scalar_type()),
+      at::device(kCPU)
+        .dtype(qx_nhwc.scalar_type())
+        .memory_format(MemoryFormat::ChannelsLast),
       output_scale,
       output_zero_point,
-      MemoryFormat::ChannelsLast);
+      c10::nullopt);
 
   compute_fused_params(
       C,
@@ -170,10 +172,12 @@ Tensor q_batch_norm3d_impl(
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast3d);
   Tensor qy = at::_empty_affine_quantized(
       oSizes,
-      at::device(kCPU).dtype(qx_nhwc.scalar_type()),
+      at::device(kCPU)
+        .dtype(qx_nhwc.scalar_type())
+        .memory_format(MemoryFormat::ChannelsLast3d),
       output_scale,
       output_zero_point,
-      MemoryFormat::ChannelsLast3d);
+      c10::nullopt);
 
   compute_fused_params(
       C,
@@ -227,93 +231,17 @@ Tensor quantized_batch_norm(
     double output_scale,
     int64_t output_zero_point) {
   Tensor qy;
-  qy = q_batch_norm_impl<false>(
+  qy = q_batch_norm2d_impl<false>(
       qx, weight, bias, mean, var, eps, output_scale, output_zero_point);
   return qy;
 }
 
-// Keep the registry in the anonymous namespace.
-namespace {
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("batch_norm2d",      q_batch_norm2d_impl<false>);
+  m.impl("batch_norm2d_relu", q_batch_norm2d_impl<true>);
+  m.impl("batch_norm3d",      q_batch_norm3d_impl<false>);
+  m.impl("batch_norm3d_relu", q_batch_norm3d_impl<true>);
+}
 
-template <bool ReLUFused = false>
-class QBatchNorm2d final : public torch::OperatorKernel {
- public:
-  Tensor operator()(
-      Tensor qx,
-      Tensor weight,
-      Tensor bias,
-      Tensor mean,
-      Tensor var,
-      double eps,
-      double output_scale,
-      int64_t output_zero_point) {
-    return q_batch_norm_impl<ReLUFused>(
-        qx, weight, bias, mean, var, eps, output_scale, output_zero_point);
-  }
-};
-
-template <bool ReLUFused = false>
-class QBatchNorm3d final : public torch::OperatorKernel {
- public:
-  Tensor operator()(
-      Tensor qx,
-      Tensor weight,
-      Tensor bias,
-      Tensor mean,
-      Tensor var,
-      double eps,
-      double output_scale,
-      int64_t output_zero_point) {
-    return q_batch_norm3d_impl<ReLUFused>(
-        qx, weight, bias, mean, var, eps, output_scale, output_zero_point);
-  }
-};
-
-static auto registry = torch::RegisterOperators().op(
-    "quantized::batch_norm(Tensor qx, "
-    "Tensor weight, "
-    "Tensor bias, "
-    "Tensor mean, "
-    "Tensor var, "
-    "float eps, "
-    "float output_scale, "
-    "int output_zero_point) -> Tensor",
-    torch::RegisterOperators::options().kernel<QBatchNorm2d<false>>(
-        DispatchKey::QuantizedCPUTensorId))
-.op(
-    "quantized::batch_norm2d_relu(Tensor qx, "
-    "Tensor weight, "
-    "Tensor bias, "
-    "Tensor mean, "
-    "Tensor var, "
-    "float eps, "
-    "float output_scale, "
-    "int output_zero_point) -> Tensor",
-    torch::RegisterOperators::options().kernel<QBatchNorm2d<true>>(
-        DispatchKey::QuantizedCPUTensorId))
-.op(
-    "quantized::batch_norm3d(Tensor qx, "
-    "Tensor weight, "
-    "Tensor bias, "
-    "Tensor mean, "
-    "Tensor var, "
-    "float eps, "
-    "float output_scale, "
-    "int output_zero_point) -> Tensor",
-    torch::RegisterOperators::options().kernel<QBatchNorm3d<false>>(
-        DispatchKey::QuantizedCPUTensorId))
-.op(
-    "quantized::batch_norm3d_relu(Tensor qx, "
-    "Tensor weight, "
-    "Tensor bias, "
-    "Tensor mean, "
-    "Tensor var, "
-    "float eps, "
-    "float output_scale, "
-    "int output_zero_point) -> Tensor",
-    torch::RegisterOperators::options().kernel<QBatchNorm3d<true>>(
-        DispatchKey::QuantizedCPUTensorId));
-
-} // namespace
 } // namespace native
 } // namespace at

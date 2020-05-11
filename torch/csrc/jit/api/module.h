@@ -1,13 +1,13 @@
 #pragma once
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/runtime/argument_spec.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/api/object.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/named_value.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/api/object.h>
-#include <torch/csrc/jit/frontend/source_range.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
@@ -131,8 +131,9 @@ struct TORCH_API Module : public Object {
       const std::string& name,
       const TypePtr t,
       IValue v,
-      bool is_param = false) {
-    type()->addOrCheckAttribute(name, t, is_param);
+      bool is_param = false,
+      bool allow_any = false) {
+    type()->addOrCheckAttribute(name, t, is_param, allow_any);
     _ivalue()->setAttr(name, std::move(v));
   }
   void register_module(const std::string& name, const Module& module) {
@@ -220,6 +221,10 @@ struct TORCH_API Module : public Object {
   void _save_for_mobile(
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+
+  Module copy() const;
+
+  Module deepcopy() const;
 
   // Clones both the underlying `ClassType` and the module instance(data), this
   // function creates a new `ClassType` and returns a new instance that has the
@@ -558,7 +563,7 @@ namespace script {
 // of the public API; new code should not use this type alias.
 using Module = ::torch::jit::Module;
 using ExtraFilesMap = ::torch::jit::ExtraFilesMap;
-}
+} // namespace script
 
 } // namespace jit
 } // namespace torch

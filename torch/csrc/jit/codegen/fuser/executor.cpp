@@ -100,7 +100,8 @@ static c10::optional<std::vector<int64_t>> canRunKernel(
 static bool expandArgs(
     const KernelSpec& spec,
     std::vector<at::Tensor>& args,
-    std::vector<int64_t>& map_size, bool dry_run) {
+    std::vector<int64_t>& map_size,
+    bool dry_run) {
   bool has_broadcast = false;
   for (size_t i = 0; i < args.size(); ++i) {
     auto& arg = args[i];
@@ -226,8 +227,9 @@ void launchFusion(
   // compute number of scalar inputs and convert them to float
   std::vector<double> scalar_inputs;
   scalar_inputs.reserve(all_inputs.size());
-  for (auto const &input: all_inputs){
-    if (input.isDouble()) scalar_inputs.push_back(input.to<float>());
+  for (auto const& input : all_inputs) {
+    if (input.isDouble())
+      scalar_inputs.push_back(input.to<float>());
   }
 
   // Computes the storage needed to store TensorInfo structs for inputs and
@@ -242,7 +244,8 @@ void launchFusion(
 
   // A vector of arguments to the kernel (numel, *input_desc_s, *output_desc_s)
   std::vector<void*> arguments;
-  arguments.reserve(3 + scalar_inputs.size() + flat_inputs_size + flat_outputs_size);
+  arguments.reserve(
+      3 + scalar_inputs.size() + flat_inputs_size + flat_outputs_size);
   arguments.push_back(&numel);
 
   auto addTensorInfoRaw = [&](const TensorDesc& desc,
@@ -283,7 +286,7 @@ void launchFusion(
     }
   }
   // Adds scalar arguments
-  for (double &s: scalar_inputs){
+  for (double& s : scalar_inputs) {
     arguments.push_back(&s);
   }
 

@@ -15,6 +15,8 @@ OS="ubuntu"
 DOCKERFILE="${OS}/Dockerfile"
 if [[ "$image" == *-cuda* ]]; then
   DOCKERFILE="${OS}-cuda/Dockerfile"
+elif [[ "$image" == *-rocm* ]]; then
+  DOCKERFILE="${OS}-rocm/Dockerfile"
 fi
 
 if [[ "$image" == *-trusty* ]]; then
@@ -33,29 +35,6 @@ TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/u
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-bionic-clang9-thrift-llvmdev)
-    CLANG_VERSION=9
-    THRIFT=yes
-    LLVMDEV=yes
-    PROTOBUF=yes
-    ;;
-  pytorch-linux-xenial-py2.7.9)
-    TRAVIS_PYTHON_VERSION=2.7.9
-    GCC_VERSION=7
-    # Do not install PROTOBUF, DB, and VISION as a test
-    ;;
-  pytorch-linux-xenial-py2.7)
-    TRAVIS_PYTHON_VERSION=2.7
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
-  pytorch-linux-xenial-py3.5)
-    TRAVIS_PYTHON_VERSION=3.5
-    GCC_VERSION=7
-    # Do not install PROTOBUF, DB, and VISION as a test
-    ;;
   pytorch-linux-xenial-py3.8)
     # TODO: This is a hack, get rid of this as soon as you get rid of the travis downloads
     TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/16.04/x86_64"
@@ -97,18 +76,19 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-xenial-cuda9-cudnn7-py2)
-    CUDA_VERSION=9.0
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=2.7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
   pytorch-linux-xenial-cuda9-cudnn7-py3)
     CUDA_VERSION=9.0
     CUDNN_VERSION=7
     ANACONDA_PYTHON_VERSION=3.6
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4)
+    CUDA_VERSION=9.2
+    CUDNN_VERSION=7
+    ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=5
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -176,6 +156,23 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
+  pytorch-linux-bionic-py3.6-clang9)
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-xenial-rocm-py3.6-clang7)
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM=yes
+    # newer cmake version required
+    CMAKE_VERSION=3.6.3
+    ;;
 esac
 
 # Set Jenkins UID and GID if running Jenkins
@@ -187,6 +184,8 @@ fi
 tmp_tag="tmp-$(cat /dev/urandom | tr -dc 'a-z' | fold -w 32 | head -n 1)"
 
 # Build image
+# TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
+# it's no longer needed.
 docker build \
        --no-cache \
        --build-arg "TRAVIS_DL_URL_PREFIX=${TRAVIS_DL_URL_PREFIX}" \
@@ -213,6 +212,7 @@ docker build \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
+       --build-arg "ROCM=${ROCM:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
