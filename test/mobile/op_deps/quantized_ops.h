@@ -31,5 +31,5 @@ inline std::vector<c10::IValue> call_unboxed_super_slow_temp_shim(
   const c10::optional<c10::OperatorHandle> op_handle =
       c10::Dispatcher::singleton().findSchema({func_name, overload_name});
   assert(op_handle.has_value());
-  return callOp(op_handle.value(), args...);
+  return call_unboxed_super_slow_temp_shim(op_handle.value(), args...);
 }
