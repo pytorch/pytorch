@@ -1240,11 +1240,11 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 }
 
 Tensor squeeze_qtensor(const Tensor& self, int64_t dim) {
-auto quantizer = get_qtensorimpl(self)->quantizer();
-std::vector<int64_t> sizes;
-std::vector<int64_t> strides;
-std::tie(sizes, strides) = inferSqueezeGeometry(self, dim);
-if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  std::vector<int64_t> sizes;
+  std::vector<int64_t> strides;
+  std::tie(sizes, strides) = inferSqueezeGeometry(self, dim);
+  if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
     TORCH_CHECK(axis != dim, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
@@ -1255,14 +1255,14 @@ if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
                                                   per_channel_quantizer->zero_points(),
                                                   axis,
                                                   quantizer->scalar_type());
-}
-if (self.dim() == 0 || self.sizes()[dim] != 1) {
-  sizes = self.sizes().vec();
-  strides = self.strides().vec();
-}
-auto result = make_qtensor(self, sizes, strides, quantizer);
-namedinference::propagate_names_except(result, self, {dim});
-return result;
+  }
+  if (self.dim() == 0 || self.sizes()[dim] != 1) {
+    sizes = self.sizes().vec();
+    strides = self.strides().vec();
+  }
+  auto result = make_qtensor(self, sizes, strides, quantizer);
+  namedinference::propagate_names_except(result, self, {dim});
+  return result;
 }
 
 Tensor squeeze(const Tensor& self) {
