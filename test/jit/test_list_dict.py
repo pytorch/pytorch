@@ -1097,6 +1097,19 @@ class TestList(JitTestCase):
         self.checkScript(to_list_float_1D, (torch.randn(
             5, dtype=torch.double).cuda(),))
 
+    def test_no_element_type_annotation(self):
+        def fn(x):
+            # type: (torch.Tensor) -> List
+            a: List = x.tolist()
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+            torch.jit.script(fn)
+
 
 class TestDict(JitTestCase):
     def dict(self):
