@@ -100,6 +100,10 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsQnnp<
       kSpatialDim == 2,
       "QNNPACK only supports conv2d_unpack right "
       "now.");
+  TORCH_CHECK(
+        orig_weight.defined(),
+        "Cannot unpack weights. "
+        "Call at::globalContext()::setReleaseOriginalWeights(false) before packing or loading to enable unpacking.");
   return std::tuple<at::Tensor, c10::optional<at::Tensor>>(orig_weight, bias);
 }
 
