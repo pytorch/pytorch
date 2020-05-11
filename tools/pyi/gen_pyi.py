@@ -455,6 +455,7 @@ def gen_pyi(declarations_path, out):
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
         'get_num_threads': ['def get_num_threads() -> _int: ...'],
         'set_num_threads': ['def set_num_threads(num: _int) -> None: ...'],
+        'init_num_threads': ['def init_num_threads() -> None: ...'],
         'get_num_interop_threads': ['def get_num_interop_threads() -> _int: ...'],
         'set_num_interop_threads': ['def set_num_interop_threads(num: _int) -> None: ...'],
         # These functions are explicitly disabled by
