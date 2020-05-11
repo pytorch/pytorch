@@ -374,7 +374,8 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
               }
 
               threadPool_.run(
-                  [futureResponseMessage,
+                  [this,
+                   futureResponseMessage,
                    responseMessage{std::move(responseMessage)}]() mutable {
                     --clientActiveCalls_;
                     if (responseMessage.type() == MessageType::EXCEPTION) {
