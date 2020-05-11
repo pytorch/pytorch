@@ -283,22 +283,34 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   void setError(FutureError&& error) {
     std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(!completed());
-    completed_ = true;
-    error_ = std::move(error);
+    setErrorInternal(std::move(error), lock);
+  }
 
-    std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-
-    finished_cv_.notify_all();
-    for (auto& callback : cbs) {
-      callback();
+  void setErrorIfNeeded(std::string errorMsg) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (completed_) {
+      // This should be rare and shouldn't cause log spew. Its important to
+      // log errors and thats why we have this log here.
+      LOG(INFO) << "Skipping setting following error on the Future since " <<
+        "it is already marked completed (this is not neccessarily an error): "
+        << errorMsg;
+      return;
+    } else {
+      setErrorInternal(FutureError(std::move(errorMsg)), lock);
     }
   }
 
   // Get the result of the current future.
   IValue value() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(completed());
+    if (error_) {
+      throw *error_;
+    }
+    return value_;
+  }
+
+  const IValue& constValue() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     if (error_) {
@@ -347,6 +359,23 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  private:
+  void setErrorInternal(
+      FutureError error,
+      std::unique_lock<std::mutex>& lock) {
+    AT_ASSERT(!completed());
+    completed_ = true;
+    error_ = std::move(error);
+
+    std::vector<std::function<void(void)>> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+
+    finished_cv_.notify_all();
+    for (auto& callback : cbs) {
+      callback();
+    }
+  }
+
   mutable std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
