@@ -50,9 +50,9 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   // These functions will start at outputs and propagate op through the DAG
   // in depth first traversal. Next could be called on nodes multiple times,
   // however, once handle is called on a node next will not be called.
-  std::vector<Statement*> next(Statement* stmt);
-  std::vector<Statement*> next(Expr* expr);
-  std::vector<Statement*> next(Val* v);
+  virtual std::vector<Statement*> next(Statement* stmt);
+  virtual std::vector<Statement*> next(Expr* expr);
+  virtual std::vector<Statement*> next(Val* v);
 
   virtual void handle(Statement* s) {
     OptOutDispatch::handle(s);

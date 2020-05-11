@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 
 #include <ATen/ThreadLocalDebugInfo.h>
+#include <ATen/record_function.h>
 
 namespace at {
 
@@ -28,6 +29,9 @@ class TORCH_API ThreadLocalState {
   // ThreadLocalDebugInfo does not change after being created
   // with DebugInfoGuard
   std::shared_ptr<at::ThreadLocalDebugInfo> debug_info_;
+
+  // RecordFunction TLS callbacks
+  RecordFunctionCallbacks callbacks_;
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   bool keep_grad_mode_ = true;
