@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
-    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict
+    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -10168,8 +10168,7 @@ class TestTorchDeviceType(TestCase):
     def test_uniform_from_to(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            # Crashes with CUDA error: unspecified launch failure
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -10242,26 +10241,22 @@ class TestTorchDeviceType(TestCase):
             torch.rand(size, size, out=res2)
             self.assertEqual(res1, res2)
 
-    @dtypes(torch.float, torch.double, torch.half)
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     def test_log_normal(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).log_normal_()
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_geometric(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).geometric_(0.5)
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
 
-    @dtypes(torch.float, torch.double, torch.half)
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     def test_exponential(self, device, dtype):
-        if IS_WINDOWS and device.startswith('cpu') and dtype == torch.bfloat16:
-            return
-
         a = torch.tensor([10], dtype=dtype, device=device).exponential_(0.5)
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
@@ -10276,14 +10271,13 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaises(RuntimeError):
             torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
 
-    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double, torch.half)
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @skipIfNoSciPy
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     def test_uniform_kstest(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            # Crashes with CUDA error: unspecified launch failure
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         from scipy import stats
         size = 1000
@@ -10294,9 +10288,9 @@ class TestTorchDeviceType(TestCase):
                     res = stats.kstest(t.cpu().to(torch.double), 'uniform', args=(from_, (to_ - from_)))
                     self.assertTrue(res.statistic < 0.1)
 
-    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double, torch.half)
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @skipIfNoSciPy
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     def test_normal_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -10306,9 +10300,9 @@ class TestTorchDeviceType(TestCase):
                 res = stats.kstest(t.cpu().to(torch.double), 'norm', args=(mean, std))
                 self.assertTrue(res.statistic < 0.1)
 
-    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double, torch.half)
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @skipIfNoSciPy
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     def test_lognormal_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -10321,9 +10315,9 @@ class TestTorchDeviceType(TestCase):
                 else:
                     self.assertTrue(res.statistic < 0.1)
 
-    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double, torch.half)
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @skipIfNoSciPy
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     def test_exponential_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -10332,9 +10326,9 @@ class TestTorchDeviceType(TestCase):
             res = stats.kstest(t.cpu().to(torch.double), 'expon', args=(0, 1 / lambd,))
             self.assertTrue(res.statistic < 0.1)
 
-    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
-    @dtypes(torch.float, torch.double, torch.half)
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @skipIfNoSciPy
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     def test_cauchy_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -10344,10 +10338,9 @@ class TestTorchDeviceType(TestCase):
                 res = stats.kstest(t.cpu().to(torch.double), 'cauchy', args=(median, sigma))
                 self.assertTrue(res.statistic < 0.1)
 
-    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
+    @skipIfNoSciPy
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_geometric_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -11538,9 +11531,8 @@ class TestTorchDeviceType(TestCase):
         # Check for race condition (correctness when applied on a large tensor).
         if dtype not in (torch.int8, torch.uint8, torch.int16, torch.half):
             y = torch.linspace(0, 1000000 - 1, 1000000, device=device, dtype=dtype)
-            correct = True
-            for i in range(y.shape[0] - 1):
-                correct = correct and y[i] < y[i + 1]
+            cond = y[:-1] < y[1:]
+            correct = all(cond)
             self.assertTrue(correct)
 
         # Check linspace for non-contiguous tensors.
@@ -15973,14 +15965,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         lambda: t.random_(from_, to_)
                     )
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float, torch.double, torch.half, torch.bfloat16)
-    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-                  torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_full_range(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -16014,14 +16003,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
         self.assertTrue((to_inc_ - delta) < t.to(torch.double).max() <= to_inc_)
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float, torch.double, torch.half, torch.bfloat16)
-    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-                  torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_from_to(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -16110,14 +16096,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         lambda: t.random_(from_, to_)
                     )
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float, torch.double, torch.half, torch.bfloat16)
-    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-                  torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_to(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -16175,14 +16158,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     lambda: t.random_(from_, to_)
                 )
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float, torch.double, torch.half, torch.bfloat16)
-    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-                  torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_default(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
