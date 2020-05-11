@@ -15991,6 +15991,36 @@ a")
 
             FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
 
+    def test_early_return_rewrite(self):
+        def test_foo(x: bool):
+            if x:
+                return 1
+            return 2
+
+        self.checkScript(test_foo, (True,))
+        self.checkScript(test_foo, (False,))
+        FileCheck().check_count("prim::If", 1, exactly=True).run(torch.jit.script(test_foo).graph)
+
+        def test_multiple(x: int):
+            if x == 5:
+                return x * x
+            else:
+                y = 2 * x
+
+            z = y * 2
+            if z == 8:
+                return 1
+
+            return z * z * z
+
+        self.checkScript(test_multiple, (5,))
+        self.checkScript(test_multiple, (2,))
+        self.checkScript(test_multiple, (3,))
+
+        graph = torch.jit.script(test_multiple).graph
+        FileCheck().check_count("prim::If", 2, exactly=True).run(graph)
+        print(torch.jit.script(test_multiple).code)
+
     def test_is_scripting_metacompile(self):
         @torch.jit.script
         def foo():
