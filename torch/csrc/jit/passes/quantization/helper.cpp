@@ -281,7 +281,7 @@ bool isSingleInputGeneralCallFunction(Node* n) {
       std::back_inserter(_single_input_general_call_funcs));
   return isFunctionNode(
       n,
-      /* call_funcs = */ _single_input_general_shape_call_funcs,
+      /* call_funcs = */ _single_input_general_call_funcs,
       /* aten_funcs = */ {});
 }
 
