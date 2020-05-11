@@ -262,35 +262,58 @@ struct SourceImporterImpl : public Resolver,
     }
   }
 
-  c10::optional<Assign> qconvAttributeAssignmentSpecialHandlingHack(
+  c10::optional<Assign> attributeAssignmentSpecialHandlingHack(
       const QualifiedName& qualified_classname,
       const Assign& assign) {
-    static std::regex mangle_re("\\.___torch_mangle_\\d+");
-    auto replaced_string =
-        std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
-    auto is_conv2d = [](const std::string& type) {
-      return type == "__torch__.torch.nn.quantized.modules.conv.Conv2d" ||
-          type ==
-          "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d";
+    struct AttrTypeReplacementDescr {
+      std::string attr_name;
+      std::string expected_type;
+      std::string replacement_type;
     };
 
-    auto is_conv3d = [](const std::string& type) {
-      return type == "__torch__.torch.nn.quantized.modules.conv.Conv3d" ||
-          type ==
-          "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d";
-    };
-    if (is_conv2d(replaced_string) || is_conv3d(replaced_string)) {
+    // module demangled qualname -> ReplacementDescr
+    static std::unordered_map<std::string, AttrTypeReplacementDescr> replacements{
+        {"__torch__.torch.nn.quantized.modules.linear.LinearPackedParams",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+        {"__torch__.torch.nn.quantized.modules.linear.Linear",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+        {"__torch__.torch.nn.quantized.modules.conv.Conv2d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
+        {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
+        {"__torch__.torch.nn.quantized.modules.conv.Conv3d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}},
+        {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}}};
+    static std::regex mangle_re("\\.___torch_mangle_\\d+");
+    auto demangled_classname =
+        std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
+    if (replacements.count(demangled_classname)) {
       auto lhs = Var(assign.lhs());
       if (!assign.type().present() || assign.type().get().kind() != TK_VAR) {
         return c10::nullopt;
       }
       auto type = Var(assign.type().get());
-      if (lhs.name().name() == "_packed_params" &&
-          type.name().name() == "Tensor") {
-        std::string packed_params_typename = is_conv2d(replaced_string)
-            ? "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"
-            : "__torch__.torch.classes.quantized.Conv3dPackedParamsBase";
-        Parser p(std::make_shared<Source>(std::move(packed_params_typename)));
+
+      auto& attr_name = replacements.at(demangled_classname).attr_name;
+      auto& expected_type = replacements.at(demangled_classname).expected_type;
+      auto& replacement_type =
+          replacements.at(demangled_classname).replacement_type;
+      if (lhs.name().name() == attr_name &&
+          type.name().name() == expected_type) {
+        Parser p(std::make_shared<Source>(replacement_type));
         auto typename_expr = p.parseExp();
         auto maybe_typename =
             Maybe<Expr>::create(typename_expr.range(), typename_expr);
@@ -358,7 +381,7 @@ struct SourceImporterImpl : public Resolver,
                 // This is to initialize the annotations dict, just ignore.
                 continue;
               } else {
-                if (auto fixed_up = qconvAttributeAssignmentSpecialHandlingHack(
+                if (auto fixed_up = attributeAssignmentSpecialHandlingHack(
                         qualified_classname, assign)) {
                   attributes.push_back(std::move(*fixed_up));
                 } else if (assign.rhs().present()) {
