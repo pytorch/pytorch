@@ -407,6 +407,18 @@ class BuildExtension(build_ext, object):
             # Use absolute path for output_dir so that the object file paths
             # (`objects`) get generated with absolute paths.
             output_dir = os.path.abspath(output_dir)
+
+            # Convert relative path in self.compilr.include_dirs to absolute path if any,
+            # For ninja build, the build location is not local, the build happns
+            # in a in script created build folder, relative path lost their correctness.
+            # To be consistent with jit extension, we allow user to enter relative include_dirs
+            # in setuptools.setup, and we convert the relative path to absolute path here
+            if self.compiler.include_dirs:
+                self_compiler_include_dirs = self.compiler.include_dirs
+                for i in range(len(self_compiler_include_dirs)):
+                    if not os.path.isabs(self_compiler_include_dirs[i]):
+                        self_compiler_include_dirs[i] = os.path.abspath(self_compiler_include_dirs[i])
+
             _, objects, extra_postargs, pp_opts, _ = \
                 self.compiler._setup_compile(output_dir, macros,
                                              include_dirs, sources,
