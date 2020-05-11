@@ -300,16 +300,6 @@ enum pytorch_qnnp_status qnnpackConv(
 
   const float convolution_scale =
       input_scale * conv_p.kernel_scale / output_scale;
-  if (convolution_scale >= 1.0f) {
-    pytorch_qnnp_log_error(
-        "failed to create convolution with %.7g input scale, %.7g kernel scale,"
-        " and %.7g output scale: "
-        "convolution scale %.7g is greater or equal to 1.0",
-        input_scale,
-        conv_p.kernel_scale,
-        output_scale,
-        convolution_scale);
-  }
   union pytorch_qnnp_q31_requantization_params requantization_params;
   union pytorch_qnnp_conv_quantization_params conv_quantization_params;
   if (conv_p.ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {

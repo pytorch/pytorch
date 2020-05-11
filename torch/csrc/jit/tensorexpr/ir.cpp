@@ -102,7 +102,7 @@ Store::Store(
     const Expr* value,
     const Expr* mask)
     : buf_(buf), indices_(std::move(indices)), value_(value), mask_(mask) {
-  if (buf->dtype() != kHandle) {
+  if (buf->base_handle()->dtype() != kHandle) {
     throw malformed_input("Store base handle must be Handle");
   }
   /*

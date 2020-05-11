@@ -440,6 +440,17 @@ static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
   auto s_iter = stack.begin();
   for (auto v : input_values) {
     AT_ASSERT(s_iter != stack.end());
+    // Leave packed param types alone. This is needed for downstream passes
+    // (like alias analysis) to work properly. This will be unpacked later
+    // in unpackQuantizedWeights.
+    if (auto named_type = v->type()->cast<c10::NamedType>()) {
+      if (auto qualname = named_type->name()) {
+        if (getCustomClass(qualname->qualifiedName())) {
+          s_iter++;
+          continue;
+        }
+      }
+    }
     if (v->type()->kind() == TupleType::Kind) {
       AT_ASSERT(v->node()->kind() == prim::Param);
       v->setType(getTupleTensorType(s_iter, stack.end(), v->type(), complete));
@@ -703,7 +714,10 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def(
           "__getattr__",
-          [](Object& self, const std::string& name) {
+          [](Object& self, const std::string& name) -> py::object {
+            if (name == "__qualname__") {
+              return py::cast(self.type()->name()->name());
+            }
             if (auto method = self.find_method(name)) {
               return py::cast(*method);
             }
@@ -919,6 +933,7 @@ void initJitScriptBindings(PyObject* module) {
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
       .def("_clone_instance", &Module::clone_instance)
+      .def("copy", &Module::copy)
       .def("deepcopy", &Module::deepcopy)
       .def_property_readonly("qualified_name", [](const Module& self) {
         return self.type()->name()->qualifiedName();
