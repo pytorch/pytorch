@@ -46,7 +46,6 @@
 namespace torch {
 namespace jit {
 
-
 inline IValue toIValue(
     py::handle obj,
     const TypePtr& type,
@@ -138,24 +137,22 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   // PythonFutureWrapper::wait().
   c10::optional<UnwrapFunc> unwrap_func;
 
-  private:
-    // Wrap Python function to guard deref
-    struct PythonFunctionGuard {
-      explicit PythonFunctionGuard(py::function func)
-          : func_(std::move(func)) {}
+ private:
+  // Wrap Python function to guard deref
+  struct PythonFunctionGuard {
+    explicit PythonFunctionGuard(py::function func) : func_(std::move(func)) {}
 
-      ~PythonFunctionGuard() {
-        pybind11::gil_scoped_acquire ag;
-        func_ = py::none();
-      }
-
-      py::function func_;
-    };
-
-    std::shared_ptr<PythonFutureWrapper> getPtr() {
-        return shared_from_this();
+    ~PythonFunctionGuard() {
+      pybind11::gil_scoped_acquire ag;
+      func_ = py::none();
     }
 
+    py::function func_;
+  };
+
+  std::shared_ptr<PythonFutureWrapper> getPtr() {
+    return shared_from_this();
+  }
 };
 
 // error reporting: when reporting user-caused errors, these functions should
