@@ -1634,11 +1634,11 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = torch.mean(x)
                 x = x.mean()
                 # interpolate node will introduce 3 quantize_per_tensor ops
-                x = F.interpolate(x, 4, mode='nearest') # interpolate node
-                x = F.upsample(x, (32, 32)) # interpolate node
-                x = F.upsample_nearest(x, (32, 32)) # interpolate node
-                x = F.interpolate(x, 4, mode='linear') # common node
-                x = F.upsample_bilinear(x, (32, 32)) # common node
+                x = F.interpolate(x, 4, mode='nearest')  # interpolate node
+                x = F.upsample(x, (32, 32))  # interpolate node
+                x = F.upsample_nearest(x, (32, 32))  # interpolate node
+                x = F.interpolate(x, 4, mode='linear')  # common node
+                x = F.upsample_bilinear(x, (32, 32))  # common node
                 x = torch.clamp(x, -3, 3)
                 x = x.clamp(-2.5, 2.5)
                 # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
@@ -1675,7 +1675,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         num_quant_by_op_type = {'conv': 2, 'common': 1, 'interpolate': 3}
         # number of ops for each type
         num_op_by_op_type = {'conv': 2, 'common': 27, 'interpolate': 3}
-        num_quantize_per_tensor = 1 # for output
+        num_quantize_per_tensor = 1  # for output
         for op_type, num_op in num_op_by_op_type.items():
             num_quantize_per_tensor += num_op * num_quant_by_op_type[op_type]
         FileCheck().check_count("aten::quantize_per_tensor(", num_quantize_per_tensor, exactly=True) \
