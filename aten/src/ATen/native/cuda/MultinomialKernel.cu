@@ -422,10 +422,10 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
           // See Note [Acquire lock when using random generators]
           std::lock_guard<std::mutex> lock(gen->mutex_);
 
-          // each thread will utilize several randoms (numdist/numblocks*numsamples/numthreads), however, since we have to use
+          // each thread generates a single sample for (numdist/numblocks.y) distributions, however, since we have to use
           // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
           // offset is 4 times that.
-          auto offset = (((n_sample-1)/block.x+1)*((numDist-1)/grid.x+1))*4;
+          auto offset = ((numDist-1)/grid.y+1)*4;
           rng_engine_inputs = gen->philox_engine_inputs(offset);
         }
         // Sample with replacement
