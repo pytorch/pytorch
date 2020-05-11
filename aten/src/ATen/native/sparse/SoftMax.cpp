@@ -317,52 +317,56 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
   /* Compute independent pools of indices */
   auto pools = get_pools(indices, sizes, dim);
 
-  for (auto const& pool_indices : pools) {
+  int64_t grain_size = 1;
+  parallel_for(0, pools.size(), grain_size, [&](int64_t begin, int64_t end) {
+      for (auto p = begin; p < end; p++) {
+        auto pool_indices = pools[p];
 
-    std::vector<scalar_t> mx_row(nvalues, -std::numeric_limits<scalar_t>::infinity());
-    std::vector<scalar_t> exp_sums_row(nvalues, 0);
+        std::vector<scalar_t> mx_row(nvalues, -std::numeric_limits<scalar_t>::infinity());
+        std::vector<scalar_t> exp_sums_row(nvalues, 0);
 
-    for (index_t i : pool_indices) {
-      auto values_row = values_accessor[i];
-      for (int64_t j=0; j < nvalues; j++) {
-        mx_row[j] = std::max(mx_row[j], values_row[j]);
-      }
-    }
-
-    /* Apply exp to (v - mx) and sum the results */
-    for (index_t i : pool_indices) {
-      auto values_row = values_accessor[i];
-      auto out_values_row = out_values_accessor[i];
-      for (int64_t j=0; j < nvalues; j++) {
-        auto v = std::exp(values_row[j] - mx_row[j]);
-        if (!LogSoftMax) {
-          out_values_row[j] = v;
+        for (index_t i : pool_indices) {
+          auto values_row = values_accessor[i];
+          for (int64_t j=0; j < nvalues; j++) {
+            mx_row[j] = std::max(mx_row[j], values_row[j]);
+          }
         }
-        exp_sums_row[j] += v;
-      }
-    }
 
-    for (int64_t j=0; j < nvalues; j++) {
-      if (LogSoftMax) {
-        mx_row[j] += std::log(exp_sums_row[j]);
-      } else {
-        exp_sums_row[j] = 1.0 / exp_sums_row[j];
-      }
-    }
+        /* Apply exp to (v - mx) and sum the results */
+        for (index_t i : pool_indices) {
+          auto values_row = values_accessor[i];
+          auto out_values_row = out_values_accessor[i];
+          for (int64_t j=0; j < nvalues; j++) {
+            auto v = std::exp(values_row[j] - mx_row[j]);
+            if (!LogSoftMax) {
+              out_values_row[j] = v;
+            }
+            exp_sums_row[j] += v;
+          }
+        }
 
-    /* Normalize with the sum of exponents */
-    for (index_t i : pool_indices) {
-      auto values_row = values_accessor[i];
-      auto out_values_row = out_values_accessor[i];
-      for (int64_t j=0; j < nvalues; j++) {
-        if (LogSoftMax) {
-          out_values_row[j] = values_row[j] - mx_row[j];
-        } else {
-          out_values_row[j] *= exp_sums_row[j];
+        for (int64_t j=0; j < nvalues; j++) {
+          if (LogSoftMax) {
+            mx_row[j] += std::log(exp_sums_row[j]);
+          } else {
+            exp_sums_row[j] = 1.0 / exp_sums_row[j];
+          }
+        }
+
+        /* Normalize with the sum of exponents */
+        for (index_t i : pool_indices) {
+          auto values_row = values_accessor[i];
+          auto out_values_row = out_values_accessor[i];
+          for (int64_t j=0; j < nvalues; j++) {
+            if (LogSoftMax) {
+              out_values_row[j] = values_row[j] - mx_row[j];
+            } else {
+              out_values_row[j] *= exp_sums_row[j];
+            }
+          }
         }
       }
-    }
-  }
+    });
 }
 
 template <typename scalar_t, typename index_t, bool LogSoftMax>
@@ -437,55 +441,60 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
   /* Compute independent pools of indices */
   auto pools = get_pools(out_indices, sizes, dim);
 
-  for (auto const& pool_indices : pools) {
-    std::vector<scalar_t> tmp_row(nvalues, 0);
+  int64_t grain_size = 1;
+  parallel_for(0, pools.size(), grain_size, [&](int64_t begin, int64_t end) {
+      for (auto p = begin; p < end; p++) {
+        auto pool_indices = pools[p];
 
-    /* Compute tmp = - sum_j output_j * grad_j */
-    for (index_t i : pool_indices) {
-      auto out_values_row = out_values_accessor[i];
-      auto values_row = values_accessor[i];
-      auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
-      auto j = low - grad_offsets.begin();
+        std::vector<scalar_t> tmp_row(nvalues, 0);
 
-      if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
-        auto grad_values_row = grad_values_accessor[j];
-        for (int64_t k=0; k<nvalues; k++) {
-          if (LogSoftMax) {
-            tmp_row[k] -= grad_values_row[k];
+        /* Compute tmp = - sum_j output_j * grad_j */
+        for (index_t i : pool_indices) {
+          auto out_values_row = out_values_accessor[i];
+          auto values_row = values_accessor[i];
+          auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
+          auto j = low - grad_offsets.begin();
+
+          if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
+            auto grad_values_row = grad_values_accessor[j];
+            for (int64_t k=0; k<nvalues; k++) {
+              if (LogSoftMax) {
+                tmp_row[k] -= grad_values_row[k];
+              } else {
+                tmp_row[k] -= out_values_row[k] * grad_values_row[k];
+              }
+            }
+          }
+        }
+
+        /* Compute grad_input = output * (grad + tmp)*/
+        for (index_t i : pool_indices) {
+          auto out_values_row = out_values_accessor[i];
+          auto values_row = values_accessor[i];
+          auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
+          auto j = low - grad_offsets.begin();
+
+          if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
+            auto grad_values_row = grad_values_accessor[j];
+            for (int64_t k=0; k<nvalues; k++) {
+              if (LogSoftMax) {
+                values_row[k] = grad_values_row[k] + std::exp(out_values_row[k]) * tmp_row[k];
+              } else {
+                values_row[k] = out_values_row[k] * (grad_values_row[k] + tmp_row[k]);
+              }
+            }
           } else {
-            tmp_row[k] -= out_values_row[k] * grad_values_row[k];
+            for (int64_t k=0; k<nvalues; k++) {
+              if (LogSoftMax) {
+                values_row[k] = std::exp(out_values_row[k]) * tmp_row[k];
+              } else {
+                values_row[k] = out_values_row[k] * (tmp_row[k]);
+              }
+            }
           }
         }
       }
-    }
-
-    /* Compute grad_input = output * (grad + tmp)*/
-    for (index_t i : pool_indices) {
-      auto out_values_row = out_values_accessor[i];
-      auto values_row = values_accessor[i];
-      auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
-      auto j = low - grad_offsets.begin();
-
-      if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
-        auto grad_values_row = grad_values_accessor[j];
-        for (int64_t k=0; k<nvalues; k++) {
-          if (LogSoftMax) {
-            values_row[k] = grad_values_row[k] + std::exp(out_values_row[k]) * tmp_row[k];
-          } else {
-            values_row[k] = out_values_row[k] * (grad_values_row[k] + tmp_row[k]);
-          }
-        }
-      } else {
-        for (int64_t k=0; k<nvalues; k++) {
-          if (LogSoftMax) {
-            values_row[k] = std::exp(out_values_row[k]) * tmp_row[k];
-          } else {
-            values_row[k] = out_values_row[k] * (tmp_row[k]);
-          }
-        }
-      }
-    }
-  }
+    });
 }
 
 } // namespace
