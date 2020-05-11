@@ -340,7 +340,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     auto fut = c10::make_intrusive<Future>(type);
     addCallback([fut, cb{std::move(callback)}]() {
       try {
-        fut->markCompleted(std::move(cb()));
+        fut->markCompleted(cb());
       } catch (std::exception& e) {
         fut->setError(e.what());
       }
