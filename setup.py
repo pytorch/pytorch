@@ -758,7 +758,7 @@ if __name__ == '__main__':
                 'py.typed',
                 'bin/*',
                 'test/*',
-                '__init__.pyi',
+                '_C/*.pyi',
                 'cuda/*.pyi',
                 'optim/*.pyi',
                 'autograd/*.pyi',
