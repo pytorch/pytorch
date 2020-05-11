@@ -24,7 +24,7 @@ class device:
 
     # THPDevice_pynew
     @overload
-    def __init__(self, device: Device) -> None: ...
+    def __init__(self, device: Union[_int, str]) -> None: ...
 
     @overload
     def __init__(self, type: str, index: _int) -> None: ...
@@ -114,7 +114,8 @@ def _get_cudnn_benchmark() -> _bool: ...  # THPModule_benchmarkCuDNN
 def _set_cudnn_benchmark(arg: _bool) -> None: ...  # THPModule_setBenchmarkCuDNN
 def _get_cudnn_deterministic() -> _bool: ...  # THPModule_deterministicCuDNN
 def _set_cudnn_deterministic(arg: _bool) -> None: ...  # THPModule_setDeterministicCuDNN
-# TODO: Is there a Capsule type in typing?  Doesn't seem so...
+# NB: There is no Capsule type in typing, see
+# https://code.activestate.com/lists/python-dev/139675/
 def _to_dlpack(data: Tensor) -> Any: ...  # THPModule_toDLPack
 def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
 def set_flush_denormal(arg: _bool) -> _bool: ...  # THPModule_setFlushDenormal
