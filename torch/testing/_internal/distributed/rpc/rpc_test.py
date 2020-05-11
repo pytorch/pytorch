@@ -2507,7 +2507,7 @@ class RpcTest(RpcAgentTestFixture):
             TypeError,
             "incompatible function arguments."
         ):
-           rpc.rpc_async(dst, raise_func)._then(None)
+            rpc.rpc_async(dst, raise_func)._then(None)
 
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):

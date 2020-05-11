@@ -831,50 +831,7 @@ void initJITBindings(PyObject* module) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_then",
-          //&PythonFutureWrapper::then,
-          [&](std::shared_ptr<PythonFutureWrapper> fut, py::function cb) {
-            return fut->then(std::move(cb));
-          },
-          /*
-          // need the shared_ptr here because we need to keep this future alive to
-          // append the cb below
-          [&](std::shared_ptr<PythonFutureWrapper> fut, py::function cb) {
-
-            auto pf = std::make_shared<PythonFunction>(std::move(cb));
-            return std::make_shared<jit::PythonFutureWrapper>(fut->fut->then(
-                [pf, fut]() -> IValue {
-                  if (fut->fut->hasError()) {
-                    throw std::runtime_error(c10::str(
-                        "Parent Future reported error: ",
-                        (*(fut->fut->error())).what()));
-                  }
-
-                  try {
-                    pybind11::gil_scoped_acquire ag;
-                    return jit::toIValue(pf->func_(fut), PyObjectType::get());
-                  } catch (py::error_already_set& e) {
-                    auto err = std::runtime_error(c10::str(
-                        "Got the following error when running the callback: ",
-                        e.what()));
-                    {
-                      pybind11::gil_scoped_acquire ag;
-                      // Release ownership on py::objects and also restore Python
-                      // Error Indicator.
-                      e.restore();
-                      // Clear the Python Error Indicator as we has recorded the
-                      // exception in the response message.
-                      PyErr_Clear();
-                    }
-
-                    throw err;
-                  } catch (...) {
-                    throw std::runtime_error("Unknown error when running callback");
-                  }
-                },
-                PyObjectType::get()));
-
-          },
-          */
+          &PythonFutureWrapper::then,
           py::call_guard<py::gil_scoped_release>());
 
   m.def("fork", [](py::args args) {
