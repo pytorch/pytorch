@@ -1377,8 +1377,6 @@ Tensor & unsqueeze_(Tensor& self, int64_t dim) {
   return self.as_strided_(std::get<0>(g), std::get<1>(g));
 }
 
-
-
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   start_dim = maybe_wrap_dim(start_dim, self.dim());
   end_dim = maybe_wrap_dim(end_dim, self.dim());
