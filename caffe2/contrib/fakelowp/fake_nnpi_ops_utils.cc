@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cinttypes>
 #include <cmath>
 
