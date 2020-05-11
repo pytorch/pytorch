@@ -128,8 +128,6 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
             }
 
             throw err;
-          } catch (...) {
-            throw std::runtime_error("Unknown error when running callback");
           }
         },
         PyObjectType::get()));

@@ -949,6 +949,26 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         self.assertEqual(future.wait(), torch.ones(2) * 2 + 1)
 
     @dist_init
+    def test_callback_chain(self):
+        n = self.rank + 1
+        dst = worker_name(n % self.world_size)
+
+        def callback(fut):
+            return fut.wait() + 1
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            one_arg,
+            args=(torch.ones(n, n),)
+        )
+
+        num_cbs = 20
+        for _ in range(num_cbs):
+            fut = fut._then(callback)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) + 1 + num_cbs)
+
+    @dist_init
     def test_async_script_throw(self):
         future = rpc.rpc_async(
             worker_name((self.rank + 1) % self.world_size),
