@@ -9514,6 +9514,38 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, msg='{} with out= kwarg'.format(fn_name))
 
+    def test_no_ident_reduction_on_emptytensor(self, device):
+        a = torch.zeros((0, 1, 0), device=device)
+        b = torch.zeros((1, 0, 0), device=device)
+
+        for fn in [torch.max, torch.min]:
+            ident_err = 'operation does not have an identity'
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(a))
+
+            ident_err = 'operation does not have an identity'
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(a, dim=0))
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(b, dim=1))
+            self.assertEqual(fn(a, dim=1).values.nelement(), 0)
+            self.assertEqual(fn(b, dim=0).values.nelement(), 0)
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(a, dim=2))
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(b, dim=-1))
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(a, dim=2))
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(b, dim=-1))
+
+        for fn in [torch.argmax, torch.argmin]:
+            ident_err = 'operation does not have an identity'
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(a))
+
+            ident_err = 'operation does not have an identity'
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(a, dim=0))
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(b, dim=1))
+            self.assertEqual(fn(a, dim=1).nelement(), 0)
+            self.assertEqual(fn(b, dim=0).nelement(), 0)
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(a, dim=2))
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(a, dim=-1))
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(b, dim=2))
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(b, dim=-1))
+
     @largeCUDATensorTest('10GB')
     def test_reduction_split(self, device):
         # Test reduction when there is a 32bit-indexing split

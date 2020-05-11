@@ -84,9 +84,16 @@ inline bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &sel
     return true;
   }
 
-  if (self.numel() == 0) {
+  if (dim < 0 && self.numel() == 0) {
     AT_ERROR("cannot perform reduction function ", fn_name,
-             " on tensor with no elements because the operation does not have an identity");
+              " on a tensor ", self.sizes(), " with no elements because the operation does not have an identity."
+              " Try performing reduction over a non-zero dimension.");
+  }
+
+  if (dim >= 0 && self.size(dim) == 0) {
+    AT_ERROR("cannot perform reduction function ", fn_name,
+             " on a zero dimension ", dim, " of ", self.sizes(), " because the operation does not have an identity."
+             " Try performing reduction over a non-zero dimension.");
   }
   return false;
 }
