@@ -55,10 +55,13 @@ py::object toPyObject(IValue ivalue);
 
 // The PythonFutureWrapper for ivalue::Future
 //
-// VISIBILITY_HIDDEN is for silencing compiling error,
+// NB: VISIBILITY_HIDDEN is for silencing compiling error,
 // "error: 'torch::jit::PythonFutureWrapper' declared with greater visibility
 // than the type of its field 'torch::jit::PythonFutureWrapper::unwrap_func'
 // [-Werror=attributes]"
+//
+// NB: inherit from enable_shared_from_this because then(py::function) needs to
+//     get a shared_ptr from this pointer.
 struct VISIBILITY_HIDDEN PythonFutureWrapper
     : std::enable_shared_from_this<PythonFutureWrapper> {
   using UnwrapFunc = std::function<void(py::object)>;
@@ -102,10 +105,10 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         // Capture a copy of the ivalue::Future instead of the `this` pointer
         // because the PythonFutureWrapper object could have been deleted
         // when the callbacks are fired. For example, RPC only captures the
-        // ivalue::Future instead PythonFutureWrapper of in FutureMessage
+        // ivalue::Future instead of PythonFutureWrapper in FutureMessage's
         // callback functions. Hence, if user code does not hold a reference to
         // this PythonFutureWrapper object, there is no guarantee that the
-        // PythonFutureWrapper is still valid in the callback.
+        // PythonFutureWrapper is still valid when running the callback.
         [pyFut(this->getPtr()), pf(std::move(pf))]() -> IValue {
           try {
             pybind11::gil_scoped_acquire ag;

@@ -2427,13 +2427,12 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_callback_multi(self):
         num_cbs = 10
-        set_by_cbs = [concurrent.futures.Future() for _ in range(num_cbs)]
         n = self.rank + 1
 
         def callback(idx, fut):
             ret = fut.wait()
             self.assertEqual(ret, torch.ones(n, n) * 2)
-            set_by_cbs[idx].set_result(ret.clone() + idx)
+            return ret + idx
 
         fut = rpc.rpc_async(
             worker_name(n % self.world_size),
@@ -2441,18 +2440,39 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(n, n), torch.ones(n, n))
         )
 
+        cb_futs = []
         for idx in range(num_cbs):
-            fut._then(partial(callback, idx))
+            cb_futs.append(fut._then(partial(callback, idx)))
 
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
         for idx in range(num_cbs):
             self.assertEqual(
-                set_by_cbs[idx].result(),
+                cb_futs[idx].wait(),
                 torch.ones(n, n) * 2 + idx
             )
 
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+    @dist_init
+    def test_callback_chain(self):
+        n = self.rank + 1
+        dst = worker_name(n % self.world_size)
+
+        def callback(fut):
+            return fut.wait() + 1
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), 1)
+        )
+
+        num_cbs = 20
+        for _ in range(num_cbs):
+            fut = fut._then(callback)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) + 1 + num_cbs)
 
     @dist_init
     def test_callback_in_rpc(self):
