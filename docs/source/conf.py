@@ -120,7 +120,7 @@ coverage_ignore_classes = [
     "RecursiveScriptModule",
     "ScriptFunction",
     "ScriptMeta",
-    # "ScriptModule",
+    "ScriptModule",
     "ScriptWarning",
     "TopLevelTracedModule",
     "TracedModule",
