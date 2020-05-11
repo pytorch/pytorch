@@ -8864,6 +8864,16 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(dims, device=device)
             test_multidim(x, singleton_dim)
 
+            # check reducing median with NaNs
+            # If the element in the median is a NaN, there can be issues
+            # when comparining with other nan elements
+            if fn_name == 'median':
+                y = torch.full((1, 3), np.nan, dtype=torch.float64, device=device)
+                y[:, :1] = 1.1
+                values, indices = fn_tuple(y, dim=1)
+                self.assertEqual(torch.tensor([nan], dtype=torch.float64), values)
+                self.assertEqual(torch.tensor([1], dtype=torch.int64), indices)
+
             # check reducing with output kwargs
             if fn_name in ['median', 'mode', 'max', 'min']:
                 y = torch.randn(5, 3, device=device)
