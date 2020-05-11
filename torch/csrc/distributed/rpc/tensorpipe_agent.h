@@ -186,6 +186,13 @@ class TensorPipeAgent : public RpcAgent {
   NetworkDataDict networkData_;
   // Mutex to guarg networkData_
   std::mutex networkDataMutex_;
+
+  // Running total of un-processed, un-errored RPC calls sent
+  std::atomic<int32_t> clientActiveCalls_{0};
+  // Running total of un-processed RPC requests received
+  std::atomic<int32_t> serverActiveCalls_{0};
+  // Running total of RPC requests that will be completed asynchronously
+  std::atomic<int32_t> serverActiveAsyncCalls_{0};
 };
 
 } // namespace rpc
