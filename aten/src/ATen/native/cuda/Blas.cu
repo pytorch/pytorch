@@ -6,19 +6,9 @@ namespace at { namespace native {
 
 Tensor &addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta_, Scalar alpha_) {
   auto r_stride = result.stride(0);
-  auto vec_size = vec.size(0);
   auto vec_stride = vec.stride(0);
 
-  if (mat.scalar_type() == kHalf || mat.scalar_type() == kBFloat16) {
-    // Currently no Hgemv/SgemvEx in Cublas
-    Tensor vec_as_matrix = vec.reshape({vec_size, 1}).contiguous();
-    Tensor self_as_matrix = self.reshape({mat.size(0), 1}).contiguous();
-    at::addmm_out(result, self_as_matrix, mat, vec_as_matrix, beta_, alpha_);
-    result.resize_({result.size(0)});
-    return result;
-  }
-
-  AT_DISPATCH_FLOATING_TYPES(mat.scalar_type(), "addmv_impl_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, mat.scalar_type(), "addmv_impl_cuda", [&] {
     auto beta = beta_.to<scalar_t>();
     auto alpha = alpha_.to<scalar_t>();
     if (mat.stride(0) == 1) {
@@ -40,11 +30,15 @@ Tensor &addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, c
 
     // In cublasSgemv, cublasDgemv (x,0).mv(0) does not
     // handle beta, whereas cublasSgemm, cublasDgemm do for case where (x,0).mm(0,y).
-    if (vec.size(0) == 0 && mat.size(0) != 0) {
-      if (beta == scalar_t(0)) {
-        result.zero_();
-      } else if (beta != scalar_t(1)) {
-        result.mul_(beta);
+    // This logic could live in blas::gemv<float> and <double> if blas::gemv's interface
+    // can be extended to accept result as an argument.
+    if (std::is_same<scalar_t, float>::value || std::is_same<scalar_t, double>::value) {
+      if (vec.size(0) == 0 && mat.size(0) != 0) {
+        if (beta == scalar_t(0)) {
+          result.zero_();
+        } else if (beta != scalar_t(1)) {
+          result.mul_(beta);
+        }
       }
     }
   });

@@ -29,9 +29,9 @@ blacklist = [
     "dump_patches",
 ]
 
-def make_stub(func, name_override=None):
+def make_stub(func, name):
     rcb = _jit_internal.createResolutionCallbackFromClosure(func)
-    ast = torch.jit.get_jit_def(func, self_name="RecursiveScriptModule", def_name_override=name_override)
+    ast = torch.jit.get_jit_def(func, name, self_name="RecursiveScriptModule")
     return ScriptMethodStub(rcb, ast, func)
 
 def make_stub_from_method(nn_module, method_name):
@@ -46,7 +46,7 @@ def make_stub_from_method(nn_module, method_name):
     #   forward = _forward
     # In this case, the actual function object will have the name `_forward`,
     # even though we requested a stub for `forward`.
-    return make_stub(func, name_override=method_name)
+    return make_stub(func, method_name)
 
 # base types that can be constants
 # in addition, tuples and lists of these base types are also considered constants
@@ -465,10 +465,10 @@ def _check_no_signature(func):
 def make_stubs_for_overloads(overload_info):
     overload_stubs = []
     for orig_fn, overloads in overload_info.items():
-        orig_ast = torch.jit.get_jit_def(orig_fn, self_name="RecursiveScriptModule")
+        orig_ast = torch.jit.get_jit_def(orig_fn, orig_fn.__name__, self_name="RecursiveScriptModule")
         for overload_name, overload_fn in overloads:
             _check_no_signature(overload_fn)
-            over_ast = torch.jit.get_jit_def(overload_fn, self_name="RecursiveScriptModule")
+            over_ast = torch.jit.get_jit_def(overload_fn, overload_fn.__name__, self_name="RecursiveScriptModule")
             new_ast = torch._C._replace_overloaded_method_decl(over_ast.decl(), orig_ast, overload_name)
             _rcb = _jit_internal.createResolutionCallbackFromClosure(orig_fn)
             overload_stubs.append(ScriptMethodStub(_rcb, new_ast, overload_fn))
@@ -590,7 +590,7 @@ def wrap_cpp_module(cpp_module):
 def compile_unbound_method(concrete_type, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
-    stub = make_stub(fn)
+    stub = make_stub(fn, fn.__name__)
     with torch.jit._disable_emit_hooks():
         # We don't want to call the hooks here since the graph that is calling
         # this function is not yet complete
