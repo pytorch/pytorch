@@ -5,7 +5,6 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <ATen/autocast_mode.h>
 #include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
 
@@ -53,16 +52,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_profiler_enabled", profilerEnabled);
-
-  // TODO: remove when jit future can hold PyObject (https://github.com/pytorch/pytorch/issues/34999)
-#ifdef USE_DISTRIBUTED
-  m.def(
-      "_call_end_callbacks_on_fut",
-      [](const at::Tensor& handle,
-         const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
-        torch::autograd::profiler::_call_end_callbacks_on_fut(handle, fut);
-      });
-#endif
 
   Py_RETURN_TRUE;
 }
