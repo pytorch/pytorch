@@ -6,6 +6,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - attach_scripts
+    - load_shared_env
     - setup_linux_system_environment
     - checkout
     - optional_merge_target_branch
@@ -16,9 +17,9 @@ jobs:
         command: |
           set -e
           # Pull Docker image and run build
-          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-          time docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}:${DOCKER_TAG}
+          time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
           git submodule sync && git submodule update -q --init --recursive
 
@@ -41,7 +42,7 @@ jobs:
             # The xla build uses the same docker image as
             # pytorch-linux-trusty-py3.6-gcc5.4-build. In the push step, we have to
             # distinguish between them so the test can pick up the correct image.
-            output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+            output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
             if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-xla
             elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
@@ -68,6 +69,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - attach_scripts
+    - load_shared_env
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -76,7 +78,7 @@ jobs:
         command: |
           set -e
           # See Note [Special build images]
-          output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-xla
           elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
