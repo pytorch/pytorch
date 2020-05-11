@@ -341,7 +341,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * to know for sure when the callback has finished.
    */
   c10::intrusive_ptr<Future> then(
-      std::function<IValue(void)> callback, TypePtr type) {
+      std::function<IValue(void)> callback,
+      TypePtr type) {
     auto fut = c10::make_intrusive<Future>(type);
     // Cannot move capture std::function in lambda, because it cannot deduce
     // the template type for std::function. Hence use std::bind to explicitly
@@ -354,8 +355,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
             fut->setError(e.what());
           }
         },
-        std::move(callback)
-    ));
+        std::move(callback)));
     return fut;
   }
 
