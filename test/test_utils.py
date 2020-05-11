@@ -14,7 +14,7 @@ from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import skipIfRocm, load_tests, retry, IS_SANDCASTLE
+from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE
 from urllib.error import HTTPError
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
