@@ -41,10 +41,35 @@ float TensorPipeAgent::TimeSeriesMetricsTracker::computeAverage() const {
 
 ////////////////////////  TensorpipeRpcAgent  /////////////////////////////////
 
+void TensorPipeAgent::collectNames() {
+  const worker_id_t selfId = workerInfo_.id_;
+  const std::string& selfName = workerInfo_.name_;
+
+  std::vector<uint8_t> selfNameVector(
+      (uint8_t*)selfName.c_str(),
+      (uint8_t*)selfName.c_str() + selfName.length());
+  addressStore_->set("names/" + c10::to_string(selfId), selfNameVector);
+
+  workerIdToInfo_.emplace(selfId, WorkerInfo(selfName, selfId));
+  workerNameToInfo_.emplace(selfName, WorkerInfo(selfName, selfId));
+  for (worker_id_t workerId = 0; workerId < worldSize_; ++workerId) {
+    if (workerId == selfId) {
+      continue;
+    }
+    std::vector<uint8_t> workerNameVector =
+        addressStore_->get("names/" + c10::to_string(workerId));
+    std::string workerName(
+        (char*)workerNameVector.data(), workerNameVector.size());
+    workerIdToInfo_.emplace(workerId, WorkerInfo(workerName, workerId));
+    workerNameToInfo_.emplace(workerName, WorkerInfo(workerName, workerId));
+  }
+}
+
 TensorPipeAgent::TensorPipeAgent(
-    worker_id_t selfId,
-    std::string selfName,
     std::shared_ptr<::c10d::Store> addressStore,
+    std::string selfName,
+    worker_id_t selfId,
+    int worldSize,
     TensorPipeRpcBackendOptions opts)
     : RpcAgent(
           WorkerInfo(std::move(selfName), selfId),
@@ -53,14 +78,9 @@ TensorPipeAgent::TensorPipeAgent(
               (long)(opts.rpcTimeoutSeconds * kToMilliseconds))),
       context_(std::make_shared<tensorpipe::Context>()),
       addressStore_(std::move(addressStore)),
+      worldSize_(worldSize),
       opts_(std::move(opts)) {
-  // Generate the maps for once.
-  for (const auto& kv : opts_.workerNameToId) {
-    const string& workerName = kv.first;
-    worker_id_t workerId = kv.second;
-    workerIdToInfo_.emplace(workerId, WorkerInfo(workerName, workerId));
-    workerNameToInfo_.emplace(workerName, WorkerInfo(workerName, workerId));
-  }
+  collectNames();
 
   // Initialize the time-series metrics tracking map
   timeSeriesMetrics_[kGilAverageWaitTime] =
