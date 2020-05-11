@@ -95,6 +95,8 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
       return FloatImm::make(static_cast<float>(val.toDouble()));
     } else if (val.isInt()) {
       return IntImm::make(val.toInt());
+    } else if (val.isBool()) {
+      return BoolImm::make(val.toBool());
     } else if (val.isNone()) {
       // This is just a placeholder so we don't throw.  None-handling
       // is operator-specific and should be handled properly in

@@ -77,7 +77,9 @@ void remainder_kernel_cuda(TensorIterator& iter) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "remainder_cuda", [&]() {
       gpu_kernel_with_scalars(iter,
         []GPU_LAMBDA(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          return a - b * static_cast<scalar_t>(std::floor(a / b));
+          auto mod = ::fmod(a, b);
+          if ((mod != 0) && ((b < 0) != (mod < 0))) mod += b;
+          return mod;
         });
     });
   }
