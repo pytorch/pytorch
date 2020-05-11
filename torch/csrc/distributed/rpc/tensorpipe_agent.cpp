@@ -22,6 +22,9 @@ constexpr long kToMilliseconds = 1000;
 const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
 const std::string kThreadPoolSize = "agent.thread_pool_size";
 const std::string kNumIdleThreads = "agent.num_idle_threads";
+const std::string kClientActiveCalls = "agent.client_active_calls";
+const std::string kServerActiveCalls = "agent.server_active_calls";
+const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
 
 //////////////////////////  MetricsTracker  /////////////////////////////////
 
@@ -453,6 +456,10 @@ std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
   metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
   metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
+  metrics[kClientActiveCalls] = c10::to_string(clientActiveCalls_.load());
+  metrics[kServerActiveCalls] = c10::to_string(serverActiveCalls_.load());
+  metrics[kServerActiveAsyncCalls] =
+      c10::to_string(serverActiveAsyncCalls_.load());
   if (isGILProfilingEnabled()) {
     {
       std::unique_lock<std::mutex> lock(metricsMutex_);
