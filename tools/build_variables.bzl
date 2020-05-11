@@ -129,6 +129,7 @@ libtorch_core_sources = [
     "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
+    "torch/csrc/jit/passes/remove_dropout.cpp",
     "torch/csrc/jit/passes/requires_grad_analysis.cpp",
     "torch/csrc/jit/passes/shape_analysis.cpp",
     "torch/csrc/jit/passes/specialize_autogradzero.cpp",
