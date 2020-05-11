@@ -16011,14 +16011,23 @@ a")
             if z == 8:
                 return 1
 
+            if z != 16:
+                z = z - 2
+                abc = 4
+            else:
+                return 3
+
+            z = z * abc
             return z * z * z
 
         self.checkScript(test_multiple, (5,))
         self.checkScript(test_multiple, (2,))
+        self.checkScript(test_multiple, (4,))
         self.checkScript(test_multiple, (3,))
+        self.checkScript(test_multiple, (10,))
 
         graph = torch.jit.script(test_multiple).graph
-        FileCheck().check_count("prim::If", 2, exactly=True).run(graph)
+        FileCheck().check_count("prim::If", 3, exactly=True).run(graph)
         print(torch.jit.script(test_multiple).code)
 
     def test_is_scripting_metacompile(self):
