@@ -60,13 +60,10 @@ std::vector<index_t> get_offsets(const Tensor& indices, const std::vector<index_
       get_offsets(indices, (2, 5), 0) -> [0, 3, 4, 1, 3]
       get_offsets(indices, (2, 5), 1) -> [0, 0, 0, 5, 5]
 
-    This function together with `get_dense_offsets` defined below are
-    used to compute the indices mapping required in the sparse softmax
-    algorithm (see below).
   */
   auto ndim = indices.size(0);
   auto nnz = indices.size(1);
-  std::vector<index_t> offsets(nnz, 0);
+  std::vector<index_t> offsets(nnz);
   std::vector<index_t> strides(ndim, 1);
   auto indices_accessor = indices.accessor<index_t, 2>();
 
@@ -76,54 +73,73 @@ std::vector<index_t> get_offsets(const Tensor& indices, const std::vector<index_
     }
   }
 
-  for (int64_t j=0; j < ndim; j++) {
-    if (j != dim) {
+  for (int64_t i=0; i < nnz; i++) {
+    index_t acc = 0;
+    for (int64_t j=0; j < ndim; j++) {
       auto indices_row = indices_accessor[j];
       auto stride = strides[j];
-      for (int64_t i=0; i < nnz; i++) {
-        offsets[i] += stride * indices_row[i];
+      if (j != dim) {
+        acc += stride * indices_row[i];
       }
     }
+    offsets[i] = acc;
   }
 
   return offsets;
 }
 
 template <typename index_t>
-std::vector<index_t> get_dense_offsets(index_t &mx, const std::vector<index_t>& offsets) {
+std::vector<std::vector<index_t>> get_pools(const Tensor& indices, const std::vector<index_t>& sizes, const int64_t dim) {
   /*
-    Return the dense set of offsets:
+    Return pools of indices that align with the given dimension.
 
-      If
-        pool = get_dense_offsets(mx, offsets)
-      then
-        pool.size() == offsets.size()
-        pool[i] == pool[j] iff offsets[i] == offsets[j]
-        set(pool) == set(range(mx))
+    Parameters:
+      `indices` - sparse tensor indices
+      `sizes`   - sparse tensor dimensions
+      `dim`     - given dimension
 
-    and the size of the pool via changing `mx` argument in-place.
+    Returns:
+      `pools`   - vector of index vectors
 
-    This function remaps a list of integers to a dense list of
-    integers. For example,
+    A pool is defined as a list of indices (of sparse tensor values)
+    that participate in the same softmax computation:
 
-      get_dense_offsets([0, 3, 4, 1, 3]) -> [0, 1, 2, 3, 1]
+    - pools[i] intersection with pools[j] is empty iff i != j
+    - union of all pools is set(range(nnz))
+    - X.values[k], k in pools[i], does not affect the result of softmax(X)[n], n in pools[j], iff i != j
+
   */
-  auto n = offsets.size();
-  std::vector<index_t> pool(n, 0);
-  std::map<index_t, index_t> i2p;
-  for (int64_t i=0; i < n; i++) {
-    auto c = offsets[i];
-    auto it = i2p.find(c);
-    index_t p = i2p.size();
-    if (it == i2p.end()) {
-      i2p.emplace(std::make_pair(c, p));
-    } else {
-      p = it->second;
+
+  std::vector<std::vector<index_t>> pools;
+
+  auto ndim = indices.size(0);
+  auto nnz = indices.size(1);
+  std::vector<index_t> strides(ndim, 1);
+  auto indices_accessor = indices.accessor<index_t, 2>();
+
+  if (ndim > 1) {
+    for (int64_t i=ndim - 2; i >= 0; i--) {
+      strides[i] = strides[i + 1] * (i + 1 == dim? 1 : sizes[i + 1]);
     }
-    pool[i] = p;
   }
-  mx = i2p.size();
-  return pool;
+
+  for (int64_t i=0; i < nnz; i++) {
+    index_t pool_index = 0;
+    for (int64_t j=0; j < ndim; j++) {
+      if (j != dim) {
+        auto indices_row = indices_accessor[j];
+        auto stride = strides[j];
+        pool_index += stride * indices_row[i];
+      }
+    }
+    while (pool_index >= pools.size()) {
+      std::vector<index_t> indices;
+      pools.push_back(indices);
+    }
+    pools[pool_index].push_back(i);
+  }
+
+  return pools;
 }
 
 template <typename scalar_t, typename index_t, bool LogSoftMax>
@@ -263,8 +279,9 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
     operations become element-wise tensor operations.
 
     The implementation below has more optimizations such as that
-    minimize the calls to exp functions as well as reuse of softmax
-    implementation for log_softmax.
+    collect pool indices for enabling concurrency, minimize the calls
+    to exp functions as well as reuse of softmax implementation for
+    log_softmax.
   */
   auto sparse_dim = input.sparse_dim();
   auto indices = input._indices().contiguous();
@@ -290,11 +307,6 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
   auto sizes = input.sizes().vec();
   auto nvalues = get_nvalues(sizes, sparse_dim);
 
-  /* Compute pool indices */
-  std::vector<index_t> offsets = get_offsets<index_t>(indices, sizes, dim);
-  int64_t npools;
-  std::vector<index_t> pool = get_dense_offsets<index_t>(npools, offsets);
-
   /* Prepare scratch space and accessors */
   auto values_2 = values.view({nnz, nvalues});
   auto values_accessor = values_2.accessor<scalar_t, 2>();
@@ -302,51 +314,34 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
   auto out_values_2 = out_values.view({nnz, nvalues});
   auto out_values_accessor = out_values_2.accessor<scalar_t, 2>();
 
-  Tensor mx = at::empty({npools, nvalues}, values.options());
-  auto mx_accessor = mx.accessor<scalar_t, 2>();
+  /* Compute independent pools of indices */
+  auto pools = get_pools(indices, sizes, dim);
 
-  Tensor exp_sums = at::zeros_like(mx);
-  auto exp_sums_accessor = exp_sums.accessor<scalar_t, 2>();
+  for (auto const& pool_indices : pools) {
 
-  /* Compute mx tensor */
-  {
-    auto ninf = -std::numeric_limits<scalar_t>::infinity();
-    for (int64_t i=0; i < npools; i++) {
-      auto mx_row = mx_accessor[i];
+    std::vector<scalar_t> mx_row(nvalues, -std::numeric_limits<scalar_t>::infinity());
+    std::vector<scalar_t> exp_sums_row(nvalues, 0);
+
+    for (index_t i : pool_indices) {
+      auto values_row = values_accessor[i];
       for (int64_t j=0; j < nvalues; j++) {
-        mx_row[j] = ninf;
+        mx_row[j] = std::max(mx_row[j], values_row[j]);
       }
     }
-  }
 
-  for (int64_t i=0; i < nnz; i++) {
-    auto p = pool[i];
-    auto mx_row = mx_accessor[p];
-    auto values_row = values_accessor[i];
-    for (int64_t j=0; j < nvalues; j++) {
-      mx_row[j] = std::max(mx_row[j], values_row[j]);
-    }
-  }
-
-  /* Apply exp to (v - mx) and sum the results */
-  for (int64_t i=0; i < nnz; i++) {
-    auto p = pool[i];
-    auto mx_row = mx_accessor[p];
-    auto exp_sums_row = exp_sums_accessor[p];
-    auto values_row = values_accessor[i];
-    auto out_values_row = out_values_accessor[i];
-    for (int64_t j=0; j < nvalues; j++) {
-      auto v = std::exp(values_row[j] - mx_row[j]);
-      if (!LogSoftMax) {
-        out_values_row[j] = v;
+    /* Apply exp to (v - mx) and sum the results */
+    for (index_t i : pool_indices) {
+      auto values_row = values_accessor[i];
+      auto out_values_row = out_values_accessor[i];
+      for (int64_t j=0; j < nvalues; j++) {
+        auto v = std::exp(values_row[j] - mx_row[j]);
+        if (!LogSoftMax) {
+          out_values_row[j] = v;
+        }
+        exp_sums_row[j] += v;
       }
-      exp_sums_row[j] += v;
     }
-  }
 
-  for (int64_t i=0; i < npools; i++) {
-    auto mx_row = mx_accessor[i];
-    auto exp_sums_row = exp_sums_accessor[i];
     for (int64_t j=0; j < nvalues; j++) {
       if (LogSoftMax) {
         mx_row[j] += std::log(exp_sums_row[j]);
@@ -354,24 +349,20 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
         exp_sums_row[j] = 1.0 / exp_sums_row[j];
       }
     }
-  }
 
-  /* Normalize with the sum of exponents */
-  for (int64_t i=0; i < nnz; i++) {
-    auto p = pool[i];
-    auto mx_row = mx_accessor[p];
-    auto exp_sums_row = exp_sums_accessor[p];
-    auto values_row = values_accessor[i];
-    auto out_values_row = out_values_accessor[i];
-    for (int64_t j=0; j < nvalues; j++) {
-      if (LogSoftMax) {
-        out_values_row[j] = values_row[j] - mx_row[j];
-      } else {
-        out_values_row[j] *= exp_sums_row[j];
+    /* Normalize with the sum of exponents */
+    for (index_t i : pool_indices) {
+      auto values_row = values_accessor[i];
+      auto out_values_row = out_values_accessor[i];
+      for (int64_t j=0; j < nvalues; j++) {
+        if (LogSoftMax) {
+          out_values_row[j] = values_row[j] - mx_row[j];
+        } else {
+          out_values_row[j] *= exp_sums_row[j];
+        }
       }
     }
   }
-
 }
 
 template <typename scalar_t, typename index_t, bool LogSoftMax>
@@ -434,17 +425,6 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
   auto nnz = values.size(0);
   auto nvalues = get_nvalues(sizes, sparse_dim);
 
-  /* Compute pool indices */
-  std::vector<index_t> offsets = get_offsets<index_t>(out_indices, sizes, dim);
-  index_t npools;
-  std::vector<index_t> pool = get_dense_offsets<index_t>(npools, offsets);
-
-  /* Prepare scratch space and accessors */
-
-  Tensor tmp = at::empty({npools, nvalues}, out_values.options());
-  tmp.zero_();
-  auto tmp_accessor = tmp.accessor<scalar_t, 2>();
-
   auto values_2 = values.view({nnz, nvalues});
   auto values_accessor = values_2.accessor<scalar_t, 2>();
 
@@ -454,53 +434,58 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
   auto grad_values_2 = grad_values.view({grad_nnz, nvalues});
   auto grad_values_accessor = grad_values_2.accessor<scalar_t, 2>();
 
-  /* Compute tmp = - sum_j output_j * grad_j */
-  for (int64_t i=0; i<out_nnz; i++) {
-    auto p = pool[i];
-    auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
-    auto j = low - grad_offsets.begin();
-    auto tmp_row = tmp_accessor[p];
-    auto out_values_row = out_values_accessor[i];
-    if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
-      auto grad_values_row = grad_values_accessor[j];
-      for (int64_t k=0; k<nvalues; k++) {
-        if (LogSoftMax) {
-          tmp_row[k] -= grad_values_row[k];
-        } else {
-          tmp_row[k] -= out_values_row[k] * grad_values_row[k];
+  /* Compute independent pools of indices */
+  auto pools = get_pools(out_indices, sizes, dim);
+
+  for (auto const& pool_indices : pools) {
+    std::vector<scalar_t> tmp_row(nvalues, 0);
+
+    /* Compute tmp = - sum_j output_j * grad_j */
+    for (index_t i : pool_indices) {
+      auto out_values_row = out_values_accessor[i];
+      auto values_row = values_accessor[i];
+      auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
+      auto j = low - grad_offsets.begin();
+
+      if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
+        auto grad_values_row = grad_values_accessor[j];
+        for (int64_t k=0; k<nvalues; k++) {
+          if (LogSoftMax) {
+            tmp_row[k] -= grad_values_row[k];
+          } else {
+            tmp_row[k] -= out_values_row[k] * grad_values_row[k];
+          }
+        }
+      }
+    }
+
+    /* Compute grad_input = output * (grad + tmp)*/
+    for (index_t i : pool_indices) {
+      auto out_values_row = out_values_accessor[i];
+      auto values_row = values_accessor[i];
+      auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
+      auto j = low - grad_offsets.begin();
+
+      if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
+        auto grad_values_row = grad_values_accessor[j];
+        for (int64_t k=0; k<nvalues; k++) {
+          if (LogSoftMax) {
+            values_row[k] = grad_values_row[k] + std::exp(out_values_row[k]) * tmp_row[k];
+          } else {
+            values_row[k] = out_values_row[k] * (grad_values_row[k] + tmp_row[k]);
+          }
+        }
+      } else {
+        for (int64_t k=0; k<nvalues; k++) {
+          if (LogSoftMax) {
+            values_row[k] = std::exp(out_values_row[k]) * tmp_row[k];
+          } else {
+            values_row[k] = out_values_row[k] * (tmp_row[k]);
+          }
         }
       }
     }
   }
-
-  /* Compute grad_input = output * (grad + tmp)*/
-  for (int64_t i=0; i<out_nnz; i++) {
-    auto p = pool[i];
-    auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
-    auto j = low - grad_offsets.begin();
-    auto tmp_row = tmp_accessor[p];
-    auto out_values_row = out_values_accessor[i];
-    auto values_row = values_accessor[i];
-    if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
-      auto grad_values_row = grad_values_accessor[j];
-      for (int64_t k=0; k<nvalues; k++) {
-        if (LogSoftMax) {
-          values_row[k] = grad_values_row[k] + std::exp(out_values_row[k]) * tmp_row[k];
-        } else {
-          values_row[k] = out_values_row[k] * (grad_values_row[k] + tmp_row[k]);
-        }
-      }
-    } else {
-      for (int64_t k=0; k<nvalues; k++) {
-        if (LogSoftMax) {
-          values_row[k] = std::exp(out_values_row[k]) * tmp_row[k];
-        } else {
-          values_row[k] = out_values_row[k] * (tmp_row[k]);
-        }
-      }
-    }
-  }
-
 }
 
 } // namespace
