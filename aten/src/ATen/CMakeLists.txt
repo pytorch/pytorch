@@ -61,9 +61,9 @@ file(GLOB native_mkl_cpp "native/mkl/*.cpp")
 file(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
 file(GLOB native_vulkan_cpp "native/vulkan/*.cpp")
 file(GLOB native_gles_cpp
-						"native/vulkan/VulkanAten.cpp"
-						"native/vulkan/VulkanGuardImpl.cpp"
-						"native/vulkan/gl/*.cpp")
+            "native/vulkan/VulkanAten.cpp"
+            "native/vulkan/VulkanGuardImpl.cpp"
+            "native/vulkan/gl/*.cpp")
 file(GLOB native_vulkan_stub_cpp "native/vulkan/stub/*.cpp")
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
@@ -106,11 +106,11 @@ endif()
 if(USE_VULKAN)
   set(all_cpu_cpp ${all_cpu_cpp} ${native_vulkan_cpp} ${vulkan_generated_cpp})
 else()
-	if (USE_GLES)
-		set(all_cpu_cpp ${all_cpu_cpp} ${native_gles_cpp} ${vulkan_generated_cpp})
-	else()
-		set(all_cpu_cpp ${all_cpu_cpp} ${native_vulkan_stub_cpp})
-	endif()
+  if (USE_GLES)
+    set(all_cpu_cpp ${all_cpu_cpp} ${native_gles_cpp} ${vulkan_generated_cpp})
+  else()
+    set(all_cpu_cpp ${all_cpu_cpp} ${native_vulkan_stub_cpp})
+  endif()
 endif()
 
 if(USE_CUDA AND USE_ROCM)

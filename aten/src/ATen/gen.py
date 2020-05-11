@@ -46,6 +46,10 @@ parser.add_argument(
     action='store_true',
     help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
 parser.add_argument(
+    '--vulkan',
+    action='store_true',
+    help='Generate Vulkan backend functions')
+parser.add_argument(
     '--op_registration_whitelist',
     nargs='*',
     help='filter op registrations by the whitelist (if set); '
@@ -67,6 +71,7 @@ parser.add_argument(
     help='force it to generate schema-only registrations for all ops, including'
          'those that are not listed on --op_registration_whitelist')
 options = parser.parse_args()
+
 # NB: It is mandatory to NOT use os.path.join here, as the install directory
 # will eventually be ingested by cmake, which does not respect Windows style
 # path slashes.  If you switch this to use os.path.join, you'll get an error
@@ -381,7 +386,8 @@ def iterate_types():
                 yield (backend, density)
     for backend in quantized_backends:
         yield (backend, 'Dense')
-    yield('Vulkan', 'Dense')
+    if options.vulkan:
+        yield('Vulkan', 'Dense')
 
 
 def gen_per_op_registration_filename(opname):
