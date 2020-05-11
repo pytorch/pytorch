@@ -599,6 +599,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
+    TORCH_CHECK(
+        data_type_.Match<T>(),
+        "Tensor type mismatch, caller expects elements to be ",
+        caffe2::TypeMeta::TypeName<T>(),
+        ", while tensor contains ",
+        data_type_.name(),
+        ". ");
     // We managed the type check ourselves
     return storage_.unsafe_data<T>() + storage_offset_;
   }
@@ -1249,10 +1256,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     } else {
       bool had_special_dtor = data_type_.placementDelete() != nullptr;
       storage_offset_ = 0;
-      if (!storage_.unique()) {
-        if (data_type_ != meta) {
-          storage_ = Storage::create_legacy(storage_.device());
-        }
+      if (!storage_.unique() && (data_type_ != meta)) {
+        storage_ = Storage::create_legacy(storage_.device());
       }
       data_type_ = meta;
       // NB: device is not changed
@@ -1304,7 +1309,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* mutable_data() {
-    if (storage_initialized()) {
+    if (storage_initialized() && data_type_.Match<T>()) {
       return static_cast<T*>(storage_.data()) + storage_offset_;
     }
     // Check it here statically - otherwise TypeMeta would throw the runtime
