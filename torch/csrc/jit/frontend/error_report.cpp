@@ -39,8 +39,6 @@ ErrorReport::ErrorReport(SourceRange r) : context(std::move(r)) {}
 
 void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {}
 
-ErrorReport::CallStack::CallStack(const std::string& name) {}
-
 ErrorReport::CallStack::~CallStack() {}
 #endif // C10_MOBILE
 
