@@ -2500,6 +2500,15 @@ class RpcTest(RpcAgentTestFixture):
         with self.assertRaisesRegex(RuntimeError, "Another expected error"):
             fut1.wait()
 
+    @dist_init
+    def test_callback_none(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        with self.assertRaisesRegex(
+            TypeError,
+            "incompatible function arguments."
+        ):
+           rpc.rpc_async(dst, raise_func)._then(None)
+
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
 

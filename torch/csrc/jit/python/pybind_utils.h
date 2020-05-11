@@ -98,7 +98,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     // destruction of the py::function object. Because, the
     // Future owns a reference to the py::function in its callback
     // vector, but Future does not acquire GIL on destruction.
-    auto pf = std::make_shared<PythonFunction>(std::move(cb));
+    auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
     return std::make_shared<jit::PythonFutureWrapper>(fut->then(
         // Capture a copy of the ivalue::Future instead of the `this` pointer
         // because the PythonFutureWrapper object could have been deleted
@@ -140,10 +140,11 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 
   private:
     // Wrap Python function to guard deref
-    struct PythonFunction {
-      explicit PythonFunction(py::function func) : func_(std::move(func)) {}
+    struct PythonFunctionGuard {
+      explicit PythonFunctionGuard(py::function func)
+          : func_(std::move(func)) {}
 
-      ~PythonFunction() {
+      ~PythonFunctionGuard() {
         pybind11::gil_scoped_acquire ag;
         func_ = py::none();
       }
