@@ -674,6 +674,56 @@ static py::dict _jit_debug_module_iterators(Module& module) {
   return result;
 }
 
+static constexpr const char *magic_method_names[] = {
+  "__lt__",
+  "__le__",
+  "__eq__",
+  "__ne__",
+  "__ge__",
+  "__gt__",
+  "__not__",
+  "__abs__",
+  "__add__",
+  "__and__",
+  "__floordiv__",
+  "__index__",
+  "__inv__",
+  "__invert__",
+  "__lshift__",
+  "__mod__",
+  "__mul__",
+  "__matmul__",
+  "__neg__",
+  "__or__",
+  "__pos__",
+  "__pow__",
+  "__rshift__",
+  "__sub__",
+  "__truediv__",
+  "__xor__",
+  "__concat__",
+  "__contains__",
+  "__delitem__",
+  "__getitem__",
+  "__setitem__",
+  "__iadd__",
+  "__iand__",
+  "__iconcat__",
+  "__ifloordiv__",
+  "__ilshift__",
+  "__imod__",
+  "__imul__",
+  "__imatmul__",
+  "__ior__",
+  "__ipow__",
+  "__irshift__",
+  "__isub__",
+  "__itruediv__",
+  "__ixor__",
+  "__str__",
+  "__len__",
+};
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -684,7 +734,7 @@ void initJitScriptBindings(PyObject* module) {
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<c10::intrusive_ptr<CustomClassHolder>>(m, "Capsule");
 
-  py::class_<Object>(m, "ScriptObject")
+  auto object_class = py::class_<Object>(m, "ScriptObject")
       .def("_type", [](Module& m) { return m.type(); })
       .def(
           "_get_method",
@@ -793,6 +843,35 @@ void initJitScriptBindings(PyObject* module) {
             err << "which does not have a __setstate__ method defined!";
             throw std::runtime_error(err.str());
           }));
+
+  // Special case __str__ to make sure we can print Objects/Modules regardless
+  // of if the user defined a __str__
+  using MagicMethodImplType = std::function<py::object(
+    const Object& self, py::args args, py::kwargs kwargs)>;
+  std::unordered_map<std::string, MagicMethodImplType> special_magic_methods{
+    {"__str__", [](const Object& self, py::args args, py::kwargs kwargs)
+        -> py::object {
+      auto method = self.find_method("__str__");
+      if (!method) {
+        return py::str("ScriptObject");
+      }
+      return invokeScriptMethodFromPython(*method, std::move(args), std::move(kwargs));
+    }}
+  };
+
+  for (const char *mm_name : magic_method_names) {
+    if (special_magic_methods.count(mm_name)) {
+      object_class.def(mm_name, special_magic_methods[mm_name]);
+    } else {
+      object_class.def(mm_name, [mm_name](const Object& self, py::args args, py::kwargs kwargs) {
+        auto method = self.find_method(mm_name);
+        if (!method) {
+          throw NotImplementedError();
+        }
+        return invokeScriptMethodFromPython(*method, std::move(args), std::move(kwargs));
+      });
+    }
+  }
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
