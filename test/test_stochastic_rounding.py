@@ -8,14 +8,18 @@ N = 2 ** 14
 
 
 @pytest.mark.parametrize('scale', tuple(range(-18, 11)))
-def test_stochastic_rounding(scale):
+@pytest.mark.parametrize('is_contiguous', (True, False))
+def test_stochastic_rounding(scale, is_contiguous):
 
     base = math.pow(2, scale)
     original_value = (base + math.pow(2, scale + 1)) / 2.0 + .5 * base
     x = torch.tensor([original_value] * N).cuda()
     _, exponent = math.frexp(original_value)
     exponent -= 1
-    rounded = torch.stochastic_rounding(x)
+    if is_contiguous:
+        rounded = torch.stochastic_rounding(x)
+    else:
+        rounded = torch.stochastic_rounding(x[::2])
 
     mean = torch.mean(rounded).item()
     delta_fp16 = math.pow(2, -10 + exponent if exponent >= -14 else -24)

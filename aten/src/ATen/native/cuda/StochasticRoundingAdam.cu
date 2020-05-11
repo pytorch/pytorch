@@ -1,14 +1,19 @@
 #include <ATen/ATen.h>
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/native/cuda/stochastic_rounding.cuh>
 
 
 namespace at {
 namespace native {
 
-template <typename scalar_t>
+template <typename scalar_t, typename IndexType, int ADims>
 __global__ void stochastic_rounding_adam_step_kernel(
-    scalar_t *weights, scalar_t *gradients,
-    scalar_t *exp_avg, scalar_t *exp_avg_sq, scalar_t *max_exp_avg_sq,
+    cuda::detail::TensorInfo<scalar_t, IndexType> weights,
+    const cuda::detail::TensorInfo<scalar_t, IndexType> gradients,
+    cuda::detail::TensorInfo<scalar_t, IndexType> exp_avg,
+    cuda::detail::TensorInfo<scalar_t, IndexType> exp_avg_sq,
+    cuda::detail::TensorInfo<scalar_t, IndexType> max_exp_avg_sq,
     float *inv_scale, float *found_inf,
     float lr, float beta1, float beta2,
     float weight_decay, float eps, int step,
@@ -27,12 +32,17 @@ __global__ void stochastic_rounding_adam_step_kernel(
   float v_correction = 1.0 - powf(beta2, step);
 
   for  (int i = blockIdx.x * blockDim.x + threadIdx.x; i < numel; i += blockDim.x * gridDim.x) {
-    float weight = static_cast<float>(weights[i]);
-    float gradient = static_cast<float>(gradients[i]) * (*inv_scale);
-    float m = static_cast<float>(exp_avg[i]);
+    const IndexType w_offset = cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(i, weights);
+    float weight = static_cast<float>(weights.data[w_offset]);
+    const IndexType g_offset = cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(i, gradients);
+    float gradient = static_cast<float>(gradients.data[g_offset]) * (*inv_scale);
+    const IndexType m_offset = cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(i, exp_avg);
+    float m = static_cast<float>(exp_avg.data[m_offset]);
     // Stochastic Rounding Adam tracks square root of the exponential average of squared gradient.
-    float v = static_cast<float>(exp_avg_sq[i]);
+    const IndexType v_offset = cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(i, exp_avg_sq);
+    float v = static_cast<float>(exp_avg_sq.data[v_offset]);
     v = v * v;
+    IndexType max_v_offset = 0;
     float4 random_values = curand_uniform4(&state);
 
     if (weight_decay != 0.0f) {
@@ -49,18 +59,19 @@ __global__ void stochastic_rounding_adam_step_kernel(
     // Unbias v
     float max_v = v;
     if (is_amsgrad) {
-      float prev_max_v = static_cast<float>(max_exp_avg_sq[i]);
+      max_v_offset = cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(i, max_exp_avg_sq);
+      float prev_max_v = static_cast<float>(max_exp_avg_sq.data[max_v_offset]);
       prev_max_v = prev_max_v * prev_max_v;
       max_v = fmaxf(prev_max_v, v);
     }
 
     weight -= (lr / m_correction) * m / (sqrtf(max_v / v_correction) + eps);
 
-    weights[i] = rounder(weight, random_values.x);
-    exp_avg[i] = rounder(m, random_values.y);
-    exp_avg_sq[i] = rounder(sqrtf(v), random_values.z);
+    weights.data[w_offset] = rounder(weight, random_values.x);
+    exp_avg.data[m_offset] = rounder(m, random_values.y);
+    exp_avg_sq.data[v_offset] = rounder(sqrtf(v), random_values.z);
     if (is_amsgrad) {
-      max_exp_avg_sq[i] = rounder(sqrtf(max_v), random_values.w);
+      max_exp_avg_sq.data[max_v_offset] = rounder(sqrtf(max_v), random_values.w);
     }
   }
 }
@@ -80,12 +91,6 @@ Tensor stochastic_rounding_adam_step_cuda(
 
   if (param.numel() == 0) return param;
 
-  TORCH_CHECK(param.is_contiguous());
-  TORCH_CHECK(grad.is_contiguous());
-  TORCH_CHECK(exp_avg.is_contiguous());
-  TORCH_CHECK(exp_avg_sq.is_contiguous());
-  TORCH_CHECK(max_exp_avg_sq.is_contiguous());
-
   const int64_t numel = param.numel();
   const int block_size = 256;
   const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / block_size;
@@ -102,21 +107,61 @@ Tensor stochastic_rounding_adam_step_cuda(
     rng_engine_inputs = gen->philox_engine_inputs(counter_offset);
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      param.scalar_type(), "stochastic_rounding_adam_step_cuda", [&] {
-        stochastic_rounding_adam_step_kernel<scalar_t><<<grid, dim_block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-            param.data_ptr<scalar_t>(),
-            grad.data_ptr<scalar_t>(),
-            exp_avg.data_ptr<scalar_t>(),
-            exp_avg_sq.data_ptr<scalar_t>(),
-            max_exp_avg_sq.data_ptr<scalar_t>(),
-            inv_scale.data_ptr<float>(),
-            found_inf.data_ptr<float>(),
-            lr, beta1, beta2, weight_decay, eps, step,
-            is_decoupled, is_amsgrad,
-            numel, rng_engine_inputs);
+  if (cuda::detail::canUse32BitIndexMath(param)) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(param.scalar_type(), "stochastic_rounding_adam_step_cuda", [&] {
+        auto param_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(param);
+        param_info.collapseDims();
+        auto grad_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(grad);
+        grad_info.collapseDims();
+        auto exp_avg_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(exp_avg);
+        exp_avg_info.collapseDims();
+        auto exp_avg_sq_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(exp_avg_sq);
+        exp_avg_sq_info.collapseDims();
+        auto max_exp_avg_sq_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(max_exp_avg_sq);
+        max_exp_avg_sq_info.collapseDims();
+
+        switch (param_info.dims) {
+          case 1:
+            stochastic_rounding_adam_step_kernel<scalar_t, unsigned int, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                param_info, grad_info, exp_avg_info, exp_avg_sq_info, max_exp_avg_sq_info,
+                inv_scale.data_ptr<float>(), found_inf.data_ptr<float>(),
+                lr, beta1, beta2, weight_decay, eps, step, is_decoupled, is_amsgrad, numel, rng_engine_inputs);
+            break;
+          default:
+            stochastic_rounding_adam_step_kernel<scalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                param_info, grad_info, exp_avg_info, exp_avg_sq_info, max_exp_avg_sq_info,
+                inv_scale.data_ptr<float>(), found_inf.data_ptr<float>(),
+                lr, beta1, beta2, weight_decay, eps, step, is_decoupled, is_amsgrad, numel, rng_engine_inputs);
         }
-      );
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(param.scalar_type(), "stochastic_rounding_adam_step_cuda", [&] {
+        auto param_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(param);
+        param_info.collapseDims();
+        auto grad_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(grad);
+        grad_info.collapseDims();
+        auto exp_avg_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(exp_avg);
+        exp_avg_info.collapseDims();
+        auto exp_avg_sq_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(exp_avg_sq);
+        exp_avg_sq_info.collapseDims();
+        auto max_exp_avg_sq_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(max_exp_avg_sq);
+        max_exp_avg_sq_info.collapseDims();
+
+        switch (param_info.dims) {
+          case 1:
+            stochastic_rounding_adam_step_kernel<scalar_t, uint64_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                param_info, grad_info, exp_avg_info, exp_avg_sq_info, max_exp_avg_sq_info,
+                inv_scale.data_ptr<float>(), found_inf.data_ptr<float>(),
+                lr, beta1, beta2, weight_decay, eps, step, is_decoupled, is_amsgrad, numel, rng_engine_inputs);
+            break;
+          default:
+            stochastic_rounding_adam_step_kernel<scalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                param_info, grad_info, exp_avg_info, exp_avg_sq_info, max_exp_avg_sq_info,
+                inv_scale.data_ptr<float>(), found_inf.data_ptr<float>(),
+                lr, beta1, beta2, weight_decay, eps, step, is_decoupled, is_amsgrad, numel, rng_engine_inputs);
+        }
+    });
+  }
   AT_CUDA_CHECK(cudaGetLastError());
   return param;
 }

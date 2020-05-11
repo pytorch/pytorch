@@ -1,4 +1,6 @@
 #include <ATen/ATen.h>
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/native/cuda/stochastic_rounding.cuh>
 
 
@@ -6,9 +8,11 @@ namespace at {
 namespace native {
 
 // SGD update math with Stochastic Rounding
-template <typename scalar_t>
+template <typename scalar_t, typename IndexType, int ADims>
 __global__ void stochastic_rounding_sgd_step_kernel(
-    scalar_t *weights, scalar_t *gradients, scalar_t *momentum_buffer,
+    cuda::detail::TensorInfo<scalar_t, IndexType> weights,
+    cuda::detail::TensorInfo<scalar_t, IndexType> gradients,
+    cuda::detail::TensorInfo<scalar_t, IndexType> momentum_buffer,
     float* inv_scale, float* found_inf,
     float weight_decay, float momentum, float dampening, float lr,
     bool nesterov, bool first_run, int numel, std::pair<uint64_t, uint64_t> seeds) {
@@ -22,9 +26,12 @@ __global__ void stochastic_rounding_sgd_step_kernel(
   round_stochastically<scalar_t, float, at::Half> rounder;
 
   for (int i = tid; i < numel; i += blockDim.x * gridDim.x) {
-    float weight = static_cast<float>(weights[i]);
-    float gradient = static_cast<float>(gradients[i]) * (*inv_scale);
-    float velocity = static_cast<float>(momentum_buffer[i]);
+    const IndexType w_offset = cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(i, weights);
+    float weight = static_cast<float>(weights.data[w_offset]);
+    const IndexType g_offset = cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(i, gradients);
+    float gradient = static_cast<float>(gradients.data[g_offset]) * (*inv_scale);
+    const IndexType v_offset = cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(i, momentum_buffer);
+    float velocity = static_cast<float>(momentum_buffer.data[v_offset]);
     float4 random_values = curand_uniform4(&state);
 
     if (weight_decay != 0.0f)
@@ -44,9 +51,9 @@ __global__ void stochastic_rounding_sgd_step_kernel(
 
     weight -= lr * gradient;
 
-    weights[i] = rounder(weight, random_values.x);
+    weights.data[w_offset] = rounder(weight, random_values.x);
     if (momentum != 0.0f)
-      momentum_buffer[i] = rounder(velocity, random_values.y);
+      momentum_buffer.data[v_offset] = rounder(velocity, random_values.y);
   }
 }
 
@@ -57,10 +64,6 @@ Tensor stochastic_rounding_sgd_step_cuda(
     bool nesterov, bool first_run, c10::optional<Generator> gen_) {
 
   if (param.numel() == 0) return param;
-
-  TORCH_CHECK(param.is_contiguous());
-  TORCH_CHECK(grad.is_contiguous());
-  TORCH_CHECK(momentum_buffer.is_contiguous());
 
   const int64_t numel = param.numel();
   const int block_size = 256;
@@ -77,16 +80,53 @@ Tensor stochastic_rounding_sgd_step_cuda(
     rng_engine_inputs = gen->philox_engine_inputs(counter_offset);
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-        param.scalar_type(), "stochastic_rounding_sgd_step_cuda", [&] {
-        stochastic_rounding_sgd_step_kernel<scalar_t><<<grid, dim_block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-            param.data_ptr<scalar_t>(),
-            grad.data_ptr<scalar_t>(),
-            momentum_buffer.data_ptr<scalar_t>(),
-            inv_scale.data_ptr<float>(), found_inf.data_ptr<float>(),
-            static_cast<float>(weight_decay), static_cast<float>(momentum), static_cast<float>(dampening), static_cast<float>(lr),
-            nesterov, first_run, numel, rng_engine_inputs);
-      });
+  if (cuda::detail::canUse32BitIndexMath(param)) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(param.scalar_type(), "stochastic_rounding_sgd_step_cuda", [&] {
+      auto param_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(param);
+      param_info.collapseDims();
+      auto grad_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(grad);
+      grad_info.collapseDims();
+      auto momentum_buffer_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(momentum_buffer);
+      momentum_buffer_info.collapseDims();
+
+      switch (param_info.dims) {
+        case 1:
+          stochastic_rounding_sgd_step_kernel<scalar_t, unsigned int, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+              param_info, grad_info, momentum_buffer_info,
+              inv_scale.data_ptr<float>(), found_inf.data_ptr<float>(),
+              weight_decay, momentum, dampening, lr, nesterov, first_run, numel, rng_engine_inputs);
+          break;
+        default:
+          stochastic_rounding_sgd_step_kernel<scalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+              param_info, grad_info, momentum_buffer_info,
+              inv_scale.data_ptr<float>(), found_inf.data_ptr<float>(),
+              weight_decay, momentum, dampening, lr, nesterov, first_run, numel, rng_engine_inputs);
+      }
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(param.scalar_type(), "stochastic_rounding_sgd_step_cuda", [&] {
+        auto param_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(param);
+        param_info.collapseDims();
+        auto grad_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(grad);
+        grad_info.collapseDims();
+        auto momentum_buffer_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(momentum_buffer);
+        momentum_buffer_info.collapseDims();
+
+        switch (param_info.dims) {
+          case 1:
+            stochastic_rounding_sgd_step_kernel<scalar_t, uint64_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                param_info, grad_info, momentum_buffer_info,
+                inv_scale.data_ptr<float>(), found_inf.data_ptr<float>(),
+                weight_decay, momentum, dampening, lr, nesterov, first_run, numel, rng_engine_inputs);
+            break;
+          default:
+            stochastic_rounding_sgd_step_kernel<scalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                param_info, grad_info, momentum_buffer_info,
+                inv_scale.data_ptr<float>(), found_inf.data_ptr<float>(),
+                weight_decay, momentum, dampening, lr, nesterov, first_run, numel, rng_engine_inputs);
+        }
+    });
+  }
   AT_CUDA_CHECK(cudaGetLastError());
   return param;
 }
