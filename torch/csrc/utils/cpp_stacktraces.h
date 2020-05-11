@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/THP_export.h>
 
 namespace torch {
 namespace utils {
