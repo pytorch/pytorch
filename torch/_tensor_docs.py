@@ -1579,6 +1579,13 @@ is_complex() -> bool
 Returns True if the data type of :attr:`self` is a complex data type.
 """)
 
+add_docstr_all('is_same_size',
+               r"""
+is_signed(other) -> bool
+
+Returns True if :attr:`self` :attr:`other` are of the same size.
+""")
+
 add_docstr_all('is_signed',
                r"""
 is_signed() -> bool

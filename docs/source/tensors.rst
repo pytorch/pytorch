@@ -319,6 +319,7 @@ view of a storage and defines numeric operations on it.
    .. autoattribute:: is_leaf
       :noindex:
    .. automethod:: is_pinned
+   .. automethod:: is_same_size
    .. automethod:: is_set_to
    .. automethod:: is_shared
    .. automethod:: is_signed
