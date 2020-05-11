@@ -516,6 +516,7 @@ class TestQuantizedOps(TestCase):
            Y_scale=st.floats(1e-6, 1e6),
            Y_zero_point=st.integers(0, 10))
     def test_hardswish(self, X, Y_scale, Y_zero_point):
+        print(f'max_examples={settings.default.max_examples} X={torch.from_numpy(X[0]).shape} Y_scale={Y_scale}, Y_zero_point={Y_zero_point}')
         _test_hardswish(self, X, Y_scale, Y_zero_point, 'fbgemm')
 
     """Tests the correctness of the scalar addition."""
@@ -3074,6 +3075,7 @@ class TestQNNPackOps(TestCase):
            Y_scale=st.floats(1e-6, 1e6),
            Y_zero_point=st.integers(0, 10))
     def test_hardswish(self, X, Y_scale, Y_zero_point):
+        print(f'max_examples={settings.default.max_examples} X={torch.from_numpy(X[0]).shape} Y_scale={Y_scale}, Y_zero_point={Y_zero_point}')
         _test_hardswish(self, X, Y_scale, Y_zero_point, 'qnnpack')
 
     """Tests the correctness of the quantized::hardsigmoid op."""
