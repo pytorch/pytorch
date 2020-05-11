@@ -138,7 +138,7 @@ class TORCH_API Future final {
     auto fut = std::make_shared<Future<R>>();
     addCallback([this, fut, cb]() {
       try {
-        fut->markCompleted(cb(*this));
+        fut->markCompleted(std::move(cb(*this)));
       } catch (std::exception& e) {
         fut->setError(e.what());
       }

@@ -46,12 +46,33 @@
 namespace torch {
 namespace jit {
 
-// The PythonFutureWrapper for ivalue::Future
-struct PythonFutureWrapper {
-  explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
-      : fut(std::move(fut)) {}
 
-  IValue wait() {
+inline IValue toIValue(
+    py::handle obj,
+    const TypePtr& type,
+    c10::optional<int32_t> N = c10::nullopt);
+
+py::object toPyObject(IValue ivalue);
+
+// The PythonFutureWrapper for ivalue::Future
+//
+// VISIBILITY_HIDDEN is for silencing compiling error,
+// "error: 'torch::jit::PythonFutureWrapper' declared with greater visibility
+// than the type of its field 'torch::jit::PythonFutureWrapper::unwrap_func'
+// [-Werror=attributes]"
+struct VISIBILITY_HIDDEN PythonFutureWrapper
+    : std::enable_shared_from_this<PythonFutureWrapper> {
+  using UnwrapFunc = std::function<void(py::object)>;
+
+  explicit PythonFutureWrapper(
+      c10::intrusive_ptr<c10::ivalue::Future> fut,
+      c10::optional<UnwrapFunc> unwrap_func = c10::nullopt)
+      : fut(std::move(fut)), unwrap_func(std::move(unwrap_func)) {}
+
+  PythonFutureWrapper(const PythonFutureWrapper&) = delete;
+  PythonFutureWrapper& operator=(const PythonFutureWrapper&) = delete;
+
+  py::object wait() {
     fut->wait();
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;
@@ -60,10 +81,80 @@ struct PythonFutureWrapper {
       auto output = graph->insert(aten::wait, {fut_val});
       jit::tracer::setValueTrace(fut->value(), output);
     }
-    return fut->value();
+    {
+      // acquiring GIL as toPyObject creates new py::object
+      // without grabbing the GIL.
+      py::gil_scoped_acquire acquire;
+      py::object py_obj = toPyObject(fut->value());
+      if (unwrap_func) {
+        (*unwrap_func)(py_obj);
+      }
+      return py_obj;
+    }
+  }
+
+  std::shared_ptr<PythonFutureWrapper> then(py::function cb) {
+    // We need this an additional layer of wrapper here to guard the
+    // destruction of the py::function object. Because, the
+    // Future owns a reference to the py::function in its callback
+    // vector, but Future does not acquire GIL on destruction.
+    auto pf = std::make_shared<PythonFunction>(std::move(cb));
+    return std::make_shared<jit::PythonFutureWrapper>(fut->then(
+        // Capture a copy of the ivalue::Future instead of the `this` pointer
+        // because the PythonFutureWrapper object could have been deleted
+        // when the callbacks are fired. For example, RPC only captures the
+        // ivalue::Future instead PythonFutureWrapper of in FutureMessage
+        // callback functions. Hence, if user code does not hold a reference to
+        // this PythonFutureWrapper object, there is no guarantee that the
+        // PythonFutureWrapper is still valid in the callback.
+        [pyFut(this->getPtr()), pf(std::move(pf))]() -> IValue {
+          try {
+            pybind11::gil_scoped_acquire ag;
+            return toIValue(pf->func_(pyFut), PyObjectType::get());
+          } catch (py::error_already_set& e) {
+            auto err = std::runtime_error(c10::str(
+                "Got the following error when running the callback: ",
+                e.what()));
+            {
+              pybind11::gil_scoped_acquire ag;
+              // Release ownership on py::objects and also restore Python
+              // Error Indicator.
+              e.restore();
+              // Clear the Python Error Indicator as we has recorded the
+              // exception in the response message.
+              PyErr_Clear();
+            }
+
+            throw err;
+          } catch (...) {
+            throw std::runtime_error("Unknown error when running callback");
+          }
+        },
+        PyObjectType::get()));
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> fut;
+  // unwrap_func works like a callback for the value returned by
+  // PythonFutureWrapper::wait().
+  c10::optional<UnwrapFunc> unwrap_func;
+
+  private:
+    // Wrap Python function to guard deref
+    struct PythonFunction {
+      explicit PythonFunction(py::function func) : func_(std::move(func)) {}
+
+      ~PythonFunction() {
+        pybind11::gil_scoped_acquire ag;
+        func_ = py::none();
+      }
+
+      py::function func_;
+    };
+
+    std::shared_ptr<PythonFutureWrapper> getPtr() {
+        return shared_from_this();
+    }
+
 };
 
 // error reporting: when reporting user-caused errors, these functions should
@@ -310,11 +401,6 @@ inline InferredType tryToInferContainerType(py::handle input) {
         "."));
   }
 }
-
-inline IValue toIValue(
-    py::handle obj,
-    const TypePtr& type,
-    c10::optional<int32_t> N = c10::nullopt);
 
 inline bool isTraceableType(TypePtr type) {
   if (type->isSubtypeOf(TensorType::get())) {
@@ -612,7 +698,7 @@ inline IValue toIValue(
           py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj));
     }
     case TypeKind::FutureType: {
-      return obj.cast<PythonFutureWrapper>().fut;
+      return obj.cast<std::shared_ptr<PythonFutureWrapper>>()->fut;
     }
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
@@ -801,7 +887,7 @@ inline py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isCapsule()) {
     return py::cast(ivalue.toCapsule());
   } else if (ivalue.isFuture()) {
-    return py::cast(PythonFutureWrapper(ivalue.toFuture()));
+    return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
   } else if (ivalue.isRRef()) {
 #ifdef USE_DISTRIBUTED
     return py::cast(torch::distributed::rpc::PyRRef(
