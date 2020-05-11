@@ -2172,7 +2172,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_DDP_module_with_no_inputs(self):
         # gh-37814
