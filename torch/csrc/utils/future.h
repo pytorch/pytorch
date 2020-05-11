@@ -133,19 +133,6 @@ class TORCH_API Future final {
     addCallback([this, cb]() { cb(*this); });
   }
 
-  template<typename R>
-  std::shared_ptr<Future<R>> then(std::function<R(const Future<T>& future)> cb) {
-    auto fut = std::make_shared<Future<R>>();
-    addCallback([this, fut, cb]() {
-      try {
-        fut->markCompleted(std::move(cb(*this)));
-      } catch (std::exception& e) {
-        fut->setError(e.what());
-      }
-    });
-    return fut;
-  }
-
  private:
   void setErrorInternal(
       FutureError error,
