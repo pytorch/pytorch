@@ -338,9 +338,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   c10::intrusive_ptr<Future> then(
       std::function<IValue(void)> callback, TypePtr type) {
     auto fut = c10::make_intrusive<Future>(type);
-    addCallback([fut, cb{std::move(callback)}]() {
+    addCallback([fut, callback]() {
       try {
-        fut->markCompleted(cb());
+        fut->markCompleted(callback());
       } catch (std::exception& e) {
         fut->setError(e.what());
       }
