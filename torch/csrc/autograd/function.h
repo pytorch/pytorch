@@ -113,8 +113,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// function call.
   variable_list operator()(variable_list&& inputs) {
     RECORD_FUNCTION(
-        this, std::vector<c10::IValue>(inputs.begin(), inputs.end()));
-
+        name(), std::vector<c10::IValue>(inputs.begin(), inputs.end()), sequence_nr());
     // In the first iteration of named tensors, autograd ignores names and
     // operates on unnamed tensors. In the long term, autograd should
     // probably operate with names.
