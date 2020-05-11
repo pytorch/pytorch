@@ -5,7 +5,7 @@
 namespace torch {
 namespace utils {
 
-struct THP_API CPPStackTraces {
+struct THP_CLASS CPPStackTraces {
   static bool is_enabled() {
     return _enabled;
   }
