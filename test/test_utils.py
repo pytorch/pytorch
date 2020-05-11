@@ -413,7 +413,6 @@ class TestBottleneck(TestCase):
         self._check_cuda(out)
 
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
-    @skipIfRocm
     def test_bottleneck_cuda(self):
         rc, out, err = self._run_bottleneck('bottleneck_test/test_cuda.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
