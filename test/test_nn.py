@@ -10628,12 +10628,10 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_grad(device)
 
-
     def test_hardsigmoid_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
         inputs.requires_grad = True
         self.assertTrue(gradcheck(F.hardsigmoid, (inputs,)))
-
 
     # currently fails on XLA
     @onlyOnCPUAndCUDA
@@ -10641,7 +10639,6 @@ class TestNNDeviceType(NNTestCase):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
         inputs.requires_grad = True
         self.assertTrue(gradcheck(F.hardswish, (inputs,)))
-
 
     def _test_batchnorm_eval(self, device, dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)

@@ -126,6 +126,7 @@ def requires_mpi():
 def skip_if_rocm(func):
     """Skips a test for ROCm"""
     func.skip_if_rocm = True
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         if not TEST_WITH_ROCM:

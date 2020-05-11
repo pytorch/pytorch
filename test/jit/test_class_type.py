@@ -169,6 +169,7 @@ class TestClassType(JitTestCase):
 
     def test_class_type_as_param(self):
         global FooTest  # see [local resolution in python]
+
         @torch.jit.script  # noqa: B903
         class FooTest(object):  # noqa: B903
             def __init__(self, x):
@@ -312,6 +313,7 @@ class TestClassType(JitTestCase):
 
     def test_python_interop(self):
         global Foo   # see [local resolution in python]
+
         @torch.jit.script  # noqa: B903
         class Foo(object):  # noqa: B903
             def __init__(self, x, y):
@@ -339,6 +341,7 @@ class TestClassType(JitTestCase):
 
     def test_class_specialization(self):
         global Foo  # see [local resolution in python]
+
         @torch.jit.script  # noqa: B903
         class Foo(object):  # noqa: B903
             def __init__(self, x, y):
@@ -364,6 +367,7 @@ class TestClassType(JitTestCase):
 
     def test_class_sorting(self):
         global Foo  # see [local resolution in python]
+
         @torch.jit.script  # noqa: B903
         class Foo(object):  # noqa: B903
             def __init__(self, x):
@@ -496,6 +500,7 @@ class TestClassType(JitTestCase):
 
     def test_interface(self):
         global Foo, Bar, OneTwo, OneTwoThree, OneTwoWrong, NotMember, NotMember2
+
         @torch.jit.script
         class Foo(object):
             def __init__(self):
@@ -658,6 +663,7 @@ class TestClassType(JitTestCase):
 
     def test_overloaded_fn(self):
         global Foo, MyClass  # see [local resolution in python]
+
         @torch.jit.script
         class Foo(object):
             def __init__(self, x):

@@ -5415,7 +5415,6 @@ class TestAutogradDeviceType(TestCase):
             m = torch.cat((asd, asd))
             m.sum().backward()
 
-
     @deviceCountAtLeast(2)
     def test_scalar_different_devices(self, devices):
         a = torch.rand([], requires_grad=True, device=devices[0])
@@ -5424,7 +5423,6 @@ class TestAutogradDeviceType(TestCase):
         c = b * a
         c.sum().backward()
 
-
     @onlyCUDA
     def test_scalar_different_device_types(self, device):
         c = torch.tensor(3.0, device='cpu', requires_grad=True) * torch.rand(2, 2, device=device)
@@ -5432,7 +5430,6 @@ class TestAutogradDeviceType(TestCase):
 
         d = torch.tensor(3.0, device=device, requires_grad=True) * torch.rand(2, 2, device='cpu')
         d.sum().backward()
-
 
     # NOTE: flaky on ROCm CI
     @skipCUDAIfRocm
@@ -5942,6 +5939,7 @@ class TestAutogradDeviceType(TestCase):
     def test_simple_reentrant_cross_device(self, device):
         class ReentrantFunc(Function):
             _cpu_mode = True
+
             @staticmethod
             def forward(ctx, x):
                 return x * (x + 2)

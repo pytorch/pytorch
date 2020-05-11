@@ -4582,7 +4582,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                          ~torch.tensor([False, True]))
 
         # test exceptions
-        for dtype in(torch.half, torch.float, torch.double):
+        for dtype in (torch.half, torch.float, torch.double):
             a = torch.zeros(10, dtype=dtype)
             with self.assertRaises(TypeError):
                 b = ~a
@@ -6293,7 +6293,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(expected_res, a)
 
         # test exceptions
-        for dtype in(torch.half, torch.float, torch.double):
+        for dtype in (torch.half, torch.float, torch.double):
             a = torch.zeros(10, dtype=dtype, device=device)
             # new tensor
             with self.assertRaises(RuntimeError):
@@ -14611,20 +14611,20 @@ class TestTorchDeviceType(TestCase):
 
         # test invalid input
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should be 2 dimensional', 
+            RuntimeError,
+            'A should be 2 dimensional',
             lambda: torch.eig(torch.ones((2))))
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should be square', 
+            RuntimeError,
+            'A should be square',
             lambda: torch.eig(torch.ones((2, 3))))
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should not contain infs or NaNs', 
+            RuntimeError,
+            'A should not contain infs or NaNs',
             lambda: torch.eig(np.inf * torch.ones((2, 2))))
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should not contain infs or NaNs', 
+            RuntimeError,
+            'A should not contain infs or NaNs',
             lambda: torch.eig(np.nan * torch.ones((2, 2))))
 
     @skipCUDAIfNoMagma
