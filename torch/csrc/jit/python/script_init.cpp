@@ -720,7 +720,8 @@ static py::dict _jit_debug_module_iterators(Module& module) {
   _(__isub__) \
   _(__itruediv__) \
   _(__ixor__) \
-  _(__str__)
+  _(__str__) \
+  _(__len__)
 
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
