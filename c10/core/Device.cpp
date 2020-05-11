@@ -11,6 +11,8 @@
 #include <vector>
 #include <regex>
 
+// Check if compiler has working std::regex implementation
+//
 // Test below is adapted from https://stackoverflow.com/a/41186162
 #if defined(_MSVC_LANG) && _MSVC_LANG >= 201103L
   // Compiler has working regex. MSVC has erroneous __cplusplus.
