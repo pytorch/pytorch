@@ -86,10 +86,10 @@ class Conf(object):
         if phase == "test":
             if not self.smoke:
                 job_def["requires"].append(self.gen_build_name("build", nightly))
-            if not (self.smoke and self.os == "macos"):
+            if not (self.smoke and self.os == "macos") and self.os != "windows":
                 job_def["docker_image"] = self.gen_docker_image()
 
-            if self.cuda_version:
+            if self.os != "windows" and self.cuda_version:
                 job_def["use_cuda_docker_runtime"] = miniutils.quote("1")
         else:
             if self.os == "linux" and phase != "upload":
@@ -97,7 +97,10 @@ class Conf(object):
 
         if phase == "test":
             if self.cuda_version:
-                job_def["resource_class"] = "gpu.medium"
+                if self.os == "windows":
+                    job_def["executor"] = "windows-with-nvidia-gpu"
+                else:
+                    job_def["resource_class"] = "gpu.medium"
         if phase == "upload":
             job_def["context"] = "org-member"
             job_def["requires"] = ["setup", self.gen_build_name(upload_phase_dependency, nightly)]
@@ -143,16 +146,14 @@ def gen_build_env_list(smoke):
 
     return newlist
 
-
-def predicate_exclude_nonlinux_and_libtorch(config):
-    return config.os == "linux"
-
+def predicate_exclude_macos(config):
+    return config.os == "linux" or config.os == "windows"
 
 def get_nightly_uploads():
     configs = gen_build_env_list(False)
     mylist = []
     for conf in configs:
-        phase_dependency = "test" if predicate_exclude_nonlinux_and_libtorch(conf) else "build"
+        phase_dependency = "test" if predicate_exclude_macos(conf) else "build"
         mylist.append(conf.gen_workflow_job("upload", phase_dependency, nightly=True))
 
     return mylist
@@ -160,7 +161,7 @@ def get_nightly_uploads():
 def get_nightly_tests():
 
     configs = gen_build_env_list(False)
-    filtered_configs = filter(predicate_exclude_nonlinux_and_libtorch, configs)
+    filtered_configs = filter(predicate_exclude_macos, configs)
 
     tests = []
     for conf_options in filtered_configs:
