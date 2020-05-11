@@ -630,8 +630,14 @@ Tensor max_values(const Tensor& self, DimnameList dims, bool keepdim) {
 }
 
 Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
-  TORCH_CHECK(self.numel() > 0, "cannot perform reduction function argmax on a "
-      "tensor with no elements because the operation does not have an identity");
+  TORCH_CHECK(dim.has_value() || self.numel() > 0,
+              "cannot perform reduction function argmax "
+              "on a tensor ", self.sizes(), " with no elements because the operation does not have an identity."
+              " Try performing reduction over a non-zero dimension.");
+  TORCH_CHECK(dim.has_value() && self.size(dim.value()) != 0,
+              "cannot perform reduction function argmax "
+              "on a zero dimension ", dim.value(), " of ", self.sizes(), " because the operation does not have an identity."
+              " Try performing reduction over a non-zero dimension.");
   Tensor in;
   if (dim) {
     in = self;
@@ -651,8 +657,14 @@ Tensor argmax(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
 }
 
 Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
-  TORCH_CHECK(self.numel() > 0, "cannot perform reduction function argmin on a "
-      "tensor with no elements because the operation does not have an identity");
+  TORCH_CHECK(dim.has_value() || self.numel() > 0,
+              "cannot perform reduction function argmin "
+              "on a tensor ", self.sizes(), " with no elements because the operation does not have an identity."
+              " Try performing reduction over a non-zero dimension.");
+  TORCH_CHECK(dim.has_value() && self.size(dim.value()) != 0,
+              "cannot perform reduction function argmin "
+              "on a zero dimension ", dim.value(), " of ", self.sizes(), " because the operation does not have an identity."
+              " Try performing reduction over a non-zero dimension.");
   Tensor in;
   if (dim) {
     in = self;
