@@ -739,7 +739,7 @@ void initJitScriptBindings(PyObject* module) {
         if (!method) { \
           throw NotImplementedError(); \
         } \
-        return invokeScriptMethodFromPython(*method, args, kwargs); \
+        return invokeScriptMethodFromPython(*method, std::move(args), std::move(kwargs)); \
       });
 
   auto object_class = py::class_<Object>(m, "ScriptObject")
