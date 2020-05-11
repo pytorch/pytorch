@@ -2404,7 +2404,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
     @dist_init
-    def test_callback_wrong_args(self):
+    def test_callback_wrong_arg_num(self):
         set_by_cb = concurrent.futures.Future()
         n = self.rank + 1
 
@@ -2423,6 +2423,19 @@ class RpcTest(RpcAgentTestFixture):
             "my\\_function\\(\\) missing 2 required positional arguments"
         ):
             cb_fut.wait()
+
+    @dist_init
+    def test_callback_wrong_arg_type(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+
+        fut0 = rpc.rpc_async(dst, torch.add, args=(torch.ones(2, 2), 1))
+        fut1 = fut0._then(lambda x: x + 1)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "unsupported operand type\\(s\\) for \\+"
+        ):
+            fut1.wait()
 
     @dist_init
     def test_callback_multi(self):
