@@ -870,7 +870,12 @@ class TestCase(expecttest.TestCase):
         b_tol = self.get_default_tolerance(b)
         return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))
 
-    def assertEqual(self, x, y, message='', *, atol=None, rtol=None, allow_inf=False, exact_dtype=None):
+    def assertEqualIgnoreType(self, *args, **kwargs):
+        # If you are seeing this function used, that means test is written wrongly
+        # and deserves detailed investigation
+        return self.assertEqual(*args, exact_dtype=False, **kwargs)
+
+    def assertEqual(self, x, y, message='', *, atol=None, rtol=None, allow_inf=False, exact_dtype=True):
         # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
         if isinstance(message, Number):
             self.assertIsNone(atol, "don't combine positional prec and atol")
@@ -1045,6 +1050,12 @@ class TestCase(expecttest.TestCase):
             except (TypeError, AssertionError):
                 pass
             super().assertNotEqual(x, y, message)
+
+    def assertEqualTypeString(self, x, y):
+        # This API is used simulate deprecated x.type() == y.type()
+        self.assertEqual(x.device, y.device)
+        self.assertEqual(x.dtype, y.dtype)
+        self.assertEqual(x.is_sparse, y.is_sparse)
 
     def assertObjectIn(self, obj, iterable):
         for elem in iterable:
@@ -1298,7 +1309,7 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
 
 
 # Decorator to retry upon certain Exceptions.
-def retry(ExceptionToCheck, tries=3, delay=3):
+def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
     def deco_retry(f):
         @wraps(f)
         def f_retry(*args, **kwargs):
@@ -1311,7 +1322,10 @@ def retry(ExceptionToCheck, tries=3, delay=3):
                     print(msg)
                     time.sleep(mdelay)
                     mtries -= 1
-            return f(*args, **kwargs)
+            try:
+                return f(*args, **kwargs)
+            except ExceptionToCheck as e:
+                raise unittest.SkipTest(f"Skipping after {tries} consecutive {str(e)}") from e if skip_after_retries else e
         return f_retry  # true decorator
     return deco_retry
 
