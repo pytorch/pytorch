@@ -19,10 +19,57 @@ namespace rpc {
 
 constexpr long kToMilliseconds = 1000;
 
+const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
+const std::string kThreadPoolSize = "agent.thread_pool_size";
+const std::string kNumIdleThreads = "agent.num_idle_threads";
+
+//////////////////////////  MetricsTracker  /////////////////////////////////
+
+TensorPipeAgent::TimeSeriesMetricsTracker::TimeSeriesMetricsTracker(
+    uint64_t currentSum,
+    uint64_t currentCount)
+    : currentSum_(currentSum), currentCount_(currentCount) {}
+
+void TensorPipeAgent::TimeSeriesMetricsTracker::addData(uint64_t dataPoint) {
+  currentSum_ += dataPoint;
+  ++currentCount_;
+}
+
+float TensorPipeAgent::TimeSeriesMetricsTracker::computeAverage() const {
+  return currentCount_ == 0 ? 0 : currentSum_ / (float)currentCount_;
+}
+
+////////////////////////  TensorpipeRpcAgent  /////////////////////////////////
+
+void TensorPipeAgent::collectNames() {
+  const worker_id_t selfId = workerInfo_.id_;
+  const std::string& selfName = workerInfo_.name_;
+
+  std::vector<uint8_t> selfNameVector(
+      (uint8_t*)selfName.c_str(),
+      (uint8_t*)selfName.c_str() + selfName.length());
+  addressStore_->set("names/" + c10::to_string(selfId), selfNameVector);
+
+  workerIdToInfo_.emplace(selfId, WorkerInfo(selfName, selfId));
+  workerNameToInfo_.emplace(selfName, WorkerInfo(selfName, selfId));
+  for (worker_id_t workerId = 0; workerId < worldSize_; ++workerId) {
+    if (workerId == selfId) {
+      continue;
+    }
+    std::vector<uint8_t> workerNameVector =
+        addressStore_->get("names/" + c10::to_string(workerId));
+    std::string workerName(
+        (char*)workerNameVector.data(), workerNameVector.size());
+    workerIdToInfo_.emplace(workerId, WorkerInfo(workerName, workerId));
+    workerNameToInfo_.emplace(workerName, WorkerInfo(workerName, workerId));
+  }
+}
+
 TensorPipeAgent::TensorPipeAgent(
-    worker_id_t selfId,
-    std::string selfName,
     std::shared_ptr<::c10d::Store> addressStore,
+    std::string selfName,
+    worker_id_t selfId,
+    int worldSize,
     TensorPipeRpcBackendOptions opts)
     : RpcAgent(
           WorkerInfo(std::move(selfName), selfId),
@@ -31,14 +78,13 @@ TensorPipeAgent::TensorPipeAgent(
               (long)(opts.rpcTimeoutSeconds * kToMilliseconds))),
       context_(std::make_shared<tensorpipe::Context>()),
       addressStore_(std::move(addressStore)),
+      worldSize_(worldSize),
       opts_(std::move(opts)) {
-  // Generate the maps for once.
-  for (const auto& kv : opts_.workerNameToId) {
-    const string& workerName = kv.first;
-    worker_id_t workerId = kv.second;
-    workerIdToInfo_.emplace(workerId, WorkerInfo(workerName, workerId));
-    workerNameToInfo_.emplace(workerName, WorkerInfo(workerName, workerId));
-  }
+  collectNames();
+
+  // Initialize the time-series metrics tracking map
+  timeSeriesMetrics_[kGilAverageWaitTime] =
+      std::make_unique<TimeSeriesMetricsTracker>();
 }
 
 TensorPipeAgent::~TensorPipeAgent() {
@@ -122,15 +168,6 @@ void TensorPipeAgent::pipeRead(
 
     // Allocate memory and fill in pointers
     Message rpcMessage = tensorpipeAllocateMessage(tpMessage);
-    TORCH_INTERNAL_ASSERT(
-        rpcMessage.tensors().size() == tpMessage.tensors.size(),
-        "Tensor num mismatch");
-    tpMessage.data = (uint8_t*)(rpcMessage.payload().data());
-    for (size_t i = 0; i < rpcMessage.tensors().size(); i++) {
-      auto& rpcTensor = rpcMessage.tensors()[i];
-      auto& tpTensor = tpMessage.tensors[i];
-      tpTensor.data = (uint8_t*)(rpcTensor.data_ptr());
-    }
 
     pipe->read(
         std::move(tpMessage),
@@ -404,6 +441,63 @@ std::string TensorPipeAgent::createUniqueShmAddr() {
       threadLocalId++);
 }
 #endif
+
+std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
+  std::unordered_map<std::string, std::string> metrics;
+  metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
+  metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
+  if (isGILProfilingEnabled()) {
+    {
+      std::unique_lock<std::mutex> lock(metricsMutex_);
+      // Include the averages for each time series metric. This is just the GIL
+      // Wait Time for now.
+      auto averageGilWaitTime =
+          timeSeriesMetrics_[kGilAverageWaitTime]->computeAverage();
+      lock.unlock();
+      metrics[kGilAverageWaitTime] = c10::to_string(averageGilWaitTime);
+    }
+  }
+
+  return metrics;
+}
+
+void TensorPipeAgent::addGilWaitTime(
+    const std::chrono::microseconds gilWaitTime) {
+  std::lock_guard<std::mutex> lock(metricsMutex_);
+  timeSeriesMetrics_[kGilAverageWaitTime]->addData(gilWaitTime.count());
+}
+
+TensorPipeAgent::NetworkDataDict TensorPipeAgent::getNetworkData() {
+  std::lock_guard<std::mutex> lock(networkDataMutex_);
+  return networkData_;
+}
+
+NetworkSourceInfo TensorPipeAgent::getNetworkSourceInfo() {
+  NetworkSourceInfo info = {
+      RpcAgent::getWorkerInfo().id_,
+      addressStore_->get(RpcAgent::getWorkerInfo().name_)};
+
+  return info;
+}
+
+void TensorPipeAgent::trackNetworkData(
+    uint64_t requestSize,
+    uint64_t responseSize,
+    const std::string& destWorkerName) {
+  std::lock_guard<std::mutex> lock(networkDataMutex_);
+  networkData_[destWorkerName].numCalls++;
+  networkData_[destWorkerName].totalSentBytes += requestSize;
+  networkData_[destWorkerName].totalRecvBytes += responseSize;
+}
+
+void TensorPipeAgent::trackNetworkError(
+    uint64_t requestSize,
+    const std::string& destWorkerName) {
+  std::lock_guard<std::mutex> lock(networkDataMutex_);
+  networkData_[destWorkerName].numCalls++;
+  networkData_[destWorkerName].totalSentBytes += requestSize;
+  networkData_[destWorkerName].totalErrors++;
+}
 
 } // namespace rpc
 } // namespace distributed
