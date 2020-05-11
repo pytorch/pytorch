@@ -1,6 +1,6 @@
 #include <ATen/core/ATenOpList.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -72,6 +72,15 @@ Operator createOperatorFromC10_withTracingHandledHere(
             AT_ASSERT(iter->isTensorList());
             auto list = iter->toTensorVector();
             tracer::addInputs(node, args[i].name().c_str(), list);
+          } else if (auto class_type = elem_type->cast<ClassType>()) {
+            AT_ASSERT(iter->isList());
+            auto list = iter->toList();
+            std::vector<c10::intrusive_ptr<c10::ivalue::Object>> objects;
+            for (IValue iv : list) {
+              objects.emplace_back(std::move(iv).toObject());
+            }
+            tracer::addInputs(
+                node, args[i].name().c_str(), objects, class_type);
           } else if (elem_type->kind() == TypeKind::FloatType) {
             AT_ASSERT(iter->isDoubleList());
             // NB: now, tracer doesn't support tracing double list. We add
@@ -138,6 +147,9 @@ Operator createOperatorFromC10_withTracingHandledHere(
             throw std::runtime_error(
                 "unsupported ouptut list type: " + elem_type->str());
           }
+        } else if (type->kind() == TypeKind::ClassType) {
+          AT_ASSERT(iter->isObject());
+          tracer::addOutput(node, iter->toObject());
         } else {
           throw std::runtime_error("unsupported output type: " + type->str());
         }

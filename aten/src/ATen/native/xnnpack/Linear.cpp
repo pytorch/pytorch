@@ -163,7 +163,7 @@ c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
       std::move(weight), std::move(bias), output_min, output_max);
 }
 
-Tensor LinearClampRun::operator()(
+Tensor linear_clamp_run(
     const Tensor& input,
     const c10::intrusive_ptr<xnnpack::LinearOpContext>& op_context) {
   return op_context->run(input);

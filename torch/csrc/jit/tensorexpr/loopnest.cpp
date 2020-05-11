@@ -239,18 +239,6 @@ class Vectorizer : public IRMutator {
     return v;
   }
 
-  const Expr* mutate(const Let* v) override {
-    const Expr* var = v->var();
-    const Expr* value = v->value();
-    const Expr* body = v->body();
-
-    std::vector<const Expr*> inputs = {body};
-    return try_vectorize(v, inputs, [&]() {
-      return Let::make(
-          ExprHandle(var), ExprHandle(value), ExprHandle(inputs[0]));
-    });
-  }
-
   const Expr* mutate(const Ramp* v) override {
     const Expr* base = v->base();
     const Expr* stride = v->stride();
@@ -439,7 +427,7 @@ class Flattener : public IRMutator {
   Expr* mutate(const FunctionCall* v) override {
     const Tensor* t = v->tensor();
     const Buf* b = t->buf();
-    Buffer buffer(BufHandle(b), t->body()->dtype());
+    Buffer buffer = Buffer(BufHandle(b));
     const std::vector<const Expr*>& params = v->params();
     std::vector<ExprHandle> params_expr(params.size());
     for (size_t i = 0; i < params.size(); i++) {
@@ -647,12 +635,21 @@ class RandomInliner : public FunctionInliner {
  private:
   // Emit let statements for all encountered random vars, thenclear them.
   Stmt* bind_random_vars(Stmt* s) {
+    if (random_vars_.empty()) {
+      return s;
+    }
+
+    Block* b = dynamic_cast<Block*>(s);
+    if (!b) {
+      b = new Block({s});
+    }
+
     for (auto const& p : random_vars_) {
       Var* v = p.second;
-      s = new LetStmt(v, new Intrinsics(kRand, v->dtype()), s);
+      b->add_var_binding(v, new Intrinsics(kRand, v->dtype()));
     }
     random_vars_.clear();
-    return s;
+    return b;
   }
 
   // Track the function currently being inlined.
@@ -841,7 +838,7 @@ std::unordered_map<const Buf*, std::vector<BufUse>> findUses(Stmt* s) {
 
 class ContainedStmtsFinder : public IRVisitor {
  public:
-  // Simply list all Stores and LetStmts that are children of the given stmt
+  // Simply list all Stores and Block that are children of the given stmt
   const std::unordered_set<Stmt*>& findContainedStmts(Stmt* s) {
     contained_.clear();
     s->accept(this);
@@ -853,7 +850,7 @@ class ContainedStmtsFinder : public IRVisitor {
     contained_.insert((Stmt*)v);
     IRVisitor::visit(v);
   }
-  void visit(const LetStmt* v) override {
+  void visit(const Block* v) override {
     contained_.insert((Stmt*)v);
     IRVisitor::visit(v);
   }
@@ -929,10 +926,8 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
   // innermost possible scope.
   std::unordered_map<const Buf*, std::vector<BufUse>> uses = findUses(stmt);
 
-  for (const auto& temp_buf : temp_bufs_) {
-    const Buf* buf = temp_buf.first;
-    Stmt* alloc =
-        new Allocate(buf->base_handle(), temp_buf.second, buf->dims());
+  for (const auto& buf : temp_bufs_) {
+    Stmt* alloc = new Allocate(buf->base_handle(), buf->dtype(), buf->dims());
     Stmt* free = new Free(buf->base_handle());
 
     Block* alloc_block = findLowestContainingBlock(uses.at(buf));
@@ -1022,7 +1017,7 @@ void LoopNest::splitWithTail(
         Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
     *tail = new For(i_tail, new IntImm(0), tail_size, body_tail);
 
-    p->append_stmt(*tail);
+    p->insert_stmt_after(*tail, *outer);
   } else {
     *tail = nullptr;
   }
@@ -1089,44 +1084,62 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   // TODO: record history of transformations
 }
 
-void LoopNest::reorderAxis(Tensor* t, For* a, For* b) {
+For* findOuterFor(For* a, For* b) {
+  Stmt* s = b; // guess b is the latter.
+  while (s != nullptr) {
+    if (s == a) {
+      // yes, b is after a.
+      return a;
+    }
+    s = s->get_parent();
+  }
+
+  // check that the two are in the same loop nest.
+  s = a;
+  while (s != nullptr) {
+    if (s == b) {
+      // a is after b.
+      return b;
+    }
+    s = s->get_parent();
+  }
+
+  // a and b have no relationship.
+  return nullptr;
+}
+
+void LoopNest::reorderAxis(For* a, For* b) {
   if (a == b) {
     // nothing to do.
     return;
   }
   // find inner and outer.
-  For* outer{nullptr};
-  For* inner{nullptr};
+  For* outer = findOuterFor(a, b);
+  if (outer == nullptr) {
+    throw std::runtime_error("Reordered a loop not in LoopNest");
+  }
+
+  For* inner = a == outer ? b : a;
   std::deque<For*> internal_axes;
 
   // Find relevant axes, store reversed.
-  for (For* loop : getLoopStmtsFor(t)) {
-    if (loop == a || loop == b) {
-      if (outer == nullptr) {
-        outer = loop;
-        internal_axes.push_front(loop);
-      } else {
-        inner = loop;
-        internal_axes.push_front(loop);
-      }
-    } else if (outer && !inner) {
-      internal_axes.push_front(loop);
+  Stmt* s = inner;
+  while (s != outer) {
+    if (For* f = dynamic_cast<For*>(s)) {
+      internal_axes.push_back(f);
     }
+
+    s = s->get_parent();
   }
 
-  if (!inner || !outer) {
-    throw std::runtime_error("Reordered a loop not in LoopNest");
-  }
+  internal_axes.push_back(outer);
 
   Block* root = dynamic_cast<Block*>(outer->get_parent());
   CHECK(root);
 
   // Do a shallow copy of the inner blocks.
-  Block* body = new Block({});
-  for (auto* s : inner->body()->stmts()) {
-    inner->body()->remove_stmt(s);
-    body->append_stmt(s);
-  }
+  Block* body = new Block(inner->body()->varBindings(), {});
+  body->splice(body->end(), inner->body());
 
   For* before{outer};
   For* after{nullptr};
@@ -1156,7 +1169,9 @@ void LoopNest::reorderAxis(Tensor* t, For* a, For* b) {
 
     bool pastMidpoint = false;
     bool hadBeforeStmts = false;
-    for (Stmt* s : loop->body()->stmts()) {
+    for (auto I = loop->body()->begin(), E = loop->body()->end(); I != E;) {
+      // Be careful not to invalidate the iterator.
+      Stmt* s = *(I++);
       if (s == last) {
         // This is the midpoint.
         loop->body()->remove_stmt(s);
@@ -1281,7 +1296,7 @@ static Store* getStoreStmtOfProducer(Stmt* s) {
     return st;
   }
   if (Block* b = dynamic_cast<Block*>(s)) {
-    for (Stmt* ss : b->stmts()) {
+    for (Stmt* ss : *b) {
       if (Store* st = dynamic_cast<Store*>(ss)) {
         return st;
       }
@@ -1444,8 +1459,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   }
 
   // TODO: Use name-hint of the producer instead of "temp"
-  const Buf* temp_buf =
-      new Buf(new Var("temp", store_bounds_info.buf->dtype()), dims);
+  const Buf* temp_buf = new Buf("temp", dims, st->value()->dtype());
 
   // Generate index variables for 'temp'
   std::vector<const Expr*> temp_indices(dims.size());
@@ -1501,7 +1515,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
   // Mark the new temp buffer as requiring an alloc (it will be inserted as a
   // part of prepareForCodegen).
-  temp_bufs_.emplace_back(std::make_pair(temp_buf, st->value()->dtype()));
+  temp_bufs_.emplace_back(temp_buf);
 }
 
 class SwapReduce : public IRMutator {
@@ -1597,7 +1611,8 @@ void LoopNest::rfactor(
   }
 
   std::vector<const Expr*> new_dims = {};
-  Buf* tmp_buf = new Buf(new Var("tmp_buf", kHandle), new_dims);
+  Buf* tmp_buf =
+      new Buf(new Var("tmp_buf", kHandle), new_dims, reduce_op->body().dtype());
 
   auto old_acc = reduce_op->accumulator();
   auto old_init_expr = reduce_op->initializer();
@@ -1718,7 +1733,7 @@ void LoopNest::rfactor(
         "Hit undefined behavior in rfactor -- couldn't infer bounds.");
   }
 
-  temp_bufs_.emplace_back(std::make_pair(tmp_buf, reduce_op->body().dtype()));
+  temp_bufs_.emplace_back(tmp_buf);
 }
 
 } // namespace tensorexpr

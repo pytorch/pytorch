@@ -991,14 +991,28 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     dim1 = 1;
   }
 
-  // if the fastest moving dimension is contiguous and large enough, we do vectorized
-  // load for better performance. Note that if vt0 < ReduceConfig::vec_size, then this
-  // means the register pressure could be high, in such case, we should avoid vectorization.
-  // We only vectorize 1D reduction
-  if (fastest_moving_stride == sizeof(scalar_t) && vt0 >= ReduceConfig::input_vec_size) {
-    if (reduction_on_fastest_striding_dimension && dim0 > 128 && iter.num_reduce_dims() == 1) {
+  // We do vectorization to gain better memory access, there are two cases which we call
+  // "vectorize along input" and "vectorize along output". Note that the "input/output"
+  // here does not mean we are vectorizing load/store instructions. We always only vectorize
+  // load instructions.
+  //
+  // Case 1: "vectorize along input"
+  // This case happens when we are reducing along fastest moving dimesion. In such case, threads
+  // with the same threadIdx.y works on the same reduction cooperatively and will produce results
+  // for the same ouput. In such case, values in each loaded vector always correspond to the same ouput.
+  //
+  // Case 2: "vectorize along output"
+  // This case happens when the fastest moving dimesion is not the dimension of reduction. In such case,
+  // threads with different threadIdx.x are independent and will produce results for different outputs.
+  // In such case, values in each loaded vector always correspond to different outputs.
+  if (fastest_moving_stride == sizeof(scalar_t)) {
+    if (reduction_on_fastest_striding_dimension && dim0 > 128 && iter.num_reduce_dims() == 1 && vt0 >= ReduceConfig::input_vec_size) {
+      // Case 1: "vectorize along input"
+      // Note that if vt0 < ReduceConfig::vec_size, then this means the register pressure could be high, in such case,
+      // we should avoid vectorization.
       config.vectorize_input = true;
     } else if (!reduction_on_fastest_striding_dimension) {
+      // Case 2: "vectorize along output"
       config.output_vec_size = get_output_vec_size<scalar_t>(iter);
       dim0 /= config.output_vec_size;
     }

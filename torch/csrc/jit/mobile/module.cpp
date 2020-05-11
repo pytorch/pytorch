@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/mobile/observer.h>
 #endif
 
+#include <ATen/record_function.h>
+
 namespace torch {
 namespace jit {
 std::ostream& operator<<(std::ostream& out, Instruction inst);

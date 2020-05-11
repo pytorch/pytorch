@@ -70,6 +70,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
+    ${TORCH_ROOT}/third_party/tensorpipe
     ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
@@ -82,7 +83,8 @@ list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
     torch_library
-    shm)
+    shm
+    fmt::fmt-header-only)
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
@@ -266,7 +268,8 @@ set(ModulesStubOut
     ${TORCH_SRC_DIR}/nn/modules/upsampling.pyi
 )
 add_custom_target(torch_python_stubs DEPENDS
-    "${TORCH_SRC_DIR}/__init__.pyi"
+    "${TORCH_SRC_DIR}/_C/__init__.pyi"
+    "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     ${ModuleStubOut}
 )
@@ -274,7 +277,8 @@ add_custom_target(torch_python_stubs DEPENDS
 add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
 add_custom_command(
     OUTPUT
-    "${TORCH_SRC_DIR}/__init__.pyi"
+    "${TORCH_SRC_DIR}/_C/__init__.pyi"
+    "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     ${ModuleStubOut}
     COMMAND
@@ -282,7 +286,8 @@ add_custom_command(
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
-    "${TORCH_SRC_DIR}/__init__.pyi.in"
+    "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
+    "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
     "${TORCH_SRC_DIR}/nn/functional.pyi.in"
     ${ModuleStubIn}
     "${TOOLS_PATH}/pyi/gen_pyi.py"
@@ -291,6 +296,10 @@ add_custom_command(
 )
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+if(HAVE_SOVERSION)
+  set_target_properties(torch_python PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 add_dependencies(torch_python torch_python_stubs)
 
 # Required workaround for generated sources

@@ -48,6 +48,7 @@ TESTS = [
     'test_numba_integration',
     'test_optim',
     'test_mobile_optimizer',
+    'test_xnnpack_integration',
     'test_quantization',
     'test_sparse',
     'test_serialization',
@@ -57,10 +58,10 @@ TESTS = [
     'test_type_hints',
     'test_utils',
     'test_namedtuple_return_api',
-    'test_jit_fuser',
-    'test_jit_simple',
+    'test_jit_profiling',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
+    'test_jit_fuser_profiling',
     'test_tensorboard',
     'test_namedtensor',
     'test_type_promotion',
@@ -100,14 +101,29 @@ ROCM_BLACKLIST = [
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
-    'test_cpp_extensions_aot_ninja',
     'test_determination',
     'test_multiprocessing',
     'test_jit_simple',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
     'test_tensorexpr',
+    'test_type_hints',
 ]
+
+RUN_PARALLEL_BLACKLIST = [
+    'test_cpp_extensions_jit',
+    'test_docs_coverage',
+    'test_expecttest',
+    'test_jit_disabled',
+    'test_mobile_optimizer',
+    'test_multiprocessing',
+    'test_multiprocessing_spawn',
+    'test_namedtuple_return_api',
+    'test_overrides',
+    'test_show_pickle',
+    'test_tensorexpr',
+    'test_cuda_primary_ctx',
+] + [test for test in TESTS if test.startswith('distributed/')]
 
 # These tests are slow enough that it's worth calculating whether the patch
 # touched any related files first.
@@ -118,8 +134,9 @@ SLOW_TESTS = [
     'test_jit_legacy',
     'test_dataloader',
     'test_overrides',
-    'test_jit_simple',
     'test_jit',
+    'test_jit_profiling',
+    'test_jit_fuser_profiling',
     'test_torch',
     'distributed/test_distributed',
     'distributed/rpc/test_rpc_spawn',
@@ -184,6 +201,8 @@ def run_test(executable, test_module, test_directory, options, *extra_unittest_a
     unittest_args = options.additional_unittest_args
     if options.verbose:
         unittest_args.append('--verbose')
+    if test_module in RUN_PARALLEL_BLACKLIST:
+        unittest_args = [arg for arg in unittest_args if not arg.startswith('--run-parallel')]
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + '.py'] + unittest_args + list(extra_unittest_args)

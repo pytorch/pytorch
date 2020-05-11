@@ -4,10 +4,11 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
-#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 
@@ -19,6 +20,9 @@ namespace jit {
 namespace {
 
 void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
+  // fuse decomposed linear into aten::linear
+  FuseLinear(graph);
+
   std::string linear_before_inline = R"(
     graph(%linear, %input, %weight, %bias):
         %r = prim::CallFunction(%linear, %input, %weight, %bias)
@@ -65,7 +69,7 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
 
 void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   // Replace _convolution with conv2d
-  graph_rewrite_helper::replaceConvolutionWithConv2d(graph);
+  graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
   std::string conv_2d_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
