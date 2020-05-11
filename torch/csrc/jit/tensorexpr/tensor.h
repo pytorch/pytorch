@@ -12,7 +12,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class Tensor {
+class Tensor : KernelScopedObject {
  public:
   Function* function() const {
     return function_;

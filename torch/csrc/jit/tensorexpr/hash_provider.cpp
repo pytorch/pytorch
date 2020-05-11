@@ -137,29 +137,6 @@ void HashProvider::visit(const Var* v) {
   putHash(v, hash_combine("var", name_manager_.get_unique_name(v)));
 }
 
-void HashProvider::visit(const Let* v) {
-  CACHE_GUARD();
-  v->var()->accept(this);
-  v->value()->accept(this);
-  v->body()->accept(this);
-
-  putHash(
-      v,
-      hash_combine(
-          "let", hashOf(v->var()), hashOf(v->value()), hashOf(v->body())));
-}
-
-void HashProvider::visit(const LetStmt* v) {
-  CACHE_GUARD();
-  v->var()->accept(this);
-  v->value()->accept(this);
-  v->body()->accept(this);
-  putHash(
-      v,
-      hash_combine(
-          "letstmt", hashOf(v->var()), hashOf(v->value()), hashOf(v->body())));
-}
-
 void HashProvider::visit(const Ramp* v) {
   CACHE_GUARD();
   v->base()->accept(this);
@@ -207,6 +184,12 @@ void HashProvider::visit(const Store* v) {
 void HashProvider::visit(const Block* v) {
   CACHE_GUARD();
   SimplifierHashType hash;
+  for (const auto& pair : v->varBindings()) {
+    pair.first->accept(this);
+    pair.second->accept(this);
+    hash = hash_combine(hash, hashOf(pair.first), hashOf(pair.second));
+  }
+
   for (Stmt* s : *v) {
     s->accept(this);
     hash = hash_combine(hash, hashOf(s));
