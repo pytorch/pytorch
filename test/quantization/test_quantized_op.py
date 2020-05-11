@@ -267,19 +267,17 @@ class TestQuantizedOps(TestCase):
                          message="Sigmoid failed: {} vs. {}".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qhardsigmoid op."""
+    @override_qengines
     def test_qhardsigmoid(self):
         max_sides = (3, 5)
         side_lens = (1, 7, 8)
         torch_types = (torch.quint8, torch.qint8)
-        engines = ('fbgemm', 'qnnpack')
-        combined = [max_sides, side_lens, torch_types, engines]
+        combined = [max_sides, side_lens, torch_types]
         test_cases = itertools.product(*combined)
         for test_case in test_cases:
-            max_side, side_len, torch_type, engine = test_case
+            max_side, side_len, torch_type = test_case
 
-            if engine not in torch.backends.quantized.supported_engines:
-                continue
-            if engine == 'qnnpack' and torch_type != torch.quint8:
+            if torch.backends.quantized.engine == 'qnnpack' and torch_type != torch.quint8:
                 continue
 
             with override_quantized_engine(engine):
@@ -306,7 +304,7 @@ class TestQuantizedOps(TestCase):
 
                 qY = torch.nn.quantized.functional.hardsigmoid(qX)
                 self.assertEqual(qY, qY_hat,
-                                 message="Hardsigmoid failed: {} vs. {}".format(qY, qY_hat))
+                                 message="Hardsigmoid failed: {} vs. {}, {}".format(qY, qY_hat, torch.backends.quantized.engine))
 
 
     """Tests the correctness of the quantized::qlayer_norm op."""
@@ -490,41 +488,38 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
 
     """Tests the correctness of the quantized::hardswish op."""
+    @override_qengines
     def test_hardswish(self):
         max_sides = (3, 5)
         side_lens = (1, 7, 8)
         torch_types = (torch.quint8, torch.qint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
-        engines = ('fbgemm', 'qnnpack')
-        combined = [max_sides, side_lens, torch_types, y_scales, y_zero_points, engines]
+        combined = [max_sides, side_lens, torch_types, y_scales, y_zero_points]
         test_cases = itertools.product(*combined)
         for test_case in test_cases:
-            max_side, side_len, torch_type, Y_scale, Y_zero_point, engine = test_case
+            max_side, side_len, torch_type, Y_scale, Y_zero_point = test_case
 
-            if engine not in torch.backends.quantized.supported_engines:
-                continue
-            if engine == 'qnnpack' and torch_type != torch.quint8:
+            if torch.backends.quantized.engine == 'qnnpack' and torch_type != torch.quint8:
                 continue
 
-            with override_quantized_engine(engine):
-                shapes = [side_len] * max_side
-                X, X_scale, X_zero_point = \
-                    _get_random_tensor_and_q_params(shapes, 2.0, torch_type)
-                qX = torch.quantize_per_tensor(X, scale=X_scale, zero_point=X_zero_point,
+            shapes = [side_len] * max_side
+            X, X_scale, X_zero_point = \
+                _get_random_tensor_and_q_params(shapes, 2.0, torch_type)
+            qX = torch.quantize_per_tensor(X, scale=X_scale, zero_point=X_zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+
+            dqY_hat = F.hardswish(dqX)
+            qY_hat = torch.quantize_per_tensor(dqY_hat, scale=Y_scale,
+                                               zero_point=Y_zero_point,
                                                dtype=torch_type)
-                dqX = qX.dequantize()
 
-                dqY_hat = F.hardswish(dqX)
-                qY_hat = torch.quantize_per_tensor(dqY_hat, scale=Y_scale,
-                                                   zero_point=Y_zero_point,
-                                                   dtype=torch_type)
-
-                qY = torch.nn.quantized.functional.hardswish(
-                    qX, scale=Y_scale, zero_point=Y_zero_point)
-                self.assertEqual(
-                    qY, qY_hat,
-                    message="Hardswish failed: {} vs {}".format(qY, qY_hat))
+            qY = torch.nn.quantized.functional.hardswish(
+                qX, scale=Y_scale, zero_point=Y_zero_point)
+            self.assertEqual(
+                qY, qY_hat,
+                message="Hardswish failed: {} vs {}, {}".format(qY, qY_hat, torch.backends.quantized.engine))
 
     """Tests the correctness of the scalar addition."""
     @unittest.skip("Failing on MacOS")
