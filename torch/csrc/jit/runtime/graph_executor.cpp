@@ -780,8 +780,7 @@ void runNondiffOptimization(
   // otherwise fallback to the legacy executor and legacy fuser
   if (strict_fuser_check) {
     FuseTensorExprs(graph);
-  }
-  else {
+  } else {
     FuseGraph(graph, strict_fuser_check);
   }
 

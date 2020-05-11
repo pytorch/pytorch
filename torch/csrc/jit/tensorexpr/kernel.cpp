@@ -313,7 +313,7 @@ Tensor* TensorExprKernel::computeTwoOperandWithAlpha(
 
         promoteInputs(inputs);
         ExprHandle compute = innerExpr(inputs[0], inputs[2] * inputs[1]);
-        //ExprHandle compute = innerExpr(inputs[0], inputs[1]);
+        // ExprHandle compute = innerExpr(inputs[0], inputs[1]);
         return demoteOutput(compute, n->output());
       });
 }
