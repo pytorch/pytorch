@@ -133,7 +133,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     ${static_dispatch_method_body}
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
-    return op.callUnboxed<${formals_types_with_return}>(${method_actuals});
+    return op.call<${formals_types_with_return}>(${method_actuals});
 #endif
 }
 """)
@@ -158,7 +158,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
-    return op.callUnboxed<${formals_types_with_return}>(${native_actuals});
+    return op.call<${formals_types_with_return}>(${native_actuals});
 #endif
 }
 """)

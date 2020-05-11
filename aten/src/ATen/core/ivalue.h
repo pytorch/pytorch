@@ -7,7 +7,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
-class CustomClassHolder : public c10::intrusive_ptr_target {};
+class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
 namespace jit {
 using ::torch::CustomClassHolder;
 struct Function;

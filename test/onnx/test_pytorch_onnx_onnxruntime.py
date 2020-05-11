@@ -188,7 +188,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_model_test_with_external_data(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
-    @skipIfUnsupportedOpsetVersion([12])
     def test_mobilenet_v2_with_external_data(self):
         model = torchvision.models.mobilenet_v2(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
@@ -205,43 +204,36 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,))
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_densenets(self):
         model = torchvision.models.densenet121(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_googlenet(self):
         model = torchvision.models.googlenet(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_inception(self):
         model = torchvision.models.inception_v3(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_mnasnet(self):
         model = torchvision.models.mnasnet1_0(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_mobilenet(self):
         model = torchvision.models.mobilenet_v2(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_resnet(self):
         model = torchvision.models.resnet50(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,))
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_shufflenet(self):
         model = torchvision.models.shufflenet_v2_x1_0(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
@@ -252,7 +244,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,))
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_vgg(self):
         model = torchvision.models.vgg19(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
@@ -261,32 +252,27 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfUnsupportedOpsetVersion([12])
     def test_fcn(self):
         model = torchvision.models.segmentation.segmentation.fcn_resnet101(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfUnsupportedOpsetVersion([12])
     def test_deeplab(self):
         model = torchvision.models.segmentation.segmentation.deeplabv3_resnet101(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_r3d_18_video(self):
         model = torchvision.models.video.r3d_18(pretrained=True)
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_mc3_18_video(self):
         model = torchvision.models.video.mc3_18(pretrained=True)
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_r2plus1d_18_video(self):
         model = torchvision.models.video.r2plus1d_18(pretrained=True)
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
@@ -1393,7 +1379,6 @@ class TestONNXRuntime(unittest.TestCase):
         model = StandardDeviation()
         self.run_test(model, x)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_bitshift(self):
         class BitshiftModel(torch.nn.Module):
             def forward(self, input, input2):
@@ -1403,7 +1388,6 @@ class TestONNXRuntime(unittest.TestCase):
         input2 = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
         self.run_test(BitshiftModel(), (input, input2))
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_bitshift_other_fp(self):
         class BitshiftModel(torch.nn.Module):
             def forward(self, input):
@@ -1498,7 +1482,11 @@ class TestONNXRuntime(unittest.TestCase):
     def test_topk_smallest_unsorted(self):
         class MyModule(torch.nn.Module):
             def forward(self, x, k):
-                return torch.topk(x, k, largest=False, sorted=False)
+                # When sorted=False, order of elements in the outout tensors
+                # are not expected to match between PyTorch and ORT
+                topk_unsorted = torch.topk(x, k, largest=False, sorted=False)
+                topk_sorted = torch.topk(x, k, largest=False, sorted=True)
+                return topk_sorted, torch.sort(topk_unsorted.values).values
 
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)
@@ -1524,13 +1512,11 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 3)
         self.run_test(Model(), x)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_layer_norm(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
         self.run_test(model, x)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_batchnorm1d(self):
         x = torch.randn(10, 10)
         model = torch.nn.BatchNorm1d(10, affine=True)
@@ -1539,7 +1525,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_batchnorm1d_noaffine(self):
         x = torch.randn(10, 10)
         model = torch.nn.BatchNorm1d(10, affine=False)
@@ -1548,25 +1533,21 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_batchnorm2d(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=True)
         self.run_test(model, x)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_batchnorm2d_noaffine(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=False)
         self.run_test(model, x)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_batchnorm3d(self):
         x = torch.randn(10, 3, 128, 128, 128)
         model = torch.nn.BatchNorm3d(3, affine=True)
         self.run_test(model, x)
 
-    @skipIfUnsupportedOpsetVersion([12])
     def test_batchnorm3d_noaffine(self):
         x = torch.randn(10, 3, 128, 128, 128)
         model = torch.nn.BatchNorm3d(3, affine=False)
@@ -2413,7 +2394,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(MaskedScatterModel(), x)
 
-    @skipIfUnsupportedOpsetVersion([12])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_masked_select(self):
         class MaskedSelectModel(torch.nn.Module):
