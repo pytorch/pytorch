@@ -2,14 +2,6 @@ import torch
 import functools
 import inspect
 
-from typing import Any, Callable, TypeVar
-from typing_extensions import Literal
-
-# Used for annotating the decorator usage of 'no_grad' and 'enable_grad'.
-# See https://mypy.readthedocs.io/en/latest/generics.html#declaring-decorators
-FuncType = Callable[..., Any]
-T = TypeVar('T', bound=FuncType)
-
 class _DecoratorContextManager:
     """Allow a context manager to be used as a decorator"""
 
@@ -36,12 +28,6 @@ class _DecoratorContextManager:
                 except StopIteration:
                     break
         return generator_context
-
-    def __enter__(self) -> None:
-        raise NotImplementedError
-
-    def __exit__(self, *args: Any) -> bool:
-        raise NotImplementedError
 
 
 class no_grad(_DecoratorContextManager):
@@ -76,12 +62,12 @@ class no_grad(_DecoratorContextManager):
         >>> z.requires_grad
         False
     """
-    def __enter__(self) -> None:
+    def __enter__(self):
         self.prev = torch.is_grad_enabled()
-        torch._C._set_grad_enabled(False)
+        torch._C.set_grad_enabled(False)
 
-    def __exit__(self, *args: Any) -> Literal[False]:
-        torch._C._set_grad_enabled(self.prev)
+    def __exit__(self, *args):
+        torch.set_grad_enabled(self.prev)
         return False
 
 
@@ -116,12 +102,12 @@ class enable_grad(_DecoratorContextManager):
         True
 
     """
-    def __enter__(self) -> None:
+    def __enter__(self):
         self.prev = torch.is_grad_enabled()
-        torch._C._set_grad_enabled(True)
+        torch._C.set_grad_enabled(True)
 
-    def __exit__(self, *args: Any) -> Literal[False]:
-        torch._C._set_grad_enabled(self.prev)
+    def __exit__(self, *args):
+        torch.set_grad_enabled(self.prev)
         return False
 
 
@@ -162,13 +148,13 @@ class set_grad_enabled(object):
 
     """
 
-    def __init__(self, mode: bool) -> None:
+    def __init__(self, mode):
         self.prev = torch.is_grad_enabled()
-        torch._C._set_grad_enabled(mode)
+        torch._C.set_grad_enabled(mode)
 
-    def __enter__(self) -> None:
+    def __enter__(self):
         pass
 
-    def __exit__(self, *args: Any) -> Literal[False]:
-        torch._C._set_grad_enabled(self.prev)
+    def __exit__(self, *args):
+        torch.set_grad_enabled(self.prev)
         return False

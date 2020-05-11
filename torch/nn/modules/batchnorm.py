@@ -21,8 +21,8 @@ class _NormBase(Module):
     momentum: float
     affine: bool
     track_running_stats: bool
-    weight: Parameter
-    bias: Parameter
+    weight: Optional[Tensor]
+    bias: Optional[Tensor]
 
     def __init__(
         self,

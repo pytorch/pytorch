@@ -7,6 +7,8 @@ from .. import functional as F
 from .. import init
 from .module import Module
 
+from typing import Optional
+
 
 class Identity(Module):
     r"""A placeholder identity operator that is argument-insensitive.
@@ -67,8 +69,8 @@ class Linear(Module):
     __constants__ = ['in_features', 'out_features']
     in_features: int
     out_features: int
-    weight: Parameter
-    bias: Parameter
+    weight: Tensor
+    bias: Optional[Tensor]
 
     def __init__(self, in_features: int, out_features: int, bias: bool = True):
         super(Linear, self).__init__()
@@ -139,8 +141,8 @@ class Bilinear(Module):
     in1_features: int
     in2_features: int
     out_features: int
-    weight: Parameter
-    bias: Parameter
+    weight: Tensor
+    bias: Optional[Tensor]
 
     def __init__(self, in1_features: int, in2_features: int, out_features: int, bias: bool = True):
         super(Bilinear, self).__init__()

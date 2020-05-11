@@ -10,8 +10,7 @@ from .module import Module
 from .utils import _single, _pair, _triple
 from .. import functional as F
 
-from torch.types import _size
-from ..common_types import _size_any_t, _maybe_indices_t, _size_1_t, _size_2_t, _size_3_t, _ratio_3_t, _ratio_2_t
+from ..common_types import _size_any_t, _size_1_t, _size_2_t, _size_3_t, _ratio_3_t, _ratio_2_t
 
 
 class _MaxPoolNd(Module):

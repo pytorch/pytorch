@@ -32,7 +32,7 @@ class _ConvNd(Module):
     groups: int
     padding_mode: str
     weight: Tensor
-    bias: Tensor
+    bias: Optional[Tensor]
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,

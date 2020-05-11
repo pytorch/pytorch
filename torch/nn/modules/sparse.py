@@ -86,7 +86,7 @@ class Embedding(Module):
     max_norm: float
     norm_type: float
     scale_grad_by_freq: bool
-    weight: Parameter
+    weight: Tensor
     sparse: bool
 
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
@@ -271,7 +271,7 @@ class EmbeddingBag(Module):
     max_norm: float
     norm_type: float
     scale_grad_by_freq: bool
-    weight: Parameter
+    weight: Tensor
     mode: str
     sparse: bool
     include_last_offset: bool

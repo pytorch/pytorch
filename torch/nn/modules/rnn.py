@@ -755,10 +755,10 @@ class RNNCellBase(Module):
     input_size: int
     hidden_size: int
     bias: bool
-    weight_ih: Parameter
-    weight_hh: Parameter
-    bias_ih: Parameter
-    bias_hh: Parameter
+    weight_ih: Tensor
+    weight_hh: Tensor
+    bias_ih: Optional[Tensor]
+    bias_hh: Optional[Tensor]
 
     def __init__(self, input_size: int, hidden_size: int, bias: bool, num_chunks: int) -> None:
         super(RNNCellBase, self).__init__()
