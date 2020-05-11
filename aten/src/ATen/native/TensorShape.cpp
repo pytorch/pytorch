@@ -1239,6 +1239,32 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
   return std::make_tuple(sizes, strides);
 }
 
+Tensor squeeze_qtensor(const Tensor& self) {
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  std::vector<int64_t> sizes;
+  std::vector<int64_t> strides;
+  std::tie(sizes, strides) = inferSqueezeGeometry(self);
+  if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
+    const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
+    auto axis = per_channel_quantizer->axis();
+    int64_t shift = 0;
+    for (int64_t d = 0; d < self.dim(); ++d) {
+      if (self.sizes()[d] == 1) {
+        TORCH_CHECK(axis != d, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
+        if (d < axis) {
+          shift += 1;
+        }
+      }
+    }
+    axis = axis - shift;
+    quantizer = make_per_channel_affine_quantizer(per_channel_quantizer->scales(),
+                                                  per_channel_quantizer->zero_points(),
+                                                  axis,
+                                                  quantizer->scalar_type());
+  }
+  return make_qtensor(self, sizes, strides, quantizer);
+}
+
 Tensor squeeze_qtensor(const Tensor& self, int64_t dim) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   std::vector<int64_t> sizes;
@@ -1267,7 +1293,12 @@ Tensor squeeze_qtensor(const Tensor& self, int64_t dim) {
 
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+  at::Tensor result;
+  if (self.is_quantized()) {
+    result = squeeze_qtensor(self);
+  } else {
+    result = self.as_strided(std::get<0>(g), std::get<1>(g));
+  }
   auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
