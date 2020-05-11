@@ -3557,9 +3557,10 @@ See :func:`torch.pinverse`
 
 add_docstr_all('index_add',
                r"""
-index_add(dim, index, tensor) -> Tensor
+index_add(tensor1, dim, index, tensor2) -> Tensor
 
-Out-of-place version of :meth:`torch.Tensor.index_add_`
+Out-of-place version of :meth:`torch.Tensor.index_add_`.
+`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_add_`.
 """)
 
 add_docstr_all('index_copy',
