@@ -21,7 +21,7 @@ class SyncBatchNorm(Function):
         combined = torch.cat([mean, invstd, count], dim=0)
         # world_size * (2C + 1)
         combined_list = [
-            torch.zeros_like(combined) for k in range(world_size)
+            torch.empty_like(combined) for k in range(world_size)
         ]
         # Use allgather instead of allreduce since I don't trust in-place operations ..
         dist.all_gather(combined_list, combined, async_op=False)
