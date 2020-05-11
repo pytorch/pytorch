@@ -1671,13 +1671,13 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # N + 1 quantize_per_tensor between these ops
         m1 = convert_script(m, debug=True)
         # NB: This Needs to be updated when we add more ops to test
-        # number of quantize_per_tensor op for type
-        num_quant_by_op_type = {'conv': 2, 'common': 1, 'interpolate': 3}
-        # number of ops for each type
-        num_op_by_op_type = {'conv': 2, 'common': 27, 'interpolate': 3}
+        # mapping from number of quant for the op to the number of these ops
+        # for example, for `3` in the key means for this type of op
+        # we'll have 3 quantize_per_tensor
+        num_op_by_num_quant = {1: 27, 2: 2, 3: 3}
         num_quantize_per_tensor = 1  # for output
-        for op_type, num_op in num_op_by_op_type.items():
-            num_quantize_per_tensor += num_op * num_quant_by_op_type[op_type]
+        for num_quant, num_op in num_op_by_num_quant.items():
+            num_quantize_per_tensor += num_op * num_quant
         FileCheck().check_count("aten::quantize_per_tensor(", num_quantize_per_tensor, exactly=True) \
                    .run(m1.graph)
 

@@ -80,7 +80,7 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "chunk",      "view",        "transpose",
     "contiguous", "permute",     "repeat_interleave",
     "relu",       "relu_",       "sigmoid",
-    "tanh",       "hardsigmoid", "hardsigmoid_",
+    "tanh",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
@@ -132,6 +132,21 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     "leaky_relu",
     "leaky_relu_",
 };
+
+// Map from aten op symbol to the quantization parameters
+// for the ops with fixed quantization parameters
+std::unordered_map<NodeKind, std::tuple<c10::QScheme, QParamVector>>
+_fixed_qparams_map =
+        {
+            {
+              Symbol::aten("hardsigmoid"),
+              std::make_tuple(
+                  c10::kPerTensorAffine,
+                  QParamVector({std::make_pair(".scale", IValue(1.0f / 256.0f)),
+                                std::make_pair(".zero_point", IValue(0)),
+                                std::make_pair(".scalar_type", IValue(c10::kQUInt8))}))
+            }
+        };
 
 // Special checks for ops that do not require observers for all input tensors.
 // For each operator in this list observers are inserted for the input based
@@ -234,17 +249,25 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
   return {};
 }
 
-bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
-  std::vector<Symbol> aten_func_symbols;
+std::vector<NodeKind> toAtenSymbol(const std::vector<std::string>& func_names) {
+  std::vector<NodeKind> symbols;
   std::transform(
-      aten_funcs.begin(),
-      aten_funcs.end(),
-      std::back_inserter(aten_func_symbols),
-      [](const std::string& s) { return Symbol::aten(s); });
+      func_names.begin(),
+      func_names.end(),
+      std::back_inserter(symbols),
+      Symbol::aten);
+  return symbols;
+}
 
+bool isAtenFunc(Node* n, const std::vector<NodeKind>& aten_funcs) {
   return std::find(
-             aten_func_symbols.begin(), aten_func_symbols.end(), n->kind()) !=
-      aten_func_symbols.end();
+             aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
+      aten_funcs.end();
+}
+
+bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
+  const auto& symbols = toAtenSymbol(aten_funcs);
+  return isAtenFunc(n, symbols);
 }
 
 // TODO: factor out isCallFunc
@@ -263,42 +286,49 @@ bool isFunctionNode(
 }
 
 bool isSingleInputGeneralValueAtenFunction(Node* n) {
-  return isFunctionNode(
-      n,
-      /* call_funcs = */ {},
-      /* aten_funcs = */ _single_input_general_value_aten_funcs);
+  return isAtenFunc(n, _single_input_general_value_aten_funcs);
 }
 
 bool isSingleInputGeneralCallFunction(Node* n) {
-  static std::vector<std::string> _single_input_general_call_funcs;
+  static std::vector<std::string> single_input_general_call_funcs;
   std::copy(
       _single_input_general_shape_call_funcs.begin(),
       _single_input_general_shape_call_funcs.end(),
-      std::back_inserter(_single_input_general_call_funcs));
+      std::back_inserter(single_input_general_call_funcs));
   std::copy(
       _single_input_general_value_call_funcs.begin(),
       _single_input_general_value_call_funcs.end(),
-      std::back_inserter(_single_input_general_call_funcs));
+      std::back_inserter(single_input_general_call_funcs));
   return isFunctionNode(
       n,
-      /* call_funcs = */ _single_input_general_call_funcs,
+      /* call_funcs = */ single_input_general_call_funcs,
       /* aten_funcs = */ {});
 }
 
 bool isSingleInputGeneralAtenFunction(Node* n) {
-  static std::vector<std::string> _single_input_general_aten_funcs;
-  std::copy(
-      _single_input_general_shape_aten_funcs.begin(),
-      _single_input_general_shape_aten_funcs.end(),
-      std::back_inserter(_single_input_general_aten_funcs));
-  std::copy(
-      _single_input_general_value_aten_funcs.begin(),
-      _single_input_general_value_aten_funcs.end(),
-      std::back_inserter(_single_input_general_aten_funcs));
-  return isFunctionNode(
-      n,
-      /* call_funcs = */ {},
-      /* aten_funcs = */ _single_input_general_aten_funcs);
+  static std::vector<NodeKind> fixed_qparams_aten_funcs;
+  std::transform(
+      _fixed_qparams_map.begin(),
+      _fixed_qparams_map.end(),
+      std::back_inserter(fixed_qparams_aten_funcs),
+      [](auto pair){return pair.first;});
+
+  return isAtenFunc(n, _single_input_general_shape_aten_funcs) ||
+    isAtenFunc(n, _single_input_general_shape_aten_funcs) ||
+    isAtenFunc(n, fixed_qparams_aten_funcs);
+}
+
+c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
+  static std::vector<NodeKind> fixed_qparam_funcs;
+  std::transform(
+      _fixed_qparams_map.begin(),
+      _fixed_qparams_map.end(),
+      std::back_inserter(fixed_qparam_funcs),
+      [](const auto& pair){return pair.first;});
+  if (isAtenFunc(n, fixed_qparam_funcs)) {
+    return _fixed_qparams_map.at(n->kind());
+  }
+  return c10::nullopt;
 }
 
 bool userDefinedCallFunction(Node* n) {
