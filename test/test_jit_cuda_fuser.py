@@ -60,9 +60,7 @@ class TestCudaFuser(JitTestCase):
             o_16 = torch.add(x, y)
             o_32_a = torch.add(y, z, alpha = alpha)
             o_32_b = torch.add(o_16, z)
-            # TODO: I'm hitting wrong result in this path. Retest after rebase
-            #return (o_16, o_32_a, o_32_b)
-            return (o_32_a, o_32_b)
+            return (o_16, o_32_a, o_32_b)
 
         t_jit = torch.jit.script(t)
         alpha = 0.5
@@ -77,7 +75,6 @@ class TestCudaFuser(JitTestCase):
         for oo, jit_oo in zip(o, jit_o):
             self.assertEqual(oo.dtype, jit_oo.dtype)
             self.assertEqual(oo, jit_oo)
-        print(t_jit.graph_for(x, y, z, alpha))
         self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, z, alpha)))
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -177,8 +174,6 @@ class TestCudaFuser(JitTestCase):
         # Currently cannot fuse this
         self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, z)))
 
-    # TODO: Retest after rebase
-    @unittest.skipIf(True, "temporary disable for buggy codegen")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
     @skipIfRocm
