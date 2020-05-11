@@ -813,7 +813,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutograd
   ASSERT_TRUE(op.has_value());
 
   called_autograd = false;
-  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPU)); // note: all tensors have VariableTypeId set
+  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU)); // note: all tensors have VariableTypeId set
   EXPECT_TRUE(called_autograd);
 }
 
@@ -826,7 +826,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_th
   ASSERT_TRUE(op.has_value());
 
   called_nonautograd = called_autograd = false;
-  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPU)); // note: all tensors have VariableTypeId set
+  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU)); // note: all tensors have VariableTypeId set
   EXPECT_FALSE(called_nonautograd);
   EXPECT_TRUE(called_autograd);
 }
@@ -841,7 +841,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_th
 
   called_nonautograd = called_autograd = false;
   at::AutoNonVariableTypeMode _var_guard(true);
-  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
+  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
   EXPECT_TRUE(called_nonautograd);
   EXPECT_FALSE(called_autograd);
 }
@@ -855,7 +855,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_t
   ASSERT_TRUE(op.has_value());
 
   called_nonautograd = called_autograd = false;
-  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));  // note: all tensors have VariableTypeId set
+  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));  // note: all tensors have VariableTypeId set
   EXPECT_FALSE(called_nonautograd);
   EXPECT_TRUE(called_autograd);
 }
@@ -870,7 +870,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_t
 
   called_nonautograd = called_autograd = false;
   at::AutoNonVariableTypeMode _var_guard(true);
-  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
+  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
   EXPECT_TRUE(called_nonautograd);
   EXPECT_FALSE(called_autograd);
 }
@@ -884,12 +884,12 @@ TEST(OperatorRegistrationTest, xlaPreAutogradOverridesAutogradKernel) {
   ASSERT_TRUE(op.has_value());
 
   called_nonautograd = called_autograd = false;
-  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(c10::DispatchKeySet{DispatchKey::XLA, DispatchKey::XLAPreAutograd}));
+  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(c10::DispatchKeySet{DispatchKey::XLA, DispatchKey::XLAPreAutograd}));
   EXPECT_TRUE(called_nonautograd);
   EXPECT_FALSE(called_autograd);
 
   called_nonautograd = called_autograd = false;
-  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
+  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
   EXPECT_TRUE(called_autograd);
   EXPECT_FALSE(called_nonautograd);
 }
@@ -1567,7 +1567,7 @@ TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
   m.impl("fn", c10::DispatchKey::BackendSelect, [&](const Tensor& x) {
      backend_generic_called = true;
      auto op = c10::Dispatcher::singleton().findSchema({"test::fn", ""});
-     return c10::Dispatcher::singleton().callUnboxedRedispatch<Tensor, const Tensor&>(*op, c10::DispatchKey::BackendSelect, x);
+     return c10::Dispatcher::singleton().redispatch<Tensor, const Tensor&>(*op, c10::DispatchKey::BackendSelect, x);
    });
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
