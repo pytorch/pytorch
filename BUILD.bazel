@@ -290,11 +290,8 @@ filegroup(
     srcs = [
         "aten/src/TH/THAllocator.cpp",
         "aten/src/TH/THBlas.cpp",
-        "aten/src/TH/THDiskFile.cpp",
-        "aten/src/TH/THFile.cpp",
         "aten/src/TH/THGeneral.cpp",
         "aten/src/TH/THLapack.cpp",
-        "aten/src/TH/THMemoryFile.cpp",
         "aten/src/TH/THStorageFunctions.cpp",
         "aten/src/TH/THTensor.cpp",
         "aten/src/TH/THTensorEvenMoreMath.cpp",
