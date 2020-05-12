@@ -134,21 +134,51 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
 }
 
 auto handle_torch_function_getter(THPVariable* self, const std::string& property_name) -> PyObject* {
-  py::object torch_api = PyObject_FastGetAttrString(THPVariableClass, (char*)property_name.c_str());
-  std::string module_name = "torch.Tensor." + property_name;
-  return handle_torch_function((PyObject *)self, "__get__", nullptr, torch_api.ptr(), module_name);
+  py::object property = PyObject_FastGetAttrString(THPVariableClass, (char*)property_name.c_str());
+  py::tuple args_ = py::make_tuple(py::handle(property.ptr()), py::handle((PyObject *)self));
+  py::object torch_api_function = PyObject_FastGetAttrString((PyObject *)property.ptr()->ob_type, "__get__");
+  TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
+  py::tuple py_types = py::make_tuple(py::handle((PyObject *)((PyObject*)self)->ob_type));
+  py::object torch_function = PyObject_FastGetAttrString((PyObject*)self, "__torch_function__");
+  py::object ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args_.ptr(), NULL));
+  if (ret.ptr() == nullptr) {
+    // if an exception occurred in a user's implementation of
+    // __torch_function__, throw it
+    throw python_error();
+  }
+  if (ret.ptr() == Py_NotImplemented) {
+    std::string error_msg = "no implementation found for 'torch.Tensor." + property_name + ".__get__' on types that implement __torch_function__: [" + ((PyObject*)self)->ob_type->tp_name + "]";
+    PyErr_SetString(PyExc_TypeError, error_msg.c_str());
+    throw python_error();
+  }
+  return ret.release().ptr();
 }
 
 auto handle_torch_function_setter(THPVariable* self, const std::string& property_name, PyObject* value) -> int {
-  py::object torch_api = PyObject_FastGetAttrString(THPVariableClass, (char*)property_name.c_str());
-  std::string module_name = "torch.Tensor." + property_name;
-  if (value != nullptr)
-  {
-    py::tuple args_ = py::make_tuple(py::handle(value));
-    handle_torch_function((PyObject *)self, "__set__", args_.ptr(), torch_api.ptr(), module_name);
+  py::object property = PyObject_FastGetAttrString(THPVariableClass, (char*)property_name.c_str());
+  py::tuple args_;
+  py::object torch_api_function;
+  if (value != nullptr) {
+    args_ = py::make_tuple(py::handle(property.ptr()), py::handle((PyObject *)self), py::handle(value));
+    torch_api_function = PyObject_FastGetAttrString((PyObject *)property.ptr()->ob_type, "__set__");
   }
   else {
-    handle_torch_function((PyObject *)self, "__delete__", nullptr, torch_api.ptr(), module_name);
+    args_ = py::make_tuple(py::handle(property.ptr()), py::handle((PyObject *)self));
+    torch_api_function = PyObject_FastGetAttrString((PyObject *)property.ptr()->ob_type, "__delete__");
+  }
+  TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
+  py::tuple py_types = py::make_tuple(py::handle((PyObject *)((PyObject*)self)->ob_type));
+  py::object torch_function = PyObject_FastGetAttrString((PyObject*)self, "__torch_function__");
+  py::object ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args_.ptr(), NULL));
+  if (ret.ptr() == nullptr) {
+    // if an exception occurred in a user's implementation of
+    // __torch_function__, throw it
+    throw python_error();
+  }
+  if (ret.ptr() == Py_NotImplemented) {
+    std::string error_msg = "no implementation found for 'torch.Tensor." + property_name + ((value != nullptr) ? ".__set__" : ".__delete__") + "' on types that implement __torch_function__: [" + ((PyObject*)self)->ob_type->tp_name + "]";
+    PyErr_SetString(PyExc_TypeError, error_msg.c_str());
+    throw python_error();
   }
   return 0;
 }

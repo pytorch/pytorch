@@ -647,7 +647,7 @@ class Tensor(torch._C._TensorBase):
         relevant_args = (self,)
         from torch._overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__cuda_array_interface__.__get__, relevant_args, self)
+            return handle_torch_function(property.__get__, relevant_args, Tensor.__cuda_array_interface__, self)
 
         # raise AttributeError for unsupported tensors, so that
         # hasattr(cpu_tensor, "__cuda_array_interface__") is False.
@@ -897,7 +897,7 @@ class Tensor(torch._C._TensorBase):
         relevant_args = (self,)
         from torch._overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.grad.__get__, relevant_args, self)
+            return handle_torch_function(property.__get__, relevant_args, Tensor.grad, self)
 
         if self.requires_grad and not hasattr(self, "retains_grad") and not self.is_leaf and self._grad is None:
             warnings.warn("The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad "
@@ -912,7 +912,7 @@ class Tensor(torch._C._TensorBase):
         relevant_args = (self,)
         from torch._overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.grad.__set__, relevant_args, self, new_grad)
+            return handle_torch_function(property.__set__, relevant_args, Tensor.grad, self, new_grad)
         self._grad = new_grad
 
     @grad.deleter
@@ -920,7 +920,7 @@ class Tensor(torch._C._TensorBase):
         relevant_args = (self,)
         from torch._overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.grad.__delete__, relevant_args, self)
+            return handle_torch_function(property.__delete__, relevant_args, Tensor.grad, self)
         del self._grad
     
     @classmethod
