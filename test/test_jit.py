@@ -16693,7 +16693,7 @@ a")
             def forward(self, x):
                 futs = []
                 for i in range(2):
-                    futs.append(torch.jit._fork(self.ml[i], x=x))
+                    futs.append(torch.jit._fork(self.ml[i], x))
 
                 results = []
                 for i in range(2):
