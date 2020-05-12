@@ -48,10 +48,7 @@ void record_function_exit(const at::Tensor& handle) {
   rec._end();
 }
 
-// Same as _call_end_callbacks_on_fut but takes an ivalue future.
-// TODO: once python and JIT futures are merged, consolidate this with
-// call_end_callbacks_on_fut (https://github.com/pytorch/pytorch/issues/34999).
-void _call_end_callbacks_on_jit_fut(
+void _call_end_callbacks_on_fut(
     const at::Tensor& handle,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
   // Save and pass thread local state into the callback
@@ -91,7 +88,7 @@ jit::RegisterOperators reg_fut_ops({
           // Pop inputs, which should be a future and a tensor
           auto fut = jit::pop(stack).toFuture();
           auto tensor = jit::pop(stack).toTensor();
-          _call_end_callbacks_on_jit_fut(tensor, fut);
+          _call_end_callbacks_on_fut(tensor, fut);
           return 0;
         },
         aliasAnalysisFromSchema()),
