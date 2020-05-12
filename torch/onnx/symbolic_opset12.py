@@ -55,8 +55,10 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
 
     return nllloss
 
+
 def nll_loss2d(g, self, target, weight, reduction, ignore_index):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
+
 
 def argmax(g, input, dim, keepdim):
     if sym_help._is_none(dim):
@@ -78,3 +80,7 @@ def argmin(g, input, dim, keepdim):
         dim = _parse_arg(dim, 'i')
         keepdim = _parse_arg(keepdim, 'i')
         return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=True)
+
+
+def pow(g, self, exponent):
+    return g.op("Pow", self, exponent)
