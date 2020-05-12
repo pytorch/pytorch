@@ -17,15 +17,17 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other);
 
 template <>
 Tensor _add_out<false>(Tensor& out, const Tensor& self, const Tensor& other) {
-  const auto kName = "quantized::t_helper1";
-  call_unboxed_super_slow_temp_shim(kName, "", self);
+  constexpr auto kName = "quantized::t_helper1";
+  static const c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({kName, ""}).value();
+  op.call<Tensor, Tensor>(self);
   return out;
 }
 
 template <>
 Tensor _add_out<true>(Tensor& out, const Tensor& self, const Tensor& other) {
-  const auto kName = "quantized::t_helper2";
-  call_unboxed_super_slow_temp_shim(kName, "", self);
+  constexpr auto kName = "quantized::t_helper2";
+  static const c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({kName, ""}).value();
+  op.call<Tensor, Tensor>(self);
   return out;
 }
 
@@ -43,7 +45,8 @@ Tensor QHelper(Tensor qa) {
   std::cout << "Op: " << opName << std::endl;
   if (callOpName != nullptr) {
     std::cout << "Call op: " << callOpName << std::endl;
-    call_unboxed_super_slow_temp_shim(callOpName, "", qa);
+    static const c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({callOpName, ""}).value();
+    op.call<Tensor, Tensor>(qa);
   }
   return qa;
 }
