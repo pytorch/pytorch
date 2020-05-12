@@ -44,6 +44,32 @@ Tensor reverse(const Tensor& input) {
   return rev_input;
 }
 
+Tensor reverse_packed_data(const Tensor& input, const Tensor& batch_sizes) {
+  Tensor sequence;
+  Tensor lengths;
+  std::tie(sequence, lengths) = torch::_pad_packed_sequence(
+    data, batch_sizes, false, 0.0, batch_sizes.size(0));
+  auto step_inputs = sequence.unbind(1);
+  int64_t * lengths_p = lengths.data_ptr<int64_t>();
+  std::vector<Tensor> reverse(lengths.size(0));
+
+  for(auto i = 0; i < lengths.size(0); i++) {
+    auto input = step_inputs[i];
+    auto input_length = lengths_p[i];
+    std::vector<Tensor> reversed_lengths(input_length);
+
+    for(auto j = 0; j < input_length; j++) {
+      reversed_lengths[input_length - j] = input.select(0, j);
+    }
+    auto reversed_input = at::stack(reversed_lengths, 0);
+    reverse[i] = reversed_input;
+  }
+
+  auto full_output = at::stack(reverse, 1);
+  Tensor output = at::_pack_padded_sequence(full_output, lengths, false)[0];
+  return output;
+}
+
 std::tuple<std::vector<Tensor>, std::vector<Tensor>> split_params(TensorList _params) {
   auto _fwd_params = _params.slice(_params.size() / 2);
   std::vector<Tensor> fwd_params;
@@ -1473,7 +1499,7 @@ bool _use_cudnn_rnn_flatten_weight() {
     Tensor _fwd_hx;                                                         \
     Tensor _bwd_hx;                                                         \
     std::tie(_fwd_hx, _bwd_hx) = split_rnn_hidden(hx);                      \
-    auto bwd_data = reverse(data);                                          \
+    auto bwd_data = reverse_packed_data(data, batch_sizes);                 \
     std::vector<Tensor> fwd_params;                                         \
     std::vector<Tensor> bwd_params;                                         \
     std::tie(fwd_params, bwd_params) = split_params(_params);               \
@@ -1507,7 +1533,7 @@ bool _use_cudnn_rnn_flatten_weight() {
       train,                                                                \
       bidirectional,                                                        \
       type_2);                                                              \
-    auto bwd_rev_output = reverse(bwd_output);                              \
+    auto bwd_rev_output = reverse_packed_data(bwd_output, batch_sizes);     \
     std::vector<Tensor> outputs;                                            \
     outputs.push_back(fwd_output);                                          \
     outputs.push_back(bwd_rev_output);                                      \
@@ -1530,7 +1556,7 @@ bool _use_cudnn_rnn_flatten_weight() {
     Tensor _fwd_hx;                                                         \
     Tensor _bwd_hx;                                                         \
     std::tie(_fwd_hx, _bwd_hx) = split_rnn_hidden(hx);                      \
-    auto bwd_data = reverse(data);                                          \
+    auto bwd_data = reverse_packed_data(data, batch_sizes);                 \
     std::vector<Tensor> fwd_params;                                         \
     std::vector<Tensor> bwd_params;                                         \
     std::tie(fwd_params, bwd_params) = split_params(_params);               \
@@ -1564,7 +1590,7 @@ bool _use_cudnn_rnn_flatten_weight() {
       train,                                                                \
       bidirectional,                                                        \
       type_2);                                                              \
-    auto bwd_rev_output = reverse(bwd_output);                              \
+    auto bwd_rev_output = reverse_packed_data(bwd_output, batch_sizes);     \
     std::vector<Tensor> outputs;                                            \
     outputs.push_back(fwd_output);                                          \
     outputs.push_back(bwd_rev_output);                                      \
@@ -2002,7 +2028,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm_packed_cudnn_type1(
   std::tie(_fwd_hx, _bwd_hx) = split_lstm_hidden(hx);
 
   // Reverse input to backward LSTM
-  auto bwd_data = reverse(data);
+  // auto bwd_data = reverse(data);
+  auto bwd_data = reverse_packed_data(data, batch_sizes);
 
   // _fwd_params contains the forward parameters and _params the backward ones
   std::vector<Tensor> fwd_params;
@@ -2020,7 +2047,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_packed_cudnn_type1(
                          num_layers, dropout_p, train, bidirectional, type_2);
 
   // Cat forward and backward outputs
-  auto bwd_rev_output = reverse(bwd_output);
+  auto bwd_rev_output = reverse_packed_data(bwd_output, batch_sizes);
 
   std::vector<Tensor> outputs;
   outputs.push_back(fwd_output);
@@ -2043,7 +2070,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_packed_miopen_type1(
   std::tie(_fwd_hx, _bwd_hx) = split_lstm_hidden(hx);
 
   // Reverse input to backward LSTM
-  auto bwd_data = reverse(data);
+  auto bwd_data = reverse_packed_data(data, batch_sizes);
 
   // _fwd_params contains the forward parameters and _params the backward ones
   std::vector<Tensor> fwd_params;
@@ -2061,7 +2088,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_packed_miopen_type1(
                           num_layers, dropout_p, train, bidirectional, type_2);
 
   // Cat forward and backward outputs
-  auto bwd_rev_output = reverse(bwd_output);
+  auto bwd_rev_output = reverse_packed_data(bwd_output, batch_sizes);
 
   std::vector<Tensor> outputs;
   outputs.push_back(fwd_output);
