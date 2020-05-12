@@ -164,6 +164,7 @@ def _if_scalar_type_as(g, self, tensor):
 def _is_none(x):
     return x.node().mustBeNone()
 
+
 def _is_value(x):
     return isinstance(x, torch._C.Value)
 
@@ -173,7 +174,7 @@ def _is_tensor_list(x):
 
 
 def _unimplemented(op, msg):
-    warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
+    raise NotImplementedError("Unsupported: ONNX export failed on {} operator. {}".format(op, msg))
 
 
 def _black_list_in_opset(name):
