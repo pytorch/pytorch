@@ -55,7 +55,7 @@ def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg=
                ' other locations ({:2.2f}%)')
         msg = msg.format(
             rtol, atol, list(index), actual[index].item(), expected[index].item(),
-            count - 1, 100 * count / actual.numel())
+            count - 1, 100 * torch.true_divide(count, actual.numel()))
 
     raise AssertionError(msg)
 
