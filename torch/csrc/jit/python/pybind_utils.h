@@ -46,15 +46,24 @@
 namespace torch {
 namespace jit {
 
+inline IValue toIValue(
+    py::handle obj,
+    const TypePtr& type,
+    c10::optional<int32_t> N = c10::nullopt);
+
 py::object toPyObject(IValue ivalue);
 
 // The PythonFutureWrapper for ivalue::Future
 //
-// VISIBILITY_HIDDEN is for silencing compiling error,
+// NB: VISIBILITY_HIDDEN is for silencing compiling error,
 // "error: 'torch::jit::PythonFutureWrapper' declared with greater visibility
 // than the type of its field 'torch::jit::PythonFutureWrapper::unwrap_func'
 // [-Werror=attributes]"
-struct VISIBILITY_HIDDEN PythonFutureWrapper {
+//
+// NB: inherit from enable_shared_from_this because then(py::function) needs to
+//     get a shared_ptr from this pointer.
+struct VISIBILITY_HIDDEN PythonFutureWrapper
+    : std::enable_shared_from_this<PythonFutureWrapper> {
   using UnwrapFunc = std::function<void(py::object)>;
 
   explicit PythonFutureWrapper(
@@ -86,10 +95,68 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper {
     }
   }
 
+  // The py::function cb arg must take a std::shared_ptr<PythonFutureWrapper>
+  // (i.e., torch._C.Future) as the only argument. If the type mismatches, an
+  // error will be thrown when waiting for the value of this returned Future.
+  std::shared_ptr<PythonFutureWrapper> then(py::function cb) {
+    // We need this an additional layer of wrapper here to guard the
+    // destruction of the py::function object. Because, the
+    // Future owns a reference to the py::function in its callback
+    // vector, but Future does not acquire GIL on destruction.
+    auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
+    return std::make_shared<jit::PythonFutureWrapper>(fut->then(
+        // Capture a copy of the ivalue::Future instead of the `this` pointer
+        // because the PythonFutureWrapper object could have been deleted
+        // when the callbacks are fired. For example, RPC only captures the
+        // ivalue::Future instead of PythonFutureWrapper in FutureMessage's
+        // callback functions. Hence, if user code does not hold a reference to
+        // this PythonFutureWrapper object, there is no guarantee that the
+        // PythonFutureWrapper is still valid when running the callback.
+        [pyFut(this->getPtr()), pf(std::move(pf))]() -> IValue {
+          try {
+            pybind11::gil_scoped_acquire ag;
+            return toIValue(pf->func_(pyFut), PyObjectType::get());
+          } catch (py::error_already_set& e) {
+            auto err = std::runtime_error(c10::str(
+                "Got the following error when running the callback: ",
+                e.what()));
+            {
+              pybind11::gil_scoped_acquire ag;
+              // Release ownership on py::objects and also restore Python
+              // Error Indicator.
+              e.restore();
+              // Clear the Python Error Indicator as we has recorded the
+              // exception in the response message.
+              PyErr_Clear();
+            }
+
+            throw err;
+          }
+        },
+        PyObjectType::get()));
+  }
+
   c10::intrusive_ptr<c10::ivalue::Future> fut;
   // unwrap_func works like a callback for the value returned by
   // PythonFutureWrapper::wait().
   c10::optional<UnwrapFunc> unwrap_func;
+
+ private:
+  // Wrap Python function to guard deref
+  struct PythonFunctionGuard {
+    explicit PythonFunctionGuard(py::function func) : func_(std::move(func)) {}
+
+    ~PythonFunctionGuard() {
+      pybind11::gil_scoped_acquire ag;
+      func_ = py::none();
+    }
+
+    py::function func_;
+  };
+
+  std::shared_ptr<PythonFutureWrapper> getPtr() {
+    return shared_from_this();
+  }
 };
 
 // error reporting: when reporting user-caused errors, these functions should
@@ -336,11 +403,6 @@ inline InferredType tryToInferContainerType(py::handle input) {
         "."));
   }
 }
-
-inline IValue toIValue(
-    py::handle obj,
-    const TypePtr& type,
-    c10::optional<int32_t> N = c10::nullopt);
 
 inline bool isTraceableType(TypePtr type) {
   if (type->isSubtypeOf(TensorType::get())) {
