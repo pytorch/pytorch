@@ -188,7 +188,7 @@ class _TestTorchMixin(object):
                        'sparse_resize_and_clear_',
                        )
         test_namespace(torch.nn)
-        test_namespace(torch.nn.functional, 'assert_int_or_pair', 'feature_alpha_dropout')
+        test_namespace(torch.nn.functional, 'assert_int_or_pair')
         # TODO: add torch.* tests when we have proper namespacing on ATen functions
         # test_namespace(torch)
 
@@ -3321,6 +3321,13 @@ class _TestTorchMixin(object):
         self.assertTrue(isinstance(b, torch.Size))
         self.assertEqual(a, b)
 
+    def test_pickle_function(self):
+        # https://github.com/pytorch/pytorch/issues/37703
+        a = torch.tanh
+        serialized = pickle.dumps(a)
+        b = pickle.loads(serialized)
+        self.assertEqual(a, b)
+
     def test_norm_fastpaths(self):
         x = torch.randn(3, 5)
 
@@ -3788,6 +3795,11 @@ class _TestTorchMixin(object):
                 obj = t(100).fill_(1)
             obj.__repr__()
             str(obj)
+
+        # test complex tensor
+        x = torch.tensor([2.3 + 4j, 7 + 6j])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([(2.3000+4.0000j), (7.0000+6.0000j)])''')
 
         # test big integer
         x = torch.tensor(2341234123412341)
@@ -11443,9 +11455,8 @@ class TestTorchDeviceType(TestCase):
         # Check for race condition (correctness when applied on a large tensor).
         if dtype not in (torch.int8, torch.uint8, torch.int16, torch.half):
             y = torch.linspace(0, 1000000 - 1, 1000000, device=device, dtype=dtype)
-            correct = True
-            for i in range(y.shape[0] - 1):
-                correct = correct and y[i] < y[i + 1]
+            cond = y[:-1] < y[1:]
+            correct = all(cond)
             self.assertTrue(correct)
 
         # Check linspace for non-contiguous tensors.
@@ -13728,7 +13739,7 @@ class TestTorchDeviceType(TestCase):
 
     def _test_unique_with_expects(self, device, dtype, f, x, expected_unique, expected_inverse, expected_counts, additional_shape):
         def ensure_tuple(x):
-            if torch.is_tensor(x):
+            if isinstance(x, torch.Tensor):
                 return (x,)
             return x
 
@@ -13757,7 +13768,7 @@ class TestTorchDeviceType(TestCase):
             return  # CPU does not have half support
 
         def ensure_tuple(x):
-            if torch.is_tensor(x):
+            if isinstance(x, torch.Tensor):
                 return (x,)
             return x
 
@@ -14602,6 +14613,24 @@ class TestTorchDeviceType(TestCase):
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
         self.assertEqual(X, Xhat, atol=1e-8, message='VeV\' wrong')
 
+        # test invalid input
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should be 2 dimensional',
+            lambda: torch.eig(torch.ones((2))))
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should be square',
+            lambda: torch.eig(torch.ones((2, 3))))
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should not contain infs or NaNs',
+            lambda: torch.eig(np.inf * torch.ones((2, 2))))
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should not contain infs or NaNs',
+            lambda: torch.eig(np.nan * torch.ones((2, 2))))
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
@@ -14962,8 +14991,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             run_test(m, v2, v1, lambda x: x.transpose(0, 1))
 
     @onlyCPU
-    @precisionOverride({torch.bfloat16: 1e-0, torch.float: 1e-4, torch.double: 1e-8})
-    @dtypes(torch.bfloat16, torch.float, torch.double)
+    @precisionOverride({torch.bfloat16: 1e-0, torch.float: 1e-4, torch.double: 1e-8,
+                        torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_addmv(self, device, dtype):
         t = torch.randn(10, device=device).to(dtype)
         m = torch.randn(10, 100, device=device).to(dtype)
@@ -14989,6 +15019,42 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 res2[i] += m[i, j] * v[j]
 
         self.assertEqual(res1, res2, atol=self.precision)
+
+    @dtypesIfCUDA(*([torch.half, torch.float, torch.double]
+                    + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypes(torch.float, torch.double)
+    def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype):
+        # tests (o, s)*(s).  o is output size, s is summed size.
+        o = 5
+        s = 3
+        a_data = torch.arange(1, o * s + 1, device=device, dtype=dtype).view(o, s)
+        x_data = torch.arange(1, s + 1, 1, device=device, dtype=dtype)
+        y_data = torch.ones(o, device=device, dtype=dtype)
+        control = torch.tensor([15., 33., 51., 69., 87.], device=device, dtype=dtype)
+
+        def _test(use_out, row_major, incx, incy, lda_tail):
+            if row_major:
+                a_storage = torch.full((o, s + lda_tail), float('nan'), device=device, dtype=dtype)
+            else:
+                a_storage = torch.full((s, o + lda_tail), float('nan'), device=device, dtype=dtype).permute(1, 0)
+            a = a_storage[:o, :s].copy_(a_data)
+
+            x_storage = torch.full((s, incx), float('nan'), device=device, dtype=dtype)
+            x = x_storage[:, 0].copy_(x_data)
+
+            y_storage = torch.full((o, incy), float('nan'), device=device, dtype=dtype)
+            y = y_storage[:, 0].copy_(y_data)
+
+            if use_out:
+                out = torch.addmv(y, a, x)
+            else:
+                out = torch.empty_like(y)
+                torch.addmv(y, a, x, out=out)
+
+            self.assertEqual(out, control, atol=1.e-4)
+
+        for use_out, row_major, incx, incy, lda_tail in product((False, True), (False, True), (1, 2), (1, 2), (0, 1)):
+            _test(use_out, row_major, incx, incy, lda_tail)
 
     @slowTest
     @onlyCPU
@@ -15386,6 +15452,27 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 # Divisor is a tensor case
                 long_res1 = long_m1.clone()
                 long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
+
+    # remove onlyCUDA after CPU impl of remainder_kernel be fixed
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    def test_remainder_fmod_large_dividend(self, device, dtype):
+        alarge = 1e9
+        pi = 3.14159265358979
+        for avalue in [alarge, -alarge]:
+            for bvalue in [pi, -pi]:
+                a = torch.tensor([avalue], dtype=dtype, device=device)
+                b = torch.tensor([bvalue], dtype=dtype, device=device)
+                c = torch.remainder(a, b)
+                d = torch.fmod(a, b)
+                self.assertTrue((b[0] > 0) == (c[0] > 0))  # remainder has same sign as divisor
+                self.assertTrue((a[0] > 0) == (d[0] > 0))  # fmod has same sign as dividend
+                self.assertTrue(abs(c[0]) < abs(b[0]))     # remainder is within range of divisor
+                self.assertTrue(abs(d[0]) < abs(b[0]))     # fmod is within range of divisor
+                if ((a[0] > 0) == (b[0] > 0)):
+                    self.assertTrue(c[0] == d[0])   # remainder is same as fmod
+                else:
+                    self.assertTrue(abs(c[0] - d[0]) == abs(b[0]))  # differ by one divisor
 
     @dtypes(torch.int64, torch.float64)
     def test_remainder_edge_cases(self, device, dtype):
@@ -17656,13 +17743,13 @@ def generate_test_function(cls,
 
         # Converts CPU tensors to device tensors
         device_tensor = cpu_tensor.to(dtype=dtype, device=device)
-        device_args = [arg.to(device=device) if torch.is_tensor(arg) else arg for arg in cpu_args]
+        device_args = [arg.to(device=device) if isinstance(arg, torch.Tensor) else arg for arg in cpu_args]
 
         # Converts float device tensors to half/bfloat16 when the dtype is half/bfloat16
         # Note: CPU half tensors don't support many operations.
         if dtype in {torch.half, torch.bfloat16}:
             device_args = [arg.to(dtype=dtype) if
-                           (torch.is_tensor(arg) and arg.dtype == torch.float) else arg
+                           (isinstance(arg, torch.Tensor) and arg.dtype == torch.float) else arg
                            for arg in device_args]
 
         # Runs the tensor op on CPU and device
