@@ -4955,6 +4955,22 @@ def foo(x):
 
         self.checkScript(annotate_none, ())
 
+    def test_fork_join_kwargs(self):
+        def foo(x, y: int):
+            print(x, y)
+            return x + y
+
+        @torch.jit.script
+        def wait_script(x):
+            fut = torch.jit._fork(foo, y=2, x=x)
+            y = torch.jit._wait(fut)
+            return y
+
+        # torch.jit._fork / torch.jit._wait spawns off a new thread
+        # with fork/join parallelism. Currently, readability suffers
+        # because torch.jit._fork does not support kwargs.
+        # The above example fails to compile with
+
     def test_list_unification(self):
         def fn():
             return [1, None, 2]
@@ -15571,7 +15587,7 @@ a")
                 output = torch.tanh(self)
                 def backward(grad_output):
                     a = 1
-                    if True:
+                    if output:
                         return 1
                     else:
                         a = 2
@@ -15724,8 +15740,8 @@ a")
         self.checkScript(test_loop_no_escape, (-1,))
         self.checkScriptRaisesRegex(test_loop_no_escape, (1,), Exception, "")
 
-        # one if added to guard x + 3, the throw in loop does not escape
-        test_num_ifs(test_loop_no_escape, 2)
+        # if guard gets optimized away
+        test_num_ifs(test_loop_no_escape, 1)
 
         def test_loop_exception_with_continue(x):
             # type: (int)
@@ -15769,8 +15785,8 @@ a")
         func = torch.jit.CompilationUnit(code).test_exit_pair_reset
         self.assertEqual(func(1,), 2)
         self.assertEqual(func(-1,), -1)
-        FileCheck().check_count("prim::If", 2, exactly=True).check("aten::add")\
-            .run(func.graph)  # if added to guard a + 1
+        # final a + 1 gets inlined into the first branch and optimized away
+        FileCheck().check_count("prim::If", 1, exactly=True).run(func.graph)
 
     def test_non_final_return(self):
         def simple(x):
@@ -15865,21 +15881,6 @@ a")
 
         for i in range(4):
             self.checkScript(complicated, (i,))
-
-    def test_partial_returns_shape_prop(self):
-        @torch.jit.script
-        def test_shape_prop(x):
-            # type: (int) -> int
-            if not bool(x):
-                return x
-            else:
-                z = torch.zeros([2, 2], dtype=torch.int64)
-            return int(z[0])
-
-        test_shape_prop(torch.tensor(0.5))
-        graph = test_shape_prop.graph_for(torch.tensor(0.5))
-        # Shape analysis of z should propagate through if statement
-        FileCheck().check("Long(2:2, 2:1)").check("prim::If").run(graph)
 
     def test_partial_returns(self):
         with self.assertRaisesRegex(RuntimeError, "does not return along all"):
@@ -16692,7 +16693,7 @@ a")
             def forward(self, x):
                 futs = []
                 for i in range(2):
-                    futs.append(torch.jit._fork(self.ml[i], x))
+                    futs.append(torch.jit._fork(self.ml[i], x=x))
 
                 results = []
                 for i in range(2):
