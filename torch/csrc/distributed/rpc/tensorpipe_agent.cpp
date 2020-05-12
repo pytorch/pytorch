@@ -245,6 +245,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
         respond(pipe);
 
         uint64_t messageId = requestMessage.id();
+        ++serverActiveCalls_;
 
         // Defer user RPC UDF run to thread pool
         threadPool_.run([this,
@@ -261,13 +262,16 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           // Shortcut if immediately done
           if (futureResponseMessage->completed()) {
+            --serverActiveCalls_;
             sendCompletedResponseMessage(
                 pipe, futureResponseMessage, messageId);
           } else {
             // Not complete yet
+            ++serverActiveAsyncCalls_;
             futureResponseMessage->addCallback(
                 [this, pipe, futureResponseMessage, messageId]() mutable {
-                  // Done
+                  --serverActiveCalls_;
+                  --serverActiveAsyncCalls_;
                   sendCompletedResponseMessage(
                       pipe, futureResponseMessage, messageId);
                 });
@@ -312,6 +316,8 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   requestMessage.setId(nextMessageID_++);
   pendingResponseMessage[requestMessage.id()] = futureResponseMessage;
 
+  ++clientActiveCalls_;
+
   // Don't need to hold lock while calling tensorpipe API.
   lock.unlock();
 
@@ -322,6 +328,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
           const tensorpipe::Error& error) {
         if (error) {
           LOG(WARNING) << "client write error: " << error.what();
+          --clientActiveCalls_;
           futureResponseMessage->setError(error.what());
           return;
         }
@@ -337,6 +344,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                 // Flushing all future messages belonging to this pipe due to
                 // error state.
                 for (auto& p : clientPipe.pendingResponseMessage_) {
+                  --clientActiveCalls_;
                   std::shared_ptr<FutureMessage>& futureMessage = p.second;
                   futureMessage->setError(error.what());
                 }
@@ -365,8 +373,10 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
               }
 
               threadPool_.run(
-                  [futureResponseMessage,
+                  [this,
+                   futureResponseMessage,
                    responseMessage{std::move(responseMessage)}]() mutable {
+                    --clientActiveCalls_;
                     if (responseMessage.type() == MessageType::EXCEPTION) {
                       futureResponseMessage->setError(std::string(
                           responseMessage.payload().begin(),
