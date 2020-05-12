@@ -3354,6 +3354,7 @@ class _TestTorchMixin(object):
                 # supplies a dummy key to test the defaultdict's default_factory
                 self.assertEqual(b._per_optimizer_states["fdsa"],
                                  torch.cuda.amp.grad_scaler._refresh_per_optimizer_state())
+                self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device="cuda:0")), 12.0)
 
     def test_norm_fastpaths(self):
         x = torch.randn(3, 5)
