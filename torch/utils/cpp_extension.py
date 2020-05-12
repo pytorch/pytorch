@@ -1747,4 +1747,3 @@ def _to_absolute_path(paths):
     for i in range(len(paths)):
         if not os.path.isabs(paths[i]):
             paths[i] = os.path.abspath(paths[i])
-
