@@ -41,7 +41,7 @@ __all__ = [
 # Load the extension module
 ################################################################################
 
-if platform.system() == 'Windows':
+if sys.platform == 'win32':
     py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
     th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
 
@@ -63,7 +63,7 @@ if platform.system() == 'Windows':
     else:
         cuda_path = ''
 
-    kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)  # type: ignore
+    kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
     dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
     with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
     prev_error_mode = kernel32.SetErrorMode(0x0001)
@@ -74,7 +74,7 @@ if platform.system() == 'Windows':
         elif with_load_library_flags:
             res = kernel32.AddDllDirectory(dll_path)
             if res == 0:
-                err = ctypes.WinError(ctypes.get_last_error())  # type: ignore
+                err = ctypes.WinError(ctypes.get_last_error())
                 err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
                 raise err
 
@@ -85,9 +85,9 @@ if platform.system() == 'Windows':
         is_loaded = False
         if with_load_library_flags:
             res = kernel32.LoadLibraryExW(dll, 0, 0x00001100)
-            last_error = ctypes.get_last_error()  # type: ignore
+            last_error = ctypes.get_last_error()
             if res == 0 and last_error != 126:
-                err = ctypes.WinError(last_error)  # type: ignore
+                err = ctypes.WinError(last_error)
                 err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
                 raise err
             elif res != 0:
@@ -98,7 +98,7 @@ if platform.system() == 'Windows':
                 path_patched = True
             res = kernel32.LoadLibraryW(dll)
             if res == 0:
-                err = ctypes.WinError(ctypes.get_last_error())  # type: ignore
+                err = ctypes.WinError(ctypes.get_last_error())
                 err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
                 raise err
 
