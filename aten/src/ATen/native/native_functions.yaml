@@ -1586,7 +1586,7 @@
 
 - func: isnan(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
   device_guard: False
   supports_named_tensor: True
   dispatch:
@@ -6979,13 +6979,13 @@
 
 - func: isfinite(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
   device_guard: False
   supports_named_tensor: True
 
 - func: isinf(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
   device_guard: False
   supports_named_tensor: True
 
