@@ -13,13 +13,14 @@ class WindowJob:
                  test_index,
                  vscode_spec,
                  cuda_version,
-                 force_on_cpu=False):
+                 force_on_cpu=False,
+                 run_on_prs_pred=lambda job: job.vscode_spec.year != 2019):
 
         self.test_index = test_index
         self.vscode_spec = vscode_spec
         self.cuda_version = cuda_version
         self.force_on_cpu = force_on_cpu
-        self.run_on_prs = vscode_spec.year != 2019
+        self.run_on_prs_pred = run_on_prs_pred
 
     def gen_tree(self):
 
@@ -55,19 +56,17 @@ class WindowJob:
 
         is_running_on_cuda = bool(self.cuda_version) and not self.force_on_cpu
 
-        vc_product = "Community" if self.vscode_spec.year == 2019 else "BuildTools"
-
         props_dict = {
             "build_environment": build_environment_string,
             "python_version": miniutils.quote("3.6"),
             "vc_version": miniutils.quote(self.vscode_spec.dotted_version()),
             "vc_year": miniutils.quote(str(self.vscode_spec.year)),
-            "vc_product": vc_product,
+            "vc_product": self.vscode_spec.get_product(),
             "use_cuda": miniutils.quote(str(int(is_running_on_cuda))),
             "requires": ["setup"] + prerequisite_jobs,
         }
 
-        if self.run_on_prs:
+        if self.run_on_prs_pred(self):
             props_dict["filters"] = {
                 "branches": {
                     "only": NON_PR_BRANCH_LIST,
@@ -92,12 +91,15 @@ class WindowJob:
 
 
 class VcSpec:
-    def __init__(self, year, version_elements=[]):
+    def __init__(self, year, version_elements=None):
         self.year = year
-        self.version_elements = version_elements
+        self.version_elements = version_elements or []
 
     def get_elements(self):
         return [self.prefixed_year()] + self.version_elements
+
+    def get_product(self):
+        return "Community" if self.year == 2019 else "BuildTools"
 
     def dotted_version(self):
         return ".".join(self.version_elements)

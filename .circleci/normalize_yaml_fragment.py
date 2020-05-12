@@ -5,17 +5,13 @@ import yaml
 import cimodel.lib.miniyaml as miniyaml
 
 
-USE_PYYAML_FORMATTER = False
-
-
-def regurgitate(depth):
+def regurgitate(depth, use_pyyaml_formatter=False):
     data = yaml.safe_load(sys.stdin)
 
-    if USE_PYYAML_FORMATTER:
+    if use_pyyaml_formatter:
         output = yaml.dump(data, sort_keys=True)
         sys.stdout.write(output)
     else:
-
         miniyaml.render(sys.stdout, data, depth)
 
 
