@@ -15,8 +15,11 @@ namespace onnx {
 using namespace ::c10::onnx;
 
 }
+// Note: this is slow because it boxes every argument
+// and likely has to re-unbox them when calling the kernel.
+// Prefer calling c10::OperatorHandle::callUnboxed<Args...>(args...).
 template <class Result, class... Args>
-inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
+inline Result call_unboxed_super_slow_temp_shim(const c10::OperatorHandle& op, Args... args) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
   // Temporary hack: when the `Profiler` dispatch key is inserted, this call
   // will fail since the `unpack()` ops return multiple values, however the
@@ -216,7 +219,7 @@ void unpackQuantizedWeightsHelper(
       at::Tensor packed_weight = itr->second.toTensor();
       auto op = Dispatcher::singleton().findSchema({unpack_fn, ""});
       assert(op.has_value());
-      std::tie(unpacked_weight, bias) = callOpUnboxed<
+      std::tie(unpacked_weight, bias) = call_unboxed_super_slow_temp_shim<
           std::tuple<at::Tensor, c10::optional<at::Tensor>>,
           at::Tensor>(*op, packed_weight);
     }
