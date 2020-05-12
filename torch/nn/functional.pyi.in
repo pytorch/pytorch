@@ -1,4 +1,5 @@
-from .. import Tensor, _size
+from torch import Tensor
+from torch.types import _size
 from typing import Any, Optional, Tuple, Dict, List, Callable
 from .common_types import _ratio_any_t
 
