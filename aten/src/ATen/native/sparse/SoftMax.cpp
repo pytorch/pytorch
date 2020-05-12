@@ -10,22 +10,21 @@ namespace at {
 namespace native {
 namespace {
 
-template <typename index_t>
-index_t get_nvalues(const std::vector<index_t>& sizes, const int64_t sparse_dim) {
+int64_t get_nvalues(const IntArrayRef& sizes, int64_t sparse_dim) {
   /* Return the number of entries in the dense part of a sparse tensor.
 
      `sizes` is a vector of sparse tensor dimensions.
      `sparse_dim` is the dimension of the sparse part of a sparse tensor.
    */
-  index_t nvalues = 1;
-  for (auto it = sizes.begin() + sparse_dim; it != sizes.end(); ++it) {
-    nvalues *= *it;
+  auto dim = sizes.size();
+  int64_t nvalues = 1;
+  for (auto i=sparse_dim; i<dim; i++) {
+    nvalues *= sizes[i];
   }
   return nvalues;
 }
 
-template <typename index_t>
-std::vector<index_t> get_offsets(const Tensor& indices, const std::vector<index_t>& sizes, const int64_t dim) {
+std::vector<int64_t> get_offsets(const Tensor& indices, const IntArrayRef& sizes, const int64_t dim) {
   /*
     Given the indices of a sparse tensor, return a vector of offsets
     for the entries in the equivalent dense tensor:
@@ -36,7 +35,7 @@ std::vector<index_t> get_offsets(const Tensor& indices, const std::vector<index_
       then
         data[offsets[n]] == A._values()[n]
 
-    `indices` must be a contiguous 2-d tensor with index_t entries.
+    `indices` must be a contiguous 2-d tensor with int64_t entries.
     `sizes` must be a vector with at least ndim entries.
 
     `dim` is an integer. When >= 0 and < ndim, the indices of all
@@ -63,9 +62,9 @@ std::vector<index_t> get_offsets(const Tensor& indices, const std::vector<index_
   */
   auto ndim = indices.size(0);
   auto nnz = indices.size(1);
-  std::vector<index_t> offsets(nnz);
-  std::vector<index_t> strides(ndim, 1);
-  auto indices_accessor = indices.accessor<index_t, 2>();
+  std::vector<int64_t> offsets(nnz);
+  std::vector<int64_t> strides(ndim, 1);
+  auto indices_accessor = indices.accessor<int64_t, 2>();
 
   if (ndim > 1) {
     for (int64_t i=ndim - 2; i >= 0; i--) {
@@ -74,7 +73,7 @@ std::vector<index_t> get_offsets(const Tensor& indices, const std::vector<index_
   }
 
   for (int64_t i=0; i < nnz; i++) {
-    index_t acc = 0;
+    int64_t acc = 0;
     for (int64_t j=0; j < ndim; j++) {
       auto indices_row = indices_accessor[j];
       auto stride = strides[j];
@@ -88,8 +87,7 @@ std::vector<index_t> get_offsets(const Tensor& indices, const std::vector<index_
   return offsets;
 }
 
-template <typename index_t>
-std::vector<std::vector<index_t>> get_pools(const Tensor& indices, const std::vector<index_t>& sizes, const int64_t dim) {
+std::vector<std::vector<int64_t>> get_pools(const Tensor& indices, const IntArrayRef& sizes, const int64_t dim) {
   /*
     Return pools of indices that align with the given dimension.
 
@@ -99,7 +97,7 @@ std::vector<std::vector<index_t>> get_pools(const Tensor& indices, const std::ve
       `dim`     - given dimension
 
     Returns:
-      `pools`   - vector of index vectors
+      `pools`   - a ragged array of indices
 
     A pool is defined as a list of indices (of sparse tensor values)
     that participate in the same softmax computation:
@@ -109,13 +107,12 @@ std::vector<std::vector<index_t>> get_pools(const Tensor& indices, const std::ve
     - X.values[k], k in pools[i], does not affect the result of softmax(X)[n], n in pools[j], iff i != j
 
   */
-
-  std::vector<std::vector<index_t>> pools;
+  std::vector<std::vector<int64_t>> pools;
 
   auto ndim = indices.size(0);
   auto nnz = indices.size(1);
-  std::vector<index_t> strides(ndim, 1);
-  auto indices_accessor = indices.accessor<index_t, 2>();
+  std::vector<int64_t> strides(ndim, 1);
+  auto indices_accessor = indices.accessor<int64_t, 2>();
 
   if (ndim > 1) {
     for (int64_t i=ndim - 2; i >= 0; i--) {
@@ -124,7 +121,7 @@ std::vector<std::vector<index_t>> get_pools(const Tensor& indices, const std::ve
   }
 
   for (int64_t i=0; i < nnz; i++) {
-    index_t pool_index = 0;
+    int64_t pool_index = 0;
     for (int64_t j=0; j < ndim; j++) {
       if (j != dim) {
         auto indices_row = indices_accessor[j];
@@ -133,8 +130,7 @@ std::vector<std::vector<index_t>> get_pools(const Tensor& indices, const std::ve
       }
     }
     while (pool_index >= pools.size()) {
-      std::vector<index_t> indices;
-      pools.push_back(indices);
+      pools.emplace_back();
     }
     pools[pool_index].push_back(i);
   }
@@ -142,7 +138,7 @@ std::vector<std::vector<index_t>> get_pools(const Tensor& indices, const std::ve
   return pools;
 }
 
-template <typename scalar_t, typename index_t, bool LogSoftMax>
+template <typename scalar_t, bool LogSoftMax>
 void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t dim) {
   /*
     See test/test_sparse.py:test_softmax:sparse_softmax for the Python
@@ -304,7 +300,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
   }
 
   auto nnz = values.size(0);
-  auto sizes = input.sizes().vec();
+  auto sizes = input.sizes();
   auto nvalues = get_nvalues(sizes, sparse_dim);
 
   /* Prepare scratch space and accessors */
@@ -325,7 +321,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
         std::vector<scalar_t> mx_row(nvalues, -std::numeric_limits<scalar_t>::infinity());
         std::vector<scalar_t> exp_sums_row(nvalues, 0);
 
-        for (index_t i : pool_indices) {
+        for (int64_t i : pool_indices) {
           auto values_row = values_accessor[i];
           for (int64_t j=0; j < nvalues; j++) {
             mx_row[j] = std::max(mx_row[j], values_row[j]);
@@ -333,7 +329,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
         }
 
         /* Apply exp to (v - mx) and sum the results */
-        for (index_t i : pool_indices) {
+        for (int64_t i : pool_indices) {
           auto values_row = values_accessor[i];
           auto out_values_row = out_values_accessor[i];
           for (int64_t j=0; j < nvalues; j++) {
@@ -354,7 +350,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
         }
 
         /* Normalize with the sum of exponents */
-        for (index_t i : pool_indices) {
+        for (int64_t i : pool_indices) {
           auto values_row = values_accessor[i];
           auto out_values_row = out_values_accessor[i];
           for (int64_t j=0; j < nvalues; j++) {
@@ -369,7 +365,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
     });
 }
 
-template <typename scalar_t, typename index_t, bool LogSoftMax>
+template <typename scalar_t, bool LogSoftMax>
 void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, const Tensor& output, const int64_t dim) {
   /*
 
@@ -449,7 +445,7 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
         std::vector<scalar_t> tmp_row(nvalues, 0);
 
         /* Compute tmp = - sum_j output_j * grad_j */
-        for (index_t i : pool_indices) {
+        for (int64_t i : pool_indices) {
           auto out_values_row = out_values_accessor[i];
           auto values_row = values_accessor[i];
           auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
@@ -468,7 +464,7 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
         }
 
         /* Compute grad_input = output * (grad + tmp)*/
-        for (index_t i : pool_indices) {
+        for (int64_t i : pool_indices) {
           auto out_values_row = out_values_accessor[i];
           auto values_row = values_accessor[i];
           auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
@@ -500,8 +496,8 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
 } // namespace
 
 Tensor softmax_sparse_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_float) {
-  AT_ASSERT(input_.is_sparse());
-  AT_ASSERTM(!half_to_float, "softmax with half to float conversion is not supported on CPU");
+  TORCH_INTERNAL_ASSERT(input_.is_sparse());
+  TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on CPU");
   auto input = input_.coalesce();
   Tensor output = at::native::empty_like(input);
   if (input.numel() == 0) {
@@ -510,14 +506,14 @@ Tensor softmax_sparse_cpu(const Tensor& input_, const int64_t dim_, const bool h
   TORCH_CHECK(dim_ >= 0 && dim_ < input.dim(),
               "dim must be non-negative and less than input dimensions");
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "softmax", [&] {
-      cpu_sparse_coo_softmax<scalar_t, int64_t, false>(output, input, dim_);
+      cpu_sparse_coo_softmax<scalar_t, false>(output, input, dim_);
   });
   return output;
 }
 
 Tensor log_softmax_sparse_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_float) {
-  AT_ASSERT(input_.is_sparse());
-  AT_ASSERTM(!half_to_float, "log_softmax with half to float conversion is not supported on CPU");
+  TORCH_INTERNAL_ASSERT(input_.is_sparse());
+  TORCH_CHECK(!half_to_float, "log_softmax with half to float conversion is not supported on CPU");
   auto input = input_.coalesce();
   Tensor output = at::native::empty_like(input);
   if (input.numel() == 0) {
@@ -526,7 +522,7 @@ Tensor log_softmax_sparse_cpu(const Tensor& input_, const int64_t dim_, const bo
   TORCH_CHECK(dim_ >= 0 && dim_ < input.dim(),
               "dim must be non-negative and less than input dimensions");
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "log_softmax", [&] {
-      cpu_sparse_coo_softmax<scalar_t, int64_t, true>(output, input, dim_);
+      cpu_sparse_coo_softmax<scalar_t, true>(output, input, dim_);
   });
   return output;
 }
@@ -555,7 +551,7 @@ Tensor softmax_backward_sparse_cpu(
               grad.sparse_dim() == output.sparse_dim(),
       "grad and output sparse dimensions must be equal");
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
-      cpu_sparse_coo_softmax_backward<scalar_t, int64_t, false>(grad_input, grad, output, dim);
+      cpu_sparse_coo_softmax_backward<scalar_t, false>(grad_input, grad, output, dim);
   });
   return grad_input;
 }
@@ -584,7 +580,7 @@ Tensor log_softmax_backward_sparse_cpu(
               grad.sparse_dim() == output.sparse_dim(),
       "grad and output sparse dimensions must be equal");
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
-      cpu_sparse_coo_softmax_backward<scalar_t, int64_t, true>(grad_input, grad, output, dim);
+      cpu_sparse_coo_softmax_backward<scalar_t, true>(grad_input, grad, output, dim);
   });
   return grad_input;
 }
