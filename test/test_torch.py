@@ -492,6 +492,8 @@ class _TestTorchMixin(object):
         _test_mv(torch.randint(0, 100, (100, 100), dtype=torch.int32), torch.randint(0, 100, (100, ), dtype=torch.int32))
         _test_mv(torch.randint(0, 100, (100, 100), dtype=torch.int64), torch.randint(0, 100, (100, ), dtype=torch.int64))
         _test_mv(torch.randn(100, 100, dtype=torch.float32).bfloat16(), torch.randn(100, dtype=torch.float32).bfloat16())
+        _test_mv(torch.randn(100, 100, dtype=torch.cfloat), torch.randn(100, dtype=torch.cfloat))
+        _test_mv(torch.randn(100, 100, dtype=torch.cdouble), torch.randn(100, dtype=torch.cdouble))
 
     def test_numpy_args(self):
         x1 = torch.randn(10)
@@ -3795,6 +3797,11 @@ class _TestTorchMixin(object):
                 obj = t(100).fill_(1)
             obj.__repr__()
             str(obj)
+
+        # test complex tensor
+        x = torch.tensor([2.3 + 4j, 7 + 6j])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([(2.3000+4.0000j), (7.0000+6.0000j)])''')
 
         # test big integer
         x = torch.tensor(2341234123412341)
@@ -11450,9 +11457,8 @@ class TestTorchDeviceType(TestCase):
         # Check for race condition (correctness when applied on a large tensor).
         if dtype not in (torch.int8, torch.uint8, torch.int16, torch.half):
             y = torch.linspace(0, 1000000 - 1, 1000000, device=device, dtype=dtype)
-            correct = True
-            for i in range(y.shape[0] - 1):
-                correct = correct and y[i] < y[i + 1]
+            cond = y[:-1] < y[1:]
+            correct = all(cond)
             self.assertTrue(correct)
 
         # Check linspace for non-contiguous tensors.
@@ -12934,11 +12940,11 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
     @skipCUDAIfRocm
-    @dtypesIfCUDA(*(torch.float, torch.double) +
+    @dtypesIfCUDA(*(torch.float, torch.double, torch.cfloat, torch.cdouble) +
                   # This test is disabled on CUDA 9, due to:
                   # See: https://github.com/pytorch/pytorch/issues/31006
                   ((torch.half,) if torch.version.cuda and not torch.version.cuda.startswith('9.') else ()))
-    @dtypes(*(set(torch.testing.get_all_dtypes()) - {torch.half, torch.bool, torch.complex64, torch.complex128}))
+    @dtypes(*(set(torch.testing.get_all_dtypes()) - {torch.half, torch.bool}))
     def test_blas_alpha_beta_empty(self, device, dtype):
         if dtype is torch.bfloat16 and self.device_type == 'xla':
             # TODO (@zasdfgbnm): this causes the following error on test
@@ -12958,6 +12964,10 @@ class TestTorchDeviceType(TestCase):
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta))
         self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta, out=out))
+
+        # TODO: update this once torch.addmm is supported for complex
+        if dtype.is_complex:
+            return
 
         # torch.addmm
         input = torch.full((2, 3), value, dtype=dtype, device=device)
@@ -14611,20 +14621,20 @@ class TestTorchDeviceType(TestCase):
 
         # test invalid input
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should be 2 dimensional', 
+            RuntimeError,
+            'A should be 2 dimensional',
             lambda: torch.eig(torch.ones((2))))
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should be square', 
+            RuntimeError,
+            'A should be square',
             lambda: torch.eig(torch.ones((2, 3))))
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should not contain infs or NaNs', 
+            RuntimeError,
+            'A should not contain infs or NaNs',
             lambda: torch.eig(np.inf * torch.ones((2, 2))))
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should not contain infs or NaNs', 
+            RuntimeError,
+            'A should not contain infs or NaNs',
             lambda: torch.eig(np.nan * torch.ones((2, 2))))
 
     @skipCUDAIfNoMagma
@@ -17249,6 +17259,8 @@ _float_types_no_half = [torch.float, torch.double]
 # with _float_types when bfloat16 bringup is complete on all platforms
 _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
 
+_complex_types = [torch.cfloat, torch.cdouble]
+
 _signed_types = [
     torch.half, torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long
@@ -17458,6 +17470,8 @@ tensor_op_tests = [
         1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addmm_? is deprecated")]),
     ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)],
+        1e-2, 1e-1, 1e-4, _complex_types),
+    ('addmv', 'complex', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2),
     ('addmv', 'scalar', _medium_1d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
