@@ -7,6 +7,7 @@ import threading
 
 import torch
 import torch.distributed as dist
+from torch.jit import Future  # noqa F401
 
 from . import (
     RpcBackendOptions,
@@ -201,6 +202,9 @@ def shutdown(graceful=True):
     ``graceful=False``, this is a local shutdown, and it does not wait for other
     RPC processes to reach this method.
 
+    .. warning::
+        Warning, ``future.wait()`` should not be called after ``shutdown()``.
+
     Arguments:
         graceful (bool): Whether to do a graceful shutdown or not. If True,
                          this will 1) wait until there is no pending system
@@ -249,6 +253,11 @@ def shutdown(graceful=True):
         # interpreter exists.
         # No matter if RRef leak exception is raised, this clean-up code
         # must run to avoid destruction segfault in Python 3.5.
+        #
+        # future.wait() should not be called after shutdown().
+        # pythonRpcHandler is cleaned up in shutdown(), after
+        # shutdown(), python objects returned from rpc python call can not be
+        # resolved.
         _cleanup_python_rpc_handler()
         _reset_current_rpc_agent()
 
