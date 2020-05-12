@@ -798,7 +798,7 @@ class TestQuantizedOps(TestCase):
     """Tests channel shuffle operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=2, max_side=32),
-                       qparams=hu.qparams()),
+                       qparams=hu.qparams(dtypes=[torch.quint8])),
            groups=st.integers(2, 6))
     def test_channel_shuffle(self, X, groups):
         X, (scale, zero_point, torch_type) = X
@@ -811,10 +811,10 @@ class TestQuantizedOps(TestCase):
         a_out = torch.nn.functional.channel_shuffle(a, groups)
 
         a_ref = torch.quantize_per_tensor(a_out, scale=scale,
-                                          zero_point=zero_point, dtype=torch.quint8)
+                                          zero_point=zero_point, dtype=torch_type)
         a_ref = a_ref.dequantize()
         qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
-                                       dtype=torch.quint8)
+                                       dtype=torch_type)
 
         a_hat = torch.nn.functional.channel_shuffle(qa, groups)
         self.assertEqual(a_ref, a_hat.dequantize(),
