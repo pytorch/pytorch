@@ -15054,14 +15054,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @onlyCPU
     def test_addmm(self, device):
         dtypes = {
-            'torch.double': 1e-8,
-            'torch.float': 1e-4,
-            'torch.bfloat16': 1e-1,
+            torch.double: 1e-8,
+            torch.float: 1e-4,
+            torch.bfloat16: 1e-1,
         }
         for dtype, prec in dtypes.items():
-            M = torch.randn(10, 25, device=device, dtype=dtype)
-            m1 = torch.randn(10, 50, device=device, dtype=dtype)
-            m2 = torch.randn(50, 25, device=device, dtype=dtype)
+            M = torch.randn(10, 25).to(device=device, dtype=dtype)
+            m1 = torch.randn(10, 50).to(device=device, dtype=dtype)
+            m2 = torch.randn(50, 25).to(device=device, dtype=dtype)
             res1 = torch.addmm(M, m1, m2)
             res2 = torch.zeros(10, 25, device=device, dtype=dtype)
             res2 += M
@@ -15073,9 +15073,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         # Test 0-strided
         for dtype, prec in dtypes.items():
-            M = torch.randn(10, 1, device=device, dtype=dtype).expand(10, 25)
-            m1 = torch.randn(10, 1, device=device, dtype=dtype).expand(10, 50)
-            m2 = torch.randn(50, 25, device=device, dtype=dtype)
+            M = torch.randn(10, 1).to(device=device, dtype=dtype).expand(10, 25)
+            m1 = torch.randn(10, 1).to(device=device, dtype=dtype).expand(10, 50)
+            m2 = torch.randn(50, 25).to(device=device, dtype=dtype)
             res1 = torch.addmm(M, m1, m2)
             res2 = torch.zeros(10, 25, device=device, dtype=dtype)
             res2 += M
