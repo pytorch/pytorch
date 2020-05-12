@@ -331,6 +331,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
           const tensorpipe::Error& error) {
         if (error) {
           LOG(WARNING) << "client write error: " << error.what();
+          --clientActiveCalls_;
           futureResponseMessage->setError(error.what());
           return;
         }
