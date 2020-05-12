@@ -34,17 +34,17 @@ at::Allocator* GetAllocator(const at::DeviceType& t) {
   return alloc;
 }
 
-C10_API bool memoryProfilingEnabled() {
+bool memoryProfilingEnabled() {
   const auto& state = ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE);
-  auto reporter_ptr = dynamic_cast<MemoryUsageReporter*>(state.get());
+  auto reporter_ptr = static_cast<MemoryReportingInfoBase*>(state.get());
   return reporter_ptr && reporter_ptr->memoryProfilingEnabled();
 }
 
-void reportMemoryUsageToProfiler(Device device, int64_t alloc_size) {
+void reportMemoryUsageToProfiler(void* ptr, int64_t alloc_size, Device device) {
   const auto& state = ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE);
-  auto reporter_ptr = dynamic_cast<MemoryUsageReporter*>(state.get());
+  auto reporter_ptr = static_cast<MemoryReportingInfoBase*>(state.get());
   if (reporter_ptr) {
-    reporter_ptr->reportMemoryUsage(device, alloc_size);
+    reporter_ptr->reportMemoryUsage(ptr, alloc_size, device);
   }
 }
 

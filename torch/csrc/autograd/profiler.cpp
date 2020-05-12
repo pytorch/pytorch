@@ -122,8 +122,7 @@ static CUDAStubs* cuda_stubs = default_stubs_addr;
 
 // Profiler state
 struct ProfilerThreadLocalState
-    : public c10::DebugInfoBase,
-      public c10::MemoryUsageReporter {
+    : public c10::MemoryReportingInfoBase {
   explicit ProfilerThreadLocalState(
       const ProfilerConfig& config)
     : config_(config) {}
@@ -210,7 +209,8 @@ struct ProfilerThreadLocalState
     return handle_;
   }
 
-  void reportMemoryUsage(c10::Device device, int64_t alloc_size) override {
+  void reportMemoryUsage(
+      void* /* unused */, int64_t alloc_size, c10::Device device) override {
     if (config_.profile_memory) {
       std::lock_guard<std::mutex> guard(state_mutex_);
       auto thread_id = at::RecordFunction::currentThreadId();
