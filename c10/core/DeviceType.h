@@ -68,3 +68,7 @@ template <> struct hash<c10::DeviceType> {
   }
 };
 } // namespace std
+
+namespace torch {
+  using c10::DeviceType;
+}

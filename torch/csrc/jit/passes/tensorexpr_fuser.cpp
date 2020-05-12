@@ -90,8 +90,6 @@ bool isSupported(Node* node) {
     case aten::gt:
     case aten::le:
     case aten::lt:
-    case aten::min:
-    case aten::max:
     case aten::pow:
     case aten::clamp:
     case aten::lerp:
@@ -134,7 +132,8 @@ bool isSupported(Node* node) {
     case aten::slice:
     case aten::unsqueeze:
     case aten::frac:
-    case aten::rand_like:
+    // TODO: uncomment once we can handle rand+broadcasts
+    // case aten::rand_like:
     case aten::_sigmoid_backward:
     case aten::_tanh_backward:
     case aten::__and__:
@@ -143,6 +142,17 @@ bool isSupported(Node* node) {
     case aten::__lshift__:
     case aten::__rshift__:
     case aten::where:
+      return true;
+    // Operators that can be both elementwise or reductions:
+    case aten::min:
+    case aten::max:
+      if (node->inputs().size() != 2) {
+        return false;
+      }
+      if (!node->inputs()[0]->type()->cast<TensorType>() ||
+          !node->inputs()[1]->type()->cast<TensorType>()) {
+        return false;
+      }
       return true;
     default:
       return false;
