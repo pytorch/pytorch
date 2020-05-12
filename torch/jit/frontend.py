@@ -6,7 +6,16 @@ import inspect
 import string
 from textwrap import dedent
 from torch._six import PY2
-from torch._C._jit_tree_views import *
+from torch._C._jit_tree_views import (
+    ClassDef, Ident, Stmt, Decl, Def, Var,
+    EmptyTypeAnnotation, Param, ExprStmt, Assign,
+    Delete, Return, Raise, Assert, AugAssign, While,
+    For, If, Pass, Break, Continue, Apply, Dots, Select,
+    TrueLiteral, FalseLiteral, NoneLiteral, Starred,
+    ListLiteral, TupleLiteral, DictLiteral, Const,
+    StringLiteral, ListComp, Attribute, BinOp, UnaryOp,
+    SliceExpr, Subscript, TernaryIf
+)
 from torch._utils_internal import get_source_lines_and_file
 
 from torch._jit_internal import SourceContext
@@ -276,6 +285,11 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_Delete(ctx, stmt):
+        if len(stmt.targets) > 1:
+            source_range = ctx.make_range(stmt.lineno, stmt.col_offset,
+                                          stmt.col_offset + len("del"))
+            raise NotSupportedError(
+                source_range, 'del with more than one operand is not supported')
         return Delete(build_expr(ctx, stmt.targets[0]))
 
     @staticmethod
@@ -571,7 +585,9 @@ class ExprBuilder(Builder):
         base = build_expr(ctx, expr.value)
         sub_type = type(expr.slice)
         if sub_type is ast.Index:
-            if isinstance(expr.slice.value, ast.Tuple) or isinstance(expr.slice.value, ast.List):
+            if isinstance(expr.slice.value, ast.Tuple):
+                # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
+                # XXX: Indexing using a list is **different**! It triggers advanced indexing.
                 indices = []
                 for index_expr in expr.slice.value.elts:
                     indices.append(build_expr(ctx, index_expr))
