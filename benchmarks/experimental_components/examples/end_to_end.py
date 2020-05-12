@@ -163,8 +163,7 @@ def compare_times(master_results, branch_results):
             print(f"Skipping unreliable measurement: {m_master.description}")
             continue
         diff = m_master.median - m_branch.median
-        mean = (m_master.median + m_branch.median) / 2
-        relative_improvement[m_master.description] = diff / mean
+        relative_improvement[m_master.description] = diff / m_master.median
         absolute_times[_MASTER][m_master.description] = m_master.median
         absolute_times[_BRANCH][m_master.description] = m_branch.median
 
