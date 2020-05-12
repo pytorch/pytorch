@@ -178,8 +178,9 @@ class QConv1dUnpackWeightsInt8 final {
           "quantized::conv1d_unpack (qnnpack): QNNPACK only supports Conv1d/Conv2d "
           "now.");
       std::tie(weight, bias) = packed_weight->unpack();
-      weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return std::tuple<at::Tensor, c10::optional<at::Tensor>>(weight, bias);
+      at::Tensor new_weight = weight.clone();
+      new_weight = new_weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+      return std::tuple<at::Tensor, c10::optional<at::Tensor>>(new_weight, bias);
     }
 #endif
 

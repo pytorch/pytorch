@@ -186,26 +186,16 @@ class Conv1d(_ConvNd):
 
     _FLOAT_MODULE = nn.Conv1d
 
-    _SQUEEZE_DIM = -2  # -2 is faster than -1.
-
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros'):
-        kernel_size = list(_pair_from_first(kernel_size))
-        kernel_size[self._SQUEEZE_DIM] = 1
-        kernel_size = tuple(kernel_size)
+        kernel_size = tuple(_pair_from_first(kernel_size))
 
-        stride = list(_pair_from_first(stride))
-        stride[self._SQUEEZE_DIM] = 1
-        stride = tuple(stride)
+        stride = tuple(_pair_from_first(stride))
 
-        padding = list(_pair_from_first(padding))
-        padding[self._SQUEEZE_DIM] = 0
-        padding = tuple(padding)
+        padding = tuple(_pair_from_first(padding))
 
-        dilation = list(_pair_from_first(dilation))
-        dilation[self._SQUEEZE_DIM] = 1
-        dilation = tuple(dilation)
+        dilation = tuple(_pair_from_first(dilation))
 
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -220,8 +210,7 @@ class Conv1d(_ConvNd):
             w, b, self.stride, self.padding, self.dilation, self.groups)
 
     def _weight_bias(self):
-        w, b = self._packed_params.unpack()
-        w = w.squeeze(dim=self._SQUEEZE_DIM)
+        w, b = torch.ops.quantized.conv1d_unpack(self._packed_params)
         return w, b
 
     def weight(self):

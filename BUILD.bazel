@@ -1923,6 +1923,7 @@ cc_library(
             "torch/csrc/jit/fuser/cuda/*.h",
             "torch/csrc/jit/passes/*.h",
             "torch/csrc/jit/passes/onnx/*.h",
+            "torch/csrc/jit/passes/quantization/*.h",
             "torch/csrc/jit/passes/utils/*.h",
             "torch/csrc/jit/python/*.h",
             "torch/csrc/jit/runtime/*.h",
