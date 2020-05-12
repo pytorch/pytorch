@@ -4186,10 +4186,10 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
 # white list for complex
-complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as',
-                'zero_', 'clone', 'tril', 'triu', 'fill_', 'eq_', 'ne_',
-                'permute', 'squeeze', 'unsqueeze', 'chunk', 'split',
-                'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos']
+complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
+                'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
+                'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
+                '__rmul__', '__rdiv__']
 
 def add_test(
         name,
@@ -5897,7 +5897,8 @@ class TestAutogradDeviceType(TestCase):
         outputs = Broadcast.apply(list(range(len(devices))), x)
         y = outputs[-1] * 2
         y.sum().backward()
-        self.assertEqual(x.grad, torch.ones(5, 5) * 2)
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(x.grad, torch.ones(5, 5) * 2)
 
     @deviceCountAtLeast(2)
     def test_backward_device(self, devices):

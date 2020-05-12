@@ -13,8 +13,9 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
+#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/python_compat.h>
 
 namespace torch {
 namespace distributed {
@@ -109,40 +110,58 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
 
 using namespace torch::distributed::autograd;
 
-std::shared_ptr<FutureIValue> toFutureIValue(
-    const std::shared_ptr<FutureMessage>& fm,
+c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
+    const std::shared_ptr<FutureMessage>& futureResponseMessage,
     bool hasValue) {
-  auto fv = std::make_shared<FutureIValue>();
+  if (hasValue) {
+    c10::intrusive_ptr<JitFuture> jitFuture =
+        c10::make_intrusive<JitFuture>(PyObjectType::get());
 
-  fm->addCallback([fv, hasValue](const FutureMessage& fm) {
-    if (fm.hasError()) {
-      fv->setError(*fm.error());
-    } else if (hasValue) {
-      // Don't need to acquire GIL here, as toPyObj and toIValue acquires GIL
-      // when creating/copying the py::object
-      fv->markCompleted(
-          jit::toIValue(toPyObj(fm.constValue()), PyObjectType::get()));
-    } else {
-      fv->markCompleted(IValue());
-    }
-  });
+    futureResponseMessage->addCallback(
+        [jitFuture](const FutureMessage& futureResponseMessage) {
+          // Don't need to acquire GIL here, as toPyObj acquires GIL
+          // when creating the py::object
+          if (futureResponseMessage.hasError()) {
+            jitFuture->setError(futureResponseMessage.error()->what());
+          } else {
+            jitFuture->markCompleted(jit::toIValue(
+                toPyObj(futureResponseMessage.constValue()),
+                PyObjectType::get()));
+          }
+        });
 
-  return fv;
+    return jitFuture;
+  } else {
+    c10::intrusive_ptr<JitFuture> jitFuture =
+        c10::make_intrusive<JitFuture>(NoneType::get());
+
+    futureResponseMessage->addCallback(
+        [jitFuture](const FutureMessage& futureResponseMessage) {
+          if (futureResponseMessage.hasError()) {
+            jitFuture->setError(futureResponseMessage.error()->what());
+          } else {
+            jitFuture->markCompleted(IValue());
+          }
+        });
+
+    return jitFuture;
+  }
 }
 
-std::shared_ptr<FutureIValue> pyRpcBuiltin(
+c10::intrusive_ptr<JitFuture> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs,
     const float rpcTimeoutSeconds) {
+  DCHECK(PyGILState_Check());
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
   // Release GIL since args and kwargs processing is done.
   py::gil_scoped_release release;
   auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
   auto agent = RpcAgent::getCurrentRpcAgent();
-  return toFutureIValue(sendMessageWithAutograd(
+  return wrapFutureMessageInJitFuture(sendMessageWithAutograd(
       *agent,
       dst,
       std::move(*scriptCall).toMessage(),
@@ -150,11 +169,63 @@ std::shared_ptr<FutureIValue> pyRpcBuiltin(
       rpcTimeoutSeconds));
 }
 
+c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
+    const WorkerInfo& dst,
+    std::string& pickledPythonUDF,
+    std::vector<torch::Tensor>& tensors,
+    const float rpcTimeoutSeconds) {
+  DCHECK(!PyGILState_Check());
+  auto serializedPyObj =
+      SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
+  auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
+
+  auto agent = RpcAgent::getCurrentRpcAgent();
+  return wrapFutureMessageInJitFuture(sendMessageWithAutograd(
+      *agent,
+      dst,
+      std::move(*pythonCall).toMessage(),
+      true /*forceGradRecording*/,
+      rpcTimeoutSeconds));
+}
+
+c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
+    const std::string& dstWorkerName,
+    const std::string& qualifiedNameStr,
+    const py::tuple& argsTuple,
+    const py::dict& kwargsDict,
+    const float rpcTimeoutSeconds) {
+  // No need to catch exception here, if function can not be found,
+  // exception will be thrown in get_function() call; if args do not match
+  // with function schema, exception will be thrown in
+  // createStackForSchema() call.
+  DCHECK(!PyGILState_Check());
+  const c10::QualifiedName qualifiedName(qualifiedNameStr);
+  auto functionSchema = PythonRpcHandler::getInstance()
+                            .jitCompilationUnit()
+                            ->get_function(qualifiedName)
+                            .getSchema();
+  Stack stack;
+  {
+    // Acquire GIL for py::args and py::kwargs processing.
+    py::gil_scoped_acquire acquire;
+    stack = torch::jit::createStackForSchema(
+        functionSchema,
+        argsTuple.cast<py::args>(),
+        kwargsDict.cast<py::kwargs>(),
+        c10::nullopt);
+  }
+  DCHECK(!PyGILState_Check());
+  c10::intrusive_ptr<c10::ivalue::Future> fut = rpcTorchscript(
+      dstWorkerName, qualifiedName, functionSchema, stack, rpcTimeoutSeconds);
+  return fut;
+}
+
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs) {
+  DCHECK(PyGILState_Check());
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
   // Release GIL since args and kwargs processing is done.
@@ -199,28 +270,11 @@ PyRRef pyRemoteBuiltin(
   }
 }
 
-std::shared_ptr<FutureIValue> pyRpcPythonUdf(
-    const WorkerInfo& dst,
-    std::string& pickledPythonUDF,
-    std::vector<torch::Tensor>& tensors,
-    const float rpcTimeoutSeconds) {
-  auto serializedPyObj =
-      SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
-  auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
-
-  auto agent = RpcAgent::getCurrentRpcAgent();
-  return toFutureIValue(sendMessageWithAutograd(
-      *agent,
-      dst,
-      std::move(*pythonCall).toMessage(),
-      true /*forceGradRecording*/,
-      rpcTimeoutSeconds));
-}
-
 PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors) {
+  DCHECK(!PyGILState_Check());
   auto& ctx = RRefContext::getInstance();
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
@@ -260,6 +314,30 @@ PyRRef pyRemotePythonUdf(
     });
     return PyRRef(ownerRRef);
   }
+}
+
+PyRRef pyRemoteTorchscript(
+    const std::string& dstWorkerName,
+    const std::string& qualifiedNameStr,
+    const py::args& args,
+    const py::kwargs& kwargs) {
+  DCHECK(!PyGILState_Check());
+  auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
+  auto functionSchema = PythonRpcHandler::getInstance()
+                            .jitCompilationUnit()
+                            ->get_function(qualifiedName)
+                            .getSchema();
+  Stack stack;
+  {
+    // Acquire GIL for py::args and py::kwargs processing.
+    pybind11::gil_scoped_acquire ag;
+    stack = torch::jit::createStackForSchema(
+        functionSchema, args, kwargs, c10::nullopt);
+  }
+  DCHECK(!PyGILState_Check());
+  auto rrefPtr =
+      remoteTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
+  return PyRRef(rrefPtr);
 }
 
 } // namespace rpc
