@@ -49,7 +49,6 @@ inline int getPrecedence(IRNodeType ty) {
     case kXor:
       return 12;
     case kCompareSelect:
-    case kLet:
       return 16;
     default:
       return 99;
@@ -336,38 +335,6 @@ bool immediateIsNegative(const T* e) {
 #undef TYPE_CASE
   return false;
 }
-
-// Bind the value to the var and evaluate the body.
-class Let : public ExprNode<Let> {
- public:
-  const Expr* var() const {
-    return var_;
-  }
-  const Expr* value() const {
-    return value_;
-  }
-  const Expr* body() const {
-    return body_;
-  }
-
-  static ExprHandle make(
-      const ExprHandle& var,
-      const ExprHandle& value,
-      const ExprHandle& body) {
-    return ExprHandle(new Let(var.node(), value.node(), body.node()));
-  }
-
-  Let(const Expr* var, const Expr* value, const Expr* body)
-      : ExprNodeBase(body->dtype(), kLet),
-        var_(var),
-        value_(value),
-        body_(body) {}
-
- private:
-  const Expr* var_;
-  const Expr* value_;
-  const Expr* body_;
-};
 
 // Represents a ramp vector node:
 //     [base, base + 1 * stride, ... , base + (lanes - 1) * stride]

@@ -885,7 +885,8 @@ class TestFuser(JitTestCase):
         script_f = torch.jit.script(fn_test_rand2)
         warmup_forward(script_f, x, y)
         out = script_f(x, y)
-        self.assertEqual(out[0, :] + torch.zeros(4, 4, device='cuda'), out)
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(out[0, :] + torch.zeros(4, 4, device='cuda'), out)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skip("rand_like is not supported yet")
