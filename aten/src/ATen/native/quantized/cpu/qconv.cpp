@@ -505,10 +505,10 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
 
   double act_input_scale = act_nhwc.q_scale();
 
-  const bool is_per_channel = orig_weight.qscheme() == at::kPerChannelAffine;
 
   // Re-quantizing the bias based on input scale and weight scale.
   if (!input_scale.has_value() || input_scale.value() != act_input_scale) {
+    const bool is_per_channel = orig_weight.qscheme() == at::kPerChannelAffine;
     // Get the original weight and adjust it to uint8 from int8
     auto weight_contig =
         orig_weight.contiguous(c10::MemoryFormat::ChannelsLast);
