@@ -464,10 +464,10 @@ class GradScaler(object):
             self._growth_tracker.fill_(state_dict["_growth_tracker"])
 
     def __getstate__(self):
-        assert len(self._per_optimizer_states) == 0, "A GradScaler instance may only be pickled at the beginning of "\
-                                                     "an iteration, or at the end after scaler.update()."
         state = self.__dict__.copy()
         if self._enabled:
+            assert len(self._per_optimizer_states) == 0, "A GradScaler instance may only be pickled at the beginning "\
+                                                         "of an iteration, or at the end after scaler.update()."
             # Pickling _scale and _growth_tracker Tensors directly triggers
             # "warnings.warn("pickle support for Storage will be removed in 1.5..."
             # so instead, we set the unpickled instance up to reinitialize them lazily.

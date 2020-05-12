@@ -3340,8 +3340,6 @@ class _TestTorchMixin(object):
                     self.assertTrue(torch.cuda.is_available())
                     a.scale(torch.tensor([4.0], dtype=torch.float32, device="cuda:0"))
                     self.assertTrue(isinstance(a._scale, torch.cuda.FloatTensor))
-                else:
-                    self.assertTrue(a._scale is None)
             serialized = pickle.dumps(a)
             b = pickle.loads(serialized)
             self.assertEqual(b.is_enabled(), a.is_enabled())
