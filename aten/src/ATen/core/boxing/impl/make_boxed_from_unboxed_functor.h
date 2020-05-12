@@ -279,7 +279,7 @@ using supported_primitive_arg_types = guts::typelist::typelist<
       constexpr size_t num_inputs = guts::function_traits<KernelFunctor>::arity();
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
 
-      using ReturnType = typename guts::function_traits_t<KernelFunctor>::return_type;
+      using ReturnType = typename guts::function_traits<KernelFunctor>::return_type;
       constexpr bool has_outputs = !std::is_same<void, ReturnType>::value;
       guts::if_constexpr<has_outputs>([&] (auto _) {
         auto output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, _(stack));
