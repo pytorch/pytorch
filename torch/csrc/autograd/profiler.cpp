@@ -127,7 +127,7 @@ struct ProfilerThreadLocalState
   explicit ProfilerThreadLocalState(
       const ProfilerConfig& config)
     : config_(config) {}
-  ~ProfilerThreadLocalState() {}
+  ~ProfilerThreadLocalState() override = default;
 
   inline const ProfilerConfig& config() const {
     return config_;
