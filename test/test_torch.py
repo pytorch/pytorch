@@ -8871,8 +8871,9 @@ class TestTorchDeviceType(TestCase):
                 y = torch.full((1, 3), np.nan, dtype=torch.float64, device=device)
                 y[:, :1] = 1.1
                 values, indices = fn_tuple(y, dim=1)
-                self.assertEqual(torch.tensor([nan], dtype=torch.float64), values)
-                self.assertEqual(torch.tensor([1], dtype=torch.int64), indices)
+                expected_values = torch.tensor([nan], dtype=torch.float64, device=device)
+                self.assertEqual(values, expected_values)
+                self.assertTrue(torch.isnan(y.flatten()[indices[0]]))
 
             # check reducing with output kwargs
             if fn_name in ['median', 'mode', 'max', 'min']:
