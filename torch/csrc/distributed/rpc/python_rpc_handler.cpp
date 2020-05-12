@@ -60,11 +60,20 @@ py::object getFunction(const py::object& module, const char* name) {
 
 PythonRpcHandler::PythonRpcHandler() {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  py::object module = py::module::import("torch.distributed.rpc.internal");
-  pyRunFunction_ = getFunction(module, "_run_function");
-  pySerialize_ = getFunction(module, "serialize");
-  pyDeserialize_ = getFunction(module, "deserialize");
-  pyHandleException_ = getFunction(module, "_handle_exception");
+  py::object rpcInternal = py::module::import("torch.distributed.rpc.internal");
+  py::object rpcApi = py::module::import("torch.distributed.rpc.api");
+  py::object rrefProxy = py::module::import("torch.distributed.rpc.rref_proxy");
+
+  pyRunFunction_ = getFunction(rpcInternal, "_run_function");
+  pySerialize_ = getFunction(rpcInternal, "serialize");
+  pyDeserialize_ = getFunction(rpcInternal, "deserialize");
+  pyHandleException_ = getFunction(rpcInternal, "_handle_exception");
+
+  rrefProxyFunctions_.rpcSync_ = getFunction(rpcApi, "rpc_sync");
+  rrefProxyFunctions_.rpcAsync_ = getFunction(rpcApi, "rpc_async");
+  rrefProxyFunctions_.remote_ = getFunction(rpcApi, "remote");
+  rrefProxyFunctions_.rrefProxyCtor_ = getFunction(rrefProxy, "RRefProxy");
+
   jitCompilationUnit_ = torch::jit::get_python_cu();
   typeParser_ = std::make_shared<jit::ScriptTypeParser>(
       std::make_shared<PythonTypeResolver>());
@@ -76,6 +85,12 @@ void PythonRpcHandler::cleanup() {
   pySerialize_ = py::none();
   pyDeserialize_ = py::none();
   pyHandleException_ = py::none();
+
+  rrefProxyFunctions_.rpcSync_ = py::none();
+  rrefProxyFunctions_.rpcAsync_ = py::none();
+  rrefProxyFunctions_.remote_ = py::none();
+  rrefProxyFunctions_.rrefProxyCtor_ = py::none();
+
   jitCompilationUnit_ = nullptr;
   typeParser_ = nullptr;
 }
@@ -137,6 +152,11 @@ void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
 
 TypePtr PythonRpcHandler::parseTypeFromStr(const std::string& type_str) {
   return typeParser_->parseType(type_str);
+}
+
+const PythonRpcHandler::RRefProxyFunctions& PythonRpcHandler::
+    getRRefProxyFunctions() const {
+  return rrefProxyFunctions_;
 }
 
 } // namespace rpc

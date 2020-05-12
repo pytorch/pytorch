@@ -34,7 +34,7 @@ LocalDispatchKeySet tls_local_dispatch_key_set() {
   if (FLAGS_disable_variable_dispatch) {
     raw_local_dispatch_key_set.set_excluded(
       raw_local_dispatch_key_set.excluded().add(
-        DispatchKey::VariableTensorId));
+        DispatchKey::Autograd));
   }
   return raw_local_dispatch_key_set;
 }

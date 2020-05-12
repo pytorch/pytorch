@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
 
 #include <iostream>
 
@@ -26,11 +25,6 @@ void check_inlineable(const IRInputOutput* const irio) {
 } // namespace
 
 void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
-  // ceilDiv Helper funtion
-  os << "__device__ int ceilDiv(const int a, const int b) {\n"
-     << "  return (a + b - 1) / b;\n"
-     << "}\n\n";
-
   os << "__global__ void " << kernel_name_ << "(";
 
   std::deque<Val*> vals;
@@ -42,7 +36,9 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
   for (Val* val : vals) {
     switch (val->getValType().value()) {
       case (ValType::TensorView):
-        os << "Tensor<" << val->getDataType().value() << "> T" << val->name();
+        os << "Tensor<" << val->getDataType().value() << ", "
+           << static_cast<TensorView*>(val)->getRootDomain()->nDims() << "> T"
+           << val->name();
         break;
       case (ValType::Scalar):
         os << val->getDataType().value() << " " << val;
@@ -57,8 +53,16 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
       os << ", ";
   }
 
+  if (fusion->random())
+    os << ", unsigned long long seed, unsigned long long offset";
   os << "){\n";
   indent_size++;
+  if (fusion->random()) {
+    indent();
+    os << "int idx = blockIdx.x*blockDim.x + threadIdx.x;\n";
+    indent();
+    os << "Philox rnd(seed, idx, offset);\n";
+  }
 }
 
 void IRPrinter::handle(Fusion* fusion) {
@@ -70,9 +74,9 @@ void IRPrinter::handle(Fusion* fusion) {
 
 void IRPrinter::handle(const TensorDomain* const td) {
   os << "[ ";
-  for (std::vector<const IterDomain*>::size_type i = 0; i < td->size(); i++) {
+  for (std::vector<const IterDomain*>::size_type i = 0; i < td->nDims(); i++) {
     handle(td->axis(i));
-    if (i != td->size() - 1)
+    if (i != td->nDims() - 1)
       os << ", ";
   }
   os << " ]";
@@ -107,8 +111,13 @@ void IRPrinter::handle(const IterDomain* const id) {
     default:
       os << id->parallel_method();
   }
+
   os << "{";
-  print_inline(id->size());
+  if (!id->start()->isZeroInt()) {
+    print_inline(id->start());
+    os << " : ";
+  }
+  print_inline(id->extent());
   os << "}";
 }
 
@@ -129,6 +138,21 @@ void IRPrinter::handle(const TensorContiguity* const t) {
   os << "format_tag: " << t->getContiguityTag();
 }
 
+void IRPrinter::handle(const Bool* const b) {
+  if (print_inline_ && FusionGuard::getCurFusion()->origin(b) != nullptr) {
+    os << "( ";
+    handle(FusionGuard::getCurFusion()->origin(b));
+    os << " )";
+    return;
+  }
+
+  if (b->isSymbolic()) {
+    os << "b" << b->name();
+  } else {
+    os << "bool(" << *(b->value()) << ")";
+  }
+}
+
 void IRPrinter::handle(const Float* const f) {
   if (print_inline_ && FusionGuard::getCurFusion()->origin(f) != nullptr) {
     os << "( ";
@@ -141,6 +165,21 @@ void IRPrinter::handle(const Float* const f) {
     os << "f" << f->name();
   } else {
     os << "float(" << *(f->value()) << ")";
+  }
+}
+
+void IRPrinter::handle(const Half* const h) {
+  if (print_inline_ && FusionGuard::getCurFusion()->origin(h) != nullptr) {
+    os << "( ";
+    handle(FusionGuard::getCurFusion()->origin(h));
+    os << " )";
+    return;
+  }
+
+  if (h->isSymbolic()) {
+    os << "h" << h->name();
+  } else {
+    os << "__float2half(" << *(h->value()) << ")";
   }
 }
 
@@ -199,7 +238,10 @@ void IRPrinter::handle(const UnaryOp* const uop) {
     handle(uop->in());
   } else {
     os << uop->getUnaryOpType() << "(";
-    handle(uop->in());
+    if (uop->getUnaryOpType() == UnaryOpType::RandLike)
+      os << "rnd";
+    else
+      handle(uop->in());
     os << ")";
   }
 
@@ -255,8 +297,49 @@ void IRPrinter::handle(const BinaryOp* const bop) {
     os << ";\n";
 }
 
+void IRPrinter::handle(const TernaryOp* const top) {
+  bool istvop = isTVOp(top);
+  if (!print_inline_) {
+    indent();
+    os << top->out();
+
+    // tensor operations tend to be long, break them up into multiple lines
+    if (istvop) {
+      os << "\n";
+      indent_size++;
+      indent();
+    }
+
+    os << " = ";
+  } else {
+    check_inlineable(top);
+  }
+
+  os << top->getTernaryOpType() << "(";
+  handle(top->in1());
+  if (istvop) {
+    os << "\n";
+    indent();
+  }
+  os << ", ";
+  handle(top->in2());
+  if (istvop) {
+    os << "\n";
+    indent();
+  }
+  os << ", ";
+  handle(top->in3());
+  os << ")";
+
+  if (istvop)
+    indent_size--;
+
+  if (!print_inline_)
+    os << ";\n";
+}
+
 void IRPrinter::handle(const ForLoop* const fl) {
-  if (fl->range()->isThread()) {
+  if (fl->iter_domain()->isThread()) {
     for (auto& expr : fl->constBody().exprs())
       handle(expr);
     return;
@@ -265,10 +348,12 @@ void IRPrinter::handle(const ForLoop* const fl) {
   indent();
   os << "for(size_t ";
   handle(fl->index());
-  os << "{0}; ";
+  os << " = ";
+  print_inline(fl->iter_domain()->start());
+  os << "; ";
   handle(fl->index());
   os << " < ";
-  print_inline(fl->range()->size());
+  print_inline(fl->iter_domain()->extent());
   os << "; ++";
   handle(fl->index());
   os << " ) {\n";
@@ -343,8 +428,6 @@ void IRPrinter::printKernel(
     const std::vector<Expr*>& exprs,
     const std::string& kernel_name) {
   Fusion* fusion = FusionGuard::getCurFusion();
-  // if(exprs.size() != 0)
-  //   fusion = exprs[0]->fusion();
 
   printHeader(fusion, kernel_name);
   for (auto* expr : exprs) {

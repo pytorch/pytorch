@@ -117,7 +117,7 @@ C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
 // Historically, every tensor only had a single DispatchKey, and it was always
-// something like CPUTensorId, and there wasn't any of this business where TLS
+// something like CPU, and there wasn't any of this business where TLS
 // could cause the DispatchKey of a tensor to change.  But we still have some
 // legacy code that is still using DispatchKey for things like instanceof
 // checks; if at all possible, refactor the code to stop using DispatchKey in
@@ -127,7 +127,7 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // top of existing "normal" keys like CPU/CUDA, you need to add it
   // here.  At the moment, RequiresGrad (replacement for Variable)
   // is the most likely key that will need this treatment; note that
-  // VariableTensorId does NOT need this as it is applied universally
+  // Autograd does NOT need this as it is applied universally
   // (and doesn't show up in TensorImpl)
   return s.highestPriorityTypeId();
 }

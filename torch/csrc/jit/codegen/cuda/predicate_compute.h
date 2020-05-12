@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
 
 /*
  * Predicate compute takes a TensorView and set of indices. The number of

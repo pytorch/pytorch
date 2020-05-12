@@ -61,9 +61,6 @@ struct CAFFE2_API Generator {
     }
   }
 
-  // TODO(pbelevich): delete this after replace Generator generator = nullptr with c10::optional<at::Generator> = c10::nullopt
-  Generator(std::nullptr_t gen_impl) {}
-
   bool operator==(const Generator& rhs) const {
     return this->impl_ == rhs.impl_;
   }

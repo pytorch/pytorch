@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <list>
 #include <string>
 #include <vector>
@@ -58,42 +59,10 @@ Stmt* StmtNode<Op>::accept_mutator(IRMutator* mutator) {
 }
 
 // Concrete Stmt classes
-class LetStmt : public StmtNode<LetStmt> {
+class TORCH_API Block : public StmtNode<Block> {
  public:
-  const Var* var() const {
-    return var_;
-  }
+  using VarMapping = std::vector<std::pair<const Var*, const Expr*>>;
 
-  const Expr* value() const {
-    return value_;
-  }
-
-  Stmt* body() const {
-    return body_;
-  }
-
-  static LetStmt* make(
-      const VarHandle& var,
-      const ExprHandle& value,
-      Stmt* body) {
-    if (body->get_parent()) {
-      throw malformed_input("LetStmt body has existing parent", body);
-    }
-
-    return new LetStmt(var.node(), value.node(), body);
-  }
-
-  LetStmt(const Var* var, const Expr* value, Stmt* body)
-      : var_(var), value_(value), body_(body) {}
-
- private:
-  const Var* var_;
-  const Expr* value_;
-  Stmt* body_;
-};
-
-class Block : public StmtNode<Block> {
- public:
   static Block* make(const std::vector<Stmt*>& stmts) {
     std::vector<Stmt*> valid_stmts;
     for (size_t i = 0; i < stmts.size(); i++) {
@@ -108,8 +77,25 @@ class Block : public StmtNode<Block> {
     return new Block(valid_stmts);
   }
 
+  static Block* make(const VarMapping& vars, const std::vector<Stmt*>& stmts) {
+    std::vector<Stmt*> valid_stmts;
+    for (size_t i = 0; i < stmts.size(); i++) {
+      if (!stmts[i]) {
+        continue;
+      }
+      valid_stmts.push_back(stmts[i]);
+    }
+    if (valid_stmts.empty()) {
+      return nullptr;
+    }
+    return new Block(vars, valid_stmts);
+  }
+
   int nstmts() const {
     return stmts_.size();
+  }
+  bool empty() const {
+    return stmts_.empty();
   }
 
   void prepend_stmt(Stmt* s) {
@@ -128,6 +114,24 @@ class Block : public StmtNode<Block> {
     stmts_.push_back(s);
     set_parent(s, this);
   }
+
+  void insert_stmt_after(Stmt* s, Stmt* after) {
+    if (s->get_parent()) {
+      throw malformed_input("Block append Stmt with existing parent", s);
+    }
+
+    auto pos = std::find(stmts_.begin(), stmts_.end(), after);
+    if (pos == stmts_.end()) {
+      throw malformed_input(
+          "Inserting after statement that is not in block", s);
+    }
+
+    ++pos;
+
+    stmts_.insert(pos, s);
+    set_parent(s, this);
+  }
+
   bool replace_stmt(Stmt* old_stmt, Stmt* new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
@@ -144,8 +148,52 @@ class Block : public StmtNode<Block> {
     set_parent(new_stmt, this);
     return true;
   }
+
+  bool remove_stmt(Stmt* stmt) {
+    auto pos = std::find(stmts_.begin(), stmts_.end(), stmt);
+    if (pos == stmts_.end()) {
+      return false;
+    }
+
+    set_parent(stmt, nullptr);
+    stmts_.erase(pos);
+    return true;
+  }
+
+  // adds a new binding to the map, replace
+  bool add_var_binding(const Var* v, const Expr* e) {
+    auto it =
+        std::find_if(varBindings_.begin(), varBindings_.end(), [v](auto p) {
+          return p.first == v;
+        });
+    if (it != varBindings_.end()) {
+      throw malformed_input(
+          "Var binding in Block would shadow existing binding");
+      return false;
+    }
+
+    varBindings_.emplace_back(v, e);
+    return true;
+  }
+
+  bool remove_var_binding(const Var* v) {
+    auto it =
+        std::find_if(varBindings_.begin(), varBindings_.end(), [v](auto p) {
+          return p.first == v;
+        });
+    if (it != varBindings_.end()) {
+      varBindings_.erase(it);
+      return true;
+    }
+    return false;
+  }
+
   std::list<Stmt*> stmts() const {
     return stmts_;
+  }
+
+  VarMapping varBindings() const {
+    return varBindings_;
   }
 
   explicit Block(const std::vector<Stmt*>& stmts) {
@@ -160,7 +208,67 @@ class Block : public StmtNode<Block> {
     }
   }
 
+  typedef std::list<Stmt*>::iterator iterator;
+  typedef std::list<Stmt*>::const_iterator const_iterator;
+
+  iterator begin() {
+    return stmts_.begin();
+  }
+
+  const_iterator begin() const {
+    return stmts_.begin();
+  }
+
+  iterator end() {
+    return stmts_.end();
+  }
+
+  const_iterator end() const {
+    return stmts_.end();
+  }
+
+  Stmt* front() {
+    return stmts_.front();
+  }
+
+  const Stmt* front() const {
+    return stmts_.front();
+  }
+
+  Stmt* back() {
+    return stmts_.back();
+  }
+
+  const Stmt* back() const {
+    return stmts_.back();
+  }
+
+  void splice(Block::iterator it, Block* other) {
+    for (Stmt* s : *other) {
+      set_parent(s, this);
+    }
+
+    stmts_.splice(it, other->stmts_);
+  }
+
+  explicit Block(const VarMapping& vars, const std::vector<Stmt*>& stmts) {
+    for (auto& pair : vars) {
+      add_var_binding(pair.first, pair.second);
+    }
+
+    for (Stmt* s : stmts) {
+      if (s->get_parent()) {
+        throw malformed_input(
+            "Block creation has Stmt with existing parent", s);
+      }
+
+      stmts_.push_back(s);
+      set_parent(s, this);
+    }
+  }
+
  private:
+  VarMapping varBindings_;
   std::list<Stmt*> stmts_;
 };
 
@@ -226,7 +334,7 @@ class TORCH_API Store : public StmtNode<Store> {
 // Allocate a buffer of given shapes and dtypes and bind it with the given
 // buffer var. The life span is at most through the current program, until it is
 // explicitly freed. An unfreed memory is likely considered an error.
-class Allocate : public StmtNode<Allocate> {
+class TORCH_API Allocate : public StmtNode<Allocate> {
  public:
   static Allocate* make(
       const VarHandle& buffer_var,
@@ -265,7 +373,7 @@ class Allocate : public StmtNode<Allocate> {
 };
 
 // Free the specific buffer. It is an error.
-class Free : public StmtNode<Free> {
+class TORCH_API Free : public StmtNode<Free> {
  public:
   static Free* make(const VarHandle& buffer_var) {
     return new Free(buffer_var.node());
@@ -281,7 +389,7 @@ class Free : public StmtNode<Free> {
   const Var* buffer_var_;
 };
 
-class Cond : public StmtNode<Cond> {
+class TORCH_API Cond : public StmtNode<Cond> {
  public:
   static Cond* make(
       const ExprHandle& condition,
@@ -328,14 +436,14 @@ class Cond : public StmtNode<Cond> {
   Block* false_stmt_ = nullptr;
 };
 
-class LoopOptions {
+class TORCH_API LoopOptions {
  public:
   // GPU Block Index
   bool is_gpu_block_index() const {
     return gpu_block_index_ != -1;
   }
 
-  bool gpu_block_index() const {
+  int gpu_block_index() const {
     return gpu_block_index_;
   }
 
@@ -412,12 +520,16 @@ class LoopOptions {
     return oss.str();
   }
 
+  bool isDefault() const {
+    return gpu_block_index_ == -1 && gpu_thread_index_ == -1;
+  }
+
  private:
   int gpu_block_index_ = -1;
   int gpu_thread_index_ = -1;
 };
 
-class For : public StmtNode<For> {
+class TORCH_API For : public StmtNode<For> {
  public:
   const Var* var() const {
     return var_;
@@ -508,6 +620,10 @@ class For : public StmtNode<For> {
     loop_options_.set_gpu_thread_index(thread_index);
   }
 
+  For* cloneWithNewBody(Stmt* body) const {
+    return new For(var_, start_, stop_, body, loop_options_);
+  }
+
  private:
   const Var* var_;
   const Expr* start_;
@@ -515,6 +631,46 @@ class For : public StmtNode<For> {
   Block* body_;
   LoopOptions loop_options_;
 };
+
+// A backend specific IR Node that implements atomic-add.
+// This node could only shows up as an internal with GPU backends.
+// TODO: move to this an internal IR.
+// TODO: make IR nodes extensible.
+class AtomicAdd : public StmtNode<AtomicAdd> {
+ public:
+  AtomicAdd(
+      const Buf* buf,
+      const std::vector<const Expr*>& indices,
+      const Expr* value)
+      : buf_(buf), indices_(indices), value_(value) {}
+
+  const Var* base_handle() const {
+    return buf_->base_handle();
+  }
+
+  const Buf* buf() const {
+    return buf_;
+  }
+
+  const Expr* flat_index() const {
+    TORCH_CHECK(indices_.size() == 1, "Indices haven't been flattened.");
+    return indices_[0];
+  }
+
+  const Expr* value() const {
+    return value_;
+  }
+
+  const std::vector<const Expr*>& indices() const {
+    return indices_;
+  }
+
+ private:
+  const Buf* buf_;
+  std::vector<const Expr*> indices_;
+  const Expr* value_;
+};
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

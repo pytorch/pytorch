@@ -15,7 +15,7 @@ namespace impl {
 // Some keys are ALWAYS considered for inclusion by default, so they are
 // included in the set here.  (const appears to be sufficient for
 // always_included to get inlined, constexpr not necessary)
-const DispatchKeySet always_included{DispatchKey::VariableTensorId, DispatchKey::BackendSelect};
+const DispatchKeySet always_included{DispatchKey::Autograd, DispatchKey::BackendSelect};
 
 // Take a DispatchKeySet for a Tensor and determine what the actual dispatch
 // DispatchKey should be, taking into account TLS, and skipping backends which
@@ -31,7 +31,7 @@ static inline DispatchKey dispatchTypeId(
     // - If there is no operator registered for a backend whose fallback behavior
     //   is to fallthrough, we eliminate that backend from consideration (since
     //   we want to "fallthrough" to the next valid key.)
-    // - If a user invokes with callUnboxedWithoutDispatchKey, the mask lets us
+    // - If a user invokes with redispatch, the mask lets us
     //   zero out the key the user asked us to stop.
     //
     // These excluded backends are NOT tracked in the TLS, but must be applied
@@ -59,9 +59,6 @@ namespace detail {
     void operator()(const at::Tensor& x) {
       ts = ts | x.key_set();
     }
-    void operator()(const TensorOptions& x) {
-      ts = ts | x.key_set();
-    }
     void operator()(at::ArrayRef<at::Tensor> xs) {
       for (const auto& x : xs) {
         ts = ts | x.key_set();
@@ -70,6 +67,11 @@ namespace detail {
     void operator()(at::Generator gen) {
       if (gen.defined()) {
         ts = ts | gen.key_set();
+      }
+    }
+    void operator()(c10::optional<at::Generator> gen) {
+      if (gen.has_value() && gen->defined()) {
+        ts = ts | gen->key_set();
       }
     }
     template <typename T>
@@ -118,9 +120,6 @@ public:
   }
 
   DispatchKey getDispatchKeyBoxed(DispatchKeySet backendsWithoutFallthrough, const torch::jit::Stack* stack) const {
-    // TODO Unboxed dispatch supports TensorOptions (i.e. ScalarType/Device/Layout) arguments
-    //      but boxed doesn't yet. See https://github.com/pytorch/pytorch/issues/26428
-
     DispatchKeySet ks;
     dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
       const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);

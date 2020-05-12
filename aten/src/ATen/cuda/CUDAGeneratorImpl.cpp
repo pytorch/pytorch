@@ -76,7 +76,7 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
  */
 CUDAGeneratorImpl::CUDAGeneratorImpl(DeviceIndex device_index)
   : c10::GeneratorImpl{Device(DeviceType::CUDA, device_index),
-              DispatchKeySet(c10::DispatchKey::CUDATensorId)} { }
+              DispatchKeySet(c10::DispatchKey::CUDA)} { }
 
 /**
  * Sets the seed to be used by curandStatePhilox4_32_10

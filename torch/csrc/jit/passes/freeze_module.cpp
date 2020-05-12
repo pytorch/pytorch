@@ -80,11 +80,8 @@ class AttributePropagator {
     }
 
     for (auto& moduleName : names_) {
-      auto it = preservedAttrs_.find(attrModule._ivalue());
-      if (it != preservedAttrs_.end()) {
-        if (it->second.count(attrModule.attr(moduleName))) {
-          return false;
-        }
+      if (preservedAttrs_.count(attrModule.attr(moduleName))) {
+        return false;
       }
       attrModule = attrModule.attr(moduleName).toModule();
     }
@@ -95,15 +92,11 @@ class AttributePropagator {
       return it == preservedScalarAttrs_.end() || !it->second.count(name);
     }
 
-    auto it = preservedAttrs_.find(attrModule._ivalue());
-    if (it == preservedAttrs_.end()) {
-      return true;
-    }
-    if (it->second.count(attr)) {
+    if (preservedAttrs_.count(attr)) {
       return false;
     }
     if (!attr.type()->cast<ClassType>()) {
-      for (auto& ivalue : it->second) {
+      for (auto& ivalue : preservedAttrs_) {
         if (!ivalue.isObject() && ivalue.overlaps(attr)) {
           return false;
         }
@@ -115,11 +108,11 @@ class AttributePropagator {
   void insertMutableAttr(
       const std::string& name,
       const IValue& attr,
-      Module& attrModule) {
+      const ModulePtr& attrModule) {
     if (AliasDb::isMutableType(attr.type())) {
-      preservedAttrs_[attrModule._ivalue()].insert(attr);
+      preservedAttrs_.insert(attr);
     } else {
-      preservedScalarAttrs_[attrModule._ivalue()].insert(name);
+      preservedScalarAttrs_[attrModule].insert(name);
     }
   }
 
@@ -165,7 +158,8 @@ class AttributePropagator {
                 n->kind() == prim::GetAttr ? "attribute: " + name + " in %" +
                         n->output()->debugName() + " has inplace writer"
                                            : "attribute: " + name + " is set");
-            insertMutableAttr(name, attr, attrModule);
+            auto mptr = attrModule._ivalue();
+            insertMutableAttr(name, attr, mptr);
           }
         }
       }
@@ -187,28 +181,6 @@ class AttributePropagator {
     }
   }
 
-  // Prepraring for clean up phase. At this point, record all  subModules that
-  // contains mutable attributes.
-  void recordReferencedAttrs(std::shared_ptr<Graph>& graph) {
-    std::stack<Block*> blocks({graph->block()});
-    while (!blocks.empty()) {
-      Block* block = blocks.top();
-      blocks.pop();
-      for (auto n : block->nodes()) {
-        for (Block* subBlock : n->blocks()) {
-          blocks.push(subBlock);
-        }
-        if (n->kind() == prim::GetAttr) {
-          auto& name = n->s(attr::name);
-          if (module_.hasattr(name)) {
-            auto attr = module_.attr(name);
-            insertMutableAttr(name, attr, module_);
-          }
-        }
-      }
-    }
-  }
-
   IValue overrideGradient(IValue attr) {
     if (attr.isTensor()) {
       auto t = attr.toTensor();
@@ -218,10 +190,13 @@ class AttributePropagator {
         attr = IValue(t);
       }
     } else if (attr.isTuple()) {
-      std::vector<IValue>& elems = attr.toTuple()->elements();
+      auto tuple = std::move(attr).toTuple();
+      std::vector<IValue>& elems = tuple->elements();
       for (auto& elem : elems) {
         elem = overrideGradient(elem);
       }
+      attr = std::move(tuple);
+
     } else if (attr.isList()) {
       c10::List<IValue> elems = std::move(attr).toList();
       for (size_t i = 0; i < elems.size(); i++) {
@@ -316,53 +291,150 @@ class AttributePropagator {
     }
   }
 
-  // cleanupFrozenModule function cleans up the Frozen module. it performs the
+  bool moduleEscapes(Module& subModule, std::shared_ptr<Graph>& graph) {
+    for (auto& output : graph->outputs()) {
+      if (subModule.type()->isSubtypeOf(output->type())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // cleanupFrozenModule function cleans up the Frozen module. It performs the
   // following:
   // 1) Remove unused attributes.
   // 2) Remove unreferenced submodules
   // 3) Remove non public unreferenced methods.
-  // TODO: do #3 because there is no API to 'unsafely' remove methods.
   void cleanupFrozenModule(std::shared_ptr<Graph>& graph) {
-    std::vector<std::string> attrsToRemove;
-    auto type = module_.type();
-    size_t N = type->numAttributes();
     recordReferencedAttrs(graph);
-    auto it = preservedAttrs_.find(module_._ivalue());
-    auto it2 = preservedScalarAttrs_.find(module_._ivalue());
+    handleSharedClassType(module_, graph);
+    removeUnusedAttrs();
+  }
+
+  // Prepraring for clean up phase. At this point, record all  subModules that
+  // contains mutable attributes.
+  void recordReferencedAttrs(std::shared_ptr<Graph>& graph) {
+    std::stack<Block*> blocks({graph->block()});
+    std::set<ModulePtr> modules({module_._ivalue()});
+    while (!blocks.empty()) {
+      Block* block = blocks.top();
+      blocks.pop();
+      for (auto n : block->nodes()) {
+        for (Block* subBlock : n->blocks()) {
+          blocks.push(subBlock);
+        }
+        if (n->kind() == prim::GetAttr) {
+          auto& name = n->s(attr::name);
+          for (auto& mptr : modules) {
+            auto module = Module(mptr);
+            if (module.type() == n->inputs()[0]->type() &&
+                module.hasattr(name)) {
+              auto attr = module.attr(name);
+              insertMutableAttr(name, attr, mptr);
+              if (attr.isModule()) {
+                modules.insert(attr.toModule()._ivalue());
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // This function recursively iterates over submodules to identify
+  // for each class type the attribute slots that need to be preserved.
+  //
+  // Note 'attrsToKeep[type].insert(type->numAttributes())' means all
+  // attribute slots of 'type' and its methods are preserved. A submodule is
+  // preserved when it escapes (meaning it is returned).
+  void handleSharedClassType(Module& module, std::shared_ptr<Graph>& graph) {
+    auto type = module.type();
+    size_t N = type->numAttributes();
+    if (moduleEscapes(module, graph)) {
+      // Perserve all its attributes and methods.
+      attrsToKeep_[type].insert(N);
+      return;
+    }
+    auto it2 = preservedScalarAttrs_.find(module._ivalue());
+    SharedTypeSubModules_[type].insert(module._ivalue());
+    attrsToKeep_[type].insert({});
     for (size_t i = 0; i < N; ++i) {
       auto attrTy = type->getAttribute(i);
       auto name = type->getAttributeName(i);
-      auto attr = module_.attr(name);
-      bool immutable;
+      auto attr = module.attr(name);
+      bool isMutable;
       if (AliasDb::isMutableType(attrTy)) {
-        immutable = it == preservedAttrs_.end() || !it->second.count(attr);
+        isMutable = preservedAttrs_.count(attr);
       } else {
-        immutable =
-            it2 == preservedScalarAttrs_.end() || !it2->second.count(name);
+        isMutable =
+            it2 != preservedScalarAttrs_.end() && it2->second.count(name);
       }
-      if (immutable) {
-        attrsToRemove.push_back(name);
+      if (isMutable) {
+        attrsToKeep_[type].insert(i);
+        if (attr.isModule()) {
+          auto attrModule = attr.toModule();
+          handleSharedClassType(attrModule, graph);
+        }
       }
     }
-    for (auto& name : attrsToRemove) {
-      module_._ivalue()->unsafeRemoveAttr(name);
-      module_.type()->unsafeRemoveAttribute(name);
-    }
-    for (auto& fn : type->methods()) {
-      auto& name = fn->name();
-      if ("forward" == name)
+  }
+
+  // Remove unused attributes and methods for each sub module of the frozen
+  // module. This function iterates over the Calsstypes of its submodule
+  // attributes including its own type.
+  void removeUnusedAttrs() {
+    std::vector<std::string> attrsToRemove;
+    std::vector<Function*> funcsToRemove;
+    for (auto& it : attrsToKeep_) {
+      auto& type = it.first;
+      size_t N = type->numAttributes();
+      if (it.second.count(N)) {
         continue;
-      type->unsafeRemoveMethod(name);
-      module_._ivalue()->compilation_unit()->unsafeRemoveMethod(fn->qualname());
+      }
+      for (size_t i = 0; i < N; ++i) {
+        if (it.second.count(i) == 0) {
+          attrsToRemove.push_back(type->getAttributeName(i));
+        }
+      }
+      for (auto& fn : type->methods()) {
+        auto& name = fn->name();
+        if ("forward" == name && *type == *module_.type())
+          continue;
+        funcsToRemove.push_back(fn);
+      }
+
+      for (auto& name : attrsToRemove) {
+        for (auto& val : SharedTypeSubModules_[type]) {
+          auto mod = val.toModule();
+          mod._ivalue()->unsafeRemoveAttr(name);
+        }
+        type->unsafeRemoveAttribute(name);
+      }
+      for (auto fn : funcsToRemove) {
+        type->unsafeRemoveMethod(fn->name());
+        auto mod = SharedTypeSubModules_[type].begin()->toModule();
+        mod._ivalue()->compilation_unit()->unsafeRemoveMethod(fn->qualname());
+      }
+
+      attrsToRemove.clear();
+      funcsToRemove.clear();
     }
   }
 
   // Contains attributes that can't be folded or user directs to keep them.
-  std::unordered_map<ModulePtr, IValue::HashAliasedIValues> preservedAttrs_;
+  IValue::HashAliasedIValues preservedAttrs_;
   // Tracked immutable types (Scalars) by their attribute names not
   // IValues.
   std::unordered_map<ModulePtr, std::unordered_set<std::string>>
       preservedScalarAttrs_;
+
+  // Contains the attribute slots that need to be preserved for each ClassType.
+  std::unordered_map<ClassTypePtr, std::unordered_set<size_t>> attrsToKeep_;
+
+  // Contains the sub modules that share the same ClassType.
+  std::unordered_map<ClassTypePtr, IValue::HashAliasedIValues>
+      SharedTypeSubModules_;
 
   Module& module_;
 
@@ -385,10 +457,11 @@ Module freeze_module(const Module& module) {
 
   Method method = module.get_method("forward");
   // Check that module does not return itself.
-  for (auto& output : method.graph()->outputs())
+  for (auto& output : method.graph()->outputs()) {
     TORCH_CHECK(
         output->type() != module.type(),
         "attempted to freeze a module that return itself");
+  }
 
   auto moduleClone = module.clone();
   AttributePropagator attrPropagator(moduleClone);

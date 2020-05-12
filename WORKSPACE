@@ -79,7 +79,7 @@ new_local_repository(
 
 new_local_repository(
     name = "fbgemm",
-    build_file = "//third_party:fbgemm.BUILD",
+    build_file = "//third_party:fbgemm/BUILD.bazel",
     path = "third_party/fbgemm",
 )
 
@@ -103,7 +103,7 @@ new_local_repository(
 
 new_local_repository(
     name = "asmjit",
-    build_file = "//third_party:asmjit.BUILD",
+    build_file = "//third_party:fbgemm/third_party/asmjit.BUILD",
     path = "third_party/fbgemm/third_party/asmjit",
 )
 
@@ -111,6 +111,12 @@ new_local_repository(
     name = "sleef",
     build_file = "//third_party:sleef.BUILD",
     path = "third_party/sleef",
+)
+
+new_local_repository(
+    name = "fmt",
+    build_file = "//third_party:fmt.BUILD",
+    path = "third_party/fmt",
 )
 
 new_patched_local_repository(
@@ -121,6 +127,12 @@ new_patched_local_repository(
     patch_strip = 1,
     build_file = "//third_party:tbb.BUILD",
     path = "third_party/tbb",
+)
+
+new_local_repository(
+    name = "tensorpipe",
+    build_file = "//third_party:tensorpipe.BUILD",
+    path = "third_party/tensorpipe",
 )
 
 http_archive(

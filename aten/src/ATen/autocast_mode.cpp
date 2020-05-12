@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/autocast_mode.h>
 
@@ -13,11 +13,11 @@ namespace at {
 namespace autocast {
 
 bool is_enabled() {
-  return c10::impl::tls_is_dispatch_key_included(DispatchKey::AutocastTensorId);
+  return c10::impl::tls_is_dispatch_key_included(DispatchKey::Autocast);
 }
 
 void set_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_included(DispatchKey::AutocastTensorId, new_enabled);
+  c10::impl::tls_set_dispatch_key_included(DispatchKey::Autocast, new_enabled);
 }
 
 namespace {
@@ -230,7 +230,7 @@ template<CastPolicy policy, class Redispatch, Redispatch* F, class Ret, class Ar
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp16, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     return (*F)(cached_cast(at::kHalf, args)...);
   }
 };
@@ -239,7 +239,7 @@ struct WrapFunction_<CastPolicy::fp16, Redispatch, F, Ret, guts::typelist::typel
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     return (*F)(cached_cast(at::kFloat, args)...);
   }
 };
@@ -248,7 +248,7 @@ struct WrapFunction_<CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typel
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     if (firstarg_is_eligible(args...)) {
       return (*F)(set_opt_dtype(at::kFloat, args)...);
     } else {
@@ -263,7 +263,7 @@ struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::t
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     at::ScalarType out_type = type_from_firstarg(at::kFloat, args...);
     return (*F)(args..., out_type);
   }
@@ -273,7 +273,7 @@ struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::ty
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::promote, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     auto to_type = promote_type(at::kHalf, args...);
     return (*F)(cached_cast(to_type, args)...);
   }
@@ -331,9 +331,6 @@ recording can't sneak in ahead of autocast.  This mirrors Apex most closely.
 I think Option 2 is the right answer for all ops, not just convolutions.  Option 2 is what I implement here.
 *****************************************************************************************************************/
 
-auto register_fallthrough = c10::import()
-  .fallback(c10::DispatchKey::AutocastTensorId, c10::CppFunction::makeFallthrough());
-
 /********************************************************************************************************************
 Explicit registration for out-of-place ops
 
@@ -360,142 +357,144 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
 // Common cases where registration signature matches redispatch signature
 // (that's why SIGNATURE is repeated in the WrapFunction instantiation)
 #define KERNEL(FUNC, REGISTER_NAME, SIGNATURE, POLICY) \
-  .impl(REGISTER_NAME, DispatchKey::AutocastTensorId, \
-    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call)
+  m.impl(REGISTER_NAME, \
+    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call);
 
 #define KERNEL_UNBOXED_ONLY(FUNC, REGISTER_NAME, SIGNATURE, POLICY) \
-  .impl_UNBOXED(REGISTER_NAME, DispatchKey::AutocastTensorId, \
-    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call)
+  m.impl_UNBOXED(REGISTER_NAME, \
+    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call);
 
 // Less-common but still useful case: redispatching to a function with a new signature (e.g. appending a dtype)
 #define KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(REDISPATCH_FUNC, REGISTER_NAME, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, POLICY) \
-  .impl_UNBOXED(REGISTER_NAME, DispatchKey::AutocastTensorId, \
-    &WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, &REDISPATCH_FUNC>::type::call)
+  m.impl_UNBOXED(REGISTER_NAME, \
+    &WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, &REDISPATCH_FUNC>::type::call);
 
 /*****************************************
 Explicit registration for out-of-place ops
 *****************************************/
-auto register_out_of_place = c10::import()
-  // fp16
-  KERNEL_UNBOXED_ONLY(ADD_NS(_convolution), "aten::_convolution", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(_convolution_nogroup), "aten::_convolution_nogroup", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(conv1d), "aten::conv1d", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(conv2d), "aten::conv2d", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(conv3d), "aten::conv3d", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(conv_tbc), "aten::conv_tbc", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(conv_transpose1d), "aten::conv_transpose1d", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(conv_transpose2d), "aten::conv_transpose2d.input", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(conv_transpose3d), "aten::conv_transpose3d.input", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(convolution), "aten::convolution", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(cudnn_convolution), "aten::cudnn_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(cudnn_convolution_transpose), "aten::cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(cudnn_convolution), "aten::cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(cudnn_convolution_transpose), "aten::cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL(ADD_NS(prelu), "aten::prelu", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(addmm), "aten::addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
-  KERNEL(ADD_NS(addmv), "aten::addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
-  KERNEL(ADD_NS(addr), "aten::addr", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
-  KERNEL(ADD_NS(matmul), "aten::matmul", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(mm), "aten::mm", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(mv), "aten::mv", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(linear), "aten::linear", Tensor (const Tensor &, const Tensor &, const Tensor &), fp16)
-  KERNEL(ADD_NS(addbmm), "aten::addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
-  KERNEL(ADD_NS(baddbmm), "aten::baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
-  KERNEL(ADD_NS(bmm), "aten::bmm", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(chain_matmul), "aten::chain_matmul", Tensor (TensorList), fp16)
+TORCH_LIBRARY_IMPL(_, Autocast, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(aten, Autocast, m) {
+  KERNEL_UNBOXED_ONLY(ADD_NS(_convolution), "_convolution", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(_convolution_nogroup), "_convolution_nogroup", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(conv1d), "conv1d", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(conv2d), "conv2d", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(conv3d), "conv3d", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(conv_tbc), "conv_tbc", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(conv_transpose1d), "conv_transpose1d", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(conv_transpose2d), "conv_transpose2d.input", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(conv_transpose3d), "conv_transpose3d.input", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(convolution), "convolution", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cudnn_convolution), "cudnn_convolution.deprecated", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cudnn_convolution), "cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
+  KERNEL(ADD_NS(prelu), "prelu", Tensor (const Tensor &, const Tensor &), fp16)
+  KERNEL(ADD_NS(addmm), "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
+  KERNEL(ADD_NS(addmv), "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
+  KERNEL(ADD_NS(addr), "addr", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
+  KERNEL(ADD_NS(matmul), "matmul", Tensor (const Tensor &, const Tensor &), fp16)
+  KERNEL(ADD_NS(mm), "mm", Tensor (const Tensor &, const Tensor &), fp16)
+  KERNEL(ADD_NS(mv), "mv", Tensor (const Tensor &, const Tensor &), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(linear), "linear", Tensor (const Tensor &, const Tensor &, const Tensor &), fp16)
+  KERNEL(ADD_NS(addbmm), "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
+  KERNEL(ADD_NS(baddbmm), "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
+  KERNEL(ADD_NS(bmm), "bmm", Tensor (const Tensor &, const Tensor &), fp16)
+  KERNEL_UNBOXED_ONLY(ADD_NS(chain_matmul), "chain_matmul", Tensor (TensorList), fp16)
   // fp32
-  KERNEL(ADD_NS(acos), "aten::acos", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(asin), "aten::asin", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(cosh), "aten::cosh", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(erfinv), "aten::erfinv", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(exp), "aten::exp", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(expm1), "aten::expm1", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(log), "aten::log", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(log10), "aten::log10", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(log2), "aten::log2", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(log1p), "aten::log1p", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(reciprocal), "aten::reciprocal", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(rsqrt), "aten::rsqrt", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(sinh), "aten::sinh", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(tan), "aten::tan", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(pow), "aten::pow.Tensor_Scalar", Tensor (const Tensor &, Scalar), fp32)
-  KERNEL(ADD_NS(pow), "aten::pow.Tensor_Tensor", Tensor (const Tensor &, const Tensor &), fp32)
-  KERNEL(ADD_NS(pow), "aten::pow.Scalar", Tensor (Scalar, const Tensor &), fp32)
-  KERNEL(ADD_NS(softplus), "aten::softplus", Tensor (const Tensor &, Scalar, Scalar), fp32)
-  KERNEL(ADD_NS(gelu), "aten::gelu", Tensor (const Tensor &), fp32)
-  KERNEL_UNBOXED_ONLY(ADD_NS(layer_norm), "aten::layer_norm", Tensor (const Tensor &, IntArrayRef, const Tensor &, const Tensor &, double, bool), fp32)
+  KERNEL(ADD_NS(acos), "acos", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(asin), "asin", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(cosh), "cosh", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(erfinv), "erfinv", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(exp), "exp", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(expm1), "expm1", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(log), "log", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(log10), "log10", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(log2), "log2", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(log1p), "log1p", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(reciprocal), "reciprocal", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(rsqrt), "rsqrt", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(sinh), "sinh", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(tan), "tan", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(pow), "pow.Tensor_Scalar", Tensor (const Tensor &, Scalar), fp32)
+  KERNEL(ADD_NS(pow), "pow.Tensor_Tensor", Tensor (const Tensor &, const Tensor &), fp32)
+  KERNEL(ADD_NS(pow), "pow.Scalar", Tensor (Scalar, const Tensor &), fp32)
+  KERNEL(ADD_NS(softplus), "softplus", Tensor (const Tensor &, Scalar, Scalar), fp32)
+  KERNEL(ADD_NS(gelu), "gelu", Tensor (const Tensor &), fp32)
+  KERNEL_UNBOXED_ONLY(ADD_NS(layer_norm), "layer_norm", Tensor (const Tensor &, IntArrayRef, const Tensor &, const Tensor &, double, bool), fp32)
   // The macro doesn't like this one so I had to write it out manually.
-  .impl_UNBOXED("aten::native_layer_norm", DispatchKey::AutocastTensorId,
-                &WrapFunction<CastPolicy::fp32, std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), &ADD_NS(native_layer_norm)>::type::call)
-  KERNEL_UNBOXED_ONLY(ADD_NS(group_norm), "aten::group_norm", Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &, double, bool), fp32)
-  KERNEL_UNBOXED_ONLY(ADD_NS(frobenius_norm), "aten::frobenius_norm", Tensor (const Tensor &), fp32)
-  KERNEL_UNBOXED_ONLY(ADD_NS(frobenius_norm), "aten::frobenius_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
-  KERNEL_UNBOXED_ONLY(ADD_NS(nuclear_norm), "aten::nuclear_norm", Tensor (const Tensor &, bool), fp32)
-  KERNEL_UNBOXED_ONLY(ADD_NS(nuclear_norm), "aten::nuclear_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
-  KERNEL(ADD_NS(cosine_similarity), "aten::cosine_similarity", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
-  KERNEL(ADD_NS(poisson_nll_loss), "aten::poisson_nll_loss", Tensor (const Tensor &, const Tensor &, bool, bool, double, int64_t), fp32)
-  KERNEL(ADD_NS(cosine_embedding_loss), "aten::cosine_embedding_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
-  KERNEL_UNBOXED_ONLY(ADD_NS(nll_loss), "aten::nll_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t), fp32)
-  KERNEL_UNBOXED_ONLY(ADD_NS(nll_loss2d), "aten::nll_loss2d", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t), fp32)
-  KERNEL(ADD_NS(hinge_embedding_loss), "aten::hinge_embedding_loss", Tensor (const Tensor &, const Tensor &, double, int64_t), fp32)
-  KERNEL(ADD_NS(kl_div), "aten::kl_div", Tensor (const Tensor &, const Tensor &, int64_t, bool), fp32)
-  KERNEL(ADD_NS(l1_loss), "aten::l1_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(ADD_NS(smooth_l1_loss), "aten::smooth_l1_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(ADD_NS(mse_loss), "aten::mse_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(ADD_NS(margin_ranking_loss), "aten::margin_ranking_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
-  KERNEL(ADD_NS(multilabel_margin_loss), "aten::multilabel_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(ADD_NS(soft_margin_loss), "aten::soft_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(ADD_NS(triplet_margin_loss), "aten::triplet_margin_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, double, double, bool, int64_t), fp32)
-  KERNEL_UNBOXED_ONLY(ADD_NS(multi_margin_loss), "aten::multi_margin_loss", Tensor (const Tensor &, const Tensor &, Scalar, Scalar, const Tensor &, int64_t), fp32)
-  KERNEL_UNBOXED_ONLY(ADD_NS(binary_cross_entropy_with_logits), "aten::binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t), fp32)
-  KERNEL(ADD_NS(dist), "aten::dist", Tensor (const Tensor &, const Tensor &, Scalar), fp32)
-  KERNEL(ADD_NS(pdist), "aten::pdist", Tensor (const Tensor &, double), fp32)
-  KERNEL_UNBOXED_ONLY(ADD_NS(cdist), "aten::cdist", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
-  KERNEL(ADD_NS(renorm), "aten::renorm", Tensor (const Tensor &, Scalar, int64_t, Scalar), fp32)
+  m.impl_UNBOXED("native_layer_norm",
+                &WrapFunction<CastPolicy::fp32, std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), &ADD_NS(native_layer_norm)>::type::call);
+  KERNEL_UNBOXED_ONLY(ADD_NS(group_norm), "group_norm", Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &, double, bool), fp32)
+  KERNEL_UNBOXED_ONLY(ADD_NS(frobenius_norm), "frobenius_norm", Tensor (const Tensor &), fp32)
+  KERNEL_UNBOXED_ONLY(ADD_NS(frobenius_norm), "frobenius_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
+  KERNEL_UNBOXED_ONLY(ADD_NS(nuclear_norm), "nuclear_norm", Tensor (const Tensor &, bool), fp32)
+  KERNEL_UNBOXED_ONLY(ADD_NS(nuclear_norm), "nuclear_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
+  KERNEL(ADD_NS(cosine_similarity), "cosine_similarity", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
+  KERNEL(ADD_NS(poisson_nll_loss), "poisson_nll_loss", Tensor (const Tensor &, const Tensor &, bool, bool, double, int64_t), fp32)
+  KERNEL(ADD_NS(cosine_embedding_loss), "cosine_embedding_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
+  KERNEL_UNBOXED_ONLY(ADD_NS(nll_loss), "nll_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t), fp32)
+  KERNEL_UNBOXED_ONLY(ADD_NS(nll_loss2d), "nll_loss2d", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t), fp32)
+  KERNEL(ADD_NS(hinge_embedding_loss), "hinge_embedding_loss", Tensor (const Tensor &, const Tensor &, double, int64_t), fp32)
+  KERNEL(ADD_NS(kl_div), "kl_div", Tensor (const Tensor &, const Tensor &, int64_t, bool), fp32)
+  KERNEL(ADD_NS(l1_loss), "l1_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(ADD_NS(smooth_l1_loss), "smooth_l1_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(ADD_NS(mse_loss), "mse_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(ADD_NS(margin_ranking_loss), "margin_ranking_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
+  KERNEL(ADD_NS(multilabel_margin_loss), "multilabel_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(ADD_NS(soft_margin_loss), "soft_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(ADD_NS(triplet_margin_loss), "triplet_margin_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, double, double, bool, int64_t), fp32)
+  KERNEL_UNBOXED_ONLY(ADD_NS(multi_margin_loss), "multi_margin_loss", Tensor (const Tensor &, const Tensor &, Scalar, Scalar, const Tensor &, int64_t), fp32)
+  KERNEL_UNBOXED_ONLY(ADD_NS(binary_cross_entropy_with_logits), "binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(ADD_NS(dist), "dist", Tensor (const Tensor &, const Tensor &, Scalar), fp32)
+  KERNEL(ADD_NS(pdist), "pdist", Tensor (const Tensor &, double), fp32)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cdist), "cdist", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
+  KERNEL(ADD_NS(renorm), "renorm", Tensor (const Tensor &, Scalar, int64_t, Scalar), fp32)
   // fp32_set_opt_dtype
-  KERNEL_UNBOXED_ONLY(ADD_NS(prod), "aten::prod", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL_UNBOXED_ONLY(ADD_NS(prod), "aten::prod.dim_int", Tensor (const Tensor &, int64_t, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL_UNBOXED_ONLY(ADD_NS(prod), "aten::prod.dim_Dimname", Tensor (const Tensor &, Dimname, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL_UNBOXED_ONLY(ADD_NS(softmax), "aten::softmax.int", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL_UNBOXED_ONLY(ADD_NS(softmax), "aten::softmax.Dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL_UNBOXED_ONLY(ADD_NS(log_softmax), "aten::log_softmax.int", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL_UNBOXED_ONLY(ADD_NS(log_softmax), "aten::log_softmax.Dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL_UNBOXED_ONLY(ADD_NS(cumprod), "aten::cumprod", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL_UNBOXED_ONLY(ADD_NS(cumprod), "aten::cumprod.dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL_UNBOXED_ONLY(ADD_NS(cumsum), "aten::cumsum", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL_UNBOXED_ONLY(ADD_NS(cumsum), "aten::cumsum.dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(ADD_NS(prod), "prod", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(ADD_NS(prod), "prod.dim_int", Tensor (const Tensor &, int64_t, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(ADD_NS(prod), "prod.dim_Dimname", Tensor (const Tensor &, Dimname, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(ADD_NS(softmax), "softmax.int", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(ADD_NS(softmax), "softmax.Dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(ADD_NS(log_softmax), "log_softmax.int", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(ADD_NS(log_softmax), "log_softmax.Dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cumprod), "cumprod", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cumprod), "cumprod.dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cumsum), "cumsum", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cumsum), "cumsum.dimname", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
   // commenting these out because they accept an explicit (not-optional) dtype, and we shouldn't try to flip that even
   // when autocasting.
-  // KERNEL_UNBOXED_ONLY(ADD_NS(norm), "aten::norm.ScalarOpt_dtype", Tensor (const Tensor &, c10::optional<Scalar>, ScalarType), fp32_set_opt_dtype)
-  // KERNEL_UNBOXED_ONLY(ADD_NS(norm), "aten::norm.ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_set_opt_dtype)
-  // KERNEL_UNBOXED_ONLY(ADD_NS(norm), "aten::norm.names_ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_set_opt_dtype)
-  KERNEL_UNBOXED_ONLY(ADD_NS(sum), "aten::sum", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL_UNBOXED_ONLY(ADD_NS(sum), "aten::sum.dim_IntList", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL_UNBOXED_ONLY(ADD_NS(sum), "aten::sum.dim_DimnameList", Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  // KERNEL_UNBOXED_ONLY(ADD_NS(norm), "norm.ScalarOpt_dtype", Tensor (const Tensor &, c10::optional<Scalar>, ScalarType), fp32_set_opt_dtype)
+  // KERNEL_UNBOXED_ONLY(ADD_NS(norm), "norm.ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_set_opt_dtype)
+  // KERNEL_UNBOXED_ONLY(ADD_NS(norm), "norm.names_ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(ADD_NS(sum), "sum", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(ADD_NS(sum), "sum.dim_IntList", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(ADD_NS(sum), "sum.dim_DimnameList", Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
   // fp32_append_dtype
   // The fp32_append_dtype wrapper overrides implicit promotion behavior.
   // norm does not implicitly promote, but be aware when adding new ops to this policy.
-  KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "aten::norm.Scalar", Tensor (const Tensor &, Scalar), Tensor (const Tensor &, c10::optional<Scalar>, ScalarType), fp32_append_dtype)
-  KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "aten::norm.ScalarOpt_dim", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool), Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_append_dtype)
-  KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "aten::norm.names_ScalarOpt_dim", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool), Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_append_dtype)
+  KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "norm.Scalar", Tensor (const Tensor &, Scalar), Tensor (const Tensor &, c10::optional<Scalar>, ScalarType), fp32_append_dtype)
+  KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "norm.ScalarOpt_dim", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool), Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_append_dtype)
+  KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(ADD_NS(norm), "norm.names_ScalarOpt_dim", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool), Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_append_dtype)
   // promote
-  KERNEL(ADD_NS(addcdiv), "aten::addcdiv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote)
-  KERNEL(ADD_NS(addcmul), "aten::addcmul", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote)
-  KERNEL(ADD_NS(atan2), "aten::atan2", Tensor (const Tensor &, const Tensor &), promote)
-  KERNEL(ADD_NS(cross), "aten::cross", Tensor (const Tensor &, const Tensor &, c10::optional<int64_t>), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(bilinear), "aten::bilinear", Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(tensordot), "aten::tensordot", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(dot), "aten::dot", Tensor (const Tensor &, const Tensor &), promote)
-  KERNEL(ADD_NS(equal), "aten::equal", bool (const Tensor &, const Tensor &), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(cat), "aten::cat", Tensor (TensorList, int64_t), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(cat), "aten::cat.names", Tensor (TensorList, Dimname), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(_cat), "aten::_cat", Tensor (TensorList, int64_t), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(stack), "aten::stack", Tensor (TensorList, int64_t), promote)
-  ;
+  KERNEL(ADD_NS(addcdiv), "addcdiv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote)
+  KERNEL(ADD_NS(addcmul), "addcmul", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote)
+  KERNEL(ADD_NS(atan2), "atan2", Tensor (const Tensor &, const Tensor &), promote)
+  KERNEL(ADD_NS(cross), "cross", Tensor (const Tensor &, const Tensor &, c10::optional<int64_t>), promote)
+  KERNEL_UNBOXED_ONLY(ADD_NS(bilinear), "bilinear", Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &), promote)
+  KERNEL_UNBOXED_ONLY(ADD_NS(tensordot), "tensordot", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote)
+  KERNEL_UNBOXED_ONLY(ADD_NS(dot), "dot", Tensor (const Tensor &, const Tensor &), promote)
+  KERNEL(ADD_NS(equal), "equal", bool (const Tensor &, const Tensor &), promote)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cat), "cat", Tensor (TensorList, int64_t), promote)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cat), "cat.names", Tensor (TensorList, Dimname), promote)
+  KERNEL_UNBOXED_ONLY(ADD_NS(_cat), "_cat", Tensor (TensorList, int64_t), promote)
+  KERNEL_UNBOXED_ONLY(ADD_NS(stack), "stack", Tensor (TensorList, int64_t), promote)
 
-auto register_banned = torch::import()
-  .impl_UNBOXED("aten::binary_cross_entropy", DispatchKey::AutocastTensorId,
-                &at::autocast::binary_cross_entropy_banned);
+  m.impl_UNBOXED("binary_cross_entropy", &at::autocast::binary_cross_entropy_banned);
+}
+
 }
 #endif
 

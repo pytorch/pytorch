@@ -1,3 +1,5 @@
+#include <c10/macros/Macros.h>
+
 #include <ATen/core/op_registration/op_registration.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -92,12 +94,12 @@ void RegisterOperators::registerOp_(Options&& options) {
   OperatorName op_name = schema.operator_name();
 
   registrars_.emplace_back(
-    Dispatcher::singleton().registerDef(std::move(schema))
+    Dispatcher::singleton().registerDef(std::move(schema), "registered by RegisterOperators")
   );
 
   for (auto& kernel : options.kernels) {
     registrars_.emplace_back(
-      Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func), std::move(kernel.inferred_function_schema), "legacy kernel from RegisterOperators")
+      Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func), std::move(kernel.inferred_function_schema), "registered by RegisterOperators")
     );
   }
 }
@@ -107,75 +109,4 @@ RegisterOperators::~RegisterOperators() = default;
 RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
 RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
 
-
-CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema, std::string debug)
-  : func_(std::move(func))
-  , schema_(std::move(schema))
-  , debug_(std::move(debug))
-  {}
-
-Module::Module(std::string ns)
-  : ns_(std::move(ns))
-  {}
-
-Module::Module()
-  : ns_(c10::nullopt)
-  {}
-
-Module::Module(Module&&) = default;
-Module& Module::operator=(Module&&) = default;
-
-// TODO: Error if an operator is def'ed multiple times.  Right now we just
-// merge everything
-
-Module& Module::_def(FunctionSchema&& schema) & {
-  if (ns_.has_value()) schema.setNamespaceIfNotSet(ns_->c_str());
-  registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema)));
-  return *this;
-}
-
-Module& Module::_def(c10::either<OperatorName, FunctionSchema>&& name_or_schema, CppFunction&& f) & {
-  FunctionSchema schema = [&] {
-    if (name_or_schema.is_right()) {
-      return std::move(name_or_schema).right();
-    } else {
-      // it's a name; use the inferred schema
-      TORCH_CHECK(f.schema_, "Module::def(): schema was not specified, and we "
-          "couldn't infer schema either.  Please explicitly provide schema.");
-      OperatorName name = std::move(name_or_schema).left();
-      FunctionSchema s = f.schema_->cloneWithName(std::move(name.name), std::move(name.overload_name));
-      s.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
-      return s;
-    }
-  }();
-  if (ns_.has_value()) schema.setNamespaceIfNotSet(ns_->c_str());
-  // Retain the OperatorName for Impl call
-  OperatorName name = schema.operator_name();
-  registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema)));
-  registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, f.dispatch_key_, std::move(f.func_), std::move(f.schema_), std::move(f.debug_)));
-  return *this;
-}
-
-Module& Module::_impl(const char* name_str, CppFunction&& f) & {
-  auto name = torch::jit::parseName(name_str);
-  if (ns_.has_value()) name.setNamespaceIfNotSet(ns_->c_str());
-  registrars_.emplace_back(
-    Dispatcher::singleton().registerImpl(
-      std::move(name),
-      f.dispatch_key_,
-      std::move(f.func_),
-      std::move(f.schema_),
-      std::move(f.debug_)
-    )
-  );
-  return *this;
-}
-
-Module& Module::_fallback(CppFunction&& f) & {
-  TORCH_CHECK(!ns_, "Cannot define fallbacks from namespaces, use c10::import().fallback() instead");
-  TORCH_CHECK(f.dispatch_key_, "Fallback for catch all function not supported");
-  registrars_.emplace_back(Dispatcher::singleton().registerFallback(*f.dispatch_key_, std::move(f.func_)));
-  return *this;
-}
-
-}
+} // namespace c10

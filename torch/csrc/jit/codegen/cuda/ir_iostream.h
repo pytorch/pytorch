@@ -19,6 +19,7 @@ struct Expr;
 
 struct UnaryOp;
 struct BinaryOp;
+struct TernaryOp;
 
 struct ForLoop;
 struct IfThenElse;
@@ -34,7 +35,9 @@ struct Split;
 struct Merge;
 struct Reorder;
 
+struct Bool;
 struct Float;
+struct Half;
 struct Int;
 struct Add;
 
@@ -47,6 +50,7 @@ struct Add;
  */
 
 struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
+ public:
   std::ostream& os;
   bool print_inline_ = false;
 
@@ -65,7 +69,6 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
 
   void printHeader(Fusion* fusion, const std::string& kernel_name_);
 
- public:
   IRPrinter(std::ostream& _os) : os(_os) {}
 
   virtual void handle(Fusion* const f);
@@ -97,12 +100,15 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   virtual void handle(const TensorIndex* const);
   virtual void handle(const TensorContiguity* const);
 
+  virtual void handle(const Bool* const);
   virtual void handle(const Float* const);
+  virtual void handle(const Half* const);
   virtual void handle(const Int* const);
   virtual void handle(const NamedScalar* const);
 
   virtual void handle(const UnaryOp* const);
   virtual void handle(const BinaryOp* const);
+  virtual void handle(const TernaryOp* const);
 
   virtual void handle(const ForLoop* const);
   virtual void handle(const IfThenElse* const);

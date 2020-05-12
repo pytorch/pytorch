@@ -124,17 +124,16 @@ class TORCH_API Future final {
     if (completed_) {
       lock.unlock();
       cb();
+      return;
     }
     callbacks_.emplace_back(std::move(cb));
   }
 
-  // Remove this once we've migrated underlying use-cases.
-  void addCallback(const std::function<
-                   void(const T&, const c10::optional<torch::utils::FutureError>&)>& cb) {
-    addCallback([cb,this]() { cb(value_, error_); });
+  void addCallback(std::function<void(const Future<T>& future)> cb) {
+    addCallback([this, cb]() { cb(*this); });
   }
 
-  private:
+ private:
   void setErrorInternal(
       FutureError error,
       std::unique_lock<std::mutex>& lock) {

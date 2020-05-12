@@ -36,6 +36,8 @@ enum class ValType;
 struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   virtual ~IterVisitor() = default;
 
+  using OptOutDispatch::handle;
+
   IterVisitor() = default;
 
   IterVisitor(const IterVisitor& other) = default;
@@ -48,17 +50,17 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   // These functions will start at outputs and propagate op through the DAG
   // in depth first traversal. Next could be called on nodes multiple times,
   // however, once handle is called on a node next will not be called.
-  std::vector<Statement*> next(Statement* stmt);
-  std::vector<Statement*> next(Expr* expr);
-  std::vector<Statement*> next(Val* v);
+  virtual std::vector<Statement*> next(Statement* stmt);
+  virtual std::vector<Statement*> next(Expr* expr);
+  virtual std::vector<Statement*> next(Val* v);
 
-  void handle(Statement* s) {
+  virtual void handle(Statement* s) {
     OptOutDispatch::handle(s);
   }
-  void handle(Expr* e) {
+  virtual void handle(Expr* e) {
     OptOutDispatch::handle(e);
   }
-  void handle(Val* v) {
+  virtual void handle(Val* v) {
     OptOutDispatch::handle(v);
   }
 
@@ -94,10 +96,10 @@ struct TORCH_CUDA_API DependencyCheck : public IterVisitor {
 
   // when handle is called on val, we know 2 things. Val is a dependency of of.
   // and dep_chain contains the values in between of and dependency.
-  void handle(Val* val);
+  void handle(Val* val) override;
 
   // When we handle an expr we pop off its outputs from the dep_chain
-  void handle(Expr* expr);
+  void handle(Expr* expr) override;
 
   // When we visit an Expr we place its outputs on the dep_chain
   void toVisitCallback(Statement* stmt);

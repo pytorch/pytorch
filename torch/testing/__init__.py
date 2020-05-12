@@ -15,7 +15,7 @@ rand_like = torch.rand_like
 randn_like = torch.randn_like
 
 
-def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True):
+def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg=''):
     if not isinstance(actual, torch.Tensor):
         actual = torch.tensor(actual)
     if not isinstance(expected, torch.Tensor):
@@ -50,13 +50,14 @@ def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True):
 
     # Count number of offenders
     count = (~close).long().sum()
+    if msg == '' or msg is None:
+        msg = ('Not within tolerance rtol={} atol={} at input{} ({} vs. {}) and {}'
+               ' other locations ({:2.2f}%)')
+        msg = msg.format(
+            rtol, atol, list(index), actual[index].item(), expected[index].item(),
+            count - 1, 100 * count / actual.numel())
 
-    msg = ('Not within tolerance rtol={} atol={} at input{} ({} vs. {}) and {}'
-           ' other locations ({:2.2f}%)')
-
-    raise AssertionError(msg.format(
-        rtol, atol, list(index), actual[index].item(), expected[index].item(),
-        count - 1, 100. * count / actual.numel()))
+    raise AssertionError(msg)
 
 def make_non_contiguous(tensor):
     if tensor.numel() <= 1:  # can't make non-contiguous
@@ -89,12 +90,11 @@ def make_non_contiguous(tensor):
 
 def get_all_dtypes():
     return [torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float16, torch.float32, torch.float64, torch.bfloat16]
-
+            torch.float16, torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128]
 
 def get_all_math_dtypes(device):
     dtypes = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-              torch.float32, torch.float64]
+              torch.float32, torch.float64, torch.complex64, torch.complex128]
 
     # torch.float16 is a math dtype on cuda but not cpu.
     if device.startswith('cuda'):
