@@ -148,7 +148,10 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 
     ~PythonFunctionGuard() {
       pybind11::gil_scoped_acquire ag;
-      func_ = py::none();
+      func_.dec_ref();
+      // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
+      // decref on the PyObject again.
+      func_.ptr() = nullptr;
     }
 
     py::function func_;
