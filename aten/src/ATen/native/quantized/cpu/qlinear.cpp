@@ -267,7 +267,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     }
     // Original bias was float, so we requantize it here.
     auto qbias = at::quantize_per_tensor(
-        bias_fp32, weight_zp_data[0] * input_scale, 0, c10::kQInt32);
+        bias_fp32, weight_scales_data[0] * input_scale, 0, c10::kQInt32);
+
     // Update the input scale to not pack again.
     this->input_scale = input_scale;
     w.reset();
@@ -283,7 +284,6 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       // On mobile, we release the original weight by resetting the intrusive_ptr.
       // Calling unpack after this will throw an assertion.
       orig_weight.reset();
-      bias_.reset();
     }
   }
 
