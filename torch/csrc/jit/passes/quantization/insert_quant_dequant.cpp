@@ -120,7 +120,7 @@ void insertDeQuantForAllUse(
     Value* original_val) {
   // copy uses to vector since value->uses() is a reference
   // and changing the graph will also change the uses() list
-  const std::vector<Use>& uses = original_val->uses();
+  const std::vector<Use> uses = original_val->uses();
   for (size_t i = 0; i < uses.size(); ++i) {
     auto* user = uses[i].user;
     // Insert dequantize node right before use node, because
@@ -904,8 +904,7 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
   for (Node* n : dequant_nodes_to_rewrite) {
     auto* quantized_val = n->input(0);
     auto* dequantized_val = n->output();
-    dequantized_val->replaceAllUsesWith(quantized_val);
-    insertDeQuantForAllUse(graph.get(), quantized_val, quantized_val);
+    insertDeQuantForAllUse(graph.get(), quantized_val, dequantized_val);
   }
 
   for (Node* n : dequant_nodes_to_rewrite) {
