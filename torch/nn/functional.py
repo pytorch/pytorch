@@ -2997,8 +2997,8 @@ def _interp_output_size(closed_over_args):  # noqa: F811
                 break
 
         if is_float_scale_factor:
-            warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
-                          "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
+            warnings.warn("The default behavior for interpolate/upsample with float scale_factor changed "
+                          "in 1.6.0 to align with other frameworks/libraries, and uses scale_factor directly, "
                           "instead of relying on the computed output size. "
                           "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
                           "See the documentation of nn.Upsample for details. ")
@@ -3094,8 +3094,8 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         scale_factor is used to compute the output_size which will then
         be used to infer new scales for the interpolation. This is the current
         default behavior when recompute_scale_factor is not specified.
-        The default behavior for recompute_scale_factor will change to False
-        in 1.6.0, and scale_factor will be used in the interpolation
+        The default behavior for recompute_scale_factor changed to False
+        in 1.6.0, and scale_factor is be used in the interpolation
         calculation.
 
     Note:
@@ -3124,7 +3124,8 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
     scale_factor_len = input.dim() - 2
     scale_factor_list = torch.jit.annotate(List[Optional[float]], [None for _ in range(scale_factor_len)])
-    if scale_factor is not None and recompute_scale_factor is False:
+    # default value of recompute_scale_factor is False
+    if scale_factor is not None and (recompute_scale_factor is False or recompute_scale_factor is None):
         if isinstance(scale_factor, list):
             _scale_factor_repeated = scale_factor
         else:
