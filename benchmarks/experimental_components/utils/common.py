@@ -78,6 +78,7 @@ class Measurement:
 
     def _populate_warnings(self):
         warnings, rel_iqr = [], self._iqr / self._median * 100
+
         def add_warning(msg):
             warnings.append(
                 f"  WARNING: Interquartile range is {rel_iqr:.1f}% "

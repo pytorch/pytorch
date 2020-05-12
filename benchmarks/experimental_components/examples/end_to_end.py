@@ -183,6 +183,7 @@ def compare_times(master_results, branch_results):
 
     print(f"\nImprovement    Absolute  |{'':>7}dtype{'':>6}numel   ", end="")
     print(f"mask_reuse     mask_true_pct      x_layout    mask_layout\n{'=' * 114}")
+
     def print_block(result_filter):
         print_result_block(
             master_results + branch_results, result_filter,
@@ -214,6 +215,7 @@ def pretty_str(m):
     x_numel = tensor_parameters["x"]["numel"]
     mask_numel = tensor_parameters["mask"]["numel"]
     mask_reuse = int(x_numel / mask_numel)
+
     def order(name):
         return str("contiguous" if tensor_parameters[name]["is_contiguous"]
                    else tensor_parameters[name]["order"])
