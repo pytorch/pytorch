@@ -116,9 +116,17 @@ def register_quantized_ops(domain, version):
     module = importlib.import_module('torch.onnx.symbolic_caffe2')
     sym_registry._symbolic_versions['caffe2'] = module
 
+    upsample_nearest2d_impl = sym_registry.get_supported_op('upsample_nearest2d', '', version)
+    max_pool2d_impl = sym_registry.get_supported_op('max_pool2d', '', version)
+    avg_pool2d_impl = sym_registry.get_supported_op('avg_pool2d', '', version)
+    reshape_impl = sym_registry.get_supported_op('reshape', '', version)
+    slice_impl = sym_registry.get_supported_op('slice', '', version)
+    sigmoid_impl = sym_registry.get_supported_op('sigmoid', '', version)
+    relu_impl = sym_registry.get_supported_op('relu', '', version)
+    cat_impl = sym_registry.get_supported_op('cat', '', version)
+
     def upsample_nearest2d(g, input, output_size, align_corners=None, scales_h=None, scales_w=None):
         if input not in sym_help._quantized_ops:
-            upsample_nearest2d_impl = sym_registry.get_registered_op('upsample_nearest2d', '', version)
             return upsample_nearest2d_impl(g, input, output_size, align_corners)
 
         output_size = sym_help._parse_arg(output_size, 'is')
@@ -136,8 +144,7 @@ def register_quantized_ops(domain, version):
     @parse_args('v', 'is', 'is', 'is', 'is', 'i')
     def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if input not in sym_help._quantized_ops:
-            max_pool2d = sym_registry.get_registered_op('max_pool2d', '', version)
-            return max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode)
+            return max_pool2d_impl(g, input, kernel_size, stride, padding, dilation, ceil_mode)
         kwargs = {
             "strides_i": stride,
             "pads_i": padding + padding,
@@ -155,8 +162,7 @@ def register_quantized_ops(domain, version):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         if input not in sym_help._quantized_ops:
-            avg_pool2d = sym_registry.get_registered_op('avg_pool2d', '', version)
-            return avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
+            return avg_pool2d_impl(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
         kwargs = {
             "strides_i": stride,
             "pads_i": padding + padding,
@@ -173,8 +179,7 @@ def register_quantized_ops(domain, version):
 
     def reshape(g, input, shape):
         if input not in sym_help._quantized_ops:
-            reshape = sym_registry.get_registered_op('reshape', '', version)
-            return reshape(g, input, shape)
+            return reshape_impl(g, input, shape)
 
         kwargs = {
             "Y_scale_f": input.node()["Y_scale"],
@@ -187,8 +192,7 @@ def register_quantized_ops(domain, version):
     @parse_args('v', 'v', 'v', 'v', 'i')
     def slice(g, input, dim, start, end, step):
         if input not in sym_help._quantized_ops:
-            slice = sym_registry.get_registered_op('slice', '', version)
-            return slice(g, input, dim, start, end, step)
+            return slice_impl(g, input, dim, start, end, step)
 
         if step != 1:
             raise RuntimeError("ONNX quantized slice export only works for step 1.")
@@ -210,8 +214,7 @@ def register_quantized_ops(domain, version):
     @parse_args('v')
     def sigmoid(g, input):
         if input not in sym_help._quantized_ops:
-            sigmoid = sym_registry.get_registered_op('sigmoid', '', version)
-            return sigmoid(g, input)
+            return sigmoid_impl(g, input)
         # Caffe2 expects the output scale to be 1/2^8
         # and output zero_point to be 0 (quint8 type)
         out_scale = 1.0 / 256
@@ -227,8 +230,7 @@ def register_quantized_ops(domain, version):
     @parse_args('v')
     def relu(g, input):
         if input not in sym_help._quantized_ops:
-            relu = sym_registry.get_registered_op('relu', '', version)
-            return relu(g, input)
+            return relu_impl(g, input)
         kwargs = {
             "Y_scale_f": input.node()["Y_scale"],
             "Y_zero_point_i": input.node()["Y_zero_point"],
@@ -241,8 +243,7 @@ def register_quantized_ops(domain, version):
         tensors = sym_help._unpack_list(tensor_list)
         input = tensors[0]
         if input not in sym_help._quantized_ops:
-            cat = sym_registry.get_registered_op('cat', '', version)
-            return cat(g, tensor_list, dim)
+            return cat_impl(g, tensor_list, dim)
 
         dim = sym_help._parse_arg(dim, 'i')
         kwargs = {

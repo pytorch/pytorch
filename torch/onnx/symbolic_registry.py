@@ -110,3 +110,12 @@ def get_registered_op(opname, domain, version):
             msg += "Please open a bug to request ONNX export support for the missing operator."
         raise RuntimeError(msg)
     return _registry[(domain, version)][opname]
+
+def get_supported_op(opname, domain, version):
+    if domain is None or version is None:
+        warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
+    global _registry
+    supported_version = get_op_supported_version(opname, domain, version)
+    if not supported_version:
+        raise RuntimeError('{}-{} ({}) is not supported'.format(opname, version, domain or 'ai.onnx'))
+    return _registry[(domain, supported_version)][opname]
