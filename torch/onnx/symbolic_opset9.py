@@ -2158,7 +2158,8 @@ def index(g, self, index):
                           str(sym_help._export_onnx_opset_version) +
                           " is achieved by combination of multiple ONNX operators, " +
                           "including Reshape, Transpose, Concat, and Gather. " +
-                          "If indices include negative values, the exported graph will produce incorrect results.")
+                          "If indices include negative values, the exported graph will produce incorrect results. " +
+                          "Consider using opset 11 or higher as it natively supports GatherND.")
             rank = self.type().dim()
             adv_idx_count = len(adv_idx_indices)
             shape_tensor = _shape_as_tensor(g, self)

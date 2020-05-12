@@ -61,6 +61,64 @@ def select(g, self, dim, index):
     return g.op("Gather", self, index, axis_i=dim)
 
 
+def index(g, self, index):
+    # ONNX GatherND does not support ':' semantics. In TorchScript, this
+    # is represented by indices with value prim::Constant(). To work around
+    # this, we can transpose corresponding data tensors. 
+    # Consider the general case of:
+    #    t: [x_1, y_1, x_2, x_3, ..., x_m, ..., y_n]
+    # where t is a tensor of rank m+n, {x_i} are axes where the tensor index is provided,
+    # and {y_i} are axes where the value is ':', we can map onto GatherND by transposing
+    # such that t becomes:
+    #    t: [x_1, x_2, ..., x_m, y_1, y_2, ..., y_n]    
+    # By applying the same transpose to the input data and dropping all {y_i} axes from t,
+    # we can then invoke ONNX GatherND and get the proper results. Or at least we could if
+    # not for one more small twist. ONNX expects the dimensions of each index to match so
+    # that the indices can be represented as a tensor rather than a sequence. To account
+    # for this, we'll also broadcast each non ':' axis in t and stack them into a single
+    # tensor.
+
+    # First check if this is a fallback operator.
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, index, operator_s="index")
+
+    # Unpack indices.
+    if sym_help._is_packed_list(index):
+        indices = sym_help._unpack_list(index)
+    else:
+        indices = [index]
+
+    # Lets identify which indices (if any) are non-':'.
+    tensor_indices = [i for i, idx in enumerate(indices) if not sym_help._is_none(idx)]
+    if len(tensor_indices) == 0:
+        return self
+    # Transpose out any axes that represent ':'
+    rank = self.type().dim()
+    self = g.op("Transpose", self, perm_i=tensor_indices + [i for i in range(rank) if i not in tensor_indices])
+    # Next we broadcast tensor indices and drop all ':' axes.
+    # First lets pull out the shapes of the indices.
+    index_shapes = [numpy.asarray(sym_help._get_const(indices[i], 'is', 'indices')).shape for i in tensor_indices]
+    # Now we'll find the target shape to broadcast to, we do this by finding the maximum dimension along each
+    # axis for the index shapes.
+    max_rank = max([len(s) for s in index_shapes])
+    # Now find the maximum dimension for each axis
+    base_shape = numpy.ones(max_rank)
+    for i in range(len(base_shape)):
+        for shape in index_shapes:
+            if len(shape) >= i:
+                if base_shape[i] < shape[i]:
+                    base_shape[i] = shape[i]
+    # Add new axis to stack on.
+    base_shape = numpy.expand_dims(base_shape, axis=0)
+    base_shape = g.op("Constant", value_t=torch.LongTensor(base_shape))
+    # Broadcast indices and stack into new tensor.
+    indices = [g.op("Expand", indices[i], base_shape) for i in tensor_indices]
+    # Finally, stack indices into a single tensor
+    indices = g.op("Concat", *indices, axis_i=0)
+    # Now we're ready to gather!
+    return g.op("GatherND", self, indices)
+
+
 def index_put(g, self, indices_list_value, values, accumulate=False):
     indices_list = sym_help._unpack_list(indices_list_value)
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
