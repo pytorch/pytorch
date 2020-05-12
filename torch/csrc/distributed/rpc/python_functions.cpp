@@ -123,15 +123,16 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
           if (futureResponseMessage.hasError()) {
             jitFuture->setError(futureResponseMessage.error()->what());
           } else {
-            // Keep obj alive until jit::toIValue returns.
-            // See Note [jit::toIValue barrow py::object refcnt] at
-            // jit::toIValue function.
-            py::object obj = toPyObj(futureResponseMessage.constValue());
-            jitFuture->markCompleted(jit::toIValue(obj, PyObjectType::get()));
+            IValue value;
             {
               pybind11::gil_scoped_acquire ag;
-              obj = py::none();
+              value = jit::toIValue(
+                  toPyObj(futureResponseMessage.constValue()),
+                  PyObjectType::get())
             }
+            jitFuture->markCompleted(value);
+            // This IValue is a ConcretePyObjectHolder, and its destructor
+            // guards the decref of the py::object.
           }
         });
 

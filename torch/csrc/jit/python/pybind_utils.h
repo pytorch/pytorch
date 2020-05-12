@@ -148,7 +148,10 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 
     ~PythonFunctionGuard() {
       pybind11::gil_scoped_acquire ag;
-      func_ = py::none();
+      func_.dec_ref();
+      // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
+      // decref on the PyObject again.
+      func_.ptr() = nullptr;
     }
 
     py::function func_;
@@ -476,17 +479,6 @@ inline void guardAgainstNamedTensor(const T& var) {
       "workaround please drop names via `tensor = tensor.rename(None)`.");
 }
 
-// NB: When passing py::object as the first argument, the call site needs to
-// keep the py::objec alive until this function returns.
-//
-// Note [jit::toIValue barrow py::object refcnt]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~
-// This function takes a py::handle as the first argument. So if the call site
-// passes a py:object as the first argument, this will be copy by value and the
-// py::handle is only live as long as py::object is, and the py::handle is not
-// reference counted. Hence, the call site needs to keep py::object alive until
-// a new copy is created by jit::toIValue().
-// see https://github.com/pybind/pybind11/issues/1201
 inline IValue toIValue(
     py::handle obj,
     const TypePtr& type,

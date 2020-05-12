@@ -285,12 +285,9 @@ void RequestCallbackImpl::processRpc(
       try {
         {
           pybind11::gil_scoped_acquire ag;
-          // Keep obj alive until jit::toIValue returns.
-          // See Note [jit::toIValue barrow py::object refcnt] at jit::toIValue
-          // function.
-          py::object obj =
-              pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf());
-          py_ivalue = jit::toIValue(obj, PyObjectType::get());
+          py_ivalue = jit::toIValue(
+              pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
+              PyObjectType::get());
         }
         ownerRRef->setValue(std::move(py_ivalue));
       } catch (py::error_already_set& e) {
