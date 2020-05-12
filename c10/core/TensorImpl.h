@@ -1256,9 +1256,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     } else {
       bool had_special_dtor = data_type_.placementDelete() != nullptr;
       storage_offset_ = 0;
-      if (!storage_.unique() && (data_type_ != meta)) {
-        storage_ = Storage::create_legacy(storage_.device());
-      }
       data_type_ = meta;
       // NB: device is not changed
 
