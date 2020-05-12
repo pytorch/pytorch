@@ -97,7 +97,19 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def(
           "top",
           [](const c10::intrusive_ptr<MyStackClass<std::string>>& self)
-              -> std::string { return self->stack_.back(); });
+              -> std::string { return self->stack_.back(); })
+      .def("__str__", [](const c10::intrusive_ptr<MyStackClass<std::string>>& self) {
+        std::stringstream ss;
+        ss << "[";
+        for (size_t i = 0; i < self->stack_.size(); ++i) {
+          ss << self->stack_[i];
+          if (i != self->stack_.size() - 1) {
+            ss << ", ";
+          }
+        }
+        ss << "]";
+        return ss.str();
+      });
   // clang-format off
         // The following will fail with a static assert telling you you have to
         // take an intrusive_ptr<MyStackClass> as the first argument.

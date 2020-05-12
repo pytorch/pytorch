@@ -3205,32 +3205,40 @@ struct to_ir {
           return dim + 1;
         }
       }
-      Value* index;
-      if (subscript_expr.kind() == TK_LIST_LITERAL) {
-        // Accept list literal as subscript but convert it to a Tensor
-        // since it's equivalent to indexing with Tensor.
-        // Advanced indexing using list:
-        // @torch.jit.script
-        // def f(x):
-        //     return x[[0, 1, 5]]  # or
-        //     return x[[0, 1], [0, 1]]  # or
-        //     return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
-        // Statements above are equivalent to advanced indexing using Tensor:
-        // @torch.jit.script
-        // def f(x):
-        //     return x[torch.tensor([0, 1, 5])]  # or
-        //     return x[torch.tensor([0, 1]), torch.tensor([0, 1])]  # or
-        //     return x[torch.tensor([[0, 1], [0, 1]]), torch.tensor([[0, 1],
-        //     [0, 1]])]
-        auto ll = emitExpr(subscript_expr);
-        index = graph->insert(aten::tensor, {ll});
-      } else {
-        TypePtr type_hint = OptionalType::ofTensor();
-        if (subscript_expr.kind() == TK_NONE) {
-          type_hint = NoneType::get();
-        }
-        index = emitExpr(subscript_expr, type_hint);
+      TypePtr type_hint;
+      if (subscript_expr.kind() == TK_NONE) {
+        type_hint = NoneType::get();
       }
+      auto index = emitExpr(subscript_expr, type_hint);
+
+      // Accept list as subscript but convert it to a Tensor
+      // since it's equivalent to indexing with Tensor.
+      // The list can be a list literal or list variable.
+      // Advanced indexing using list:
+      // @torch.jit.script
+      // def f(x):
+      //   return x[[0, 1, 5]]  # or
+      //   return x[[0, 1], [0, 1]]  # or
+      //   return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]  # or
+      //   ls = [0, 1]
+      //   return x[ls]
+      // Statements above are equivalent to advanced indexing using Tensor:
+      // @torch.jit.script
+      // def f(x):
+      //   return x[torch.tensor([0, 1, 5])]  # or
+      //   return x[torch.tensor([0, 1]), torch.tensor([0, 1])]  # or
+      //   return x[torch.tensor([[0, 1], [0, 1]]),
+      //            torch.tensor([[0, 1], [0, 1]])]  # or
+      //   ls = [0, 1]
+      //   return x[torch.tensor(ls)]
+      if (index->type()->kind() == c10::TypeKind::ListType) {
+        // Always create index tensor as LongTensor.
+        // This is to match Pytorch eager frontend behavior which accepts
+        // indexing with float list.
+        index = graph->insert(
+            aten::tensor, {index}, {NamedValue("dtype", c10::kLong)});
+      }
+
       exprs[expr_idx] = index;
       if (index->type()->isSubtypeOf(NoneType::get())) {
         if (is_reverse) {
@@ -3255,7 +3263,7 @@ struct to_ir {
         throw ErrorReport(loc)
             << "Unsupported operation: indexing tensor with unsupported index type '"
             << index->type()->python_str()
-            << "'. Only ints, slices, and tensors are supported";
+            << "'. Only ints, slices, lists and tensors are supported";
       }
     };
 
