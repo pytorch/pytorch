@@ -1691,7 +1691,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # patterns
         # one quantize_per_tensor for input
         m2 = convert_script(m, debug=False)
-        print(m2.graph)
         FileCheck().check_count("aten::quantize_per_tensor(", 1, exactly=True) \
                    .run(m2.graph)
         FileCheck().check_count("quantized::conv2d(", 2, exactly=True) \
