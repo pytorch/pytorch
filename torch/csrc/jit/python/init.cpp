@@ -828,6 +828,10 @@ void initJITBindings(PyObject* module) {
       .def(
           "wait",
           &PythonFutureWrapper::wait,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_then",
+          &PythonFutureWrapper::then,
           py::call_guard<py::gil_scoped_release>());
 
   m.def("fork", [](py::args args) {
