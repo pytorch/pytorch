@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import os
 import sys
 import tempfile
 import time
@@ -8,7 +9,7 @@ import logging
 import traceback
 import types
 
-from collections import namedtuple
+from typing import NamedTuple
 from functools import wraps
 
 import torch
@@ -17,15 +18,44 @@ import torch.distributed as c10d
 from functools import partial, reduce
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 
-TestSkip = namedtuple('TestSkip', 'exit_code, message')
+class TestSkip(NamedTuple):
+    exit_code: int
+    message: str
 
 
 TEST_SKIPS = {
+    "backend_unavailable": TestSkip(72, "Skipped because distributed backend is not available."),
+    "small_worldsize": TestSkip(73, "Skipped due to small world size."),
+    "no_cuda": TestSkip(74, "CUDA is not available."),
     "multi-gpu": TestSkip(75, "Need at least 2 CUDA devices"),
     "nccl": TestSkip(76, "c10d not compiled with NCCL support"),
     "known_issues": TestSkip(77, "Test skipped due to known issues"),
     "skipIfRocm": TestSkip(78, "Test skipped for ROCm")
 }
+
+def skip_if_no_gpu(func):
+    """ Nccl multigpu tests require at least 2 GPUS. Skip if this is not met"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not torch.cuda.is_available():
+            sys.exit(TEST_SKIPS["no_cuda"].exit_code)
+        if torch.cuda.device_count() < int(os.environ["WORLD_SIZE"]):
+            sys.exit(TEST_SKIPS["multi-gpu"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def skip_if_small_worldsize(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) <= 2:
+            sys.exit(TEST_SKIPS["small_worldsize"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
 
 
 def skip_if_not_multigpu(func):
