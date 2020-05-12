@@ -47,6 +47,8 @@ class TORCH_API Future final {
     return value_;
   }
 
+  // These constValue/moveValue accessors should only be used if
+  // we know that the future is completed() with no error.
   const T& constValue() const {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed_);
