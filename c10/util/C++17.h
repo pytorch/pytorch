@@ -244,10 +244,12 @@ struct _if_constexpr<false> final {
  *   }
  *
  * Example 3: branch based on type (i.e. replacement for SFINAE)
+ *   struct MyClass1 {int value;};
+ *   struct MyClass2 {int val};
  *   template <class T>
  *   int func(T t) {
  *     return if_constexpr<std::is_same<T, MyClass1>::value>(
- *       [&](auto _) { return _(t).value; }, // this code is invalid for T == MyClass2
+ *       [&](auto _) { return _(t).value; }, // this code is invalid for T == MyClass2, so a regular non-constexpr if statement wouldn't compile
  *       [&](auto _) { return _(t).val; }    // this code is invalid for T == MyClass1
  *     );
  *   }
@@ -257,33 +259,51 @@ struct _if_constexpr<false> final {
  *       doesn't know what kind of _ is passed in. Without it, the compiler would fail
  *       when you try to access t.value but the member doesn't exist.
  *
- * Note: A reference implementation of if_constexpr in C++17 would look like this:
- *   template<bool Condition, class ThenCallback, class ElseCallback>
- *   decltype(auto) if_constexpr(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
- *     if constexpr(Condition) {
- *       if constexpr (function_takes_identity_argument<ThenCallback>::value) {
- *         return std::forward<ThenCallback>(thenCallback)(_identity());
- *       } else {
- *         return std::forward<ThenCallback>(thenCallback)();
- *       }
- *     } else {
- *       if constexpr (function_takes_identity_argument<ElseCallback>::value) {
- *         return std::forward<ElseCallback>(elseCallback)(_identity());
- *       } else {
- *         return std::forward<ElseCallback>(elseCallback)();
- *       }
- *     }
- *   }
+ * Note: In Example 3, both branches return int, so func() returns int. This is not necessary.
+ *       If func() had a return type of "auto", then both branches could return different
+ *       types, say func<MyClass1>() could return int and func<MyClass2>() could return string.
  */
 template<bool Condition, class ThenCallback, class ElseCallback>
 decltype(auto) if_constexpr(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
+#if defined(__cpp_if_constexpr)
+  // If we have C++17, just use it's "if constexpr" feature instead of wrapping it.
+  // This will give us better error messages.
+  if constexpr(Condition) {
+    if constexpr (detail::function_takes_identity_argument<ThenCallback>::value) {
+      return std::forward<ThenCallback>(thenCallback)(detail::_identity());
+    } else {
+      return std::forward<ThenCallback>(thenCallback)();
+    }
+  } else {
+    if constexpr (detail::function_takes_identity_argument<ElseCallback>::value) {
+      return std::forward<ElseCallback>(elseCallback)(detail::_identity());
+    } else {
+      return std::forward<ElseCallback>(elseCallback)();
+    }
+  }
+#else
+  // C++14 implementation of if constexpr
   return detail::_if_constexpr<Condition>::call(std::forward<ThenCallback>(thenCallback),
                                                  std::forward<ElseCallback>(elseCallback));
+#endif
 }
 
 template<bool Condition, class ThenCallback>
 decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
+#if defined(__cpp_if_constexpr)
+  // If we have C++17, just use it's "if constexpr" feature instead of wrapping it.
+  // This will give us better error messages.
+  if constexpr(Condition) {
+    if constexpr (detail::function_takes_identity_argument<ThenCallback>::value) {
+      return std::forward<ThenCallback>(thenCallback)(detail::_identity());
+    } else {
+      return std::forward<ThenCallback>(thenCallback)();
+    }
+  }
+#else
+  // C++14 implementation of if constexpr
   return if_constexpr<Condition>(std::forward<ThenCallback>(thenCallback), [] (auto) {});
+#endif
 }
 
 
