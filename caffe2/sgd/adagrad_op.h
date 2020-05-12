@@ -83,9 +83,9 @@ class AdagradOp final : public Operator<Context> {
         decay_(this->template GetSingleArgument<float>("decay", 1.0f)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG(INFO) << "gradient optimization operator in use: "
-              << "AdagradOp"
-              << " weight_decay_=" << weight_decay_;
+    LOG_FIRST_N(INFO, 1) << "gradient optimization operator in use: "
+                         << "AdagradOp"
+                         << " weight_decay_=" << weight_decay_;
   }
 
   bool RunOnDevice() override {
@@ -173,9 +173,9 @@ class SparseAdagradOp final : public Operator<CPUContext> {
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG(INFO) << "gradient optimization operator in use: "
-              << "SparseAdagradOp"
-              << " weight_decay_=" << weight_decay_;
+    LOG_FIRST_N(INFO, 1) << "gradient optimization operator in use: "
+                         << "SparseAdagradOp"
+                         << " weight_decay_=" << weight_decay_;
     const float decay = this->template GetSingleArgument<float>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
@@ -361,9 +361,9 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG(INFO) << "gradient optimization operator in use: "
-              << "RowWiseSparseAdagradOp"
-              << " weight_decay_=" << weight_decay_;
+    LOG_FIRST_N(INFO, 1) << "gradient optimization operator in use: "
+                         << "RowWiseSparseAdagradOp"
+                         << " weight_decay_=" << weight_decay_;
   }
 
   bool RunOnDevice() override {

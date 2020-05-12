@@ -38,7 +38,7 @@ class IterOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (InputSize() == 0) {
-      LOG(INFO) << "[Input size is zero]";
+      LOG_FIRST_N(INFO, 1) << "[Input size is zero]";
       if (!OperatorBase::OutputIsTensorType(0, CPU)) {
         // This is the first run; set the iter to start with 0.
         LOG(ERROR) << "You are using an old definition of IterOp that will "
