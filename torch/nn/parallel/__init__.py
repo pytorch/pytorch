@@ -12,7 +12,7 @@ __all__ = ['replicate', 'scatter', 'parallel_apply', 'gather', 'data_parallel',
            'DataParallel']
 
 if dist.is_available():
-    __all__ += ['DistributedDataParallel']
+    __all__ = __all__ + ['DistributedDataParallel']
 
 def DistributedDataParallelCPU(*args, **kwargs):
     import warnings
