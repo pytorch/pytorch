@@ -335,6 +335,30 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     callbacks_.emplace_back(std::move(callback));
   }
 
+  /**
+   * Add a callback to the future, and return another Future to hold the return
+   * value of the callback. This is necessary when the callback provider needs
+   * to know for sure when the callback has finished.
+   */
+  c10::intrusive_ptr<Future> then(
+      std::function<IValue(void)> callback,
+      TypePtr type) {
+    auto fut = c10::make_intrusive<Future>(type);
+    // Cannot move capture std::function in lambda, because it cannot deduce
+    // the template type for std::function. Hence use std::bind to explicitly
+    // specify types.
+    addCallback(std::bind(
+        [fut](std::function<IValue(void)> cb) {
+          try {
+            fut->markCompleted(cb());
+          } catch (std::exception& e) {
+            fut->setError(e.what());
+          }
+        },
+        std::move(callback)));
+    return fut;
+  }
+
   // Check if the current future has completed
   bool completed() const{
     return completed_;

@@ -48,6 +48,7 @@ class C10_API ProfiledCPUMemoryReporter {
  private:
   std::mutex mutex_;
   std::unordered_map<void*, size_t> size_table_;
+  size_t allocated_ = 0;
 };
 
 C10_API ProfiledCPUMemoryReporter& profiledCPUMemoryReporter();
