@@ -197,7 +197,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
       ScalarType item_scalarType = infer_scalar_type(cur_item);
       scalarType = (scalarType) ?
           at::promoteTypes(*scalarType, item_scalarType) : item_scalarType;
-      if (scalarType == ScalarType::Double) {
+      if (scalarType == ScalarType::ComplexDouble) {
         // this won't change (unless we hit undefined, but that will fail later).
         return *scalarType;
       }
