@@ -10168,8 +10168,7 @@ class TestTorchDeviceType(TestCase):
     def test_uniform_from_to(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            # Crashes with CUDA error: unspecified launch failure
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -15891,7 +15890,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_random_full_range(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -15899,14 +15898,22 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         int64_min_val = torch.iinfo(torch.int64).min
         int64_max_val = torch.iinfo(torch.int64).max
 
+        if dtype == torch.double:
+            fp_limit = 2**53
+        elif dtype == torch.float:
+            fp_limit = 2**24
+        elif dtype == torch.half:
+            fp_limit = 2**11
+        elif dtype == torch.bfloat16:
+            fp_limit = 2**8
+        else:
+            fp_limit = 0
+
         t = torch.empty(size, dtype=dtype, device=device)
 
-        if dtype in [torch.float, torch.double, torch.half]:
-            from_ = int(max(torch.finfo(dtype).min, int64_min_val))
-            to_inc_ = int(min(torch.finfo(dtype).max, int64_max_val))
-        elif dtype == torch.bfloat16:
-            from_ = int(max(-3.389531389251535e+38, int64_min_val))
-            to_inc_ = int(min(3.389531389251535e+38, int64_max_val))
+        if dtype in [torch.float, torch.double, torch.half, torch.bfloat16]:
+            from_ = int(max(-fp_limit, int64_min_val))
+            to_inc_ = int(min(fp_limit, int64_max_val))
         else:
             from_ = int(max(torch.iinfo(dtype).min, int64_min_val))
             to_inc_ = int(min(torch.iinfo(dtype).max, int64_max_val))
@@ -15924,7 +15931,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_random_from_to(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -16020,7 +16027,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_random_to(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -16085,7 +16092,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_random_default(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
