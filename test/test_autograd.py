@@ -4186,10 +4186,10 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
 # white list for complex
-complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as',
-                'zero_', 'clone', 'tril', 'triu', 'fill_', 'eq_', 'ne_',
-                'permute', 'squeeze', 'unsqueeze', 'chunk', 'split',
-                'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos']
+complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
+                'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
+                'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
+                '__rmul__', '__rdiv__']
 
 def add_test(
         name,

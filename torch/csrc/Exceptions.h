@@ -265,6 +265,14 @@ struct ValueError : public PyTorchError {
   }
 };
 
+// Translates to Python NotImplementedError
+struct NotImplementedError : public PyTorchError {
+  NotImplementedError() {}
+  PyObject* python_type() override {
+    return PyExc_NotImplementedError;
+  }
+};
+
 struct WarningMeta {
   WarningMeta(const c10::SourceLocation& _source_location,
       const std::string& _msg,

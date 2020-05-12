@@ -59,4 +59,5 @@ setup(
     name='torch_test_cpp_extension',
     packages=['torch_test_cpp_extension'],
     ext_modules=ext_modules,
+    include_dirs = 'self_compiler_include_dirs_test',
     cmdclass={'build_ext': BuildExtension.with_options(use_ninja=USE_NINJA)})
