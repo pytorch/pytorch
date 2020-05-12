@@ -116,7 +116,7 @@ void insertDeQuantForAllUse(
     Value* original_val) {
   // copy uses to vector since value->uses() is a reference
   // and changing the graph will also change the uses() list
-  const std::vector<Use>& uses = original_val->uses();
+  const std::vector<Use> uses = original_val->uses();
   for (size_t i = 0; i < uses.size(); ++i) {
     auto* user = uses[i].user;
     // Insert dequantize node right before use node, because
@@ -627,7 +627,7 @@ void propagateQParams(
   std::vector<Value*> quant_inputs;
   auto quant_kind = Symbol::aten("quantize_per_tensor");
   if (qparams_opt.has_value()) {
-    quant_inputs = {quantized_input};
+    quant_inputs = {original_output};
     auto qscheme = std::get<0>(*qparams_opt);
     auto qparams = std::get<1>(*qparams_opt);
     if (isPerChannel(qscheme)) {
@@ -655,7 +655,10 @@ void propagateQParams(
         "q_zero_point");
     Node* dtype = insertQParam(
         graph, quantized_input, prim::dtype, IntType::get(), "dtype");
-    quant_inputs = {original_output, scale->output(), zero_point->output(), dtype->output()};
+    quant_inputs = {original_output,
+                    scale->output(),
+                    zero_point->output(),
+                    dtype->output()};
   }
   Node* quant = insertQuant(
       graph, quant_inputs, quant_kind, original_output->debugName() + ".quant");
@@ -919,8 +922,7 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
   for (Node* n : dequant_nodes_to_rewrite) {
     auto* quantized_val = n->input(0);
     auto* dequantized_val = n->output();
-    dequantized_val->replaceAllUsesWith(quantized_val);
-    insertDeQuantForAllUse(graph.get(), quantized_val, quantized_val);
+    insertDeQuantForAllUse(graph.get(), quantized_val, dequantized_val);
   }
 
   for (Node* n : dequant_nodes_to_rewrite) {

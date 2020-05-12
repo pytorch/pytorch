@@ -39,7 +39,8 @@ TORCH_API bool isSingleInputGeneralCallFunction(Node* n);
 
 TORCH_API bool isSingleInputGeneralAtenFunction(Node* n);
 
-TORCH_API c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n);
+TORCH_API c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(
+    Node* n);
 
 // We don't want to analyze the graph for some `builtin` CallFunctions
 // like `linear` because we want to preserve the op boundary

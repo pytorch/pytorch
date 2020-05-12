@@ -1541,6 +1541,27 @@ inverse() -> Tensor
 See :func:`torch.inverse`
 """)
 
+add_docstr_all('isnan',
+               r"""
+isnan() -> Tensor
+
+See :func:`torch.isnan`
+""")
+
+add_docstr_all('isinf',
+               r"""
+isinf() -> Tensor
+
+See :func:`torch.isinf`
+""")
+
+add_docstr_all('isfinite',
+               r"""
+isfinite() -> Tensor
+
+See :func:`torch.isfinite`
+""")
+
 add_docstr_all('isclose',
                r"""
 isclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor

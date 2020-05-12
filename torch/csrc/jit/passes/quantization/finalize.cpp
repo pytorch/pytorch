@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/passes/quantization/finalize.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/quantization/quantization_patterns.h>
@@ -113,7 +112,6 @@ void FoldQuantizedPrepackingOps(Module& module) {
 Module Finalize(Module& module, bool is_dynamic) {
   auto graph = module.get_method("forward").graph();
   InsertPrepackUnpack(graph);
-  ConstantPropagation(graph);
   QuantFusion(graph, is_dynamic);
   auto frozen = freeze_module(module);
   FoldQuantizedPrepackingOps(frozen);

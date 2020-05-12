@@ -60,11 +60,7 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "_max_pool3d",
     "dropout",
     "relu",
-    "relu_",
-    "sigmoid",
-    "tanh",
     "hardsigmoid",
-    "hardsigmoid_",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
@@ -73,14 +69,24 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
 // operation only depends on the shape of the Tensor
 // e.g. `aten::flatten(%input_tensor, ...)`
 std::vector<std::string> _single_input_general_shape_aten_funcs = {
-    "max_pool1d", "max_pool2d",  "max_pool3d",
-    "flatten",    "max",         "min",
-    "dropout",    "reshape",
-    "resize_", // Non-inplace resize is deprecated
-    "chunk",      "view",        "transpose",
-    "contiguous", "permute",     "repeat_interleave",
-    "relu",       "relu_",       "sigmoid",
-    "tanh",
+    "max_pool1d",
+    "max_pool2d",
+    "max_pool3d",
+    "flatten",
+    "max",
+    "min",
+    "dropout",
+    "reshape",
+    // Non-inplace resize is deprecated
+    "resize_",
+    "chunk",
+    "view",
+    "transpose",
+    "contiguous",
+    "permute",
+    "repeat_interleave",
+    "relu",
+    "relu_",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
@@ -133,20 +139,30 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     "leaky_relu_",
 };
 
+std::tuple<c10::QScheme, QParamVector> _per_tensor_asym_qparam =
+    std::make_tuple(
+        c10::kPerTensorAffine,
+        QParamVector({std::make_pair(".scale", IValue(1.0f / 256.0f)),
+                      std::make_pair(".zero_point", IValue(0)),
+                      std::make_pair(".scalar_type", IValue(c10::kQUInt8))}));
+
+std::tuple<c10::QScheme, QParamVector> _per_tensor_sym_qparam = std::make_tuple(
+    c10::kPerTensorAffine,
+    QParamVector({std::make_pair(".scale", IValue(2.0f / 256.0f)),
+                  std::make_pair(".zero_point", IValue(128)),
+                  std::make_pair(".scalar_type", IValue(c10::kQUInt8))}));
+
 // Map from aten op symbol to the quantization parameters
 // for the ops with fixed quantization parameters
 std::unordered_map<NodeKind, std::tuple<c10::QScheme, QParamVector>>
-_fixed_qparams_map =
-        {
-            {
-              Symbol::aten("hardsigmoid"),
-              std::make_tuple(
-                  c10::kPerTensorAffine,
-                  QParamVector({std::make_pair(".scale", IValue(1.0f / 256.0f)),
-                                std::make_pair(".zero_point", IValue(0)),
-                                std::make_pair(".scalar_type", IValue(c10::kQUInt8))}))
-            }
-        };
+    _fixed_qparams_map = {
+        {Symbol::aten("hardsigmoid"), _per_tensor_asym_qparam},
+        {Symbol::aten("hardsigmoid_"), _per_tensor_asym_qparam},
+        {Symbol::aten("sigmoid"), _per_tensor_asym_qparam},
+        {Symbol::aten("sigmoid_"), _per_tensor_asym_qparam},
+        {Symbol::aten("tanh"), _per_tensor_sym_qparam},
+        {Symbol::aten("tanh_"), _per_tensor_sym_qparam},
+};
 
 // Special checks for ops that do not require observers for all input tensors.
 // For each operator in this list observers are inserted for the input based
@@ -260,8 +276,7 @@ std::vector<NodeKind> toAtenSymbol(const std::vector<std::string>& func_names) {
 }
 
 bool isAtenFunc(Node* n, const std::vector<NodeKind>& aten_funcs) {
-  return std::find(
-             aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
+  return std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
       aten_funcs.end();
 }
 
@@ -311,11 +326,11 @@ bool isSingleInputGeneralAtenFunction(Node* n) {
       _fixed_qparams_map.begin(),
       _fixed_qparams_map.end(),
       std::back_inserter(fixed_qparams_aten_funcs),
-      [](auto pair){return pair.first;});
+      [](auto pair) { return pair.first; });
 
   return isAtenFunc(n, _single_input_general_shape_aten_funcs) ||
-    isAtenFunc(n, _single_input_general_shape_aten_funcs) ||
-    isAtenFunc(n, fixed_qparams_aten_funcs);
+      isAtenFunc(n, _single_input_general_value_aten_funcs) ||
+      isAtenFunc(n, fixed_qparams_aten_funcs);
 }
 
 c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
@@ -324,7 +339,7 @@ c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
       _fixed_qparams_map.begin(),
       _fixed_qparams_map.end(),
       std::back_inserter(fixed_qparam_funcs),
-      [](const auto& pair){return pair.first;});
+      [](const auto& pair) { return pair.first; });
   if (isAtenFunc(n, fixed_qparam_funcs)) {
     return _fixed_qparams_map.at(n->kind());
   }

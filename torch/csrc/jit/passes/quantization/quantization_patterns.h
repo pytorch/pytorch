@@ -450,14 +450,14 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
 
   // aten::avg_pool1d
   std::string avg_pool1d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
+graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad):
           %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::avg_pool1d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
+          %r = aten::avg_pool1d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad)
 )" + common_general_value_op;
 
   std::string aten_avg_pool1d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
-          %r = aten::avg_pool1d(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
+graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad):
+          %r = aten::avg_pool1d(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad)
           return (%r) )";
 
   // aten::avg_pool2d
@@ -522,14 +522,14 @@ graph(%a_quant, %output_size):
 
   // aten::mean
   std::string mean = R"(
-graph(%a_quant):
+graph(%a_quant, %dim):
           %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::mean(%a_dequant)
+          %r = aten::mean(%a_dequant, %dim)
 )" + common_general_value_op;
 
   std::string aten_mean = R"(
-graph(%a_quant):
-          %r = aten::mean(%a_quant)
+graph(%a_quant, %dim):
+          %r = aten::mean(%a_quant, %dim)
           return (%r) )";
 
   // aten::upsample_nearest1d
@@ -546,26 +546,26 @@ graph(%a_quant, %size, %scale_factor):
 
   // aten::upsample_nearest2d
   std::string upsample_nearest2d = R"(
-graph(%a_quant, %size, %scale_factor):
+graph(%a_quant, %size, %scale_h, %scale_w):
           %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::upsample_nearest2d(%a_dequant, %size, %scale_factor)
+          %r = aten::upsample_nearest2d(%a_dequant, %size, %scale_h, %scale_w)
 )" + common_general_value_op;
 
   std::string aten_upsample_nearest2d = R"(
-graph(%a_quant, %size, %scale_factor):
-          %r = aten::upsample_nearest2d(%a_quant, %size, %scale_factor)
+graph(%a_quant, %size, %scale_h, %scale_w):
+          %r = aten::upsample_nearest2d(%a_quant, %size, %scale_h, %scale_w)
           return (%r) )";
 
   // aten::upsample_nearest3d
   std::string upsample_nearest3d = R"(
-graph(%a_quant, %size, %scale_factor):
+graph(%a_quant, %size, %scale_d, %scale_h, %scale_w):
           %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::upsample_nearest3d(%a_dequant, %size, %scale_factor)
+          %r = aten::upsample_nearest3d(%a_dequant, %size, %scale_d, %scale_h, %scale_w)
 )" + common_general_value_op;
 
   std::string aten_upsample_nearest3d = R"(
-graph(%a_quant, %size, %scale_factor):
-          %r = aten::upsample_nearest3d(%a_quant, %size, %scale_factor)
+graph(%a_quant, %size, %scale_d, %scale_h, %scale_w):
+          %r = aten::upsample_nearest3d(%a_quant, %size, %scale_d, %scale_h, %scale_w)
           return (%r) )";
 
   // aten::upsample_linear1d
@@ -688,6 +688,94 @@ graph(%a_quant, %negative_slope):
           %r = aten::leaky_relu_(%a_quant, %negative_slope)
           return (%r) )";
 
+  // IR pattern common to all ops with fixed quantization parameters for
+  // asymetric quantization
+  std::string asym_fixed_qparam_op_suffix = R"(
+          %r_scale : float = prim::Constant[value=0.00390625]()
+          %r_zero_point : int = prim::Constant[value=0]()
+          %r_dtype : int = prim::Constant[value=13]()
+          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+          return (%r_quant) )";
+
+  std::string sym_fixed_qparam_op_suffix = R"(
+          %r_scale : float = prim::Constant[value=0.0078125]()
+          %r_zero_point : int = prim::Constant[value=128]()
+          %r_dtype : int = prim::Constant[value=13]()
+          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+          return (%r_quant) )";
+
+  // aten::hardsigmoid
+  std::string hardsigmoid = R"(
+graph(%a_quant):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::hardsigmoid(%a_dequant)
+)" + asym_fixed_qparam_op_suffix;
+
+  std::string aten_hardsigmoid = R"(
+graph(%a_quant):
+          %r = aten::hardsigmoid(%a_quant)
+          return (%r) )";
+
+  // aten::hardsigmoid_
+  std::string hardsigmoid_ = R"(
+graph(%a_quant):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::hardsigmoid_(%a_dequant)
+)" + asym_fixed_qparam_op_suffix;
+
+  std::string aten_hardsigmoid_ = R"(
+graph(%a_quant):
+          %r = aten::hardsigmoid_(%a_quant)
+          return (%r) )";
+
+  // aten::sigmoid
+  std::string sigmoid = R"(
+graph(%a_quant):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::sigmoid(%a_dequant)
+)" + asym_fixed_qparam_op_suffix;
+
+  std::string aten_sigmoid = R"(
+graph(%a_quant):
+          %r = aten::sigmoid(%a_quant)
+          return (%r) )";
+
+  // aten::sigmoid_
+  std::string sigmoid_ = R"(
+graph(%a_quant):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::sigmoid_(%a_dequant)
+)" + asym_fixed_qparam_op_suffix;
+
+  std::string aten_sigmoid_ = R"(
+graph(%a_quant):
+          %r = aten::sigmoid_(%a_quant)
+          return (%r) )";
+
+  // aten::tanh
+  std::string tanh = R"(
+graph(%a_quant):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::tanh(%a_dequant)
+)" + sym_fixed_qparam_op_suffix;
+
+  std::string aten_tanh = R"(
+graph(%a_quant):
+          %r = aten::tanh(%a_quant)
+          return (%r) )";
+
+  // aten::tanh_
+  std::string tanh_ = R"(
+graph(%a_quant):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::tanh_(%a_dequant)
+)" + sym_fixed_qparam_op_suffix;
+
+  std::string aten_tanh_ = R"(
+graph(%a_quant):
+          %r = aten::tanh_(%a_quant)
+          return (%r) )";
+
   return {
       {"quantized::conv2d", conv2d, quantized_conv2d},
       {"quantized::conv2d_relu", conv2d_relu, quantized_conv2d_relu},
@@ -779,6 +867,13 @@ graph(%a_quant, %negative_slope):
       {"aten::elu_", elu_, aten_elu_},
       {"aten::leaky_relu", leaky_relu, aten_leaky_relu},
       {"aten::leaky_relu_", leaky_relu_, aten_leaky_relu_},
+      // fixed qparam ops
+      {"aten::hardsigmoid", hardsigmoid, aten_hardsigmoid},
+      {"aten::hardsigmoid_", hardsigmoid_, aten_hardsigmoid_},
+      {"aten::sigmoid", sigmoid, aten_sigmoid},
+      {"aten::sigmoid_", sigmoid_, aten_sigmoid_},
+      {"aten::tanh", tanh, aten_tanh},
+      {"aten::tanh_", tanh_, aten_tanh_},
   };
 }
 
