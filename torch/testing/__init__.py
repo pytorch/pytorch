@@ -96,14 +96,19 @@ def get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=True, 
         dtypes += get_all_complex_dtypes()
     return dtypes
 
+
 def get_all_math_dtypes(device):
-    return get_all_int_dtypes() + get_all_fp_dtypes(include_half=device.startswith('cuda'), include_bfloat16=False) + get_all_complex_dtypes()
+    return get_all_int_dtypes() + get_all_fp_dtypes(include_half=device.startswith('cuda'),
+                                                    include_bfloat16=False) + get_all_complex_dtypes()
+
 
 def get_all_complex_dtypes():
     return [torch.complex64, torch.complex128]
 
+
 def get_all_int_dtypes():
     return [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
+
 
 def get_all_fp_dtypes(include_half=True, include_bfloat16=True):
     dtypes = [torch.float32, torch.float64]
@@ -112,6 +117,7 @@ def get_all_fp_dtypes(include_half=True, include_bfloat16=True):
     if include_bfloat16:
         dtypes.append(torch.bfloat16)
     return dtypes
+
 
 def get_all_device_types():
     return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
