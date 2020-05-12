@@ -1327,7 +1327,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, grad_output):
-                return (grad_output * 0).type(torch.DoubleTensor)
+                return (grad_output * 0).to(torch.double)
 
         x = torch.randn(5, 5, requires_grad=True)
         mask = MyFunction.apply(x)
@@ -2675,6 +2675,48 @@ class TestAutograd(TestCase):
 
         self.assertEqual(len(prof.function_events), 1)
         self.assertEqual(prof.function_events[0].name, '_TorchScriptTesting::take_an_instance')
+
+    def test_profiler_propagation(self):
+        def foo(x):
+            with record_function("in_foo") as rf:
+                return x * 2
+
+        x = torch.rand(3, 4)
+        traced_foo = torch.jit.trace(foo, x)
+
+        def bar(x):
+            with record_function("in_bar") as rf:
+                # we expect that profiler will be able
+                # propagate across fork
+                fut = torch.jit._fork(traced_foo, x)
+                y = torch.jit._wait(fut)
+                # note: continuation (and rf's end) can
+                # be executed in a different thread
+                with record_function("in_bar_after_wait") as rf2:
+                    y = y * 2
+                return y
+
+        traced_bar = torch.jit.trace(bar, x)
+
+        with profile() as p:
+            traced_bar(x)
+
+        found_foo = False
+        found_bar = False
+        found_bar_after_wait = False
+        for info in p.function_events:
+            if info.name == "in_foo":
+                self.assertFalse(found_foo)
+                found_foo = True
+            elif info.name == "in_bar":
+                self.assertFalse(found_bar)
+                found_bar = True
+            elif info.name == "in_bar_after_wait":
+                self.assertFalse(found_bar_after_wait)
+                found_bar_after_wait = True
+        self.assertTrue(found_foo)
+        self.assertTrue(found_bar)
+        self.assertTrue(found_bar_after_wait)
 
     def test_record_function_callbacks(self):
         x = torch.randn(10, 10)
@@ -4054,6 +4096,13 @@ for shape in [(1,), ()]:
         foo = MyFn.apply(base, True)
         self.assertEqual(foo.grad_fn.__class__.__name__, "MyFnBackward")
 
+    def test_integer_outputs(self):
+        inp = torch.rand(4, requires_grad=True)
+
+        out = inp.argmax()
+        self.assertFalse(out.dtype.is_floating_point)
+        self.assertFalse(out.requires_grad)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -4133,14 +4182,14 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
     self_variable = f_args_variable[0]
     if isinstance(output_variable, torch.Tensor) and output_variable.requires_grad and self_variable is not None:
         output_variable.backward(randn_like(output_variable))
-        test_case.assertEqual(self_variable.type(), self_variable.grad.type())
+        test_case.assertEqualTypeString(self_variable, self_variable.grad)
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
 # white list for complex
-complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as',
-                'zero_', 'clone', 'tril', 'triu', 'fill_', 'eq_', 'ne_',
-                'permute', 'squeeze', 'unsqueeze', 'chunk', 'split',
-                'split_with_sizes', 'resize', 'resize_as']
+complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
+                'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
+                'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
+                '__rmul__', '__rdiv__']
 
 def add_test(
         name,
@@ -4302,15 +4351,15 @@ def add_test(
 class TestAutogradFunctional(TestCase):
     def _assert_same_struct(self, res, base):
         # base and res should be Tensors or tuple of Tensors with the same size
-        if torch.is_tensor(base):
-            self.assertTrue(torch.is_tensor(res))
+        if isinstance(base, torch.Tensor):
+            self.assertTrue(isinstance(res, torch.Tensor))
             self.assertEqual(base.size(), res.size())
         elif isinstance(base, tuple):
             self.assertTrue(isinstance(res, tuple))
             self.assertEqual(len(base), len(res))
             for el_base, el_res in zip(base, res):
-                self.assertTrue(torch.is_tensor(el_base))
-                self.assertTrue(torch.is_tensor(el_res))
+                self.assertTrue(isinstance(el_base, torch.Tensor))
+                self.assertTrue(isinstance(el_res, torch.Tensor))
                 self.assertEqual(el_base.size(), el_res.size())
         else:
             # Wrong base
@@ -4325,22 +4374,22 @@ class TestAutogradFunctional(TestCase):
         # - tuple, Tensor: res[i][k][l] = (base1[i][k], base2[l])
         # - Tensor, tuple: res[i][j][l] = (base1[i], base2[j][l])
         # - Tensor, Tensor: res[k][l] = (base1[k], base2[l])
-        if torch.is_tensor(base1) and torch.is_tensor(base2):
-            self.assertTrue(torch.is_tensor(res))
+        if isinstance(base1, torch.Tensor) and isinstance(base2, torch.Tensor):
+            self.assertTrue(isinstance(res, torch.Tensor))
             self.assertEqual(res.size(), base1.size() + base2.size())
-        elif isinstance(base1, tuple) and torch.is_tensor(base2):
+        elif isinstance(base1, tuple) and isinstance(base2, torch.Tensor):
             self.assertTrue(isinstance(res, tuple))
             self.assertEqual(len(res), len(base1))
             for el_res, el_base1 in zip(res, base1):
-                self.assertTrue(torch.is_tensor(el_res))
-                self.assertTrue(torch.is_tensor(el_base1))
+                self.assertTrue(isinstance(el_res, torch.Tensor))
+                self.assertTrue(isinstance(el_base1, torch.Tensor))
                 self.assertEqual(el_res.size(), el_base1.size() + base2.size())
-        elif torch.is_tensor(base1) and isinstance(base2, tuple):
+        elif isinstance(base1, torch.Tensor) and isinstance(base2, tuple):
             self.assertTrue(isinstance(res, tuple))
             self.assertEqual(len(res), len(base2))
             for el_res, el_base2 in zip(res, base2):
-                self.assertTrue(torch.is_tensor(el_res))
-                self.assertTrue(torch.is_tensor(el_base2))
+                self.assertTrue(isinstance(el_res, torch.Tensor))
+                self.assertTrue(isinstance(el_base2, torch.Tensor))
                 self.assertEqual(el_res.size(), base1.size() + el_base2.size())
         elif isinstance(base1, tuple) and isinstance(base2, tuple):
             self.assertTrue(isinstance(res, tuple))
@@ -4349,8 +4398,8 @@ class TestAutogradFunctional(TestCase):
                 self.assertTrue(isinstance(el_res, tuple))
                 self.assertEqual(len(res), len(base2))
                 for el_el_res, el_base2 in zip(el_res, base2):
-                    self.assertTrue(torch.is_tensor(el_el_res))
-                    self.assertTrue(torch.is_tensor(el_base2))
+                    self.assertTrue(isinstance(el_el_res, torch.Tensor))
+                    self.assertTrue(isinstance(el_base2, torch.Tensor))
                     self.assertEqual(el_el_res.size(), el_base1.size() + el_base2.size())
         else:
             # Wrong bases
@@ -5848,7 +5897,8 @@ class TestAutogradDeviceType(TestCase):
         outputs = Broadcast.apply(list(range(len(devices))), x)
         y = outputs[-1] * 2
         y.sum().backward()
-        self.assertEqual(x.grad, torch.ones(5, 5) * 2)
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(x.grad, torch.ones(5, 5) * 2)
 
     @deviceCountAtLeast(2)
     def test_backward_device(self, devices):

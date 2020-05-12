@@ -44,12 +44,14 @@ Tensor& addbmm_cuda_out(Tensor& result, const Tensor& self, const Tensor& batch1
   return legacy::cuda::_th_addbmm_out(result, self, batch1, batch2, beta, alpha);
 }
 
-Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
-  return legacy::cuda::_th_bmm(self, mat2);
+Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
+  result.resize_({ batch1.size(0), batch1.size(1), batch2.size(2) });
+  return legacy::cuda::_th_bmm_out(result, batch1, batch2);
 }
 
-Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
-  return legacy::cuda::_th_bmm_out(result, batch1, batch2);
+Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
+  Tensor result = at::empty({0}, self.options());
+  return native::bmm_out_cuda(result, self, mat2);
 }
 
 Tensor prepare_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor) {

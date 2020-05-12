@@ -33,12 +33,11 @@ namespace jit {
   _(ExprBitwiseOps)                         \
   _(IRPrinterBasicValueTest)                \
   _(IRPrinterBasicValueTest02)              \
-  _(IRPrinterLetTest01)                     \
-  _(IRPrinterLetTest02)                     \
   _(IRPrinterCastTest)                      \
   _(ExprSimple01)                           \
   _(ExprLower01)                            \
   _(ExprSimple02)                           \
+  _(ExprSplitWithTail)                      \
   _(ExprSplitWithTailNone)                  \
   _(ExprSplitWithMask01)                    \
   _(ScheduleBroadcastAddBuffer)             \
