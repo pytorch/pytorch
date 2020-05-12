@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
-import sys
+import os, sys
+
+sys.path.append(os.path.join(sys.path[0], '..'))
+
 import yaml
 import cimodel.lib.miniyaml as miniyaml
 
