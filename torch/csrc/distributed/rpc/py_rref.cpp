@@ -109,7 +109,10 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         TypePtr elem_type = tryInferTypeWithTypeHint(value, type_hint);
         auto rref = RRefContext::getInstance().createOwnerRRef(elem_type);
         py::object copy(value); // increases refcount
-        IValue ivalue = jit::toIValue(std::move(copy), elem_type);
+        // Keep copy alive until jit::toIValue returns.
+        // See Note [jit::toIValue barrow py::object refcnt] at jit::toIValue
+        // function.
+        IValue ivalue = jit::toIValue(copy, elem_type);
         rref->setValue(std::move(ivalue));
         return rref;
       }()) {}
