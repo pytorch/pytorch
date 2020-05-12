@@ -3329,14 +3329,16 @@ class _TestTorchMixin(object):
         self.assertEqual(a, b)
 
     def test_pickle_gradscaler(self):
-        # The code below should be valid whether or not cuda is available.
-        # If cuda is not available, scaler.is_enabled() should be false and the calls should short-circuit.
+        # This test is not in test_cuda.py because it should pass whether or not cuda is available.
+        # If cuda is not available, scaler.is_enabled() should be false and the pickling/unpickling should
+        # ignore GradScaler's cuda-specific attributes.
         for lazy_init_scale in True, False:
             a = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
             if lazy_init_scale:
                 # Dummy a.scale() call lazy-inits a._scale if cuda is available.
-                a.scale(torch.tensor([4.0], dtype=torch.float32, device="cuda:0"))
                 if a.is_enabled():
+                    self.assertTrue(torch.cuda.is_available())
+                    a.scale(torch.tensor([4.0], dtype=torch.float32, device="cuda:0"))
                     self.assertTrue(isinstance(a._scale, torch.cuda.FloatTensor))
                 else:
                     self.assertTrue(a._scale is None)
