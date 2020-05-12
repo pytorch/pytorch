@@ -5,7 +5,7 @@ import torch
 import torch.onnx
 from torch.onnx import utils, OperatorExportTypes
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
-from test_pytorch_common import skipIfUnsupportedOpsetVersion
+from test_pytorch_common import skipIfUnsupportedOpsetVersion, skipIfUnsupportedMinOpsetVersion
 
 import onnx
 import onnxruntime  # noqa
@@ -526,8 +526,6 @@ class TestUtilityFuns(TestCase):
         # verify that the model state is preserved
         assert model.training == old_state
 
-    # TODO: Enable test when Dropout is implemented in ORT for opset 12.
-    @skipIfUnsupportedOpsetVersion([12])
     def test_dropout_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -551,7 +549,7 @@ class TestUtilityFuns(TestCase):
         ort_outs = ort_sess.run(None, ort_inputs)
         assert x != ort_outs[0]
 
-    @skipIfUnsupportedOpsetVersion([12])
+    @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training_zero(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
