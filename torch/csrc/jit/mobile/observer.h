@@ -1,11 +1,11 @@
 #pragma once
 
-#include <ATen/ThreadLocalDebugInfo.h>
+#include <c10/util/ThreadLocalDebugInfo.h>
 #include <string>
 
 namespace torch {
 
-class MobileDebugInfo : public at::DebugInfoBase {
+class MobileDebugInfo : public c10::DebugInfoBase {
  public:
   const std::string& getModelName() {
     return model_name_;

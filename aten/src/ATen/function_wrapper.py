@@ -196,11 +196,6 @@ NATIVE_DECLARATION = CodeTemplate("""\
 CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
 
-CONDITIONAL_INITIALIZER = CodeTemplate("""\
-if (${name}.defined()) {
-    ${initializer}
-}""")
-
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
 OPERATOR_NAME = CodeTemplate("aten::${operator_name}")
@@ -295,8 +290,6 @@ CHECKED_CAST = {
             'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'DeviceType::${DeviceType}, ScalarType::Long)'),
-    # This is a cast done via direct-construction
-    'IntArrayRefStride': CodeTemplate('at::IntArrayRef ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate(
@@ -394,8 +387,6 @@ THFormal = TypedDict('THFormal', {
     'annotation': str,
     'allocate': bool,
     'mask': bool,
-    'resize': str,
-    'zero': bool,
 }, total=False)
 
 # Generic ATen formal or native_functions.yaml formal argument.
@@ -1331,15 +1322,6 @@ def create_derived(backend_type_env, declarations):
             'auto {} = Tensor({}::reclaim({}));'.format(name, intrusive_ptr_type, tensor_arg),
         ]
 
-    def resize_arg(arg):
-        # type: (THFormal) -> str
-        resize = arg['resize']
-        if isinstance(resize, str):
-            return "{}.resize_({}.sizes());".format(arg['name'], resize)
-        else:
-            dims = ['{}.size({})'.format(name, dim) for name, dim in resize]
-            return "{}.resize_({{ {} }});".format(arg['name'], ','.join(dims))
-
     def handle_call(env, option, cimpl):
         # type: (Environment, FunctionOption, FunctionOption) -> str
         is_nn = option['mode'] == 'NN'
@@ -1422,25 +1404,6 @@ def create_derived(backend_type_env, declarations):
                                 size=arg.get('size'), scalar_type='dispatch_scalar_type')
                             case_body.append("auto {}_ = {};".format(
                                 arg['name'], check_cast))
-
-                        initializers = []
-
-                        # resize tensors for special ops that require it
-                        if 'resize' in arg:
-                            initializers.append(resize_arg(arg))
-
-                        # also special handling where we zero some outputs.
-                        if arg.get('zero', False):
-                            initializers.append("{}.zero_();".format(arg['name']))
-
-                        # only initialize non-null arguments
-                        if nullable_argument(arg) and len(initializers) > 0:
-                            case_body.append(CONDITIONAL_INITIALIZER.substitute({
-                                'name': arg['name'],
-                                'initializer': initializers
-                            }))
-                        else:
-                            case_body += initializers
 
                 # cimpls, if it exists, contains the underlying C function names and
                 # arguments. Otherwise use option
