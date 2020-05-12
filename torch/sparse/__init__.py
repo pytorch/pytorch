@@ -4,6 +4,16 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 
+# A workaround to support both TorchScript and MyPy:
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from torch import dtype as DType
+else:
+    DType = int
+# TODO: replace the above with
+# from torch.types import _dtype as DType
+
+
 __all__ = [
     'addmm',
     'mm',
@@ -141,8 +151,7 @@ def sum(input, dim=None, dtype=None):
             return torch._sparse_sum(input, dtype=dtype)
 
 
-def softmax(input, dim, dtype=None):
-    # type: (Tensor, int, Optional[int]) -> Tensor
+def softmax(input: Tensor, dim: int, dtype: Optional[DType] = None) -> Tensor:
     r"""Applies a softmax function.
 
     Softmax is defined as:
@@ -166,14 +175,10 @@ def softmax(input, dim, dtype=None):
           performed. This is useful for preventing data type
           overflows. Default: None
     """
-    if dtype is None:
-        return torch._sparse_softmax(input, dim)
-    else:
-        return torch._sparse_softmax(input, dim, dtype=dtype)
+    return torch._sparse_softmax(input, dim, dtype=dtype)
 
 
-def log_softmax(input, dim, dtype=None):
-    # type: (Tensor, int, Optional[int]) -> Tensor
+def log_softmax(input: Tensor, dim: int, dtype: Optional[DType] = None) -> Tensor:
     r"""Applies a softmax function followed by logarithm.
 
     See :class:`~torch.sparse.softmax` for more details.
@@ -187,7 +192,4 @@ def log_softmax(input, dim, dtype=None):
           performed. This is useful for preventing data type
           overflows. Default: None
     """
-    if dtype is None:
-        return torch._sparse_log_softmax(input, dim)
-    else:
-        return torch._sparse_log_softmax(input, dim, dtype=dtype)
+    return torch._sparse_log_softmax(input, dim, dtype=dtype)
