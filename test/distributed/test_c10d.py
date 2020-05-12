@@ -2978,7 +2978,7 @@ class ReducerTest(TestCase):
         model = ReducerModule()
         parameters = list(model.parameters())
         buckets = [list(range(len(parameters)))]
-        dist.Reducer([parameters], buckets, self.process_group, self.process_group)
+        dist.Reducer([parameters], buckets, self.process_group)
 
     def _create_mixed_precision_model(self):
         model = ReducerModule()
@@ -2994,7 +2994,7 @@ class ReducerTest(TestCase):
         with self.assertRaises(RuntimeError):
             parameters = [list(model.parameters())]
             buckets = [list(range(len(parameters[0])))]
-            dist.Reducer(parameters, buckets, self.process_group, self.process_group)
+            dist.Reducer(parameters, buckets, self.process_group)
 
     def test_multi_dtype_multi_bucket(self):
         model = self._create_mixed_precision_model()
@@ -3003,7 +3003,7 @@ class ReducerTest(TestCase):
             range(len(parameters[0])),
             key=lambda i: parameters[0][i].dtype)
         buckets = [list(indices) for _, indices in group_by_dtype]
-        dist.Reducer(parameters, buckets, self.process_group, self.process_group)
+        dist.Reducer(parameters, buckets, self.process_group)
 
     def _create_reducer_for_models(self, models):
         parameters = [list(model.parameters()) for model in models]
@@ -3011,7 +3011,7 @@ class ReducerTest(TestCase):
             range(len(parameters[0])),
             key=lambda i: parameters[0][i].dtype)
         buckets = [list(indices) for _, indices in group_by_dtype]
-        return dist.Reducer(parameters, buckets, self.process_group, self.process_group)
+        return dist.Reducer(parameters, buckets, self.process_group)
 
     def test_forward_backward_single_replica(self):
         batch_size = 10

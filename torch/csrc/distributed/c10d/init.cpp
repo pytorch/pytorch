@@ -122,13 +122,11 @@ PyObject* c10d_init(PyObject* _unused) {
               std::vector<std::vector<torch::autograd::Variable>>,
               std::vector<std::vector<size_t>>,
               std::shared_ptr<::c10d::ProcessGroup>,
-              std::shared_ptr<::c10d::ProcessGroup>,
               std::vector<std::vector<bool>>,
               int64_t>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
-          py::arg("default_process_group"),
-          py::arg("process_group_gloo"),
+          py::arg("process_group"),
           py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
           py::arg("bucket_bytes_cap") = ::c10d::DEFAULT_BUCKET_BYTES_CAP)
       .def(

@@ -25,13 +25,11 @@ inline int64_t current_time_in_nanos() {
 Reducer::Reducer(
     std::vector<std::vector<torch::autograd::Variable>> replicas,
     std::vector<std::vector<size_t>> bucket_indices,
-    std::shared_ptr<c10d::ProcessGroup> default_process_group,
-    std::shared_ptr<c10d::ProcessGroup> process_group_gloo,
+    std::shared_ptr<c10d::ProcessGroup> process_group,
     std::vector<std::vector<bool>> expect_sparse_gradients,
     int64_t bucket_bytes_cap)
     : replicas_(std::move(replicas)),
-      default_process_group_(std::move(default_process_group)),
-      process_group_gloo_(std::move(process_group_gloo)),
+      process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
       expect_autograd_hooks_(false),
       require_finalize_(false),
@@ -374,7 +372,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   // Check if this was the final gradient for this bucket.
   if (--replica.pending == 0) {
     // Prescale bucket contents to turn the global sum into the global average.
-    replica.contents.div_(default_process_group_->getSize());
+    replica.contents.div_(process_group_->getSize());
     // Kick off reduction if all replicas for this bucket are ready.
     if (--bucket.pending == 0) {
       mark_bucket_ready(bucket_index.bucket_index);
@@ -390,7 +388,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
       // allreduce respect the current stream, so will be sequenced correctly.
       local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
     }
-    local_used_work_ = default_process_group_->allreduce(local_used_maps_dev_);
+    local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
 
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::lock_guard<std::mutex> lock(this->mutex_);
@@ -437,7 +435,7 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
       //
       tensors.push_back(replica.contents);
     }
-    bucket.work = default_process_group_->allreduce(tensors);
+    bucket.work = process_group_->allreduce(tensors);
   }
 }
 
@@ -770,6 +768,10 @@ void Reducer::sync_bucket_indices(
     total_size += bucket_size;
   }
 
+  at::TensorOptions options;
+  options = options.dtype(at::kInt);
+  options = options.device(replicas_[0][0].device());
+
   // Group indices and num_bucket together into indices_tensor
   // Broadcast this tensor first, as its size is equal among all processes
   auto indices_tensor = at::empty({total_size + 1}, at::kInt);
@@ -782,8 +784,14 @@ void Reducer::sync_bucket_indices(
     }
   }
   indices_accessor[indices_accessor_Index] = num_buckets;
+
+  // Copy CPU tensor to device tensor, as the process_group_ could be NCCL and
+  // it can only broadcast device tensors.
+  auto indices_tensor_device = at::empty({total_size + 1}, options);
+  indices_tensor_device.copy_(indices_tensor, true);
   broadcast_coalesced(
-      process_group_gloo_, indices_tensor, broadcast_bucket_size);
+      process_group_, indices_tensor_device, broadcast_bucket_size);
+  indices_tensor.copy_(indices_tensor_device);
 
   // Update num_buckets after receiving it from rank 0
   num_buckets = indices_accessor[indices_accessor_Index];
@@ -797,8 +805,11 @@ void Reducer::sync_bucket_indices(
     bucket_sizes_accessor[i] =
         bucket_sizes.at(std::min(i, (bucket_sizes.size() - 1)));
   }
+  auto bucket_sizes_tensor_device = at::empty({(int64_t)num_buckets}, options);
+  bucket_sizes_tensor_device.copy_(bucket_sizes_tensor, true);
   broadcast_coalesced(
-      process_group_gloo_, bucket_sizes_tensor, broadcast_bucket_size);
+      process_group_, bucket_sizes_tensor_device, broadcast_bucket_size);
+  bucket_sizes_tensor.copy_(bucket_sizes_tensor_device);
 
   // Clear bucket_indices first, and then update bucket_indices using received
   // num_buckets, bucket_sizes_tensor and indices_tensor from rank 0
