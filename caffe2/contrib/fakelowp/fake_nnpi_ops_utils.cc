@@ -1,6 +1,10 @@
 #include <algorithm>
+#include <cassert>
 #include <cinttypes>
 #include <cmath>
+#include <vector>
+
+#include <immintrin.h>
 
 #include "fake_nnpi_ops_utils.h"
 
@@ -146,6 +150,8 @@ void matmul_u8i8u8acc32_ref(
     float C_multiplier, // A_scale * B_scale / C_scale
     int32_t C_zero_point,
     bool fuse_relu) {
+#ifndef NDEBUG
+  std::vector<int8_t> C_ref(M * K);
   for (int i = 0; i < M; ++i) {
     for (int j = 0; j < N; ++j) {
       int32_t sum = bias ? bias[j] : 0;
@@ -157,8 +163,43 @@ void matmul_u8i8u8acc32_ref(
       /// step hardware we probably want to change this.
       uint8_t rounded = static_cast<uint32_t>(
           nnpiQuantize(sum, C_multiplier, C_zero_point, true, false, true));
+      C_ref[i * ldc + j] =
+          std::max(static_cast<uint8_t>(fuse_relu ? C_zero_point : 0), rounded);
+    }
+  }
+#endif
+
+  for (int i = 0; i < M; ++i) {
+    for (int j = 0; j < N; ++j) {
+      int32_t sum = bias ? bias[j] : 0;
+      __m256i c_v = _mm256_setzero_si256();
+      int k;
+      for (k = 0; k < K / 16 * 16; k += 16) {
+        __m256i a_v = _mm256_cvtepu8_epi16(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(A + i * lda + k)));
+        __m256i b_v = _mm256_cvtepi8_epi16(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(B + j * ldb + k)));
+        a_v = _mm256_sub_epi16(a_v, _mm256_set1_epi16(A_zero_point));
+        b_v = _mm256_sub_epi16(b_v, _mm256_set1_epi16(B_zero_point));
+        _mm256_add_epi32(c_v, _mm256_madd_epi16(a_v, b_v));
+      }
+      alignas(64) int32_t buf[8];
+      _mm256_store_si256(reinterpret_cast<__m256i*>(buf), c_v);
+      for (int i = 0; i < 8; ++i) {
+        sum += buf[i];
+      }
+      for (; k < K; ++k) {
+        sum +=
+            (A[i * lda + k] - A_zero_point) * (B[j * ldb + k] - B_zero_point);
+      }
+
+      /// Note that we are doing round-half-to-nearest-up here. Once we get next
+      /// step hardware we probably want to change this.
+      uint8_t rounded = static_cast<uint32_t>(
+          nnpiQuantize(sum, C_multiplier, C_zero_point, true, false, true));
       C[i * ldc + j] =
           std::max(static_cast<uint8_t>(fuse_relu ? C_zero_point : 0), rounded);
+      assert(C[i * ldc + j] == C_ref[i * ldc + j]);
     }
   }
 }
