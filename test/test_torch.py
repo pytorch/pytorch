@@ -188,7 +188,7 @@ class _TestTorchMixin(object):
                        'sparse_resize_and_clear_',
                        )
         test_namespace(torch.nn)
-        test_namespace(torch.nn.functional, 'assert_int_or_pair', 'feature_alpha_dropout')
+        test_namespace(torch.nn.functional, 'assert_int_or_pair')
         # TODO: add torch.* tests when we have proper namespacing on ATen functions
         # test_namespace(torch)
 
@@ -3796,6 +3796,11 @@ class _TestTorchMixin(object):
             obj.__repr__()
             str(obj)
 
+        # test complex tensor
+        x = torch.tensor([2.3 + 4j, 7 + 6j])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([(2.3000+4.0000j), (7.0000+6.0000j)])''')
+
         # test big integer
         x = torch.tensor(2341234123412341)
         self.assertEqual(x.__repr__(), str(x))
@@ -6092,6 +6097,29 @@ class TestTorchDeviceType(TestCase):
         self.assertTrue(y1.size() == expected_size)
         self.assertTrue(y2.size() == expected_size)
 
+    def _do_pow_for_exponents(self, m1, exponents, pow_fn, atol):
+        for num in exponents:
+            if isinstance(num, int) and num < 0 and not m1.is_floating_point() and not m1.is_complex():
+                with self.assertRaisesRegex(RuntimeError,
+                                            r'Integers to negative integer powers are not allowed\.'):
+                    torch.pow(m1[4], num)
+            else:
+                # base - tensor, exponent - number
+                # contiguous
+                res1 = torch.pow(m1[4], num)
+                res2 = res1.clone().zero_()
+                # `math.pow` has issues with complex exponentiation so we need to resort to normal `pow`.
+                for i in range(res2.size(0)):
+                    res2[i] = pow_fn(m1[4][i], num)
+                self.assertEqual(res1, res2, {'atol': atol})
+
+                # non-contiguous
+                res1 = torch.pow(m1[:, 4], num)
+                res2 = res1.clone().zero_()
+                for i in range(res2.size(0)):
+                    res2[i] = pow_fn(m1[i, 4], num)
+                self.assertEqual(res1, res2, {'atol': atol})
+
     def test_pow(self, device):
         # [res] torch.pow([res,] x)
 
@@ -6108,33 +6136,20 @@ class TestTorchDeviceType(TestCase):
                 continue
 
             m1 = torch.empty(0, dtype=dtype, device=device)
-            if m1.is_floating_point():
+            if m1.is_floating_point() or m1.is_complex():
                 m1 = torch.rand(100, 100, dtype=dtype, device=device) + 0.5
             else:
                 # math.pow will overflow and throw exceptions for large integers
                 range_high = 4 if dtype in (torch.int8, torch.uint8) else 10
                 m1 = torch.randint(1, range_high, (100, 100), dtype=dtype, device=device)
 
-            for num in [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3]:
-                if isinstance(num, int) and num < 0 and not m1.is_floating_point():
-                    with self.assertRaisesRegex(RuntimeError,
-                                                r'Integers to negative integer powers are not allowed\.'):
-                        torch.pow(m1[4], num)
-                else:
-                    # base - tensor, exponent - number
-                    # contiguous
-                    res1 = torch.pow(m1[4], num)
-                    res2 = res1.clone().zero_()
-                    for i in range(res2.size(0)):
-                        res2[i] = math.pow(m1[4][i], num)
-                    self.assertEqual(res1, res2)
-
-                    # non-contiguous
-                    res1 = torch.pow(m1[:, 4], num)
-                    res2 = res1.clone().zero_()
-                    for i in range(res2.size(0)):
-                        res2[i] = math.pow(m1[i, 4], num)
-                    self.assertEqual(res1, res2)
+            exponents = [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3]
+            complex_exponents = [-2.5j, -1.0j, 0j, 1.0j, 2.5j, 1.0 + 1.0j, -1.0 - 1.5j, 3.3j]
+            if m1.is_complex():
+                self._do_pow_for_exponents(m1, exponents + complex_exponents, pow, 10e-4)
+            else:
+                self._do_pow_for_exponents(m1, exponents, math.pow, {})
+                self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
 
             # base - number, exponent - tensor
             # contiguous
@@ -11450,9 +11465,8 @@ class TestTorchDeviceType(TestCase):
         # Check for race condition (correctness when applied on a large tensor).
         if dtype not in (torch.int8, torch.uint8, torch.int16, torch.half):
             y = torch.linspace(0, 1000000 - 1, 1000000, device=device, dtype=dtype)
-            correct = True
-            for i in range(y.shape[0] - 1):
-                correct = correct and y[i] < y[i + 1]
+            cond = y[:-1] < y[1:]
+            correct = all(cond)
             self.assertTrue(correct)
 
         # Check linspace for non-contiguous tensors.
@@ -13735,7 +13749,7 @@ class TestTorchDeviceType(TestCase):
 
     def _test_unique_with_expects(self, device, dtype, f, x, expected_unique, expected_inverse, expected_counts, additional_shape):
         def ensure_tuple(x):
-            if torch.is_tensor(x):
+            if isinstance(x, torch.Tensor):
                 return (x,)
             return x
 
@@ -13764,7 +13778,7 @@ class TestTorchDeviceType(TestCase):
             return  # CPU does not have half support
 
         def ensure_tuple(x):
-            if torch.is_tensor(x):
+            if isinstance(x, torch.Tensor):
                 return (x,)
             return x
 
@@ -15448,6 +15462,27 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 # Divisor is a tensor case
                 long_res1 = long_m1.clone()
                 long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
+
+    # remove onlyCUDA after CPU impl of remainder_kernel be fixed
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    def test_remainder_fmod_large_dividend(self, device, dtype):
+        alarge = 1e9
+        pi = 3.14159265358979
+        for avalue in [alarge, -alarge]:
+            for bvalue in [pi, -pi]:
+                a = torch.tensor([avalue], dtype=dtype, device=device)
+                b = torch.tensor([bvalue], dtype=dtype, device=device)
+                c = torch.remainder(a, b)
+                d = torch.fmod(a, b)
+                self.assertTrue((b[0] > 0) == (c[0] > 0))  # remainder has same sign as divisor
+                self.assertTrue((a[0] > 0) == (d[0] > 0))  # fmod has same sign as dividend
+                self.assertTrue(abs(c[0]) < abs(b[0]))     # remainder is within range of divisor
+                self.assertTrue(abs(d[0]) < abs(b[0]))     # fmod is within range of divisor
+                if ((a[0] > 0) == (b[0] > 0)):
+                    self.assertTrue(c[0] == d[0])   # remainder is same as fmod
+                else:
+                    self.assertTrue(abs(c[0] - d[0]) == abs(b[0]))  # differ by one divisor
 
     @dtypes(torch.int64, torch.float64)
     def test_remainder_edge_cases(self, device, dtype):
@@ -17718,13 +17753,13 @@ def generate_test_function(cls,
 
         # Converts CPU tensors to device tensors
         device_tensor = cpu_tensor.to(dtype=dtype, device=device)
-        device_args = [arg.to(device=device) if torch.is_tensor(arg) else arg for arg in cpu_args]
+        device_args = [arg.to(device=device) if isinstance(arg, torch.Tensor) else arg for arg in cpu_args]
 
         # Converts float device tensors to half/bfloat16 when the dtype is half/bfloat16
         # Note: CPU half tensors don't support many operations.
         if dtype in {torch.half, torch.bfloat16}:
             device_args = [arg.to(dtype=dtype) if
-                           (torch.is_tensor(arg) and arg.dtype == torch.float) else arg
+                           (isinstance(arg, torch.Tensor) and arg.dtype == torch.float) else arg
                            for arg in device_args]
 
         # Runs the tensor op on CPU and device
