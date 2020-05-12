@@ -126,7 +126,7 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
             // Keep obj alive until jit::toIValue returns.
             // See Note [jit::toIValue barrow py::object refcnt] at
             // jit::toIValue function.
-            py::object obj = toPyObj(futureResponseMessage.constValue();
+            py::object obj = toPyObj(futureResponseMessage.constValue());
             jitFuture->markCompleted(jit::toIValue(obj, PyObjectType::get()));
           }
         });
