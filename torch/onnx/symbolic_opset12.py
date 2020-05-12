@@ -57,3 +57,24 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
 
 def nll_loss2d(g, self, target, weight, reduction, ignore_index):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
+
+def argmax(g, input, dim, keepdim):
+    if sym_help._is_none(dim):
+        from torch.onnx.symbolic_opset9 import reshape
+        flattened = reshape(g, input, (-1,))
+        return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False, select_last_index_i=True)
+    else:
+        dim = _parse_arg(dim, 'i')
+        keepdim = _parse_arg(keepdim, 'i')
+        return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=True)
+
+
+def argmin(g, input, dim, keepdim):
+    if sym_help._is_none(dim):
+        from torch.onnx.symbolic_opset9 import reshape
+        flattened = reshape(g, input, (-1,))
+        return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False, select_last_index_i=True)
+    else:
+        dim = _parse_arg(dim, 'i')
+        keepdim = _parse_arg(keepdim, 'i')
+        return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=True)
