@@ -3796,6 +3796,11 @@ class _TestTorchMixin(object):
             obj.__repr__()
             str(obj)
 
+        # test complex tensor
+        x = torch.tensor([2.3 + 4j, 7 + 6j])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([(2.3000+4.0000j), (7.0000+6.0000j)])''')
+
         # test big integer
         x = torch.tensor(2341234123412341)
         self.assertEqual(x.__repr__(), str(x))
@@ -14610,20 +14615,20 @@ class TestTorchDeviceType(TestCase):
 
         # test invalid input
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should be 2 dimensional', 
+            RuntimeError,
+            'A should be 2 dimensional',
             lambda: torch.eig(torch.ones((2))))
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should be square', 
+            RuntimeError,
+            'A should be square',
             lambda: torch.eig(torch.ones((2, 3))))
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should not contain infs or NaNs', 
+            RuntimeError,
+            'A should not contain infs or NaNs',
             lambda: torch.eig(np.inf * torch.ones((2, 2))))
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should not contain infs or NaNs', 
+            RuntimeError,
+            'A should not contain infs or NaNs',
             lambda: torch.eig(np.nan * torch.ones((2, 2))))
 
     @skipCUDAIfNoMagma
