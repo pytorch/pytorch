@@ -549,7 +549,7 @@ class CAFFE2_API Tensor {
   }
 
   template <typename F, typename... Args>
-  auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
+  decltype(auto) m(F func, Args&&... params) const {
     return func(*this, std::forward<Args>(params)...);
   }
 

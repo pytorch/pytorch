@@ -193,6 +193,7 @@ Basic activations are supported.
 * :meth:`~torch.nn.functional.adaptive_avg_pool2d` - Adaptive average pooling
 * :meth:`~torch.nn.functional.avg_pool2d` - Average pooling
 * :meth:`~torch.nn.functional.interpolate` - Interpolation
+* :meth:`~torch.nn.functional.hardswish` - Hard Swish
 * :meth:`~torch.nn.functional.upsample` - Upsampling
 * :meth:`~torch.nn.functional.upsample_bilinear` - Bilinear Upsampling 
 * :meth:`~torch.nn.functional.upsample_nearest` - Upsampling Nearest
@@ -365,6 +366,7 @@ quantization output parameters)
 * :func:`~torch.nn.quantized.functional.linear` — Linear (fully-connected) op
 * :func:`~torch.nn.quantized.functional.max_pool2d` — 2D max pooling
 * :func:`~torch.nn.quantized.functional.relu` — Rectified linear unit
+* :func:`~torch.nn.quantized.functional.hardswish` — Hard Swish
 * :func:`~torch.nn.quantized.functional.upsample` — Upsampler. Will be
   deprecated in favor of :func:`~torch.nn.quantized.functional.interpolate`
 * :func:`~torch.nn.quantized.functional.upsample_bilinear` — Bilenear
@@ -691,6 +693,7 @@ Functional interface
 .. autofunction:: adaptive_avg_pool2d
 .. autofunction:: avg_pool2d
 .. autofunction:: interpolate
+.. autofunction:: hardswish
 .. autofunction:: upsample
 .. autofunction:: upsample_bilinear
 .. autofunction:: upsample_nearest
