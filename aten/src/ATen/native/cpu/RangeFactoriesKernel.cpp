@@ -35,7 +35,7 @@ static void linspace_kernel(TensorIterator& iter, Scalar scalar_start, Scalar sc
           [start, end, step, halfway, steps, &idx]() -> Vec256<scalar_t> {
             Vec256<scalar_t> res;
             if (idx < halfway) {
-              res = Vec256<scalar_t>::arange(start + step * idx, step);
+              res = Vec256<scalar_t>::arange(start + step * static_cast<step_t>(idx), step);
             } else {
               res = Vec256<scalar_t>::arange(
                   end - step * static_cast<step_t>(steps - idx - 1), step);
