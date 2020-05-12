@@ -122,7 +122,7 @@ static CUDAStubs* cuda_stubs = default_stubs_addr;
 
 // Profiler state
 struct ProfilerThreadLocalState
-    : public at::DebugInfoBase
+    : public c10::DebugInfoBase,
       public c10::MemoryUsageReporter {
   explicit ProfilerThreadLocalState(
       const ProfilerConfig& config)
