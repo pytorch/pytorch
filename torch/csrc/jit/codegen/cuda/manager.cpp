@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/shape_inference.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -18,14 +19,22 @@ namespace cuda {
 constexpr auto DISABLED_FALLBACK = true;
 
 namespace {
-
-KernelArgsReq expandSizeSupport(const at::IntArrayRef sizes) {
-  KernelArgsReq req;
-  for (auto size : sizes) {
-    req.low_.push_back(size);
-    req.hi_.push_back(size);
+std::unique_ptr<KernelArgsReq> makePWKernelSupport(
+    const at::ArrayRef<IValue> inputs) {
+  auto req_ptr = std::make_unique<NaivePWKernelArgsReq>();
+  for (auto input : inputs) {
+    req_ptr->dims_.push_back(input.isTensor() ? input.toTensor().dim() : -1);
   }
-  return req;
+  return req_ptr;
+}
+
+// TODO: contiguity could be used for better kernel launch config.
+TensorContiguity infer_contiguity_from_tensor_type(
+    const std::shared_ptr<c10::TensorType>& tensor_type) {
+  TORCH_INTERNAL_ASSERT(tensor_type->isComplete());
+  return TensorContiguity(
+      *(tensor_type->sizes().concrete_sizes()),
+      *(tensor_type->strides().concrete_sizes()));
 }
 
 // CudaFusionManager holds compiled `CudaKernel` and handles all interfacing
@@ -85,7 +94,7 @@ class CudaFusionManager {
 
     // TODO: temporary hack
     auto cuda_kernel =
-        kernel_cache_[kernel_id].getKernelPtr(outputs[0].sizes());
+        kernel_cache_[kernel_id].getKernelPtr(inputs);
     if (cuda_kernel) {
       // TODO: update launch config for specific sizes;
       //       maybe we should store it in CudaKernel and compute it later
@@ -93,9 +102,8 @@ class CudaFusionManager {
     } else {
       // TODO: this should somehow be done after kernel compilation.
       //       we will want compileKernel to return a heuristic
-      auto kernel_arg_req = expandSizeSupport(outputs[0].sizes());
       cuda_kernel =
-          kernel_cache_[kernel_id].allocateKernelInCache(kernel_arg_req);
+          kernel_cache_[kernel_id].allocateKernelInCache(makePWKernelSupport(inputs));
 
       // lower torch::jit::Graph to torch::jit::fuser::cuda::fusion
       Fusion fusion;

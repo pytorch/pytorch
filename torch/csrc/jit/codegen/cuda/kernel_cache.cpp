@@ -9,16 +9,17 @@ namespace fuser {
 namespace cuda {
 
 at::optional<CudaKernel*> CudaKernelCache::getKernelPtr(
-    c10::IntArrayRef sizes) {
+    const at::ArrayRef<IValue> inputs) {
   for (auto& iter : kernels_) {
-    if (iter.first.matchKernelSize(sizes)) {
+    if (iter.first->matchKernelSize(inputs)) {
       return &(iter.second);
     }
   }
   return at::nullopt;
 }
 
-CudaKernel* CudaKernelCache::allocateKernelInCache(KernelArgsReq args_req) {
+CudaKernel* CudaKernelCache::allocateKernelInCache(
+    std::unique_ptr<KernelArgsReq>&& args_req) {
   kernels_.emplace_back(std::make_pair(std::move(args_req), CudaKernel()));
   return &(kernels_.back().second);
 }

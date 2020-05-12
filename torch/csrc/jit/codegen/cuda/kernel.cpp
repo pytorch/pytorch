@@ -157,13 +157,18 @@ std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
 
 } // namespace
 
-bool KernelArgsReq::matchKernelSize(const at::IntArrayRef inputs) {
-  if (inputs.size() != low_.size()) {
-    return false;
-  }
-  for (decltype(inputs.size()) i{0}; i < inputs.size(); i++) {
-    if (inputs[i] < low_[i] || inputs[i] > hi_[i]) {
-      return false;
+bool NaivePWKernelArgsReq::matchKernelSize(const at::ArrayRef<IValue> inputs) {
+  TORCH_INTERNAL_ASSERT(inputs.size()== dims_.size(),
+      "wrong number of inputs feed to generated kernel!");
+  for (size_t i = 0; i < dims_.size(); i++) {
+    if (inputs[i].isTensor()) {
+      if (inputs[i].toTensor().dim() != dims_[i]) {
+        return false;
+      }
+    } else {
+      if (dims_[i] != -1) {
+        return false;
+      }
     }
   }
   return true;

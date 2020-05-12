@@ -323,5 +323,30 @@ class TestCudaFuser(JitTestCase):
         where_jit = torch.jit.script(where)
         self._run_helper(where_jit, where, True, x, y, cond)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Requires profiling node to run cuda fuser")
+    @skipIfRocm
+    def test_dynamic_size(self):
+        def t(x : torch.Tensor, y : torch.Tensor, z : float):
+            o = x + y
+            o = o + z
+            return o
+        t_jit = torch.jit.script(t)
+        x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        y = torch.randn(32, 32, dtype=torch.float, device="cuda")
+        jit_o = t_jit(x, y, 2.0)
+        jit_o = t_jit(x, y, 2.0)
+        o = t(x, y, 2.0)
+        self.assertEqual(o, jit_o)
+        self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, 2.0)))
+        x = torch.randn(8, 32, 16, 8, dtype=torch.float, device="cuda")
+        y = torch.randn(16, 8, dtype=torch.float, device="cuda")
+        jit_o = t_jit(x, y, 2.0)
+        o = t(x, y, 2.0)
+        self.assertEqual(o, jit_o)
+        x = torch.randn(8, 17, 8, dtype=torch.float, device="cuda")
+        y = torch.randn(8, 17, 1, dtype=torch.float, device="cuda")
+        jit_o = t_jit(x, y, 2.0)
+
 if __name__ == '__main__':
     run_tests()

@@ -24,14 +24,18 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// Not checking explicit broadcasting yet.
-// check only shape falls in the range;
+// TODO: given that KernelArgsReq is becoming complicated and not really
+//       hashable, I should throw this inside CudaKernel.
+// Interfacing object allows kernel to return whether a given input
+// configuration could/should be handled.
 struct KernelArgsReq {
-  // We are checking accumulated output shape for now, this is a restricting
-  // aproach, we should check applicability on input tensor shapes instead.
-  bool matchKernelSize(const c10::IntArrayRef inputs);
-  std::vector<size_t> low_;
-  std::vector<size_t> hi_;
+  virtual bool matchKernelSize(const at::ArrayRef<IValue> inputs) = 0;
+};
+
+// naive P-wise kernel only requires same dimensionality for input tensors.
+struct NaivePWKernelArgsReq : KernelArgsReq {
+  virtual bool matchKernelSize(const at::ArrayRef<IValue> inputs);
+  std::vector<int> dims_;
 };
 
 class CudaKernel {
