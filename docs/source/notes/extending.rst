@@ -199,7 +199,7 @@ This is how a ``Linear`` module can be implemented::
 
             # Not a very smart way to initialize weights
             self.weight.data.uniform_(-0.1, 0.1)
-            if bias is not None:
+            if self.bias is not None:
                 self.bias.data.uniform_(-0.1, 0.1)
 
         def forward(self, input):
