@@ -433,7 +433,7 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG_FIRST_N(INFO, 1)
+    C10_LOG_FIRST_N(INFO, 1)
         << "gradient optimization operator in use: "
         << "CUDASparseAdagradFusedWithSparseLengthSumGradientOp"
         << " weight_decay_=" << weight_decay_;
@@ -586,7 +586,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG_FIRST_N(INFO, 1)
+    C10_LOG_FIRST_N(INFO, 1)
         << "gradient optimization operator in use: "
         << "CUDASparseAdagradFusedWithSparseLengthWeightedSumGradientOp"
         << " weight_decay_=" << weight_decay_;
@@ -784,7 +784,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG_FIRST_N(INFO, 1)
+    C10_LOG_FIRST_N(INFO, 1)
         << "gradient optimization operator in use: "
         << "CUDARowWiseSparseAdagradFusedWithSparseLengthSumGradientOp"
         << " weight_decay_=" << weight_decay_;
@@ -940,7 +940,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG_FIRST_N(INFO, 1)
+    C10_LOG_FIRST_N(INFO, 1)
         << "gradient optimization operator in use: "
         << "CUDARowWiseSparseAdagradFusedWithSparseLengthWeightedSumGradientOp"
         << " weight_decay_=" << weight_decay_;

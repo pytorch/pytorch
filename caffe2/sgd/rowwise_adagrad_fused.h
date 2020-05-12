@@ -140,7 +140,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG_FIRST_N(INFO, 1)
+    C10_LOG_FIRST_N(INFO, 1)
         << "gradient optimization operator in use: "
         << "RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp";
     const T decay = this->template GetSingleArgument<T>("decay", 1.0);
@@ -387,7 +387,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG_FIRST_N(INFO, 1)
+    C10_LOG_FIRST_N(INFO, 1)
         << "gradient optimization operator in use: "
         << "RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp";
   }
@@ -691,7 +691,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG_FIRST_N(INFO, 1)
+    C10_LOG_FIRST_N(INFO, 1)
         << "gradient optimization operator in use: "
         << "RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp";
     const T decay = this->template GetSingleArgument<T>("decay", 1.0);
