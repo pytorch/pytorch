@@ -649,7 +649,7 @@ void expectCannotCallConcatBoxed(DispatchKey dispatch_key) {
   ASSERT_TRUE(op.has_value());
   expectThrows<c10::Error>(
     [&] {callOp(*op, dummyTensor(dispatch_key), "1", "2", 3);},
-    "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::callUnboxed()."
+    "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::call()."
   );
 }
 

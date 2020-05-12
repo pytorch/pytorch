@@ -544,7 +544,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     // Original bias was float, so we requantize it here.
-    auto bias = at::quantize_per_tensor(
+    auto qbias = at::quantize_per_tensor(
         bias_fp32, kernel_scale * act_input_scale, 0, c10::kQInt32);
     // Update the input scale to not pack again.
     input_scale = act_input_scale;
@@ -552,19 +552,26 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     w = std::make_unique<qnnpack::PrePackConvWeights>(
         conv_p,
         reinterpret_cast<uint8_t*>(qnnp_w_data),
-        reinterpret_cast<int32_t*>(bias.template data_ptr<c10::qint32>()));
+        reinterpret_cast<int32_t*>(qbias.template data_ptr<c10::qint32>()));
     pack_w = w.get();
+    if (at::globalContext().releaseWeightsWhenPrepacking()) {
+        // On mobile, we release the original weight by resetting the intrusive_ptr.
+        // Calling unpack after this will throw an assertion.
+        orig_weight.reset();
+    }
   }
   TORCH_INTERNAL_ASSERT(pack_w != nullptr, "Packed Weights are NULL");
   const auto output_shape = MakeConvOutputShape<kSpatialDim>(
       N, M, {H, W}, kernel, stride_, padding_, dilation_);
-  TORCH_CHECK(
-      std::all_of(
-          output_shape.begin(),
-          output_shape.end(),
-          [](int64_t i) { return i > 0; }),
-      "quantized::conv2d (qnnpack): each dimension of output tensor should "
-      "be greater than 0.")
+  if (act_nhwc.numel() > 0) {
+    TORCH_CHECK(
+        std::all_of(
+            output_shape.begin(),
+            output_shape.end(),
+            [](int64_t i) { return i > 0; }),
+        "quantized::conv2d (qnnpack): each dimension of output tensor should "
+        "be greater than 0.")
+  }
 
   // Allocate output Tensor and a buffer for QNNPACK to use
   at::Tensor output = at::native::empty_affine_quantized(

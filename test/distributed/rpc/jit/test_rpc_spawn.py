@@ -3,9 +3,9 @@ import unittest
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import TEST_WITH_ASAN, run_tests
-from torch.testing._internal.distributed.rpc.jit.rpc_test import (
+from torch.testing._internal.distributed.rpc.jit.rpc_test import JitRpcTest
+from torch.testing._internal.distributed.rpc.jit.rpc_test_faulty import (
     JitFaultyAgentRpcTest,
-    JitRpcTest,
 )
 
 

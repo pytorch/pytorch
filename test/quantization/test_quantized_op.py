@@ -17,6 +17,7 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines
 
@@ -319,6 +320,7 @@ class TestQuantizedOps(TestCase):
                          message="Sigmoid failed: {} vs. {}".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qhardsigmoid op."""
+    @skipIfNoFBGEMM
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams()))
@@ -327,10 +329,8 @@ class TestQuantizedOps(TestCase):
 
 
     """Tests the correctness of the quantized::qlayer_norm op."""
+    @skipIfNoFBGEMM
     def test_qlayer_norm(self):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
-            return
-
         # hypothesis is flaky for this test, create test cases manually
         max_sides = (4, 5)
         side_lens = (1, 8, 11)
@@ -441,7 +441,7 @@ class TestQuantizedOps(TestCase):
                          message="TanH failed: {} vs. {}".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::clamp op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
            min_val=hu.floats(-1e6, 1e6, allow_nan=False),
@@ -468,14 +468,13 @@ class TestQuantizedOps(TestCase):
             self.assertEqual(qY, qY_hat, message="{} qclamp failed".format(name))
 
     """Tests the correctness of the quantized::hardtanh op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+    @skipIfNoFBGEMM
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams()),
            min_val=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
            max_val=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
     def test_hardtanh(self, X, min_val, max_val):
-        if 'fbgemm' not in torch.backends.quantized.supported_engines:
-            return
         with override_quantized_engine('fbgemm'):
             X, (scale, zero_point, torch_type) = X
 
@@ -509,7 +508,8 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
 
     """Tests the correctness of the quantized::hardswish op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+    @skipIfNoFBGEMM
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams()),
            Y_scale=st.floats(1e-6, 1e6),
@@ -796,8 +796,8 @@ class TestQuantizedOps(TestCase):
 
     """Tests channel shuffle operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
-                                              min_side=2, max_side=32),
-                       qparams=hu.qparams()),
+                                              min_side=2, max_side=32, max_numel=10**5),
+                       qparams=hu.qparams(dtypes=[torch.quint8])),
            groups=st.integers(2, 6))
     def test_channel_shuffle(self, X, groups):
         X, (scale, zero_point, torch_type) = X
@@ -810,10 +810,10 @@ class TestQuantizedOps(TestCase):
         a_out = torch.nn.functional.channel_shuffle(a, groups)
 
         a_ref = torch.quantize_per_tensor(a_out, scale=scale,
-                                          zero_point=zero_point, dtype=torch.quint8)
+                                          zero_point=zero_point, dtype=torch_type)
         a_ref = a_ref.dequantize()
         qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
-                                       dtype=torch.quint8)
+                                       dtype=torch_type)
 
         a_hat = torch.nn.functional.channel_shuffle(qa, groups)
         self.assertEqual(a_ref, a_hat.dequantize(),
@@ -1187,8 +1187,9 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qX_hat = op(qX, output_size=output_size)
-            self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0,
-                             message=error_message.format(name, X_ref, qX_hat))
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0,
+                                       message=error_message.format(name, X_ref, qX_hat))
             self.assertEqual(scale, qX_hat.q_scale(),
                              message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -1233,8 +1234,9 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             X_hat = op(qX, output_size=output_size)
             self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
-            self.assertEqual(X_ref, X_hat.int_repr(), atol=1.0,
-                             message="{} results are off".format(name))
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(X_ref, X_hat.int_repr(), atol=1.0,
+                                       message="{} results are off".format(name))
             self.assertEqual(scale, X_hat.q_scale(),
                              message=error_message.format(name + '.scale', scale, X_hat.q_scale()))
             self.assertEqual(zero_point, X_hat.q_zero_point(),
@@ -1395,8 +1397,9 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
-            self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0,
-                             message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0,
+                                       message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
             self.assertEqual(scale, qX_hat.q_scale(),
                              message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -1448,8 +1451,9 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
-            self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0,
-                             message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0,
+                                       message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
             self.assertEqual(scale, qX_hat.q_scale(),
                              message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -1576,15 +1580,13 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qX.equal(qX2), equal_ref(qX, qX2))
 
 
+    @skipIfNoFBGEMM
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
-                                              min_side=1, max_side=32),
+                                              min_side=1, max_side=32, max_numel=10**5),
                        qparams=hu.qparams(dtypes=(torch.quint8, torch.qint8))),
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
     def test_batch_norm2d(self, X, Y_scale, Y_zero_point):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
-            return
-
         with override_quantized_engine("fbgemm"):
             X, (scale_x, zero_point_x, dtype_x) = X
 
@@ -1604,10 +1606,8 @@ class TestQuantizedOps(TestCase):
             quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, dtype_x)
             self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
 
+    @skipIfNoFBGEMM
     def test_group_norm(self):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
-            return
-
         # hypothesis is flaky for this test, create test cases manually
         batches_list = (1, 7)
         num_groups_list = (1, 2)
@@ -1691,10 +1691,8 @@ class TestQuantizedOps(TestCase):
                 self.assertTrue(pct_diff < 1e-6)
                 self.assertTrue(pct_diff_off_by_one < 0.01)
 
+    @skipIfNoFBGEMM
     def test_instance_norm(self):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
-            return
-
         max_sides = (4, 5)
         side_lens = (2, 8, 11)
         torch_types = (torch.qint8, torch.quint8)
@@ -1770,10 +1768,8 @@ class TestQuantizedOps(TestCase):
                 self.assertTrue(pct_diff < 1e-6)
                 self.assertTrue(pct_diff_off_by_one < 0.01)
 
+    @skipIfNoFBGEMM
     def test_batch_norm2d_relu(self):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
-            return
-
         # hypothesis too slow for this test, create test cases manually
         max_sides = (4, 5)
         side_lens = (1, 8, 11)
@@ -1820,10 +1816,8 @@ class TestQuantizedOps(TestCase):
                     quantize_ref.int_repr().numpy(),
                     message="{} vs {}".format(qy, quantize_ref))
 
+    @skipIfNoFBGEMM
     def test_batch_norm3d(self):
-        if "fbgemm" not in torch.backends.quantized.supported_engines:
-            return
-
         # hypothesis too slow for this test, create test cases manually
         side_lens = (1, 8, 11)
         torch_types = (torch.qint8, torch.quint8)
@@ -1980,9 +1974,7 @@ class TestDynamicQuantizedLinear(TestCase):
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          message="torch.ops.quantized.linear_dynamic (fbgemm) results are off")
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @skipIfNoFBGEMM
     @given(
         batch_size=st.integers(1, 4),
         input_channels=st.integers(16, 32),
@@ -2713,7 +2705,6 @@ class TestQuantizedConv(unittest.TestCase):
                 (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w),
                 channelwise)
 
-
 class TestPadding(TestCase):
     @given(batch_size=st.integers(1, 64),
            channels=st.integers(1, 64),
@@ -2760,6 +2751,7 @@ class TestQNNPackOps(TestCase):
             self.assertEqual(qY, qY_hat)
 
     """Tests the correctness of the quantized::qnnpack_tanh op."""
+    @skipIfNoFBGEMM
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams(dtypes=torch.quint8)))
     def test_qnnpack_tanh(self, X):
@@ -2785,6 +2777,7 @@ class TestQNNPackOps(TestCase):
                              message="QNNPACK TanH failed (FBGEMM ref)!")
 
     """Tests the correctness of the quantized::qnnpack_sigmoid op."""
+    @skipIfNoFBGEMM
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams(dtypes=torch.quint8)))
     def test_qnnpack_sigmoid(self, X):
@@ -2809,6 +2802,7 @@ class TestQNNPackOps(TestCase):
             self.assertEqual(qYserver, qY_hat,
                              message="QNNPACK Sigmoid failed (FBGEMM ref)!")
 
+    @skipIfNoFBGEMM
     def test_qnnpack_sigmoid_sweep(self):
         # Input parameters
         f_min = -4.0
@@ -3072,7 +3066,7 @@ class TestQNNPackOps(TestCase):
             np.testing.assert_array_almost_equal(Y.int_repr().numpy(), qY.int_repr().numpy(), decimal=0)
 
     """Tests the correctness of the quantized::hardswish op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams(dtypes=(torch.quint8))),
            Y_scale=st.floats(1e-6, 1e6),
@@ -3081,14 +3075,14 @@ class TestQNNPackOps(TestCase):
         _test_hardswish(self, X, Y_scale, Y_zero_point, 'qnnpack')
 
     """Tests the correctness of the quantized::hardsigmoid op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams(dtypes=(torch.quint8))))
     def test_qhardsigmoid(self, X):
         _test_hardsigmoid(self, X, 'qnnpack')
 
     """Tests the correctness of the quantized::hardtanh op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams(dtypes=torch.quint8)),
            min_val=hu.floats(-1e6, -9.999999974752427e-07, allow_nan=False, allow_infinity=False),
@@ -3114,6 +3108,21 @@ class TestQNNPackOps(TestCase):
                 qY, qY_hat,
                 message="hardtanh failed:\nactual {}\nexpected {}".format(qY_hat, qY))
 
+    def test_qconv_empty_batch(self):
+        with override_quantized_engine('qnnpack'):
+            a = torch.ones((0, 2, 4, 4), dtype=torch.float32)
+            qa = torch.quantize_per_tensor(a, scale=1.0, zero_point=0,
+                                           dtype=torch.quint8)
+            w = torch.randn((2, 2, 2, 2), dtype=torch.float)
+            qw = torch.quantize_per_tensor(w, scale=1.0, zero_point=0, dtype=torch.qint8)
+            bias_float = torch.ones(2, dtype=torch.float)
+            strides = [1, 1]
+            pads = [0, 0]
+            dilations = [1, 1]
+
+            w_packed = torch.ops.quantized.conv2d_prepack(qw, bias_float, strides, pads, dilations, 1)
+            result = torch.ops.quantized.conv2d(qa, w_packed, 1.0, 0)
+            self.assertEqual(result.shape, (0, 2, 3, 3))
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):

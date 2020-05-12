@@ -91,34 +91,36 @@ function assert_git_not_dirty() {
     fi
 }
 
-if which sccache > /dev/null; then
-  # Save sccache logs to file
-  sccache --stop-server || true
-  rm ~/sccache_error.log || true
-  # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
-  # https://github.com/pytorch/pytorch/pull/16645
-  SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
-
-  # Report sccache stats for easier debugging
-  sccache --zero-stats
-  function sccache_epilogue() {
-    echo '=================== sccache compilation log ==================='
-    python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
-    echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
-    sccache --show-stats
+if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
+  if which sccache > /dev/null; then
+    # Save sccache logs to file
     sccache --stop-server || true
-  }
-  trap_add sccache_epilogue EXIT
-fi
+    rm ~/sccache_error.log || true
+    # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
+    # https://github.com/pytorch/pytorch/pull/16645
+    SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
 
-if which ccache > /dev/null; then
-  # Report ccache stats for easier debugging
-  ccache --zero-stats
-  ccache --show-stats
-  function ccache_epilogue() {
+    # Report sccache stats for easier debugging
+    sccache --zero-stats
+    function sccache_epilogue() {
+      echo '=================== sccache compilation log ==================='
+      python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
+      echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
+      sccache --show-stats
+      sccache --stop-server || true
+    }
+    trap_add sccache_epilogue EXIT
+  fi
+
+  if which ccache > /dev/null; then
+    # Report ccache stats for easier debugging
+    ccache --zero-stats
     ccache --show-stats
-  }
-  trap_add ccache_epilogue EXIT
+    function ccache_epilogue() {
+      ccache --show-stats
+    }
+    trap_add ccache_epilogue EXIT
+  fi
 fi
 
 # It's called a COMPACT_JOB_NAME because it's distinct from the
