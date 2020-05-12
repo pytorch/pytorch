@@ -528,7 +528,7 @@ class emit_nvtx(object):
             torch.autograd.ProfilerConfig(
                 torch.autograd.ProfilerState.NVTX,
                 self.record_shapes,
-                false
+                False
             )
         )
         return self
