@@ -53,6 +53,13 @@ encode the operation history. Every new function requires you to implement 2 met
   - :meth:`~torch.autograd.function._ContextMethodMixin.mark_non_differentiable` must
     be used to tell the engine if an output is not differentiable.
 
+.. note::
+
+  By default, all the output Tensors that are of differentiable type will be set to
+  require gradient and have all autograd metadata set for them. If you don't want
+  them to require gradients, you can use the `mark_non_differentiable` method mentioned
+  above. For output Tensors that are not of differentiable type (integer types for example),
+  they won't be marked as requiring gradients.
 
 Below you can find code for a ``Linear`` function from :mod:`torch.nn`, with
 additional comments::
