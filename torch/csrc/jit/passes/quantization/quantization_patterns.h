@@ -450,14 +450,14 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
 
   // aten::avg_pool1d
   std::string avg_pool1d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
+graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad):
           %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::avg_pool1d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
+          %r = aten::avg_pool1d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad)
 )" + common_general_value_op;
 
   std::string aten_avg_pool1d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
-          %r = aten::avg_pool1d(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
+graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad):
+          %r = aten::avg_pool1d(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad)
           return (%r) )";
 
   // aten::avg_pool2d
@@ -522,14 +522,14 @@ graph(%a_quant, %output_size):
 
   // aten::mean
   std::string mean = R"(
-graph(%a_quant):
+graph(%a_quant, %dim):
           %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::mean(%a_dequant)
+          %r = aten::mean(%a_dequant, %dim)
 )" + common_general_value_op;
 
   std::string aten_mean = R"(
-graph(%a_quant):
-          %r = aten::mean(%a_quant)
+graph(%a_quant, %dim):
+          %r = aten::mean(%a_quant, %dim)
           return (%r) )";
 
   return {
