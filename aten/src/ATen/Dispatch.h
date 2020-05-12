@@ -263,7 +263,7 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     }                                                                       \
   }()
 
-#define AT_DISPATCH_FLOATING_AND_C10_OMPLEX_TYPES_AND2(                     \
+#define AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES_AND2(                    \
     SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...)                              \
   [&] {                                                                     \
     const auto& the_type = TYPE;                                            \
