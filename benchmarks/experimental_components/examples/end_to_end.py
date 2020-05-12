@@ -24,7 +24,6 @@ NOTE:
 """
 
 import argparse
-import collections
 import multiprocessing
 import multiprocessing.dummy
 import os
@@ -34,7 +33,7 @@ import sys
 import tempfile
 
 import torch
-from utils import Compare, FuzzedParameter, FuzzedTensor, Fuzzer, Timer
+from utils import FuzzedParameter, FuzzedTensor, Fuzzer, Timer
 
 
 _MIN_RUN_SEC = 0.5
@@ -167,7 +166,8 @@ def compare_times(master_results, branch_results):
         absolute_times[_MASTER][m_master.description] = m_master.median
         absolute_times[_BRANCH][m_master.description] = m_branch.median
 
-    sort_by_value = lambda x: sorted(x.items(), key=lambda i: (i[1], i[0]))
+    def sort_by_value(x):
+        return sorted(x.items(), key=lambda i: (i[1], i[0]))
     ordered_descriptions = [i[0] for i in sort_by_value(relative_improvement)]
 
     n_regressed = len([i for i in relative_improvement.values() if i < -0.1])
@@ -183,12 +183,11 @@ def compare_times(master_results, branch_results):
 
     print(f"\nImprovement    Absolute  |{'':>7}dtype{'':>6}numel   ", end="")
     print(f"mask_reuse     mask_true_pct      x_layout    mask_layout\n{'=' * 114}")
-    print_block = lambda result_filter: print_result_block(
-        master_results + branch_results,
-        result_filter,
-        relative_improvement,
-        absolute_times,
-    )
+    def print_block(result_filter):
+        print_result_block(
+            master_results + branch_results, result_filter,
+            relative_improvement, absolute_times,
+        )
     print_block(ordered_descriptions[:15])
     print("\n...\n")
     print_block(ordered_descriptions[-15:])
@@ -215,11 +214,9 @@ def pretty_str(m):
     x_numel = tensor_parameters["x"]["numel"]
     mask_numel = tensor_parameters["mask"]["numel"]
     mask_reuse = int(x_numel / mask_numel)
-    order = lambda name: str(
-        "contiguous"
-        if tensor_parameters[name]["is_contiguous"]
-        else tensor_parameters[name]["order"]
-    )
+    def order(name):
+        return str("contiguous" if tensor_parameters[name]["is_contiguous"]
+                   else tensor_parameters[name]["order"])
     return (
         f"{x_numel:>9}  {mask_reuse:>9}{'':>12}"
         f"{m.metadata['params']['mask_fraction'] * 100:>3.0f}%      "

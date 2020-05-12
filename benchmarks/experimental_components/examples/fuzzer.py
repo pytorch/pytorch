@@ -5,9 +5,6 @@ $ python -m examples.fuzzer
 
 import sys
 
-import numpy as np
-import torch
-
 import utils as benchmark_utils
 
 
@@ -61,7 +58,8 @@ def main():
 
     # More string munging to make pretty output.
     print(f"Average attemts per valid config: {1. / (1. - add_fuzzer.rejection_rate):.1f}")
-    time_fn = lambda m: m.median / m.metadata["numel"]
+    def time_fn(m):
+        return m.median / m.metadata["numel"]
     measurements.sort(key=time_fn)
 
     template = f"{{:>6}}{' ' * 19}Size    Shape{' ' * 13}X order        Y order\n{'-' * 80}"

@@ -1,9 +1,7 @@
 """Timer class based on the timeit.Timer class, but torch aware."""
 
-import logging
-import sys
 import timeit
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 import numpy as np
 import torch

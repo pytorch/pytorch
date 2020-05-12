@@ -1,13 +1,11 @@
 """Display class to aggregate and print the results of many measurements."""
 import collections
 import itertools as it
-import logging
 from typing import List, Tuple
 
 import numpy as np
 
 import utils.common as common
-import utils.timer as timer
 
 __all__ = ["Compare"]
 

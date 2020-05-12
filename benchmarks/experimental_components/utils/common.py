@@ -3,7 +3,7 @@
 import collections
 import contextlib
 import logging
-from typing import List, NamedTuple, Optional
+from typing import List, Optional
 
 import numpy as np
 import torch
@@ -39,7 +39,7 @@ class Measurement:
         description: Optional[str],
         env: Optional[str],
         stmt: Optional[str],
-        metadata: Optional[dict]=None,
+        metadata: Optional[dict] = None,
     ):
         self.number_per_run = number_per_run
         self.times = times
@@ -78,10 +78,11 @@ class Measurement:
 
     def _populate_warnings(self):
         warnings, rel_iqr = [], self._iqr / self._median * 100
-        add_warning = lambda msg: warnings.append(
-            f"  WARNING: Interquartile range is {rel_iqr:.1f}% "
-            f"of the median measurement.\n           {msg}"
-        )
+        def add_warning(msg):
+            warnings.append(
+                f"  WARNING: Interquartile range is {rel_iqr:.1f}% "
+                f"of the median measurement.\n           {msg}"
+            )
 
         if self._iqr / self._median > _IQR_GROSS_WARN_THRESHOLD:
             add_warning("This suggests significant environmental influence.")
