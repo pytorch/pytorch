@@ -28,7 +28,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase, \
     requires_gloo, requires_nccl, requires_nccl_version, \
-    skip_if_not_multigpu, skip_if_lt_x_gpu, skip_for_known_issues, get_timeout, skip_if_rocm, \
+    skip_if_not_multigpu, skip_if_lt_x_gpu, get_timeout, skip_if_rocm, \
     simple_sparse_reduce_tests
 
 from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, \
@@ -2099,148 +2099,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
-    @skip_for_known_issues
-    def test_dist_broadcast_coalesced_nccl(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-
-        device = torch.device('cuda')
-
-        for fine_grained in [False, True]:
-            target = torch.arange(60, dtype=torch.float16, device=device).chunk(5)
-            target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
-            target += torch.arange(60, dtype=torch.float16, device=device).chunk(5)
-            target += torch.arange(60, dtype=torch.float64, device=device).chunk(5)
-            target += torch.arange(60, dtype=torch.float16, device=device).chunk(5)
-            target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
-
-            if self.is_master:
-                # All processes should have these tensors in the end.
-                tensors = target
-            else:
-                # Non-master processes start with empty tensors and should be
-                # filled with the tensors from the master.
-                tensors = torch.zeros(60, dtype=torch.float16, device=device).chunk(5)
-                tensors += torch.zeros(60, dtype=torch.float32, device=device).chunk(5)
-                tensors += torch.zeros(60, dtype=torch.float16, device=device).chunk(5)
-                tensors += torch.zeros(60, dtype=torch.float64, device=device).chunk(5)
-                tensors += torch.zeros(60, dtype=torch.float16, device=device).chunk(5)
-                tensors += torch.zeros(60, dtype=torch.float32, device=device).chunk(5)
-
-            c10d._dist_broadcast_coalesced(
-                process_group,
-                tensors,
-                buffer_size=256,
-                fine_grained=fine_grained)
-
-            self.assertEqual(tensors, target)
-
-    @requires_gloo()
-    @skip_if_not_multigpu
-    def test_dist_broadcast_coalesced_gloo(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
-
-        device = torch.device('cuda')
-
-        for fine_grained in [False, True]:
-            target = torch.arange(60, dtype=torch.float16, device=device).chunk(5)
-            target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
-            target += torch.arange(60, dtype=torch.float16, device=device).chunk(5)
-            target += torch.arange(60, dtype=torch.float64, device=device).chunk(5)
-            target += torch.arange(60, dtype=torch.float16, device=device).chunk(5)
-            target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
-
-            if self.is_master:
-                # All processes should have these tensors in the end.
-                tensors = target
-            else:
-                # Non-master processes start with empty tensors and should be
-                # filled with the tensors from the master.
-                tensors = torch.zeros(60, dtype=torch.float16, device=device).chunk(5)
-                tensors += torch.zeros(60, dtype=torch.float32, device=device).chunk(5)
-                tensors += torch.zeros(60, dtype=torch.float16, device=device).chunk(5)
-                tensors += torch.zeros(60, dtype=torch.float64, device=device).chunk(5)
-                tensors += torch.zeros(60, dtype=torch.float16, device=device).chunk(5)
-                tensors += torch.zeros(60, dtype=torch.float32, device=device).chunk(5)
-
-            c10d._dist_broadcast_coalesced(
-                process_group,
-                tensors,
-                buffer_size=128,
-                fine_grained=fine_grained)
-
-            self.assertEqual(tensors, target)
-
-    @requires_gloo()
-    @skip_if_not_multigpu
-    def test_sync_params_no_buffers(self, dtype=torch.double):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
-
-        # Use all available devices on every process here (data is small, so should be fine).
-        devices = gpus_for_rank(self.world_size)[self.rank]
-        target = torch.arange(10, dtype=dtype, device='cuda:{}'.format(devices[0])).chunk(5)
-        parameter_data = [target]
-        parameter_data += [torch.zeros(10, dtype=dtype, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
-        buffer_data = [[]] * len(parameter_data)
-
-        c10d._sync_params(
-            process_group,
-            parameter_data=parameter_data,
-            buffer_data=buffer_data,
-            devices=devices,
-            broadcast_bucket_size=10,
-            broadcast_buffers=False)
-
-        for device_data in parameter_data:
-            for i, parameter in enumerate(device_data):
-                self.assertEqual(parameter, target[i])
-
-    @requires_gloo()
-    @skip_if_not_multigpu
-    def test_sync_params_with_buffers(self, dtype=torch.double):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
-
-        devices = gpus_for_rank(self.world_size)[self.rank]
-        target = torch.arange(10, dtype=dtype, device='cuda:{}'.format(devices[0])).chunk(5)
-        parameter_data = [target]
-        parameter_data += [torch.zeros(10, dtype=dtype, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
-
-        # sync_params should do a dist_broadcast for buffers, so we only populate the master buffers and
-        # then check that other processes' tensors end up matching.
-
-        if self.is_master:
-            buffer_data = [target]
-            buffer_data += [torch.zeros(10, dtype=dtype, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
-        else:
-            buffer_data = [torch.zeros(10, dtype=dtype, device=torch.device('cuda', d)).chunk(5) for d in devices]
-
-        c10d._sync_params(
-            process_group,
-            parameter_data=parameter_data,
-            buffer_data=buffer_data,
-            devices=devices,
-            broadcast_bucket_size=10,
-            broadcast_buffers=True)
-
-        for device_data in parameter_data:
-            for i, parameter in enumerate(device_data):
-                self.assertEqual(parameter, target[i])
-
-        for device_data in buffer_data:
-            for i, buffer in enumerate(device_data):
-                self.assertEqual(buffer, target[i])
-
-    @requires_nccl()
-    @skip_if_not_multigpu
     def test_fp16(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -2269,53 +2127,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self.assertFalse(
             any(torch.isinf(p.grad).any() for p in ddp_model.parameters())
         )
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_queue_reduction(self):
-        # Set up process group.
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-
-        # Get this process' split of devices.
-        devices = gpus_for_rank(self.world_size)[self.rank]
-        grads_batch = [(torch.ones(10, device=torch.device('cuda', d)) *
-                       (self.rank + 1)).chunk(5)
-                       for d in devices]
-
-        work, local_grad_sum = c10d._queue_reduction(process_group,
-                                                     grads_batch,
-                                                     devices)
-        # The first return value should be the allreduce work item.
-        self.assertTrue(isinstance(work, c10d.Work))
-        # The second return value will be the finished allreduced gradients.
-        self.assertTrue(isinstance(local_grad_sum, torch.Tensor))
-
-        # Wait for the allreduce to finish.
-        work.wait()
-
-        # The expected result of the allreduce should be the average
-        self.assertEqual(local_grad_sum,
-                         torch.ones(10) * (self.world_size + 1) * len(devices) / 2.0)
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_sync_reduction(self):
-        # Set up process group.
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-
-        # Get this process' split of devices.
-        devices = gpus_for_rank(self.world_size)[self.rank]
-        grads_batch = [(torch.ones(10, device=torch.device('cuda', d)) *
-                       (self.rank + 1)).chunk(5)
-                       for d in devices]
-        work, local_grad_sum = c10d._queue_reduction(process_group,
-                                                     grads_batch,
-                                                     devices)
-        c10d._sync_reduction(work, grads_batch[0], local_grad_sum)
-        # The expected result of the allreduce should be the average
-        self.assertEqual(grads_batch[0], (torch.ones(10) * (self.world_size + 1) * len(devices) / 2.0).chunk(5))
 
     @requires_nccl()
     @skip_if_not_multigpu

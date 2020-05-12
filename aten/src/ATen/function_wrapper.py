@@ -44,6 +44,7 @@ switch (dispatch_scalar_type) {
     default:
         AT_ERROR("${api_name} not supported on ${Type} for ", dispatch_scalar_type);
 }
+${switch_epilogue}
 """)
 
 LEGACY_TH_DEFINITION_CASE = CodeTemplate("""\
@@ -1414,19 +1415,7 @@ def create_derived(backend_type_env, declarations):
 
                 if ret['kind'] == 'arguments':
                     case_body.extend([call + ';' for call in calls])
-                    arguments_indices = ret['arguments']
-                    arguments = [option['arguments'][argi]
-                                 for argi in arguments_indices]
-                    if len(arguments_indices) == 1:
-                        arg = arguments[0]
-                        case_body.append("return {};".format(arg['name']))
-                    else:
-                        types = [to_return_type(arg, option)['type']
-                                 for arg in arguments]
-                        # TODO: check for move semantics...
-                        names = [arg['name'] for arg in arguments]
-                        case_body.append(CodeTemplate("return std::tuple<${types}>(${names});").substitute(
-                            types=types, names=names))
+                    # return handled later
                 elif ret['kind'] == 'type':
                     assert len(calls) == 1
                     call = calls[0]
@@ -1444,7 +1433,24 @@ def create_derived(backend_type_env, declarations):
                     raise Exception("NYI - return handling")
 
                 cases.append(LEGACY_TH_DEFINITION_CASE.substitute(case_env, case_body=case_body))
-        body.append(LEGACY_TH_DEFINITION_SWITCH_STATEMENT.substitute(env, cases=cases, switch_prologue=switch_prologue))
+        switch_epilogue = ''
+        if ret['kind'] == 'arguments':
+            arguments_indices = ret['arguments']
+            arguments = [option['arguments'][argi]
+                         for argi in arguments_indices]
+            if len(arguments_indices) == 1:
+                arg = arguments[0]
+                switch_epilogue = "return {};".format(arg['name'])
+            else:
+                types = [to_return_type(arg, option)['type']
+                         for arg in arguments]
+                # TODO: check for move semantics...
+                names = [arg['name'] for arg in arguments]
+                switch_epilogue = CodeTemplate("return std::tuple<${types}>(${names});").substitute(
+                    types=types, names=names)
+        body.append(LEGACY_TH_DEFINITION_SWITCH_STATEMENT.substitute(env, cases=cases,
+                                                                     switch_prologue=switch_prologue,
+                                                                     switch_epilogue=switch_epilogue))
         return body
 
     def process_legacy_th_option(option):

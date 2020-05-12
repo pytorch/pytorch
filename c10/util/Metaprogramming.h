@@ -65,15 +65,13 @@ namespace detail {
 template<template <class> class Condition, size_t index, class Enable, class... Args> struct extract_arg_by_filtered_index_;
 template<template <class> class Condition, size_t index, class Head, class... Tail>
 struct extract_arg_by_filtered_index_<Condition, index, std::enable_if_t<!Condition<Head>::value>, Head, Tail...> {
-  static auto call(Head&& /*head*/, Tail&&... tail)
-  -> decltype(extract_arg_by_filtered_index_<Condition, index, void, Tail...>::call(std::forward<Tail>(tail)...)) {
+  static decltype(auto) call(Head&& /*head*/, Tail&&... tail) {
     return extract_arg_by_filtered_index_<Condition, index, void, Tail...>::call(std::forward<Tail>(tail)...);
   }
 };
 template<template <class> class Condition, size_t index, class Head, class... Tail>
 struct extract_arg_by_filtered_index_<Condition, index, std::enable_if_t<Condition<Head>::value && index != 0>, Head, Tail...> {
-  static auto call(Head&& /*head*/, Tail&&... tail)
-  -> decltype(extract_arg_by_filtered_index_<Condition, index-1, void, Tail...>::call(std::forward<Tail>(tail)...)) {
+  static decltype(auto) call(Head&& /*head*/, Tail&&... tail) {
     return extract_arg_by_filtered_index_<Condition, index-1, void, Tail...>::call(std::forward<Tail>(tail)...);
   }
 };
@@ -85,15 +83,13 @@ struct extract_arg_by_filtered_index_<Condition, index, void> {
 };
 template<template <class> class Condition, size_t index, class Head, class... Tail>
 struct extract_arg_by_filtered_index_<Condition, index, std::enable_if_t<Condition<Head>::value && index == 0>, Head, Tail...> {
-  static auto call(Head&& head, Tail&&... /*tail*/)
-  -> decltype(std::forward<Head>(head)) {
+  static decltype(auto) call(Head&& head, Tail&&... /*tail*/) {
     return std::forward<Head>(head);
   }
 };
 }
 template<template <class> class Condition, size_t index, class... Args>
-auto extract_arg_by_filtered_index(Args&&... args)
--> decltype(detail::extract_arg_by_filtered_index_<Condition, index, void, Args...>::call(std::forward<Args>(args)...)) {
+decltype(auto) extract_arg_by_filtered_index(Args&&... args) {
   static_assert(is_type_condition<Condition>::value, "In extract_arg_by_filtered_index, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
   return detail::extract_arg_by_filtered_index_<Condition, index, void, Args...>::call(std::forward<Args>(args)...);
 }
@@ -125,8 +121,8 @@ template<class ResultType> struct filter_map_<ResultType, 0> {
 };
 }
 
-template<class ResultType, template <class> class Condition, class Mapper, class... Args> auto filter_map(const Mapper& mapper, Args&&... args)
--> decltype(detail::filter_map_<ResultType, typelist::count_if<Condition, typelist::typelist<Args...>>::value>::template call<Condition, Mapper, Args...>(mapper, std::make_index_sequence<typelist::count_if<Condition, typelist::typelist<Args...>>::value>(), std::forward<Args>(args)...)) {
+template<class ResultType, template <class> class Condition, class Mapper, class... Args>
+decltype(auto) filter_map(const Mapper& mapper, Args&&... args) {
   static_assert(is_type_condition<Condition>::value, "In filter_map<Result, Condition>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
 
   static constexpr size_t num_results = typelist::count_if<Condition, typelist::typelist<Args...>>::value;

@@ -87,11 +87,6 @@ class Int8OpsTest(unittest.TestCase):
     def test_int8_fc(
         self, n, m, k, rand_seed, quantize_bias
     ):  # Int8FCFakeAcc32NNPI only supports quantize_bias=True
-        n = 1
-        m = 3
-        k = 1
-        rand_seed = 0
-        quantize_bias = True
         print(
             "n={}, m={}, k={}, rand_seed={}, quantize_bias={}".format(
                 n, m, k, rand_seed, quantize_bias
@@ -161,7 +156,7 @@ class Int8OpsTest(unittest.TestCase):
         Y_glow = workspace.FetchBlob("Y")
 
         diff = Y_fbgemm - Y_glow
-        if np.count_nonzero(diff) > 10:
+        if np.count_nonzero(diff) * 10 > diff.size:
             print_test_debug_info(
                 "int8_fc",
                 {
