@@ -21,4 +21,3 @@ def regurgitate(depth):
 
 if __name__ == "__main__":
     regurgitate(3)
-

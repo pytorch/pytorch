@@ -1,12 +1,4 @@
-from collections import OrderedDict
-
-from cimodel.data.pytorch_build_data import TopLevelNode, CONFIG_TREE_DATA
-import cimodel.data.dimensions as dimensions
-import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
-
-from dataclasses import dataclass, field
-from typing import List, Optional
 
 
 NON_PR_BRANCH_LIST = [
@@ -67,11 +59,11 @@ class WindowJob:
 
         props_dict = {
             "build_environment": build_environment_string,
-            "python_version": "3.6",
-            "vc_version": self.vscode_spec.dotted_version(),
-            "vc_year": self.vscode_spec.year,
+            "python_version": miniutils.quote("3.6"),
+            "vc_version": miniutils.quote(self.vscode_spec.dotted_version()),
+            "vc_year": miniutils.quote(str(self.vscode_spec.year)),
             "vc_product": vc_product,
-            "use_cuda": int(is_running_on_cuda),
+            "use_cuda": miniutils.quote(str(int(is_running_on_cuda))),
             "requires": ["setup"] + prerequisite_jobs,
         }
 
@@ -93,7 +85,7 @@ class WindowJob:
             if is_running_on_cuda:
                 props_dict["executor"] = "windows-with-nvidia-gpu"
 
-        props_dict["cuda_version"] = 10 if self.cuda_version else "cpu"
+        props_dict["cuda_version"] = miniutils.quote(str(10)) if self.cuda_version else "cpu"
         props_dict["name"] = "_".join(name_parts)
 
         return [{key_name: props_dict}]
