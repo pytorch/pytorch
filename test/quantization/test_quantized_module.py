@@ -10,8 +10,13 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     prepare_dynamic,
     _make_conv_test_input,
+    skipIfNoFBGEMM,
 )
-from torch.testing._internal.common_quantized import _calculate_dynamic_qparams, override_quantized_engine, supported_qengines
+from torch.testing._internal.common_quantized import (
+    _calculate_dynamic_qparams,
+    override_quantized_engine,
+    override_qengines,
+)
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
@@ -26,17 +31,6 @@ quantized operator implementations correctly in the user facing APIs, these are
 not correctness test for the underlying quantized operators. For correctness
 test please see `caffe2/test/test_quantized_op.py`.
 '''
-
-# TODO: Update all quantization tests to use this decorator.
-# Currently for some of the tests it seems to have inconsistent params
-# for fbgemm vs qnnpack.
-def override_qengines(qfunction):
-    def test_fn(*args, **kwargs):
-        for qengine in supported_qengines:
-            with override_quantized_engine(qengine):
-                result = qfunction(*args, **kwargs)
-        return result
-    return test_fn
 
 class TestStaticQuantizedModule(QuantizationTestCase):
     def test_relu(self):
@@ -118,15 +112,19 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # Test serialization of quantized Linear Module using state_dict
         model_dict = qlinear.state_dict()
-        self.assertEqual(model_dict['_packed_params.weight'], W_q)
-        if use_bias:
-            self.assertEqual(model_dict['_packed_params.bias'], B)
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
         loaded_dict = torch.load(b)
         for key in model_dict:
-            self.assertEqual(model_dict[key], loaded_dict[key])
+            if isinstance(model_dict[key], torch._C.ScriptObject):
+                assert isinstance(loaded_dict[key], torch._C.ScriptObject)
+                w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
+                w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
+                self.assertEqual(w_model, w_loaded)
+                self.assertEqual(b_model, b_loaded)
+            else:
+                self.assertEqual(model_dict[key], loaded_dict[key])
         if use_fused:
             loaded_qlinear = nnq_fused.LinearReLU(in_features, out_features)
         else:
@@ -164,9 +162,11 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # self.assertEqual(qlinear.scale, loaded.scale)
         # self.assertEqual(qlinear.zero_point, loaded.zero_point)
         # <end code>
-        with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
-            b = io.BytesIO()
-            torch.save(qlinear, b)
+        #
+        # Currently disabled after TorchBind PR
+        # with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
+        #     b = io.BytesIO()
+        #     torch.save(qlinear, b)
 
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X_q], [Z_ref])), check_save_load=True)
@@ -341,8 +341,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # Smoke test extra_repr
         self.assertTrue(module_name in str(converted_qconv_module))
 
-    # TODO: reenable use_fused=True, currently it is set to False
-    # because of the flakiness
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            H=st.integers(4, 16),
@@ -363,7 +361,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
            Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
-           use_fused=st.sampled_from([False]),
+           use_fused=st.booleans(),
            use_channelwise=st.booleans())
     @override_qengines
     def test_conv2d_api(
@@ -408,6 +406,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
             Y_zero_point, use_bias, use_fused, use_channelwise)
 
+    @skipIfNoFBGEMM
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16]),
            D=st.integers(3, 6),
@@ -449,33 +448,32 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         stride = (stride_d, stride_h, stride_w)
         padding = (pad_d, pad_h, pad_w)
         dilation = (dilation, dilation, dilation)
-        if 'fbgemm' in supported_qengines:
-            with override_quantized_engine('fbgemm'):
-                if use_fused:
-                    module_name = "QuantizedConvReLU3d"
-                    qconv_module = nnq_fused.ConvReLU3d(
-                        in_channels, out_channels, kernel_size, stride, padding,
-                        dilation, groups, use_bias, padding_mode="zeros")
-                else:
-                    module_name = "QuantizedConv3d"
-                    qconv_module = nnq.Conv3d(
-                        in_channels, out_channels, kernel_size, stride, padding,
-                        dilation, groups, use_bias, padding_mode="zeros")
-
-                conv_module = nn.Conv3d(
+        with override_quantized_engine('fbgemm'):
+            if use_fused:
+                module_name = "QuantizedConvReLU3d"
+                qconv_module = nnq_fused.ConvReLU3d(
                     in_channels, out_channels, kernel_size, stride, padding,
                     dilation, groups, use_bias, padding_mode="zeros")
-                if use_fused:
-                    relu_module = nn.ReLU()
-                    conv_module = nni.ConvReLU3d(conv_module, relu_module)
-                conv_module = conv_module.float()
+            else:
+                module_name = "QuantizedConv3d"
+                qconv_module = nnq.Conv3d(
+                    in_channels, out_channels, kernel_size, stride, padding,
+                    dilation, groups, use_bias, padding_mode="zeros")
 
-                self._test_conv_api_impl(
-                    module_name, qconv_module, conv_module, batch_size,
-                    in_channels_per_group, input_feature_map_size,
-                    out_channels_per_group, groups, kernel_size, stride, padding,
-                    dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
-                    Y_zero_point, use_bias, use_fused, use_channelwise)
+            conv_module = nn.Conv3d(
+                in_channels, out_channels, kernel_size, stride, padding,
+                dilation, groups, use_bias, padding_mode="zeros")
+            if use_fused:
+                relu_module = nn.ReLU()
+                conv_module = nni.ConvReLU3d(conv_module, relu_module)
+            conv_module = conv_module.float()
+
+            self._test_conv_api_impl(
+                module_name, qconv_module, conv_module, batch_size,
+                in_channels_per_group, input_feature_map_size,
+                out_channels_per_group, groups, kernel_size, stride, padding,
+                dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
+                Y_zero_point, use_bias, use_fused, use_channelwise)
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.
@@ -572,6 +570,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
+    @skipIfNoFBGEMM
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -605,15 +604,19 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         # Test serialization of dynamic quantized Linear Module using state_dict
         model_dict = qlinear.state_dict()
-        self.assertEqual(model_dict['_packed_params.weight'], W_q)
-        if use_bias:
-            self.assertEqual(model_dict['_packed_params.bias'], B)
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
         loaded_dict = torch.load(b)
         for key in model_dict:
-            self.assertEqual(model_dict[key], loaded_dict[key])
+            if isinstance(model_dict[key], torch._C.ScriptObject):
+                assert isinstance(loaded_dict[key], torch._C.ScriptObject)
+                w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
+                w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
+                self.assertEqual(w_model, w_loaded)
+                self.assertEqual(b_model, b_loaded)
+            else:
+                self.assertEqual(model_dict[key], loaded_dict[key])
         loaded_qlinear = nnqd.Linear(in_features, out_features)
         loaded_qlinear.load_state_dict(loaded_dict)
 
@@ -646,9 +649,9 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         # self.assertEqual(qlinear.weight(), loaded.weight())
         # self.assertEqual(qlinear.zero_point, loaded.zero_point)
         # <end code>
-        with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
-            b = io.BytesIO()
-            torch.save(qlinear, b)
+        # with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
+        #     b = io.BytesIO()
+        #     torch.save(qlinear, b)
 
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X], [Z_ref])), check_save_load=True)
