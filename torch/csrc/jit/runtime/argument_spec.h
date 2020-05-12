@@ -18,7 +18,7 @@ namespace jit {
 // dimensionalitities and types of inputs.
 
 inline static at::Device ConvertIntToCPUOrCUDA(int device) {
-  return device < 0 ? at::kCPU : at::Device(at::DeviceType::CUDA, device);
+  return device < 0 ? at::kCPU : at::Device(DeviceType::CUDA, device);
 }
 struct ArgumentInfo {
   friend struct ArgumentSpec;
@@ -44,11 +44,11 @@ struct ArgumentInfo {
   TypePtr toType() const {
     if (!defined())
       return TensorType::get();
+
     return TensorType::create(
         type(),
         ConvertIntToCPUOrCUDA(device()),
-        c10::VaryingShape(dim()),
-        c10::VaryingShape(dim()),
+        c10::optional<size_t>(dim()),
         requires_grad());
   }
   operator TypePtr() const {
@@ -257,8 +257,7 @@ struct CompleteArgumentSpec {
         if (pod.defined) {
           pod.type = static_cast<int>(t.scalar_type());
           pod.device = (!t.is_cuda()) ? -1 : t.get_device();
-          pod.requires_grad =
-              with_grad && autograd::as_variable_ref(t).requires_grad();
+          pod.requires_grad = with_grad && t.requires_grad();
           total_dims += t.ndimension();
           auto sizes = t.sizes();
           std::copy(sizes.begin(), sizes.end(), next_dim);
@@ -354,7 +353,11 @@ struct CompleteArgumentInfo {
     if (!defined())
       return TensorType::get();
     return TensorType::create(
-        type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());
+        type(),
+        ConvertIntToCPUOrCUDA(device()),
+        c10::VaryingShape<int64_t>{sizes()},
+        c10::VaryingShape<int64_t>{strides()},
+        requires_grad());
   }
 
  private:
@@ -441,12 +444,12 @@ inline c10::optional<int8_t> convertOptional(
 
 namespace std {
 
-template <>
-struct hash<c10::VaryingShape> {
-  size_t operator()(const c10::VaryingShape& vs) const {
+template <typename T>
+struct hash<c10::VaryingShape<T>> {
+  size_t operator()(const c10::VaryingShape<T>& vs) const {
     return torch::get_hash(
         vs.size(),
-        vs.size() ? vs.sizes().value() : std::vector<c10::optional<int64_t>>());
+        vs.size() ? vs.sizes().value() : std::vector<c10::optional<T>>());
   }
 };
 
@@ -455,8 +458,8 @@ struct hash<c10::TensorType> {
   size_t operator()(const c10::TensorType& ptt) const {
     return torch::get_hash<
         c10::optional<int8_t>,
-        c10::VaryingShape,
-        c10::VaryingShape,
+        c10::VaryingShape<int64_t>,
+        c10::VaryingShape<int64_t>,
         c10::optional<bool>>(
         torch::jit::convertOptional(ptt.scalarType()),
         ptt.sizes(),

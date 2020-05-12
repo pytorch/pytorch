@@ -1,8 +1,10 @@
 import torch
+from torch.types import _TensorOrTensors
 from torch._six import container_abcs, istuple
 import torch.testing
 from itertools import product
 import warnings
+from typing import Callable, Union, Optional
 
 def zero_gradients(x):
     if isinstance(x, torch.Tensor):
@@ -16,7 +18,7 @@ def zero_gradients(x):
 
 def make_jacobian(input, num_out):
     if isinstance(input, torch.Tensor):
-        if not input.is_floating_point():
+        if not input.is_floating_point() and not input.is_complex():
             return None
         if not input.requires_grad:
             return None
@@ -96,8 +98,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                     outb = fn(input).clone()
                     x_value[x_idx] = orig
                     r = (outb - outa) / (2 * eps)
-                    if is_complex:
-                        r = r.abs()
                     d_tensor[d_idx] = r.detach().reshape(-1)
         elif x_tensor.layout == torch._mkldnn:
             # Use .data here to get around the version check
@@ -120,8 +120,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 outb = fn([x_tensor_mkl])
 
                 r = (outb - outa) / (2 * eps)
-                if is_complex:
-                    r = r.abs()
                 d_tensor[d_idx] = r.detach().reshape(-1)
         else:
             # Use .data here to get around the version check
@@ -134,8 +132,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 outb = fn(input).clone()
                 x_tensor[x_idx] = orig
                 r = (outb - outa) / (2 * eps)
-                if is_complex:
-                    r = r.abs()
                 d_tensor[d_idx] = r.detach().reshape(-1)
 
     return jacobian
@@ -195,9 +191,27 @@ def _differentiable_outputs(x):
     return tuple(o for o in _as_tuple(x) if o.requires_grad)
 
 
-def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True, check_sparse_nnz=False, nondet_tol=0.0):
+# Note [VarArg of Tensors]
+# ~~~~~~~~~~~~~~~~~~~~~~~~
+# 'func' accepts a vararg of tensors, which isn't expressable in the type system at the moment.
+# If https://mypy.readthedocs.io/en/latest/additional_features.html?highlight=callable#extended-callable-types is accepted,
+# the '...' first argument of Callable can be replaced with VarArg(Tensor).
+# For now, we permit any input.
+# the '...' first argument of Callable can be replaced with VarArg(Tensor).
+# For now, we permit any input.
+
+def gradcheck(
+    func: Callable[..., Union[_TensorOrTensors]],  # See Note [VarArg of Tensors]
+    inputs: _TensorOrTensors,
+    eps: float = 1e-6,
+    atol: float = 1e-5,
+    rtol: float = 1e-3,
+    raise_exception: bool = True,
+    check_sparse_nnz: bool = False,
+    nondet_tol: float = 0.0
+) -> bool:
     r"""Check gradients computed via small finite differences against analytical
-    gradients w.r.t. tensors in :attr:`inputs` that are of floating point type
+    gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
     and with ``requires_grad=True``.
 
     The check between numerical and analytical gradients uses :func:`~torch.allclose`.
@@ -248,12 +262,12 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     for inp in tupled_inputs:
         if isinstance(inp, torch.Tensor):
             if inp.requires_grad:
-                if inp.dtype != torch.float64:
+                if not (inp.dtype == torch.float64 or inp.dtype == torch.complex128):
                     warnings.warn(
                         'At least one of the inputs that requires gradient '
-                        'is not of double precision floating point. '
+                        'is not of double precision floating point or complex. '
                         'This check will likely fail if all the inputs are '
-                        'not of double precision floating point. ')
+                        'not of double precision floating point or complex. ')
                 any_input_requiring_grad = True
                 inp.retain_grad()
             else:
@@ -337,12 +351,20 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     return True
 
 
-def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-3,
-                  gen_non_contig_grad_outputs=False, raise_exception=True,
-                  nondet_tol=0.0):
+def gradgradcheck(
+    func: Callable[..., _TensorOrTensors],  # See Note [VarArg of Tensors]
+    inputs: _TensorOrTensors,
+    grad_outputs: Optional[_TensorOrTensors] = None,
+    eps: float = 1e-6,
+    atol: float = 1e-5,
+    rtol: float = 1e-3,
+    gen_non_contig_grad_outputs: bool = False,
+    raise_exception: bool = True,
+    nondet_tol: float = 0.0
+) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and
-    :attr:`grad_outputs` that are of floating point type and with
+    :attr:`grad_outputs` that are of floating point or complex type and with
     ``requires_grad=True``.
 
     This function checks that backpropagating through the gradients computed
@@ -393,7 +415,8 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         # If grad_outputs is not specified, create random Tensors of the same
         # shape, type, and device as the outputs
         def randn_like(x):
-            y = torch.testing.randn_like(x if x.is_floating_point() else x.double(), memory_format=torch.legacy_contiguous_format)
+            y = torch.testing.randn_like(
+                x if (x.is_floating_point() or x.is_complex()) else x.double(), memory_format=torch.legacy_contiguous_format)
             if gen_non_contig_grad_outputs:
                 y = torch.testing.make_non_contiguous(y)
             return y.requires_grad_()

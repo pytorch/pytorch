@@ -21,23 +21,8 @@ CONFIG_TREE_DATA = [
             ("5", [
                 XImportant("3.6"),  # This is actually the ASAN build
             ]),
-            ("7", [
-                ("3.6", [
-                    ("xla", [XImportant(True)]),
-                ]),
-            ]),
         ]),
         ("cuda", [
-            ("9", [
-                # Note there are magic strings here
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L21
-                # and
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L143
-                # and
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
-                # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
-                X("3.6"),
-            ]),
             ("9.2", [X("3.6")]),
             ("10.1", [X("3.6")]),
             ("10.2", [
@@ -55,6 +40,18 @@ CONFIG_TREE_DATA = [
                     ("android_abi", [X("arm-v7a")]),
                     ("android_abi", [X("arm-v8a")]),
                 ])
+            ]),
+        ]),
+    ]),
+    ("bionic", [
+        ("clang", [
+            ("9", [
+                XImportant("3.6"),
+            ]),
+            ("9", [
+                ("3.6", [
+                    ("xla", [XImportant(True)]),
+                ]),
             ]),
         ]),
     ]),
@@ -100,6 +97,7 @@ class DistroConfigNode(TreeConfigNode):
 
         next_nodes = {
             "xenial": XenialCompilerConfigNode,
+            "bionic": BionicCompilerConfigNode,
         }
         return next_nodes[distro]
 
@@ -204,8 +202,28 @@ class XenialCompilerConfigNode(TreeConfigNode):
 
         return XenialCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
 
+class BionicCompilerConfigNode(TreeConfigNode):
+
+    def modify_label(self, label):
+        return label or "<unspecified>"
+
+    def init2(self, node_name):
+        self.props["compiler_name"] = node_name
+
+    # noinspection PyMethodMayBeStatic
+    def child_constructor(self):
+
+        return BionicCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
 
 class XenialCompilerVersionConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["compiler_version"] = node_name
+
+    # noinspection PyMethodMayBeStatic
+    def child_constructor(self):
+        return PyVerConfigNode
+
+class BionicCompilerVersionConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["compiler_version"] = node_name
 

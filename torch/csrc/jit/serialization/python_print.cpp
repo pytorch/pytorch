@@ -500,7 +500,7 @@ struct PythonPrintImpl {
       indent();
       body_ << useOf(lhs[i]);
       if (requiresAnnotation(lhs[i], rhs[i])) {
-        body_ << ": " << lhs[i]->type()->python_str();
+        body_ << ": " << lhs[i]->type()->python_str(type_printer_);
       }
       body_ << " = " << useOf(rhs[i]) << "\n";
     }
@@ -606,21 +606,36 @@ struct PythonPrintImpl {
   //   _0 = x.add_(b)
   //   _1 = some_long + expression
   //   r = foo(_0, _1)
-  void splitLongInlines(at::ArrayRef<Value*> inputs) {
-    size_t long_inline_slice = 0;
-    // find the last input that is too long
-    for (size_t i = 0; i < inputs.size(); ++i) {
-      if (isLongInline(inputs[i]->node())) {
-        long_inline_slice = i + 1;
+
+  void splitLongInlines(Value* v) {
+    std::vector<Value*> to_split_reversed;
+    Use u = v->uses().at(0);
+    scanLongInlines(u.user, u.offset, to_split_reversed);
+    for (auto it = to_split_reversed.rbegin(), end = to_split_reversed.rend();
+         it != end;
+         ++it) {
+      printOutputDefinition((*it)->node(), *useOf(*it));
+    }
+  }
+
+  void scanLongInlines(
+      Node* user,
+      int64_t offset,
+      std::vector<Value*>& to_split_reversed) {
+    auto it = visited_split_inline_uses_.find(user);
+    bool present = it != visited_split_inline_uses_.end();
+    for (int64_t i = offset; i >= (present ? it->second + 1 : 0); --i) {
+      Value* prev_arg = user->input(i);
+      if (isNonConstantInline(prev_arg)) {
+        to_split_reversed.push_back(prev_arg);
       }
     }
-    // un-inline everything through the last long line
-    // constants are ignored since long constants are never inlined in the
-    // first place
-    for (size_t i = 0; i < long_inline_slice; ++i) {
-      if (isNonConstantInline(inputs[i])) {
-        printOutputDefinition(inputs[i]->node(), *useOf(inputs[i]));
-      }
+    visited_split_inline_uses_[user] = offset;
+    if (!present && output_inline_.count(user)) {
+      Use u = user->output()->uses().at(0);
+      scanLongInlines(u.user, int64_t(u.offset) - 1, to_split_reversed);
+      // -1 because the actual use is still being
+      // emitted so it cannot be split
     }
   }
 
@@ -682,7 +697,6 @@ struct PythonPrintImpl {
     scanTypeDependencies(node);
     if (!print_const && node->kind() == prim::Constant)
       return;
-    splitLongInlines(node->inputs());
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
@@ -755,7 +769,7 @@ struct PythonPrintImpl {
           if (i > 0) {
             body_ << ", ";
           }
-          body_ << useOf(v) << ": " << v->type()->python_str();
+          body_ << useOf(v) << ": " << v->type()->python_str(type_printer_);
         }
         body_ << "):\n";
         printBody(graph->block());
@@ -774,6 +788,9 @@ struct PythonPrintImpl {
           // this node is safe to inline, so assign the output value
           // to that expression directly
           assignValue(node->output(), ss);
+          if (isLongLine(ss->str())) {
+            splitLongInlines(node->output());
+          }
         }
     }
   }
@@ -787,7 +804,7 @@ struct PythonPrintImpl {
       if (v.isTuple() && v.type()->expect<TupleType>()->schema()) {
         // print the namedtuple constructor and let rest of tuple printing
         // continue
-        ss << v.type()->expect<TupleType>()->python_str();
+        ss << v.type()->expect<TupleType>()->python_str(type_printer_);
       }
       return false;
     };
@@ -839,14 +856,15 @@ struct PythonPrintImpl {
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
       case prim::Uninitialized: {
-        stmt << "uninitialized(" << node->output()->type()->python_str() << ")";
+        stmt << "uninitialized("
+             << node->output()->type()->python_str(type_printer_) << ")";
       } break;
       case prim::Constant: {
         if (node->outputs().size() == 1 &&
             node->output()->type()->kind() == TypeKind::FunctionType) {
           auto fn = node->output()->type()->expect<FunctionType>();
           registerDependency(fn);
-          stmt << fn->name()->qualifiedName();
+          stmt << fn->python_str(type_printer_);
         } else if (!node->mustBeNone()) {
           IValue v = toIValue(node->output()).value();
           printConstant(stmt, v);
@@ -857,8 +875,8 @@ struct PythonPrintImpl {
       case aten::ScalarImplicit:
       case aten::FloatImplicit:
       case aten::IntImplicit: {
-        stmt << "annotate(" << node->output()->type()->python_str() << ", "
-             << useOf(node->input()) << ")";
+        stmt << "annotate(" << node->output()->type()->python_str(type_printer_)
+             << ", " << useOf(node->input()) << ")";
       } break;
       case aten::Int: {
         printValueList(stmt, node->inputs(), "int(", ")");
@@ -884,7 +902,7 @@ struct PythonPrintImpl {
       case prim::TupleConstruct: {
         if (auto qualname =
                 node->output()->type()->expect<TupleType>()->name()) {
-          stmt << qualname->qualifiedName();
+          stmt << node->output()->type()->python_str(type_printer_);
         }
         printValueList(
             stmt, node->inputs(), "(", node->inputs().size() == 1 ? ",)" : ")");
@@ -903,13 +921,14 @@ struct PythonPrintImpl {
         // Empty lists must be annotated with their type so the compiler knows
         // what type is supposed to be inside them
         if (node->inputs().size() == 0) {
-          stmt << "annotate(" << node->output()->type()->python_str()
-               << ", [])";
+          stmt << "annotate("
+               << node->output()->type()->python_str(type_printer_) << ", [])";
           // If we can't infer the type based on what's inside, explicitly
           // annotate it to disambiguate.
           // This happens for List[Tensor] vs. List[Optional[Tensor]]
         } else if (!elementTypeCanBeInferredFromMembers(elem_type)) {
-          stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+          stmt << "annotate("
+               << node->output()->type()->python_str(type_printer_) << ", ";
           printValueList(stmt, node->inputs(), "[", "]");
           stmt << ")";
           // Otherwise just print a list
@@ -927,7 +946,8 @@ struct PythonPrintImpl {
         if (node->inputs().size() == 0 ||
             !elementTypeCanBeInferredFromMembers(dict_type->getKeyType()) ||
             !elementTypeCanBeInferredFromMembers(dict_type->getValueType())) {
-          stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+          stmt << "annotate("
+               << node->output()->type()->python_str(type_printer_) << ", ";
           printDict(stmt, node->inputs());
           stmt << ")";
           // Otherwise just print a dict
@@ -937,8 +957,8 @@ struct PythonPrintImpl {
       } break;
       case prim::CreateObject: {
         const auto classType = node->output()->type()->expect<ClassType>();
-        stmt << classType->python_str() << ".__new__("
-             << classType->python_str() << ")";
+        stmt << classType->python_str(type_printer_) << ".__new__("
+             << classType->python_str(type_printer_) << ")";
       } break;
       case prim::GetAttr: {
         const auto obj = node->inputs().at(0);
@@ -972,9 +992,9 @@ struct PythonPrintImpl {
 
         if (auto selfClass = self->type()->cast<ClassType>()) {
           registerDependency(selfClass);
-          const auto method = selfClass->getMethod(node->s(attr::name));
+          const Function& method = selfClass->getMethod(node->s(attr::name));
           TORCH_INTERNAL_ASSERT(
-              method->qualname() ==
+              method.qualname() ==
               QualifiedName(selfClass->name()->qualifiedName(), methodName));
         } else if (auto selfInterface = self->type()->cast<InterfaceType>()) {
           registerDependency(selfInterface);
@@ -993,7 +1013,7 @@ struct PythonPrintImpl {
         if (node->input()->type()->isSubtypeOf(NoneType::get()) ||
             node->input()->mustBeNone()) {
           auto input_type = OptionalType::create(node->output()->type());
-          stmt << "annotate(" << input_type->python_str() << ", "
+          stmt << "annotate(" << input_type->python_str(type_printer_) << ", "
                << useOf(node->input()) << ")";
         } else {
           stmt << useOf(node->input());
@@ -1006,14 +1026,15 @@ struct PythonPrintImpl {
       // equivalent op
       case prim::unchecked_unwrap_optional:
       case prim::unchecked_cast: {
-        stmt << "unchecked_cast(" << node->output()->type()->python_str()
-             << ", " << useOf(node->input()) << ")";
+        stmt << "unchecked_cast("
+             << node->output()->type()->python_str(type_printer_) << ", "
+             << useOf(node->input()) << ")";
       } break;
       case prim::isinstance: {
         stmt << "isinstance(" << useOf(node->input()) << ", ";
         const auto& types = node->tys(attr::types);
         if (types.size() == 1) {
-          stmt << types.at(0)->python_str();
+          stmt << types.at(0)->python_str(type_printer_);
         } else {
           // check multiple things, e.g. (str, list, int)
           stmt << "(";
@@ -1022,7 +1043,7 @@ struct PythonPrintImpl {
             if (!first) {
               stmt << ", ";
             }
-            stmt << typ->python_str();
+            stmt << typ->python_str(type_printer_);
             first = false;
           }
           stmt << ")";
@@ -1030,7 +1051,8 @@ struct PythonPrintImpl {
         stmt << ")";
       } break;
       case prim::tolist: {
-        stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+        stmt << "annotate(" << node->output()->type()->python_str(type_printer_)
+             << ", ";
         stmt << useOf(node->input(0)) << ".tolist()"
              << ")";
       } break;
@@ -1150,10 +1172,11 @@ struct PythonPrintImpl {
         // the flag print_first_argument_type determines when to do this
         body_ << arg_name;
         if (print_first_argument_type) {
-          body_ << ": " << arg.type()->python_str();
+          body_ << ": " << arg.type()->python_str(type_printer_);
         }
       } else {
-        body_ << ",\n    " << arg_name << ": " << arg.type()->python_str();
+        body_ << ",\n    " << arg_name << ": "
+              << arg.type()->python_str(type_printer_);
       }
       if (arg.default_value()) {
         printDefaultValue(arg, body_, *arg.default_value());
@@ -1161,7 +1184,8 @@ struct PythonPrintImpl {
       assignValue(*param_it++, arg_name);
     }
 
-    body_ << ") -> " << schema.returns().at(0).type()->python_str() << ":\n";
+    body_ << ") -> " << schema.returns().at(0).type()->python_str(type_printer_)
+          << ":\n";
     printBody(graph.block());
   }
 
@@ -1172,10 +1196,12 @@ struct PythonPrintImpl {
   PythonPrintImpl(
       std::vector<at::Tensor>& tensor_table,
       std::vector<c10::NamedTypePtr>& deps_table,
+      c10::TypePrinter type_printer,
       bool enforce_importable)
       : body_(&source_range_stack_),
         tensor_table_(tensor_table),
         deps_table_(deps_table),
+        type_printer_(type_printer),
         enforce_importable_(enforce_importable) {}
 
   void printClass(const ClassTypePtr& classType) {
@@ -1236,11 +1262,12 @@ struct PythonPrintImpl {
           // Print out a direct manipulation of the annotations dict, like:
           //   __annotations__["0"] = SomeType
           body_ << "__annotations__["
-                << "\"" << name << "\"] = " << type->python_str() << "\n";
+                << "\"" << name << "\"] = " << type->python_str(type_printer_)
+                << "\n";
         } else {
           // Otherwise: just emit a python 3 attribute annotation, like:
           //   foo : SomeType
-          body_ << name << " : " << type->python_str() << "\n";
+          body_ << name << " : " << type->python_str(type_printer_) << "\n";
         }
       }
 
@@ -1251,7 +1278,7 @@ struct PythonPrintImpl {
 
         indent();
         body_ << name << " : "
-              << "Final[" << v.type()->python_str() << "] = ";
+              << "Final[" << v.type()->python_str(type_printer_) << "] = ";
         auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
         printConstant(*ss, v);
         body_ << ss->str() << "\n";
@@ -1278,7 +1305,8 @@ struct PythonPrintImpl {
         for (const auto& attr : tupleType->schema()->arguments()) {
           TORCH_INTERNAL_ASSERT(attr.type());
           indent();
-          body_ << attr.name() << " : " << attr.type()->python_str() << "\n";
+          body_ << attr.name() << " : "
+                << attr.type()->python_str(type_printer_) << "\n";
         }
       }
     } else if (auto interfaceType = type->cast<InterfaceType>()) {
@@ -1300,11 +1328,12 @@ struct PythonPrintImpl {
                at::ArrayRef<Argument>(method.arguments()).slice(1)) {
             auto type = arg.type();
             registerClassDependencies(type);
-            body_ << ", " << arg.name() << ": " << type->python_str();
+            body_ << ", " << arg.name() << ": "
+                  << type->python_str(type_printer_);
           }
           auto return_type = method.returns().at(0).type();
           registerClassDependencies(return_type);
-          body_ << ") -> " << return_type->python_str() << ":\n";
+          body_ << ") -> " << return_type->python_str(type_printer_) << ":\n";
           indent();
           body_ << "  pass\n";
         }
@@ -1321,6 +1350,13 @@ struct PythonPrintImpl {
   // assigning a temporary variable
   std::unordered_set<Node*> output_inline_;
 
+  // see [reordering of inlines]
+  // used to track parts of an inline statement we already scanned
+  // for splitting long lines, so that we do not revisit them causing n^2
+  // behavior. stores the maximum offset into inputs that has already been
+  // scanned for the node.
+  std::unordered_map<Node*, int64_t> visited_split_inline_uses_;
+
   // what valid identifiers are in use for the current function
   std::unordered_set<std::string> used_names_;
 
@@ -1332,6 +1368,10 @@ struct PythonPrintImpl {
   // table.
   std::vector<c10::NamedTypePtr>& deps_table_;
 
+  // A function that, given a named type, returns us the correct string to print
+  // for it.
+  c10::TypePrinter type_printer_;
+
   // when we print this, should we error if the resulting output would
   // not be able to be reparsed?
   bool enforce_importable_;
@@ -1340,10 +1380,12 @@ struct PythonPrintImpl {
 PythonPrint::PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& deps_table,
+    c10::TypePrinter type_printer,
     bool enforce_importable)
     : pImpl(std::make_shared<PythonPrintImpl>(
           tensor_table,
           deps_table,
+          type_printer,
           enforce_importable)) {}
 
 void PythonPrint::printNamedType(const c10::NamedTypePtr& type) {

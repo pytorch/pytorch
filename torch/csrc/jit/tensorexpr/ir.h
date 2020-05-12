@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
@@ -48,7 +49,6 @@ inline int getPrecedence(IRNodeType ty) {
     case kXor:
       return 12;
     case kCompareSelect:
-    case kLet:
       return 16;
     default:
       return 99;
@@ -154,11 +154,11 @@ class And : public BinaryOpNode<And> {
  public:
   And(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kAnd) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+    if (!lhs->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in And");
     }
   }
 };
@@ -167,11 +167,11 @@ class Or : public BinaryOpNode<Or> {
  public:
   Or(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kOr) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+    if (!lhs->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in Or");
     }
   }
 };
@@ -180,11 +180,11 @@ class Xor : public BinaryOpNode<Xor> {
  public:
   Xor(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kXor) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+    if (!lhs->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in Xor");
     }
   }
 };
@@ -197,7 +197,7 @@ class Lshift : public BinaryOpNode<Lshift> {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in Lshift");
     }
   }
 };
@@ -210,7 +210,7 @@ class Rshift : public BinaryOpNode<Rshift> {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in Rshift");
     }
   }
 };
@@ -288,7 +288,7 @@ Expr* getImmediateByType(ScalarType immType, T initialVal) {
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
     return new Name##Imm(initialVal);
-    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
       throw unsupported_dtype();
@@ -307,7 +307,7 @@ T immediateAs(const Expr* e) {
   if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
     return imm->value();                                          \
   }
-  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
   throw unsupported_dtype();
   return 0;
@@ -319,7 +319,7 @@ bool immediateEquals(const Expr* e, T val) {
   if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
     return imm->value() == val;                                   \
   }
-  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
   throw unsupported_dtype();
   return false;
@@ -335,73 +335,6 @@ bool immediateIsNegative(const T* e) {
 #undef TYPE_CASE
   return false;
 }
-
-// Creates a new Expr of the given type with the provided lhs and rhs.
-static const Expr* newBinaryOpOfType(
-    IRNodeType expr_type,
-    const Expr* lhs,
-    const Expr* rhs,
-    bool option) {
-  switch (expr_type) {
-    case IRNodeType::kAdd:
-      return new Add(lhs, rhs);
-    case IRNodeType::kSub:
-      return new Sub(lhs, rhs);
-    case IRNodeType::kMul:
-      return new Mul(lhs, rhs);
-    case IRNodeType::kDiv:
-      return new Div(lhs, rhs);
-    case IRNodeType::kMod:
-      return new Mod(lhs, rhs);
-    case IRNodeType::kMax:
-      return new Max(lhs, rhs, option);
-    case IRNodeType::kMin:
-      return new Min(lhs, rhs, option);
-    case IRNodeType::kAnd:
-      return new And(lhs, rhs);
-    case IRNodeType::kXor:
-      return new Xor(lhs, rhs);
-    case IRNodeType::kLshift:
-      return new Lshift(lhs, rhs);
-    case IRNodeType::kRshift:
-      return new Rshift(lhs, rhs);
-    default:
-      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
-      return nullptr;
-  }
-}
-
-// Bind the value to the var and evaluate the body.
-class Let : public ExprNode<Let> {
- public:
-  const Expr* var() const {
-    return var_;
-  }
-  const Expr* value() const {
-    return value_;
-  }
-  const Expr* body() const {
-    return body_;
-  }
-
-  static ExprHandle make(
-      const ExprHandle& var,
-      const ExprHandle& value,
-      const ExprHandle& body) {
-    return ExprHandle(new Let(var.node(), value.node(), body.node()));
-  }
-
-  Let(const Expr* var, const Expr* value, const Expr* body)
-      : ExprNodeBase(body->dtype(), kLet),
-        var_(var),
-        value_(value),
-        body_(body) {}
-
- private:
-  const Expr* var_;
-  const Expr* value_;
-  const Expr* body_;
-};
 
 // Represents a ramp vector node:
 //     [base, base + 1 * stride, ... , base + (lanes - 1) * stride]
@@ -429,7 +362,7 @@ class Ramp : public ExprNode<Ramp> {
         stride_(stride),
         lanes_(lanes) {
     if (stride->dtype() != base->dtype()) {
-      throw malformed_input();
+      throw malformed_input("Bad stride in Ramp");
     }
   }
 
@@ -442,39 +375,44 @@ class Ramp : public ExprNode<Ramp> {
 class TORCH_API Load : public ExprNode<Load> {
  public:
   const Var* base_handle() const {
-    return base_handle_;
+    return buf_->base_handle();
   }
-  const Expr* index() const {
-    return index_;
+  std::vector<const Expr*> indices() const {
+    return indices_;
+  }
+  const Expr* flat_index() const {
+    TORCH_CHECK(indices_.size() == 1, "Indices haven't been flattened.");
+    return indices_[0];
   }
   const Expr* mask() const {
     return mask_;
   }
+  const Buf* buf() const {
+    return buf_;
+  }
   static ExprHandle make(
       const Buffer& buffer,
-      const ExprHandle& index,
-      const ExprHandle& mask) {
-    return ExprHandle(new Load(buffer, index.node(), mask.node()));
-  }
+      const std::vector<ExprHandle>& indices,
+      const ExprHandle& mask);
   static ExprHandle make(
       Dtype dtype,
-      const VarHandle& base_handle,
-      const ExprHandle& index,
-      const ExprHandle& mask) {
-    return ExprHandle(
-        new Load(dtype, base_handle.node(), index.node(), mask.node()));
-  }
+      const BufHandle& buf,
+      const std::vector<ExprHandle>& indices,
+      const ExprHandle& mask);
 
-  Load(const Buffer& buffer, const Expr* index, const Expr* mask);
+  Load(
+      const Buffer& buffer,
+      const std::vector<const Expr*>& indices,
+      const Expr* mask);
   Load(
       Dtype dtype,
-      const Var* base_handle,
-      const Expr* index,
+      const Buf* base_handle,
+      const std::vector<const Expr*>& indices,
       const Expr* mask);
 
  private:
-  const Var* base_handle_;
-  const Expr* index_;
+  const Buf* buf_;
+  std::vector<const Expr*> indices_;
   const Expr* mask_;
 };
 
@@ -524,14 +462,14 @@ class IfThenElse : public ExprNode<IfThenElse> {
 
   IfThenElse(const Expr* c, const Expr* t, const Expr* f)
       : ExprNodeBase(t->dtype()), condition_(c), true_(t), false_(f) {
-    if (c->dtype().scalar_type() != ScalarType::Int) {
+    if (!c->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (c->dtype().lanes() != 1) {
       throw unsupported_dtype();
     }
     if (t->dtype() != f->dtype()) {
-      throw malformed_input();
+      throw malformed_input("Bad dtype in IfThenElse");
     }
   }
 
@@ -616,7 +554,7 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const ExprHandle& rhs,
       CompareSelectOperation cmp_op) {
     if (lhs.dtype() != rhs.dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in CompareSelect");
     }
     return ExprHandle(new CompareSelect(
         lhs.node(),
@@ -633,7 +571,7 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const ExprHandle& ret_val2,
       CompareSelectOperation cmp_op) {
     if (lhs.dtype() != rhs.dtype() || ret_val1.dtype() != ret_val2.dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in CompareSelect");
     }
     return ExprHandle(new CompareSelect(
         lhs.node(), rhs.node(), ret_val1.node(), ret_val2.node(), cmp_op));
@@ -659,7 +597,7 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
         ret_val2_(ret_val2),
         compare_op_(cmp_op) {
     if (ret_val1->dtype() != ret_val2->dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in CompareSelect");
     }
   }
 };
@@ -795,7 +733,7 @@ class Intrinsics : public CallNode<Intrinsics> {
         return "frac";
       default:
         throw std::runtime_error(
-            "invalid op_type: " + std::to_string(op_type()));
+            "invalid op_type: " + c10::to_string(op_type()));
     }
   }
   using BaseClass = CallNode<Intrinsics>;
@@ -804,7 +742,7 @@ class Intrinsics : public CallNode<Intrinsics> {
       : BaseClass(IntrinsicsDtype(op_type, dtype), kIntrinsics, {}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 0) {
-      throw malformed_input();
+      throw malformed_input("bad arg count in Intrinsics");
     }
   }
 
@@ -812,7 +750,7 @@ class Intrinsics : public CallNode<Intrinsics> {
       : BaseClass(IntrinsicsDtype(op_type, v1->dtype()), kIntrinsics, {v1}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 1) {
-      throw malformed_input();
+      throw malformed_input("bad arg count in Intrinsics");
     }
   }
 
@@ -823,7 +761,7 @@ class Intrinsics : public CallNode<Intrinsics> {
             {v1, v2}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 2) {
-      throw malformed_input();
+      throw malformed_input("bad arg count in Intrinsics");
     }
   }
 
@@ -831,7 +769,7 @@ class Intrinsics : public CallNode<Intrinsics> {
       : BaseClass(IntrinsicsDtype(op_type, params), kIntrinsics, params),
         op_type_(op_type) {
     if (OpArgCount(op_type) != nparams()) {
-      throw malformed_input();
+      throw malformed_input("bad arg count in Intrinsics");
     }
   }
 
@@ -872,6 +810,9 @@ TORCH_API std::vector<const Var*> VarHandleVectorToVarVector(
     const std::vector<VarHandle>&);
 TORCH_API std::vector<VarHandle> VarVectorToVarHandleVector(
     const std::vector<const Var*>&);
+TORCH_API const Expr* flatten_index(
+    const std::vector<const Expr*>& dims,
+    const std::vector<const Expr*>& indices);
 
 } // namespace tensorexpr
 } // namespace jit

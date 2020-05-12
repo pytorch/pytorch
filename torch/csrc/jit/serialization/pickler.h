@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/qualified_name.h>
 #include <string>
 #include <vector>
 
@@ -96,8 +97,8 @@ struct WriteableTensorData {
   size_t sizeInBytes() const {
     return size_;
   }
-  size_t numel() const {
-    return tensor_.storage().numel();
+  size_t nbytes() const {
+    return tensor_.storage().nbytes();
   }
   bool storageHasDeleter() const {
     return tensor_.storage().data_ptr().get_context() != nullptr;
@@ -116,12 +117,17 @@ class Pickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
  public:
+  Pickler(std::function<void(const char*, size_t)> writer)
+      : Pickler(writer, nullptr, nullptr, nullptr) {}
+
   Pickler(
       std::function<void(const char*, size_t)> writer,
       std::vector<at::Tensor>* tensor_table,
-      std::vector<c10::ClassTypePtr>* memorized_class_types = nullptr)
+      std::function<c10::QualifiedName(const c10::ClassTypePtr&)> type_renamer,
+      std::vector<c10::ClassTypePtr>* memorized_class_types)
       : writer_(writer),
         tensor_table_(tensor_table),
+        type_renamer_(type_renamer),
         memorized_class_types_(memorized_class_types) {}
   ~Pickler();
 
@@ -240,6 +246,8 @@ class Pickler {
   // Otherwise, it is possible that a raw address gets reused for another
   // object, and we will alias it to the old object at that address.
   std::vector<IValue> memoized_ivalues_;
+
+  std::function<c10::QualifiedName(const c10::ClassTypePtr&)> type_renamer_;
 
   // List of all the types that it wrote, inspect from the IValues it wrote.
   std::vector<c10::ClassTypePtr>* memorized_class_types_;

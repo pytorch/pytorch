@@ -5,7 +5,7 @@
 #include <ATen/Utils.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
-#include <ATen/CPUGenerator.h>
+#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
@@ -110,6 +110,11 @@ class CAFFE2_API Context {
   void setQEngine(at::QEngine e);
   const std::vector<at::QEngine>& supportedQEngines() const;
   bool isXNNPACKAvailable() const;
+  // This method is used to release the original weight after pre-packing.
+  // It should be called once before loading/running the model.
+  // NB: By default it is set to true for mobile builds.
+  void setReleaseWeightsWhenPrepacking(bool e);
+  bool releaseWeightsWhenPrepacking() const;
 
  private:
   void initCUDAIfNeeded(DeviceType p) {
@@ -128,6 +133,11 @@ class CAFFE2_API Context {
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
   bool enabled_mkldnn = true;
+  #ifdef C10_MOBILE
+  bool release_original_weights = true;
+  #else
+  bool release_original_weights = false;
+  #endif
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
@@ -217,8 +227,8 @@ static inline void manual_seed(uint64_t seed) {
   auto gen = globalContext().defaultGenerator(DeviceType::CPU);
   {
     // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-    gen->set_current_seed(seed);
+    std::lock_guard<std::mutex> lock(gen.mutex());
+    gen.set_current_seed(seed);
   }
   // NB: Sometimes we build with CUDA, but we don't have any GPUs
   // available. In that case, we must not seed CUDA; it will fail!
@@ -228,8 +238,8 @@ static inline void manual_seed(uint64_t seed) {
       auto cuda_gen = globalContext().defaultGenerator(Device(at::kCUDA, i));
       {
         // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(cuda_gen->mutex_);
-        cuda_gen->set_current_seed(seed);
+        std::lock_guard<std::mutex> lock(cuda_gen.mutex());
+        cuda_gen.set_current_seed(seed);
       }
     }
   }

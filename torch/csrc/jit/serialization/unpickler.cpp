@@ -6,8 +6,8 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
 #include <string>
-#include "unpickler.h"
 
 namespace torch {
 namespace jit {
@@ -410,9 +410,11 @@ PickleOpCode Unpickler::readInstruction() {
       }
       at::DataPtr storage_ptr = read_record_(key);
       int64_t numel = args.at(4).toInt();
+      caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
       at::Storage storage(
-          at::CPU(type).typeMeta(),
-          numel,
+          c10::Storage::use_byte_size_t(),
+          dtype,
+          numel * dtype.itemsize(),
           std::move(storage_ptr),
           /*allocator=*/nullptr,
           /*resizable=*/false); // NB: we didn't set any allocator for the
@@ -426,12 +428,12 @@ PickleOpCode Unpickler::readInstruction() {
         tensor = at::empty({0}, options).set_(storage);
       }
 
-      if (device.type() == at::DeviceType::CUDA) {
+      if (device.type() == DeviceType::CUDA) {
         tensor = tensor.to(device, tensor.scalar_type());
-      } else if (device.type() != at::DeviceType::CPU) {
+      } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
             "supported devices include CPU and CUDA, however got ",
-            at::DeviceTypeName(device.type(), false));
+            DeviceTypeName(device.type(), false));
       }
       stack_.push_back(std::move(tensor));
     } break;
@@ -490,7 +492,13 @@ void Unpickler::readGlobal(
         if (entry != type_cache_.end()) {
           type = entry->second;
         } else {
-          type = c10::parseType(type_str);
+          if (type_resolver_ == nullptr) {
+            // If we haven't injected a custom way of retrieving types from
+            // names, use a barebones type parser.
+            type = c10::parseType(type_str);
+          } else {
+            type = type_resolver_(type_str).type_;
+          }
           type_cache_[type_str] = type;
         }
         // TODO: Use lookahead to avoid creating the tuple and immediately
@@ -713,24 +721,27 @@ void Unpickler::readSlowWithBuffer(char* dest, size_t sz) {
 
 // Read a number of bytes from the input stream
 std::string Unpickler::readBytes(size_t length) {
-  std::string data(length, 0);
+  std::string data;
   static const size_t kSmallString = 64;
   if (length <= buffer_remaining_) {
     // Fast-path: entirely in buffer.
-    memcpy(&data[0], buffer_.data() + buffer_pos_, length);
+    data.assign(buffer_.data() + buffer_pos_, length);
     buffer_pos_ += length;
     buffer_remaining_ -= length;
   } else if (length <= kSmallString) {
     // If the string is smallish, do a full buffer read,
     // and read out of that buffer.
+    data.resize(length);
     readSlowWithBuffer(&data[0], length);
   } else {
     // Otherwise, for larger strings, read what we can from
     // the buffer, and then read directly to the destination.
     const size_t from_old_buf = buffer_remaining_;
     if (from_old_buf != 0) {
-      memcpy(&data[0], buffer_.data() + buffer_pos_, from_old_buf);
+      data.reserve(length);
+      data.append(buffer_.data() + buffer_pos_, from_old_buf);
     }
+    data.resize(length);
     const size_t needed = length - from_old_buf;
     size_t nread = reader_(&data[from_old_buf], needed);
     if (nread != needed) {

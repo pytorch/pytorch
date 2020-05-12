@@ -28,7 +28,6 @@
 
 using at::Backend;
 using at::Device;
-using at::DeviceType;
 using at::IntArrayRef;
 using at::kCPU;
 using at::kCUDA;
@@ -197,7 +196,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
       ScalarType item_scalarType = infer_scalar_type(cur_item);
       scalarType = (scalarType) ?
           at::promoteTypes(*scalarType, item_scalarType) : item_scalarType;
-      if (scalarType == ScalarType::Double) {
+      if (scalarType == ScalarType::ComplexDouble) {
         // this won't change (unless we hit undefined, but that will fail later).
         return *scalarType;
       }
@@ -332,23 +331,23 @@ Tensor legacy_new_from_sequence(
 // in x.new(y), 'x' is the base.
 void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_layout) {
   if (expected_layout == c10::kStrided) {
-    TORCH_CHECK(dispatch_key == c10::DispatchKey::CPUTensorId
-                || dispatch_key == c10::DispatchKey::CUDATensorId
-                || dispatch_key == c10::DispatchKey::HIPTensorId
-                || dispatch_key == c10::XLATensorId(),
-                "new(): expected DispatchKey: ", c10::DispatchKey::CPUTensorId,
-                " or ", c10::DispatchKey::CUDATensorId,
-                " or ", c10::DispatchKey::HIPTensorId,
-                " or ", c10::DispatchKey::XLATensorId,
+    TORCH_CHECK(dispatch_key == c10::DispatchKey::CPU
+                || dispatch_key == c10::DispatchKey::CUDA
+                || dispatch_key == c10::DispatchKey::HIP
+                || dispatch_key == c10::XLA(),
+                "new(): expected DispatchKey: ", c10::DispatchKey::CPU,
+                " or ", c10::DispatchKey::CUDA,
+                " or ", c10::DispatchKey::HIP,
+                " or ", c10::DispatchKey::XLA,
                 " but got: ", dispatch_key);
   } else if(expected_layout == c10::kSparse) {
     // NOTE: no sparse XLA
-    TORCH_CHECK(dispatch_key == c10::DispatchKey::SparseCPUTensorId
-                || dispatch_key == c10::DispatchKey::SparseCUDATensorId
-                || dispatch_key == c10::DispatchKey::SparseHIPTensorId,
-                "new(): expected DispatchKey: ", c10::DispatchKey::SparseCPUTensorId,
-                " or ", c10::DispatchKey::SparseCUDATensorId,
-                " or ", c10::DispatchKey::SparseHIPTensorId,
+    TORCH_CHECK(dispatch_key == c10::DispatchKey::SparseCPU
+                || dispatch_key == c10::DispatchKey::SparseCUDA
+                || dispatch_key == c10::DispatchKey::SparseHIP,
+                "new(): expected DispatchKey: ", c10::DispatchKey::SparseCPU,
+                " or ", c10::DispatchKey::SparseCUDA,
+                " or ", c10::DispatchKey::SparseHIP,
                 " but got: ", dispatch_key);
   } else {
     TORCH_INTERNAL_ASSERT(false, "unexpected layout");

@@ -125,7 +125,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         cuda_model = model.cuda()
         # input might be nested - we want to move everything to GPU
         cuda_input = function._nested_map(
-            lambda o: isinstance(o, Variable) or torch.is_tensor(o),
+            lambda o: isinstance(o, Variable) or isinstance(o, torch.Tensor),
             lambda o: o.cuda())(input)
         return cuda_model, cuda_input
 
@@ -1439,7 +1439,6 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
-    @unittest.skip("peephole removed")
     def test_tensor_factories_script(self):
         class TensorFactory(torch.jit.ScriptModule):
             @torch.jit.script_method

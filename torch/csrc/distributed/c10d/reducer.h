@@ -26,7 +26,8 @@ class Reducer {
   explicit Reducer(
       std::vector<std::vector<torch::autograd::Variable>> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
-      std::shared_ptr<c10d::ProcessGroup> process_group,
+      std::shared_ptr<c10d::ProcessGroup> default_process_group,
+      std::shared_ptr<c10d::ProcessGroup> process_group_gloo,
       std::vector<std::vector<bool>> expect_sparse_gradients,
       int64_t bucket_bytes_cap);
 
@@ -64,7 +65,8 @@ class Reducer {
 
   std::mutex mutex_;
   std::vector<std::vector<torch::autograd::Variable>> replicas_;
-  std::shared_ptr<c10d::ProcessGroup> process_group_;
+  std::shared_ptr<c10d::ProcessGroup> default_process_group_;
+  std::shared_ptr<c10d::ProcessGroup> process_group_gloo_;
   std::vector<std::vector<bool>> expect_sparse_gradients_;
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
@@ -116,7 +118,7 @@ class Reducer {
   // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
   // the buckets
   void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
-  // Rebuild buckets based on rebuilt_tensors_ and rebuilt_param_indices_
+  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
   // TODO this function makes broadcast communication call and
   // could be overlapped with next forward() call, thus
   // it could be async. Will make it async when rebuilding buckets for
@@ -125,7 +127,7 @@ class Reducer {
   // and parameter indices order may change more frequently.
   // For find_unused_parameters = false case, buckets are only rebuilt once,
   // the performance cost is negligible.
-  void rebuildBuckets();
+  std::vector<std::vector<size_t>> rebuildBuckets();
 
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.
@@ -207,8 +209,8 @@ class Reducer {
   std::vector<std::vector<int64_t>> backward_stats_;
 
   // Following variables are to help build dynamic bucket order
-  bool was_rebuilt_bucket_;
-  std::vector<at::Tensor> rebuilt_tensors_;
+  bool has_rebuilt_bucket_;
+  std::vector<at::Tensor> rebuilt_params_;
   std::vector<int64_t> rebuilt_param_indices_;
   const int64_t bucket_bytes_cap_;
 };

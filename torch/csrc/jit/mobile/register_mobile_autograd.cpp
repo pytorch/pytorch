@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/TypeDefault.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/stack.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/library.h>
 
 using Stack = std::vector<c10::IValue>;
 using at::Scalar;
@@ -101,47 +101,34 @@ void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
 }
 
 // NB! This is _aten, not aten!!!
-static auto registry =
-    torch::import()
-        .impl(
-            "_aten::add.Scalar",
-            torch::dispatch_autograd(torch::autograd::VariableType::add_Scalar))
-        .impl(
-            "_aten::mul.Tensor",
-            torch::dispatch_autograd(torch::autograd::VariableType::mul_Tensor))
-        .impl(
-            "_aten::conv2d",
-            torch::dispatch_autograd(
-                CppFunction::makeFromBoxedFunction<conv2d_kernel>()))
-        .impl("_aten::dropout", torch::dispatch_autograd(VariableType::dropout))
-        .impl(
-            "_aten::feature_dropout",
-            torch::dispatch_autograd(VariableType::feature_dropout))
-        .impl(
-            "_aten::log_softmax.int",
-            torch::dispatch_autograd(
-                CppFunction::makeFromBoxedFunction<log_softmax_kernel>()))
-        .impl(
-            "_aten::max_pool2d",
-            torch::dispatch_autograd([](const Tensor& self,
-                                        c10::List<int64_t> kernel_size,
-                                        c10::List<int64_t> stride,
-                                        c10::List<int64_t> padding,
-                                        c10::List<int64_t> dilation,
-                                        bool ceil_mode = false) {
-              return VariableType::max_pool2d(
-                  self,
-                  kernel_size.vec(),
-                  stride.vec(),
-                  padding.vec(),
-                  dilation.vec(),
-                  ceil_mode);
-            }))
-        .impl("_aten::relu", torch::dispatch_autograd(VariableType::relu))
-        .impl(
-            "_aten::view",
-            torch::dispatch_autograd(
-                CppFunction::makeFromBoxedFunction<view_kernel>()))
-        .impl("_aten::t", torch::dispatch_autograd(VariableType::t))
-        .impl("_aten::addmm", torch::dispatch_autograd(VariableType::addmm));
+TORCH_LIBRARY_IMPL(_aten, Autograd, m) {
+  m.impl("add.Scalar", torch::autograd::VariableType::add_Scalar);
+  m.impl("mul.Tensor", torch::autograd::VariableType::mul_Tensor);
+  m.impl("conv2d", torch::CppFunction::makeFromBoxedFunction<conv2d_kernel>());
+  m.impl("dropout", VariableType::dropout);
+  m.impl("feature_dropout", VariableType::feature_dropout);
+  m.impl(
+      "log_softmax.int",
+      torch::CppFunction::makeFromBoxedFunction<log_softmax_kernel>());
+  m.impl(
+      "max_pool2d",
+      [](const Tensor& self,
+         c10::List<int64_t> kernel_size,
+         c10::List<int64_t> stride,
+         c10::List<int64_t> padding,
+         c10::List<int64_t> dilation,
+         bool ceil_mode = false) {
+        return VariableType::max_pool2d(
+            self,
+            kernel_size.vec(),
+            stride.vec(),
+            padding.vec(),
+            dilation.vec(),
+            ceil_mode);
+      });
+  m.impl("relu", VariableType::relu);
+  m.impl("view", torch::CppFunction::makeFromBoxedFunction<view_kernel>());
+  m.impl("t", VariableType::t);
+  m.impl("addmm", VariableType::addmm);
+}
 } // anonymous namespace

@@ -202,40 +202,24 @@ RRefForkData UserRRef::fork() const {
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
 const IValue& OwnerRRef::getValue() const {
-  std::unique_lock<std::mutex> lock(mutex_);
-  valueCV_.wait(lock, [this] { return value_.has_value(); });
-  return value_.value();
+  future_->wait();
+  return future_->constValue();
 }
 
 bool OwnerRRef::hasValue() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return value_.has_value();
+  return future_->completed();
 }
 
-std::shared_ptr<FutureMessage> OwnerRRef::getFuture() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  if (future_.get()) {
-    return future_;
-  }
-  future_ = std::make_shared<FutureMessage>();
-  std::shared_ptr<FutureMessage> ret = future_;
-  if (value_.has_value()) {
-    lock.unlock();
-    ret->markCompleted(Message());
-  }
-  return ret;
+std::shared_ptr<JitFuture> OwnerRRef::getFuture() {
+  return future_;
 }
 
 void OwnerRRef::setValue(IValue&& value) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  value_ = std::move(value);
-  std::shared_ptr<FutureMessage> future;
-  future.swap(future_);
-  lock.unlock();
-  valueCV_.notify_all();
-  if (future.get() && !future->completed()) {
-    future->markCompleted(Message());
-  }
+  future_->markCompleted(value);
+}
+
+void OwnerRRef::setError(const std::string& error) {
+  future_->setErrorIfNeeded(error);
 }
 
 } // namespace rpc

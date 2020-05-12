@@ -29,6 +29,13 @@ struct BuiltinOpFunction : public Function {
     callable_(stack);
   }
 
+  c10::intrusive_ptr<c10::ivalue::Future> runAsync(Stack& stack) override {
+    run(stack);
+    auto res = c10::make_intrusive<c10::ivalue::Future>(stack.front().type());
+    res->markCompleted(std::move(stack.front()));
+    return res;
+  }
+
   at::IValue operator()(std::vector<at::IValue> stack, const Kwargs& kwargs)
       override {
     getSchema().checkAndNormalizeInputs(stack, kwargs);
@@ -56,6 +63,12 @@ struct BuiltinOpFunction : public Function {
   }
 
   std::shared_ptr<Graph> optimized_graph() const override {
+    TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had a graph requested "
+      "from it. This probably indicates that the JIT calling context needs a "
+      "special case on Function::isGraphFunction()");
+  }
+
+  void clear_execution_info() override {
     TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had a graph requested "
       "from it. This probably indicates that the JIT calling context needs a "
       "special case on Function::isGraphFunction()");

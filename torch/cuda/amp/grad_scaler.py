@@ -53,7 +53,7 @@ class GradScaler(object):
                 scaler.update()
 
     See the :ref:`Automatic Mixed Precision examples<amp-examples>` for usage
-    (along with autocasting) in more complex cases like gradient clipping, gradient penalty,
+    (along with autocasting) in more complex cases like gradient clipping, gradient accumulation, gradient penalty,
     and multiple losses/optimizers.
 
     ``scaler`` dynamically estimates the scale factor each iteration.  To minimize gradient underflow,

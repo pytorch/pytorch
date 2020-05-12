@@ -278,8 +278,18 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     }
     if (tensor_.is_quantized()) {
       stream << ", qscheme: " << toString(tensor_.qscheme());
-      stream << ", scale: " << tensor_.q_scale();
-      stream << ", zero_point: " << tensor_.q_zero_point();
+      if (tensor_.qscheme() == c10::kPerTensorAffine) {
+        stream << ", scale: " << tensor_.q_scale();
+        stream << ", zero_point: " << tensor_.q_zero_point();
+      } else if (tensor_.qscheme() == c10::kPerChannelAffine) {
+        stream << ", scales: ";
+        Tensor scales = tensor_.q_per_channel_scales();
+        print(stream, scales, linesize);
+        stream << ", zero_points: ";
+        Tensor zero_points = tensor_.q_per_channel_zero_points();
+        print(stream, zero_points, linesize);
+        stream << ", axis: " << tensor_.q_per_channel_axis();
+      }
     }
     stream << " ]";
   }

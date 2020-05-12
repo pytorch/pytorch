@@ -370,7 +370,6 @@ class TestAsync(JitTestCase):
 
         traced = torch.jit.trace(fn, (torch.rand(3, 4),))
         torch._C._jit_pass_inline_fork_wait(traced.graph)
-        torch._C._jit_pass_dce(traced.graph)
         self.assertGraphContainsExactly(traced.graph, kind='prim::fork', num_kind_nodes=0)
         self.assertGraphContainsExactly(traced.graph, kind='aten::wait', num_kind_nodes=0)
         self.assertGraphContainsExactly(traced.graph, kind='aten::add', num_kind_nodes=2)
@@ -388,6 +387,66 @@ class TestAsync(JitTestCase):
         # smoke test for ONNX export
         f = io.BytesIO()
         torch.onnx.export(MyMod(), (torch.rand(3, 4),), f)
+
+    def test_trace_fork_wait_list_modulecalls(self):
+        def add_one(input):
+            return input + torch.ones(input.size())
+
+        class TestListFutureModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, input):
+                input_list = []
+                for i in range(3):
+                    input_list.append(input)
+
+                fut_list: List[Future[torch.Tensor]] = []
+                for input_tensor in input_list:
+                    fut_list.append(torch.jit._fork(add_one, input_tensor))
+                # return list[future[tensor]] here to ensure tracing
+                # module calls return the correct types
+                return fut_list
+
+        class TestModuleWrapper(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.list_fut_mod = TestListFutureModule()
+
+            def forward(self, input):
+                fut_list = self.list_fut_mod(input)
+                res = input
+                for fut in fut_list:
+                    res = res + fut.wait()
+                return res
+
+        self.checkTrace(TestModuleWrapper(), (torch.randn(5, 5),))
+
+    def test_trace_modulecalls_with_different_output_types(self):
+        def add_one(input):
+            return input + torch.ones(input.size())
+
+        class DifferentOutputModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, input):
+                fut_res = torch.jit._fork(add_one, (input))
+
+                # return different types from module call
+                return input, fut_res
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gen_output = DifferentOutputModule()
+
+            def forward(self, input):
+                res, fut_res = self.gen_output(input)
+                res = res + fut_res.wait()
+                return res
+
+        self.checkTrace(TestModule(), (torch.randn(5, 5),))
 
     def test_save_load_with_extra_files(self):
         class MyMod(torch.jit.ScriptModule):

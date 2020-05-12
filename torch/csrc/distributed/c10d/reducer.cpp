@@ -8,32 +8,13 @@
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/utils/hash.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
-
 namespace {
-
-// Turns lambda without input/output into a torch::autograd::FunctionPostHook.
-class LambdaPostHook : public torch::autograd::FunctionPostHook {
-  using variable_list = std::vector<torch::autograd::Variable>;
-
- public:
-  /* implicit */ LambdaPostHook(std::function<void(void)> fn)
-      : fn_(std::move(fn)) {}
-
-  variable_list operator()(
-      const variable_list& outputs,
-      const variable_list& /* unused */) override {
-    fn_();
-    return outputs;
-  }
-
- protected:
-  std::function<void(void)> fn_;
-};
 
 inline int64_t current_time_in_nanos() {
   return torch::autograd::profiler::getTime();
@@ -44,11 +25,13 @@ inline int64_t current_time_in_nanos() {
 Reducer::Reducer(
     std::vector<std::vector<torch::autograd::Variable>> replicas,
     std::vector<std::vector<size_t>> bucket_indices,
-    std::shared_ptr<c10d::ProcessGroup> process_group,
+    std::shared_ptr<c10d::ProcessGroup> default_process_group,
+    std::shared_ptr<c10d::ProcessGroup> process_group_gloo,
     std::vector<std::vector<bool>> expect_sparse_gradients,
     int64_t bucket_bytes_cap)
     : replicas_(std::move(replicas)),
-      process_group_(std::move(process_group)),
+      default_process_group_(std::move(default_process_group)),
+      process_group_gloo_(std::move(process_group_gloo)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
       expect_autograd_hooks_(false),
       require_finalize_(false),
@@ -56,8 +39,9 @@ Reducer::Reducer(
       has_marked_unused_parameters_(false),
       local_used_maps_reduced_(false),
       backward_stats_base_(0),
-      was_rebuilt_bucket_(false),
+      has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap) {
+  C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
 
@@ -138,8 +122,13 @@ Reducer::Reducer(
 
         // Hook to execute after the gradient accumulator has executed.
         hooks_.emplace_back(
-            grad_accumulator->add_post_hook(torch::make_unique<LambdaPostHook>(
-                [=] { this->autograd_hook(index); })),
+            grad_accumulator->add_post_hook(
+                torch::make_unique<torch::autograd::utils::LambdaPostHook>(
+                    [=](const torch::autograd::variable_list& outputs,
+                        const torch::autograd::variable_list& /* unused */) {
+                      this->autograd_hook(index);
+                      return outputs;
+                    })),
             grad_accumulator);
 
         // Map raw function pointer to replica index and parameter index.
@@ -287,17 +276,17 @@ void Reducer::autograd_hook(VariableIndex index) {
     return;
   }
 
-  // Rebuild bucket only if 1) it is first time rebuilt 2) unused_parameters_
-  // is empty, currently it does not support when there is unused parameters
-  // 3) this backward pass needs to run all reduce.
-  // Here, we just dump tensors and their parameter indices into
-  // rebuilt_tensors_ and rebuilt_param_indices_, and then at the end of
-  // finalize_backward(), buckets will be rebuilt based on rebuilt_tensors_
-  // and rebuilt_param_indices_, and then will be broadcasted and intialized.
-  // Also we only need to dump tensors and parameter indcies of one replica.
-  if (!was_rebuilt_bucket_ && unused_parameters_.empty() &&
+  // Rebuild bucket only if 1) it is the first time to rebuild bucket 2)
+  // unused_parameters_ is empty, currently it does not support when there are
+  // unused parameters 3) this backward pass needs to run all reduce. Here, we
+  // just dump tensors and their parameter indices into rebuilt_params_ and
+  // rebuilt_param_indices_, and then at the end of finalize_backward(), buckets
+  // will be rebuilt based on rebuilt_params_ and rebuilt_param_indices_, and
+  // then will be broadcasted and intialized. Also we only need to dump tensors
+  // and parameter indcies of one replica.
+  if (!has_rebuilt_bucket_ && unused_parameters_.empty() &&
       index.replica_index == 0) {
-    rebuilt_tensors_.push_back(
+    rebuilt_params_.push_back(
         replicas_[index.replica_index][index.variable_index]);
     rebuilt_param_indices_.push_back(index.variable_index);
   }
@@ -340,26 +329,34 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   // Something is wrong if all variables contained in this bucket replica have
   // already been marked as ready.
   if (replica.pending == 0) {
-    // Receiving a call to `mark_variable_ready` twice for the same variable
-    // is only possible if the variable was initially deemed unused, and was
-    // marked ready from the `prepare_for_backward` function, only to become
-    // part of the autograd graph at a later point in time.
-    TORCH_INTERNAL_ASSERT(has_marked_unused_parameters_);
-    TORCH_CHECK(
-        false,
+    const auto common_error = c10::str(
         "Expected to mark a variable ready only once. ",
         "",
-        "This error is caused by use of a module parameter outside the ",
-        "`forward` function. The return value of the `forward` function ",
-        "is inspected by the distributed data parallel wrapper to figure ",
-        "out if any of the module's parameters went unused. If this is the ",
-        "case, it knows they won't receive gradients in a backward pass. ",
-        "If any of those parameters are then used outside `forward`, this ",
-        "error condition is triggered. ",
-        "",
-        "You can disable unused parameter detection by passing the keyword "
-        "argument `find_unused_parameters=False` to ",
+        "This error is caused by one of the following reasons: ",
+        "1) Use of a module parameter outside the `forward` function. ",
+        "Please make sure model parameters are not shared across multiple ",
+        "concurrent forward-backward passes",
+        "2) Reused parameters in multiple reentrant backward passes. For ",
+        "example, if you use multiple `checkpoint` functions to wrap the ",
+        "same part of your model, it would result in the same set of ",
+        "parameters been used by different reentrant backward passes ",
+        "multiple times, and hence marking a variable ready multiple times. ",
+        "DDP does not support such use cases yet.");
+    TORCH_CHECK(
+        has_marked_unused_parameters_,
+        common_error,
+        "3) Incorrect unused parameter detection. The return value of the ",
+        "`forward` function is inspected by the distributed data parallel ",
+        "wrapper to figure out if any of the module's parameters went ",
+        "unused. For unused parameters, DDP would not expect gradients from ",
+        "then. However, if an unused parameter becomes part of the autograd ",
+        "graph at a later point in time (e.g., in a reentrant backward when ",
+        "using `checkpoint`), the gradient will show up unexpectedly. If all ",
+        "parameters in the model participate in the backward pass, you can ",
+        "disable unused parameter detection by passing the keyword argument ",
+        "`find_unused_parameters=False` to ",
         "`torch.nn.parallel.DistributedDataParallel`.");
+    TORCH_CHECK(!has_marked_unused_parameters_, common_error);
   }
 
   if (bucket.expect_sparse_gradient) {
@@ -377,7 +374,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   // Check if this was the final gradient for this bucket.
   if (--replica.pending == 0) {
     // Prescale bucket contents to turn the global sum into the global average.
-    replica.contents.div_(process_group_->getSize());
+    replica.contents.div_(default_process_group_->getSize());
     // Kick off reduction if all replicas for this bucket are ready.
     if (--bucket.pending == 0) {
       mark_bucket_ready(bucket_index.bucket_index);
@@ -393,11 +390,19 @@ void Reducer::mark_variable_ready(VariableIndex index) {
       // allreduce respect the current stream, so will be sequenced correctly.
       local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
     }
-    local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
+    local_used_work_ = default_process_group_->allreduce(local_used_maps_dev_);
 
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::lock_guard<std::mutex> lock(this->mutex_);
       this->finalize_backward();
+      // Rebuild bucket if this is the first time to rebuild
+      if (!rebuilt_params_.empty()) {
+        auto rebuilt_bucket_indices = rebuildBuckets();
+        // Unlock before initialize_buckets() as initialize_buckets() requires a
+        // lock, it could result in self deadlock without unlocking here.
+        mutex_.unlock();
+        initialize_buckets(std::move(rebuilt_bucket_indices));
+      }
     });
   }
 }
@@ -432,7 +437,7 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
       //
       tensors.push_back(replica.contents);
     }
-    bucket.work = process_group_->allreduce(tensors);
+    bucket.work = default_process_group_->allreduce(tensors);
   }
 }
 
@@ -477,6 +482,7 @@ void Reducer::initialize_buckets(
             "that expect a sparse gradient.");
       }
     }
+
     // Iterate over model replicas.
     for (size_t replica_index = 0; replica_index < replica_count;
          replica_index++) {
@@ -539,7 +545,6 @@ void Reducer::initialize_buckets(
           .intra_bucket_index = intra_bucket_index++,
       };
     }
-
     bucket.variable_indices = std::move(bucket_indices[bucket_index]);
 
     buckets_.push_back(std::move(bucket));
@@ -750,75 +755,91 @@ void Reducer::finalize_backward() {
     local_used_work_->wait();
   }
   local_used_maps_reduced_ = false;
-
-  // Rebuilt bucket if this is the first time to rebuilt
-  if (!rebuilt_tensors_.empty()) {
-    rebuildBuckets();
-  }
 }
 
 void Reducer::sync_bucket_indices(
     std::vector<std::vector<size_t>>& bucket_indices) {
   int64_t broadcast_bucket_size = DEFAULT_BROADCAST_BUCKET_BYTES;
+
   auto num_buckets = bucket_indices.size();
+  std::vector<size_t> bucket_sizes;
   int64_t total_size = 0;
   for (size_t i = 0; i < num_buckets; i++) {
-    total_size += bucket_indices.at(i).size();
+    auto bucket_size = bucket_indices.at(i).size();
+    bucket_sizes.push_back(bucket_size);
+    total_size += bucket_size;
   }
-  at::TensorOptions options;
-  options = options.dtype(at::kInt);
-  options = options.device(replicas_[0][0].device());
-  auto broadcast_tensor = at::empty({total_size}, at::kInt);
-  auto accessor = broadcast_tensor.accessor<int, 1>();
-  auto accessorIndex = 0;
+
+  // Group indices and num_bucket together into indices_tensor
+  // Broadcast this tensor first, as its size is equal among all processes
+  auto indices_tensor = at::empty({total_size + 1}, at::kInt);
+  auto indices_accessor = indices_tensor.accessor<int, 1>();
+  auto indices_accessor_Index = 0;
   for (size_t i = 0; i < num_buckets; i++) {
     const auto& bucket_size = bucket_indices.at(i).size();
     for (size_t j = 0; j < bucket_size; j++) {
-      accessor[accessorIndex++] = bucket_indices[i][j];
+      indices_accessor[indices_accessor_Index++] = bucket_indices[i][j];
     }
   }
-  auto broadcast_tensor_device = at::empty({total_size}, options);
-  broadcast_tensor_device.copy_(broadcast_tensor, true);
-  // Copy CPU tensor to device tensor, as the process_group_ could be NCCL and
-  // it can only broadcast device tensors.
+  indices_accessor[indices_accessor_Index] = num_buckets;
   broadcast_coalesced(
-      process_group_, broadcast_tensor_device, broadcast_bucket_size);
-  broadcast_tensor.copy_(broadcast_tensor_device);
-  accessorIndex = 0;
+      process_group_gloo_, indices_tensor, broadcast_bucket_size);
+
+  // Update num_buckets after receiving it from rank 0
+  num_buckets = indices_accessor[indices_accessor_Index];
+
+  // Broadcast bucket_sizes
+  auto bucket_sizes_tensor = at::empty({(int64_t)num_buckets}, at::kInt);
+  auto bucket_sizes_accessor = bucket_sizes_tensor.accessor<int, 1>();
   for (size_t i = 0; i < num_buckets; i++) {
-    const auto& bucket_size = bucket_indices.at(i).size();
+    // For rank != 0, it is possible that local num buckets bucket_sizes.size()
+    // is smaller than broadcasted num_buckets
+    bucket_sizes_accessor[i] =
+        bucket_sizes.at(std::min(i, (bucket_sizes.size() - 1)));
+  }
+  broadcast_coalesced(
+      process_group_gloo_, bucket_sizes_tensor, broadcast_bucket_size);
+
+  // Clear bucket_indices first, and then update bucket_indices using received
+  // num_buckets, bucket_sizes_tensor and indices_tensor from rank 0
+  bucket_indices.clear();
+  bucket_indices.reserve(num_buckets);
+  indices_accessor_Index = 0;
+  for (size_t i = 0; i < num_buckets; i++) {
+    const auto& bucket_size = bucket_sizes_accessor[i];
+    std::vector<size_t> bucket;
+    bucket.reserve(bucket_size);
     for (size_t j = 0; j < bucket_size; j++) {
-      bucket_indices[i][j] = accessor[accessorIndex++];
+      bucket.push_back(indices_accessor[indices_accessor_Index++]);
     }
+    bucket_indices.push_back(bucket);
   }
 }
 
-void Reducer::rebuildBuckets() {
+std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
   TORCH_INTERNAL_ASSERT(
-      rebuilt_tensors_.size() == rebuilt_param_indices_.size(),
+      rebuilt_params_.size() == rebuilt_param_indices_.size(),
       "rebuild tensor size is not same as rebuild param indices size.");
   std::vector<std::vector<size_t>> rebuilt_bucket_indices;
   std::vector<size_t> bucket_size_limits;
   bucket_size_limits.push_back(DEFAULT_FIRST_BUCKET_BYTES);
   bucket_size_limits.push_back(bucket_bytes_cap_);
   rebuilt_bucket_indices = compute_bucket_assignment_by_size(
-      rebuilt_tensors_,
+      rebuilt_params_,
       bucket_size_limits,
       expect_sparse_gradients_[0],
       rebuilt_param_indices_);
 
   // For rebuilt bucket indices, it needs to be synced across all ranks.
-  // broadcast the newly rebuilt bucket indices from rank 0 in default.
-  // After sync rebuilt bucket indices, initialize buckets for reducer.
+  // Broadcast the newly rebuilt bucket indices from rank 0 in default.
+  // After syncing up rebuilt bucket indices, initialize buckets for reducer.
   sync_bucket_indices(rebuilt_bucket_indices);
 
-  was_rebuilt_bucket_ = true;
-  rebuilt_tensors_.clear();
+  has_rebuilt_bucket_ = true;
+  rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
-  // Unlock before initialize_buckets() as initialize_buckets() requires a lock,
-  // it could result in self deadlock without unlocking here.
-  mutex_.unlock();
-  initialize_buckets(std::move(rebuilt_bucket_indices));
+
+  return std::move(rebuilt_bucket_indices);
 }
 
 namespace {

@@ -1,5 +1,5 @@
-#ifndef CAFFE2_OPERATORS_LENGTHS_REDUCER_FUSED_8BIT_ROWWISE_OPS_H_
-#define CAFFE2_OPERATORS_LENGTHS_REDUCER_FUSED_8BIT_ROWWISE_OPS_H_
+#ifndef CAFFE2_OPERATORS_LENGTHS_REDUCER_FUSED_NBIT_ROWWISE_OPS_H_
+#define CAFFE2_OPERATORS_LENGTHS_REDUCER_FUSED_NBIT_ROWWISE_OPS_H_
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
@@ -92,7 +92,9 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
             block_size,
             weights != nullptr,
             is_mean,
-            /*prefetch distance*/ 16);
+            /*prefetch distance*/ 8,
+            /*is_weight_positional*/ false,
+            /*use_offsets*/ false);
       } else {
         CAFFE_ENFORCE((std::is_same<IndexType, std::int64_t>::value));
         kernel64_ = fbgemm::GenerateEmbeddingSpMDMNBit<std::int64_t>(
@@ -100,7 +102,9 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
             block_size,
             weights != nullptr,
             is_mean,
-            /*prefetch distance*/ 16);
+            /*prefetch distance*/ 8,
+            /*is_weight_positional*/ false,
+            /*use_offsets*/ false);
       }
     }
 
@@ -408,7 +412,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     weights != nullptr,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           } else {
             kernel32_ =
                 fbgemm::GenerateEmbeddingSpMDMNBitRowWiseSparse<std::int32_t>(
@@ -416,7 +422,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     weights != nullptr,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           }
         } else {
           CAFFE_ENFORCE((std::is_same<IndexType, std::int64_t>::value));
@@ -426,7 +434,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     weights != nullptr,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           } else {
             kernel64_ =
                 fbgemm::GenerateEmbeddingSpMDMNBitRowWiseSparse<std::int64_t>(
@@ -434,7 +444,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     weights != nullptr,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           }
         }
       } else { // fallback_to_no_sparse == true
@@ -446,7 +458,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     with_weights,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           } else {
             kernel32_no_sparse_ =
                 fbgemm::GenerateEmbeddingSpMDMNBit<std::int32_t>(
@@ -454,7 +468,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     weights != nullptr,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           }
         } else {
           CAFFE_ENFORCE((std::is_same<IndexType, std::int64_t>::value));
@@ -464,7 +480,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     with_weights,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           } else {
             kernel64_no_sparse_ =
                 fbgemm::GenerateEmbeddingSpMDMNBit<std::int64_t>(
@@ -472,7 +490,9 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
                     block_size,
                     weights != nullptr,
                     is_mean,
-                    /*prefetch distance*/ 16);
+                    /*prefetch distance*/ 16,
+                    /*is_weight_positional*/ false,
+                    /*use_offsets*/ false);
           }
         }
       }

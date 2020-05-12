@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/variable_tensor_list.h>
 
+C10_DECLARE_bool(torch_jit_enable_new_executor);
+
 namespace torch {
 namespace jit {
 struct GraphExecutorState;
@@ -45,7 +47,10 @@ struct GraphExecutorImplBase;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
   GraphExecutor(std::shared_ptr<Graph> graph, std::string function_name);
+
   void run(Stack& inputs);
+  c10::intrusive_ptr<Future> runAsync(Stack& stack);
+
   // `remaining_bailout_depth` stands for the maximum number of profiled and
   // specialized recompilations allowed for the current `GraphExecutor`. if
   // remaining_bailout_depth is equal to 0, `GraphExecutor` won't perform any
@@ -58,6 +63,9 @@ struct TORCH_API GraphExecutor {
   ExecutionPlan getPlanFor(Stack& inputs, size_t remaining_bailout_depth);
   explicit operator bool() const {
     return pImpl != nullptr;
+  }
+  void reset() {
+    pImpl.reset();
   }
   std::shared_ptr<Graph> graph() const;
   GraphExecutorState getDebugState();
@@ -79,6 +87,7 @@ TORCH_API std::atomic<bool>& getProfilingMode();
 TORCH_API std::atomic<bool>& getExecutorMode();
 TORCH_API std::atomic<size_t>& getNumProfiledRuns();
 TORCH_API std::atomic<size_t>& getBailoutDepth();
+TORCH_API bool IsNewExecutorEnabled();
 
 struct TORCH_API GraphOptimizerEnabledGuard {
   GraphOptimizerEnabledGuard(bool state)
