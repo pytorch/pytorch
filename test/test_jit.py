@@ -4955,22 +4955,6 @@ def foo(x):
 
         self.checkScript(annotate_none, ())
 
-    def test_fork_join_kwargs(self):
-        def foo(x, y: int):
-            print(x, y)
-            return x + y
-
-        @torch.jit.script
-        def wait_script(x):
-            fut = torch.jit._fork(foo, y=2, x=x)
-            y = torch.jit._wait(fut)
-            return y
-
-        # torch.jit._fork / torch.jit._wait spawns off a new thread
-        # with fork/join parallelism. Currently, readability suffers
-        # because torch.jit._fork does not support kwargs.
-        # The above example fails to compile with
-
     def test_list_unification(self):
         def fn():
             return [1, None, 2]
