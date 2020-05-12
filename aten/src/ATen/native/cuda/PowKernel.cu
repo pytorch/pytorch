@@ -4,6 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/Pow.h>
+#include <ATen/native/cuda/zmath.cuh>
 
 namespace at { namespace native {
 
@@ -62,6 +63,11 @@ static inline __host__ __device__ typename std::enable_if<!std::is_same<Base_typ
   pow_(Base_type base, Exp_type exp) {
   return static_cast<Base_type>(std::pow(static_cast<double>(base), static_cast<double>(exp)));
 }
+// pow (Complex)
+template<typename B, typename E>
+static inline __host__ __device__ B complex_pow_(B base, E exp) {
+  return thrust::pow(base, exp);
+}
 // Functions for sqrt
 // sqrt (floating)
 template <typename T>
@@ -97,10 +103,22 @@ template <typename T>
 static inline __host__ __device__ T invsqrt_(T x) {
   return 1.0 / ::sqrt(x);
 }
+// Rely only on thrust for complex ops
+template<typename B, typename E>
+static inline __host__ __device__ B complex_pow_(B base, E exp) {
+  return thrust::pow(base, exp);
+}
 #endif
 
 void pow_tensor_tensor_kernel(TensorIterator& iter) {
-  if (isFloatingType(iter.dtype())) {
+  if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
+      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+      gpu_kernel(iter, [=]GPU_LAMBDA(thrust_t base, thrust_t exp) -> thrust_t {
+        return complex_pow_(base, exp);
+      });
+    });
+  } else if (isFloatingType(iter.dtype())) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "pow_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
         return pow_(base, exp);
@@ -151,7 +169,15 @@ void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
 }
 
 void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
-  if (isFloatingType(iter.dtype()) || exp_scalar.isIntegral(false)) {
+  if (isComplexType(iter.dtype()) || exp_scalar.isComplex()) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
+      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+      const auto exp = thrust_t(exp_scalar.to<scalar_t>());
+      gpu_kernel(iter, [=]GPU_LAMBDA(thrust_t base) -> thrust_t {
+        return complex_pow_(base, exp);
+      });
+    });
+  } else if (isFloatingType(iter.dtype()) || exp_scalar.isIntegral(false)) {
     AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "pow_cuda", [&]() {
       const auto exp = exp_scalar.to<scalar_t>();
       pow_tensor_scalar_kernel_impl<scalar_t>(iter, exp);
