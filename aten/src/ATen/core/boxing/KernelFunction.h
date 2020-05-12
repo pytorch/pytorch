@@ -2,6 +2,7 @@
 
 #include <ATen/core/stack.h>
 #include <c10/util/TypeList.h>
+#include <typeindex>
 
 namespace c10 {
 
@@ -196,7 +197,7 @@ public:
 
 private:
 
-  explicit KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func);
+  explicit KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, c10::optional<std::type_index> signature_hash);
 
   template<BoxedKernelFunction* func>
   static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, Stack* stack);
@@ -207,6 +208,12 @@ private:
 
   InternalBoxedKernelFunction* boxed_kernel_func_;
   void* unboxed_kernel_func_;
+
+  // signature_hash_ is set to the hash of the function signature if the
+  // KernelFunction was created in a way that allowed us to know the function
+  // signature. If this is set, it will be used in unboxed function calls
+  // to verify their arguments against the known function signature.
+  c10::optional<std::type_index> signature_hash_;
 };
 
 }

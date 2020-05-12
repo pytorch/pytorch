@@ -147,6 +147,23 @@ void expectUnboxedCallingWithoutReturnWorks(const KernelFunction& func) {
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
 }
+
+template<class Return, class... Args>
+void expectUnboxedCallingFailsWith(const KernelFunction& func, Args... args, const char* errorMessage) {
+  called_with_args = c10::nullopt;
+  OperatorHandle dummy = makeDummyOperatorHandle();
+
+  expectThrows<c10::Error>([&] {
+    func.call<Return, Args...>(dummy, args...);
+  }, errorMessage);
+}
+
+template<class Return, class... Args>
+void expectUnboxedCallingDoesntFailWith(const KernelFunction& func, Args... args) {
+  called_with_args = c10::nullopt;
+  OperatorHandle dummy = makeDummyOperatorHandle();
+  func.call<Return, Args...>(dummy, args...);
+}
 }
 
 TEST(KernelFunctionTest, givenBoxedFunction_withReturn_whenCallingBoxed_thenWorks) {
@@ -287,6 +304,111 @@ TEST(KernelFunctionTest, givenUnboxedLambda_withReturn_whenCallingUnboxed_thenWo
 TEST(KernelFunctionTest, givenUnboxedLambda_withoutReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_without_return);
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
+}
+
+TEST(KernelFunctionTest, givenUnboxedFunctor_withoutReturn_whenCallingWithMismatchingArgType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_without_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_without_return>()));
+  kernels::expectUnboxedCallingFailsWith<int64_t, const int64_t&, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedFunctor_withReturn_whenCallingWithMismatchingArgType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_with_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_with_return>()));
+  kernels::expectUnboxedCallingFailsWith<int64_t, const int64_t&, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedFunctor_withReturn_whenCallingWithMismatchingReturnType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_with_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_with_return>()));
+  kernels::expectUnboxedCallingFailsWith<const int64_t&, int64_t, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedOnlyFunctor_withoutReturn_whenCallingWithMismatchingArgType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunctor<kernels::unboxed_functor_without_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_without_return>()));
+  kernels::expectUnboxedCallingDoesntFailWith<void, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<void, const int64_t&, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedOnlyFunctor_withReturn_whenCallingWithMismatchingArgType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunctor<kernels::unboxed_functor_with_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_with_return>()));
+  kernels::expectUnboxedCallingDoesntFailWith<int64_t, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<int64_t, const int64_t&, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedOnlyFunctor_withReturn_whenCallingWithMismatchingReturnType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunctor<kernels::unboxed_functor_with_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_with_return>()));
+  kernels::expectUnboxedCallingDoesntFailWith<int64_t, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<const int64_t&, int64_t, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedFunction_withoutReturn_whenCallingWithMismatchingArgType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedFunction<decltype(kernels::unboxed_function_without_return), &kernels::unboxed_function_without_return>();
+  kernels::expectUnboxedCallingDoesntFailWith<void, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<void, const int64_t&, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedFunction_withReturn_whenCallingWithMismatchingArgType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedFunction<decltype(kernels::unboxed_function_with_return), &kernels::unboxed_function_with_return>();
+  kernels::expectUnboxedCallingDoesntFailWith<int64_t, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<int64_t, const int64_t&, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedFunction_withReturn_whenCallingWithMismatchingReturnType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedFunction<decltype(kernels::unboxed_function_with_return), &kernels::unboxed_function_with_return>();
+  kernels::expectUnboxedCallingDoesntFailWith<int64_t, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<const int64_t&, int64_t, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedOnlyFunction_withoutReturn_whenCallingWithMismatchingArgType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction<decltype(kernels::unboxed_function_without_return), &kernels::unboxed_function_without_return>();
+  kernels::expectUnboxedCallingDoesntFailWith<void, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<void, const int64_t&, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedOnlyFunction_withReturn_whenCallingWithMismatchingArgType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction<decltype(kernels::unboxed_function_with_return), &kernels::unboxed_function_with_return>();
+  kernels::expectUnboxedCallingDoesntFailWith<int64_t, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<int64_t, const int64_t&, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedOnlyFunction_withReturn_whenCallingWithMismatchingReturnType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction<decltype(kernels::unboxed_function_with_return), &kernels::unboxed_function_with_return>();
+  kernels::expectUnboxedCallingDoesntFailWith<int64_t, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<const int64_t&, int64_t, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withoutReturn_whenCallingWithMismatchingArgType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_without_return);
+  kernels::expectUnboxedCallingDoesntFailWith<void, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<void, const int64_t&, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withReturn_whenCallingWithMismatchingArgType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_with_return);
+  kernels::expectUnboxedCallingDoesntFailWith<int64_t, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<int64_t, const int64_t&, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withReturn_whenCallingWithMismatchingReturnType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_with_return);
+  kernels::expectUnboxedCallingDoesntFailWith<int64_t, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<const int64_t&, int64_t, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedLambda_withoutReturn_whenCallingWithMismatchingArgType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_without_return);
+  kernels::expectUnboxedCallingDoesntFailWith<void, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<void, const int64_t&, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedLambda_withReturn_whenCallingWithMismatchingArgType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_with_return);
+  kernels::expectUnboxedCallingDoesntFailWith<int64_t, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<int64_t, const int64_t&, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
+}
+
+TEST(KernelFunctionTest, givenUnboxedLambda_withReturn_whenCallingWithMismatchingReturnType_thenFails) {
+  KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_with_return);
+  kernels::expectUnboxedCallingDoesntFailWith<int64_t, int64_t, int64_t>(func, 2, 3);
+  kernels::expectUnboxedCallingFailsWith<const int64_t&, int64_t, int64_t>(func, 2, 3, "Called KernelFunction::call with wrong argument types");
 }
 
 }
