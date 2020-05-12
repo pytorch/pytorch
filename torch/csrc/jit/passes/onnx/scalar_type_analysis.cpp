@@ -60,8 +60,7 @@ static const std::unordered_set<NodeKind> comparisonOps = {onnx::Greater,
                                                            onnx::Less,
                                                            onnx::Equal,
                                                            onnx::GreaterOrEqual,
-                                                           onnx::LessOrEqual
-                                                           };
+                                                           onnx::LessOrEqual};
 
 static bool IsComparisonOp(const NodeKind& nkind) {
   return comparisonOps.find(nkind) != comparisonOps.end();
