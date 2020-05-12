@@ -3796,6 +3796,11 @@ class _TestTorchMixin(object):
             obj.__repr__()
             str(obj)
 
+        # test complex tensor
+        x = torch.tensor([2.3 + 4j, 7 + 6j])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([(2.3000+4.0000j), (7.0000+6.0000j)])''')
+
         # test big integer
         x = torch.tensor(2341234123412341)
         self.assertEqual(x.__repr__(), str(x))
@@ -6092,6 +6097,29 @@ class TestTorchDeviceType(TestCase):
         self.assertTrue(y1.size() == expected_size)
         self.assertTrue(y2.size() == expected_size)
 
+    def _do_pow_for_exponents(self, m1, exponents, pow_fn, atol):
+        for num in exponents:
+            if isinstance(num, int) and num < 0 and not m1.is_floating_point() and not m1.is_complex():
+                with self.assertRaisesRegex(RuntimeError,
+                                            r'Integers to negative integer powers are not allowed\.'):
+                    torch.pow(m1[4], num)
+            else:
+                # base - tensor, exponent - number
+                # contiguous
+                res1 = torch.pow(m1[4], num)
+                res2 = res1.clone().zero_()
+                # `math.pow` has issues with complex exponentiation so we need to resort to normal `pow`.
+                for i in range(res2.size(0)):
+                    res2[i] = pow_fn(m1[4][i], num)
+                self.assertEqual(res1, res2, {'atol': atol})
+
+                # non-contiguous
+                res1 = torch.pow(m1[:, 4], num)
+                res2 = res1.clone().zero_()
+                for i in range(res2.size(0)):
+                    res2[i] = pow_fn(m1[i, 4], num)
+                self.assertEqual(res1, res2, {'atol': atol})
+
     def test_pow(self, device):
         # [res] torch.pow([res,] x)
 
@@ -6108,33 +6136,20 @@ class TestTorchDeviceType(TestCase):
                 continue
 
             m1 = torch.empty(0, dtype=dtype, device=device)
-            if m1.is_floating_point():
+            if m1.is_floating_point() or m1.is_complex():
                 m1 = torch.rand(100, 100, dtype=dtype, device=device) + 0.5
             else:
                 # math.pow will overflow and throw exceptions for large integers
                 range_high = 4 if dtype in (torch.int8, torch.uint8) else 10
                 m1 = torch.randint(1, range_high, (100, 100), dtype=dtype, device=device)
 
-            for num in [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3]:
-                if isinstance(num, int) and num < 0 and not m1.is_floating_point():
-                    with self.assertRaisesRegex(RuntimeError,
-                                                r'Integers to negative integer powers are not allowed\.'):
-                        torch.pow(m1[4], num)
-                else:
-                    # base - tensor, exponent - number
-                    # contiguous
-                    res1 = torch.pow(m1[4], num)
-                    res2 = res1.clone().zero_()
-                    for i in range(res2.size(0)):
-                        res2[i] = math.pow(m1[4][i], num)
-                    self.assertEqual(res1, res2)
-
-                    # non-contiguous
-                    res1 = torch.pow(m1[:, 4], num)
-                    res2 = res1.clone().zero_()
-                    for i in range(res2.size(0)):
-                        res2[i] = math.pow(m1[i, 4], num)
-                    self.assertEqual(res1, res2)
+            exponents = [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3]
+            complex_exponents = [-2.5j, -1.0j, 0j, 1.0j, 2.5j, 1.0 + 1.0j, -1.0 - 1.5j, 3.3j]
+            if m1.is_complex():
+                self._do_pow_for_exponents(m1, exponents + complex_exponents, pow, 10e-4)
+            else:
+                self._do_pow_for_exponents(m1, exponents, math.pow, {})
+                self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
 
             # base - number, exponent - tensor
             # contiguous
@@ -11450,9 +11465,8 @@ class TestTorchDeviceType(TestCase):
         # Check for race condition (correctness when applied on a large tensor).
         if dtype not in (torch.int8, torch.uint8, torch.int16, torch.half):
             y = torch.linspace(0, 1000000 - 1, 1000000, device=device, dtype=dtype)
-            correct = True
-            for i in range(y.shape[0] - 1):
-                correct = correct and y[i] < y[i + 1]
+            cond = y[:-1] < y[1:]
+            correct = all(cond)
             self.assertTrue(correct)
 
         # Check linspace for non-contiguous tensors.
@@ -14611,20 +14625,20 @@ class TestTorchDeviceType(TestCase):
 
         # test invalid input
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should be 2 dimensional', 
+            RuntimeError,
+            'A should be 2 dimensional',
             lambda: torch.eig(torch.ones((2))))
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should be square', 
+            RuntimeError,
+            'A should be square',
             lambda: torch.eig(torch.ones((2, 3))))
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should not contain infs or NaNs', 
+            RuntimeError,
+            'A should not contain infs or NaNs',
             lambda: torch.eig(np.inf * torch.ones((2, 2))))
         self.assertRaisesRegex(
-            RuntimeError, 
-            'A should not contain infs or NaNs', 
+            RuntimeError,
+            'A should not contain infs or NaNs',
             lambda: torch.eig(np.nan * torch.ones((2, 2))))
 
     @skipCUDAIfNoMagma
