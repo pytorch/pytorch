@@ -5204,9 +5204,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 self.assertTrue(python_error_msg in err_msg)
                 self.assertTrue((cpp_stack_msg in err_msg) == has_cpp_stack_trace)
 
+        orig = torch.utils.debug.is_cpp_stacktraces_enabled()
+        torch.utils.debug.set_cpp_stacktraces_enabled(False)
         check_error(False)
-        with torch.utils.debug.cpp_stacktraces():
-            check_error(True)
+        torch.utils.debug.set_cpp_stacktraces_enabled(True)
+        check_error(True)
+        torch.utils.debug.set_cpp_stacktraces_enabled(orig)
 
 
 # Functions to test negative dimension wrapping
