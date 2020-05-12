@@ -60,6 +60,7 @@ void cleanupPyObj(py::object& obj) {
   obj.dec_ref();
   // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
   // decref on the PyObject again.
+  // See Note [Destructing py::object] in python_ivalue.h
   obj.ptr() = nullptr;
 }
 
