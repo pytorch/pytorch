@@ -38,7 +38,7 @@ static void linspace_kernel(TensorIterator& iter, Scalar scalar_start, Scalar sc
               res = Vec256<scalar_t>::arange(start + step * idx, step);
             } else {
               res = Vec256<scalar_t>::arange(
-                  end - step * (steps - idx - 1), step);
+                  end - step * static_cast<step_t>(steps - idx - 1), step);
             }
             idx += Vec256<scalar_t>::size();
             return res;
