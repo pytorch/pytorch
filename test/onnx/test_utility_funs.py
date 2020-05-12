@@ -570,7 +570,7 @@ class TestUtilityFuns(TestCase):
         y = x.numpy()
         y_mask = np.where(y == 0, 1, y)
         input = torch.from_numpy(y_mask)
-        nb_elements = 10 * 3 * 128 * 128
+        nb_elements = torch.numel(input)
 
         model.train()
 
