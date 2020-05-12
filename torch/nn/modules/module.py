@@ -84,7 +84,7 @@ class Module(object):
         self.training = True
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
-        self._persistent_buffers_set = set()
+        self._non_persistent_buffers_set = set()
         self._backward_hooks = OrderedDict()
         self._forward_hooks = OrderedDict()
         self._forward_pre_hooks = OrderedDict()
@@ -131,6 +131,9 @@ class Module(object):
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
 
         """
+        if persistent is False and isinstance(self, torch.jit.ScriptModule):
+            raise RuntimeError("ScriptModule does not support non-persistent buffers")
+
         if '_buffers' not in self.__dict__:
             raise AttributeError(
                 "cannot assign buffer before Module.__init__() call")
@@ -150,9 +153,9 @@ class Module(object):
         else:
             self._buffers[name] = tensor
             if persistent:
-                self._persistent_buffers_set.add(name)
+                self._non_persistent_buffers_set.discard(name)
             else:
-                self._persistent_buffers_set.discard(name)
+                self._non_persistent_buffers_set.add(name)
 
     def register_parameter(self, name, param):
         r"""Adds a parameter to the module.
@@ -631,7 +634,7 @@ class Module(object):
             if params is None:
                 raise AttributeError(
                     "cannot assign parameters before Module.__init__() call")
-            remove_from(self.__dict__, self._buffers, self._modules, self._persistent_buffers_set)
+            remove_from(self.__dict__, self._buffers, self._modules, self._non_persistent_buffers_set)
             self.register_parameter(name, value)
         elif params is not None and name in params:
             if value is not None:
@@ -645,7 +648,7 @@ class Module(object):
                 if modules is None:
                     raise AttributeError(
                         "cannot assign module before Module.__init__() call")
-                remove_from(self.__dict__, self._parameters, self._buffers, self._persistent_buffers_set)
+                remove_from(self.__dict__, self._parameters, self._buffers, self._non_persistent_buffers_set)
                 modules[name] = value
             elif modules is not None and name in modules:
                 if value is not None:
@@ -669,7 +672,7 @@ class Module(object):
             del self._parameters[name]
         elif name in self._buffers:
             del self._buffers[name]
-            self._persistent_buffers_set.discard(name)
+            self._non_persistent_buffers_set.discard(name)
         elif name in self._modules:
             del self._modules[name]
         else:
@@ -703,7 +706,7 @@ class Module(object):
             if param is not None:
                 destination[prefix + name] = param if keep_vars else param.detach()
         for name, buf in self._buffers.items():
-            if buf is not None and name in self._persistent_buffers_set:
+            if buf is not None and name not in self._non_persistent_buffers_set:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
@@ -782,7 +785,7 @@ class Module(object):
         for hook in self._load_state_dict_pre_hooks.values():
             hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
-        persistent_buffers = {k: v for k, v in self._buffers.items() if k in self._persistent_buffers_set}
+        persistent_buffers = {k: v for k, v in self._buffers.items() if k not in self._non_persistent_buffers_set}
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
         local_state = {k: v for k, v in local_name_params if v is not None}
 
