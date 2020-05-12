@@ -6,8 +6,20 @@ import torch.nn.quantized as nnq
 
 
 """
-Microbenchmarks for qConv2d operators.
+Microbenchmarks for qConv operators.
 """
+
+# Configs for qconv1d
+
+qconv_1d_configs = op_bench.config_list(
+    attrs=[
+        # Shape matching the floating point short benchmark
+        [1, 128, 256, 64, 1, 3, 1, 0],
+        [4, 256, 256, 64, 1, 3, 2, 0],
+    ],
+    attr_names=["N", "IC", "OC", "L", "G", "kernel", "stride", "pad"],
+    tags=["short"],
+)
 
 # Configs for qconv2d
 qconv_2d_configs = op_bench.config_list(
@@ -57,6 +69,29 @@ resnext_32_4d_shape_configs = op_bench.config_list(
     attr_names=["N", "IC", "OC", "H", "W", "G", "kernel", "stride", "pad"],
     tags=["resnext101_32x4d"],
 )
+
+class QConv1dBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, N, IC, OC, L, G, kernel, stride, pad):
+
+        scale = 1.0 / 255
+        zero_point = 0
+        X = torch.randn(N, IC, L, dtype=torch.float32)
+        qX = torch.quantize_per_tensor(
+            X, scale=scale, zero_point=zero_point, dtype=torch.quint8
+        )
+        # Convert the tensor to NHWC format
+        W = torch.randn(OC, IC // G, kernel, dtype=torch.float32)
+        qW = torch.quantize_per_tensor(W, scale=scale, zero_point=0, dtype=torch.qint8)
+
+        self.input = qX
+        self.qconv1d = nnq.Conv1d(IC, OC, kernel, stride=stride, padding=pad, groups=G)
+        self.qconv1d.set_weight_bias(qW, None)
+        self.qconv1d.scale = torch.tensor([scale], dtype=torch.double)
+        self.qconv1d.zero_point = torch.tensor([zero_point], dtype=torch.int)
+        self.set_module_name("QConv1d")
+
+    def forward(self):
+        return self.qconv1d(self.input)
 
 
 class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
@@ -116,6 +151,7 @@ class QConv2dChainedBenchmark(op_bench.TorchBenchmarkBase):
         return self.qconv2d2(x)
 
 
+op_bench.generate_pt_test(qconv_1d_configs, QConv1dBenchmark)
 op_bench.generate_pt_test(qconv_2d_configs, QConv2dBenchmark)
 op_bench.generate_pt_test(resnext_32_4d_shape_configs, QConv2dBenchmark)
 op_bench.generate_pt_test(qconv_2d_configs, QConv2dChainedBenchmark)
