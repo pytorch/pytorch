@@ -12308,7 +12308,7 @@ class TestTorchDeviceType(TestCase):
             ("asin", doubles, True, True, 'cpu'),
             ("asin", doubles, True, True, 'cuda'),
             ("atan", doubles, True, True, 'cpu'),
-            ("atan", doubles, False, True, 'cuda'),
+            ("atan", doubles, True, True, 'cuda'),
             ("bitwise_not", ints, True, True, 'cpu'),
             ("bitwise_not", ints, True, True, 'cuda'),
             ("ceil", doubles, True, True, 'cpu'),
@@ -13640,7 +13640,7 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: y.addcmul(x, y, value=2),
                 lambda x, y: x.asin(),
                 lambda x, y: x.asin_(),
-                # lambda x, y: x.atan(), # https://github.com/pytorch/pytorch/issues/24538
+                lambda x, y: x.atan(),
                 lambda x, y: x.atan2(y),
                 lambda x, y: x.atan2_(y),
                 lambda x, y: x.ceil(),
