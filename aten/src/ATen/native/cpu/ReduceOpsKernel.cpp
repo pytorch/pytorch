@@ -101,7 +101,7 @@ static void cumprod_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) 
 }
 
 static void sum_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::BFloat16, ScalarType::Half, ScalarType::Bool, iter.dtype(), "sum_cpu", [&] {
         binary_kernel_reduce_vec(
             iter, [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
