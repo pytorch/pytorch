@@ -160,6 +160,11 @@ Non-linear activation functions
 .. autofunction:: hardtanh
 .. autofunction:: hardtanh_
 
+:hidden:`hardswish`
+~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: hardswish
+
 :hidden:`relu6`
 ~~~~~~~~~~~~~~~
 
@@ -268,6 +273,12 @@ Non-linear activation functions
 
 .. autofunction:: sigmoid
 
+:hidden:`hardsigmoid`
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: hardsigmoid
+
+
 Normalization functions
 -----------------------
 
@@ -321,6 +332,11 @@ Dropout functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: alpha_dropout
+
+:hidden:`feature_alpha_dropout`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: feature_alpha_dropout
 
 :hidden:`dropout2d`
 ~~~~~~~~~~~~~~~~~~~

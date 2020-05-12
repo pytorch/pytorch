@@ -3,6 +3,7 @@ import sys
 import time
 import unittest
 from collections import namedtuple
+from functools import partial
 from unittest import mock
 
 import torch
@@ -262,6 +263,7 @@ def heavy_rpc(tensor):
         tensor /= i + 1
     return 0
 
+
 @torch.jit.script
 def heavy_rpc_torchscript(tensor):
     for i in range(1, 100):
@@ -269,9 +271,11 @@ def heavy_rpc_torchscript(tensor):
         tensor /= i + 1
     return 0
 
+
 @torch.jit.script
 def my_script_func(tensor):
     return torch.add(tensor, tensor)
+
 
 def raise_func():
     raise ValueError("Expected error")
@@ -296,6 +300,17 @@ def check_rref_confirmed(rref):
 
 def get_rref_debug_info():
     return _rref_context_get_debug_info()
+
+
+def add_use_future_cb(to, x, y, z):
+    out = concurrent.futures.Future()
+
+    def callback(fut):
+        out.set_result(fut.wait() + z)
+
+    fut = rpc.rpc_async(to, torch.add, args=(x, y))
+    fut._then(callback)
+    return out.result()
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -867,12 +882,14 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_event_idx = next(i for i, event in enumerate(events) if rpc_exec_mode.value in event.name)
                 self.assertLess(foo_event_ix, rpc_event_idx)
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_sync_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_sync_rpc_builtin(self):
         self._profiler_test_with_rpc(
@@ -883,12 +900,14 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_async_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_async_rpc_builtin(self):
         self._profiler_test_with_rpc(
@@ -899,12 +918,14 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_remote_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_remote_builtin(self):
         self._profiler_test_with_rpc(
@@ -915,6 +936,7 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_script_async_rpc(self):
         self._profiler_test_with_rpc(
@@ -927,6 +949,7 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_script_sync_rpc(self):
         self._profiler_test_with_rpc(
@@ -939,6 +962,7 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_script_remote_rpc(self):
         self._profiler_test_with_rpc(
@@ -951,6 +975,7 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_async_record_function_double_end_callbacks(self):
         num_sleep_seconds = 1
@@ -968,6 +993,7 @@ class RpcTest(RpcAgentTestFixture):
                         rf._call_end_callbacks_on_future(fut)
                 fut.wait()
 
+    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_async_record_function_cbs_jit_call(self):
         if self.rank == 1:
@@ -1714,19 +1740,19 @@ class RpcTest(RpcAgentTestFixture):
             rref = rpc.remote(worker_name(1), torch.add, args=(1, 1))
             rref.to_here()
             fut = rref._get_future()
-            self.assertIsInstance(fut, torch.distributed.rpc.Future)
+            self.assertIsInstance(fut, torch._C.Future)
 
             # UDF
             rref = rpc.remote(worker_name(1), foo_add, args=())
             rref.to_here()
             fut = rref._get_future()
-            self.assertIsInstance(fut, torch.distributed.rpc.Future)
+            self.assertIsInstance(fut, torch._C.Future)
 
             # Script
             rref = rpc.remote(worker_name(1), my_script_func, args=(torch.tensor(1), ))
             rref.to_here()
             fut = rref._get_future()
-            self.assertIsInstance(fut, torch.distributed.rpc.Future)
+            self.assertIsInstance(fut, torch._C.Future)
 
 
     @dist_init
@@ -2355,12 +2381,173 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(t_view, t_ret)
             self.assertFalse(t_ret.is_contiguous())
 
+    @dist_init
+    def test_callback_simple(self):
+        set_by_cb = concurrent.futures.Future()
+        n = self.rank + 1
+
+        def callback(fut):
+            ret = fut.wait()
+            self.assertEqual(ret, torch.ones(n, n) * 2)
+            set_by_cb.set_result(ret.clone() + 1)
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n))
+        )
+
+        fut._then(callback)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+        self.assertEqual(set_by_cb.result(), torch.ones(n, n) * 2 + 1)
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+    @dist_init
+    def test_callback_wrong_arg_num(self):
+        set_by_cb = concurrent.futures.Future()
+        n = self.rank + 1
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n))
+        )
+
+        cb_fut = fut._then(my_function)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "my\\_function\\(\\) missing 2 required positional arguments"
+        ):
+            cb_fut.wait()
+
+    @dist_init
+    def test_callback_wrong_arg_type(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+
+        fut0 = rpc.rpc_async(dst, torch.add, args=(torch.ones(2, 2), 1))
+        fut1 = fut0._then(lambda x: x + 1)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "unsupported operand type\\(s\\) for \\+"
+        ):
+            fut1.wait()
+
+    @dist_init
+    def test_callback_multi(self):
+        num_cbs = 10
+        n = self.rank + 1
+
+        def callback(idx, fut):
+            ret = fut.wait()
+            self.assertEqual(ret, torch.ones(n, n) * 2)
+            return ret + idx
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n))
+        )
+
+        cb_futs = []
+        for idx in range(num_cbs):
+            cb_futs.append(fut._then(partial(callback, idx)))
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+        for idx in range(num_cbs):
+            self.assertEqual(
+                cb_futs[idx].wait(),
+                torch.ones(n, n) * 2 + idx
+            )
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+    @dist_init
+    def test_callback_chain(self):
+        n = self.rank + 1
+        dst = worker_name(n % self.world_size)
+
+        def callback(fut):
+            return fut.wait() + 1
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), 1)
+        )
+
+        num_cbs = 20
+        for _ in range(num_cbs):
+            fut = fut._then(callback)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) + 1 + num_cbs)
+
+    @dist_init
+    def test_callback_in_rpc(self):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        ret = rpc.rpc_sync(
+            dst1,
+            add_use_future_cb,
+            args=(dst2, torch.ones(2, 2), 1, 2)
+        )
+        self.assertEqual(ret, torch.ones(2, 2) + 1 + 2)
+
+    @dist_init
+    def test_callback_with_ret(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+
+        def callback(fut0):
+            fut2 = rpc.rpc_async(
+                dst,
+                torch.add,
+                args=(fut0.wait(), 1)
+            )._then(lambda fut1: fut1.wait() + 1)
+
+            return fut2.wait()
+
+        fut3 = rpc.rpc_async(
+            dst,
+            torch.add,
+            args=(torch.ones(2, 2), 1)
+        )._then(callback)
+
+        self.assertEqual(fut3.wait(), torch.ones(2, 2) + 3)
+
+    @dist_init
+    def test_callback_with_error(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+
+        def callback(fut0):
+            with self.assertRaisesRegex(ValueError, "Expected error"):
+                fut0.wait()
+            raise RuntimeError("Another expected error")
+
+        fut1 = rpc.rpc_async(dst, raise_func)._then(callback)
+        with self.assertRaisesRegex(RuntimeError, "Another expected error"):
+            fut1.wait()
+
+    @dist_init
+    def test_callback_none(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        with self.assertRaisesRegex(
+            TypeError,
+            "incompatible function arguments."
+        ):
+            rpc.rpc_async(dst, raise_func)._then(None)
+
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
 
     # no faulty_messages defined so this fails all retryable messages - see
     # faulty_rpc_agent_test_fixture.py for the list of retryable messages.
-    @dist_init
+    @dist_init(messages_to_delay={})
     def test_check_failed_messages(self):
         if self.rank == 0:
             dst_worker_b = worker_name((self.rank + 1) % self.world_size)
@@ -2381,6 +2568,7 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
         self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
         self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)
+        self.assertEqual(len(self.rpc_backend_options.messages_to_delay), 2)
         self.assertEqual(self.rpc_backend_options.rpc_timeout, rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
 
     @dist_init(faulty_messages=["RREF_FORK_REQUEST", "RREF_CHILD_ACCEPT"])
