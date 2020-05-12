@@ -115,7 +115,7 @@ namespace test_map_types_to_values {
     struct Class2 {static double func() {return 2.0;}};
 
     struct mapper_call_func {
-      template<class T> auto operator()(T) -> decltype(T::type::func()) { return T::type::func(); }
+      template<class T> decltype(auto) operator()(T) { return T::type::func(); }
     };
 
     TEST(TypeListTest, MapTypesToValues_members) {
@@ -127,7 +127,7 @@ namespace test_map_types_to_values {
     }
 
     struct mapper_call_nonexistent_function {
-      template<class T> auto operator()(T) -> decltype(T::type::this_doesnt_exist()) { return T::type::this_doesnt_exist(); }
+      template<class T> decltype(auto) operator()(T) { return T::type::this_doesnt_exist(); }
     };
 
     TEST(TypeListTest, MapTypesToValues_empty) {
