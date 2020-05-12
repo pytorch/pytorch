@@ -189,8 +189,7 @@ static TensorIterator make_reduction(
 
 Tensor _logcumsumexp_cpu(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  logcumsumexp_stub(self.device().type(), result, self, dim);
-  return result;
+  return _logcumsumexp_out_cpu(result, self, dim);
 }
 
 Tensor& _logcumsumexp_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
