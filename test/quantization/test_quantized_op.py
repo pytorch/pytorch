@@ -1188,8 +1188,9 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qX_hat = op(qX, output_size=output_size)
-            self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0,
-                             message=error_message.format(name, X_ref, qX_hat))
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0,
+                                       message=error_message.format(name, X_ref, qX_hat))
             self.assertEqual(scale, qX_hat.q_scale(),
                              message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -1234,8 +1235,9 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             X_hat = op(qX, output_size=output_size)
             self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
-            self.assertEqual(X_ref, X_hat.int_repr(), atol=1.0,
-                             message="{} results are off".format(name))
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(X_ref, X_hat.int_repr(), atol=1.0,
+                                       message="{} results are off".format(name))
             self.assertEqual(scale, X_hat.q_scale(),
                              message=error_message.format(name + '.scale', scale, X_hat.q_scale()))
             self.assertEqual(zero_point, X_hat.q_zero_point(),
@@ -1396,8 +1398,9 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
-            self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0,
-                             message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0,
+                                       message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
             self.assertEqual(scale, qX_hat.q_scale(),
                              message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -1449,8 +1452,9 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
-            self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0,
-                             message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0,
+                                       message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
             self.assertEqual(scale, qX_hat.q_scale(),
                              message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -2693,7 +2697,6 @@ class TestQuantizedConv(unittest.TestCase):
                 (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w),
                 channelwise)
 
-
 class TestPadding(TestCase):
     @given(batch_size=st.integers(1, 64),
            channels=st.integers(1, 64),
@@ -3097,6 +3100,21 @@ class TestQNNPackOps(TestCase):
                 qY, qY_hat,
                 message="hardtanh failed:\nactual {}\nexpected {}".format(qY_hat, qY))
 
+    def test_qconv_empty_batch(self):
+        with override_quantized_engine('qnnpack'):
+            a = torch.ones((0, 2, 4, 4), dtype=torch.float32)
+            qa = torch.quantize_per_tensor(a, scale=1.0, zero_point=0,
+                                           dtype=torch.quint8)
+            w = torch.randn((2, 2, 2, 2), dtype=torch.float)
+            qw = torch.quantize_per_tensor(w, scale=1.0, zero_point=0, dtype=torch.qint8)
+            bias_float = torch.ones(2, dtype=torch.float)
+            strides = [1, 1]
+            pads = [0, 0]
+            dilations = [1, 1]
+
+            w_packed = torch.ops.quantized.conv2d_prepack(qw, bias_float, strides, pads, dilations, 1)
+            result = torch.ops.quantized.conv2d(qa, w_packed, 1.0, 0)
+            self.assertEqual(result.shape, (0, 2, 3, 3))
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
