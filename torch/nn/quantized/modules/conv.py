@@ -179,7 +179,7 @@ class Conv1d(_ConvNd):
         >>> input = torch.randn(20, 16, 100)
         >>> # quantize input to quint8
         >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0,
-                                                dtype=torch.quint32)
+                                                dtype=torch.quint8)
         >>> output = m(q_input)
 
     """
@@ -189,13 +189,10 @@ class Conv1d(_ConvNd):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros'):
-        kernel_size = tuple(_pair_from_first(kernel_size))
-
-        stride = tuple(_pair_from_first(stride))
-
-        padding = tuple(_pair_from_first(padding))
-
-        dilation = tuple(_pair_from_first(dilation))
+        kernel_size = _pair_from_first(kernel_size)
+        stride = _pair_from_first(stride)
+        padding = _pair_from_first(padding)
+        dilation = _pair_from_first(dilation)
 
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
