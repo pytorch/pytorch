@@ -275,26 +275,37 @@ endif()
 
 # ---[ pthreadpool
 if(NOT USE_SYSTEM_PTHREADPOOL)
-  # We would like to maintain the ability to build against the internal C2
-  # pthreadpool implementation for now, hence this flag.  This flag is not
-  # exposed as a build option to the user and is purly internal.
-  set(USE_INTERNAL_PTHREADPOOL_IMPL OFF CACHE BOOL "" FORCE)
+  # Opt for custom Caffe2 implementation on MSVC.  Windows support seems to have
+  # been added to pthreadpool recently but the current third party revision we are
+  # using right now does not suppor it.  Should unify later after updating pthreadpool.
+  if(MSVC)
+    set(USE_INTERNAL_PTHREADPOOL_IMPL ON CACHE BOOL "" FORCE)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
 
-  if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
-    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-    set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+    # XNNPACK cannot link against a custom implementation of pthreadpool
+    caffe2_update_option(USE_XNNPACK OFF)
+  else()
+    # We would like to maintain the ability to build against the internal C2
+    # pthreadpool implementation for now, hence this flag.  This flag is not
+    # exposed as a build option to the user and is purly internal.
+    set(USE_INTERNAL_PTHREADPOOL_IMPL OFF CACHE BOOL "" FORCE)
+
+    if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+      set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+      set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+    endif()
+
+    if(NOT TARGET pthreadpool)
+      set(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
+      set(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
+      add_subdirectory(
+        "${PTHREADPOOL_SOURCE_DIR}"
+        "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool")
+      set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+    endif()
+
+    list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
   endif()
-
-  if(NOT TARGET pthreadpool)
-    set(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
-    set(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    add_subdirectory(
-      "${PTHREADPOOL_SOURCE_DIR}"
-      "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool")
-    set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
-  endif()
-
-  list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
 endif()
 
 # ---[ Caffe2 uses cpuinfo library in the thread pool
