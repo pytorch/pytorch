@@ -36,6 +36,9 @@ at::Allocator* GetAllocator(const at::DeviceType& t) {
 
 bool memoryProfilingEnabled() {
   const auto& state = ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE);
+  if (!state) {
+    return false;
+  }
   auto reporter_ptr = static_cast<MemoryReportingInfoBase*>(state.get());
   return reporter_ptr && reporter_ptr->memoryProfilingEnabled();
 }
