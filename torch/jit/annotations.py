@@ -249,7 +249,9 @@ def try_ann_to_type(ann, loc):
     elif is_tuple(ann):
         return TupleType([try_ann_to_type(a, loc) for a in ann.__args__])
     elif is_list(ann):
-        return ListType(try_ann_to_type(ann.__args__[0], loc))
+        elem_type = try_ann_to_type(ann.__args__[0], loc)
+        if elem_type:
+            return ListType(elem_type)
     elif is_dict(ann):
         key = try_ann_to_type(ann.__args__[0], loc)
         value = try_ann_to_type(ann.__args__[1], loc)
