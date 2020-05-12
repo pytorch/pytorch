@@ -380,6 +380,7 @@ Other Operations
     bincount
     block_diag
     broadcast_tensors
+    bucketize
     cartesian_prod
     cdist
     combinations
@@ -401,6 +402,7 @@ Other Operations
     renorm
     repeat_interleave
     roll
+    searchsorted
     tensordot
     trace
     tril
