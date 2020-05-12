@@ -2155,7 +2155,6 @@ t2.start()
             ret = run(data, mod_scaling, opt_scaling, scaler, loss_fn, skip_iter, True)
 
             # Allows run() to optionally return a different scaler instance.
-            print(ret)
             scaler = ret if ret else scaler
 
             # If scaling was enabled, the scale factor should have been multiplied by the growth factor
