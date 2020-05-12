@@ -92,7 +92,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-      c10::optional<float> input_scale,
+      c10::optional<double> input_scale,
       std::vector<int64_t> kernel,
       at::Tensor w_scale,
       at::Tensor w_zp)
@@ -115,7 +115,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   torch::List<int64_t> padding_;
   torch::List<int64_t> dilation_;
   int64_t groups_;
-  c10::optional<float> input_scale;
+  c10::optional<double> input_scale;
   std::vector<int64_t> kernel;
   at::Tensor w_scales;
   at::Tensor w_zero_points;
