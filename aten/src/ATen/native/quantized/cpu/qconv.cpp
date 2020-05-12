@@ -558,7 +558,6 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         // On mobile, we release the original weight by resetting the intrusive_ptr.
         // Calling unpack after this will throw an assertion.
         orig_weight.reset();
-        bias.reset();
     }
   }
   TORCH_INTERNAL_ASSERT(pack_w != nullptr, "Packed Weights are NULL");

@@ -272,7 +272,6 @@ class QLinearInt8 final {
         // On mobile, we release the original weight by resetting the intrusive_ptr.
         // Calling unpack after this will throw an assertion.
         pack_ptr.orig_weight.reset();
-        pack_ptr.bias.reset();
       }
     }
 
