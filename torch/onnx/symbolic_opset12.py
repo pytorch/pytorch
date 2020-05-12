@@ -62,3 +62,9 @@ def nll_loss2d(g, self, target, weight, reduction, ignore_index):
 
 def pow(g, self, exponent):
     return g.op("Pow", self, exponent)
+
+def ge(g, input, other):
+    return g.op('GreaterOrEqual', input, other)
+
+def le(g, input, other):
+    return g.op('LessOrEqual', input, other)
