@@ -37,7 +37,7 @@ inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, Stack* sta
             TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callBoxed() on an uninitialized KernelFunction.");
         } else {
             // TODO We want to introduce the invariant that all kernels must be callable in a boxed way, then this case should be impossible.
-            TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::callUnboxed().");
+            TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::call().");
         }
     }
 
@@ -45,7 +45,7 @@ inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, Stack* sta
 }
 
 template<class Return, class... Args>
-inline Return KernelFunction::callUnboxed(const OperatorHandle& opHandle, Args... args) const {
+inline Return KernelFunction::call(const OperatorHandle& opHandle, Args... args) const {
     // note: Args above is intentionally not Args&&. We don't want perfect
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
@@ -56,7 +56,7 @@ inline Return KernelFunction::callUnboxed(const OperatorHandle& opHandle, Args..
         return (*func)(functor_.get(), std::forward<Args>(args)...);
     }
 
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::callUnboxed() on an uninitialized KernelFunction.");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::call() on an uninitialized KernelFunction.");
     return impl::boxAndCallBoxedFunc<Return, Args...>(boxed_kernel_func_, functor_.get(), opHandle, std::forward<Args>(args)...);
 }
 
