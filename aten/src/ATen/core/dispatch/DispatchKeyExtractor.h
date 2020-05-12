@@ -31,7 +31,7 @@ static inline DispatchKey dispatchTypeId(
     // - If there is no operator registered for a backend whose fallback behavior
     //   is to fallthrough, we eliminate that backend from consideration (since
     //   we want to "fallthrough" to the next valid key.)
-    // - If a user invokes with callUnboxedWithoutDispatchKey, the mask lets us
+    // - If a user invokes with redispatch, the mask lets us
     //   zero out the key the user asked us to stop.
     //
     // These excluded backends are NOT tracked in the TLS, but must be applied
@@ -57,9 +57,6 @@ namespace detail {
   struct MultiDispatchKeySet : at::IterArgs<MultiDispatchKeySet> {
     DispatchKeySet ts;
     void operator()(const at::Tensor& x) {
-      ts = ts | x.key_set();
-    }
-    void operator()(const TensorOptions& x) {
       ts = ts | x.key_set();
     }
     void operator()(at::ArrayRef<at::Tensor> xs) {
@@ -123,9 +120,6 @@ public:
   }
 
   DispatchKey getDispatchKeyBoxed(DispatchKeySet backendsWithoutFallthrough, const torch::jit::Stack* stack) const {
-    // TODO Unboxed dispatch supports TensorOptions (i.e. ScalarType/Device/Layout) arguments
-    //      but boxed doesn't yet. See https://github.com/pytorch/pytorch/issues/26428
-
     DispatchKeySet ks;
     dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
       const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);

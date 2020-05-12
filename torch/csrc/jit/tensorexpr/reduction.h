@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/tensorexpr/dim_arg.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 #include <functional>
@@ -24,26 +25,28 @@ using ReduceInteraction = std::function<ExprHandle(ExprHandle, ExprHandle)>;
 class ReduceOp : public ExprNode<ReduceOp> {
  public:
   ReduceOp(
-      ExprHandle accum,
-      Stmt* init,
+      const Buf* accum,
+      const Expr* init,
       ExprHandle body,
       ReduceInteraction c,
+      const std::vector<const Expr*>& output_args,
       const std::vector<const Var*>& reduce_args)
       : ExprNodeBase(body.dtype()),
         accumulator_(accum),
         initializer_(init),
         body_(body),
         interaction_(c),
+        output_args_(output_args),
         reduce_args_(reduce_args) {}
 
   // return the accumulation load expression.
-  ExprHandle accumulator() const {
+  const Buf* accumulator() const {
     return accumulator_;
   }
 
   // return a Statement which stores the initializer into the accumulation
   // buffer.
-  Stmt* initializer() const {
+  const Expr* initializer() const {
     return initializer_;
   }
 
@@ -58,6 +61,11 @@ class ReduceOp : public ExprNode<ReduceOp> {
     return interaction_;
   }
 
+  // returns variables associated with the output Tensor.
+  const std::vector<const Expr*>& output_args() const {
+    return output_args_;
+  }
+
   // returns variables associated with the axes of reduction.
   const std::vector<const Var*>& reduce_args() const {
     return reduce_args_;
@@ -66,14 +74,19 @@ class ReduceOp : public ExprNode<ReduceOp> {
   // Completes the reduction operator by applying the interaction function to
   // the accumulation and the body expression.
   ExprHandle complete() const {
-    return interaction_(accumulator_, body_);
+    std::vector<const Expr*> indices(output_args_.begin(), output_args_.end());
+    ExprHandle accum = ExprHandle(
+        new Load(body_.dtype(), accumulator_, indices, new IntImm(1)));
+    auto e = interaction_(accum, body_);
+    return e;
   }
 
  private:
-  ExprHandle accumulator_;
-  Stmt* initializer_;
+  const Buf* accumulator_;
+  const Expr* initializer_;
   ExprHandle body_;
   ReduceInteraction interaction_;
+  std::vector<const Expr*> output_args_;
   std::vector<const Var*> reduce_args_;
 };
 
@@ -97,19 +110,15 @@ class Reducer {
   ReduceOp* operator()(
       Buf* result_buf,
       ExprHandle body,
-      std::vector<const Var*> outer,
+      std::vector<const Expr*> output,
       std::vector<const Var*> inner) const {
-    std::vector<const Expr*> indices;
-    for (size_t i = 0; i < outer.size(); i++) {
-      indices.push_back(outer[i]);
-    }
-
-    ExprHandle accum =
-        ExprHandle(new Load(body.dtype(), result_buf, indices, new IntImm(1)));
-    Stmt* init = new Store(
-        result_buf, indices, new Cast(body.dtype(), init_), new IntImm(1));
-
-    return new ReduceOp(accum, init, body, interaction_, inner);
+    return new ReduceOp(
+        result_buf,
+        new Cast(body.dtype(), init_),
+        body,
+        interaction_,
+        output,
+        inner);
   }
 
   // Polymorphic handling of Body functions with a variety of parameters.

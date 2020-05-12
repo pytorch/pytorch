@@ -47,28 +47,35 @@ void TransformReplay::replayBackward(Reorder* expr) {
 TensorDomain* TransformReplay::replayBackward(
     TensorDomain* td,
     bool create_record) {
-  influence = std::vector<bool>(td->size(), false);
+  influence = std::vector<bool>(td->nDims(), false);
   for (int i = 0; i < compute_at_axis; i++)
     influence[i] = true;
   return TransformIter::runBackward(td, create_record);
 }
 
 /*
- * Replay functions, takes a TensorView and steps through the operations in
+ * Replay functions, takes a TensorDomain and steps through the operations in
  * "record" based on influence axes. Will also update influence and propagate
  * it forward.
  */
-TensorView* TransformReplay::replay(Split* expr, TensorView* tv) {
+TensorDomain* TransformReplay::replay(Split* expr, TensorDomain* td) {
   int axis = expr->axis();
+  bool run_split = influence[axis];
+
+  // Propagate influence
+  influence.insert(influence.begin() + axis + 1, influence[axis]);
+
   // Forward prop influence
-  if (influence[axis]) {
+  if (run_split) {
     // Make sure split axis is real.
     int real_axis = axis_map[expr->axis()];
     TORCH_INTERNAL_ASSERT(
         real_axis != -1,
         "During transformation replay attempted to split an imaginary axis.");
-    // Replay split
-    tv->split(real_axis, *(expr->factor()->value()));
+    TORCH_INTERNAL_ASSERT(
+        td->axis(real_axis)->start()->isZeroInt(),
+        "Transform Replay tried to split an IterDomain with a start value that is not 0,",
+        " this is not currently supported.");
     // Inserted a real axis, push everything in axis_map over to the right
     // after this inserted axis
     for (decltype(axis_map.size()) i{0}; i < axis_map.size(); i++)
@@ -78,31 +85,20 @@ TensorView* TransformReplay::replay(Split* expr, TensorView* tv) {
     axis_map.insert(
         axis_map.begin() + expr->axis() + 1,
         real_axis + 1); // insert axis at position axis.
+
+    // Replay split
+    return td->split(real_axis, *(expr->factor()->value()));
   } else {
     // Fake it
     axis_map.insert(axis_map.begin() + expr->axis() + 1, -1);
   }
 
-  influence.insert(influence.begin() + axis + 1, influence[axis]);
-
-  return tv;
+  return td;
 }
 
-TensorView* TransformReplay::replay(Merge* expr, TensorView* tv) {
+TensorDomain* TransformReplay::replay(Merge* expr, TensorDomain* td) {
   int axis = expr->axis();
-
-  if (influence[axis] || influence[axis + 1]) {
-    // Make sure both merge axes are real.
-    TORCH_INTERNAL_ASSERT(
-        axis_map[axis] != -1 && axis_map[axis + 1] != -1,
-        "During transformation replay attempted to merge an imaginary axis.");
-    // Replay merge
-    tv->merge(axis_map[axis]);
-  } else {
-    // If we aren't applying the merge, we won't change any following axis
-    // Doesn't matter which axis we propagate for the merge in the axis_map
-    assert(axis_map[axis + 1] == -1);
-  }
+  bool merge = influence[axis] || influence[axis + 1];
   axis_map.erase(axis_map.begin() + expr->axis() + 1);
 
   for (decltype(axis_map.size()) i = expr->axis() + 1; i < axis_map.size(); i++)
@@ -113,10 +109,27 @@ TensorView* TransformReplay::replay(Merge* expr, TensorView* tv) {
   influence[axis] = influence[axis] || influence[axis + 1];
   influence.erase(influence.begin() + axis + 1);
 
-  return tv;
+  if (merge) {
+    // Make sure both merge axes are real.
+    TORCH_INTERNAL_ASSERT(
+        axis_map[axis] != -1 && axis_map[axis + 1] != -1,
+        "During transformation replay attempted to merge an imaginary axis.");
+    // Replay merge
+    TORCH_INTERNAL_ASSERT(
+        td->axis(axis)->start()->isZeroInt() &&
+            td->axis(axis + 1)->start()->isZeroInt(),
+        "Transform Replay tried to Merge IterDomains with a start value that is not 0,",
+        " this is not currently supported.");
+    return td->merge(axis_map[axis]);
+  } else {
+    // If we aren't applying the merge, we won't change any following axis
+    // Doesn't matter which axis we propagate for the merge in the axis_map
+    assert(axis_map[axis + 1] == -1);
+    return td;
+  }
 }
 
-TensorView* TransformReplay::replay(Reorder* expr, TensorView* tv) {
+TensorDomain* TransformReplay::replay(Reorder* expr, TensorDomain* td) {
   // axis2pos[old_pos] = new_pos is sent to reorder, Reorder holds
   // pos2axis[new_pos] = old_pos Generate new axis2pos map
   std::unordered_map<int, int> axis2pos;
@@ -161,13 +174,13 @@ TensorView* TransformReplay::replay(Reorder* expr, TensorView* tv) {
     axis2pos[entry.first] = axis++;
   }
 
-  for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
+  for (decltype(td->nDims()) i{0}; i < td->nDims(); i++) {
     if (axis2pos.find(i) == axis2pos.end())
       axis2pos[i] = axis++;
   }
 
   // replay reorder
-  tv->reorder(axis2pos);
+  TensorDomain* reordered_td = td->reorder(axis2pos);
 
   // Fake transform:
   for (decltype(pos2axis.size()) i = 0; i < pos2axis.size(); i++) {
@@ -181,7 +194,7 @@ TensorView* TransformReplay::replay(Reorder* expr, TensorView* tv) {
   influence = reordered_influence;
   axis_map = reordered_axis_map;
 
-  return tv;
+  return reordered_td;
 }
 
 /*
@@ -219,16 +232,18 @@ TensorView* TransformReplay::replay(Reorder* expr, TensorView* tv) {
  * outside of compute_at_axis.
  *
  */
-TensorView* TransformReplay::runReplay(
-    TensorView* replay_ref,
-    TensorView* replay_target,
+TensorDomain* TransformReplay::runReplay(
+    TensorDomain* replay_ref,
+    TensorDomain* replay_target,
     int compute_at_axis) {
   if (compute_at_axis < 0)
     compute_at_axis += int(replay_ref->nDims()) + 1;
 
   TORCH_CHECK(
       compute_at_axis >= 0 && compute_at_axis < int(replay_ref->nDims()) + 1,
-      "Transform replay cannot be performed as the compute_at_axis is not in the valid range.");
+      "Transform replay cannot be performed as the compute_at_axis is not in the valid range, it should be 0 or greater, and less than ",
+      int(replay_ref->nDims()) + 1,
+      ".");
 
   this->compute_at_axis = compute_at_axis;
 
@@ -236,7 +251,7 @@ TensorView* TransformReplay::runReplay(
   // Reset the tensor domain of the target, this is the only way we can be
   // certain That we can actually replay the ops of ref.
   // Trace back to the root TensorDomain's of ref and target
-  replay_target->resetView();
+  replay_target = replay_target->rootDomain();
 
   /* STEP 2 */
   // Mark compute_at_axis and below as "influenced", trace back through
@@ -244,7 +259,7 @@ TensorView* TransformReplay::runReplay(
   // produce these axis
   // As we trace the ref, record the operations to go from replay_ref ->
   // ref_root, save in "record"
-  TensorDomain* ref_root = replayBackward(replay_ref->domain(), true);
+  TensorDomain* ref_root = replayBackward(replay_ref, true);
   // We're going to save a copy of this vector, class member influnce will be
   // used during replay to forward propagate influence.
   std::vector<bool> root_influence_vector = influence;
@@ -257,7 +272,7 @@ TensorView* TransformReplay::runReplay(
       axis_map.push_back(i);
 
   // Domain sizes must match at root for replay.
-  if (axis_map.size() != ref_root->size()) {
+  if (axis_map.size() != ref_root->nDims()) {
     std::stringstream err_msg;
     err_msg
         << "Transforms cannot be replayed as source and destinations do not have the same root sizes."
@@ -266,9 +281,10 @@ TensorView* TransformReplay::runReplay(
   }
 
   /*
-   * TODO: Decide if the following check is reasonable, when we're parsing the
-   * JIT graph, we are using symbolic sizes for each tensor individually, so
-   * they won't all have the same size.
+   * TODO: The JIT graph has symbolic sizes, so inputs may actually have the
+   * same sizes (assuming no broadcasts/reductions), we at some point want to
+   * have some size matching, and sizes should actually match at this point, but
+   * the check below won't work.
    */
 
   // for (decltype(axis_map.size()) i{0}; i < axis_map.size(); i++) {
@@ -288,7 +304,7 @@ TensorView* TransformReplay::runReplay(
   // actually execute those based on influence. If we didn't track all
   // axes, we wouldn't know what axis split/merge/reorder are referencing
   // as they're relative to the "full" replay that produced the reference.
-  TensorView* replayed = TransformIter::runReplay(replay_target);
+  TensorDomain* replayed = TransformIter::runReplay(replay_target);
 
   for (decltype(replayed->nDims()) i{0}; i < compute_at_axis; i++)
     if (replayed->axis(i)->isReduction())
@@ -297,6 +313,16 @@ TensorView* TransformReplay::runReplay(
           "Generated a compute_at dependency where a reduction would be used before computed.");
 
   return replayed;
+}
+
+TensorView* TransformReplay::runReplay(
+    TensorView* replay_ref,
+    TensorView* replay_target,
+    int compute_at_axis) {
+  TensorDomain* td =
+      runReplay(replay_ref->domain(), replay_target->domain(), compute_at_axis);
+  replay_target->setDomain(td);
+  return replay_target;
 }
 
 TensorView* TransformReplay::replay(
@@ -312,8 +338,14 @@ TensorView* TransformReplay::fullReplay(
     TensorView* replay_ref,
     TensorView* replay_target) {
   TransformReplay tr;
-  tr.runReplay(replay_ref, replay_target, -1);
-  return replay_target;
+  return tr.runReplay(replay_ref, replay_target, -1);
+}
+
+TensorDomain* TransformReplay::fullReplay(
+    TensorDomain* replay_ref,
+    TensorDomain* replay_target) {
+  TransformReplay tr;
+  return tr.runReplay(replay_ref, replay_target, -1);
 }
 
 } // namespace fuser

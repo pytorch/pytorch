@@ -21,7 +21,7 @@ void IndexCompute::replayBackward(Merge* expr) {
       ax >= 0 && ax < indices.size(),
       "Hit an invalid MERGE transformation during IndexCompute, axis is not within bounds.");
 
-  Val* I = expr->in()->axis(ax + 1)->size();
+  Val* I = expr->in()->axis(ax + 1)->extent();
   Val* ind = indices[ax];
   indices[ax] = div(ind, I);
   indices.insert(indices.begin() + ax + 1, mod(ind, I));
@@ -62,10 +62,10 @@ IndexCompute::IndexCompute(const TensorView* tv, std::vector<Val*> _indices) {
 
   TensorDomain* td = tv->domain();
 
-  bool exclude_reduction = td->size() > indices.size();
+  bool exclude_reduction = td->nDims() > indices.size();
 
   TORCH_CHECK(
-      exclude_reduction || td->size() == indices.size(),
+      exclude_reduction || td->nDims() == indices.size(),
       "For IndexCompute the number of axis should match the number of dimensions"
       " in the TensorView.");
 
@@ -73,7 +73,7 @@ IndexCompute::IndexCompute(const TensorView* tv, std::vector<Val*> _indices) {
   // being consumed, not produced, then insert dummy dimensions in the
   // indices for bookkeeping while replaying split/merge/reorder operations.
   if (exclude_reduction)
-    for (decltype(td->size()) i{0}; i < td->size(); i++)
+    for (decltype(td->nDims()) i{0}; i < td->nDims(); i++)
       if (td->axis(i)->isReduction())
         indices.insert(indices.begin() + i, new Int(-1));
 
@@ -83,7 +83,7 @@ IndexCompute::IndexCompute(const TensorView* tv, std::vector<Val*> _indices) {
   TensorDomain* root = TransformIter::runBackward(td, true);
 
   TORCH_INTERNAL_ASSERT(
-      root->size() == indices.size(),
+      root->nDims() == indices.size(),
       "Error during IndexCompute. The number of indices generated"
       " after running the transformations backwards should match"
       " the number of dimensions of the root TensorView.");
@@ -91,7 +91,7 @@ IndexCompute::IndexCompute(const TensorView* tv, std::vector<Val*> _indices) {
   // Remove indices associated with reduction axes, we had them just for
   // bookkeeping.
   if (exclude_reduction) {
-    for (auto i = root->size() - 1; i >= 0; i--)
+    for (auto i = root->nDims() - 1; i >= 0; i--)
       if (root->axis(i)->isReduction())
         indices.erase(indices.begin() + i);
   }

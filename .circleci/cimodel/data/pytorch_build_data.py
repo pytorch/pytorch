@@ -23,16 +23,6 @@ CONFIG_TREE_DATA = [
             ]),
         ]),
         ("cuda", [
-            ("9", [
-                # Note there are magic strings here
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L21
-                # and
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L143
-                # and
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
-                # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
-                X("3.6"),
-            ]),
             ("9.2", [X("3.6")]),
             ("10.1", [X("3.6")]),
             ("10.2", [
@@ -55,6 +45,9 @@ CONFIG_TREE_DATA = [
     ]),
     ("bionic", [
         ("clang", [
+            ("9", [
+                XImportant("3.6"),
+            ]),
             ("9", [
                 ("3.6", [
                     ("xla", [XImportant(True)]),
@@ -147,6 +140,7 @@ class XlaConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
+
 class ParallelTBBConfigNode(TreeConfigNode):
     def modify_label(self, label):
         return "PARALLELTBB=" + str(label)
@@ -156,6 +150,7 @@ class ParallelTBBConfigNode(TreeConfigNode):
 
     def child_constructor(self):
         return ImportantConfigNode
+
 
 class ParallelNativeConfigNode(TreeConfigNode):
     def modify_label(self, label):
@@ -167,6 +162,7 @@ class ParallelNativeConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
+
 class LibTorchConfigNode(TreeConfigNode):
     def modify_label(self, label):
         return "BUILD_TEST_LIBTORCH=" + str(label)
@@ -177,6 +173,7 @@ class LibTorchConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
+
 class AndroidAbiConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
@@ -184,6 +181,7 @@ class AndroidAbiConfigNode(TreeConfigNode):
 
     def child_constructor(self):
         return ImportantConfigNode
+
 
 class ImportantConfigNode(TreeConfigNode):
     def modify_label(self, label):
@@ -209,6 +207,7 @@ class XenialCompilerConfigNode(TreeConfigNode):
 
         return XenialCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
 
+
 class BionicCompilerConfigNode(TreeConfigNode):
 
     def modify_label(self, label):
@@ -222,6 +221,7 @@ class BionicCompilerConfigNode(TreeConfigNode):
 
         return BionicCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
 
+
 class XenialCompilerVersionConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["compiler_version"] = node_name
@@ -229,6 +229,7 @@ class XenialCompilerVersionConfigNode(TreeConfigNode):
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):
         return PyVerConfigNode
+
 
 class BionicCompilerVersionConfigNode(TreeConfigNode):
     def init2(self, node_name):

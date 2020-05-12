@@ -66,16 +66,16 @@ public:
    *
    * > KernelFunction func = KernelFunction::makeFromUnboxedLambda(
    * >      [] (Tensor a, bool b) -> Tensor {...});
-   * > Tensor result = func.callUnboxed<Tensor, Tensor, bool>(tensor1, true);
+   * > Tensor result = func.call<Tensor, Tensor, bool>(tensor1, true);
    *
    * Or, with a boxed implementation:
    *
    * > void boxed_func(OperatorKernel*, Stack* stack) {...}
    * > KernelFunction func = KernelFunction::makeFromBoxedFunction(&boxed_func);
-   * > Tensor result = func.callUnboxed<Tensor, Tensor, bool>(tensor1, true);
+   * > Tensor result = func.call<Tensor, Tensor, bool>(tensor1, true);
    */
   template<class Return, class... Args>
-  Return callUnboxed(const OperatorHandle& opHandle, Args... args) const;
+  Return call(const OperatorHandle& opHandle, Args... args) const;
 
   /**
    * Create a KernelFunction from a boxed function.
@@ -104,9 +104,8 @@ public:
 
   /**
    * Create a KernelFunction from an unboxed functor and prevent creation of an
-   * unboxing-wrapper. This means that you can only call this KernelFunction
-   * using KernelFunction::callUnboxedOnly(), not using KernelFunction::callBoxed()
-   * or KernelFunction::callUnboxed().
+   * unboxing-wrapper. This means that you cannot call this KernelFunction
+   * using KernelFunction::callBoxed()
    *
    * This is necessary because our unboxing wrappers don't work for all types
    * yet, so if you want to use one of these types as function arguments,
@@ -140,9 +139,8 @@ public:
 
   /**
    * Create a KernelFunction from an unboxed function and prevent creation of an
-   * unboxing-wrapper. This means that you can only call this KernelFunction
-   * using KernelFunction::callUnboxedOnly(), not using KernelFunction::callBoxed()
-   * or KernelFunction::callUnboxed().
+   * unboxing-wrapper. This means that you cannot call this KernelFunction
+   * using KernelFunction::callBoxed()
    *
    * This is necessary because our unboxing wrappers don't work for all types
    * yet, so if you want to use one of these types as function arguments,
@@ -190,7 +188,7 @@ public:
   // For testing internal invariants only
   bool _equalsBoxedAndUnboxed(const KernelFunction&) const;
 
-  // This function is a temporary hack that allows register_aten_ops.cpp to register its codegen'ed
+  // This function is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
   // unboxing wrapper for aten operators. We still need those for some operators because not all work
   // with the templated unboxing logic yet.
   // TODO Delete setManuallyBoxedKernel_ once all operators work with the templated boxing logic. This can be done once https://github.com/pytorch/pytorch/issues/32366 is fixed.
@@ -213,4 +211,4 @@ private:
 
 }
 
-#include "KernelFunction_impl.h"
+#include <ATen/core/boxing/KernelFunction_impl.h>

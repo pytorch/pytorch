@@ -12,6 +12,7 @@
 
 #include <ATen/core/boxing/impl/test_helpers.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/core/Tensor.h>
 #include <functional>
 
@@ -21,6 +22,10 @@ using c10::OperatorHandle;
 using c10::Dispatcher;
 using c10::IValue;
 using c10::DispatchKey;
+
+using torch::Library;
+using torch::CppFunction;
+
 using at::Tensor;
 
 namespace {
@@ -703,7 +708,7 @@ void backend_fallback_kernel(const c10::OperatorHandle& op, c10::Stack* stack) {
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernel_thenCanBeCalled) {
-  auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+  auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>(), "");
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()");
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
@@ -713,7 +718,7 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernel_thenCanBeCal
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelForWrongBackend_thenCannotBeCalled) {
-  auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CUDA, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+  auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CUDA, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>(), "");
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()");
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
@@ -726,7 +731,7 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelForWrongBacke
 bool called = false;
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKernelForDifferentBackend_thenRegularKernelCanBeCalled) {
-  auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+  auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>(), "");
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()", c10::RegisterOperators::options()
       .kernel(c10::DispatchKey::CUDA, [] (Tensor, std::string) {
@@ -741,7 +746,7 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKer
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKernelForDifferentBackend_thenFallbackKernelCanBeCalled) {
-  auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+  auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>(), "");
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()", c10::RegisterOperators::options()
       .kernel(c10::DispatchKey::CUDA, [] (Tensor, std::string) {
@@ -757,7 +762,7 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKer
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKernelForSameBackend_thenCallsRegularKernel) {
-  auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+  auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>(), "");
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()", c10::RegisterOperators::options()
       .kernel(c10::DispatchKey::CPU, [] (Tensor, std::string) {
@@ -772,7 +777,7 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKer
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndCatchallKernelForSameBackend_thenCallsFallbackKernel) {
-  auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+  auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>(), "");
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()", c10::RegisterOperators::options()
       .catchAllKernel([] (Tensor, std::string) {
@@ -806,7 +811,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutograd
   ASSERT_TRUE(op.has_value());
 
   called_autograd = false;
-  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPU)); // note: all tensors have VariableTypeId set
+  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU)); // note: all tensors have VariableTypeId set
   EXPECT_TRUE(called_autograd);
 }
 
@@ -819,7 +824,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_th
   ASSERT_TRUE(op.has_value());
 
   called_nonautograd = called_autograd = false;
-  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPU)); // note: all tensors have VariableTypeId set
+  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU)); // note: all tensors have VariableTypeId set
   EXPECT_FALSE(called_nonautograd);
   EXPECT_TRUE(called_autograd);
 }
@@ -834,7 +839,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_th
 
   called_nonautograd = called_autograd = false;
   at::AutoNonVariableTypeMode _var_guard(true);
-  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
+  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
   EXPECT_TRUE(called_nonautograd);
   EXPECT_FALSE(called_autograd);
 }
@@ -848,7 +853,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_t
   ASSERT_TRUE(op.has_value());
 
   called_nonautograd = called_autograd = false;
-  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));  // note: all tensors have VariableTypeId set
+  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));  // note: all tensors have VariableTypeId set
   EXPECT_FALSE(called_nonautograd);
   EXPECT_TRUE(called_autograd);
 }
@@ -863,7 +868,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_t
 
   called_nonautograd = called_autograd = false;
   at::AutoNonVariableTypeMode _var_guard(true);
-  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
+  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
   EXPECT_TRUE(called_nonautograd);
   EXPECT_FALSE(called_autograd);
 }
@@ -877,12 +882,12 @@ TEST(OperatorRegistrationTest, xlaPreAutogradOverridesAutogradKernel) {
   ASSERT_TRUE(op.has_value());
 
   called_nonautograd = called_autograd = false;
-  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(c10::DispatchKeySet{DispatchKey::XLA, DispatchKey::XLAPreAutograd}));
+  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(c10::DispatchKeySet{DispatchKey::XLA, DispatchKey::XLAPreAutograd}));
   EXPECT_TRUE(called_nonautograd);
   EXPECT_FALSE(called_autograd);
 
   called_nonautograd = called_autograd = false;
-  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
+  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
   EXPECT_TRUE(called_autograd);
   EXPECT_FALSE(called_nonautograd);
 }
@@ -1078,7 +1083,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     c10::List<double>(), [] (const c10::List<double>& v) {EXPECT_EQ(0, v.size());},
     c10::List<double>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<double>>().size());},
     "(float[] a) -> float[]");
-  testArgTypes<c10::List<int64_t>, c10::List<int64_t>>::test(
+  testArgTypes<c10::List<int64_t>>::test(
     c10::List<int64_t>(), [] (const c10::List<int64_t>& v) {EXPECT_EQ(0, v.size());},
     c10::List<int64_t>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<int64_t>>().size());},
     "(int[] a) -> int[]");
@@ -1126,12 +1131,112 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     },
     "(Tensor[] a) -> Tensor[]");
 
+  // ArrayRef list types (with empty list)
+  testArgTypes<c10::ArrayRef<double>, c10::List<double>>::test(
+    c10::ArrayRef<double>(), [] (c10::ArrayRef<double> v) {EXPECT_EQ(0, v.size());},
+    c10::List<double>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<double>>().size());},
+    "(float[] a) -> float[]");
+  testArgTypes<c10::ArrayRef<int64_t>, c10::List<int64_t>>::test(
+    c10::ArrayRef<int64_t>(), [] (c10::ArrayRef<int64_t> v) {EXPECT_EQ(0, v.size());},
+    c10::List<int64_t>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<int64_t>>().size());},
+    "(int[] a) -> int[]");
+  testArgTypes<c10::ArrayRef<std::string>, c10::List<std::string>>::test(
+    c10::ArrayRef<std::string>(), [] (c10::ArrayRef<std::string> v) {EXPECT_EQ(0, v.size());},
+    c10::List<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toListRef().size());},
+    "(str[] a) -> str[]");
+
+
+  // list types (with non-empty list)
+  testArgTypes<c10::ArrayRef<double>, c10::List<double>>::test(
+    c10::ArrayRef<double>({1.5, 2.5}), [] (c10::ArrayRef<double> v) {expectListEquals({1.5, 2.5}, v);},
+    c10::List<double>({3.5, 4.5}), [] (const IValue& v) {expectListEquals({3.5, 4.5}, v.to<c10::List<double>>());},
+    "(float[] a) -> float[]");
+  testArgTypes<c10::ArrayRef<int64_t>, c10::List<int64_t>>::test(
+    c10::ArrayRef<int64_t>({1, 2}), [] (c10::ArrayRef<int64_t> v) {expectListEquals({1, 2}, v);},
+    c10::List<int64_t>({3, 4}), [] (const IValue& v) {expectListEquals({3, 4}, v.to<c10::List<int64_t>>());},
+    "(int[] a) -> int[]");
+  testArgTypes<c10::ArrayRef<std::string>, c10::List<std::string>>::test(
+    c10::ArrayRef<std::string>({"first", "second"}), [] (c10::ArrayRef<std::string> v) {expectListEquals({"first", "second"}, v);},
+    c10::List<std::string>({"first", "second"}), [] (const IValue& v) {
+      EXPECT_EQ(2, v.toListRef().size());
+      EXPECT_EQ("first", v.toListRef()[0].toStringRef());
+      EXPECT_EQ("second", v.toListRef()[1].toStringRef());
+    },
+    "(str[] a) -> str[]");
+  testArgTypes<c10::ArrayRef<Tensor>, c10::List<Tensor>>::test(
+    c10::ArrayRef<Tensor>({dummyTensor(c10::DispatchKey::CPUTensorId), dummyTensor(c10::DispatchKey::CUDATensorId)}), [] (c10::ArrayRef<Tensor> v) {
+      EXPECT_EQ(2, v.size());
+      EXPECT_EQ(c10::DispatchKey::CPUTensorId, extractDispatchKey(v[0]));
+      EXPECT_EQ(c10::DispatchKey::CUDATensorId, extractDispatchKey(v[1]));
+    },
+    c10::List<Tensor>({dummyTensor(c10::DispatchKey::CUDATensorId), dummyTensor(c10::DispatchKey::CPUTensorId)}), [] (const IValue& v) {
+      EXPECT_EQ(2, v.to<c10::List<at::Tensor>>().size());
+      EXPECT_EQ(c10::DispatchKey::CUDATensorId, extractDispatchKey(v.to<c10::List<at::Tensor>>().get(0)));
+      EXPECT_EQ(c10::DispatchKey::CPUTensorId, extractDispatchKey(v.to<c10::List<at::Tensor>>().get(1)));
+    },
+    "(Tensor[] a) -> Tensor[]");
+
+
+  // std::array list types (with empty list)
+  testArgTypes<std::array<double, 0>>::test(
+    std::array<double, 0>(), [] (std::array<double, 0> v) {},
+    std::array<double, 0>(), [] (const IValue& v) {EXPECT_EQ(0, (v.to<c10::List<double>>().size()));},
+    "(float[0] a) -> float[0]");
+  testArgTypes<std::array<int64_t, 0>>::test(
+    std::array<int64_t, 0>(), [] (std::array<int64_t, 0> v) {},
+    std::array<int64_t, 0>(), [] (const IValue& v) {EXPECT_EQ(0, (v.to<c10::List<int64_t>>().size()));},
+    "(int[0] a) -> int[0]");
+  testArgTypes<std::array<bool, 0>>::test(
+    std::array<bool, 0>(), [] (std::array<bool, 0> v) {},
+    std::array<bool, 0>(), [] (const IValue& v) {EXPECT_EQ(0, (v.to<std::array<bool, 0>>().size()));},
+    "(bool[0] a) -> bool[0]");
+  testArgTypes<std::array<std::string, 0>>::test(
+    std::array<std::string, 0>(), [] (std::array<std::string, 0> v) {EXPECT_EQ(0, v.size());},
+    std::array<std::string, 0>(), [] (const IValue& v) {EXPECT_EQ(0, v.toListRef().size());},
+    "(str[0] a) -> str[0]");
+
+
+  // std::array list types (with non-empty list)
+  testArgTypes<std::array<double, 2>>::test(
+    std::array<double, 2>({1.5, 2.5}), [] (std::array<double, 2> v) {expectListEquals({1.5, 2.5}, v);},
+    std::array<double, 2>({3.5, 4.5}), [] (const IValue& v) {expectListEquals({3.5, 4.5}, v.to<std::array<double, 2>>());},
+    "(float[2] a) -> float[2]");
+  testArgTypes<std::array<int64_t, 2>>::test(
+    std::array<int64_t, 2>({1, 2}), [] (std::array<int64_t, 2> v) {expectListEquals({1, 2}, v);},
+    std::array<int64_t, 2>({3, 4}), [] (const IValue& v) {expectListEquals({3, 4}, v.to<std::array<int64_t, 2>>());},
+    "(int[2] a) -> int[2]");
+  testArgTypes<std::array<bool, 2>>::test(
+    std::array<bool, 2>({true, false}), [] (std::array<bool, 2> v) {expectListEquals({true, false}, v);},
+    std::array<bool, 2>({true, false}), [] (const IValue& v) {expectListEquals({true, false}, v.to<std::array<bool, 2>>());},
+    "(bool[2] a) -> bool[2]");
+  testArgTypes<std::array<std::string, 2>>::test(
+    std::array<std::string, 2>({"first", "second"}), [] (std::array<std::string, 2> v) {expectListEquals({"first", "second"}, v);},
+    std::array<std::string, 2>({"first", "second"}), [] (const IValue& v) {
+      EXPECT_EQ(2, v.toListRef().size());
+      EXPECT_EQ("first", v.toListRef()[0].toStringRef());
+      EXPECT_EQ("second", v.toListRef()[1].toStringRef());
+    },
+    "(str[2] a) -> str[2]");
+  testArgTypes<std::array<Tensor, 2>>::test(
+    std::array<Tensor, 2>({dummyTensor(c10::DispatchKey::CPUTensorId), dummyTensor(c10::DispatchKey::CUDATensorId)}), [] (std::array<Tensor, 2> v) {
+      EXPECT_EQ(2, v.size());
+      EXPECT_EQ(c10::DispatchKey::CPUTensorId, extractDispatchKey(v[0]));
+      EXPECT_EQ(c10::DispatchKey::CUDATensorId, extractDispatchKey(v[1]));
+    },
+    std::array<Tensor, 2>({dummyTensor(c10::DispatchKey::CUDATensorId), dummyTensor(c10::DispatchKey::CPUTensorId)}), [] (const IValue& v) {
+      EXPECT_EQ(2, v.to<c10::List<at::Tensor>>().size());
+      EXPECT_EQ(c10::DispatchKey::CUDATensorId, extractDispatchKey(v.to<c10::List<at::Tensor>>().get(0)));
+      EXPECT_EQ(c10::DispatchKey::CPUTensorId, extractDispatchKey(v.to<c10::List<at::Tensor>>().get(1)));
+    },
+    "(Tensor[2] a) -> Tensor[2]");
+
+
   // deprecated list types (with empty list)
   testArgTypes<std::vector<double>>::test<TestLegacyAPI>(
     std::vector<double>(), [] (const std::vector<double>& v) {EXPECT_EQ(0, v.size());},
     std::vector<double>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<double>>().size());},
     "(float[] a) -> float[]");
-  testArgTypes<std::vector<int64_t>, std::vector<int64_t>>::test<TestLegacyAPI>(
+  testArgTypes<std::vector<int64_t>>::test<TestLegacyAPI>(
     std::vector<int64_t>(), [] (const std::vector<int64_t>& v) {EXPECT_EQ(0, v.size());},
     std::vector<int64_t>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<int64_t>>().size());},
     "(int[] a) -> int[]");
@@ -1291,17 +1396,17 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 }
 
 TEST(NewOperatorRegistrationTest, testBasics) {
-  auto registrar = c10::import()
-    .def("_test::dummy(Tensor self) -> Tensor")
-    .def("_test::dummy1(Tensor self) -> Tensor")
-    .def("_test::dummy2(Tensor self) -> Tensor")
-    .def("_test::dummy3(Tensor self, Tensor other) -> Tensor", [](const Tensor& self, const Tensor& other) { return self; })
-    .def("_test::dummy4", [](const Tensor& self, const Tensor& other) { return other; })
-    .impl("_test::dummy", c10::DeviceType::CPU, [](const Tensor& self) { return self; })
-    .impl("_test::dummy", c10::DeviceType::XLA, [](const Tensor& self) { return self; })
-    // Internal API
-    .impl("_test::dummy2", c10::DispatchKey::CPU, [](const Tensor& self) { return self; })
-    .impl("_test::dummy2", c10::DispatchKey::XLA, [](const Tensor& self) { return self; });
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("dummy(Tensor self) -> Tensor");
+  m.def("dummy1(Tensor self) -> Tensor");
+  m.def("dummy2(Tensor self) -> Tensor");
+  m.def("dummy3(Tensor self, Tensor other) -> Tensor", [](const Tensor& self, const Tensor& other) { return self; });
+  m.def("dummy4", [](const Tensor& self, const Tensor& other) { return other; });
+  m.impl("dummy", c10::DeviceType::CPU, [](const Tensor& self) { return self; });
+  m.impl("dummy", c10::DeviceType::XLA, [](const Tensor& self) { return self; });
+  // Internal API
+  m.impl("dummy2", c10::DispatchKey::CPU, [](const Tensor& self) { return self; });
+  m.impl("dummy2", c10::DispatchKey::XLA, [](const Tensor& self) { return self; });
 
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy", ""}).has_value());
   // Should have a schema even if there are no impls
@@ -1312,11 +1417,14 @@ TEST(NewOperatorRegistrationTest, testBasics) {
 }
 
 TEST(NewOperatorRegistrationTest, importTopLevel) {
-  auto registrar = c10::import()
-    .def("test::def1(Tensor self) -> Tensor")
-    .def("test::def2(Tensor self) -> Tensor", [](const Tensor& x) { return x; })
-    .def("test::def3", [](const Tensor& x) { return x; })
-    .impl("test::impl1", [](const Tensor& x) { return x; });
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("def1(Tensor self) -> Tensor");
+  m.def("def2(Tensor self) -> Tensor", [](const Tensor& x) { return x; });
+  m.def("def3", [](const Tensor& x) { return x; });
+
+  auto m2 = MAKE_TORCH_LIBRARY_IMPL(test, CatchAll);
+  m2.impl("impl1", [](const Tensor& x) { return x; });
+
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def2", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def3", ""}).has_value());
@@ -1327,42 +1435,38 @@ TEST(NewOperatorRegistrationTest, importTopLevel) {
 }
 
 TEST(NewOperatorRegistrationTest, overload) {
-  auto registrar = c10::import()
-    .def("test::fn(Tensor self) -> Tensor")
-    .def("test::fn.overload1(Tensor self, Tensor other) -> Tensor")
-    .def("test::fn.overload2(Tensor self, Tensor other, Tensor alpha) -> Tensor");
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn(Tensor self) -> Tensor");
+  m.def("fn.overload1(Tensor self, Tensor other) -> Tensor");
+  m.def("fn.overload2(Tensor self, Tensor other, Tensor alpha) -> Tensor");
+
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::fn", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::fn", "overload1"}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::fn", "overload2"}).has_value());
 }
 
-// See https://github.com/pytorch/pytorch/issues/35397
 TEST(NewOperatorRegistrationTest, importNamespace) {
-  auto registrar = c10::_import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD("test")
-    .def("def1(Tensor self) -> Tensor")
-    .def("def2(Tensor self) -> Tensor", [](const Tensor& x) { return x; })
-    .def("def3", [](const Tensor& x) { return x; })
-    .impl("impl1", [](const Tensor& x) { return x; })
-    .def("retest::def1(Tensor self) -> Tensor")
-    .def("retest::def2(Tensor self) -> Tensor", [](const Tensor& x) { return x; })
-    .def("retest::def3", [](const Tensor& x) { return x; })
-    .impl("retest::impl1", [](const Tensor& x) { return x; });
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("def1(Tensor self) -> Tensor");
+  m.def("def2(Tensor self) -> Tensor", [](const Tensor& x) { return x; });
+  m.def("def3", [](const Tensor& x) { return x; });
+  m.impl("impl1", [](const Tensor& x) { return x; });
+  expectThrows<c10::Error>([&] {
+    m.def("retest::def1(Tensor self) -> Tensor");
+  }, "");
+
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def2", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def3", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findOp({"test::impl1", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findSchema({"retest::def1", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findSchema({"retest::def2", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findSchema({"retest::def3", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findOp({"retest::impl1", ""}).has_value());
 }
 
 TEST(NewOperatorRegistrationTest, schema) {
-  auto registrar = c10::import()
-    .def("test::def1(Tensor self) -> Tensor")
-    .def(torch::schema("test::def2(Tensor self) -> Tensor"))
-    .def(torch::schema("test::def3(Tensor self) -> Tensor", c10::AliasAnalysisKind::PURE_FUNCTION))
-    .def(torch::jit::parseSchema("test::def4(Tensor self) -> Tensor"));
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("def1(Tensor self) -> Tensor");
+  m.def(torch::schema("def2(Tensor self) -> Tensor"));
+  m.def(torch::schema("def3(Tensor self) -> Tensor", c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::jit::parseSchema("def4(Tensor self) -> Tensor"));
 
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def2", ""}).has_value());
@@ -1379,10 +1483,10 @@ TEST(NewOperatorRegistrationTest, dispatch) {
   bool cpu_called = false;
   bool cuda_called = false;
   bool autograd_called = false;
-  auto registrar = c10::import()
-    .def("test::fn_cpu", torch::dispatch(c10::DispatchKey::CPU, [&](const Tensor& x) { cpu_called = true; return x; }))
-    .def("test::fn_cuda", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }))
-    .def("test::fn_autograd", torch::dispatch(c10::kAutograd, [&](const Tensor& x) { autograd_called = true; return x; }));
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn_cpu", torch::dispatch(c10::DispatchKey::CPU, [&](const Tensor& x) { cpu_called = true; return x; }));
+  m.def("fn_cuda", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }));
+  m.def("fn_autograd", torch::dispatch(c10::kAutograd, [&](const Tensor& x) { autograd_called = true; return x; }));
 
   {
     auto op = Dispatcher::singleton().findSchema({"test::fn_cpu", ""});
@@ -1413,13 +1517,13 @@ TEST(NewOperatorRegistrationTest, dispatchMultiple) {
   bool cpu_called = false;
   bool cuda_called = false;
   bool autograd_called = false;
-  auto registrar = c10::import()
-    .def("test::fn(Tensor self) -> Tensor")
-    // NB: Direct use of DispatchKey is discouraged; use the DeviceType
-    // k-synonyms instead
-    .impl("test::fn", c10::DispatchKey::CPU, [&](const Tensor& x) { cpu_called = true; return x; })
-    .impl("test::fn", c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; })
-    .impl("test::fn", c10::kAutograd, [&](const Tensor& x) { autograd_called = true; return x; });
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn(Tensor self) -> Tensor");
+  // NB: Direct use of DispatchKey is discouraged; use the DeviceType
+  // k-synonyms instead
+  m.impl("fn", c10::DispatchKey::CPU, [&](const Tensor& x) { cpu_called = true; return x; });
+  m.impl("fn", c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; });
+  m.impl("fn", c10::kAutograd, [&](const Tensor& x) { autograd_called = true; return x; });
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
   ASSERT_TRUE(op.has_value());
@@ -1441,10 +1545,11 @@ TEST(NewOperatorRegistrationTest, dispatchMultiple) {
 }
 
 TEST(NewOperatorRegistrationTest, fallback) {
-  auto registrar = c10::import()
-    .fallback(c10::kCPU, c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+  auto m = MAKE_TORCH_LIBRARY_IMPL(_, CPU);
+  m.fallback(CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()");
+
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
   auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPU), "hello ");
@@ -1454,20 +1559,31 @@ TEST(NewOperatorRegistrationTest, fallback) {
 TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
   bool cpu_called = false;
   bool backend_generic_called = false;
-  auto registrar = c10::import()
-    .def("test::fn(Tensor self) -> Tensor")
-    .impl("test::fn", c10::kCPU, [&](const Tensor& x) { cpu_called = true; return x; })
-    .impl("test::fn", c10::DispatchKey::BackendSelect, [&](const Tensor& x) {
-      backend_generic_called = true;
-      auto op = c10::Dispatcher::singleton().findSchema({"test::fn", ""});
-      return c10::Dispatcher::singleton().callUnboxedRedispatch<Tensor, const Tensor&>(*op, c10::DispatchKey::BackendSelect, x);
-    })
-  ;
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn(Tensor self) -> Tensor");
+  m.impl("fn", c10::kCPU, [&](const Tensor& x) { cpu_called = true; return x; });
+  m.impl("fn", c10::DispatchKey::BackendSelect, [&](const Tensor& x) {
+     backend_generic_called = true;
+     auto op = c10::Dispatcher::singleton().findSchema({"test::fn", ""});
+     return c10::Dispatcher::singleton().redispatch<Tensor, const Tensor&>(*op, c10::DispatchKey::BackendSelect, x);
+   });
+
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
   ASSERT_TRUE(op.has_value());
   callOp(*op, dummyTensor(c10::DispatchKey::CPU));
   ASSERT_TRUE(cpu_called);
   ASSERT_TRUE(backend_generic_called);
+}
+
+TEST(NewOperatorRegistrationTest, TorchLibraryTwiceIsError) {
+  {
+    auto m = MAKE_TORCH_LIBRARY(test);
+    expectThrows<c10::Error>([] {
+      auto m2 = MAKE_TORCH_LIBRARY(test);
+    }, "Only a single TORCH_LIBRARY");
+  }
+  // Ensure it's ok after deregistering
+  auto m = MAKE_TORCH_LIBRARY(test);
 }
 
 Tensor dummy_fn(const Tensor& x) {
@@ -1476,16 +1592,16 @@ Tensor dummy_fn(const Tensor& x) {
 
 TEST(NewOperatorRegistrationTest, CppFunction) {
   // Just show off the possible ways to register functions
-  auto registrar = c10::import()
-    .def("test::fn1", &dummy_fn)
-    // C++ will implicitly convert function to function pointer
-    // c.f. https://en.cppreference.com/w/cpp/language/implicit_conversion#Function_to_pointer
-    .def("test::fn2", dummy_fn)
-    .def("test::fn3", [](const Tensor& x) { return x; })
-    // These require explicit schema
-    .def("test::fn4(Tensor x) -> Tensor", c10::CppFunction::makeFallthrough())
-    .def("test::fn5(Tensor x) -> Tensor", c10::CppFunction::makeUnboxedOnly(dummy_fn))
-    .def("test::fn6(Tensor x) -> Tensor", c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn1", &dummy_fn);
+  // C++ will implicitly convert function to function pointer
+  // c.f. https://en.cppreference.com/w/cpp/language/implicit_conversion#Function_to_pointer
+  m.def("fn2", dummy_fn);
+  m.def("fn3", [](const Tensor& x) { return x; });
+  // These require explicit schema
+  m.def("fn4(Tensor x) -> Tensor", CppFunction::makeFallthrough());
+  m.def("fn5(Tensor x) -> Tensor", CppFunction::makeUnboxedOnly(dummy_fn));
+  m.def("fn6(Tensor x) -> Tensor", CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 }
 
 // Some internal tests that have to be done from C++
@@ -1509,10 +1625,12 @@ TEST(NewOperatorRegistrationTest, testDelayedListener) {
   int64_t initial_num_deregisters = listener_ptr->num_deregisters_;
   auto op = Dispatcher::singleton().findOp({"_test::dummy", ""});
   ASSERT_FALSE(op.has_value());
-  auto reg1 = c10::import().impl("_test::dummy", [](const Tensor& self) { return self; });
+  auto m1 = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+  m1.impl("dummy", [](const Tensor& self) { return self; });
   EXPECT_EQ(initial_num_registers, listener_ptr->num_registers_);
   {
-    auto reg2 = c10::import().def("_test::dummy(Tensor self) -> Tensor");
+    auto m2 = MAKE_TORCH_LIBRARY(_test);
+    m2.def("dummy(Tensor self) -> Tensor");
     EXPECT_EQ(initial_num_registers + 1, listener_ptr->num_registers_);
   }
   EXPECT_EQ(initial_num_deregisters + 1, listener_ptr->num_deregisters_);

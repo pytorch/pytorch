@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
 
 namespace torch {
@@ -31,6 +32,23 @@ std::vector<Expr*> ExprSort::getExprs(
   ExprSort es;
   es.traverse(fusion, from_outputs_only, breadth_first);
   return es.exprs;
+}
+
+std::vector<Statement*> InputsOf::next(Val* v) {
+  if (FusionGuard::getCurFusion()->origin(v) == nullptr)
+    inputs.emplace(v);
+  return IterVisitor::next(v);
+}
+
+std::set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
+  TORCH_CHECK(
+      fusion->hasOutput(output_),
+      "Asked for the inputs of ",
+      output_,
+      " however, it is not an output of the provided fusion.");
+  InputsOf io;
+  io.traverseFrom(FusionGuard::getCurFusion(), {output_});
+  return io.inputs;
 }
 
 Fusion::~Fusion() {
@@ -140,6 +158,31 @@ std::vector<Expr*> Fusion::exprs(bool from_outputs_only, bool breadth_first) {
   return ExprSort::getExprs(this, from_outputs_only, breadth_first);
 }
 
+std::set<Val*> Fusion::inputsOf(Val* val) {
+  return InputsOf::output(this, val);
+}
+
+void Fusion::validateInputs() {
+  std::set<Val*> all_inputs;
+  for (Val* out : outputs()) {
+    auto outs_inputs = inputsOf(out);
+    std::set_union(
+        all_inputs.begin(),
+        all_inputs.end(),
+        outs_inputs.begin(),
+        outs_inputs.end(),
+        std::inserter(all_inputs, all_inputs.begin()));
+  }
+  for (Val* inp : all_inputs) {
+    if (!inp->isConstScalar())
+      TORCH_CHECK(
+          hasInput(inp),
+          "Could not figure out how ",
+          inp,
+          " is generated, however it was not specified as an input.");
+  }
+}
+
 void Fusion::print() {
   FusionGuard fg(this);
   std::cout << "%kernel {\n";
@@ -148,6 +191,18 @@ void Fusion::print() {
   IRTransformPrinter t_exprs(std::cout);
   t_exprs.handle(this);
   std::cout << "}\n";
+}
+
+void Fusion::printMath() {
+  FusionGuard fg(this);
+  IRMathPrinter op_exprs(std::cout);
+  op_exprs.handle(this);
+}
+
+void Fusion::printTransforms() {
+  FusionGuard fg(this);
+  IRTransformPrinter t_exprs(std::cout);
+  t_exprs.handle(this);
 }
 
 StmtNameType Fusion::registerVal(Val* val) {
@@ -265,6 +320,13 @@ StmtNameType Fusion::getValName(ValType vtype) {
 }
 StmtNameType Fusion::getExprName() {
   return expr_name_counter_++;
+}
+
+void Fusion::setRandom(bool r) {
+  this->random_ = r;
+}
+bool Fusion::random() const noexcept {
+  return random_;
 }
 
 } // namespace fuser

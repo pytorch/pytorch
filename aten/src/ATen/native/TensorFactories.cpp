@@ -119,12 +119,14 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
 
   int64_t nelements = prod_intlist(size);
   auto dtype = options.dtype();
+  int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
-    dtype,
-    nelements,
-    allocator->allocate(nelements * dtype.itemsize()),
-    allocator,
-    /*resizeable=*/true);
+      c10::StorageImpl::use_byte_size_t(),
+      dtype,
+      size_bytes,
+      allocator->allocate(size_bytes),
+      allocator,
+      /*resizeable=*/true);
 
   auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::DispatchKey::CPU);
   // Default TensorImpl has size [0]
@@ -330,7 +332,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data_ptr<scalar_t>();
     at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       for(int64_t i = p_begin; i < p_end; i++)
@@ -914,13 +916,44 @@ Tensor hann_window(
       window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, options);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~ vandermonde_matrix ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+Tensor vander(const Tensor& x, c10::optional<int64_t> N, bool increasing) {
+  TORCH_CHECK(x.dim() == 1, "x must be a one-dimensional tensor.");
+
+  // Acquires n, defaulting to size if not provided
+  int64_t n = x.size(0);
+  if (N.has_value()) {
+    n = *N;
+    TORCH_CHECK(n >= 0, "N must be non-negative.");
+  }
+
+  // Note: result is long if x is an integer tensor (like int8) because
+  // cumprod promotes integer tensors to long
+  auto result = at::empty({x.size(0), n}, x.options().dtype(at::promote_types(x.scalar_type(), c10::ScalarType::Long)));
+
+  if (n > 0) {
+    result.select(1, 0).fill_(1);
+  }
+  if (n > 1) {
+    result.slice(1, 1).copy_(x.unsqueeze(1));
+    result.slice(1, 1).copy_(at::cumprod(result.slice(1, 1), 1));
+  }
+
+  if (!increasing) {
+    return at::flip(result, {1});
+  }
+  return result;
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
   AT_ASSERT(result.is_contiguous());
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(result.scalar_type(), "tensor_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX(result.scalar_type(), "tensor_cpu", [&] {
     std::copy(values.begin(), values.end(), result.template data_ptr<scalar_t>());
   });
   return result;
@@ -945,18 +978,20 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
     TORCH_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned");
-    size_t my_size = size.value_or(0);
+    int64_t my_size = size.value_or(0);
     int flags = shared.value_or(false) ? TH_ALLOCATOR_MAPPED_SHARED : 0;
     auto dtype = options.dtype();
+    size_t size_bytes = my_size * dtype.itemsize();
     auto storage_impl = c10::make_intrusive<at::StorageImpl>(
-      dtype,
-      my_size,
-      THMapAllocator::makeDataPtr(
-          filename.c_str(), flags, my_size * dtype.itemsize(), nullptr),
-      /*allocator=*/nullptr,
-      /*resizable=*/false);
+        c10::StorageImpl::use_byte_size_t(),
+        dtype,
+        size_bytes,
+        THMapAllocator::makeDataPtr(
+            filename.c_str(), flags, size_bytes, nullptr),
+        /*allocator=*/nullptr,
+        /*resizable=*/false);
     auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::DispatchKey::CPU);
-    tensor.unsafeGetTensorImpl()->set_sizes_contiguous({storage_impl->numel()});
+    tensor.unsafeGetTensorImpl()->set_sizes_contiguous({my_size});
     return tensor;
 }
 

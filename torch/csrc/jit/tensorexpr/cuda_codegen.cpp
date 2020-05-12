@@ -97,12 +97,94 @@ static void getMajorMinor(
   minor = dev_version.second;
 }
 
+void CudaPrinter::maybe_insert_sync() {
+  if (need_sync_) {
+    emitIndent();
+    os() << "__syncthreads();" << std::endl;
+    need_sync_ = false;
+  }
+}
+
+std::string cudaDtypeCppString(const Dtype& dtype) {
+  switch (dtype.scalar_type()) {
+    case ScalarType::Bool:
+      return "bool";
+    case ScalarType::Half:
+      return "half";
+    case ScalarType::Char:
+      return "char";
+    case ScalarType::Byte:
+      return "unsigned char";
+    case ScalarType::Short:
+      return "short";
+    case ScalarType::Long:
+      return "long";
+    default:
+      return dtype.ToCppString();
+  }
+}
+
+static void print_flat_alloc(std::ostream& os, const Allocate* alloc) {
+  std::vector<const Expr*> dims = alloc->dims();
+  // TODO: this should be merged with the storage flattener.
+  int64_t flat_size = 1;
+  for (auto dim : dims) {
+    const IntImm* dim_i = dynamic_cast<const IntImm*>(dim);
+    if (dim_i) {
+      flat_size *= dim_i->value();
+    } else {
+      throw std::runtime_error("Only IntImm dimensions are supported for now");
+    }
+  }
+  os << cudaDtypeCppString(alloc->dtype()) << " " << (*alloc->buffer_var())
+     << "[" << flat_size << "];" << std::endl;
+}
+
+void CudaPrinter::visit(const Free* v) {
+  Stmt* p = v->get_parent();
+  while (p) {
+    const For* for_v = dynamic_cast<const For*>(p);
+    if (for_v &&
+        (for_v->loop_options().is_gpu_block_index() ||
+         for_v->loop_options().is_gpu_thread_index())) {
+      return;
+    }
+    p = p->get_parent();
+  }
+  throw std::runtime_error("Global free not supported yet");
+}
+
+void CudaPrinter::visit(const Allocate* v) {
+  Stmt* p = v->get_parent();
+  while (p) {
+    const For* for_v = dynamic_cast<const For*>(p);
+    if (for_v) {
+      if (for_v->loop_options().is_gpu_block_index()) {
+        emitIndent();
+        os() << "__shared__ ";
+        print_flat_alloc(os(), v);
+        return;
+      } else if (for_v->loop_options().is_gpu_thread_index()) {
+        emitIndent();
+        print_flat_alloc(os(), v);
+        thread_local_bufs_.insert(v->buffer_var());
+        return;
+      }
+    }
+    p = p->get_parent();
+  }
+  throw std::runtime_error("Global alloc not supported yet");
+}
+
 void CudaPrinter::visit(const For* v) {
+  maybe_insert_sync();
   const LoopOptions& loop_options = v->loop_options();
   if (loop_options.is_gpu_block_index()) {
     ScopedVarName var_name(
         name_manager(), v->var(), loop_options.gpu_block_index_str());
+    emitIndent();
     v->body()->accept(this);
+    os() << std::endl;
     int gpu_block_index = loop_options.gpu_block_index();
     if (gpu_block_extents_.size() <= gpu_block_index) {
       gpu_block_extents_.resize(gpu_block_index + 1);
@@ -116,7 +198,9 @@ void CudaPrinter::visit(const For* v) {
   } else if (loop_options.is_gpu_thread_index()) {
     ScopedVarName var_name(
         name_manager(), v->var(), loop_options.gpu_thread_index_str());
+    emitIndent();
     v->body()->accept(this);
+    os() << std::endl;
     int gpu_thread_index = loop_options.gpu_thread_index();
     if (gpu_thread_extents_.size() <= gpu_thread_index) {
       gpu_thread_extents_.resize(gpu_thread_index + 1);
@@ -126,10 +210,30 @@ void CudaPrinter::visit(const For* v) {
           "start must be zero for gpu_block_index: " +
           std::to_string(v->start()));
     }
+    // A conservative measure to insert thread-syncs between each thread-idx
+    // change.
+    // TODO: only apply this when a cross-thread dependency happens across this
+    // point.
+    // TODO: maybe move this to a dedicated IRNode, if the logic gets
+    // sufficiently complicated.
+    need_sync_ = true;
+    if (gpu_thread_extents_[gpu_thread_index]) {
+      if (immediateEquals(v->stop(), 1)) {
+        // This is a trivial thread-idx
+        return;
+      }
+    }
     gpu_thread_extents_[gpu_thread_index] = v->stop();
   } else {
     IRPrinter::visit(v);
   }
+}
+
+void CudaPrinter::visit(const Cast* v) {
+  os() << cudaDtypeCppString(v->dtype());
+  os() << "(";
+  v->src_value()->accept(this);
+  os() << ")";
 }
 
 void CudaPrinter::visit(const Intrinsics* v) {
@@ -230,17 +334,27 @@ class AtomicAddFuser : public IRMutator {
 };
 
 void CudaPrinter::visit(const Store* v) {
+  emitIndent();
   os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
   if (v->value()->dtype().scalar_type() == ScalarType::Half) {
     os() << "__float2half(" << *v->value() << ");";
   } else {
     os() << *v->value() << ";";
   }
+  os() << std::endl;
 }
 
 void CudaPrinter::visit(const AtomicAdd* v) {
-  os() << "atomicAdd(&" << *v->base_handle() << "[" << *v->flat_index() << "]"
-       << ", " << *v->value() << ");";
+  emitIndent();
+  if (thread_local_bufs_.count(v->base_handle()) > 0) {
+    // atomicAdd only works on global and shared memory
+    os() << *v->base_handle() << "[" << *v->flat_index()
+         << "] += " << *v->value() << ";";
+  } else {
+    os() << "atomicAdd(&" << *v->base_handle() << "[" << *v->flat_index() << "]"
+         << ", " << *v->value() << ");";
+  }
+  os() << std::endl;
 }
 
 void CudaPrinter::visit(const Max* v) {
@@ -287,35 +401,6 @@ void CudaPrinter::visit(const Min* v) {
   os() << ")";
 }
 
-std::string cudaDtypeCppString(const Dtype& dtype) {
-  switch (dtype.scalar_type()) {
-    case ScalarType::Half:
-      return "half";
-    case ScalarType::Char:
-      return "char";
-    case ScalarType::Byte:
-      return "unsigned char";
-    case ScalarType::Short:
-      return "short";
-    case ScalarType::Long:
-      return "long";
-    default:; /* nothing */
-  }
-  return dtype.ToCppString();
-}
-
-void CudaPrinter::visit(const LetStmt* v) {
-  const Var* var = v->var();
-  if (var->dtype().scalar_type() == ScalarType::Half) {
-    // we do math in floats so use that.
-    os() << "float";
-  } else {
-    os() << cudaDtypeCppString(var->dtype());
-  }
-  os() << " " << *var << " = " << *v->value() << "; " << std::endl;
-  v->body()->accept(this);
-}
-
 void CudaPrinter::visit(const IfThenElse* v) {
   os() << "((";
   v->condition()->accept(this);
@@ -326,6 +411,34 @@ void CudaPrinter::visit(const IfThenElse* v) {
   os() << ")";
 }
 
+void CudaPrinter::visit(const Block* v) {
+  os() << "{" << std::endl;
+  indent_++;
+  for (const auto& pair : v->varBindings()) {
+    emitIndent();
+    const Var* var = pair.first;
+    const Expr* val = pair.second;
+
+    if (var->dtype().scalar_type() == ScalarType::Half) {
+      // we do math in floats so use that.
+      os() << "float";
+    } else {
+      os() << cudaDtypeCppString(var->dtype());
+    }
+    os() << " " << *var << " = ";
+    val->accept(this);
+    os() << "; " << std::endl;
+  }
+
+  for (Stmt* s : v->stmts()) {
+    s->accept(this);
+  }
+
+  indent_--;
+  emitIndent();
+  os() << "}";
+}
+
 class PrioritizeLoad : public IRMutator {
  public:
   const Expr* mutate(const Load* v) override {
@@ -333,11 +446,30 @@ class PrioritizeLoad : public IRMutator {
     if (nested_if_then_else_ > 0) {
       return IRMutator::mutate(v);
     }
+    if (thread_local_bufs_.count(v->base_handle()) > 0) {
+      return IRMutator::mutate(v);
+    }
     MemLoadList& load_list = load_stack_.back();
     const Var* load_new_var = new Var("v", v->dtype());
     const Expr* new_value = IRMutator::mutate(v);
     load_list.push_back(std::make_pair(load_new_var, new_value));
     return load_new_var;
+  }
+
+  // TODO: merge this with CudaPrinter into CudaAnalysis
+  Stmt* mutate(const Allocate* v) override {
+    Stmt* p = v->get_parent();
+    while (p) {
+      const For* for_v = dynamic_cast<const For*>(p);
+      if (for_v) {
+        if (for_v->loop_options().is_gpu_thread_index()) {
+          thread_local_bufs_.insert(v->buffer_var());
+          break;
+        }
+      }
+      p = p->get_parent();
+    }
+    return (Stmt*)v;
   }
 
   // TODO: merge this with the IRMutator::mutate version.
@@ -362,25 +494,6 @@ class PrioritizeLoad : public IRMutator {
       return (Stmt*)v;
     }
     return new For(var_new, start_new, stop_new, body_with_loads, loop_options);
-  }
-
-  Stmt* mutate(const LetStmt* v) override {
-    const Var* var = v->var();
-    const Expr* value = v->value();
-    Stmt* body = v->body();
-    const Var* var_new = dynamic_cast<const Var*>(var->accept_mutator(this));
-    if (var_new == nullptr) {
-      throw std::runtime_error("LetStmt var must be variable");
-    }
-    const Expr* value_new = value->accept_mutator(this);
-    PushList();
-    Stmt* body_new = body->accept_mutator(this);
-    Stmt* body_with_loads = AddMemLoadsFromList(body_new);
-    PopList();
-    if (var == var_new && value == value_new && body == body_with_loads) {
-      return (Stmt*)v;
-    }
-    return new LetStmt(var_new, value_new, body_with_loads);
   }
 
   Stmt* mutate(const Cond* v) override {
@@ -436,13 +549,18 @@ class PrioritizeLoad : public IRMutator {
 
   Stmt* AddMemLoadsFromList(Stmt* stmt) {
     MemLoadList& load_list = load_stack_.back();
-    Stmt* stmt_v = stmt;
-    for (auto iter = load_list.rbegin(); iter != load_list.rend(); iter++) {
-      const MemLoadEntry& entry = *iter;
-      const Var* var_ptr = entry.first;
-      stmt_v = new LetStmt(var_ptr, entry.second, stmt_v);
+    if (load_list.empty()) {
+      return stmt;
     }
-    return stmt_v;
+
+    if (Block* b = dynamic_cast<Block*>(stmt)) {
+      for (const auto& pair : load_list) {
+        b->add_var_binding(pair.first, pair.second);
+      }
+      return b;
+    }
+
+    return Block::make(load_list, {stmt});
   }
 
   MemoryLoadStack load_stack_;
@@ -458,6 +576,7 @@ class PrioritizeLoad : public IRMutator {
   // }
   // int v2 = v + 2;
   int nested_if_then_else_ = 0;
+  std::unordered_set<const Var*> thread_local_bufs_;
 };
 
 std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
@@ -468,6 +587,137 @@ std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
   int64_t value = counter;
   return func_prefix + "_" + std::to_string(value);
 }
+
+// Find all the statements that are not covered by any thread-idx axes,
+// and wrap them under a trivial thread idx.
+class NoThreadIdxRewriter : public IRMutator {
+ private:
+  Stmt* rewrite(const VarMapping& vars, const std::vector<Stmt*>& stmts) {
+    std::vector<Stmt*> cloned_stmts(stmts.size());
+    for (size_t index = 0; index < stmts.size(); index++) {
+      cloned_stmts[index] = Stmt::clone(stmts[index]);
+    }
+    Stmt* new_block = Block::make(vars, cloned_stmts);
+    // Wrap the new block under a trivial thread-idx
+    //   for t in 0..1: // threadIdx
+    //     if (t < 1):
+    //       new_block
+    // Note: the insertion of this for loop serves two purpose. First it is
+    // turned into a mask; Second, it will make sure a sync point is inserted
+    // when we switch to another thread-idx axis.
+    VarHandle t("t", kInt);
+    ExprHandle t_lt_1 = CompareSelect::make(t, 1, CompareSelectOperation::kLT);
+    // TODO: move "if (t < 1)" to threadIdx generation
+    Cond* masked_block = Cond::make(t_lt_1, new_block, nullptr);
+    LoopOptions thread_idx_opt;
+    // TODO: the added trivial threadIdx needs to match the kernel threadIdx
+    // dimensions
+    thread_idx_opt.set_gpu_thread_index(0);
+    For* trivial_loop = For::make(t, 0, 1, masked_block, thread_idx_opt);
+    return trivial_loop;
+  }
+
+  Stmt* mutate(const For* v) override {
+    if (v->loop_options().is_gpu_block_index()) {
+      gpu_blocks_.push_back(v);
+      need_rewrite_ = false;
+    } else if (v->loop_options().is_gpu_thread_index()) {
+      gpu_threads_.push_back(v);
+    }
+
+    Stmt* new_for = IRMutator::mutate(v);
+
+    if (v->loop_options().is_gpu_block_index()) {
+      gpu_blocks_.pop_back();
+      need_rewrite_ = false;
+    } else if (v->loop_options().is_gpu_thread_index()) {
+      gpu_threads_.pop_back();
+    }
+
+    return new_for;
+  }
+
+  Stmt* mutate(const Block* v) override {
+    std::list<Stmt*> old_stmts(v->begin(), v->end());
+    std::vector<bool> need_rewrites(old_stmts.size());
+    std::vector<Stmt*> new_stmts(old_stmts.size());
+    int index = 0;
+    for (auto old_stmt : old_stmts) {
+      need_rewrite_ = false;
+      Stmt* new_stmt = old_stmt->accept_mutator(this);
+      need_rewrites[index] = need_rewrite_;
+      new_stmts[index] = new_stmt;
+      index++;
+    }
+
+    bool any_need_fix = false;
+    bool all_need_fix = need_rewrites.empty();
+    for (auto need_fix : need_rewrites) {
+      if (need_fix) {
+        any_need_fix = true;
+      } else {
+        all_need_fix = false;
+      }
+    }
+
+    need_rewrite_ = false;
+    // If nothing needs fix, return as it is
+    if (!any_need_fix) {
+      return (Stmt*)v;
+    }
+
+    // If all needs fix, then we could have its parent statement to merge
+    // further. Unless the parent is a block-indx axis, then we should handle
+    // the rewrite now.
+    if (all_need_fix) {
+      Stmt* parent = v->get_parent();
+      For* loop_parent = dynamic_cast<For*>(parent);
+      if (loop_parent && loop_parent->loop_options().is_gpu_block_index()) {
+        Stmt* new_block = rewrite(v->varBindings(), new_stmts);
+        return new_block;
+      }
+      need_rewrite_ = true;
+      return (Stmt*)v;
+    }
+
+    // if some needs fix, rewrites the consecutive parts
+    int start = 0;
+    int count = new_stmts.size();
+    std::vector<Stmt*> rewrite_stmts;
+    while (start < count) {
+      while (start < count && !need_rewrites[start]) {
+        rewrite_stmts.push_back(Stmt::clone(new_stmts[start]));
+        start++;
+      }
+      if (start >= count) {
+        break;
+      }
+      int stop = start + 1;
+      while (stop < count && need_rewrites[stop]) {
+        stop++;
+      }
+
+      // Rewrite the stmts from [start, stop)
+      std::vector<Stmt*> stmts_to_rewrite(
+          new_stmts.begin() + start, new_stmts.begin() + stop);
+      Stmt* rewritten_stmt = rewrite(v->varBindings(), stmts_to_rewrite);
+      rewrite_stmts.push_back(rewritten_stmt);
+
+      start = stop;
+    }
+    Stmt* rewritten_block = Block::make(v->varBindings(), rewrite_stmts);
+    return rewritten_block;
+  }
+
+  Stmt* mutate(const Store* v) override {
+    need_rewrite_ = gpu_threads_.empty();
+    return (Stmt*)v;
+  }
+
+  std::vector<const For*> gpu_blocks_;
+  std::vector<const For*> gpu_threads_;
+  bool need_rewrite_ = false;
+};
 
 void CudaCodeGen::Initialize() {
   // TODO: handle multiple kernels.
@@ -533,6 +783,8 @@ void CudaCodeGen::Initialize() {
   }
 
   Stmt* stmt_v = stmt();
+  NoThreadIdxRewriter no_thread_idx;
+  stmt_v = stmt_v->accept_mutator(&no_thread_idx);
   AtomicAddFuser atomic_add_fuser;
   stmt_v = stmt_v->accept_mutator(&atomic_add_fuser);
   PrioritizeLoad prioritize_load;

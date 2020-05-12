@@ -2,7 +2,7 @@ import os
 import unittest
 
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
+from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA
 import torch
 import torch.backends.cudnn
@@ -55,7 +55,6 @@ class TestCppExtensionAOT(common.TestCase):
         expected_tensor_grad = torch.ones([4, 4], dtype=torch.double).mm(weights.t())
         self.assertEqual(tensor.grad, expected_tensor_grad)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cuda_extension(self):
         import torch_test_cpp_extension.cuda as cuda_extension
@@ -76,7 +75,6 @@ class TestCppExtensionAOT(common.TestCase):
         # `True`. This *should* mean that on Python 3, the produced shared
         # library does not have an ABI suffix like
         # "cpython-37m-x86_64-linux-gnu" before the library suffix, e.g. "so".
-        # On Python 2 there is no ABI suffix anyway.
         root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "build")
         matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith("so")]
         self.assertEqual(len(matches), 1, str(matches))
@@ -90,10 +88,6 @@ class TestCppExtensionAOT(common.TestCase):
 
 
 class TestMSNPUTensor(common.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        msnpu_extension.init_msnpu_extension()
-
     def test_unregistered(self):
         a = torch.arange(0, 10, device='cpu')
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
@@ -144,6 +138,10 @@ class TestMSNPUTensor(common.TestCase):
 
 
 class TestRNGExtension(common.TestCase):
+
+    def setUp(self):
+        super(TestRNGExtension, self).setUp()
+        rng_extension.registerOps()
 
     def test_rng(self):
         fourty_two = torch.full((10,), 42, dtype=torch.int64)

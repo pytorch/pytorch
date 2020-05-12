@@ -26,8 +26,8 @@ Tensor global_helper_call_AA_op_2(const Tensor& self) {
 Tensor global_helper_call_AA_op_3(const Tensor& self) {
   auto lambda = [&]() {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
-        .findSchema({"aten::AA", ""}).value();
-    return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor&>(
+        .findSchema({"_test::AA", ""}).value();
+    return c10::Dispatcher::singleton().call<Tensor, const Tensor&>(
         op, self, self);
   };
   return lambda();

@@ -701,11 +701,11 @@ Tensor & leaky_relu_(
   return at::leaky_relu_out(self, self, neg_val);
 }
 
-// Note: leakyReLu backward calculation doesn't support in-place call with non-positive slope.
+// Note: leakyReLu backward calculation doesn't support in-place call with negative slope.
 // The reason is that for in-place forward call, the forward result will be saved into autograd
 // node instead of the input itself, when calculating backward gradient, there is no way to know
 // whether the original input for current node is positive or not if the input slope is
-// non-positive. eg. forward is 2, slope is -0.2, the original input for this node could be
+// negative. eg. forward is 2, slope is -0.2, the original input for this node could be
 // either 2, or -10, so no way to get a correct backward gradient in this case.
 Tensor leaky_relu_backward(
     const Tensor& grad_output,
@@ -713,11 +713,11 @@ Tensor leaky_relu_backward(
     Scalar negval,
     bool is_result) {
   TORCH_CHECK(
-    !is_result || negval.to<double>() > 0.0,
-    "In-place leakyReLu backward calculation is triggered with a non-positive slope which is not supported. "
-    "This is caused by calling in-place forward function with a non-positive slope, "
+    !is_result || negval.to<double>() >= 0.0,
+    "In-place leakyReLu backward calculation is triggered with a negative slope which is not supported. "
+    "This is caused by calling in-place forward function with a negative slope, "
     "please call out-of-place version instead. File an issue at https://github.com/pytorch/pytorch if you do "
-    "require supporting in-place leakRelu backward calculation with non-positive slope");
+    "require supporting in-place leakRelu backward calculation with negative slope");
 
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self_or_result, grad_output);
@@ -726,15 +726,32 @@ Tensor leaky_relu_backward(
 }
 
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
-  auto result = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto buffer = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  // FIXME: do these actually need to be zeros_like or can they be empty_like?
+  auto result = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  auto buffer = at::zeros_like(input, at::MemoryFormat::Contiguous);
   log_sigmoid_cpu_stub(kCPU, result, buffer, input.contiguous());
   return std::make_tuple(result, buffer);
 }
 
 std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(Tensor& result, Tensor& buffer, const Tensor& input) {
-  log_sigmoid_cpu_stub(kCPU, result, buffer, input);
+  result.resize_as_(input);
+  buffer.resize_as_(input, at::MemoryFormat::Contiguous);
+  TORCH_CHECK(buffer.is_contiguous(), "Contiguous buffer required for log_sigmoid with out parameter");
+  Tensor result_tmp = result.is_contiguous() ? result : at::empty_like(result, at::MemoryFormat::Contiguous);
+  log_sigmoid_cpu_stub(kCPU, result_tmp, buffer, input.contiguous());
+  if (!result.is_contiguous()) {
+    result.copy_(result_tmp);
+  }
   return std::forward_as_tuple(result, buffer);
+}
+
+Tensor & log_sigmoid_out(Tensor & output, const Tensor & self) {
+  Tensor buffer = at::empty({0}, self.options());
+  return std::get<0>(at::log_sigmoid_forward_out(output, buffer, self));
+}
+
+Tensor log_sigmoid(const Tensor & self) {
+  return std::get<0>(at::log_sigmoid_forward(self));
 }
 
 Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
