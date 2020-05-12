@@ -26,7 +26,8 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
 
   ~ConcretePyObjectHolder() {
     pybind11::gil_scoped_acquire ag;
-    py_obj_ = py::none();
+    py_obj_.dec_ref();
+    py_obj_.ptr() = nullptr;
   }
   // explicit construction to avoid errornous implicit conversion and
   // copy-initialization
