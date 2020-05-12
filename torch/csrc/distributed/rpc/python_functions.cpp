@@ -118,16 +118,19 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
 
     futureResponseMessage->addCallback(
         [jitFuture](const FutureMessage& futureResponseMessage) {
-          // Don't need to acquire GIL here, as toPyObj acquires GIL
-          // when creating the py::object
           if (futureResponseMessage.hasError()) {
             jitFuture->setError(futureResponseMessage.error()->what());
           } else {
             // Keep obj alive until jit::toIValue returns.
             // See Note [jit::toIValue barrow py::object refcnt] at
             // jit::toIValue function.
-            py::object obj = toPyObj(futureResponseMessage.constValue());
-            jitFuture->markCompleted(jit::toIValue(obj, PyObjectType::get()));
+            IValue value;
+            {
+              pybind11::gil_scoped_acquire ag;
+              py::object obj = toPyObj(futureResponseMessage.constValue());
+              value = jit::toIValue(obj, PyObjectType::get());
+            }
+            jitFuture->markCompleted(std::move(value));
           }
         });
 
