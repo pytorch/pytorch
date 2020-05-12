@@ -274,60 +274,27 @@ if(INTERN_BUILD_MOBILE AND INTERN_USE_EIGEN_BLAS)
 endif()
 
 # ---[ pthreadpool
-# pthreadpool is a C library with no concept of namespaces, which means two
-# copies of the library cannot exist in the same binary or symbol collision
-# will occur violating ODR.  The conundrum is that Caffe2 provides its own
-# custom implementation of pthreadpool under the exact same interface the open
-# source version operates under; an implementation that is only used in Caffe2
-# operators and Caffe2's usage of NNPACK and QNNPACK. On the other hand, we
-# are interested in using the open source implementation on PyTorch which seems
-# to have been updated to exhibit superior performance.  Here we try to solve
-# this conundrum by prefering to pick the internal Caffe2 implementation if
-# BUILD_CAFFE2_OPS is on.  This will force both PyTorch and Caffe2 to use the
-# Caffe2 pthreadpool version (remember we cannot have two copies in one binary)
-# and in doing so we achieve our goal of keeping Caffe2's behavior intact if
-# at the cost of some performance loss to PyTorch.  Otherwise, if BUILD_CAFFE2_OPS
-# is not requested, we take the liberty of picking the open source version to
-# improve PyTorch's performance.  All of this admittedly error prone logic
-# can be removed and simplified if and when we decide to migrate Caffe2 to the
-# open source pthreadpool as well.
-
 if(NOT USE_SYSTEM_PTHREADPOOL)
-  # Opt for custom Caffe2 implementation whenever BUILD_CAFFE2_OPS is enabled
-  if(BUILD_CAFFE2_OPS)
-    set(USE_INTERNAL_PTHREADPOOL_IMPL ON CACHE BOOL "" FORCE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
+  # We would like to maintain the ability to build against the internal C2
+  # pthreadpool implementation for now, hence this flag.  This flag is not
+  # exposed as a build option to the user and is purly internal.
+  set(USE_INTERNAL_PTHREADPOOL_IMPL OFF CACHE BOOL "" FORCE)
 
-    # XNNPACK cannot link against a custom implementation of pthreadpool
-    caffe2_update_option(USE_XNNPACK OFF)
-
-  # But try using the open source implementation if, and only if:
-  elseif(
-    # We are on a mobile build of PyTorch (for at::parallel_for) regardless
-    # of whether NNPACK and family are requested, or
-    (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE) OR
-    # We are on a mobile or non-mobile build of PyTorch where (non system)
-    # NNPACK or family are requested.
-    (USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR (USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK))
-  )
-    set(USE_INTERNAL_PTHREADPOOL_IMPL OFF CACHE BOOL "" FORCE)
-
-    if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
-      set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-      set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
-    endif()
-
-    if(NOT TARGET pthreadpool)
-      set(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
-      set(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
-      add_subdirectory(
-        "${PTHREADPOOL_SOURCE_DIR}"
-        "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool")
-      set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
-    endif()
-
-    list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
+  if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+    set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
   endif()
+
+  if(NOT TARGET pthreadpool)
+    set(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
+    set(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    add_subdirectory(
+      "${PTHREADPOOL_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool")
+    set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+  endif()
+
+  list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
 endif()
 
 # ---[ Caffe2 uses cpuinfo library in the thread pool
