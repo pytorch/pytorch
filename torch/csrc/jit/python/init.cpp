@@ -738,14 +738,13 @@ void initJITBindings(PyObject* module) {
           [](PyTorchStreamReader& self,
              const std::string& key,
              size_t numel,
-             py::object dd) {
-            at::DataPtr data;
-            size_t size;
-            std::tie(data, size) = self.getRecord(key);
+             py::object data_type_obj) {
+            at::DataPtr data(std::get<0>(self.getRecord(key)));
             auto scalar_type =
-                reinterpret_cast<THPDtype*>(dd.ptr())->scalar_type;
+                reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
 
             auto storage = c10::Storage(
+                c10::Storage::use_byte_size_t(),
                 at::CPU(scalar_type).typeMeta(),
                 numel,
                 std::move(data),
