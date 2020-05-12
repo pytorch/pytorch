@@ -104,8 +104,8 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
     push<PickleOpCode>(PickleOpCode::NEWOBJ);
     if (checkHasValidSetGetState(type)) {
-      Function* getstate = type->getMethod("__getstate__");
-      pushIValue((*getstate)({obj}));
+      Function& getstate = type->getMethod("__getstate__");
+      pushIValue(getstate({obj}));
     } else {
       push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
       push<PickleOpCode>(PickleOpCode::MARK);
@@ -595,7 +595,7 @@ WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {
   result.tensor_ = tensor;
   result.size_ = tensor.storage().nbytes();
   // TODO HIP support
-  if (tensor.storage().device_type() == at::DeviceType::CUDA) {
+  if (tensor.storage().device_type() == DeviceType::CUDA) {
     // NB: This new tensor is created to support cuda tensors.
     // Storages can be mutated when converting tensors from cuda to cpu,
     // and we need a cpu tensor to copy data from.
@@ -618,7 +618,7 @@ WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {
 
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   // Check that the schemas for __getstate__ and __setstate__ are correct
-  auto getstate = cls->getMethod("__getstate__");
+  auto getstate = cls->findMethod("__getstate__");
   if (getstate == nullptr) {
     return false;
   }
@@ -638,7 +638,7 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
 
   // Check __setstate__ if the method exists
   //   __setstate__ is expected to be (self, T) -> None
-  auto setstate = cls->getMethod("__setstate__");
+  auto setstate = cls->findMethod("__setstate__");
   if (!setstate) {
     return false;
   }
