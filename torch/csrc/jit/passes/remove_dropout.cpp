@@ -9,7 +9,9 @@ bool isDropoutRemovable(const Node* node) {
   TORCH_INTERNAL_ASSERT(inputs.size() == 3);
   const Value* training_input = inputs[2];
   auto optional_ivalue = toIValue(training_input);
-  TORCH_INTERNAL_ASSERT(optional_ivalue.has_value());
+  if (!optional_ivalue) {
+    return false;
+  }
   const IValue& val = optional_ivalue.value();
   TORCH_INTERNAL_ASSERT(val.isBool());
   const bool is_training = val.toBool();
@@ -17,7 +19,6 @@ bool isDropoutRemovable(const Node* node) {
 }
 
 void removeDropoutImpl(Block* block) {
-  auto graph = block->owningGraph();
   std::vector<Node*> deleted_nodes;
 
   for (auto it = block->nodes().rbegin(); it != block->nodes().rend(); it++) {
