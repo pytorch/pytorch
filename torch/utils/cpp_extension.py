@@ -413,11 +413,7 @@ class BuildExtension(build_ext, object):
             # in a in script created build folder, relative path lost their correctness.
             # To be consistent with jit extension, we allow user to enter relative include_dirs
             # in setuptools.setup, and we convert the relative path to absolute path here
-            if self.compiler.include_dirs:
-                self_compiler_include_dirs = self.compiler.include_dirs
-                for i in range(len(self_compiler_include_dirs)):
-                    if not os.path.isabs(self_compiler_include_dirs[i]):
-                        self_compiler_include_dirs[i] = os.path.abspath(self_compiler_include_dirs[i])
+            _to_absolute_path(self.compiler.include_dirs)
 
             _, objects, extra_postargs, pp_opts, _ = \
                 self.compiler._setup_compile(output_dir, macros,
@@ -548,6 +544,14 @@ class BuildExtension(build_ext, object):
             if not self.compiler.initialized:
                 self.compiler.initialize()
             output_dir = os.path.abspath(output_dir)
+
+            # Convert relative path in self.compiler.include_dirs to absolute path if any,
+            # For ninja build, the build location is not local, the build happens
+            # in a in script created build folder, relative path lost their correctness.
+            # To be consistent with jit extension, we allow user to enter relative include_dirs
+            # in setuptools.setup, and we convert the relative path to absolute path here
+            _to_absolute_path(self.compiler.include_dirs)
+
             _, objects, extra_postargs, pp_opts, _ = \
                 self.compiler._setup_compile(output_dir, macros,
                                              include_dirs, sources,
@@ -1736,3 +1740,11 @@ def _is_cuda_file(path):
     if IS_HIP_EXTENSION:
         valid_ext.append('.hip')
     return os.path.splitext(path)[1] in valid_ext
+
+def _to_absolute_path(paths):
+    if not paths:
+        return
+    for i in range(len(paths)):
+        if not os.path.isabs(paths[i]):
+            paths[i] = os.path.abspath(paths[i])
+
