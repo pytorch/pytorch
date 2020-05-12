@@ -16,8 +16,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-constexpr auto DISABLED_FALLBACK = true;
-
 namespace {
 std::unique_ptr<KernelArgsReq> makePWKernelSupport(
     const at::ArrayRef<IValue> inputs) {
@@ -179,55 +177,68 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
   // Currently we just construct I/O tensors for static graph;
   std::shared_ptr<Graph> graph = fusion_node->g(attr::Subgraph)->copy();
 
-  try {
-    const auto nInputs = graph->inputs().size();
-    at::ArrayRef<IValue> inputs = last(stack, nInputs);
+  auto execute_lambda = [&] () {
+      const auto nInputs = graph->inputs().size();
+      at::ArrayRef<IValue> inputs = last(stack, nInputs);
 
-    // shape inference in graph
-    // update shape information per the new inputs;
-    EraseShapeInformation(graph);
-    for (int i = 0; i < nInputs; i++) {
-      graph->inputs()[i]->setType(inputs[i].type());
+      // shape inference in graph
+      // update shape information per the new inputs;
+      EraseShapeInformation(graph);
+      for (int i = 0; i < nInputs; i++) {
+        graph->inputs()[i]->setType(inputs[i].type());
+      }
+      // shape inference
+      ShapeTypePropagate(graph);
+
+      // we need to construct outputs;
+      std::vector<at::Tensor> outputs;
+      for (const auto* const output : graph->outputs()) {
+        auto type = output->type()->expect<TensorType>();
+        // Expect output to be tensor;
+        TORCH_CHECK(
+            type && type->isComplete(),
+            "Complete TensorType for output is expected.");
+
+        const auto device = *(type->device());
+        const auto scalar_type = *(type->scalarType());
+
+        auto options = at::TensorOptions()
+                           .dtype(scalar_type)
+                           .layout(at::kStrided)
+                           .device(device)
+                           .requires_grad(type->requires_grad());
+
+        // TODO: We should infer output shape from `inputs`
+        const auto sizes = extractSizes(type);
+        const auto strides = extractStrides(type);
+
+        auto tensor = at::empty_strided(sizes, strides, options);
+        outputs.push_back(tensor);
+      }
+      CudaFusionManager::getManager().runFusionNode(
+          kernel_id, graph, inputs, outputs);
+      drop(stack, inputs.size());
+      stack.insert(
+          stack.end(),
+          std::make_move_iterator(outputs.begin()),
+          std::make_move_iterator(outputs.end()));
+  };
+
+  const char* disable_fb_env = getenv("PYTORCH_CUDA_FUSER_DISABLE_FALLBACK");
+  int disable_fb_flag = disable_fb_env ? atoi(disable_fb_env) : 0;
+  if (disable_fb_flag) {
+    execute_lambda();
+  } else {
+    try {
+      execute_lambda();
+    } catch (...) {
+      TORCH_WARN("FALLBACK path is done. This is an dindication that codegen"
+          "Failed for some reason. To debug try disable codegen fallback path"
+          "via setting the env variable"
+          "`export PYTORCH_CUDA_FUSER_DISABLE_FALLBACK=1`");
+      EraseShapeInformation(graph);
+      InterpreterState{Code(graph, "fallback_cuda_fuser")}.run(stack);
     }
-    // shape inference
-    ShapeTypePropagate(graph);
-
-    // we need to construct outputs;
-    std::vector<at::Tensor> outputs;
-    for (const auto* const output : graph->outputs()) {
-      auto type = output->type()->expect<TensorType>();
-      // Expect output to be tensor;
-      TORCH_CHECK(
-          type && type->isComplete(),
-          "Complete TensorType for output is expected.");
-
-      const auto device = *(type->device());
-      const auto scalar_type = *(type->scalarType());
-
-      auto options = at::TensorOptions()
-                         .dtype(scalar_type)
-                         .layout(at::kStrided)
-                         .device(device)
-                         .requires_grad(type->requires_grad());
-
-      // TODO: We should infer output shape from `inputs`
-      const auto sizes = extractSizes(type);
-      const auto strides = extractStrides(type);
-
-      auto tensor = at::empty_strided(sizes, strides, options);
-      outputs.push_back(tensor);
-    }
-    CudaFusionManager::getManager().runFusionNode(
-        kernel_id, graph, inputs, outputs);
-    drop(stack, inputs.size());
-    stack.insert(
-        stack.end(),
-        std::make_move_iterator(outputs.begin()),
-        std::make_move_iterator(outputs.end()));
-  } catch (...) {
-    TORCH_CHECK(!DISABLED_FALLBACK, "codegen errored out.");
-    EraseShapeInformation(graph);
-    InterpreterState{Code(graph, "fallback_cuda_fuser")}.run(stack);
   }
 }
 
