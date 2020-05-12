@@ -17,9 +17,13 @@ at::DataPtr InefficientStdFunctionContext::makeDataPtr(
 }
 
 C10_API at::Allocator* allocator_array[at::COMPILE_TIME_MAX_DEVICE_TYPES];
+C10_API uint8_t allocator_priority[at::COMPILE_TIME_MAX_DEVICE_TYPES] = {0};
 
-void SetAllocator(at::DeviceType t, at::Allocator* alloc) {
-  allocator_array[static_cast<int>(t)] = alloc;
+void SetAllocator(at::DeviceType t, at::Allocator* alloc, uint8_t priority) {
+  if (priority >= allocator_priority[static_cast<int>(t)]) {
+    allocator_array[static_cast<int>(t)] = alloc;
+    allocator_priority[static_cast<int>(t)] = priority;
+  }
 }
 
 at::Allocator* GetAllocator(const at::DeviceType& t) {
