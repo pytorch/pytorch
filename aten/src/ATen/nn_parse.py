@@ -294,15 +294,6 @@ def backward_declaration(base, thnn_functions, backend_types):
         arg['mask'] = True
         arg['is_nullable'] = True
 
-        # grad_weight and grad_bias need to be resized and zeroed
-        if arg['name'] == 'grad_weight' and base['name'] != '_thnn_conv2d' and base['name'] != '_thnn_conv_depthwise2d':
-            arg['resize'] = 'weight'
-            arg['zero'] = True
-        if arg['name'] == 'grad_bias' and base['name'] != '_thnn_conv2d' and base['name'] != '_thnn_conv_depthwise2d':
-            dim = 1 if 'transpose' in name else 0
-            arg['resize'] = [('weight', dim)]
-            arg['zero'] = True
-
     is_batch_norm_backward = '_backward' in thnn_functions[0].name
     grad_params = []
     if len(thnn_functions) > 1 or is_batch_norm_backward:

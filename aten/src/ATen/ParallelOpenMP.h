@@ -19,6 +19,7 @@ inline void parallel_for(
     const int64_t grain_size,
     const F& f) {
   TORCH_CHECK(grain_size >= 0);
+  at::internal::lazy_init_num_threads();
   if (begin >= end) {
     return;
   }
@@ -65,6 +66,7 @@ inline scalar_t parallel_reduce(
     const F& f,
     const SF& sf) {
   TORCH_CHECK(grain_size >= 0);
+  at::internal::lazy_init_num_threads();
   if (begin >= end) {
     return ident;
   } else if (in_parallel_region() || get_num_threads() == 1) {

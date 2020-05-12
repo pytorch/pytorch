@@ -285,6 +285,11 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_Delete(ctx, stmt):
+        if len(stmt.targets) > 1:
+            source_range = ctx.make_range(stmt.lineno, stmt.col_offset,
+                                          stmt.col_offset + len("del"))
+            raise NotSupportedError(
+                source_range, 'del with more than one operand is not supported')
         return Delete(build_expr(ctx, stmt.targets[0]))
 
     @staticmethod
