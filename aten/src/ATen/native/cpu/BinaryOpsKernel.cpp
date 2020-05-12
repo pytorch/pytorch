@@ -120,7 +120,6 @@ void remainder_kernel(TensorIterator& iter) {
           return mod;
         },
         [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-          // TODO: Sleef 3.5 will have a Sleef_remainder{d4,f8}
           auto mod = a.fmod(b);
           const auto zero = Vec256<scalar_t>(0);
           auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
