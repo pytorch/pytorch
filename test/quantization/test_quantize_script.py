@@ -1101,7 +1101,10 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
     for individual ops end to end.
     """
     def _test_op_impl(self, module, data, quantized_op):
-        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
+        qengine = torch.backends.quantized.engine
+        if qengine == 'none':
+            qengine = 'fbgemm'
+        qconfig_dict = {'': get_default_qconfig(qengine)}
         model = torch.jit.script(module).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
         FileCheck().check(quantized_op) \
