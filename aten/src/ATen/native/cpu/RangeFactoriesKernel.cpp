@@ -29,7 +29,7 @@ static void linspace_kernel(TensorIterator& iter, Scalar scalar_start, Scalar sc
             if (idx < halfway) {
               return start + step * static_cast<step_t>(idx++);
             } else {
-              return end - step * (steps - (idx++) - 1);
+              return end - step * static_cast<step_t>(steps - (idx++) - 1);
             }
           },
           [start, end, step, halfway, steps, &idx]() -> Vec256<scalar_t> {
