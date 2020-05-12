@@ -558,19 +558,20 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         // On mobile, we release the original weight by resetting the intrusive_ptr.
         // Calling unpack after this will throw an assertion.
         orig_weight.reset();
-        bias.reset();
     }
   }
   TORCH_INTERNAL_ASSERT(pack_w != nullptr, "Packed Weights are NULL");
   const auto output_shape = MakeConvOutputShape<kSpatialDim>(
       N, M, {H, W}, kernel, stride_, padding_, dilation_);
-  TORCH_CHECK(
-      std::all_of(
-          output_shape.begin(),
-          output_shape.end(),
-          [](int64_t i) { return i > 0; }),
-      "quantized::conv2d (qnnpack): each dimension of output tensor should "
-      "be greater than 0.")
+  if (act_nhwc.numel() > 0) {
+    TORCH_CHECK(
+        std::all_of(
+            output_shape.begin(),
+            output_shape.end(),
+            [](int64_t i) { return i > 0; }),
+        "quantized::conv2d (qnnpack): each dimension of output tensor should "
+        "be greater than 0.")
+  }
 
   // Allocate output Tensor and a buffer for QNNPACK to use
   at::Tensor output = at::native::empty_affine_quantized(
