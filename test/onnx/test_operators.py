@@ -685,9 +685,9 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.max(functional.dropout(x)), x, training=torch.onnx.TrainingMode.TRAINING)
 
-    #def test_dropout_training_opset12(self):
-    #    x = torch.randn(3, 4, requires_grad=True)
-    #    self.assertONNX(lambda x: torch.max(functional.dropout(x)), x, opset_version=12, training=torch.onnx.TrainingMode.TRAINING)
+    def test_dropout_training_opset12(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x)), x, opset_version=12, training=torch.onnx.TrainingMode.TRAINING)
 
     def test_nonzero(self):
         x = torch.tensor([[[2., 2.], [1., 0.]], [[0., 0.], [1., 1.]]], requires_grad=True)
