@@ -4633,7 +4633,7 @@ Args:
 
 add_docstr(torch.randint,
            r"""
-randint(low=0, high, size, \*, generator=None, out=None, \
+randint(low=0, high, size, generator=None, out=None,
         dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random integers generated uniformly
@@ -4651,7 +4651,8 @@ Args:
     size (tuple): a tuple defining the shape of the output tensor.
     {generator}
     {out}
-    {dtype}
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+                                            Default: if ``None``, uses dtype ``torch.int64``.
     {layout}
     {device}
     {requires_grad}
