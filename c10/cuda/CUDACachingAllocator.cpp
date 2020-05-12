@@ -314,7 +314,7 @@ class DeviceCachingAllocator {
     active_blocks.insert(block);
 
     c10::reportMemoryUsageToProfiler(
-        c10::Device(c10::DeviceType::CUDA, device), block->size);
+        block, block->size, c10::Device(c10::DeviceType::CUDA, device));
 
     update_stat_array(stats.allocation, 1, params.stat_types);
     update_stat_array(stats.allocated_bytes, block->size, params.stat_types);
@@ -331,7 +331,7 @@ class DeviceCachingAllocator {
     block->allocated = false;
 
     c10::reportMemoryUsageToProfiler(
-        c10::Device(c10::DeviceType::CUDA, block->device), -block->size);
+        block, -block->size, c10::Device(c10::DeviceType::CUDA, block->device));
 
     StatTypes stat_types;
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
