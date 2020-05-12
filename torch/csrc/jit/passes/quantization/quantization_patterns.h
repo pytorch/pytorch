@@ -442,9 +442,9 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
   // ============= General Ops that doesn't require observation =============
   // aten::avg_pool1d
   std::string avg_pool1d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
+graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad):
           %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::avg_pool1d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
+          %r = aten::avg_pool1d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad)
           %r_scale : float = aten::q_scale(%a_quant)
           %r_zero_point : int = aten::q_zero_point(%a_quant)
           %r_dtype : int = prim::dtype(%a_quant)
@@ -452,8 +452,8 @@ graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad,
           return (%r_quant) )";
 
   std::string aten_avg_pool1d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
-          %r = aten::avg_pool1d(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
+graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad):
+          %r = aten::avg_pool1d(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad)
           return (%r) )";
 
   // aten::avg_pool2d
@@ -538,9 +538,9 @@ graph(%a_quant, %output_size):
 
   // aten::mean
   std::string mean = R"(
-graph(%a_quant):
+graph(%a_quant, %dim):
           %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::mean(%a_dequant)
+          %r = aten::mean(%a_dequant, %dim)
           %r_scale : float = aten::q_scale(%a_quant)
           %r_zero_point : int = aten::q_zero_point(%a_quant)
           %r_dtype : int = prim::dtype(%a_quant)
@@ -548,8 +548,8 @@ graph(%a_quant):
           return (%r_quant) )";
 
   std::string aten_mean = R"(
-graph(%a_quant):
-          %r = aten::mean(%a_quant)
+graph(%a_quant, %dim):
+          %r = aten::mean(%a_quant, %dim)
           return (%r) )";
 
   return {
