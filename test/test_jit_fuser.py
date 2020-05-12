@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode
+    enable_profiling_mode_for_profiling_tests
 from textwrap import dedent
 from itertools import product, permutations
 
@@ -172,6 +172,18 @@ class TestFuser(JitTestCase):
         self.assertAllFused(scripted.graph_for(x, y))
 
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    def test_remainder_cuda(self):
+        def cuda_rem(x, y):
+            return 1 + torch.remainder(x, y) - 1
+
+        a = torch.rand([512], dtype=torch.float).cuda()
+        b = torch.rand([512], dtype=torch.float).cuda()
+        inputs = [a, b]
+        ge = self.checkScript(cuda_rem, inputs)
+        graph = ge.graph_for(*inputs)
+        self.assertAllFused(graph)
+
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
     def test_chunk_cuda(self):
         def fn(x):
             a, b, c = x.chunk(3, 1)
@@ -304,7 +316,7 @@ class TestFuser(JitTestCase):
             s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})
             c = s(inp1, inp2)
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 warmup_backward(c.sum())
             graph = backward_graph(s)
             self.assertAllFused(graph, except_for={'aten::Float', 'aten::_grad_sum_to_size'})
@@ -488,7 +500,7 @@ class TestFuser(JitTestCase):
                 with torch.jit.optimized_execution(False):
                     out_noopt = model_noopt(x, y)
                     rep_noopt = str(model_noopt.graph_for(x, y))
-                self.assertEqual(out, out_noopt, prec=3e-5)
+                self.assertEqual(out, out_noopt, atol=3e-5)
 
             # Check that normalization op has really been decomposed
             for node_in_graph in in_opt_graph:
@@ -607,7 +619,7 @@ class TestFuser(JitTestCase):
         self.assertAllFused(s.graph_for(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2),
                             except_for={'aten::size', 'prim::BroadcastSizes', 'aten::_size_if_not_equal'})
 
-        with enable_profiling_mode(True):
+        with enable_profiling_mode_for_profiling_tests(True):
             c = s(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2)
             warmup_backward(c.sum(), [b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2])
             graph = backward_graph(s)
@@ -688,7 +700,7 @@ class TestFuser(JitTestCase):
         FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
             .check_next("return").run(str(forward_graph))
 
-        with enable_profiling_mode(True):
+        with enable_profiling_mode_for_profiling_tests(True):
             hy, cy = module(*inputs)
             warmup_backward((hy + cy).sum())
             backward = backward_graph(module)

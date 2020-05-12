@@ -38,7 +38,7 @@ static inline void upsample_1d_shape_check(
     // Allow for empty batch size but not other dimensions
     bool valid_empty = false;
     valid_empty = input.size(0) == 0 && input.size(1) != 0 && input.size(2) != 0;
-    
+
     TORCH_CHECK(
                 (input.numel() != 0 || valid_empty) && input.dim() == 3,
                 "Non-empty 3D data tensor expected but got a tensor with sizes ",

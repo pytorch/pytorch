@@ -25,7 +25,21 @@ namespace c10 {
  * or "SparseCUDA"; backend in torch.backends is something like "MKL" or
  * "CUDNN".
  */
-enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, QuantizedCPU, Undefined, MkldnnCPU, NumOptions };
+enum class Backend {
+  CPU,
+  CUDA,
+  HIP,
+  SparseCPU,
+  SparseCUDA,
+  SparseHIP,
+  MSNPU,
+  XLA,
+  QuantizedCPU,
+  QuantizedCUDA,
+  Undefined,
+  MkldnnCPU,
+  NumOptions
+};
 
 static inline Backend toSparse(Backend b) {
   switch (b) {
@@ -66,6 +80,8 @@ static inline Backend toDense(Backend b) {
       return Backend::HIP;
     case Backend::QuantizedCPU:
       return Backend::QuantizedCPU;
+    case Backend::QuantizedCUDA:
+      return Backend::QuantizedCUDA;
     default:
       throw std::runtime_error("Unknown backend");
   }
@@ -92,6 +108,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::MkldnnCPU;
   } else if (t == DispatchKey::QuantizedCPU) {
     return Backend::QuantizedCPU;
+  } else if (t == DispatchKey::QuantizedCUDA) {
+    return Backend::QuantizedCUDA;
   } else if (t == DispatchKey::Undefined) {
     return Backend::Undefined;
   } else {
@@ -121,6 +139,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::MkldnnCPU;
     case Backend::QuantizedCPU:
       return DispatchKey::QuantizedCPU;
+    case Backend::QuantizedCUDA:
+      return DispatchKey::QuantizedCUDA;
     case Backend::Undefined:
       return DispatchKey::Undefined;
     default:
@@ -149,6 +169,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
     case Backend::MkldnnCPU:
     case Backend::QuantizedCPU:
       return DeviceType::CPU;
+    case Backend::QuantizedCUDA:
+      return DeviceType::CUDA;
     case Backend::Undefined:
       AT_ERROR("Undefined backend is not a valid device type");
     default:
@@ -176,6 +198,8 @@ static inline Backend backendToCPU(Backend b) {
     case Backend::MkldnnCPU:
       return Backend::MkldnnCPU;
     case Backend::QuantizedCPU:
+      return Backend::QuantizedCPU;
+    case Backend::QuantizedCUDA:
       return Backend::QuantizedCPU;
     case Backend::Undefined:
       return Backend::Undefined;
@@ -245,6 +269,8 @@ static inline const char* toString(Backend b) {
       return "MkldnnCPU";
     case Backend::QuantizedCPU:
       return "QuantizedCPU";
+    case Backend::QuantizedCUDA:
+      return "QuantizedCUDA";
     default:
       return "UNKNOWN_BACKEND";
   }
