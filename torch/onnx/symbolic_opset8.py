@@ -55,10 +55,10 @@ def _interpolate(name, dim, interpolate_mode):
         sym_help._interpolate_warning(interpolate_mode)
         align_corners = sym_help._maybe_get_scalar(align_corners)
         if align_corners:
-            return _unimplemented(name, "align_corners == True is not supported.")
+            return _unimplemented(name, "align_corners == True")
         output_size = sym_help._maybe_get_const(output_size, 'is')
         if sym_help._is_value(output_size):
-            return _unimplemented(name, "torch._C.Value (output_size) indexing is not supported.")
+            return _unimplemented(name, "torch._C.Value (output_size) indexing")
         if scales is None:
             scales = [1. if i < 2 else
                       float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
@@ -78,13 +78,13 @@ upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
     align_corners = sym_help._maybe_get_const(align_corners, 'b')
     if not sym_help._is_none(align_corners) and align_corners:
-        return _unimplemented("interpolate", "align_corners == True is not supported.")
+        return _unimplemented("interpolate", "align_corners == True")
 
     if not sym_help._is_none(scale_factor) and sym_help._is_value(scale_factor):
-        return _unimplemented("interpolate", "dynamic scales in opset 8 is not supported.")
+        return _unimplemented("interpolate", "dynamic scales in opset 8")
 
     if not sym_help._is_none(size) and sym_help._is_value(size):
-        return _unimplemented("interpolate", "dynamic size in opset 8 is not supported.")
+        return _unimplemented("interpolate", "dynamic size in opset 8")
 
     scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
                                                              mode , align_corners)

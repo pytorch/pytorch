@@ -85,14 +85,14 @@ def reshape_as(g, self, other):
 def add(g, self, other, alpha=None):
     # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
     if alpha and sym_help._scalar(sym_help._maybe_get_scalar(alpha)) != 1:
-        return _unimplemented("add", "alpha != 1 is not supported.")
+        return _unimplemented("add", "alpha != 1")
     return g.op("Add", self, other)
 
 
 def sub(g, self, other, alpha=None):
     # default alpha arg is to allow no-alpha sub (aten sub st overload no alpha)
     if alpha and sym_help._scalar(sym_help._maybe_get_scalar(alpha)) != 1:
-        return _unimplemented("sub", "alpha != 1 is not supported.")
+        return _unimplemented("sub", "alpha != 1")
     return g.op("Sub", self, other)
 
 
@@ -296,7 +296,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
         @parse_args('v', 'none')
         def reduce_nodim(g, self, dtype):
             if dtype.node().kind() != 'prim::Constant':
-                return _unimplemented(name, "dtype " + dtype.node().kind() + " not supported.")
+                return _unimplemented(name, "dtype")
             return symbolic(g, self)
 
         dim_desc = 'is' if allow_multi_dim_support else 'i'
@@ -304,7 +304,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
         @parse_args('v', dim_desc, 'i', 'none')
         def reduce_dim(g, self, dim, keepdim, dtype):
             if dtype.node().kind() != 'prim::Constant':
-                return _unimplemented(name, "dtype " + dtype.node().kind() + " not supported.")
+                return _unimplemented(name, "dtype")
             return symbolic(g, self, dim, keepdim)
         return reduce_nodim, reduce_dim
     return reduce
@@ -319,7 +319,7 @@ prod = _reduce_with_dtype('ReduceProd', 'prod', allow_multi_dim_support=False)  
 def cumsum(g, input, dim, dtype):
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         if dtype.node().kind() != 'prim::Constant':
-            return _unimplemented("cumsum", "dtype " + dtype.node().kind() + " not supported.")
+            return _unimplemented(name, "dtype")
         return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
     else:
         raise RuntimeError('Unsupported: ONNX export of cumsum in '
@@ -330,7 +330,7 @@ def _sample_dirichlet(g, self, generator):
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         if not sym_help._is_none(generator):
             return _unimplemented('_sample_dirichlet',
-                                  'We are not able to export generator.')
+                                  'We are not able to export generator')
         return g.op("ATen", self, operator_s="_sample_dirichlet")
     else:
         raise RuntimeError('Unsupported: ONNX export of _sample_dirichlet operator. '
@@ -341,7 +341,7 @@ def _standard_gamma(g, self, generator):
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         if not sym_help._is_none(generator):
             return _unimplemented('_standard_gamma',
-                                  'We are not able to export generator.')
+                                  'We are not able to export generator')
         return g.op("ATen", self, operator_s="_standard_gamma")
     else:
         raise RuntimeError('Unsupported: ONNX export of _standard_gamma operator. '
@@ -541,7 +541,7 @@ def squeeze(g, self, dim=None):
                                   "Passing an tensor of different rank in execution will be incorrect.")
                     dims[i] += rank
                 else:
-                    return _unimplemented('squeeze', 'Negative axis with unknown input rank is not supported.')
+                    return _unimplemented('squeeze', 'negative axis with unknown input rank')
 
     return g.op("Squeeze", self, axes_i=dims)
 
@@ -570,9 +570,9 @@ def floor(g, input):
 def threshold(g, self, threshold, value):
     # See Note [Export inplace]
     if sym_help._scalar(threshold) != 0:
-        return _unimplemented("threshold", "non-zero threshold is not supported.")
+        return _unimplemented("threshold", "non-zero threshold")
     if sym_help._scalar(value) != 0:
-        return _unimplemented("threshold", "non-zero value is not supported.")
+        return _unimplemented("threshold", "non-zero value")
     return g.op("Relu", self)
 
 
@@ -650,7 +650,7 @@ def softmax(g, input, dim, dtype=None):
 @parse_args('v', 't', 'v')
 def softplus(g, self, beta, threshold):
     if beta != 1:
-        return _unimplemented("Softplus", "Beta !=1 is not supported.")
+        return _unimplemented("beta", "has to be 1")
     return g.op('Softplus', self)
 
 
@@ -681,9 +681,9 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
     @parse_args('v', 'is', 'is', 'is', 'is', 'i')
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if ceil_mode and not input.isCompleteTensor():
-            return _unimplemented(name, "input size not accessible.")
+            return _unimplemented(name, "input size not accessible")
         if set(tuple_fn(dilation)) != {1}:
-            return _unimplemented(name, "dilation is not supported.")
+            return _unimplemented(name, "dilation")
         if not stride:
             stride = kernel_size
         padding = tuple(tuple_fn(padding))
@@ -739,7 +739,7 @@ def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         if ceil_mode and not input.isCompleteTensor():
-            return _unimplemented(name, "input size not accessible.")
+            return _unimplemented(name, "input size not accessible")
         if not stride:
             stride = kernel_size
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
@@ -785,14 +785,14 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         if not input.isCompleteTensor():
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
-            return _unimplemented(name, 'input size not accessible.')
+            return _unimplemented(name, 'input size not accessible')
         dim = input.type().sizes()[2:]
         # verify if output size % input size = 0 for all dim
         mod = [dim[i] % output_size[i] for i in range(0, len(dim))]
         if mod != [0] * len(mod):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
-            return _unimplemented(name, 'output size that are not factor of input size.')
+            return _unimplemented(name, 'output size that are not factor of input size')
         k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
         # call max_poolxd_with_indices to get indices in the output
         if type == "MaxPool":
@@ -865,7 +865,7 @@ def _interpolate(name, dim, interpolate_mode):
         sym_help._interpolate_warning(interpolate_mode)
         align_corners = sym_help._maybe_get_scalar(align_corners)
         if align_corners:
-            return _unimplemented(name, "align_corners == True is not supported.")
+            return _unimplemented(name, "align_corners == True")
         if scales is None:
             scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
         return g.op("Upsample", input, scales, mode_s=interpolate_mode)
@@ -888,7 +888,7 @@ def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_
 @parse_args('v')
 def bitwise_not(g, inp):
     if inp.type().scalarType() != 'Bool':
-        return _unimplemented("bitwise_not", "non-bool tensor is not supported.")
+        return _unimplemented("bitwise_not", "non-bool tensor")
     return g.op("Not", inp)
 
 
@@ -1178,15 +1178,15 @@ def unfold(g, input, dimension, size, step):
         unsqueeze = [g.op("Unsqueeze", g.op("Transpose", t, perm_i=perm), axes_i=[dimension]) for t in stack]
         return g.op("Concat", *unsqueeze, axis_i=dimension)
     else:
-        return _unimplemented("Unfold", "input size not accessible.")
+        return _unimplemented("Unfold", "input size not accessible")
 
 
 @parse_args('v', 't', 't', 't')
 def elu(g, input, alpha, scale, input_scale):
     if scale and scale != 1.:
-        return _unimplemented("scale", "does not support scale in Elu.")
+        return _unimplemented("scale", "does not support scale in Elu")
     if input_scale and input_scale != 1.:
-        return _unimplemented("input_scale", "does not support input_scale in Elu.")
+        return _unimplemented("input_scale", "does not support input_scale in Elu")
     # See Note [Export inplace]
     return g.op("Elu", input, alpha_f=sym_help._scalar(alpha))
 
@@ -1370,7 +1370,7 @@ def _unsupported_dropout(name):
     def feature_dropout(g, input, p, train):
         # NB: In inference mode, FeatureDropout is exported as an identity op.
         if train:
-            return _unimplemented(name, "training mode is not supported.")
+            return _unimplemented(name, "training mode")
         return input
     return feature_dropout
 
@@ -1518,7 +1518,7 @@ def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_me
 @parse_args('v', 'v', 'v', 'v', 'i')
 def slice(g, self, dim, start, end, step):
     if step != 1:
-        _unimplemented("slice", "step!=1 is currently not supported.")
+        _unimplemented("slice", "step!=1 is currently not supported")
     if start.node().kind() != 'onnx::Constant' or \
             end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant':
         if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
@@ -1560,16 +1560,16 @@ def unsqueeze(g, self, dim):
                           "Passing an tensor of different rank in execution will be incorrect.")
             dim = dim + rank + 1
         else:
-            return _unimplemented('unsqueeze', 'negative axis with unknown input rank is not supported.')
+            return _unimplemented('unsqueeze', 'negative axis with unknown input rank')
 
     return g.op("Unsqueeze", self, axes_i=[dim])
 
 @parse_args('v', 'i', 'i', 'none')
 def sort(g, self, dim, decending, out=None):
     if out is not None:
-        _unimplemented("Sort", "Out parameter is not supported for sort.")
+        _unimplemented("Sort", "Out parameter is not supported for sort")
     if not self.isCompleteTensor():
-        return _unimplemented("Sort", "input size not accessible.")
+        return _unimplemented("Sort", "input size not accessible")
 
     return g.op("TopK", self, k_i=self.type().sizes()[dim], axis_i=dim, outputs=2)
 
@@ -1582,9 +1582,9 @@ def numel(g, self):
 @parse_args('v', 'i', 'i', 'i', 'i', 'none')
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
-        _unimplemented("TopK", "Out parameter is not supported for topk.")
+        _unimplemented("TopK", "Out parameter is not supported for topk")
     if not largest:
-        _unimplemented("TopK", "Ascending TopK is not supported.")
+        _unimplemented("TopK", "Ascending TopK is not supported")
 
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
@@ -1642,7 +1642,7 @@ def repeat(g, self, repeats):
 def pixel_shuffle(g, self, upscale_factor):
     dims = self.type().sizes()
     if len(dims) != 4:
-        return _unimplemented("pixel_shuffle", "only support 4d input.")
+        return _unimplemented("pixel_shuffle", "only support 4d input")
     output_channel = dims[1] // upscale_factor // upscale_factor
     after_view = view(g, self, [-1, output_channel, upscale_factor, upscale_factor,
                                 dims[2], dims[3]])
@@ -1671,7 +1671,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         # batch, seq, feat -> seq, batch, feat
         input = g.op('Transpose', input, perm_i=[1, 0, 2])
     if dropout and train:
-        return _unimplemented("RNN/GRU/LSTM", "dropout in training mode is not supported.")
+        return _unimplemented("RNN/GRU/LSTM", "dropout in training mode")
 
     if variant.startswith('RNN'):
         nonlinearity = variantToOnnxActivationMap[variant[4:].lower()]
@@ -1956,7 +1956,7 @@ def flatten(g, input, start_dim, end_dim):
     if not input.isCompleteTensor():
         return _unimplemented("flatten",
                               "input size not accessible "
-                              "(consider using reshape op instead of flatten op to export to ONNX).")
+                              "(consider using reshape op instead of flatten op to export to ONNX)")
     input_dims = input.type().sizes()
     output_dims = []
     for i in range(0, dim):
@@ -2013,7 +2013,7 @@ def scatter(g, self, dim, index, src):
 @parse_args('v', 'i', 'v', 'v')
 def scatter_add(g, self, dim, index, src):
     if not self.isCompleteTensor():
-        return _unimplemented("scatter_add", "input size not accessible.")
+        return _unimplemented("scatter_add", "input size not accessible")
     dtype = self.type().scalarType()
     dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     dtype = sym_help.scalar_type_to_pytorch_type[dtype]
@@ -2042,7 +2042,7 @@ def one_hot(g, self, num_classes):
 @parse_args('v', 'i', 'v', 'v')
 def gather(g, self, dim, index, sparse_grad=False):
     if sym_help._maybe_get_const(sparse_grad, 'i'):
-        return _unimplemented("gather", "sparse_grad == True is not supported.")
+        return _unimplemented("gather", "sparse_grad == True")
     # NOTE: This workaround is needed since GatherElement is only supported
     #       since opset 11, and Gather in ONNX is not the same as torch.gather.
     dtype = self.type().scalarType()
@@ -2260,9 +2260,9 @@ def frobenius_norm(g, self, dim=None, keepdim=False):
 @parse_args('v', 'i', 'b', 'v')
 def multinomial(g, input, num_samples, replacement=False, generator=None):
     if generator is not None and not sym_help._is_none(generator):
-        _unimplemented("Multinomial", "generator is not supported for multinomial.")
+        _unimplemented("Multinomial", "generator is not supported for multinomial")
     if not replacement and num_samples > 1:
-        _unimplemented("Multinomial", "replacement=False when num_samples > 1 is not supported for multinomial.")
+        _unimplemented("Multinomial", "replacement=False when num_samples > 1 is not supported for multinomial")
 
     log_input = log(g, input)
     return g.op("Multinomial", log_input,

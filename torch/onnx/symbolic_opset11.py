@@ -105,7 +105,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 def pixel_shuffle(g, self, upscale_factor):
     dims = self.type().sizes()
     if len(dims) != 4:
-        return _unimplemented("pixel_shuffle", "only support 4d input.")
+        return _unimplemented("pixel_shuffle", "only support 4d input")
     return g.op("DepthToSpace", self, blocksize_i=upscale_factor, mode_s="CRD")
 
 
@@ -184,7 +184,7 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_s
         if is_scalar:
             if not input.type().dim():
                 return sym_help._unimplemented("interpolate (with a scalar output_size)",
-                                               "missing input shape (try giving an array of output_size values).")
+                                               "missing input shape (try giving an array of output_size values)")
             size = unsqueeze(g, size, 0)
             size = [size for i in range(input.type().dim() - 2)]
             size = g.op("Concat", *size, axis_i=0)
@@ -216,7 +216,7 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_s
 @parse_args('v', 'i', 'v', 'v')
 def gather(g, self, dim, index, sparse_grad=False):
     if sym_help._maybe_get_const(sparse_grad, 'i'):
-        return _unimplemented("gather", "sparse_grad == True is not supported.")
+        return _unimplemented("gather", "sparse_grad == True")
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, dim, index, sparse_grad, operator_s="gather")
     return g.op("GatherElements", self, index, axis_i=dim)
@@ -657,7 +657,7 @@ def flatten(g, input, start_dim, end_dim):
     if not input.isCompleteTensor():
         return _unimplemented("flatten",
                               "input size not accessible "
-                              "(consider using reshape op instead of flatten op to export to ONNX).")
+                              "(consider using reshape op instead of flatten op to export to ONNX)")
     # if end_dim is negative add dim
     if end_dim < 0 :
         end_dim = dim + end_dim
