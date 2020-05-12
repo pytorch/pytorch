@@ -626,7 +626,7 @@ __declspec(dllexport)
 #endif
 PyObject* initModule() {
   HANDLE_TH_ERRORS
-  at::init_num_threads();
+  at::internal::lazy_init_num_threads();
 
   C10_LOG_API_USAGE_ONCE("torch.python.import");
 
@@ -758,6 +758,18 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
+
+  py_module.def(
+    "init_num_threads",
+    torch::wrap_pybind_function(at::init_num_threads),
+    R"(
+init_num_threads()
+
+Initializes the number of parallel threads used on the current thread.
+
+Call this whenever a new thread is created in order to propagate values from
+:func:`torch.set_num_threads` onto the new thread.
+)");
 
   ASSERT_TRUE(set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));

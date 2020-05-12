@@ -157,7 +157,8 @@ class TestQuantizedTensor(TestCase):
         for dtype in [torch.qint8, torch.quint8]:
             q = torch._empty_per_channel_affine_quantized(
                 [numel], scales=scales, zero_points=zero_points, axis=ch_axis, dtype=dtype)
-            self.assertEqual(scales, q.q_per_channel_scales())
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(scales, q.q_per_channel_scales())
             self.assertEqual(zero_points, q.q_per_channel_zero_points())
             self.assertEqual(ch_axis, q.q_per_channel_axis())
 
@@ -165,7 +166,8 @@ class TestQuantizedTensor(TestCase):
         int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8)
         q = torch._make_per_channel_quantized_tensor(int_tensor, scales, zero_points, ch_axis)
         self.assertEqual(int_tensor, q.int_repr())
-        self.assertEqual(scales, q.q_per_channel_scales())
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(scales, q.q_per_channel_scales())
         self.assertEqual(zero_points, q.q_per_channel_zero_points())
         self.assertEqual(ch_axis, q.q_per_channel_axis())
 
@@ -288,7 +290,8 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(qr.stride(), list(reversed(sorted(qr.stride()))))
         self.assertNotEqual(qlast.stride(), list(reversed(sorted(qlast.stride()))))
         self.assertEqual(qr.int_repr(), qlast.int_repr())
-        self.assertEqual(scales, qlast.q_per_channel_scales())
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(scales, qlast.q_per_channel_scales())
         self.assertEqual(zero_points, qlast.q_per_channel_zero_points())
         self.assertEqual(1, qlast.q_per_channel_axis())
         self.assertEqual(qlast.dequantize(), qr.dequantize())

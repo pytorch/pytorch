@@ -134,7 +134,8 @@ bool isSupported(Node* node) {
     case aten::slice:
     case aten::unsqueeze:
     case aten::frac:
-    case aten::rand_like:
+    // TODO: uncomment once we can handle rand+broadcasts
+    // case aten::rand_like:
     case aten::_sigmoid_backward:
     case aten::_tanh_backward:
     case aten::__and__:
