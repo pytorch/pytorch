@@ -87,7 +87,8 @@ class Optimizer(object):
         def pack_group(group):
             nonlocal start_index
             packed = {k: v for k, v in group.items() if k != 'params'}
-            param_mappings.update({id(p): i for i, p in enumerate(group['params'], start_index)})
+            param_mappings.update({id(p): i for i, p in enumerate(group['params'], start_index)
+                                   if id(p) not in param_mappings})
             packed['params'] = [param_mappings[id(p)] for p in group['params']]
             start_index += len(packed['params'])
             return packed
