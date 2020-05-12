@@ -3328,6 +3328,31 @@ class _TestTorchMixin(object):
         b = pickle.loads(serialized)
         self.assertEqual(a, b)
 
+    def test_pickle_gradscaler(self):
+        # The code below should be valid whether or not cuda is available.
+        # If cuda is not available, scaler.is_enabled() should be false and the calls should short-circuit.
+        for lazy_init_scale in True, False:
+            a = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
+            if lazy_init_scale:
+                # Dummy a.scale() call lazy-inits a._scale if cuda is available.
+                a.scale(torch.tensor([4.0], dtype=torch.float32, device="cuda:0"))
+                if a.is_enabled():
+                    self.assertTrue(isinstance(a._scale, torch.cuda.FloatTensor))
+                else:
+                    self.assertTrue(a._scale is None)
+            serialized = pickle.dumps(a)
+            b = pickle.loads(serialized)
+            self.assertEqual(b.is_enabled(), a.is_enabled())
+            if b.is_enabled():
+                self.assertEqual(b.get_scale(), 3.)
+                self.assertEqual(b.get_growth_factor(), 4.)
+                self.assertEqual(b.get_backoff_factor(), .5)
+                self.assertEqual(b.get_growth_interval(), 2)
+                self.assertEqual(b._init_growth_tracker, 0)
+                # supplies a dummy key to test the defaultdict's default_factory
+                self.assertEqual(b._per_optimizer_states["fdsa"],
+                                 torch.cuda.amp.grad_scaler._refresh_per_optimizer_state())
+
     def test_norm_fastpaths(self):
         x = torch.randn(3, 5)
 
