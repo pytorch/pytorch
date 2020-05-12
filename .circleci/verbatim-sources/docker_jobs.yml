@@ -35,13 +35,15 @@
               export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
               eval $(aws ecr get-login --no-include-email --region us-east-1)
               set -x
+              PREVIOUS_DOCKER_TAG=$(git rev-parse "$(git merge-base HEAD << pipeline.git.base_revision >>):.circleci/docker")
               # Check if image already exists, if it does then skip building it
               if docker manifest inspect "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${IMAGE_NAME}:${DOCKER_TAG}"; then
                 circleci-agent step halt
+                # circleci-agent step halt doesn't actually halt the step so we need to
+                # explicitly exit the step here ourselves before it causes too much trouble
+                exit 0
               fi
-              PREVIOUS_DOCKER_TAG=$(git rev-parse "$(git merge-base HEAD << pipeline.git.base_revision >>):.circleci/docker")
               # If no image exists but the hash is the same as the previous hash then we should error out here
-              # no stampeding herd effect plz.
               if [[ ${PREVIOUS_DOCKER_TAG} = ${DOCKER_TAG} ]]; then
                 echo "ERROR: Something has gone wrong and the previous image isn't available for the merge-base of your branch"
                 echo "       contact the PyTorch team to restore the original images"

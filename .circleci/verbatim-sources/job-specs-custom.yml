@@ -172,6 +172,7 @@
       image: ubuntu-1604:201903-01
     steps:
     - attach_scripts
+    - load_shared_env
     - setup_linux_system_environment
     - checkout
     - setup_ci_environment
