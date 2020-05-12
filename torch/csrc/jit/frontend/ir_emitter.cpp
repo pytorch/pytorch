@@ -413,6 +413,17 @@ struct Environment {
     return getSugaredVar(ident)->asValue(ident.range(), method);
   }
 
+  void throwVarNotFoundError(
+      const std::string& ident,
+      const SourceRange& range) {
+    // check if this value was not emitted in an if statement because of a
+    // type mismatch. if it was, then we print a more informative error msg
+    if (auto msg = findVariableTypeError(ident)) {
+      throw ErrorReport(range) << *msg << "and was used here";
+    }
+    throw ErrorReport(range) << "undefined value " << ident;
+  }
+
   SugaredValuePtr getSugaredVar(
       const std::string& ident,
       const SourceRange& range,
@@ -509,18 +520,27 @@ struct Environment {
     }
 
     if (!retval && required) {
-      // check if this value was not emitted in an if statement because of a
-      // type mismatch. if it was, then we print a more informative error msg
-      if (auto msg = findVariableTypeError(ident)) {
-        throw ErrorReport(range) << *msg << "and was used here";
-      }
-      throw ErrorReport(range) << "undefined value " << ident;
+      throwVarNotFoundError(ident, range);
     }
     return retval;
   }
 
   Value* getVar(const std::string& ident, const SourceRange& range) {
     return getSugaredVar(ident, range)->asValue(range, method);
+  }
+
+  void removeVar(const Ident& ident, bool check_if_removed = false) {
+    bool removed = false;
+
+    for (auto runner = this; runner; runner = runner->next.get()) {
+      auto a = runner->value_table.erase(ident.name());
+      auto b = runner->type_table.erase(ident.name());
+      removed = a || b;
+    }
+
+    if (check_if_removed && !removed) {
+      throwVarNotFoundError(ident.name(), ident.range());
+    }
   }
 
   std::vector<std::string> definedVariables() {
@@ -901,26 +921,30 @@ struct to_ir {
   }
 
   void emitDelete(const Delete& stmt) {
-    if (stmt.expr().kind() != TK_SUBSCRIPT) {
+    if (stmt.expr().kind() == TK_SUBSCRIPT) {
+      Subscript subscript(stmt.expr());
+      const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+      if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
+        throw ErrorReport(stmt.range())
+            << "del statements only support deletion at a single index, "
+               "slicing is not supported"
+               " (see https://github.com/pytorch/pytorch/issues/31430)";
+      }
+      const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+      const SourceRange& val_range = subscript.value().range();
+      Value* idx = emitExpr(subscript_exprs[0]);
+      Value* val = sv->asValue(val_range, method);
+      auto node = graph->create(aten::Delete, {val, idx}, 0)
+                      ->setSourceRange(stmt.range());
+      graph->insertNode(node);
+    } else if (stmt.expr().kind() == TK_VAR) {
+      Var var(stmt.expr());
+      environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
+    } else {
       throw ErrorReport(stmt.range())
-          << "del statements are only supported for list"
-             " and dict item deletion";
+          << "del statements are only supported for deleting"
+             " list and dict items and variables";
     }
-    Subscript subscript(stmt.expr());
-    const List<Expr>& subscript_exprs = subscript.subscript_exprs();
-    if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      throw ErrorReport(stmt.range())
-          << "del statements only support deletion at a single index, "
-             "slicing is not supported"
-             " (see https://github.com/pytorch/pytorch/issues/31430)";
-    }
-    const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
-    const SourceRange& val_range = subscript.value().range();
-    Value* idx = emitExpr(subscript_exprs[0]);
-    Value* val = sv->asValue(val_range, method);
-    auto node = graph->create(aten::Delete, {val, idx}, 0)
-                    ->setSourceRange(stmt.range());
-    graph->insertNode(node);
   }
 
   void emitReturn(const Return& stmt) {
@@ -2207,10 +2231,41 @@ struct to_ir {
         if (stmt.type().present()) {
           type = typeParser_.parseTypeFromExpr(stmt.type().get());
         }
+        auto rhs_sugared_val = emitSugaredExpr(rhs, 1, type);
+        // START BC HACK
+        //
+        // For old serialized quantized RNN modules, switch
+        // quantized::linear_prepack to quantized::linear_prepack_legacy. We
+        // changed linear_prepack to return a TorchBind class and not a
+        // cpp_custom_type_hack tensor anymore, but the old serialized models
+        // are tightly coupled with the type_hack version. If we still create a
+        // Tensor here, then the quantized_lstm.legacy overload can kick in in
+        // forward_impl(), and the module will still run correctly.
+        if (method.qualname() ==
+            "__torch__.torch.nn.quantized.dynamic.modules.rnn.PackedParameter.__setstate__") {
+          if (auto sv =
+                  std::dynamic_pointer_cast<SimpleValue>(rhs_sugared_val)) {
+            Node* rhs_node = sv->getValue()->node();
+            if (rhs_node->kind() ==
+                Symbol::fromQualString("quantized::linear_prepack")) {
+              std::vector<NamedValue> inputs;
+              for (Value* i : rhs_node->inputs()) {
+                inputs.emplace_back(i);
+              }
+              Value* new_val = rhs_node->owningGraph()->insert(
+                  Symbol::fromQualString("quantized::linear_prepack_legacy"),
+                  inputs,
+                  {},
+                  rhs_node->sourceRange());
+              rhs_sugared_val = std::make_shared<SimpleValue>(new_val);
+            }
+          }
+        }
+        // END BC HACK
         environment_stack->setSugaredVar(
             v.range(),
             v.name().name(),
-            emitSugaredExpr(rhs, 1, type),
+            std::move(rhs_sugared_val),
             /*annotated_type=*/type);
       } break;
       case TK_TUPLE_LITERAL:
@@ -3174,32 +3229,40 @@ struct to_ir {
           return dim + 1;
         }
       }
-      Value* index;
-      if (subscript_expr.kind() == TK_LIST_LITERAL) {
-        // Accept list literal as subscript but convert it to a Tensor
-        // since it's equivalent to indexing with Tensor.
-        // Advanced indexing using list:
-        // @torch.jit.script
-        // def f(x):
-        //     return x[[0, 1, 5]]  # or
-        //     return x[[0, 1], [0, 1]]  # or
-        //     return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
-        // Statements above are equivalent to advanced indexing using Tensor:
-        // @torch.jit.script
-        // def f(x):
-        //     return x[torch.tensor([0, 1, 5])]  # or
-        //     return x[torch.tensor([0, 1]), torch.tensor([0, 1])]  # or
-        //     return x[torch.tensor([[0, 1], [0, 1]]), torch.tensor([[0, 1],
-        //     [0, 1]])]
-        auto ll = emitExpr(subscript_expr);
-        index = graph->insert(aten::tensor, {ll});
-      } else {
-        TypePtr type_hint = OptionalType::ofTensor();
-        if (subscript_expr.kind() == TK_NONE) {
-          type_hint = NoneType::get();
-        }
-        index = emitExpr(subscript_expr, type_hint);
+      TypePtr type_hint;
+      if (subscript_expr.kind() == TK_NONE) {
+        type_hint = NoneType::get();
       }
+      auto index = emitExpr(subscript_expr, type_hint);
+
+      // Accept list as subscript but convert it to a Tensor
+      // since it's equivalent to indexing with Tensor.
+      // The list can be a list literal or list variable.
+      // Advanced indexing using list:
+      // @torch.jit.script
+      // def f(x):
+      //   return x[[0, 1, 5]]  # or
+      //   return x[[0, 1], [0, 1]]  # or
+      //   return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]  # or
+      //   ls = [0, 1]
+      //   return x[ls]
+      // Statements above are equivalent to advanced indexing using Tensor:
+      // @torch.jit.script
+      // def f(x):
+      //   return x[torch.tensor([0, 1, 5])]  # or
+      //   return x[torch.tensor([0, 1]), torch.tensor([0, 1])]  # or
+      //   return x[torch.tensor([[0, 1], [0, 1]]),
+      //            torch.tensor([[0, 1], [0, 1]])]  # or
+      //   ls = [0, 1]
+      //   return x[torch.tensor(ls)]
+      if (index->type()->kind() == c10::TypeKind::ListType) {
+        // Always create index tensor as LongTensor.
+        // This is to match Pytorch eager frontend behavior which accepts
+        // indexing with float list.
+        index = graph->insert(
+            aten::tensor, {index}, {NamedValue("dtype", c10::kLong)});
+      }
+
       exprs[expr_idx] = index;
       if (index->type()->isSubtypeOf(NoneType::get())) {
         if (is_reverse) {
@@ -3224,7 +3287,7 @@ struct to_ir {
         throw ErrorReport(loc)
             << "Unsupported operation: indexing tensor with unsupported index type '"
             << index->type()->python_str()
-            << "'. Only ints, slices, and tensors are supported";
+            << "'. Only ints, slices, lists and tensors are supported";
       }
     };
 
