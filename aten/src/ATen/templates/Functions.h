@@ -26,9 +26,11 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
-    const TensorOptions& options = {}) {
+    const TensorOptions& options = {},
+    const c10::optional<Device> target_device = c10::nullopt) {
   AutoNonVariableTypeMode guard;
-  auto device = globalContext().getDeviceFromPtr(data, options.device().type());
+  auto device = (target_device.has_value()?
+    target_device.value() : globalContext().getDeviceFromPtr(data, options.device().type()));
   if (options.device().has_index()) {
     TORCH_CHECK(
         options.device() == device,
