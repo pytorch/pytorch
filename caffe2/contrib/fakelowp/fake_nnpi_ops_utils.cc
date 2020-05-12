@@ -150,7 +150,7 @@ void matmul_u8i8u8acc32_ref(
     float C_multiplier, // A_scale * B_scale / C_scale
     int32_t C_zero_point) {
 #ifndef NDEBUG
-  std::vector<uint8_t> C_ref(M * K);
+  std::vector<uint8_t> C_ref(M * N);
   for (int i = 0; i < M; ++i) {
     for (int j = 0; j < N; ++j) {
       int32_t sum = HAS_BIAS ? bias[j] : 0;
