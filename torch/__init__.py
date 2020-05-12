@@ -63,7 +63,7 @@ if platform.system() == 'Windows':
     else:
         cuda_path = ''
 
-    kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
+    kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)  # type: ignore
     dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
     with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
     prev_error_mode = kernel32.SetErrorMode(0x0001)
