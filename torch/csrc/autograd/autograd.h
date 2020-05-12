@@ -70,5 +70,11 @@ TORCH_API variable_list grad(
     bool create_graph = false,
     bool allow_unused = false);
 
+/// Check if this type is supported by the autograd engine.
+/// If you change this, update the doc at the top of the torch/autograd/__init__.py file
+static inline bool isDifferentiableType(at::ScalarType t) {
+    return isFloatingType(t) || isComplexType(t);
+}
+
 } // namespace autograd
 } // namespace torch

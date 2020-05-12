@@ -214,9 +214,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
-  // currently, isFloatingType will return false for (floating) complex types,
-  // so this might have to be amended when they should be differentiable
-  requires_grad &= isFloatingType(self.scalar_type());
+  requires_grad &= isDifferentiableType(self.scalar_type());
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
