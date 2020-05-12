@@ -89,8 +89,6 @@ class LLVMCodeGenImpl : public IRVisitor {
 
   void visit(const Cast* v) override;
   void visit(const Var* v) override;
-  void visit(const Let* v) override;
-  void visit(const LetStmt* v) override;
   void visit(const Ramp* v) override;
   void visit(const Load* v) override;
   void visit(const For* v) override;
@@ -711,49 +709,6 @@ void LLVMCodeGenImpl::visit(const Var* v) {
   }
 }
 
-void LLVMCodeGenImpl::visit(const Let* v) {
-  const Var* var = dynamic_cast<const Var*>(v->var());
-  if (!var) {
-    throw malformed_input("llvm_codgen: bad Var in Let", v);
-  }
-
-  v->value()->accept(this);
-  auto value = value_;
-  if (!varToVal_.count(var)) {
-    varToVal_.emplace(var, value);
-  } else {
-    throw std::runtime_error("var should not exist before");
-  }
-  v->body()->accept(this);
-  if (varToVal_.count(var)) {
-    varToVal_.erase(var);
-  } else {
-    throw std::runtime_error("erasing var that doesn't exist");
-  }
-}
-
-// TODO: refactor this and merge with Let
-void LLVMCodeGenImpl::visit(const LetStmt* v) {
-  const Var* var = v->var();
-  if (!var) {
-    throw malformed_input("llvm_codgen: bad Var in LetStmt", v);
-  }
-
-  v->value()->accept(this);
-  auto value = value_;
-  if (!varToVal_.count(var)) {
-    varToVal_.emplace(var, value);
-  } else {
-    throw std::runtime_error("var should not exist before");
-  }
-  v->body()->accept(this);
-  if (varToVal_.count(var)) {
-    varToVal_.erase(var);
-  } else {
-    throw std::runtime_error("erasing var that doesn't exist");
-  }
-}
-
 void LLVMCodeGenImpl::visit(const Ramp* v) {
   v->base()->accept(this);
   auto base = this->value_;
@@ -963,8 +918,25 @@ void LLVMCodeGenImpl::visit(const For* v) {
 }
 
 void LLVMCodeGenImpl::visit(const Block* v) {
+  for (auto pair : v->varBindings()) {
+    const Var* v = pair.first;
+    pair.second->accept(this);
+    if (!varToVal_.count(v)) {
+      varToVal_.emplace(v, value_);
+    } else {
+      throw std::runtime_error("var should not exist before");
+    }
+  }
+
   for (Stmt* s : *v) {
     s->accept(this);
+  }
+
+  for (auto pair : v->varBindings()) {
+    const Var* v = pair.first;
+    if (varToVal_.erase(v) != 1) {
+      throw std::runtime_error("erasing var that doesn't exist");
+    }
   }
 }
 
