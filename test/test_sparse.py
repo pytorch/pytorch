@@ -2363,23 +2363,18 @@ class TestSparse(TestCase):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
         self.assertRaises(TypeError, lambda: t.numpy())
 
+    @cpu_only
     def test_softmax(self):
-        if self.device != 'cpu':
-            self.skipTest('sparse softmax not available on %s' % (self.device))
-
         import torch.nn.functional as F
 
         def to_dense(sparse, fill_value=None):
             """
             Return dense tensor from a sparse tensor using given fill value.
             """
-            if isinstance(fill_value, str):
-                fill_value = float(fill_value)
             if fill_value is None or fill_value == 0:
                 return sparse.to_dense()
             sparse = sparse.coalesce()
-            dense = torch.empty(sparse.shape, dtype=sparse.dtype, device=sparse.device)
-            dense[:] = fill_value
+            dense = torch.full(sparse.shape, fill_value, dtype=sparse.dtype, device=sparse.device)
             for idx, value in zip(sparse._indices().t(), sparse._values()):
                 dense[tuple(idx)] = value
             return dense
@@ -2403,7 +2398,6 @@ class TestSparse(TestCase):
             """
             dtype = sparse.dtype
             device = sparse.device
-            sparse = sparse.coalesce()
             dense = to_dense(sparse, fill_value=-float('inf'))
             r = F.softmax(dense, dim)
             # softmax on empty lines results nan, replace with zeros to match the definition
@@ -2605,7 +2599,7 @@ class TestSparse(TestCase):
                 # Check autograd support on sparse softmax
 
                 # check softmax Jacobian definition for dense input
-                x1 = to_dense(x, fill_value='-inf')
+                x1 = to_dense(x, fill_value=float('-inf'))
                 J = softmax_jacobian_analytic(x1, dim)
                 assert J.shape[0] == x.shape[dim]
                 assert J.shape[dim + 1] == x.shape[dim]
