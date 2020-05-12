@@ -26,9 +26,9 @@ void removeDropoutImpl(Block* block) {
     for (auto block : node->blocks()) {
       removeDropoutImpl(block);
     }
-    if ((node->kind() == c10::Symbol::fromQualString("aten::dropout")
-          || node->kind() == c10::Symbol::fromQualString("aten::dropout_"))
-        && isDropoutRemovable(*it)) {
+    if ((node->kind() == c10::Symbol::fromQualString("aten::dropout") ||
+         node->kind() == c10::Symbol::fromQualString("aten::dropout_")) &&
+        isDropoutRemovable(*it)) {
       // Input tensor of dropout.
       Value* input_value = node->inputs()[0];
       // Output tensor.
@@ -37,7 +37,7 @@ void removeDropoutImpl(Block* block) {
       deleted_nodes.push_back(node);
     }
   }
-  for(auto del_node : deleted_nodes) {
+  for (auto del_node : deleted_nodes) {
     del_node->destroy();
   }
 }
