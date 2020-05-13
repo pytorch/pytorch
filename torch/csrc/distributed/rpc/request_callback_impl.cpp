@@ -33,41 +33,34 @@ using namespace torch::distributed::autograd;
 
 namespace {
 
-std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
-    RpcCommandBase& rpc,
+std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
+    std::unique_ptr<RpcCommandBase> rpc,
     const MessageType& messageType) {
   switch (messageType) {
     case MessageType::PYTHON_CALL: {
-      auto& pc = static_cast<PythonCall&>(rpc);
+      auto& pc = static_cast<PythonCall&>(*rpc);
       return std::make_unique<UnpickledPythonCall>(pc.serializedPyObj());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
-      auto& prc = static_cast<PythonRemoteCall&>(rpc);
+      auto& prc = static_cast<PythonRemoteCall&>(*rpc);
       return std::make_unique<UnpickledPythonRemoteCall>(
           prc.serializedPyObj(), prc.retRRefId(), prc.retForkId());
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
       // Deserialize the wrapped RPC if it contains Python UDF
-      auto& rwa = static_cast<RpcWithAutograd&>(rpc);
+      auto& rwa = static_cast<RpcWithAutograd&>(*rpc);
       auto& wrappedRpc = rwa.wrappedRpc();
       auto pythonRpc = deserializePythonRpcCommandReference(
           wrappedRpc, rwa.wrappedMessageType());
       if (pythonRpc) {
         rwa.setWrappedRpc(std::move(pythonRpc));
       }
-      return nullptr;
+      return std::move(rpc);
     }
     default: {
-      return nullptr;
+      return std::move(rpc);
     }
   }
-}
-
-std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
-    std::unique_ptr<RpcCommandBase> rpc,
-    const MessageType& messageType) {
-  auto pythonRpc = deserializePythonRpcCommandReference(*rpc, messageType);
-  return pythonRpc ? std::move(pythonRpc) : std::move(rpc);
 }
 
 // When request message has autograd info, processMessage() will set up valid
