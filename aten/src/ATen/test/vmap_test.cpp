@@ -1,10 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/core/op_registration/op_registration.h>
-#include <torch/csrc/jit/runtime/operator.h>
-#include <torch/torch.h>
 #include <ATen/BatchedTensorImpl.h>
 
 using namespace at;
