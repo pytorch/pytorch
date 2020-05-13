@@ -3,7 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/Resize.h>
 #include <ATen/quantized/Quantizer.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <c10/core/QScheme.h>
 
 namespace at {

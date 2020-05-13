@@ -172,9 +172,9 @@ bool TensorContiguity::isBroadcastDim(int axis) const {
 
 std::vector<int> TensorContiguity::getBroadcastDims() const {
   std::vector<int> ret;
-  for (int i = 0; i < contiguity_.size(); i++) {
+  for (decltype(contiguity_.size()) i{0}; i < contiguity_.size(); i++) {
     if (contiguity_[i] == 0) {
-      ret.emplace_back(i);
+      ret.emplace_back(static_cast<int>(i));
     }
   }
   return ret;
