@@ -155,11 +155,10 @@ class QConvUnpackWeightsInt8 final {
   }
 };
 
-template <int kSpatialDim = 2>
 class QConv1dUnpackWeightsInt8 final {
  public:
   static std::tuple<at::Tensor, c10::optional<at::Tensor>> run(
-      const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight) {
+      const c10::intrusive_ptr<ConvPackedParamsBase<2>>& packed_weight) {
     auto& ctx = at::globalContext();
     at::Tensor weight;
     c10::optional<at::Tensor> bias;
@@ -173,10 +172,6 @@ class QConv1dUnpackWeightsInt8 final {
 
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
-      TORCH_CHECK(
-          kSpatialDim == 2,
-          "quantized::conv1d_unpack (qnnpack): QNNPACK only supports Conv1d/Conv2d "
-          "now.");
       std::tie(weight, bias) = packed_weight->unpack();
       at::Tensor new_weight = weight.clone();
       new_weight = new_weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
@@ -232,7 +227,7 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
   // conv_unpack is deprecated, please use conv2d_unpack for 2D conv.
   m.impl("conv_unpack", QConvUnpackWeightsInt8<2>::run);
   // We use  conv2d_unpack to be consistent with conv3d_unpack
-  m.impl("conv1d_unpack", QConv1dUnpackWeightsInt8<2>::run);
+  m.impl("conv1d_unpack", QConv1dUnpackWeightsInt8::run);
   m.impl("conv2d_unpack", QConvUnpackWeightsInt8<2>::run);
   m.impl("conv3d_unpack", QConvUnpackWeightsInt8<3>::run);
   m.impl("conv2d_stride", QConvStride<2>::run);

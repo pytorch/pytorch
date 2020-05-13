@@ -129,6 +129,7 @@ libtorch_core_sources = [
     "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
+    "torch/csrc/jit/passes/remove_dropout.cpp",
     "torch/csrc/jit/passes/requires_grad_analysis.cpp",
     "torch/csrc/jit/passes/shape_analysis.cpp",
     "torch/csrc/jit/passes/specialize_autogradzero.cpp",
@@ -359,7 +360,6 @@ libtorch_python_cuda_sources = [
     "torch/csrc/cuda/shared/cudart.cpp",
     "torch/csrc/cuda/shared/cudnn.cpp",
     "torch/csrc/cuda/shared/nvtx.cpp",
-    "torch/csrc/distributed/c10d/ddp.cpp",
 ]
 
 libtorch_python_core_sources = [
