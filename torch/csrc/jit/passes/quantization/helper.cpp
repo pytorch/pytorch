@@ -23,10 +23,6 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "layer_norm",
 };
 
-std::vector<std::string> _dynamic_quantizable_call_funcs = {
-    "linear",
-};
-
 std::vector<std::string> _static_quantizable_aten_funcs = {
     "conv2d",
     "conv3d",
@@ -41,6 +37,10 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "mul_",
     "hardswish",
     "layer_norm",
+};
+
+std::vector<std::string> _dynamic_quantizable_call_funcs = {
+    "linear",
 };
 
 std::vector<std::string> _dynamic_quantizable_aten_funcs = {
@@ -89,7 +89,6 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "flatten",
     "max",
     "min",
-    "mean",
     "upsample_nearest1d",
     "upsample_nearest2d",
     "upsample_nearest3d",
@@ -145,6 +144,7 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     "adaptive_avg_pool1d",
     "adaptive_avg_pool2d",
     "adaptive_avg_pool3d",
+    "mean",
 };
 
 // Special checks for ops that do not require observers for all input tensors.
