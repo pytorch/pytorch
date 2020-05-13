@@ -126,6 +126,31 @@ std::tuple<std::vector<Tensor>, std::vector<Tensor>> split_lstm_hidden(TensorLis
   return std::make_tuple(std::move(_fwd_hx), std::move(_bwd_hx));
 }
 
+std::tuple<Tensor, Tensor> merge_lstm_hidden(
+    const Tensor& hx_fwd,
+    const Tensor& hx_bwd,
+    const Tensor& cx_fwd,
+    const Tensor& cx_bwd) {
+  std::vector<Tensor> _hx;
+  std::vector<Tensor> _cx;
+
+  auto h_fwd_slices = hx_fwd.split(1, 0);
+  auto c_fwd_slices = cx_fwd.split(1, 0);
+  auto h_bwd_slices = hx_bwd.split(1, 0);
+  auto c_bwd_slices = cx_bwd.split(1, 0);
+
+  for(auto i = 0; i < hx_fwd.size(0); i++) {
+    _hx.push_back(h_fwd_slices[i]);
+    _hx.push_back(h_bwd_slices[i]);
+    _cx.push_back(c_fwd_slices[i]);
+    _cx.push_back(c_bwd_slices[i]);
+  }
+
+  auto hx = at::cat(_hx, 0);
+  auto cx = at::cat(_cx, 0);
+  return std::make_tuple(std::move(hx), std::move(cx));
+}
+
 std::tuple<Tensor, Tensor> split_rnn_hidden(const Tensor& hx) {
   auto h_slices = hx.split(1, 0);
   std::vector<Tensor> h_fwds;
@@ -143,6 +168,18 @@ std::tuple<Tensor, Tensor> split_rnn_hidden(const Tensor& hx) {
   auto h_bwd = at::cat(h_bwds, 0);
 
   return std::make_tuple(std::move(h_fwd), std::move(h_bwd));
+}
+
+Tensor merge_rnn_hidden(const Tensor& hx_fwd, const Tensor& hx_bwd) {
+  std::vector<Tensor> _hx;
+  auto h_fwd_slices = hx_fwd.split(1, 0);
+  auto h_bwd_slices = hx_bwd.split(1, 0);
+  for(auto i = 0; i < hx_fwd.size(0); i++) {
+    _hx.push_back(h_fwd_slices[i]);
+    _hx.push_back(h_bwd_slices[i]);
+  }
+  auto hx = at::cat(_hx, 0);
+  return hx;
 }
 
 template<typename T>
@@ -1456,7 +1493,7 @@ bool _use_cudnn_rnn_flatten_weight() {
     outputs.push_back(bwd_rev_output);                                      \
     auto cat_outputs = at::cat(outputs, -1);                                \
     auto output = batch_first ? cat_outputs.transpose(0, 1) : cat_outputs;  \
-    auto hy = at::cat({f_hy, b_hy}, 0);                                     \
+    auto hy = merge_rnn_hidden(f_hy, b_hy);                                 \
     return std::make_tuple(std::move(output), std::move(hy));               \
   }                                                                         \
                                                                             \
@@ -1515,7 +1552,7 @@ bool _use_cudnn_rnn_flatten_weight() {
     outputs.push_back(bwd_rev_output);                                      \
     auto cat_outputs = at::cat(outputs, -1);                                \
     auto output = batch_first ? cat_outputs.transpose(0, 1) : cat_outputs;  \
-    auto hy = at::cat({f_hy, b_hy}, 0);                                     \
+    auto hy = merge_rnn_hidden(f_hy, b_hy);                                 \
     return std::make_tuple(std::move(output), std::move(hy));               \
   }                                                                         \
                                                                             \
@@ -1572,7 +1609,7 @@ bool _use_cudnn_rnn_flatten_weight() {
     outputs.push_back(fwd_output);                                          \
     outputs.push_back(bwd_rev_output);                                      \
     auto output = at::cat(outputs, -1);                                     \
-    auto hy = at::cat({f_hy, b_hy}, 0);                                     \
+    auto hy = merge_rnn_hidden(f_hy, b_hy);                                 \
     return std::make_tuple(std::move(output), std::move(hy));               \
   }                                                                         \
                                                                             \
@@ -1629,7 +1666,7 @@ bool _use_cudnn_rnn_flatten_weight() {
     outputs.push_back(fwd_output);                                          \
     outputs.push_back(bwd_rev_output);                                      \
     auto output = at::cat(outputs, -1);                                     \
-    auto hy = at::cat({f_hy, b_hy}, 0);                                     \
+    auto hy = merge_rnn_hidden(f_hy, b_hy);                                 \
     return std::make_tuple(std::move(output), std::move(hy));               \
   }                                                                         \
                                                                             \
@@ -2001,8 +2038,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm_cudnn_type1(
   auto cat_outputs = at::cat(outputs, -1);
   auto output = batch_first ? cat_outputs.transpose(0, 1) : cat_outputs;
 
-  auto hy = at::cat({f_hy, b_hy}, 0);
-  auto cy = at::cat({f_cy, b_cy}, 0);
+  Tensor hy, cy;
+  std::tie(hy, cy) = merge_lstm_hidden(f_hy, b_hy, f_cy, b_cy);
   return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
 }
 
@@ -2047,8 +2084,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm_miopen_type1(
   auto cat_outputs = at::cat(outputs, -1);
   auto output = batch_first ? cat_outputs.transpose(0, 1) : cat_outputs;
 
-  auto hy = at::cat({f_hy, b_hy}, 0);
-  auto cy = at::cat({f_cy, b_cy}, 0);
+  Tensor hy, cy;
+  std::tie(hy, cy) = merge_lstm_hidden(f_hy, b_hy, f_cy, b_cy);
   return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
 }
 
@@ -2089,8 +2126,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm_packed_cudnn_type1(
 
   auto output = at::cat(outputs, -1);
 
-  auto hy = at::cat({f_hy, b_hy}, 0);
-  auto cy = at::cat({f_cy, b_cy}, 0);
+  Tensor hy, cy;
+  std::tie(hy, cy) = merge_lstm_hidden(f_hy, b_hy, f_cy, b_cy);
   return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
 }
 
@@ -2130,8 +2167,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm_packed_miopen_type1(
 
   auto output = at::cat(outputs, -1);
 
-  auto hy = at::cat({f_hy, b_hy}, 0);
-  auto cy = at::cat({f_cy, b_cy}, 0);
+  Tensor hy, cy;
+  std::tie(hy, cy) = merge_lstm_hidden(f_hy, b_hy, f_cy, b_cy);
   return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
 }
 
