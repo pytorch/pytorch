@@ -2,6 +2,7 @@
 
 #include <sstream>
 #include <string>
+#include <stdexcept>
 
 namespace c10 {
 
