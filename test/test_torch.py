@@ -6443,10 +6443,10 @@ class TestTorchDeviceType(TestCase):
 
                 torch.logical_not(a, out=b)
                 np.logical_not(a_np, out=b_np)
-                self.assertEqual(b_np, b)
+                self.assertEqual(b_np, b.to('cpu'))
 
             # in-place
-            self.assertEqual(np.logical_not(a_np, a_np), a.logical_not_())
+            self.assertEqual(np.logical_not(a_np, a_np), a.logical_not_().to('cpu'))
 
     def _test_logical(self, device, op, a_, b_, expected_res_):
         for dtype in torch.testing.get_all_dtypes():
