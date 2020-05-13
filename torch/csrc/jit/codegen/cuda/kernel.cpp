@@ -478,6 +478,9 @@ void runKernel(
     }
   }
 
+
+  TORCH_INTERNAL_ASSERT(outputs.size() == entry->outputs.size(),
+                        "Wrong number of kernel outputs.");
   for (auto& output : outputs) {
     kernel_args.push(output);
   }
@@ -546,6 +549,8 @@ void runTestKernel(
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different
   // from I/O expected by the generated CUDA kernel.
+  TORCH_INTERNAL_ASSERT(inputs.size() == entry->inputs.size(),
+                        "Wrong number of kernel inputs.");
   for (auto& input : inputs) {
     if (input.isTensor()) {
       TORCH_INTERNAL_ASSERT(
