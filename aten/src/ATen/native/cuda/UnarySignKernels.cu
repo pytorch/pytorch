@@ -13,6 +13,11 @@ namespace at { namespace native {
 // We manually overload abs because std::abs does not work with thrust::complex types and ROCm.
 template<typename scalar_t>
 __host__ __device__ static inline scalar_t abs_wrapper(scalar_t v) {
+  return ::abs(v);
+}
+
+template<typename T>
+__host__ __device__ static inline c10::complex<T> abs_wrapper(c10::complex<T> v) {
   return std::abs(v);
 }
 
