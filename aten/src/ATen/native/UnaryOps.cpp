@@ -245,9 +245,9 @@ Tensor& cosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor cosh(const Tensor& self) { return unary_op_impl(self, at::cosh_out); }
 Tensor& cosh_(Tensor& self) { return unary_op_impl_(self, at::cosh_out); }
 
-Tensor& arcosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, arcosh_stub); }
-Tensor arcosh(const Tensor& self) { return unary_op_impl(self, at::arcosh_out); }
-Tensor& arcosh_(Tensor& self) { return unary_op_impl_(self, at::arcosh_out); }
+Tensor& arccosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, arccosh_stub); }
+Tensor arccosh(const Tensor& self) { return unary_op_impl(self, at::arccosh_out); }
+Tensor& arccosh_(Tensor& self) { return unary_op_impl_(self, at::arccosh_out); }
 
 Tensor& arcsinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, arcsinh_stub); }
 Tensor arcsinh(const Tensor& self) { return unary_op_impl(self, at::arcsinh_out); }
@@ -461,7 +461,7 @@ DEFINE_DISPATCH(real_stub);
 DEFINE_DISPATCH(imag_stub);
 DEFINE_DISPATCH(conj_stub);
 DEFINE_DISPATCH(acos_stub);
-DEFINE_DISPATCH(arcosh_stub);
+DEFINE_DISPATCH(arccosh_stub);
 DEFINE_DISPATCH(arcsinh_stub);
 DEFINE_DISPATCH(arctanh_stub);
 DEFINE_DISPATCH(asin_stub);

@@ -194,8 +194,8 @@ static void cosh_kernel(TensorIterator& iter) {
   });
 }
 
-static void arcosh_kernel(TensorIterator& iter) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "arcosh_cpu", [&]() {
+static void arccosh_kernel(TensorIterator& iter) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "arccosh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::acosh(a); });
@@ -486,7 +486,7 @@ REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sign_stub, &sign_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
-REGISTER_DISPATCH(arcosh_stub, &arcosh_kernel);
+REGISTER_DISPATCH(arccosh_stub, &arccosh_kernel);
 REGISTER_DISPATCH(arcsinh_stub, &arcsinh_kernel);
 REGISTER_DISPATCH(arctanh_stub, &arctanh_kernel);
 REGISTER_DISPATCH(digamma_stub, &digamma_kernel);

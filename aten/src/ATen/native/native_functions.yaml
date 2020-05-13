@@ -452,16 +452,16 @@
     CPU: argmin
     CUDA: argmin
 
-- func: arcosh(Tensor self) -> Tensor
+- func: arccosh(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
   variants: function, method
 
-- func: arcosh_(Tensor(a!) self) -> Tensor(a!)
+- func: arccosh_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
 
-- func: arcosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+- func: arccosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
 - func: arcsinh(Tensor self) -> Tensor

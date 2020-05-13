@@ -166,16 +166,15 @@ void tanh_kernel_cuda(TensorIterator& iter) {
 }
 
 template<typename scalar_t>
-__host__ __device__ static inline scalar_t arcosh_wrapper(scalar_t v) {
+__host__ __device__ static inline scalar_t arccosh_wrapper(scalar_t v) {
   return ::acosh(v);
 }
 
-void arcosh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "arcosh_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "arcosh_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return arcosh_wrapper(a);
-      });
+void arccosh_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "arccosh_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return arccosh_wrapper(a);
     });
   });
 }
@@ -186,11 +185,10 @@ __host__ __device__ static inline scalar_t arcsinh_wrapper(scalar_t v) {
 }
 
 void arcsinh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "arcsinh_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "arcsinh_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return arcsinh_wrapper(a);
-      });
+  AT_DISPATCH_FLOATING_TYPES_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "arcsinh_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return arcsinh_wrapper(a);
     });
   });
 }
@@ -224,7 +222,7 @@ void tan_kernel_cuda(TensorIterator& iter) {
 }
 
 REGISTER_DISPATCH(acos_stub, &acos_kernel_cuda);
-REGISTER_DISPATCH(arcosh_stub, &arcosh_kernel_cuda);
+REGISTER_DISPATCH(arccosh_stub, &arccosh_kernel_cuda);
 REGISTER_DISPATCH(arcsinh_stub, &arcsinh_kernel_cuda);
 REGISTER_DISPATCH(arctanh_stub, &arctanh_kernel_cuda);
 REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda);
