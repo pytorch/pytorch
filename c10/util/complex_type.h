@@ -404,6 +404,38 @@ constexpr bool operator!=(const T& lhs, const c10::complex<T>& rhs) {
   return !(lhs == rhs);
 }
 
+
+// Define operators between integral scalars and c10::complex
+#define COMPLEX_INTEGER_OP_TEMPLATE_CONDITION \
+  typename std::enable_if_t<std::is_floating_point<fT>::value && std::is_integral<iT>::value, int> = 0
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+c10::complex<fT> operator+(const c10::complex<fT>& a, const iT& b) { return a + static_cast<fT>(b); }
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+c10::complex<fT> operator+(const iT& a, const c10::complex<fT>& b) { return static_cast<fT>(a) + b; }
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+c10::complex<fT> operator-(const c10::complex<fT>& a, const iT& b) { return a - static_cast<fT>(b); }
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+c10::complex<fT> operator-(const iT& a, const c10::complex<fT>& b) { return static_cast<fT>(a) - b; }
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+c10::complex<fT> operator*(const c10::complex<fT>& a, const iT& b) { return a * static_cast<fT>(b); }
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+c10::complex<fT> operator*(const iT& a, const c10::complex<fT>& b) { return static_cast<fT>(a) * b; }
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+c10::complex<fT> operator/(const c10::complex<fT>& a, const iT& b) { return a / static_cast<fT>(b); }
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+c10::complex<fT> operator/(const iT& a, const c10::complex<fT>& b) { return static_cast<fT>(a) / b; }
+
+#undef COMPLEX_INTEGER_OP_TEMPLATE_CONDITION
+
+
 template <typename T, typename CharT, typename Traits>
 std::basic_ostream<CharT, Traits>& operator<<(std::basic_ostream<CharT, Traits>& os, const c10::complex<T>& x) {
   return (os << static_cast<std::complex<T>>(x));
