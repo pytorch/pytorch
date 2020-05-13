@@ -26,13 +26,13 @@ struct CudaIPCSentData final {
   at::DataPtr original_ptr_; // Original mem allocation
   cudaEvent_t event_; // Sync cuEventDestroy
   bool event_sync_required_;
-  Device device_;
+  at::Device device_;
 
   CudaIPCSentData(
       std::string handle,
       int64_t offset,
       int64_t* counter_ptr,
-      Device device);
+      at::Device device);
   ~CudaIPCSentData();
 
   int64_t counter_value();
@@ -47,7 +47,7 @@ struct CudaIPCSentData final {
   }
 };
 
-at::DataPtr GetNewRefCountedSentData(void* data, Device device);
+at::DataPtr GetNewRefCountedSentData(void* data, at::Device device);
 
 namespace {
 

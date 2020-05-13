@@ -49,7 +49,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   });
   torch::ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  auto device = r.deviceWithDefault(0, Device(at::kCPU));
+  auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
 
   THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
 #ifdef USE_CUDA
@@ -82,9 +82,9 @@ static PyObject * THPGenerator_getState(THPGenerator *self, PyObject *noargs)
 #ifdef USE_CUDA
     TORCH_INTERNAL_ASSERT(self->cdata.device().type() == at::kCUDA);
     THCRandom_getRNGState(self->cdata, (THByteTensor*)(var.unsafeGetTensorImpl()));
-#else
+#else 
     TORCH_INTERNAL_ASSERT(false, "PyTorch not compiled with CUDA");
-#endif
+#endif 
   }
   return THPVariable_Wrap(std::move(var));
   END_HANDLE_TH_ERRORS
@@ -108,9 +108,9 @@ static PyObject * THPGenerator_setState(THPGenerator *self, PyObject *_new_state
 #ifdef USE_CUDA
     TORCH_INTERNAL_ASSERT(self->cdata.device().type() == at::kCUDA);
     THCRandom_setRNGState(self->cdata, (THByteTensor*)tensor.unsafeGetTensorImpl());
-#else
+#else 
     TORCH_INTERNAL_ASSERT(false, "PyTorch not compiled with CUDA");
-#endif
+#endif 
   }
   Py_INCREF(self);
   return (PyObject*)self;

@@ -41,7 +41,7 @@ class ScriptModuleDeserializer final {
   ScriptModuleDeserializer(
       std::shared_ptr<CompilationUnit> cu,
       std::unique_ptr<PyTorchStreamReader> reader,
-      const c10::optional<Device>& device)
+      const c10::optional<at::Device>& device)
       : compilation_unit_(cu),
         reader_(std::move(reader)),
         device_(device),
@@ -72,7 +72,7 @@ class ScriptModuleDeserializer final {
 
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unique_ptr<PyTorchStreamReader> reader_;
-  c10::optional<Device> device_;
+  c10::optional<at::Device> device_;
   std::vector<at::Tensor> constants_table_;
   SourceImporter source_importer_;
   std::string export_prefix_ = "code/";
@@ -166,7 +166,7 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
   }
   const std::string& record_key = tensor_proto.data().key();
   AT_ASSERT(tensor_proto.has_device() && !tensor_proto.device().empty());
-  Device device(tensor_proto.device());
+  at::Device device(tensor_proto.device());
   if (device_.has_value()) {
     // override the device, if user provides map_location
     device = device_.value();

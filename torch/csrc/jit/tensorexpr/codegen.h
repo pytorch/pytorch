@@ -24,7 +24,7 @@ class TORCH_API CodeGen {
   CodeGen(
       Stmt* stmt,
       const std::vector<BufferArg>& buffer_args,
-      Device device = at::kCPU)
+      at::Device device = at::kCPU)
       : stmt_(stmt), buffer_args_(buffer_args), device_(device) {}
 
   virtual ~CodeGen() {}
@@ -41,7 +41,7 @@ class TORCH_API CodeGen {
     return buffer_args_;
   }
 
-  Device device() {
+  at::Device device() {
     return device_;
   }
 
@@ -50,7 +50,7 @@ class TORCH_API CodeGen {
  private:
   Stmt* stmt_;
   std::vector<BufferArg> buffer_args_;
-  Device device_ = at::kCPU;
+  at::Device device_ = at::kCPU;
 };
 
 class CodeGen::BufferArg {
@@ -142,7 +142,7 @@ class RegisterCodeGenList {
   using StmtFactoryMethod = std::function<std::unique_ptr<CodeGen>(
       Stmt* stmt,
       const std::vector<CodeGen::BufferArg>&,
-      Device device)>;
+      at::Device device)>;
 
   TORCH_API StmtFactoryMethod FindStmtFactoryMethod(const std::string& name);
 
@@ -168,7 +168,7 @@ class RegisterCodeGen {
         name,
         [](Stmt* stmt,
            const std::vector<CodeGen::BufferArg>& params,
-           Device device) {
+           at::Device device) {
           std::unique_ptr<CodeGen> method(
               new CodeGenType(stmt, params, device));
           return method;
@@ -180,7 +180,7 @@ TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& params,
-    Device device = at::kCPU);
+    at::Device device = at::kCPU);
 
 } // namespace tensorexpr
 } // namespace jit

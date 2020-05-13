@@ -16,7 +16,7 @@ namespace autograd {
 
 struct TORCH_CUDA_API Scatter : public Node {
   explicit Scatter(
-      std::vector<Device> devices,
+      std::vector<at::Device> devices,
       const c10::optional<std::vector<int64_t>>& chunk_sizes = c10::nullopt,
       int64_t dim = 0,
       const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams =
@@ -26,7 +26,7 @@ struct TORCH_CUDA_API Scatter : public Node {
 
   variable_list apply(variable_list&& inputs) override;
 
-  std::vector<Device> devices_;
+  std::vector<at::Device> devices_;
   c10::optional<std::vector<int64_t>> chunk_sizes_;
   int64_t dim_;
   c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams_;
@@ -34,12 +34,12 @@ struct TORCH_CUDA_API Scatter : public Node {
 };
 
 struct TORCH_CUDA_API Gather : public Node {
-  explicit Gather(const Device& destination_device, int64_t dim = 0);
+  explicit Gather(const at::Device& destination_device, int64_t dim = 0);
   ~Gather() override;
 
   variable_list apply(variable_list&& inputs) override;
 
-  Device destination_device_;
+  at::Device destination_device_;
   int64_t dim_;
 };
 

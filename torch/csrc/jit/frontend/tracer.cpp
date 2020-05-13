@@ -620,7 +620,7 @@ void addInputs(
   Value* undef_gen = g->insertNode(g->createNone())->output();
   n->addInput(undef_gen);
 }
-void addInputs(Node* n, const char* name, Device value) {
+void addInputs(Node* n, const char* name, at::Device value) {
   detail::genericAddInput(n, value);
 }
 void addInputs(Node* n, const char* name, at::Layout value) {
@@ -656,7 +656,10 @@ void addInputs(
     n->addInput(none);
   }
 }
-void addInputs(Node* n, const char* name, const c10::optional<Device>& value) {
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Device>& value) {
   if (value.has_value()) {
     detail::genericAddInput(n, value);
   } else {

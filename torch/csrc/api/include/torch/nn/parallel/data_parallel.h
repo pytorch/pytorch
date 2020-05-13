@@ -59,7 +59,7 @@ namespace {
 // Autograd function for the replicate step in data parallel. This is only used
 // in data parallel, and should not be exposed as a user API.
 struct ReduceAdd : public autograd::Node {
-  explicit ReduceAdd(const Device& destination_device)
+  explicit ReduceAdd(const at::Device& destination_device)
       : destination_device_(destination_device) {};
   ~ReduceAdd() override {}
 
@@ -86,7 +86,7 @@ struct ReduceAdd : public autograd::Node {
   }
 
  private:
-  Device destination_device_;
+  at::Device destination_device_;
 };
 
 } // namespace

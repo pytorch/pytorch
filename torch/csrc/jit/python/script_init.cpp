@@ -1291,7 +1291,7 @@ void initJitScriptBindings(PyObject* module) {
          const std::string& filename,
          py::object map_location,
          ExtraFilesMap& extra_files) {
-        c10::optional<Device> optional_device;
+        c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
@@ -1307,7 +1307,7 @@ void initJitScriptBindings(PyObject* module) {
          py::object map_location,
          ExtraFilesMap& extra_files) {
         std::istringstream in(buffer);
-        c10::optional<Device> optional_device;
+        c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =

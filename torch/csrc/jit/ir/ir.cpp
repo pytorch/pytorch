@@ -343,7 +343,7 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
 
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
-  c10::optional<Device> device = c10::nullopt;
+  c10::optional<at::Device> device = c10::nullopt;
   auto checkValue = [&](const Value* v) {
     if (TensorTypePtr type = v->type()->cast<TensorType>()) {
       if (type->device() && !has_device) {
