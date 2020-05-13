@@ -14,6 +14,9 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+using steady_clock_time_point =
+    std::chrono::time_point<std::chrono::steady_clock>;
+
 struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
   TensorPipeRpcBackendOptions(float rpc_timeout, std::string init_method)
       : RpcBackendOptions(rpc_timeout, init_method) {}
@@ -158,6 +161,31 @@ class TensorPipeAgent : public RpcAgent {
 
   mutable std::mutex mutex_;
   uint64_t nextMessageID_{0};
+
+  // Map to store the expiration times for each message.
+  std::map<steady_clock_time_point, std::vector<std::shared_ptr<FutureMessage>>>
+      timeoutMap_;
+
+  // Thread that will poll the timeoutMap_ for timed out messages and mark them
+  // with an error accordingly
+  std::thread timeoutThread_;
+
+  // Function run by the timeoutThread_ to check for timed out RPCs
+  void pollTimeoutRpcs();
+
+  // Mutex to guard the timeoutMap_
+  std::mutex timeoutMapMutex_;
+
+  // Condition Variable to signal population of the timeoutMap_
+  std::condition_variable timeoutThreadCV_;
+
+  // Returns the expiration time for an RPC by adding the current time to the
+  // passed in timeout.
+  inline steady_clock_time_point computeRpcMessageExpiryTime(
+      std::chrono::milliseconds timeout) const {
+    return std::chrono::time_point_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() + timeout);
+  }
 
   // This is a generic struct for capturing Time-Series Metrics. It keeps a
   // running sum and count of data points (observations), and can return an

@@ -25,6 +25,9 @@ namespace distributed {
 namespace rpc {
 
 constexpr long kToMilliseconds = 1000;
+// This large time duration is for the timeoutMapCV_. We cannot use
+// std::chrono::time_point::max() due to a known overflow-related bug.
+constexpr auto kLargeTimeDuration = std::chrono::hours(10000);
 
 const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
 const std::string kThreadPoolSize = "agent.thread_pool_size";
@@ -138,6 +141,9 @@ void TensorPipeAgent::startImpl() {
         std::string((const char*)nodeAddrData.data(), nodeAddrData.size());
     workerNameToURL_.insert({name, nodeAddrStr});
   }
+
+  // Start the Timeout Thread
+  timeoutThread_ = std::thread(&TensorPipeAgent::pollTimeoutRpcs, this);
 
   listener_->accept([this](
                         const tensorpipe::Error& error,
@@ -293,7 +299,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 std::shared_ptr<FutureMessage> TensorPipeAgent::send(
     const WorkerInfo& toWorkerInfo,
     Message&& requestMessage,
-    const float /* unused */) {
+    const float rpcTimeoutSeconds) {
   TORCH_CHECK(
       requestMessage.isRequest(),
       "TensorPipeAgent::send(..) is only for sending requests.");
@@ -327,6 +333,25 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   pendingResponseMessage[requestMessage.id()] = futureResponseMessage;
 
   ++clientActiveCalls_;
+  // Use the default RPC timeout if no timeout is specified for this send call
+  auto timeout = rpcTimeoutSeconds == kUnsetRpcTimeout
+      ? getRpcTimeout()
+      : std::chrono::milliseconds(
+            static_cast<int>(rpcTimeoutSeconds * kToMilliseconds));
+
+  // We only add to the timeoutMap_ if the timeout is not 0. Per our
+  // documentation, a user-provided timeout of 0 indicates the RPC should never
+  // expire (infinite timeout), so there is no need to track it in the
+  // timeoutMap_.
+  if (timeout.count() != 0) {
+    // Compute the expiration time for this message based on the timeout
+    auto expirationTime = computeRpcMessageExpiryTime(timeout);
+
+    // Add the Future to the right vector in the timeoutMap_
+    auto& timeoutFuturesVector = timeoutMap_[expirationTime];
+    timeoutFuturesVector.emplace_back(futureResponseMessage);
+    timeoutThreadCV_.notify_one();
+  }
 
   // Don't need to hold lock while calling tensorpipe API.
   lock.unlock();
@@ -402,6 +427,73 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   return futureResponseMessage;
 }
 
+void TensorPipeAgent::pollTimeoutRpcs() {
+  // Stores incomplete Futures at this timestep so we can mark them with errors
+  // outside the lock.
+  std::vector<std::shared_ptr<FutureMessage>> errorFutures;
+
+  while (rpcAgentRunning_.load()) {
+    std::unique_lock<std::mutex> lock(timeoutMapMutex_);
+
+    steady_clock_time_point earliestTimeout =
+        std::chrono::steady_clock::now() + kLargeTimeDuration;
+
+    // We sleep until the earliest expiring RPC in the timeoutMap_. We must
+    // also ensure that we sleep while the map is empty, and we exit sleeping
+    // if the RPC Agent has been shutdown.
+    for (;;) {
+      if (!rpcAgentRunning_.load()) {
+        return;
+      }
+      if (std::chrono::steady_clock::now() >= earliestTimeout) {
+        break;
+      }
+      if (!timeoutMap_.empty()) {
+        earliestTimeout = timeoutMap_.begin()->first;
+      }
+      timeoutThreadCV_.wait_until(lock, earliestTimeout);
+    }
+
+    // Update these in case something was added to the map while sleeping.
+    earliestTimeout = timeoutMap_.begin()->first;
+    auto timeoutFuturesVector = timeoutMap_.begin()->second;
+
+    for (auto it = timeoutFuturesVector.begin();
+         it != timeoutFuturesVector.end();
+         /* no increment*/) {
+      auto& future = *it;
+      // We add all incomplete futures to the errorFutures vector, so we can
+      // set them with errors outside the lock. We can ignore the completed
+      // futures, and those entries will simply be deleted from the map.
+      if (!future->completed()) {
+        errorFutures.emplace_back(future);
+      }
+      it = timeoutFuturesVector.erase(it);
+    }
+
+    // If there are no more futures set to expire at the current timepoint
+    // (which we expect to be the case since we've processed the entire vector
+    // in the loop above), we can safely remove this key from the timeoutMap_.
+    if (timeoutFuturesVector.empty()) {
+      timeoutMap_.erase(earliestTimeout);
+    }
+
+    lock.unlock();
+
+    // Set an error on futures added to the errorFutures map. We do this
+    // outside the lock to prevent potential lock-order-inversions by callbacks
+    // triggered by the serError call.
+    for (const auto& future : errorFutures) {
+      std::string errorMsg = c10::str(
+          "RPC ran for more than set timeout and will now be marked with an error");
+      // Using setErrorIfNeeded so we don't set an error if the future was
+      // completed since adding to the errorFutures vector.
+      future->setErrorIfNeeded(errorMsg);
+    }
+    errorFutures.clear();
+  }
+}
+
 // TODO: Remove sync()
 void TensorPipeAgent::sync() {}
 
@@ -412,6 +504,12 @@ void TensorPipeAgent::join() {
 
 void TensorPipeAgent::shutdownImpl() {
   threadPool_.waitWorkComplete();
+
+  // Join the Timeout Thread
+  timeoutThreadCV_.notify_one();
+  if (timeoutThread_.joinable()) {
+    timeoutThread_.join();
+  }
   // TODO: context_->join() is not absolutely ready yet.
   // NOTE: context_->join() will wait for available RPC message to be
   //       read or written, and wait for the remaining unavailable ones
@@ -534,7 +632,7 @@ std::string TensorPipeAgent::getDefaultIPAddress() {
     return defaultIP;
   }
 
-  struct addrinfo hints{};
+  struct addrinfo hints {};
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
