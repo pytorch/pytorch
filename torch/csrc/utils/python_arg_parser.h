@@ -49,9 +49,10 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/QScheme.h>
+#include <torch/csrc/Layout.h>
 #include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/python_dimname.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/numpy_stub.h>
@@ -104,6 +105,7 @@ struct PythonArgParser {
 private:
   [[noreturn]]
   void print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
+  void check_deprecated(const FunctionSignature & signature);
   PythonArgs raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
 
   std::vector<FunctionSignature> signatures_;
@@ -152,7 +154,7 @@ struct PythonArgs {
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
-  inline at::Generator* generator(int i);
+  inline c10::optional<at::Generator> generator(int i);
   inline at::Storage storage(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
@@ -161,8 +163,9 @@ struct PythonArgs {
   inline c10::optional<int64_t> toInt64Optional(int i);
   inline c10::optional<bool> toBoolOptional(int i);
   inline c10::optional<double> toDoubleOptional(int i);
-  inline const THPLayout& layout(int i);
-  inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
+  inline at::Layout layout(int i);
+  inline at::Layout layoutWithDefault(int i, at::Layout default_layout);
+  inline c10::optional<at::Layout> layoutOptional(int i);
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
@@ -216,7 +219,7 @@ struct FunctionParameter {
     double default_double;
     double default_complex[2]; // see Scalar
     at::ScalarType default_scalartype;
-    THPLayout* default_layout;
+    at::Layout default_layout;
   };
 };
 
@@ -368,13 +371,18 @@ inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
   return scalartype(i);
 }
 
-inline const THPLayout& PythonArgs::layout(int i) {
-  if (!args[i]) return *signature.params[i].default_layout;
-  return *reinterpret_cast<THPLayout*>(args[i]);
+inline at::Layout PythonArgs::layout(int i) {
+  if (!args[i]) return signature.params[i].default_layout;
+  return reinterpret_cast<THPLayout*>(args[i])->layout;
 }
 
-inline const THPLayout& PythonArgs::layoutWithDefault(int i, const THPLayout& default_layout) {
+inline at::Layout PythonArgs::layoutWithDefault(int i, at::Layout default_layout) {
   if (!args[i]) return default_layout;
+  return layout(i);
+}
+
+inline c10::optional<at::Layout> PythonArgs::layoutOptional(int i) {
+  if (!args[i]) return c10::nullopt;
   return layout(i);
 }
 
@@ -389,7 +397,7 @@ inline at::Device PythonArgs::device(int i) {
   if (THPUtils_checkLong(args[i])) {
     const auto device_index = THPUtils_unpackLong(args[i]);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(at::DeviceType::CUDA, device_index);
+    return at::Device(DeviceType::CUDA, device_index);
   }
   const std::string &device_str = THPUtils_unpackString(args[i]);
   return at::Device(device_str);
@@ -535,8 +543,8 @@ inline bool PythonArgs::isNone(int i) {
   return args[i] == nullptr;
 }
 
-inline at::Generator* PythonArgs::generator(int i) {
-  if (!args[i]) return nullptr;
+inline c10::optional<at::Generator> PythonArgs::generator(int i) {
+  if (!args[i]) return c10::nullopt;
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
@@ -674,5 +682,48 @@ static auto check_has_torch_function(PyObject* obj) -> bool
   }
   return false;
 }
+
+/*
+ *
+ * Handle __torch_function__ overrides if we know that there are overloaded
+ * arguments.  All objects stored in r.overloaded_args must have a
+ * __torch_function__ implementation and the arguments must be ordered in order
+ * of precedence. Precedence goes from left to right in the order of the
+ * signature of the function the overloaded arguments were passed to, except
+ * subclasses are always considered before superclasses.
+ *
+ * If the result of calling __torch_function__ is NotImplemented, the
+ * next implementation in the precedence order is called. If all
+ * arguments return NotImplemented from their __torch_function__
+ * implementation, a TypeError is raised in Python.
+ *
+ * Assumes overloaded_args has at least one entry. All entries must have
+ * a __torch_function__ attribute that resolves to a callable that
+ * accepts a torch API function, a tuple of arguments, and a dict of
+ * keyword arguments for the torch API function.
+ *
+ * It is sufficient to call PythonArgs::has_torch_function before
+ * calling this function to verify that there are valid arguments
+ * present. If that is not done then special care must be taken to
+ * ensure there are arguments that are overloaded with
+ * __torch_function__.
+ *
+ * See torch._overrides.handle_torch_function for the equivalent
+ * code in the pure-python implementation.
+ *
+ * 'r' is a parsed PythonArgs instance, returned from
+ * PythonArgParser::parse.
+ *
+ * 'args' is a reference to the python tuple of arguments to the torch
+ * API function.
+ *
+ * 'kwargs' is a reference to the python dict of keyword arguments to
+ * the torch API function.
+ *
+ * 'torch_api' is a reference to a python torch API namespace.
+ *
+ */
+
+auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
 
 } // namespace torch

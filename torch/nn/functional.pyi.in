@@ -1,4 +1,5 @@
-from .. import Tensor, _size
+from torch import Tensor
+from torch.types import _size
 from typing import Any, Optional, Tuple, Dict, List, Callable
 from .common_types import _ratio_any_t
 
@@ -217,7 +218,7 @@ def poisson_nll_loss(input: Tensor, target: Tensor, log_input: bool = ..., full:
 
 
 def kl_div(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
-           reduction: str = ...) -> Tensor: ...
+           reduction: str = ..., log_target: bool = ...) -> Tensor: ...
 
 
 def cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ..., size_average: Optional[bool] = ...,

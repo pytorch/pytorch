@@ -86,9 +86,25 @@ def is_registered_op(opname, domain, version):
     global _registry
     return (domain, version) in _registry and opname in _registry[(domain, version)]
 
+def get_op_supported_version(opname, domain, version):
+    iter_version = version
+    while iter_version <= _onnx_stable_opsets[-1]:
+        ops = [op[0] for op in get_ops_in_version(iter_version)]
+        if opname in ops:
+            return iter_version
+        iter_version += 1
+    return None
 
 def get_registered_op(opname, domain, version):
     if domain is None or version is None:
         warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
     global _registry
+    if not is_registered_op(opname, domain, version):
+        msg = "Exporting the operator " + opname + " to ONNX opset version " + str(version) + " is not supported. "
+        supported_version = get_op_supported_version(opname, domain, version)
+        if supported_version is not None:
+            msg += "Support for this operator was added in version " + str(supported_version) + ", try exporting with this version."
+        else:
+            msg += "Please open a bug to request ONNX export support for the missing operator."
+        raise RuntimeError(msg)
     return _registry[(domain, version)][opname]

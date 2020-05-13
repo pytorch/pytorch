@@ -8,7 +8,7 @@ import warnings
 import numpy
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
-from torch.onnx.symbolic_opset9 import expand
+from torch.onnx.symbolic_opset9 import expand, unused
 from torch.nn.modules.utils import _single, _pair, _triple
 
 
@@ -21,7 +21,7 @@ from torch.nn.modules.utils import _single, _pair, _triple
 @parse_args('v', 'f', 'f')
 def hardtanh(g, self, min_val, max_val):
     dtype = self.type().scalarType()
-    if dtype is not None:
+    if dtype is None:
         dtype = 6  # float
     else:
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
@@ -43,6 +43,22 @@ def clamp(g, self, min, max):
         min = _cast_if_not_none(min, dtype)
         max = _cast_if_not_none(max, dtype)
     return g.op("Clip", self, min, max)
+
+
+def clamp_min(g, self, min):
+    max = unused(g)
+    return clamp(g, self, min, max)
+
+
+def clamp_max(g, self, max):
+    min = unused(g)
+    return clamp(g, self, min, max)
+
+
+# Opset 11 gather accepts negative indices
+@parse_args('v', 'i', 'v')
+def select(g, self, dim, index):
+    return g.op("Gather", self, index, axis_i=dim)
 
 
 def index_put(g, self, indices_list_value, values, accumulate=False):
@@ -297,6 +313,8 @@ def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
+        if not stride:
+            stride = kernel_size
         if count_include_pad:
             input = g.op("Pad", input,
                          g.op("Constant", value_t=torch.tensor(((0,) * 2 + padding) * 2)), mode_s='constant')
@@ -333,6 +351,14 @@ def sort(g, self, dim, decending, out=None):
 
 def round(g, self):
     return g.op("Round", self)
+
+
+@parse_args('v', 'v', 'i')
+def split_with_sizes(g, self, split_sizes, dim):
+    if sym_help._is_value(split_sizes) and split_sizes.node().kind() == 'prim::ListConstruct':
+        return g.op("SplitToSequence", self, split_sizes, axis_i=dim)
+    else:
+        return torch.onnx.symbolic_opset9.split_with_sizes(g, self, split_sizes, dim)
 
 
 # Generate paddings in ONNX order based on pad in pytorch.
@@ -439,7 +465,9 @@ def _dim_arange(g, like, dim):
     return arange(g, stop, 4, None, None, None)
 
 
-def size(g, self, dim):
+def size(g, self, dim=None):
+    if dim is None:
+        return g.op("Shape", self)
     return sym_help._size_helper(g, self, dim)
 
 

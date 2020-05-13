@@ -30,9 +30,20 @@ variable_list RecvRpcBackward::apply(variable_list&& grads) {
     }
   }
 
+  auto sharedContext = autogradContext_.lock();
+  TORCH_CHECK(
+      sharedContext,
+      c10::str(
+          "Autograd context no longer valid! This usually ",
+          "means the autograd context was cleaned up by a different thread due ",
+          "to an error before RecvRcpBackward had a chance to run"));
+
   // Send the gradients over the wire and record the future in the autograd
   // context.
-  PropagateGradientsReq gradCall(autogradMetadata_, outputGrads);
+  PropagateGradientsReq gradCall(
+      autogradMetadata_,
+      outputGrads,
+      sharedContext->retrieveGraphTask()->keep_graph_);
 
   // Send the gradients over to the appropriate node.
   auto rpcAgent = rpc::RpcAgent::getCurrentRpcAgent();
@@ -40,11 +51,7 @@ variable_list RecvRpcBackward::apply(variable_list&& grads) {
       rpcAgent->getWorkerInfo(fromWorkerId_), std::move(gradCall).toMessage());
 
   // Record the future in the context.
-  if (auto sharedContext = autogradContext_.lock()) {
-    sharedContext->addOutstandingRpc(futureMessage);
-  } else {
-    C10_THROW_ERROR(Error, "Autograd context no longer valid");
-  }
+  sharedContext->addOutstandingRpc(futureMessage);
 
   // 'recv' function sends the gradients over the wire using RPC, it doesn't
   // need to return anything for any downstream autograd function.

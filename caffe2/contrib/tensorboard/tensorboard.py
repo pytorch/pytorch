@@ -115,7 +115,7 @@ def tensorboard_graphs(c2_netdef, tf_dir):
     log.setLevel(logging.INFO)
 
     def parse_net_def(path):
-        import google.protobuf.text_format
+        import google.protobuf.text_format  # type: ignore[import]
         net_def = caffe2_pb2.NetDef()
         with open(path) as f:
             google.protobuf.text_format.Merge(f.read(), net_def)
@@ -158,8 +158,11 @@ def tensorboard_events(c2_dir, tf_dir):
         return [(n, s) for (n, s) in summaries if s]
 
     def inferred_histo(summary, samples=1000):
-        np.random.seed(hash(
-            summary.std + summary.mean + summary.min + summary.max))
+        np.random.seed(
+            hash(
+                summary.std + summary.mean + summary.min + summary.max
+            ) % np.iinfo(np.int32).max
+        )
         samples = np.random.randn(samples) * summary.std + summary.mean
         samples = np.clip(samples, a_min=summary.min, a_max=summary.max)
         (hist, edges) = np.histogram(samples)

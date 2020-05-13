@@ -6,22 +6,46 @@ namespace jit {
 void InlineForkWait(
     Block* b,
     std::unordered_map<Value*, Value*>& future_remap) {
-  for (auto n : b->nodes()) {
-    if (n->kind() == prim::fork) {
-      WithInsertPoint insert_guard(n);
-      auto graph = b->owningGraph();
-      auto subgraph = n->g(attr::Subgraph);
+  auto nodes = b->nodes();
 
-      auto output = insertGraph(*graph, *subgraph, n->inputs());
-
-      future_remap[n->output()] = output.at(0);
-    } else if (n->kind() == aten::wait) {
-      AT_ASSERT(n->inputs().size() == 1);
-      AT_ASSERT(n->outputs().size() == 1);
-      n->output()->replaceAllUsesWith(future_remap.at(n->input()));
+  // Track the futures returned by prim::fork.
+  for (auto it = nodes.begin(); it != nodes.end(); it++) {
+    auto node = *it;
+    if (node->kind() != prim::fork) {
+      continue;
     }
+    WithInsertPoint insert_guard(node);
+    auto graph = b->owningGraph();
+    auto subgraph = node->g(attr::Subgraph);
 
-    for (auto sub_b : n->blocks()) {
+    auto output = insertGraph(*graph, *subgraph, node->inputs());
+
+    future_remap[node->output()] = output.at(0);
+  }
+
+  // Remove aten::wait if its input future is returned by prim::fork.
+  auto reversed = b->nodes().reverse();
+  for (auto it = reversed.begin(); it != reversed.end(); it++) {
+    auto node = *it;
+    if (node->kind() == prim::fork) {
+      it.destroyCurrent();
+    } else if (node->kind() == aten::wait) {
+      AT_ASSERT(node->inputs().size() == 1);
+      AT_ASSERT(node->outputs().size() == 1);
+      // If the future does not map to a prim::fork, it could be
+      // returned from prim::rpc_async, which has side effect, so it shouldn't
+      // be dead code eliminated.
+      if (future_remap.count(node->input())) {
+        node->output()->replaceAllUsesWith(future_remap.at(node->input()));
+        it.destroyCurrent();
+      }
+    }
+  }
+
+  // Recursively inline fork/wait.
+  for (auto it = nodes.begin(); it != nodes.end(); it++) {
+    auto node = *it;
+    for (auto sub_b : node->blocks()) {
       InlineForkWait(sub_b, future_remap);
     }
   }

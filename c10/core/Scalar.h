@@ -49,9 +49,11 @@ class C10_API Scalar {
     v.member[1] = c10::convert<double>(vv.imag());       \
   }
 
-  DEFINE_IMPLICIT_COMPLEX_CTOR(at::ComplexHalf, ComplexHalf, z)
+  DEFINE_IMPLICIT_COMPLEX_CTOR(c10::complex<c10::Half>, ComplexHalf, z)
   DEFINE_IMPLICIT_COMPLEX_CTOR(std::complex<float>, ComplexFloat, z)
   DEFINE_IMPLICIT_COMPLEX_CTOR(std::complex<double>, ComplexDouble, z)
+  DEFINE_IMPLICIT_COMPLEX_CTOR(c10::complex<float>, ComplexFloat, z)
+  DEFINE_IMPLICIT_COMPLEX_CTOR(c10::complex<double>, ComplexDouble, z)
 
 #undef DEFINE_IMPLICIT_COMPLEX_CTOR
 
@@ -60,7 +62,7 @@ class C10_API Scalar {
     if (Tag::HAS_d == tag) {                              \
       return checked_convert<type, double>(v.d, #type);   \
     } else if (Tag::HAS_z == tag) {                       \
-      return checked_convert<type, std::complex<double>>( \
+      return checked_convert<type, c10::complex<double>>( \
           {v.z[0], v.z[1]}, #type);                       \
     } if (Tag::HAS_b == tag) {                            \
       return checked_convert<type, bool>(v.i, #type);     \
@@ -98,6 +100,20 @@ class C10_API Scalar {
 
   Scalar operator-() const;
 
+  ScalarType type() const {
+    if (isComplex()) {
+      return ScalarType::ComplexDouble;
+    } else if (isFloatingPoint()) {
+      return ScalarType::Double;
+    } else if (isIntegral(/*includeBool=*/false)) {
+      return ScalarType::Long;
+    } else if (isBoolean()) {
+      return ScalarType::Bool;
+    } else {
+      throw std::runtime_error("Unknown scalar type.");
+    }
+  }
+
  private:
     template<typename T,
              typename std::enable_if<std::numeric_limits<T>::is_integer && ! std::is_same<T, bool>::value, bool>::type* =
@@ -124,6 +140,7 @@ class C10_API Scalar {
     // Can't do put std::complex in the union, because it triggers
     // an nvcc bug:
     //    error: designator may not specify a non-POD subobject
+    // TODO: can we put c10::complex to it?
     double z[2];
   } v;
 };
@@ -141,4 +158,18 @@ inline T Scalar::to() const {
   }
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO)
 #undef DEFINE_TO
+
+// TODO(@zasdfgbnm): Remove this!
+// This is needed only when the migration of std::complex to c10::complex
+// is not done. This should be removed once the migration is done.
+template <>
+inline std::complex<float> Scalar::to() const {
+  return static_cast<std::complex<float>>(toComplexFloat());
+}
+template <>
+inline std::complex<double> Scalar::to() const {
+  return static_cast<std::complex<double>>(toComplexDouble());
+}
+// end TODO
+
 } // namespace c10

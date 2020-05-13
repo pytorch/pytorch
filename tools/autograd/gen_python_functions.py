@@ -33,7 +33,7 @@
 from collections import defaultdict
 import re
 from .gen_variable_type import should_trace
-from .utils import write
+from .utils import write, is_tensor_method
 
 try:
     from src.ATen.code_template import CodeTemplate
@@ -61,6 +61,7 @@ SKIP_PYTHON_BINDINGS = [
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
     'arange.*', 'range.*', '_solve.*', '_inverse.*',
+    'full(_out)?',
     '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*', '_svd.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
@@ -70,7 +71,7 @@ SKIP_PYTHON_BINDINGS = [
     'set_quantizer_',  # return types not supported yet
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
-    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_'
+    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -81,6 +82,11 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
     'mul(Tensor, Scalar)', 'mul_(Tensor, Scalar)',
     'div(Tensor, Scalar)', 'div_(Tensor, Scalar)',
 ]
+
+NATIVE_NAMESPACE_MAPPING = {
+    "torch": "THPVariableFunctionsModule",
+    "torch.nn": "THPNNVariableFunctionsModule"
+}
 
 def should_generate_python_binding(declaration):
     name = declaration['name']
@@ -121,7 +127,8 @@ def gen_py_variable_methods(out, declarations, template_path):
 
     py_variable_methods = get_py_variable_methods(declarations)
 
-    env = create_python_bindings(py_variable_methods, is_python_method=True, is_module=False)
+    env = create_python_bindings(py_variable_methods, is_python_method=True, module=None)
+
     write(out, 'python_variable_methods.cpp', PY_VARIABLE_METHODS_CPP, env)
 
 
@@ -145,7 +152,8 @@ def gen_py_nn_functions(out, declarations, template_path):
 
     py_nn_functions = get_py_nn_functions(declarations)
 
-    env = create_python_bindings(py_nn_functions, is_python_method=False, is_module=True)
+    env = create_python_bindings(py_nn_functions, is_python_method=False, module="torch.nn")
+
     write(out, 'python_nn_functions.cpp', PY_NN_FUNCTIONS_CPP, env)
 
 
@@ -170,7 +178,8 @@ def gen_py_torch_functions(out, declarations, template_path):
 
     py_torch_functions = get_py_torch_functions(declarations)
 
-    env = create_python_bindings(py_torch_functions, is_python_method=False, is_module=False)
+    env = create_python_bindings(py_torch_functions, is_python_method=False, module="torch")
+
     write(out, 'python_torch_functions.cpp', PY_TORCH_FUNCTIONS_CPP, env)
 
 
@@ -181,7 +190,7 @@ def group_declarations_by_op_name(declarations):
     return groups
 
 
-def create_python_bindings(python_functions, is_python_method, is_module):
+def create_python_bindings(python_functions, is_python_method, module):
     """Generates Python bindings to ATen functions"""
     py_methods = []
     py_method_defs = []
@@ -189,9 +198,9 @@ def create_python_bindings(python_functions, is_python_method, is_module):
 
     for name in sorted(python_functions.keys()):
         overload_decls = python_functions[name]
-        py_methods.append(method_impl(name, overload_decls, is_python_method, is_module))
-        py_method_defs.append(method_def(name, overload_decls, is_python_method, is_module))
-        py_forwards.extend(forward_decls(name, overload_decls, is_python_method, is_module))
+        py_methods.append(method_impl(name, overload_decls, is_python_method, module))
+        py_method_defs.append(method_def(name, overload_decls, is_python_method, module))
+        py_forwards.extend(forward_decls(name, overload_decls, is_python_method, module))
 
     return {
         'py_forwards': py_forwards,
@@ -207,14 +216,14 @@ def create_python_bindings(python_functions, is_python_method, is_module):
 UNPACK_METHODS = {
     'const Tensor &': 'tensor',
     'Tensor &': 'tensor',
-    'Generator *': 'generator',
+    'c10::optional<Generator>': 'generator',
     'Storage': 'storage',
     'Storage &': 'storage',
     'const ScalarType &': 'scalartype',
-    'const THPLayout &': 'layout',
     'const Device &': 'device',
     'c10::optional<DimnameList>': 'toDimnameListOptional',
     'c10::optional<ScalarType>': 'scalartypeOptional',
+    'c10::optional<Layout>': 'layoutOptional',
     'c10::optional<MemoryFormat>': 'memoryformatOptional',
     'c10::optional<Scalar>': 'scalarOptional',
     'c10::optional<int64_t>': 'toInt64Optional',
@@ -240,8 +249,8 @@ UNPACK_WITH_SIZE_METHODS = {
 
 UNPACK_WITH_DEFAULT_METHODS = {
     'const ScalarType &': 'scalartypeWithDefault',
-    'const THPLayout &': 'layoutWithDefault',
     'const Device &': 'deviceWithDefault',
+    'c10::optional<Layout>': 'layoutWithDefault',
 }
 
 def parsed_arg_expr(arg, arg_index):
@@ -340,6 +349,7 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,double,int64_t>',
     'std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t>',
     'std::tuple<Tensor,Tensor,double,Tensor,int64_t>',
+    'std::tuple<double,int64_t>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
     'QScheme', 'double',
@@ -417,7 +427,7 @@ TENSOR_OPTIONS_DECL = CodeTemplate("""\
 const auto ${name} = TensorOptions()
     .dtype(${dtype})
     .device(${device})
-    .layout(${layout}.layout)
+    .layout(${layout})
     .requires_grad(${requires_grad})
     .pinned_memory(${pin_memory});
 """)
@@ -426,8 +436,8 @@ const auto ${name} = TensorOptions()
 # (if present) are checked against properties of a tensor output param
 # TODO remove hardcoding, use unpack logic from emit_single_dispatch
 PY_VARIABLE_CHECK_OUT_TYPE_HACK = CodeTemplate("""\
-check_out_type_matches(_r.tensor(${out_idx}), _r.scalartype(${type_idx}), _r.isNone(${type_idx}),
-                       _r.layout(${layout_idx}), _r.isNone(${layout_idx}),
+check_out_type_matches(_r.tensor(${out_idx}), _r.scalartype(${type_idx}),
+                       _r.isNone(${type_idx}), _r.layoutOptional(${layout_idx}),
                        _r.device(${device_idx}), _r.isNone(${device_idx}));
 """)
 
@@ -713,7 +723,6 @@ def namedtuple_fieldnames(declaration):
                 return x['field_name']
         return [get_field_name(x) for x in returns]
 
-
 PY_NAMEDTUPLE_FIELDSDEF = CodeTemplate("""\
 static PyStructSequence_Field ${fieldsname}[] = { ${fields,} {nullptr} };
 """)
@@ -800,20 +809,6 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 
   ParsedArgs<${max_args}> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
-  if (_r.signature.deprecated) {
-    auto msg = c10::str(
-        "This overload of ", _r.signature.name, " is deprecated:\n",
-        "${name}", _r.signature.toString());
-    auto signatures = parser.get_signatures();
-    if (!signatures.empty()) {
-      msg += "\nConsider using one of the following signatures instead:";
-      for (const auto & sig : signatures) {
-        msg += "\n${name}";
-        msg += sig;
-      }
-    }
-    TORCH_WARN_ONCE(msg);
-  }
   ${check_has_torch_function}
   switch (_r.idx) {
     ${dispatch}
@@ -854,11 +849,11 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 
 """)
 
-TORCH_FUNCTION_CHECK = """\
-if (_r.has_torch_function()) {
-  return handle_torch_function(_r, args, kwargs, THPVariableFunctions);
+TORCH_FUNCTION_CHECK = CodeTemplate("""\
+if(_r.has_torch_function()) {
+  return handle_torch_function(_r, args, kwargs, ${namespace}, ${modulename});
 }
-"""
+""")
 
 # NOTE: we type the unpacked self as Tensor not Variable to avoid return type
 # discrepancies on method resolution (e.g. Variable::detach_ returns void
@@ -866,7 +861,7 @@ if (_r.has_torch_function()) {
 UNPACK_SELF = "Tensor& self = reinterpret_cast<THPVariable*>(self_)->cdata;"
 
 
-def method_impl(name, declarations, is_python_method, is_module):
+def method_impl(name, declarations, is_python_method, module):
     """
     Generate a python binding for all overloads of an op.
     """
@@ -911,8 +906,11 @@ def method_impl(name, declarations, is_python_method, is_module):
     else:
         template = PY_VARIABLE_METHOD_VARARGS
 
-    if not is_module and not is_python_method:
-        check_has_torch_function = TORCH_FUNCTION_CHECK
+    if module:
+        check_has_torch_function = TORCH_FUNCTION_CHECK.substitute(
+            namespace=NATIVE_NAMESPACE_MAPPING[module],
+            modulename='"' + module + '"',
+        )
     else:
         check_has_torch_function = ''
 
@@ -945,8 +943,8 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args);
 """)
 
 
-def forward_decls(name, declarations, is_python_method, is_module):
-    if is_module or is_python_method:
+def forward_decls(name, declarations, is_python_method, module):
+    if is_python_method:
         return []
 
     if is_noarg_binding(declarations):
@@ -993,7 +991,7 @@ PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
 {"${name}", (PyCFunction)${pycfunc_voidcast}${pycname}, ${flags}, NULL},""")
 
 
-def method_def(name, declarations, is_python_method, is_module):
+def method_def(name, declarations, is_python_method, module):
     """
     Generate method def entry.
     """
@@ -1006,7 +1004,7 @@ def method_def(name, declarations, is_python_method, is_module):
         pycfunc_voidcast = '(void(*)(void))'
         flags = 'METH_VARARGS | METH_KEYWORDS'
 
-    if not is_module and not is_python_method:
+    if module == "torch":
         flags += ' | METH_STATIC'
 
     if name in BINARY_OP_NAMES:
@@ -1055,7 +1053,9 @@ def group_overloads(declarations, is_python_method):
     result = []
     for x, dictionary in sorted(grouped.items()):
         if 'base' not in dictionary:
-            raise RuntimeError("'base' not in dictionary for " + str(x), dictionary)
+            raise RuntimeError(
+                "'base' not in dictionary for {}. keys are {}".format(
+                    x, list(dictionary.keys())))
         result.append(dictionary)
     return sort_declarations(result)
 
@@ -1361,13 +1361,13 @@ def make_python_binding_args(declaration):
         python_binding_arguments.append(dtype_arg)
 
     if is_factory_function or is_like_or_new_function_with_options:
-        py_default_layout = '*torch::getLayout(self.options().backend())' if is_like_or_new_function_with_options else None
+        py_default_layout = 'layout_from_backend(self.options().backend())' if is_like_or_new_function_with_options else None
         layout_arg = {
             'default': 'torch.strided',
             'dynamic_type': 'Layout',
             'kwarg_only': True,
             'name': 'layout',
-            'type': 'const THPLayout &',
+            'type': 'c10::optional<Layout>',
             'simple_type': 'Layout',
             'python_default_init': py_default_layout,
         }
@@ -1444,10 +1444,6 @@ def get_tensor_options(declaration):
 
 def has_tensor_options(declaration):
     return get_tensor_options(declaration) is not None
-
-
-def is_tensor_method(declaration):
-    return 'Tensor' in declaration['method_of']
 
 
 def is_torch_function(declaration):

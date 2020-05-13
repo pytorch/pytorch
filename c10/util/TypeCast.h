@@ -4,46 +4,10 @@
 #include <c10/util/BFloat16.h>
 #include <c10/macros/Macros.h>
 
+#include <type_traits>
+
 
 namespace c10 {
-
-// Note [Implicit conversion between signed and unsigned]
-// C and C++ have a lovely set of implicit conversion rules, where casting
-// signed integral values to unsigned integral values is always valid
-// (it basically treats the value as if using modulo arithmetic), however
-// converting negative floating point values to unsigned integral types
-// is UB! This means that: (double)-1 -> (int64_t)-1 -> (uint8_t)255 is
-// guaranteed to look like this, but we have (double)-1 -> (uint8_t)<ANYTHING>
-// because it's UB. This also makes UBSan really angry.
-//
-// I think those rules are stupid and we really shouldn't conform to them.
-// The structs below ensure that for all unsigned types we use (currently
-// only uint8_t), we will do an intermediate convertion via int64_t,
-// to ensure that any negative values are wrapped around correctly.
-//
-// Note that conversions from doubles to signed integral types that can't
-// represent a particular value after truncating the fracitonal part are UB as well,
-// but fixing them is not as simple as adding an int64_t intermediate, beacuse the
-// int64_t -> <smaller signed type> conversion is UB for those large values anyway.
-// I guess in that case we just have to live with that, but it's definitely less
-// surprising than the thing above.
-//
-// For the curious:
-//   https://en.cppreference.com/w/cpp/language/implicit_conversion
-//   The relevant paragraph is "Floating-integral conversions".
-
-template <typename T>
-struct inter_copy_type {
-  using type = T;
-};
-
-template <>
-struct inter_copy_type<uint8_t> {
-  using type = int64_t;
-};
-
-template <typename T>
-using inter_copy_type_t = typename inter_copy_type<T>::type;
 
 template<typename dest_t, typename src_t>
 struct needs_real {
@@ -59,20 +23,49 @@ struct maybe_real {
 
 template<typename src_t>
 struct maybe_real<true, src_t> {
-  C10_HOST_DEVICE static inline auto apply(src_t src) -> decltype(src.real()) {
+  C10_HOST_DEVICE static inline decltype(auto) apply(src_t src) {
     return src.real();
   }
 };
 
-
+// Note: deliberately ignores undefined behavior, consistent with NumPy.
+// PyTorch's type conversions can cause a variety of undefined behavior,
+// including float to integral overflow and signed to unsigned integer overflow.
+// Some of this undefined behavior is addressed below.
 template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
-  C10_HOST_DEVICE static inline dest_t apply(src_t src) {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t apply(src_t src) {
     constexpr bool real = needs_real<dest_t, src_t>::value;
-    return static_cast<dest_t>(
-      static_cast<inter_copy_type_t<dest_t>>(maybe_real<real, src_t>::apply(src)));
+    return static_cast<dest_t>(maybe_real<real, src_t>::apply(src));
   }
 };
+
+// Partial template instantiation for casting to uint8.
+// Note: Converting from negative float values to unsigned integer types is
+// undefined behavior in C++, and current CPU and GPU compilers exhibit
+// divergent behavior. Casting from negative float values to signed
+// integer types and then to unsigned integer types is not undefiend,
+// however, so this cast improves the consistency of type conversions
+// to uint8 across compilers.
+// Further note: Type conversions across compilers still have other undefined
+// and divergent behavior.
+template <typename src_t>
+struct static_cast_with_inter_type<uint8_t, src_t> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline uint8_t apply(src_t src) {
+    constexpr bool real = needs_real<uint8_t, src_t>::value;
+    return static_cast<uint8_t>(
+      static_cast<int64_t>(maybe_real<real, src_t>::apply(src)));
+  }
+};
+
+#if defined(__CUDACC__)
+template <typename dest_value_t, typename src_value_t>
+  struct static_cast_with_inter_type<thrust::complex<dest_value_t>, c10::complex<src_value_t>> {
+    C10_HOST_DEVICE static inline thrust::complex<dest_value_t> apply(c10::complex<src_value_t> src) {
+      return thrust::complex<dest_value_t>(src.real(), src.imag());
+    }
+};
+#endif
 
 // Dynamic type casting utils:
 // - fetch_and_cast
@@ -180,7 +173,7 @@ To checked_convert(From f, const char* name) {
     std::ostringstream oss;
     oss << "value cannot be converted to type " << name
         << " without overflow: " << f;
-    throw std::domain_error(oss.str());
+    throw std::runtime_error(oss.str());  // rather than domain_error (issue 33562)
   }
   return convert<To, From>(f);
 }

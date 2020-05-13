@@ -1,8 +1,8 @@
 #include <test/cpp/jit/test_base.h>
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/testing/file_check.h>
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/irparser.h"
+#include "torch/csrc/jit/ir/ir.h"
+#include "torch/csrc/jit/ir/irparser.h"
 
 namespace torch {
 namespace jit {

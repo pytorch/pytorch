@@ -294,7 +294,8 @@ class KLDivLoss(_Loss):
 
     As with :class:`~torch.nn.NLLLoss`, the `input` given is expected to contain
     *log-probabilities* and is not restricted to a 2D Tensor.
-    The targets are given as *probabilities* (i.e. without taking the logarithm).
+    The targets are interpreted as *probabilities* by default, but could be considered
+    as *log-probabilities* with :attr:`log_target` set to ``True``.
 
     This criterion expects a `target` `Tensor` of the same size as the
     `input` `Tensor`.
@@ -339,6 +340,8 @@ class KLDivLoss(_Loss):
             ``'sum'``: the output will be summed.
             ``'mean'``: the output will be divided by the number of elements in the output.
             Default: ``'mean'``
+        log_target (bool, optional): Specifies whether `target` is passed in the log space.
+            Default: ``False``
 
     .. note::
         :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
@@ -359,11 +362,12 @@ class KLDivLoss(_Loss):
     """
     __constants__ = ['reduction']
 
-    def __init__(self, size_average=None, reduce=None, reduction='mean'):
+    def __init__(self, size_average=None, reduce=None, reduction='mean', log_target=False):
         super(KLDivLoss, self).__init__(size_average, reduce, reduction)
+        self.log_target = log_target
 
     def forward(self, input, target):
-        return F.kl_div(input, target, reduction=self.reduction)
+        return F.kl_div(input, target, reduction=self.reduction, log_target=self.log_target)
 
 
 class MSELoss(_Loss):
@@ -389,7 +393,7 @@ class MSELoss(_Loss):
     :math:`x` and :math:`y` are tensors of arbitrary shapes with a total
     of :math:`n` elements each.
 
-    The sum operation still operates over all the elements, and divides by :math:`n`.
+    The mean operation still operates over all the elements, and divides by :math:`n`.
 
     The division by :math:`n` can be avoided if one sets ``reduction = 'sum'``.
 
@@ -454,6 +458,23 @@ class BCELoss(_WeightedLoss):
     This is used for measuring the error of a reconstruction in for example
     an auto-encoder. Note that the targets :math:`y` should be numbers
     between 0 and 1.
+
+    Notice that if :math:`x_n` is either 0 or 1, one of the log terms would be
+    mathematically undefined in the above loss equation. PyTorch chooses to set
+    :math:`\log (0) = -\infty`, since :math:`\lim_{x\to 0} \log (x) = -\infty`.
+    However, an infinite term in the loss equation is not desirable for several reasons.
+
+    For one, if either :math:`y_n = 0` or :math:`(1 - y_n) = 0`, then we would be
+    multipying 0 with infinity. Secondly, if we have an infinite loss value, then
+    we would also have an infinite term in our gradient, since
+    :math:`\lim_{x\to 0} \frac{d}{dx} \log (x) = \infty`.
+    This would make BCELoss's backward method nonlinear with respect to :math:`x_n`,
+    and using it for things like linear regression would not be straight-forward.
+
+    Our solution is that BCELoss clamps its log function outputs to be greater than
+    or equal to -100. This way, we can always have a finite loss value and a linear
+    backward method.
+
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to the loss
@@ -547,11 +568,11 @@ class BCEWithLogitsLoss(_Loss):
     Examples::
 
         >>> target = torch.ones([10, 64], dtype=torch.float32)  # 64 classes, batch size = 10
-        >>> output = torch.full([10, 64], 0.999)  # A prediction (logit)
+        >>> output = torch.full([10, 64], 1.5)  # A prediction (logit)
         >>> pos_weight = torch.ones([64])  # All weights are equal to 1
         >>> criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-        >>> criterion(output, target)  # -log(sigmoid(0.999))
-        tensor(0.3135)
+        >>> criterion(output, target)  # -log(sigmoid(1.5))
+        tensor(0.2014)
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to the loss
@@ -1270,7 +1291,7 @@ class CTCLoss(_Loss):
         Labelling Unsegmented Sequence Data with Recurrent Neural Networks:
         https://www.cs.toronto.edu/~graves/icml_2006.pdf
 
-    .. Note::
+    Note:
         In order to use CuDNN, the following must be satisfied: :attr:`targets` must be
         in concatenated format, all :attr:`input_lengths` must be `T`.  :math:`blank=0`,
         :attr:`target_lengths` :math:`\leq 256`, the integer arguments must be of
@@ -1279,8 +1300,13 @@ class CTCLoss(_Loss):
         The regular implementation uses the (more common in PyTorch) `torch.long` dtype.
 
 
-    .. include:: cudnn_deterministic.rst
-
+    Note:
+        In some circumstances when using the CUDA backend with CuDNN, this operator
+        may select a nondeterministic algorithm to increase performance. If this is
+        undesirable, you can try to make the operation deterministic (potentially at
+        a performance cost) by setting ``torch.backends.cudnn.deterministic =
+        True``.
+        Please see the notes on :doc:`/notes/randomness` for background.
     """
     __constants__ = ['blank', 'reduction']
 

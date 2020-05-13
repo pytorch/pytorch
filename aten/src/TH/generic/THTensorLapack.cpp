@@ -9,6 +9,19 @@ static int THTensor_(isTransposedContiguous)(THTensor *self)
 {
   return self->stride(0) == 1 && self->stride(1) == self->size(0);
 }
+
+/*
+Check if self contains any inf or NaN values
+*/
+static int THTensor_(isFinite)(THTensor *self)
+{
+  std::atomic<int> finite{1};
+  TH_TENSOR_APPLY(scalar_t, self, if (finite && !std::isfinite(*self_data)) {
+                        finite = 0;
+                        TH_TENSOR_APPLY_hasFinished = 1; break;
+                     });
+  return finite;
+}
 /*
 If a matrix is a regular contiguous matrix, make sure it is transposed
 because this is what we return from Lapack calls.
@@ -121,9 +134,8 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   TORCH_CHECK(a->size(0) == b->size(0), "Expected A and b to have same size "
       "at dim 0, but A has ", a->size(0), " rows and B has ", b->size(0), " rows");
 
-  if (THTensor_nDimensionLegacyAll(b) == 1) {
-    b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
-            b->stride(0), 1, 0);
+  if (b->dim() == 1) {
+    b = THTensor_wrap(b).unsqueeze(1).unsafeReleaseTensorImpl();
     free_b = 1;
   }
 
@@ -193,6 +205,7 @@ void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, bool eigenvecto
 
   THArgCheck(a_->dim() == 2, 1, "A should be 2 dimensional");
   THArgCheck(a_->size(0) == a_->size(1), 1,"A should be square");
+  THArgCheck(THTensor_(isFinite)(a_), 1, "A should not contain infs or NaNs");
 
   /* we want to definitely clone a_ for geev*/
   a = THTensor_(cloneColumnMajor)(NULL, a_);
@@ -297,7 +310,8 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a, bool upper)
 {
   char uplo = upper ? 'U' : 'L';
   if (a == NULL) a = ra_;
-  THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 1, "A should be 2 dimensional");
+  THArgCheck(THTensor_nDimension(a) == 2, 1, "A should be 2 dimensional");
+  THArgCheck(!a->is_empty(), 1, "A should not be empty");
   THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
 
   int n, lda, info;
@@ -305,7 +319,7 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a, bool upper)
 
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  n = THTensor_sizeLegacyNoScalars(ra__, 0);
+  n = THTensor_(size)(ra__, 0);
   lda = n;
 
   /* Run inverse */
@@ -395,12 +409,13 @@ void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
 void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
 {
   if (a == NULL) a = ra_;
-  THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 1, "A should be 2 dimensional");
+  THArgCheck(THTensor_nDimension(a) == 2, 1, "A should be 2 dimensional");
+  THArgCheck(!a->is_empty(), 1, "A should not be empty");
 
   THTensor *ra__ = NULL;
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  int m = THTensor_sizeLegacyNoScalars(ra__, 0);
+  int m = THTensor_(size)(ra__, 0);
   int k = THTensor_sizeLegacyNoScalars(tau, 0);
   int lda = m;
 

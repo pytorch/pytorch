@@ -1,4 +1,5 @@
 import contextlib
+import io
 import unittest
 from copy import deepcopy
 from collections import OrderedDict
@@ -7,10 +8,13 @@ import torch
 from torch import nn
 import torch.nn.parallel as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase, skipIfRocm, repeat_test_for_types, ALL_TENSORTYPES, PY3
+from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
-from torch.testing._internal.common_utils import dtype2prec
+from torch.testing._internal.common_utils import dtype2prec_DONTUSE
+from torch.testing._internal.common_utils import skipIfRocm
 import torch.nn.functional as F
+
+torch.set_default_dtype(torch.double)
 
 class TestDataParallel(TestCase):
 
@@ -25,11 +29,11 @@ class TestDataParallel(TestCase):
             def forward(self, x):
                 return x * self.t_rg + self.t_not_rg
 
-        m = TestModule(torch.randn(100, device='cuda', requires_grad=True, dtype=torch.double))
+        m = TestModule(torch.randn(100, device='cuda', requires_grad=True))
         self.assertTrue(m.t_rg.requires_grad)
 
         dpm = nn.DataParallel(m, [0, 1])
-        inp = torch.randn(2, 100, device='cuda', dtype=torch.double)
+        inp = torch.randn(2, 100, device='cuda')
 
         def fn(t):
             return dpm(inp)
@@ -50,7 +54,7 @@ class TestDataParallel(TestCase):
                 return self.rnn(x)
 
         def step(model):
-            opt = torch.optim.SGD(model.parameters(), lr=0.1)
+            opt = torch.optim.SGD(model.parameters(), lr=10)
             input = torch.ones(4, 4, 300).to(0)
             output = model(input)
             loss = F.mse_loss(output[0], torch.zeros_like(output[0]))
@@ -69,7 +73,7 @@ class TestDataParallel(TestCase):
         step(model_dp)
 
         for p1, p2 in zip(model.parameters(), model_dp.parameters()):
-            p1.allclose(p2)
+            self.assertTrue(p1.allclose(p2))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
@@ -77,8 +81,8 @@ class TestDataParallel(TestCase):
         l2 = nn.Linear(10, 5).to("cuda:1", torch.float)
         i1 = torch.randn(2, 10, device="cuda:0", dtype=torch.float)
         i2 = torch.randn(2, 10, device="cuda:1", dtype=torch.float)
-        expected1 = l1(i1).data
-        expected2 = l2(i2).data
+        expected1 = l1(i1)
+        expected2 = l2(i2)
         modules = (l1, l2)
         expected_outputs = (expected1, expected2)
 
@@ -87,7 +91,7 @@ class TestDataParallel(TestCase):
         for inputs in [((i1,), (i2,)), (i1, i2)]:
             outputs = dp.parallel_apply(modules, inputs, None)
             for out, expected in zip(outputs, expected_outputs):
-                self.assertEqual(out.data, expected)
+                self.assertEqual(out, expected)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_parallel_apply_passes_exception(self):
@@ -130,8 +134,9 @@ class TestDataParallel(TestCase):
         gvar2_exp = var2.grad.clone()
 
         def local_test(out):
-            var1.grad.data.fill_(0.0)
-            var2.grad.data.fill_(0.0)
+            with torch.no_grad():
+                var1.grad.fill_(0.0)
+                var2.grad.fill_(0.0)
             loss = out.sum()
             loss.backward()
             self.assertEqual(out, expected)
@@ -147,8 +152,9 @@ class TestDataParallel(TestCase):
         out = dp.data_parallel(m, (var1, var2, float1), (0,))
         local_test(out)
 
-        var1.grad.data.fill_(0.0)
-        var2.grad.data.fill_(0.0)
+        with torch.no_grad():
+            var1.grad.fill_(0.0)
+            var2.grad.fill_(0.0)
         expected = m(var1, var2, float1, var3=var3)
         loss = expected.sum()
         loss.backward()
@@ -252,8 +258,7 @@ class TestDataParallel(TestCase):
         test(s.cpu(), None, inp, [1, 0], should_fail=True)
         test(s.cuda(1), None, inp, [1, 0], should_fail=False)
 
-    @unittest.skipIf(not TEST_MULTIGPU or not PY3, "multi-GPU not supported")
-    @skipIfRocm
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_model_no_refcycles(self):
         # Python 2.7 will create reference cycles with the following
         # Module on multiple GPUs, but Python 3 shouldn't unless
@@ -311,9 +316,9 @@ class TestDataParallel(TestCase):
                 loss = out.sum()
                 loss.backward()
                 self.assertEqual(out.get_device(), dev_id[0])
-                self.assertEqual(out.data, expected_out.data)
+                self.assertEqual(out, expected_out)
                 for expected, param in zip(expected_grads, l.parameters()):
-                    self.assertEqual(param.grad.data, expected.data)
+                    self.assertEqual(param.grad, expected)
 
         # Check for None device_ids
         l = l.cuda()
@@ -338,9 +343,9 @@ class TestDataParallel(TestCase):
                 loss = out.sum()
                 loss.backward()
                 self.assertEqual(out.get_device(), dev_id[0])
-                self.assertEqual(out.data, expected_out.data)
+                self.assertEqual(out, expected_out)
                 for expected, param in zip(expected_grads, l.parameters()):
-                    self.assertEqual(param.grad.data, expected.data)
+                    self.assertEqual(param.grad, expected)
 
         # Check for None device_ids
         l = l.cuda()
@@ -397,11 +402,11 @@ class TestDataParallel(TestCase):
     def test_data_parallel_module(self, dtype=torch.float):
         l = nn.Linear(10, 5).to("cuda", dtype)
         i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i).data
+        expected_out = l(i)
         net = nn.DataParallel(l)
         out = net(i)
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out.data, expected_out, dtype2prec[dtype])
+        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -416,11 +421,11 @@ class TestDataParallel(TestCase):
 
         l = nn.Linear(10, 5).to("cuda", dtype)
         i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i).data
+        expected_out = l(i)
         n = nn.DataParallel(Net())
         out = n(input=i)
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out.data, expected_out, dtype2prec[dtype])
+        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -435,11 +440,11 @@ class TestDataParallel(TestCase):
 
         l = nn.Linear(10, 5).to("cuda", dtype)
         i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i).data
+        expected_out = l(i)
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': []})
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out.data, expected_out, dtype2prec[dtype])
+        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -454,11 +459,11 @@ class TestDataParallel(TestCase):
 
         l = nn.Linear(10, 5).to("cuda", dtype)
         i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i).data
+        expected_out = l(i)
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': {}})
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out.data, expected_out, dtype2prec[dtype])
+        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -473,11 +478,11 @@ class TestDataParallel(TestCase):
 
         l = nn.Linear(10, 5).to("cuda", dtype)
         i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i).data
+        expected_out = l(i)
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': ()})
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out.data, expected_out, dtype2prec[dtype])
+        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_device_args(self):
@@ -529,24 +534,24 @@ class TestDataParallel(TestCase):
         self.assertEqual(result[0].get_device(), 0)
         self.assertEqual(result[1], x[2:])
         self.assertEqual(result[1].get_device(), 1)
-        grad = result[0].data.clone().fill_(2)
+        grad = result[0].detach().clone().fill_(2)
         result[0].backward(grad)
-        self.assertEqual(x.grad.data[:2], grad)
-        self.assertEqual(x.grad.data[2:], grad.clone().zero_())
+        self.assertEqual(x.grad[:2], grad)
+        self.assertEqual(x.grad[2:], grad.clone().zero_())
         _assertGradAndGradgradChecks(self, lambda y: dp.scatter(y, (0, 1)), (x,))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_scatter_cpu(self):
-        self._test_scatter(torch.randn((4, 4), dtype=torch.double))
+        self._test_scatter(torch.randn((4, 4)))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_scatter_gpu(self):
-        self._test_scatter(torch.randn((4, 4), dtype=torch.double).cuda())
+        self._test_scatter(torch.randn((4, 4)).cuda())
 
     def _test_gather(self, output_device):
         inputs = (
-            torch.randn(2, 4, device='cuda:0', requires_grad=True, dtype=torch.double),
-            torch.randn(2, 4, device='cuda:1', requires_grad=True, dtype=torch.double),
+            torch.randn(2, 4, device='cuda:0', requires_grad=True),
+            torch.randn(2, 4, device='cuda:1', requires_grad=True),
         )
         result = dp.gather(inputs, output_device)
         self.assertEqual(result.size(), torch.Size([4, 4]))
@@ -556,18 +561,18 @@ class TestDataParallel(TestCase):
             self.assertEqual(result.get_device(), output_device)
         else:
             self.assertFalse(result.is_cuda)
-        grad = torch.randn((4, 4), dtype=torch.double)
+        grad = torch.randn((4, 4))
         if output_device != -1:
             grad = grad.cuda(output_device)
         result.backward(grad)
-        self.assertEqual(inputs[0].grad.data, grad[:2])
-        self.assertEqual(inputs[1].grad.data, grad[2:])
+        self.assertEqual(inputs[0].grad, grad[:2])
+        self.assertEqual(inputs[1].grad, grad[2:])
         _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
 
         # test scalar inputs, should stack into a vector in this case
         inputs = (
-            torch.randn((), device='cuda:0', requires_grad=True, dtype=torch.double),
-            torch.randn((), device='cuda:1', requires_grad=True, dtype=torch.double),
+            torch.randn((), device='cuda:0', requires_grad=True),
+            torch.randn((), device='cuda:1', requires_grad=True),
         )
         result = dp.gather(inputs, output_device)
         self.assertEqual(result.size(), torch.Size([2]))
@@ -577,7 +582,7 @@ class TestDataParallel(TestCase):
             self.assertEqual(result.get_device(), output_device)
         else:
             self.assertFalse(result.is_cuda)
-        grad = torch.randn(2, dtype=torch.double)
+        grad = torch.randn(2)
         if output_device != -1:
             grad = grad.cuda(output_device)
         result.backward(grad)
@@ -609,14 +614,14 @@ class TestDataParallel(TestCase):
     def test_replicate(self):
         module = nn.Linear(10, 5).float().cuda()
         input = torch.randn(2, 10, dtype=torch.float, device="cuda")
-        expected_output = module(input).data
+        expected_output = module(input)
         for devices in [(0, 1), [0, 1]]:
             replicas = dp.replicate(module, devices)
             for i, replica in enumerate(replicas):
                 for p in replica.parameters():
                     self.assertEqual(p.get_device(), i)
                 replica_input = input.cuda(i)
-                self.assertEqual(replica(replica_input).data, expected_output)
+                self.assertEqual(replica(replica_input), expected_output)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_replicate_buffers(self):
@@ -630,6 +635,51 @@ class TestDataParallel(TestCase):
                 self.assertEqual(replica.bn.running_var.get_device(), i, 'buffer on wrong device')
                 self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_zero_grad(self):
+        # zero_grad should warn about using gradients inside forward
+
+        class Net(torch.nn.Module):
+            def __init__(self, testcase):
+                super(Net, self).__init__()
+                self._testcase = testcase
+
+            def forward(self, x):
+                with self._testcase.assertWarnsRegex(
+                        UserWarning,
+                        r"Calling \.zero_grad\(\) from a module created with nn\.DataParallel\(\) has no effect."):
+                    self.zero_grad()
+                return x
+
+        module = Net(self).cuda()
+        dpm = dp.DataParallel(module)
+        dpm(torch.rand(4, 3, 6, 5))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_autocast(self):
+        class Model(torch.nn.Linear):
+            def __init__(self):
+                super(Model, self).__init__(8, 8)
+
+            @torch.cuda.amp.autocast()
+            def forward(self, input):
+                return super(Model, self).forward(input)
+
+        model = dp.DataParallel(Model().cuda().to(dtype=torch.float32))
+        input = torch.randn((8, 8), dtype=torch.float32, device="cuda")
+        self.assertTrue(model(input).dtype is torch.float16)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_save_replica_module(self):
+        # DataParallel replicas can be saved (gh-37182)
+        module = torch.nn.Linear(8, 8).cuda()
+        dpm = torch.nn.parallel.replicate(module, devices=[0, 1], detach=False)
+        data = io.BytesIO()
+        torch.save(dpm, data)
+        dpm = torch.nn.parallel.replicate(module, devices=[0, 1], detach=True)
+        torch.save(dpm, data)
 
 
 if __name__ == '__main__':

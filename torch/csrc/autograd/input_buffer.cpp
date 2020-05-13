@@ -84,7 +84,6 @@ namespace torch { namespace autograd {
         // (3a)
         opt_accumulate_stream = opt_consumer_stream;
         opt_sync_stream = guard.getDefaultStream(opt_consumer_stream->device());
-        TORCH_INTERNAL_ASSERT(opt_sync_stream == guard.getStream(*device_of(var)));
       } else if (on_producer && !on_consumer) {
         // (4a)
         opt_accumulate_stream = guard.getDefaultStream(opt_producer_stream->device());
