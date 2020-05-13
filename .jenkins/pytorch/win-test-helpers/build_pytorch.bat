@@ -74,10 +74,15 @@ set PATH=%TMP_DIR_WIN%\bin;%PATH%
 if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=5.2
 
 :: The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
-set SCCACHE_IDLE_TIMEOUT=0
 sccache --stop-server
+@setlocal
+set SCCACHE_IDLE_TIMEOUT=0
+set RUST_LOG=sccache=trace
+set SCCACHE_ERROR_LOG=%USERPROFILE%\sccache_trace.log
 sccache --start-server
+@endlocal
 sccache --zero-stats
+
 set CC=sccache-cl
 set CXX=sccache-cl
 
@@ -117,11 +122,16 @@ if "%REBUILD%" == "" (
   )
 )
 
-python setup.py install --cmake && sccache --show-stats && (
+python setup.py install --cmake 
+if errorlevel 1 (
+  tail -n 100 %USERPROFILE%\sccache_trace.log
+  exit /b 1
+) else (
+  tail -n 100 %USERPROFILE%\sccache_trace.log
+  sccache --show-stats
   if "%BUILD_ENVIRONMENT%"=="" (
     echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
   ) else (
     7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && python %SCRIPT_HELPERS_DIR%\upload_image.py %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z
   )
 )
-
