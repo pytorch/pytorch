@@ -225,11 +225,17 @@ void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
   });
 }
 
+// TODO: The implementation of `tensor_kernel_scan_outer_dim` and
+// `tensor_kernel_scan_innermost_dim` is similar to
+// `tensor_kernel_scan_outer_dim_with_indices`
+// `tensor_kernel_scan_outer_dim_with_indices` and should be refactored to
+// remove the duplication.
+
 /* Perform an inclusive scan along an outer dimension of a tensor.
  *
  * - num_orows is the size of the flattened outer dimensions;
  * - num_irows is the size of the flattened inner dimensions;
- * - row_size is the size of the dimension along which to compute the variance;
+ * - row_size is the size of the dimension along which to scan;
  *
  * The dimensions to the outside and inside of the specified dimension are considered as flattened.
  * Thread blocks with the same blockIdx.y process an "outer row" (i.e. an element of the flattened
