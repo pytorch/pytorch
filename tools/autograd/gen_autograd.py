@@ -111,6 +111,7 @@ def load_aten_declarations(path):
         declaration['args'] = [arg['name'] for arg in declaration['arguments']]
         declaration['type_method_formals'] = [arg['type'] + ' ' + arg['name']
                                               for arg in declaration['arguments']]
+        assert declaration['type_method_formals'] == declaration['formals']
         declaration['type_method_args'] = [arg['name'] for arg in declaration['arguments']]
         declaration['api_name'] = declaration['name']
         # NB: keep this in sync with common_with_cwrap.py

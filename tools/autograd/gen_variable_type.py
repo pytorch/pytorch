@@ -180,11 +180,11 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals}) ;
+${return_type} ${type_wrapper_name}(${formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${formals}) {
   ${type_definition_body}
 }
 """)
@@ -339,7 +339,7 @@ ${statements}
 
 # Generate a file that lists all functions and their schema string. Used for XLA
 REGISTRATION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
+${return_type} ${api_name}(${formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
 """)
 
 # ProfiledType templates
@@ -545,8 +545,10 @@ def gen_variable_type(out, aten_declarations, template_path):
 
     for declaration in aten_declarations:
         if dispatch_strategy(declaration) == 'use_derived':
+            assert declaration['type_method_formals'] == declaration['formals']
             registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration, compound='false'))
         else:
+            assert declaration['type_method_formals'] == declaration['formals']
             registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration, compound='true'))
 
     env = {
@@ -567,9 +569,11 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
 
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
+        assert declaration['type_method_formals'] == declaration['formals']
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if not declaration['manual_kernel_registration']:
             body = emit_body(declaration)
+            assert declaration['type_method_formals'] == declaration['formals']
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body))
             if declaration['use_c10_dispatcher'] == 'full':
