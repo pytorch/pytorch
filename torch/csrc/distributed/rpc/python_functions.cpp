@@ -23,7 +23,7 @@ namespace rpc {
 
 namespace {
 
-py::object toPyObj(const Message& message) {
+IValue toIValue(const Message& message) {
   MessageType msgType = message.type();
   auto response = deserializeResponse(message, msgType);
   switch (msgType) {
@@ -31,18 +31,22 @@ py::object toPyObj(const Message& message) {
       auto& ret = static_cast<ScriptResp&>(*response);
       Stack stack;
       stack.push_back(ret.value());
-      {
-        pybind11::gil_scoped_acquire ag;
-        // The createPyObjectForStack does not acquire GIL, but creating a new
-        // py::object requires GIL.
-        return torch::jit::createPyObjectForStack(std::move(stack));
-      }
+      // Need GIL to guard createPyObjectForStack() and its returned
+      // py::object
+      py::gil_scoped_acquire acquire;
+      return jit::toIValue(
+          torch::jit::createPyObjectForStack(std::move(stack)),
+          PyObjectType::get());
     }
     case MessageType::PYTHON_RET: {
       // TODO: Try to avoid a copy here.
       auto& resp = static_cast<PythonResp&>(*response);
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-      return pythonRpcHandler.deserialize(resp.serializedPyObj());
+      // Need GIL to destruct the py::object returned by deserialize()
+      py::gil_scoped_acquire acquire;
+      return jit::toIValue(
+          pythonRpcHandler.deserialize(resp.serializedPyObj()),
+          PyObjectType::get());
     }
     default: {
       TORCH_CHECK(false, "Unrecognized response message type ", msgType);
@@ -118,14 +122,11 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
 
     futureResponseMessage->addCallback(
         [jitFuture](const FutureMessage& futureResponseMessage) {
-          // Don't need to acquire GIL here, as toPyObj acquires GIL
-          // when creating the py::object
           if (futureResponseMessage.hasError()) {
             jitFuture->setError(futureResponseMessage.error()->what());
           } else {
-            jitFuture->markCompleted(jit::toIValue(
-                toPyObj(futureResponseMessage.constValue()),
-                PyObjectType::get()));
+            jitFuture->markCompleted(
+                toIValue(futureResponseMessage.constValue()));
           }
         });
 
@@ -307,7 +308,7 @@ PyRRef pyRemotePythonUdf(
     fm->addCallback([](const FutureMessage& fm) {
       auto deletedRRef = callback::finishCreatingOwnerRRef(fm);
       if (deletedRRef && deletedRRef->isPyObj()) {
-        pybind11::gil_scoped_acquire ag;
+        py::gil_scoped_acquire ag;
         deletedRRef.reset();
       }
     });
@@ -329,7 +330,7 @@ PyRRef pyRemoteTorchscript(
   Stack stack;
   {
     // Acquire GIL for py::args and py::kwargs processing.
-    pybind11::gil_scoped_acquire ag;
+    py::gil_scoped_acquire ag;
     stack = torch::jit::createStackForSchema(
         functionSchema, args, kwargs, c10::nullopt);
   }
