@@ -524,6 +524,42 @@ class TestTensorExprFuser(BaseTestClass):
         )
 
 
+    def test_min_max_reduction(self):
+        def test(x):
+            return torch.min(x) + torch.max(x)
+
+        traced = torch.jit.trace(test, (torch.zeros(1024)))
+        a = 8.0 * torch.rand(1024)
+        np.testing.assert_allclose(traced(a), np.amin(a.numpy()) + np.amax(a.numpy()))
+
+
+    def test_min_max_reduction2(self):
+        def test(x):
+            return x.min() + x.max()
+
+        traced = torch.jit.trace(test, (torch.zeros(1024)))
+        a = 8.0 * torch.rand(1024)
+        np.testing.assert_allclose(traced(a), np.amin(a.numpy()) + np.amax(a.numpy()))
+
+
+    def test_min_max_reduction_dim1(self):
+        def test(x):
+            return torch.min(x, 1)[0] + torch.max(x, 1)[0]
+
+        traced = torch.jit.trace(test, (torch.zeros(16, 16)))
+        a = 8.0 * torch.rand(16, 16)
+        np.testing.assert_allclose(traced(a), np.amin(a.numpy(), axis=1) + np.amax(a.numpy(), axis=1))
+
+
+    def test_min_max_reduction_dim1_2(self):
+        def test(x):
+            return torch.min(x, 1)
+
+        traced = torch.jit.trace(test, (torch.zeros(16, 16)))
+        a = 8.0 * torch.rand(16, 16)
+        np.testing.assert_allclose(traced(a)[0], np.amin(a.numpy(), axis=1))
+
+
     def test_clamp(self):
         def test(x):
             return torch.clamp(x + 3.0, 0.0, 6.0)
