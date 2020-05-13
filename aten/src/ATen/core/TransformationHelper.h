@@ -25,13 +25,15 @@ template <> struct DistAccumType<double> { using type = double; };
 template <typename T>
 using dist_acctype = typename DistAccumType<T>::type;
 
+namespace transformation {
+
 /**
  * A transformation function for `torch.Tensor.random_()`, when both `from` and `to` are specified.
  * `range` is `to - from`
  * `base` is `from`
  */
 template <typename T, typename V>
-C10_HOST_DEVICE inline T uniform_int_from_to_transformation(V val, uint64_t range, int64_t base) {
+C10_HOST_DEVICE inline T uniform_int_from_to(V val, uint64_t range, int64_t base) {
   return static_cast<T>(static_cast<int64_t>((val % range) + base));
 }
 
@@ -39,7 +41,7 @@ C10_HOST_DEVICE inline T uniform_int_from_to_transformation(V val, uint64_t rang
  * A transformation function for `torch.Tensor.random_()`, when `from=min_value(int64_t)` and to=None
  */
 template <typename T, typename V>
-C10_HOST_DEVICE inline T uniform_int_full_range_transformation(V val) {
+C10_HOST_DEVICE inline T uniform_int_full_range(V val) {
   return static_cast<T>(static_cast<int64_t>(val));
 }
 
@@ -47,7 +49,7 @@ C10_HOST_DEVICE inline T uniform_int_full_range_transformation(V val) {
  * A transformation function for `torch.Tensor.random_()`, when used without specifying `from` and `to`.
  */
 template <typename T, typename V>
-C10_HOST_DEVICE inline T uniform_int_transformation(V val) {
+C10_HOST_DEVICE inline T uniform_int(V val) {
   if (std::is_same<T, bool>::value) {
     return static_cast<bool>(val & 1);
   } else if (std::is_same<T, double>::value) {
@@ -65,11 +67,11 @@ C10_HOST_DEVICE inline T uniform_int_transformation(V val) {
 }
 
 template <typename T, typename V>
-C10_HOST_DEVICE inline dist_acctype<T> uniform_real_transformation(V val, T from, T to) {
+C10_HOST_DEVICE inline dist_acctype<T> uniform_real(V val, T from, T to) {
   constexpr auto MASK = static_cast<V>((static_cast<uint64_t>(1) << std::numeric_limits<T>::digits) - 1);
   constexpr auto DIVISOR = static_cast<dist_acctype<T>>(1) / (static_cast<uint64_t>(1) << std::numeric_limits<T>::digits);
   dist_acctype<T> x = (val & MASK) * DIVISOR;
   return (x * (to - from) + from);
 }
 
-} // namespace at
+}} // namespace at::transformation
