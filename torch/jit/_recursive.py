@@ -29,16 +29,24 @@ blacklist = [
     "dump_patches",
 ]
 
-def make_stub(func):
+def make_stub(func, name):
     rcb = _jit_internal.createResolutionCallbackFromClosure(func)
-    ast = torch.jit.get_jit_def(func, self_name="RecursiveScriptModule")
+    ast = torch.jit.get_jit_def(func, name, self_name="RecursiveScriptModule")
     return ScriptMethodStub(rcb, ast, func)
 
-def make_stub_from_method(nn_module, method):
-    func = get_function_from_type(type(nn_module), method)
+def make_stub_from_method(nn_module, method_name):
+    func = get_function_from_type(type(nn_module), method_name)
     if isinstance(func, ScriptMethodStub):
         return func
-    return make_stub(func)
+    # Make sure the name present in the resulting AST will match the name
+    # requested here. The only time they don't match is if you do something
+    # like:
+    #   def _forward(self):
+    #       pass
+    #   forward = _forward
+    # In this case, the actual function object will have the name `_forward`,
+    # even though we requested a stub for `forward`.
+    return make_stub(func, method_name)
 
 # base types that can be constants
 # in addition, tuples and lists of these base types are also considered constants
@@ -60,6 +68,12 @@ def _get_valid_constant(attr, v):
         3. a list or tuple of (2)
         """.format(type(v).__name__, attr, constants)))
 
+
+class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
+    def __init__(self, source, filename, file_lineno, leading_whitespace_len):
+        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
+
+
 def infer_concrete_type_builder(nn_module):
     """
     Build a ConcreteModuleTypeBuilder from an nn.Module. This
@@ -77,9 +91,9 @@ def infer_concrete_type_builder(nn_module):
     # try to infer the type from type annotation or from the object itself
     def infer_type(name, item):
         if name in class_annotations:
-            attr_type = torch.jit.annotations.ann_to_type(class_annotations[name])
+            attr_type = torch.jit.annotations.ann_to_type(class_annotations[name], _jit_internal.fake_range())
         elif isinstance(item, torch.jit.Attribute):
-            attr_type = torch.jit.annotations.ann_to_type(item.type)
+            attr_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())
         else:
             attr_type = torch._C._jit_try_infer_type(item)
         return attr_type
@@ -87,27 +101,18 @@ def infer_concrete_type_builder(nn_module):
     added_names = set()
 
     for name, item in nn_module._parameters.items():
-        if item is None:
-            # TODO special case: parameters can be None. The JIT assumes
-            # parameters are Tensor types, so in this case just add it as a
-            # attribute.
-            # The "correct" fix here is to add the parameter as a NoneType
-            # attribute, but NoneType refinemenet is currently wonky
-            continue
-        assert isinstance(item, torch.Tensor)
+        assert item is None or isinstance(item, torch.Tensor)
         attr_type = infer_type(name, item)
+        # We currently have the invariant in various places in our code
+        # that parameters must be Tensors. However, the nn.Module API also
+        # allows NoneType parameters. These parameters are not returned as
+        # part of `parameters()` and its variants, but are available
+        # through direct attribute access.
         concrete_type_builder.add_attribute(name, attr_type, True)
         added_names.add(name)
 
     for name, item in nn_module._buffers.items():
-        if item is None:
-            # TODO special case: parameters can be None. The JIT assumes
-            # parameters are Tensor types, so in this case just add it as a
-            # attribute.
-            # The "correct" fix here is to add the parameter as a NoneType
-            # attribute, but NoneType refinemenet is currently wonky
-            continue
-        assert isinstance(item, torch.Tensor)
+        assert item is None or isinstance(item, torch.Tensor)
         attr_type = infer_type(name, item)
         concrete_type_builder.add_attribute(name, attr_type, False)
         added_names.add(name)
@@ -140,13 +145,23 @@ def infer_concrete_type_builder(nn_module):
 
     for name in constants_set:
         if name in added_names:
-            # XXX: It is possible for something to be in the constants set but
-            # also in the parameters/buffers. This happens in BatchNorm as a
-            # hack to support optional parameters.
+            # TODO: We should really error in this case, but its bc-breaking so
+            # we need to warn for at least one release
+            if name in nn_module._modules:
+                hint = "submodule"
+            elif name in nn_module._buffers:
+                hint = "buffer"
+            elif name in nn_module._parameters:
+                hint = "parameter"
+            else:
+                raise AssertionError("added_names must be submodule, parameter, or buffer")
+
+            warnings.warn("'{}' was found in ScriptModule constants, "
+                          " but it is a non-constant {}. Consider removing it.".format(name, hint))
             continue
         if not hasattr(nn_module, name):
-            # TODO: We should really error in this case, but there are a couple
-            # extant examples of this so leave it for a future PR.
+            # TODO: We should really error in this case, but its bc-breaking so
+            # we need to warn for at least one release
             warnings.warn("'{}' was found in ScriptModule constants, "
                           "but was not actually set in __init__. "
                           "Consider removing it.".format(name))
@@ -334,6 +349,17 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 
+        # 3. Copy @ignored/@unused methods from the original `nn_module` to the new ScriptModule.
+        #    This ensures we can access these Python methods on the ScriptModule.
+        for name in dir(nn_module):
+            item = getattr(nn_module, name, None)
+            if not inspect.ismethod(item):
+                continue
+            if _jit_internal.is_ignored_fn(item):
+                unbound_function = getattr(type(nn_module), name)
+                bound_method = unbound_function.__get__(script_module)
+                setattr(script_module, name, bound_method)
+
         # For convenience, attach the concrete type to the new ScriptModule
         script_module._concrete_type = concrete_type
 
@@ -439,10 +465,10 @@ def _check_no_signature(func):
 def make_stubs_for_overloads(overload_info):
     overload_stubs = []
     for orig_fn, overloads in overload_info.items():
-        orig_ast = torch.jit.get_jit_def(orig_fn, self_name="RecursiveScriptModule")
+        orig_ast = torch.jit.get_jit_def(orig_fn, orig_fn.__name__, self_name="RecursiveScriptModule")
         for overload_name, overload_fn in overloads:
             _check_no_signature(overload_fn)
-            over_ast = torch.jit.get_jit_def(overload_fn, self_name="RecursiveScriptModule")
+            over_ast = torch.jit.get_jit_def(overload_fn, overload_fn.__name__, self_name="RecursiveScriptModule")
             new_ast = torch._C._replace_overloaded_method_decl(over_ast.decl(), orig_ast, overload_name)
             _rcb = _jit_internal.createResolutionCallbackFromClosure(orig_fn)
             overload_stubs.append(ScriptMethodStub(_rcb, new_ast, overload_fn))
@@ -564,7 +590,7 @@ def wrap_cpp_module(cpp_module):
 def compile_unbound_method(concrete_type, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
-    stub = make_stub(fn)
+    stub = make_stub(fn, fn.__name__)
     with torch.jit._disable_emit_hooks():
         # We don't want to call the hooks here since the graph that is calling
         # this function is not yet complete

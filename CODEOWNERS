@@ -13,10 +13,10 @@
 # Not there to strictly require the approval, but to be tagged as a reviewer
 # on the PRs to push them into a high priority inbox.
 /torch/csrc/api/data/ @apaszke
-/torch/csrc/autograd/ @apaszke
+/torch/csrc/autograd/ @apaszke @albanD
 /torch/csrc/jit/ @apaszke
 /torch/nn/ @apaszke
-/torch/autograd/ @apaszke
+/torch/autograd/ @apaszke @albanD
 /torch/jit/ @apaszke
 /torch/utils/data/ @apaszke
 
@@ -26,3 +26,11 @@
 /torch/distributed/rpc @mrshenli @pritamdamania87 @zhaojuanmao
 /torch/distributed/autograd @mrshenli @pritamdamania87 @zhaojuanmao
 /torch/distributed/optim @mrshenli @pritamdamania87 @zhaojuanmao @aazzolini
+
+# Tensorpipe RPC Agent.
+/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
+/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw @beauby
+
+# Distributed tests
+/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao
+/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao

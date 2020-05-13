@@ -23,7 +23,6 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/comm.h>
-#include <torch/csrc/distributed/c10d/ddp.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
@@ -204,6 +203,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::BarrierOptions::timeout);
 
+  py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
+      .def(py::init<>())
+      .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout);
+
   auto store =
       py::class_<::c10d::Store, std::shared_ptr<::c10d::Store>, PythonStore>(
           module, "Store")
@@ -259,10 +262,22 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<>());
 
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
-      .def(py::init<const std::string&, int, int, bool>());
+      .def(
+          py::init<
+              const std::string&,
+              int,
+              int,
+              bool,
+              std::chrono::milliseconds>(),
+          py::arg("host_name"),
+          py::arg("port"),
+          py::arg("world_size"),
+          py::arg("is_master"),
+          py::arg("timeout") =
+              std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
 
   shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
-      .def(py::init<const std::string&, ::c10d::Store&>());
+      .def(py::init<const std::string&, std::shared_ptr<::c10d::Store>>());
 
   auto processGroup =
       shared_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
@@ -458,6 +473,55 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
+              "alltoall_base",
+              &::c10d::ProcessGroup::alltoall_base,
+              py::arg("output_tensor"),
+              py::arg("input_tensor"),
+              py::arg("output_split_sizes"),
+              py::arg("input_split_sizes"),
+              py::arg("opts") = ::c10d::AllToAllOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "alltoall_base",
+              [](::c10d::ProcessGroup& pg,
+                 at::Tensor& output,
+                 at::Tensor& input,
+                 std::vector<int64_t> outputSplitSizes,
+                 std::vector<int64_t> inputSplitSizes) {
+                return pg.alltoall_base(
+                    output,
+                    input,
+                    outputSplitSizes,
+                    inputSplitSizes,
+                    ::c10d::AllToAllOptions());
+              },
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("output_split_sizes"),
+              py::arg("input_split_sizes"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "alltoall",
+              &::c10d::ProcessGroup::alltoall,
+              py::arg("output_tensor"),
+              py::arg("input_tensor"),
+              py::arg("opts") = ::c10d::AllToAllOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "alltoall",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& output,
+                 std::vector<at::Tensor>& input) {
+                return pg.alltoall(output, input, ::c10d::AllToAllOptions());
+              },
+              py::arg("output"),
+              py::arg("input"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
               "send",
               &::c10d::ProcessGroup::send,
               py::call_guard<py::gil_scoped_release>())
@@ -557,7 +621,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("timeout") = std::chrono::milliseconds(10 * 1000));
+          py::arg("timeout") = std::chrono::milliseconds(10 * 1000)); // NOLINT
 #endif
 
 #ifdef USE_C10D_NCCL
@@ -604,52 +668,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
           &::c10d::ProcessGroup::Work::wait,
           py::call_guard<py::gil_scoped_release>());
 
-#ifdef USE_CUDA
-  module.def(
-      "_dist_bucket_tensors",
-      &::c10d::bucketTensors,
-      py::arg("tensors"),
-      py::arg("bucket_size"),
-      py::arg("fine_grained"),
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
-      "_dist_broadcast_coalesced",
-      &::c10d::distBroadcastCoalesced,
-      py::arg("process_group"),
-      py::arg("tensors"),
-      py::arg("buffer_size"),
-      py::arg("fine_grained"),
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
-      "_sync_params",
-      &::c10d::syncParams,
-      py::arg("process_group"),
-      py::arg("parameter_data"),
-      py::arg("buffer_data"),
-      py::arg("devices"),
-      py::arg("broadcast_bucket_size"),
-      py::arg("broadcast_buffers"),
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
-      "_queue_reduction",
-      &::c10d::queueReduction,
-      py::arg("process_group"),
-      py::arg("grads_batch"),
-      py::arg("devices"),
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
-      "_sync_reduction",
-      &::c10d::syncReduction,
-      py::arg("reduction_work"),
-      py::arg("grads_batch"),
-      py::arg("grads_batch_coalesced"),
-      py::call_guard<py::gil_scoped_release>());
-#endif
-
   module.def(
       "_compute_bucket_assignment_by_size",
       &::c10d::compute_bucket_assignment_by_size,
@@ -664,9 +682,9 @@ They are used in specifying strategies for reduction collectives, e.g.,
       // for the tensor list argument, but still pass it to the underlying
       // function as a c10::ArrayRef.
       [](std::shared_ptr<::c10d::ProcessGroup> process_group,
-         std::vector<at::Tensor> tensors,
+         std::vector<at::Tensor> tensors, // NOLINT
          size_t buffer_size) {
-        broadcast_coalesced(process_group, tensors, buffer_size);
+        broadcast_coalesced(std::move(process_group), tensors, buffer_size);
       },
       py::arg("process_group"),
       py::arg("tensors"),
@@ -731,7 +749,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
 } // namespace
 
 // c10d methods on torch._C
-static PyMethodDef methods[] = {
+static PyMethodDef methods[] = { // NOLINT
     {"_c10d_init", (PyCFunction)c10d_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 

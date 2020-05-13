@@ -4,6 +4,7 @@
 
 #include <fbgemm/Fbgemm.h>
 
+#include <caffe2/core/tensor.h>
 #include "caffe2/quantization/server/dnnlowp.h"
 
 namespace caffe2 {

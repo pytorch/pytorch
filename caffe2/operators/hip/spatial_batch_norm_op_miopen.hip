@@ -116,12 +116,10 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
   auto& bias = Input(BIAS);
   auto* Y = Output(OUTPUT);
 
-  // Only 2D BatchNorm is supported in MIopen for now
-  // @petrex will follow up on adding 1D and 3D support
-  CAFFE_ENFORCE_EQ(
-      X.ndim(),
-      4,
-      "Only 2D input is supported in MIOpen BatchNormalization right now.");
+  // Only 2D and 3D BatchNorm are supported in MIopen for now
+  CAFFE_ENFORCE(
+        X.ndim() == 4 || X.ndim() == 5,
+        "Currently only 2D and 3D batchnorms are supported with MIOpen.");
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
@@ -139,8 +137,9 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
   if (N > 0 && X.sizes() != miopen_input_dims_) {
     VLOG(1) << "Setting descriptors.";
     miopen_input_dims_ = X.sizes().vec();
-    MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-        data_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
+    vector<int> input_dims(begin(miopen_input_dims_), end(miopen_input_dims_));
+    MIOPEN_ENFORCE(miopenSetTensorDescriptor(
+        data_desc_, miopenTypeWrapper<T>::type, input_dims.size(), input_dims.data(), nullptr));
 
     MIOPEN_ENFORCE(
         miopenDeriveBNTensorDescriptor(bn_param_desc_, data_desc_, mode_));
@@ -279,8 +278,9 @@ bool MIOpenSpatialBNGradientOp::DoRunWithType() {
   // See if we need to reshape.
   if (N > 0 && X.sizes() != miopen_input_dims_) {
     miopen_input_dims_ = X.sizes().vec();
-    MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-        data_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
+    vector<int> input_dims(begin(miopen_input_dims_), end(miopen_input_dims_));
+    MIOPEN_ENFORCE(miopenSetTensorDescriptor(
+        data_desc_, miopenTypeWrapper<T>::type, input_dims.size(), input_dims.data(), nullptr));
 
     MIOPEN_ENFORCE(
         miopenDeriveBNTensorDescriptor(bn_param_desc_, data_desc_, mode_));

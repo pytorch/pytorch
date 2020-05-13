@@ -4,15 +4,13 @@
 
 #include <unordered_set>
 
-C10_DECLARE_bool(caffe2_tvm_profiling_based_jit);
-
 namespace caffe2 {
 
 struct TvmTransformOptions final : public BackendTransformOptions {
   explicit TvmTransformOptions() : BackendTransformOptions() {}
 
   //  Whether to enable profiling based jit
-  bool profiling_based_jit{true};
+  bool profiling_based_jit{false};
 };
 
 class CAFFE2_API TvmTransformer final : public BackendTransformerBase {
@@ -38,6 +36,12 @@ class CAFFE2_API TvmTransformer final : public BackendTransformerBase {
       const std::vector<std::string>& weight_names,
       const ShapeInfoMap& shape_hints,
       const std::unordered_set<int>& blacklisted_ops) override;
+
+  static const std::unordered_set<std::string>& getSupportedOps();
+
+  static bool canConvertFullGraph(
+      const caffe2::NetDef& net,
+      const std::unordered_set<int>& blacklisted_ops);
 
  private:
   // Given TVM runnable subnets, contract them into one TVMJitOp
@@ -72,8 +76,18 @@ CAFFE2_API void tvmTransform(
     const std::vector<std::string>& weight_names,
     const ShapeInfoMap& shape_hints,
     const std::unordered_set<int>& blacklisted_ops,
-    size_t max_batch_size,
-    size_t max_seq_size,
+    int32_t max_batch_size,
+    int32_t max_seq_size,
+    int32_t num_embeddings,
+    int32_t embedding_size,
+    int32_t tvm_min_ops,
+    bool tvm_profiling_based_jit,
     bool debug);
+
+CAFFE2_API void cleanUpPredictNet(
+    NetDef* net,
+    const std::vector<std::string>& input_names,
+    const std::vector<std::string>& output_names,
+    const std::vector<std::string>& weight_names);
 
 } // namespace caffe2

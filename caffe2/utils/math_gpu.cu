@@ -36,6 +36,7 @@
 #endif // __HIP_PLATFORM_HCC__
 
 #ifdef __HIP_PLATFORM_HCC__
+#include <hip/hip_version.h>
 using CUBLAS_HALF_TYPE = rocblas_half;
 #else // __HIP_PLATFORM_HCC
 using CUBLAS_HALF_TYPE = __half;
@@ -913,9 +914,9 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     // Convert alpha, beta from float -> __half
     const __half alpha_fp16 = at::Half(alpha);
     const __half beta_fp16 = at::Half(beta);
-    std::vector<const __half*> A_array(batch_size);
-    std::vector<const __half*> B_array(batch_size);
-    std::vector<__half*> C_array(batch_size);
+    thrust::host_vector<const __half*> A_array(batch_size);
+    thrust::host_vector<const __half*> B_array(batch_size);
+    thrust::host_vector<__half*> C_array(batch_size);
     for (int i = 0; i < batch_size; ++i) {
       A_array[i] = reinterpret_cast<const __half*>(A[i]);
       B_array[i] = reinterpret_cast<const __half*>(B[i]);
@@ -1689,8 +1690,19 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
     const at::Half* b,
     at::Half* y,
     CUDAContext* context) {
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined __HIP_PLATFORM_HCC__ && HIP_VERSION < 210
   CAFFE_THROW("HIP currently does not support FP16 completely yet.");
+#elif defined __HIP_PLATFORM_HCC__ && HIP_VERSION >= 210  
+  CUBLAS_ENFORCE(cublasSetPointerMode(
+      context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
+  CUBLAS_ENFORCE(rocblas_hdot(
+      context->cublas_handle(),
+      n,
+      reinterpret_cast<const rocblas_half*>(a),
+      1,
+      reinterpret_cast<const rocblas_half*>(b),
+      1,
+      reinterpret_cast<rocblas_half*>(y)));
 #else
   // execute with 32-bit math
   CUBLAS_ENFORCE(cublasSetPointerMode(

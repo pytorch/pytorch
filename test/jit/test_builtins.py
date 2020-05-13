@@ -1,5 +1,6 @@
 import os
 import sys
+import inspect
 from typing import List
 
 import torch
@@ -72,3 +73,95 @@ class TestBuiltins(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "hasattr"):
             torch.jit.script(Mod())
+
+    def test_del(self):
+        def fn(x):
+            # type: (List[int]) -> List[int]
+            a = x * 2
+            del a
+            return x
+
+        self.checkScript(fn, ([1, 2, 3],))
+
+        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+            @torch.jit.script
+            def fn(x):
+                a = x ** 2
+                del a
+                return a
+
+        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+            @torch.jit.script
+            def fn(x):
+                a = x ** 2
+                if a:
+                    del a
+                return a
+
+        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+            @torch.jit.script
+            def fn(x):
+                a = x ** 2
+                del b
+                return a
+
+    def test_del_multiple_operands(self):
+
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
+                                    "with more than one operand"):
+            @torch.jit.script
+            def del_list_multiple_operands(x):
+                # type: (List[int]) -> List[int]
+                del x[0], x[1]
+                return x
+
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
+                                    "with more than one operand"):
+            @torch.jit.script
+            def del_dict_multiple_operands(x):
+                # type: (Dict[str, int]) -> Dict[str, int]
+                del x['hi'], x['there']
+                return x
+
+
+class TestTensorBuiltins(JitTestCase):
+    def test_tensor_properties(self):
+        def should_keep(tensor, name):
+            if inspect.isroutine(getattr(tensor, name)):
+                return False
+            if name.startswith('_'):
+                return False
+            return True
+
+        tensor = torch.arange(4, dtype=torch.float).view(2, 2)
+        properties = [p for p in dir(tensor) if should_keep(tensor, p)]
+
+        code_template = """
+        def fn(x):
+            return x.{}
+        """
+
+        EQUALITY_MISMATCH = set([
+            # TorchScript doesn't have real enums so they return an int instead
+            # of the actual value
+            'dtype',
+            'layout',
+        ])
+        MISSING_PROPERTIES = set([
+            'grad_fn',
+            # This is an undocumented property so it's not included
+            "output_nr",
+            # This has a longer implementation, maybe not worth copying to
+            # TorchScript if named tensors don't work there anyways
+            'names',
+        ])
+
+        for p in properties:
+            if p in MISSING_PROPERTIES:
+                continue
+            code = code_template.format(p)
+            cu = torch.jit.CompilationUnit()
+            cu.define(code)
+            if p in EQUALITY_MISMATCH:
+                continue
+            self.assertEqual(getattr(tensor, p), cu.fn(tensor))
