@@ -87,7 +87,7 @@ static TypePtr importType(
         return source;
       },
       /*version=*/2);
-  return si.loadNamedType(qual_name);
+  return si.loadType(qual_name);
 }
 
 TEST(TypeEquality, ClassBasic) {

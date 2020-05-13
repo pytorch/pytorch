@@ -1,16 +1,17 @@
 #pragma once
 
+#include <ATen/core/stack.h>
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/op_registration/infer_schema.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/stack.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
+#include <torch/library.h>
 #include <torch/custom_class_detail.h>
 #include <iostream>
 #include <sstream>
@@ -117,6 +118,17 @@ class class_ {
     return *this;
   }
 
+  /// This is an unsafe method registration API added for adding custom JIT backend support via custom
+  /// C++ classes. It is not for general purpose use.
+  class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema) {
+    auto qualMethodName = qualClassName + "." + name;
+    auto method = std::make_unique<jit::BuiltinOpFunction>(
+        qualMethodName, std::move(schema), std::move(func));
+    classTypePtr->addMethod(method.get());
+    registerCustomClassMethod(std::move(method));
+    return *this;
+  }
+
   /// def_pickle() is used to define exactly what state gets serialized
   /// or deserialized for a given instance of a custom C++ class in
   /// Python or TorchScript. This protocol is equivalent to the Pickle
@@ -176,7 +188,7 @@ class class_ {
             std::move(setstate_wrapper)));
 
     // type validation
-    auto getstate_schema = classTypePtr->getMethod("__getstate__")->getSchema();
+    auto getstate_schema = classTypePtr->getMethod("__getstate__").getSchema();
     auto format_getstate_schema = [&getstate_schema]() {
       std::stringstream ss;
       ss << getstate_schema;
@@ -196,7 +208,7 @@ class class_ {
         "__getstate__ should return exactly one value for serialization. Got: ",
         format_getstate_schema());
     auto ser_type = getstate_schema.returns().at(0).type();
-    auto setstate_schema = classTypePtr->getMethod("__setstate__")->getSchema();
+    auto setstate_schema = classTypePtr->getMethod("__setstate__").getSchema();
     auto arg_type = setstate_schema.arguments().at(1).type();
     TORCH_CHECK(
         (*arg_type == *ser_type),
@@ -270,4 +282,14 @@ using ::torch::class_;
 
 } // namespace jit
 
-} // namespace torch
+template <class CurClass>
+inline class_<CurClass> Library::class_(const std::string& className) {
+  TORCH_CHECK(kind_ == DEF || kind_ == FRAGMENT,
+    "class_(\"", className, "\"): Cannot define a class inside of a TORCH_LIBRARY_IMPL block.  "
+    "All class_()s should be placed in the (unique) TORCH_LIBRARY block for their namespace.  "
+    "(Error occurred at ", file_, ":", line_, ")");
+  TORCH_INTERNAL_ASSERT(ns_.has_value(), file_, ":", line_);
+  return torch::class_<CurClass>(*ns_, className);
+}
+
+}

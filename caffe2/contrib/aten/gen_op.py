@@ -20,6 +20,7 @@ import yaml
 import argparse
 import os
 from copy import deepcopy
+from typing import Dict, List
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--template_dir", default=".", help="where template.h is")
@@ -38,7 +39,7 @@ if args.aten_root:
     sys.path.append(os.path.join(args.aten_root, 'src', 'ATen'))
     from code_template import CodeTemplate as CT
 else:
-    from src.ATen.code_template import CodeTemplate as CT
+    from src.ATen.code_template import CodeTemplate as CT  # type: ignore[import,no-redef]
 
 OP_TEMPLATE = CT.from_file(
     os.path.join(args.template_dir, 'aten_op_template.h'))
@@ -48,7 +49,7 @@ try:
     # use faster C loader if available
     from yaml import CLoader as Loader
 except ImportError:
-    from yaml import Loader
+    from yaml import Loader  # type: ignore[misc]
 
 
 def write(filename, s):
@@ -228,7 +229,7 @@ if __name__ == '__main__':
     top_env = {
         'mappings': [],
         'implementations': [],
-    }
+    }  # type: Dict[str, List]
     seen = set()
     key = 0
     for o in filtered:

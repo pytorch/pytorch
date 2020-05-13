@@ -54,6 +54,7 @@ fi
 
 # Test the package
 /builder/check_binary.sh
+
 # =================== The above code will be executed inside Docker container ===================
 EOL
 echo

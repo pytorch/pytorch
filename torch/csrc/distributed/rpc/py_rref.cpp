@@ -13,6 +13,7 @@ namespace rpc {
 /////////////////////  Pickle/Unpickle Helplers ////////////////////////////
 
 namespace {
+
 py::tuple toPyTuple(const RRefForkData& rrefForkData) {
   // add GIL as it is contructing a py::object
   pybind11::gil_scoped_acquire ag;
@@ -25,6 +26,7 @@ py::tuple toPyTuple(const RRefForkData& rrefForkData) {
       rrefForkData.parent_,
       rrefForkData.typeStr_);
 }
+
 RRefForkData fromPyTuple(const py::tuple& pyTuple) {
   // add GIL as it is accessing a py::object
   pybind11::gil_scoped_acquire ag;
@@ -92,7 +94,7 @@ TypePtr tryInferTypeWithTypeHint(
   // Otherwise it's a pure pyobject, create the RRef
   // that holds an IValue of an pyobject.
   return PyObjectType::get();
-} // namespace
+}
 
 } // namespace
 
@@ -112,8 +114,12 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         return rref;
       }()) {}
 
-const std::shared_ptr<FutureMessage> PyRRef::getFuture() const {
-  return rref_->getOwnerCreationFuture();
+c10::intrusive_ptr<JitFuture> PyRRef::getFuture() const {
+  // Marking hasValue to false, as this Future is only used for signaling
+  // profiler to update profiling result and the profiler does not retrieve
+  // any value from it.
+  return wrapFutureMessageInJitFuture(
+      rref_->getOwnerCreationFuture(), false /* hasValue */);
 }
 
 bool PyRRef::isOwner() const {
@@ -186,6 +192,27 @@ std::string PyRRef::str() const {
         ", ForkId = ",
         c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId(),
         ")");
+  }
+}
+
+py::object PyRRef::createRRefProxy(const RRefProxyType& type) const {
+  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+  pybind11::gil_scoped_acquire ag;
+  auto& functions = pythonRpcHandler.getRRefProxyFunctions();
+  auto& ctor = functions.rrefProxyCtor_;
+  switch (type) {
+    case RRefProxyType::RPC_SYNC: {
+      return ctor(*this, functions.rpcSync_);
+    }
+    case RRefProxyType::RPC_ASYNC: {
+      return ctor(*this, functions.rpcAsync_);
+    }
+    case RRefProxyType::REMOTE: {
+      return ctor(*this, functions.remote_);
+    }
+    default: {
+      TORCH_INTERNAL_ASSERT(false, "Unrecognized RRefProxy type ", type);
+    }
   }
 }
 
