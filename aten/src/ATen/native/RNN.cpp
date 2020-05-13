@@ -1453,7 +1453,7 @@ bool _use_cudnn_rnn_flatten_weight() {
     Tensor _bwd_hx;                                                         \
     std::tie(_fwd_hx, _bwd_hx) = split_rnn_hidden(hx);                      \
     auto input = batch_first ? _input.transpose(0, 1) : _input;             \
-    auto rev_input = reverse(_input);                                       \
+    auto rev_input = reverse(input);                                        \
     std::vector<Tensor> fwd_params;                                         \
     std::vector<Tensor> bwd_params;                                         \
     std::tie(fwd_params, bwd_params) = split_params(_params);               \
@@ -1512,7 +1512,7 @@ bool _use_cudnn_rnn_flatten_weight() {
     Tensor _bwd_hx;                                                         \
     std::tie(_fwd_hx, _bwd_hx) = split_rnn_hidden(hx);                      \
     auto input = batch_first ? _input.transpose(0, 1) : _input;             \
-    auto rev_input = reverse(_input);                                       \
+    auto rev_input = reverse(input);                                        \
     std::vector<Tensor> fwd_params;                                         \
     std::vector<Tensor> bwd_params;                                         \
     std::tie(fwd_params, bwd_params) = split_params(_params);               \
@@ -2009,7 +2009,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_cudnn_type1(
 
   // Reverse input to backward LSTM
   auto input = batch_first ? _input.transpose(0, 1) : _input;
-  auto rev_input = reverse(_input);
+  auto rev_input = reverse(input);
 
   // _fwd_params contains the forward parameters and _params the backward ones
   std::vector<Tensor> fwd_params;
@@ -2055,7 +2055,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_miopen_type1(
 
   // Reverse input to backward LSTM
   auto input = batch_first ? _input.transpose(0, 1) : _input;
-  auto rev_input = reverse(_input);
+  auto rev_input = reverse(input);
 
   // _fwd_params contains the forward parameters and _params the backward ones
   std::vector<Tensor> fwd_params;
