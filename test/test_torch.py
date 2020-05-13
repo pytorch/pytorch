@@ -55,12 +55,15 @@ SIZE = 100
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
 class _TestTorchMixin(object):
-    def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True):
+    def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True, use_complex=False):
         float_types = [torch.double,
                        torch.float]
         int_types = [torch.int64,
                      torch.int32,
                      torch.int16]
+
+        complex_types = [torch.complex64,
+                         torch.complex128]
 
         def make_contiguous(shape, dtype):
             if dtype in float_types:
@@ -92,6 +95,8 @@ class _TestTorchMixin(object):
             types += float_types
         if use_integral:
             types += int_types
+        if use_complex:
+            types += complex_types
         tensors = {"cont": [], "noncont": [], "slice": []}
         for dtype in types:
             tensors["cont"].append(make_contiguous(shape, dtype))
