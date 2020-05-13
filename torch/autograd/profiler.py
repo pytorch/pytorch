@@ -806,9 +806,9 @@ def parse_cpu_trace(thread_records):
         for record in thread_record_list:
             # remove special record_function c10 ops
             if (record.name() in [
-                    "profiler::_record_function_enter",
-                    "profiler::_record_function_exit"
-                ] or record.handle() in filtered_handles):
+                        "profiler::_record_function_enter",
+                        "profiler::_record_function_exit"
+                    ] or record.handle() in filtered_handles):
                 filtered_handles.add(record.handle())
                 continue
 
