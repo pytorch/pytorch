@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from torch.testing._internal.common_utils import enable_profiling_mode, GRAPH_EXECUTOR, ProfilingMode
+from torch.testing._internal.common_utils import enable_profiling_mode_for_profiling_tests, GRAPH_EXECUTOR, ProfilingMode
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -230,7 +230,7 @@ class TestModels(JitTestCase):
     @staticmethod
     def _test_mnist(self, device, check_export_import=True):
         # eval() is present because dropout makes this nondeterministic
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             self.checkTrace(MnistNet().to(device).eval(), (torch.rand(5, 1, 28, 28, device=device),),
                             export_import=check_export_import)
 
@@ -280,7 +280,7 @@ class TestModels(JitTestCase):
                 action_scores = self.affine2(x)
                 return F.softmax(action_scores, dim=1)
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             self.checkTrace(Policy().to(device), (torch.rand(1, 4, device=device),),
                             export_import=test_export_import)
 
@@ -533,7 +533,7 @@ class TestModels(JitTestCase):
                             export_import=False, allow_unused=True,
                             inputs_require_grads=False)
         else:
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 # eval() is present because randn_like makes this nondeterministic
                 self.checkTrace(VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device),),
                                 export_import=check_export_import)

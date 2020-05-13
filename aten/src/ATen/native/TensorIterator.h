@@ -357,6 +357,23 @@ struct CAFFE2_API TensorIterator {
     resize_outputs_ = false;
   }
 
+  void declare_static_shape(IntArrayRef shape) {
+    // WARNING:
+    //   This will bypass all shape checking in the TensorIterator. Kernels which call this method
+    //   are expected to check shapes before calling `add_input` or `add_output`.
+    TORCH_CHECK(!resize_outputs_, "dont_resize_outputs() must be called before declare_static_shape(...)")
+    shape_ = shape;
+    static_shape_ = true;
+  }
+
+  void declare_static_shape(IntArrayRef shape, const int64_t squash_dim){
+    declare_static_shape(shape);
+    if (!shape_.size()) return;
+    TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(shape_.size()),
+                "squash_dim ", squash_dim, " must be in [0, ", shape_.size(), ").");
+    shape_[squash_dim] = 1;
+  }
+
   void build();
 
 protected:
@@ -397,6 +414,7 @@ protected:
   bool all_ops_same_shape_ = false;
   bool requires_channels_last_output_ = false;
   bool requires_channels_last_3d_output_ = false;
+  bool static_shape_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover

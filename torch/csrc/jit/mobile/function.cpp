@@ -1,10 +1,10 @@
-#include "function.h"
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/custom_class_detail.h>
-#include "interpreter.h"
+#include <torch/library.h>
 
 namespace torch {
 namespace jit {
@@ -38,9 +38,7 @@ bool Function::append_operator(
   } else {
     auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
     if (op.has_value()) {
-      fn = [op](Stack& stack) {
-        c10::Dispatcher::singleton().callBoxed(*op, &stack);
-      };
+      fn = [op](Stack& stack) { op->callBoxed(&stack); };
     } else {
       return false;
     }
