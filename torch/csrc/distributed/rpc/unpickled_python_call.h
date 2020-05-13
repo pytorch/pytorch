@@ -18,12 +18,11 @@ namespace rpc {
 class TORCH_API UnpickledPythonCall : public RpcCommandBase {
  public:
   explicit UnpickledPythonCall(const SerializedPyObj& serializedPyObj);
-  ~UnpickledPythonCall() override;
 
   // toMessage() method is not implemented, as objects of this class should
   // never be directly converted into a Message object.
   Message toMessageImpl() && override;
-  const py::object& pythonUdf() const;
+  py::object movePythonUdf() &&;
 
  private:
   py::object pythonUdf_;
