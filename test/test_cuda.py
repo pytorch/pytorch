@@ -659,15 +659,13 @@ class TestCuda(TestCase):
 
         r_tensors = list(map(comm.reduce_add, zip(*dup_tensors)))
         for r, t in zip(r_tensors, tensors):
-            self.assertEqual(r.get_device(), t.get_device())
+            self.assertEqualTypeString(r, t)
             self.assertEqual(r, t * 2)
-            self.assertEqual(r.type(), t.type())
 
         rc_tensors = comm.reduce_add_coalesced(dup_tensors, buffer_size=buffer_size)
         self.assertEqual(r_tensors, rc_tensors)
         for r, rc in zip(r_tensors, rc_tensors):
-            self.assertEqual(rc.get_device(), r.get_device())
-            self.assertEqual(rc.type(), r.type())
+            self.assertEqualTypeString(rc, r)
 
         # Since we have both cuda:0 and cuda:1 inputs, the outputs must be new.
         # We can check that they have different version counters.
@@ -1813,6 +1811,7 @@ class TestCuda(TestCase):
         counted = t.bincount(minlength=65536)
         self.assertEqual(torch.sum(counted), 10)
 
+    @skipIfRocm
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
         a /= 100000000
@@ -2735,13 +2734,6 @@ t2.start()
                     with torch.cuda.amp.autocast(enabled=False):
                         type_no_autocast = torch.norm(a_ignore).dtype
                     self.assertTrue(torch.norm(a_ignore).dtype is type_no_autocast)
-
-                # Tests if CastPolicy::promote ops ignore double and int
-                with self.assertRaises(RuntimeError):
-                    torch.cat((a_ignore, c_16))
-                with torch.cuda.amp.autocast(enabled=False):
-                    type_no_autocast = torch.cat((a_ignore, b_ignore)).dtype
-                self.assertTrue(torch.cat((a_ignore, b_ignore)).dtype is type_no_autocast)
 
     @skipIfRocm
     def test_autocast_custom_enabled(self):

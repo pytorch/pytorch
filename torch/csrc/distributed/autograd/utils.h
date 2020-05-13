@@ -48,7 +48,8 @@ sendMessageWithAutograd(
     rpc::RpcAgent& agent,
     const rpc::WorkerInfo& dst,
     rpc::Message&& wrappedRpcMsg,
-    bool forceGradRecording = false);
+    bool forceGradRecording = false,
+    const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout);
 
 } // namespace autograd
 } // namespace distributed
