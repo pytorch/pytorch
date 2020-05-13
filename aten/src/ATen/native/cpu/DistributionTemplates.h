@@ -229,10 +229,13 @@ struct UniformKernel {
 // ==================================================== Cauchy ========================================================
 
 template<typename RNG>
-void cauchy_kernel(TensorIterator& iter, double median, double sigma, RNG generator) {
+void cauchy_kernel(TensorIterator& iter, double median_, double sigma_, RNG generator) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "cauchy_cpu", [&]() {
+    using accscalar_t = at::acc_type<scalar_t, false>;
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    at::cauchy_distribution<double> cauchy(median, sigma);
+    auto median = static_cast<accscalar_t>(median_);
+    auto sigma = static_cast<accscalar_t>(sigma_);
+    at::cauchy_distribution<accscalar_t> cauchy(median, sigma);
     cpu_serial_kernel(iter, [&cauchy, generator]() -> scalar_t {
       return static_cast<scalar_t>(cauchy(generator));
     });
