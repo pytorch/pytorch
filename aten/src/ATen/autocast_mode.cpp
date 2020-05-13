@@ -405,6 +405,9 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL_UNBOXED_ONLY(ADD_NS(chain_matmul), "chain_matmul", Tensor (TensorList), fp16)
   // fp32
   KERNEL(ADD_NS(acos), "acos", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(arcosh), "arcosh", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(arcsinh), "arcsinh", Tensor (const Tensor &), fp32)
+  KERNEL(ADD_NS(arctanh), "arctanh", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(asin), "asin", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(cosh), "cosh", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(erfinv), "erfinv", Tensor (const Tensor &), fp32)

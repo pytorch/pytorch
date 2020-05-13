@@ -49,6 +49,9 @@ __device__ void test(){
   assert(::abs(::acos(Half(-1.0)) - ::acos(-1.0f)) <= threshold);
   assert(::abs(::cosh(Half(1.0)) - ::cosh(1.0f)) <= threshold);
   assert(::abs(::acosh(Half(1.0)) - ::acosh(1.0f)) <= threshold);
+  assert(::abs(::arcosh(Half(1.0)) - ::arcosh(1.0f)) <= threshold);
+  assert(::abs(::arcsinh(Half(1.0)) - ::arcsinh(1.0f)) <= threshold);
+  assert(::abs(::arctanh(Half(1.0)) - ::arctanh(1.0f)) <= threshold);
   assert(::abs(::asin(Half(1.0)) - ::asin(1.0f)) <= threshold);
   assert(::abs(::sinh(Half(1.0)) - ::sinh(1.0f)) <= threshold);
   assert(::abs(::asinh(Half(1.0)) - ::asinh(1.0f)) <= threshold);
