@@ -19,6 +19,8 @@ DECLARE_DISPATCH(unary_fn, imag_stub);
 DECLARE_DISPATCH(unary_fn, conj_stub);
 DECLARE_DISPATCH(unary_fn, acos_stub);
 DECLARE_DISPATCH(unary_fn, arcosh_stub);
+DECLARE_DISPATCH(unary_fn, arcsinh_stub);
+DECLARE_DISPATCH(unary_fn, arctanh_stub);
 DECLARE_DISPATCH(unary_fn, asin_stub);
 DECLARE_DISPATCH(unary_fn, atan_stub);
 DECLARE_DISPATCH(unary_fn, bitwise_not_stub);

@@ -249,6 +249,14 @@ Tensor& arcosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_ou
 Tensor arcosh(const Tensor& self) { return unary_op_impl(self, at::arcosh_out); }
 Tensor& arcosh_(Tensor& self) { return unary_op_impl_(self, at::arcosh_out); }
 
+Tensor& arcsinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, arcsinh_stub); }
+Tensor arcsinh(const Tensor& self) { return unary_op_impl(self, at::arcsinh_out); }
+Tensor& arcsinh_(Tensor& self) { return unary_op_impl_(self, at::arcsinh_out); }
+
+Tensor& arctanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, arctanh_stub); }
+Tensor arctanh(const Tensor& self) { return unary_op_impl(self, at::arctanh_out); }
+Tensor& arctanh_(Tensor& self) { return unary_op_impl_(self, at::arctanh_out); }
+
 Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
 Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
 Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }

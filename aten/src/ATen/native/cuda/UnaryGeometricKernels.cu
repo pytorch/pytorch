@@ -181,6 +181,36 @@ void arcosh_kernel_cuda(TensorIterator& iter) {
 }
 
 template<typename scalar_t>
+__host__ __device__ static inline scalar_t arcsinh_wrapper(scalar_t v) {
+  return ::asinh(v);
+}
+
+void arcsinh_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "arcsinh_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "arcsinh_cuda", [&] {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return arcsinh_wrapper(a);
+      });
+    });
+  });
+}
+
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t arctanh_wrapper(scalar_t v) {
+  return ::atanh(v);
+}
+
+void arctanh_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "arctanh_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "arctanh_cuda", [&] {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return arctanh_wrapper(a);
+      });
+    });
+  });
+}
+
+template<typename scalar_t>
 __host__ __device__ static inline scalar_t tan_wrapper(scalar_t v) {
   return ::tan(v);
 }
@@ -195,6 +225,8 @@ void tan_kernel_cuda(TensorIterator& iter) {
 
 REGISTER_DISPATCH(acos_stub, &acos_kernel_cuda);
 REGISTER_DISPATCH(arcosh_stub, &arcosh_kernel_cuda);
+REGISTER_DISPATCH(arcsinh_stub, &arcsinh_kernel_cuda);
+REGISTER_DISPATCH(arctanh_stub, &arctanh_kernel_cuda);
 REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda);
 REGISTER_DISPATCH(atan_stub, &atan_kernel_cuda);
 REGISTER_DISPATCH(sin_stub, &sin_kernel_cuda);

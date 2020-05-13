@@ -202,6 +202,22 @@ static void arcosh_kernel(TensorIterator& iter) {
     });
 }
 
+static void arcsinh_kernel(TensorIterator& iter) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "arcsinh_cpu", [&]() {
+      cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::asinh(a); });
+    });
+}
+
+static void arctanh_kernel(TensorIterator& iter) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "arctanh_cpu", [&]() {
+      cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::atanh(a); });
+    });
+}
+
 static void digamma_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "digamma", [&]() {
     cpu_kernel(
@@ -471,6 +487,8 @@ REGISTER_DISPATCH(sign_stub, &sign_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 REGISTER_DISPATCH(arcosh_stub, &arcosh_kernel);
+REGISTER_DISPATCH(arcsinh_stub, &arcsinh_kernel);
+REGISTER_DISPATCH(arctanh_stub, &arctanh_kernel);
 REGISTER_DISPATCH(digamma_stub, &digamma_kernel);
 REGISTER_DISPATCH(trigamma_stub, &trigamma_kernel);
 REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
