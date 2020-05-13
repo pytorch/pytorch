@@ -83,9 +83,9 @@ class AdagradOp final : public Operator<Context> {
         decay_(this->template GetSingleArgument<float>("decay", 1.0f)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG(INFO) << "gradient optimization operator in use: "
-              << "AdagradOp"
-              << " weight_decay_=" << weight_decay_;
+    VLOG(1) << "gradient optimization operator in use: "
+            << "AdagradOp"
+            << " weight_decay_=" << weight_decay_;
   }
 
   bool RunOnDevice() override {
@@ -173,9 +173,9 @@ class SparseAdagradOp final : public Operator<CPUContext> {
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG(INFO) << "gradient optimization operator in use: "
-              << "SparseAdagradOp"
-              << " weight_decay_=" << weight_decay_;
+    VLOG(1) << "gradient optimization operator in use: "
+            << "SparseAdagradOp"
+            << " weight_decay_=" << weight_decay_;
     const float decay = this->template GetSingleArgument<float>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
@@ -226,8 +226,7 @@ class SparseAdagradOp final : public Operator<CPUContext> {
         n);
 
 #if defined(USE_FBGEMM) && !defined(__NVCC__)
-    C10_LOG_FIRST_N(INFO, 1)
-        << "using fbgemm::GenerateSparseAdaGrad in SparseAdagradOp";
+    VLOG(1) << "using fbgemm::GenerateSparseAdaGrad in SparseAdagradOp";
 
     if (block_size != last_block_size_) {
       last_block_size_ = block_size;
@@ -282,7 +281,7 @@ class SparseAdagradOp final : public Operator<CPUContext> {
     }
 #endif
 
-    C10_LOG_FIRST_N(INFO, 1)
+    VLOG(1)
         << "using internal::adagrad_update_prefetch_inlined in SparseAdagradOp";
 
     const auto* paramIn = Input(PARAM).template data<float>();
@@ -361,9 +360,9 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG(INFO) << "gradient optimization operator in use: "
-              << "RowWiseSparseAdagradOp"
-              << " weight_decay_=" << weight_decay_;
+    VLOG(1) << "gradient optimization operator in use: "
+            << "RowWiseSparseAdagradOp"
+            << " weight_decay_=" << weight_decay_;
   }
 
   bool RunOnDevice() override {
@@ -416,8 +415,7 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
         n);
 
 #if defined(USE_FBGEMM) && !defined(__NVCC__)
-    C10_LOG_FIRST_N(INFO, 1)
-        << "using fbgemm::GenerateSparseAdaGrad in RowWiseSparseAdagradOp";
+    VLOG(1) << "using fbgemm::GenerateSparseAdaGrad in RowWiseSparseAdagradOp";
 
     if (block_size != last_block_size_) {
       last_block_size_ = block_size;
@@ -474,8 +472,7 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
       return true;
     }
 #else
-    C10_LOG_FIRST_N(INFO, 1)
-        << "using plain adagrad updates in RowWiseSparseAdagradOp";
+    VLOG(1) << "using plain adagrad updates in RowWiseSparseAdagradOp";
 
     for (auto i = 0; i < n; ++i) {
       auto idx = indices[i];
