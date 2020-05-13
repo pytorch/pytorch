@@ -96,6 +96,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_.*negative_ind.*'  # negative axis is not supported yet
                      '|test_argmax_.*select_last_index.*'  # unsupported case
                      '|test_argmin_.*select_last_index_.*'  # unsupported case
+                     '|test_.*gradient.*'  # no support for gradient op in c2-onnx
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
