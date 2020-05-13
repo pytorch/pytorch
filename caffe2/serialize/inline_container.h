@@ -144,7 +144,8 @@ class CAFFE2_API PyTorchStreamWriter final {
       const std::string& name,
       const void* data,
       size_t size,
-      bool compress = false);
+      bool compress = false,
+      int skip = 1);
   void writeEndOfFile();
 
   bool finalized() const {

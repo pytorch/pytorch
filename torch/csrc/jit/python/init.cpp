@@ -650,6 +650,43 @@ void initJITBindings(PyObject* module) {
              size_t size) {
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
+          })
+      .def(
+          "write_records",
+          [](PyTorchStreamWriter& self,
+             std::vector<std::tuple<const std::string,
+             const char*,
+             size_t>> records) {
+            for (const auto record : records) {
+              auto name = std::get<0>(record);
+              auto data = std::get<1>(record);
+              auto size = std::get<2>(record);
+              self.writeRecord(
+                name, reinterpret_cast<const char*>(data), size);
+            }
+            
+          })
+          .def(
+          "write_records",
+          [](PyTorchStreamWriter& self,
+             std::vector<std::tuple<const std::string,
+             uintptr_t,
+             size_t>> records) {
+            // int i = 0;
+            // int stop = records.size() - 1;
+            for (const auto record : records) {
+              auto name = std::get<0>(record);
+              auto data = reinterpret_cast<const char*>(std::get<1>(record));
+              auto size = std::get<2>(record);
+              // if (i == stop) {
+                // self.writeRecord(
+                //  name, data, size, false, 0);
+              // } else {
+                self.writeRecord(
+                name, data, size, false, 0);
+              // }
+            }
+            
           });
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
