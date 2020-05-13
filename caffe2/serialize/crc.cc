@@ -1,7 +1,7 @@
 #include "miniz.h"
 #include <iostream>
 
-#include <boost/crc.hpp>
+#include "caffe2/serialize/boost_crc.h"
 #include <algorithm>
 #include <stdexcept>
 #include <array>
