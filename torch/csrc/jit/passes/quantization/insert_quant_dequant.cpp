@@ -339,17 +339,17 @@ void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
   rewriter.runOnGraph(graph, filter);
 }
 
-void checkGetQParamsResult(const IValue& qparams) {
+void checkCalculateQParamsResult(const IValue& qparams) {
   TORCH_CHECK(
       qparams.isTuple(),
-      "`get_qparams` function is expected to return a "
+      "`calculate_qparams` function is expected to return a "
       "Tuple, but got:",
       qparams.tagKind());
   auto tp = qparams.toTuple();
   TORCH_CHECK(
-      tp->elements().size() == 2 || tp->elements().size() == 3,
-      "`get_qparams` function is expected to return a "
-      "Tuple of size 2 or 3, got Tuple of size ",
+      tp->elements().size() == 2,
+      "`calculate_qparams` function is expected to return a "
+      "Tuple of size 2, got Tuple of size ",
       tp->elements().size());
   // Expect first two elements of the tuple to be Tensor
   for (size_t i = 0; i < 2; ++i) {
@@ -359,15 +359,6 @@ void checkGetQParamsResult(const IValue& qparams) {
         i,
         " has type: ",
         tp->elements()[i].tagKind());
-  }
-  // Expect the third elements of the tuple to be int
-  if (tp->elements().size() == 3) {
-    TORCH_CHECK(
-        tp->elements()[2].isInt(),
-        "Element of Tuple is expected to be int, but element ",
-        2,
-        " has type: ",
-        tp->elements()[2].tagKind());
   }
 }
 
@@ -567,9 +558,9 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
       v->debugName(),
       " exists.");
   auto observer_module = module.attr(observer_name.value()).toModule();
-  auto get_qparams = observer_module.get_method("get_qparams");
-  IValue result = get_qparams(std::vector<IValue>());
-  checkGetQParamsResult(result);
+  auto calculate_qparams = observer_module.get_method("calculate_qparams");
+  IValue result = calculate_qparams(std::vector<IValue>());
+  checkCalculateQParamsResult(result);
   auto scalar_type = observer_module.attr("dtype");
   TORCH_CHECK(
       scalar_type.toScalarType() != at::ScalarType::Undefined,
@@ -582,9 +573,10 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   QParamVector qparams;
   auto qscheme = observer_module.attr("qscheme").toQScheme();
   if (isPerChannel(qscheme)) {
+    auto axis = observer_module.attr("ch_axis");
     qparams.push_back(std::make_pair("_scale", scale));
     qparams.push_back(std::make_pair("_zero_point", zero_point));
-    qparams.push_back(std::make_pair("_axis", tp->elements()[2].toInt()));
+    qparams.push_back(std::make_pair("_axis", axis.toInt()));
   } else {
     qparams.push_back(std::make_pair("_scale", scale.item<double>()));
     qparams.push_back(
