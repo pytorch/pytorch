@@ -1,6 +1,7 @@
 #include <c10/util/Exception.h>
 #include <test/cpp/jit/tests.h>
 #include <test/cpp/tensorexpr/tests.h>
+#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -22,8 +23,9 @@ JIT_TEST_API void runJITCPPTests(bool runCuda) {
   // So it is not part of the general test list (which is shared between the
   // gtest and python test runners), but is instead invoked manually by the
   // torch_python_test.cpp
-  testEvalModeForLoadedModule();
-  testTorchSaveError();
+  // testEvalModeForLoadedModule();
+  testSerializationInterop();
+  // testTorchSaveError();
 }
 #undef JIT_TEST
 

@@ -40,15 +40,20 @@ class EvalModeForLoadedModule(FileSetup):
 
 
 class SerializationInterop(FileSetup):
-    path = 'ivalue.pt'
+    path = 'ivalue.zip'
 
     def setup(self):
-        ones = torch.ones(2, 2)
-        twos = torch.ones(3, 5) * 2
+        class Foo(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(Foo, self).__init__()
 
-        value = (ones, twos)
+                @torch.jit.script_method
+                def forward(self, x, y):
+                    return 2 * x + y
 
-        torch.save(value, self.path, _use_new_zipfile_serialization=True)
+        foo = Foo()
+
+        torch.jit.save(foo, self.path)
 
 
 # See testTorchSaveError in test/cpp/jit/tests.h for usage
