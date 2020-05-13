@@ -33,34 +33,41 @@ using namespace torch::distributed::autograd;
 
 namespace {
 
-std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
-    std::unique_ptr<RpcCommandBase> rpc,
+std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
+    RpcCommandBase& rpc,
     const MessageType& messageType) {
   switch (messageType) {
     case MessageType::PYTHON_CALL: {
-      auto& pc = static_cast<PythonCall&>(*rpc);
+      auto& pc = static_cast<PythonCall&>(rpc);
       return std::make_unique<UnpickledPythonCall>(pc.serializedPyObj());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
-      auto& prc = static_cast<PythonRemoteCall&>(*rpc);
+      auto& prc = static_cast<PythonRemoteCall&>(rpc);
       return std::make_unique<UnpickledPythonRemoteCall>(
           prc.serializedPyObj(), prc.retRRefId(), prc.retForkId());
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
       // Deserialize the wrapped RPC if it contains Python UDF
-      auto& rwa = static_cast<RpcWithAutograd&>(*rpc);
+      auto& rwa = static_cast<RpcWithAutograd&>(rpc);
       auto& wrappedRpc = rwa.wrappedRpc();
       auto pythonRpc = deserializePythonRpcCommandReference(
           wrappedRpc, rwa.wrappedMessageType());
       if (pythonRpc) {
         rwa.setWrappedRpc(std::move(pythonRpc));
       }
-      return std::move(rpc);
+      return nullptr;
     }
     default: {
-      return std::move(rpc);
+      return nullptr;
     }
   }
+}
+
+std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
+    std::unique_ptr<RpcCommandBase> rpc,
+    const MessageType& messageType) {
+  auto pythonRpc = deserializePythonRpcCommandReference(*rpc, messageType);
+  return pythonRpc ? std::move(pythonRpc) : std::move(rpc);
 }
 
 // When request message has autograd info, processMessage() will set up valid
@@ -164,7 +171,7 @@ void RequestCallbackImpl::processRpc(
         pybind11::gil_scoped_acquire ag;
         serializedPyObj =
             std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
-                pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf())));
+                pythonRpcHandler.runPythonUdf(upc.pythonUdf())));
       }
       markComplete(
           std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
@@ -274,7 +281,7 @@ void RequestCallbackImpl::processRpc(
         {
           pybind11::gil_scoped_acquire ag;
           py_ivalue = jit::toIValue(
-              pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
+              pythonRpcHandler.runPythonUdf(uprc.pythonUdf()),
               PyObjectType::get());
         }
         ownerRRef->setValue(std::move(py_ivalue));
@@ -542,6 +549,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
   auto& rrefContext = RRefContext::getInstance();
   try {
     rrefContext.recordThreadLocalPendingRRefs();
+    // Deserialize PythonUDF here to trigger RRef unpickling
     std::unique_ptr<RpcCommandBase> rpc = deserializePythonRpcCommand(
         deserializeRequest(request), request.type());
     auto rrefsReadyFuture = rrefContext.waitForThreadLocalPendingRRefs();
