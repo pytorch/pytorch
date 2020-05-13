@@ -159,6 +159,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     if (C10_UNLIKELY(!pointer)) {
       return;
     }
+    // TODO: enable with better TLS support on mobile
     // if (memoryProfilingEnabled()) {
     //   profiledCPUMemoryReporter().Delete(pointer);
     // }
