@@ -614,6 +614,22 @@ void fmod_scalar_kernel(TensorIterator& iter, Scalar divisor) {
 
 }
 
+void logaddexp_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          scalar_t m = std::max(a, b);
+          return m + std::log((scalar_t)(1.0) + std::exp(-std::abs(a - b)));
+        },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+          Vec256<scalar_t> one(1.0);
+          Vec256<scalar_t> m = maximum(a, b);
+          return m + (one + (a - b).abs().neg().exp()).log();
+        });
+  });
+}
+
 } // anonymous namespace
 
 
@@ -645,5 +661,6 @@ REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel);
 REGISTER_DISPATCH(mse_stub, &mse_kernel);
 REGISTER_DISPATCH(fmod_stub, &fmod_kernel);
 REGISTER_DISPATCH(fmod_scalar_stub, &fmod_scalar_kernel);
+REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel);
 
 }} // namespace at::native

@@ -55,5 +55,6 @@ DECLARE_DISPATCH(binary_fn, tanh_backward_stub);
 DECLARE_DISPATCH(binary_fn, mse_stub);
 DECLARE_DISPATCH(binary_fn, fmod_stub);
 DECLARE_DISPATCH(binary_fn_alpha, fmod_scalar_stub);
+DECLARE_DISPATCH(binary_fn, logaddexp_stub);
 
 }} // namespace at::native
