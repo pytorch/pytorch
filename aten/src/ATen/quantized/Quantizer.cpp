@@ -1,17 +1,16 @@
-#include <ATen/ATen.h>
-#include <ATen/Parallel.h>
 #include <ATen/quantized/Quantizer.h>
-#include <c10/core/Allocator.h>
-#include <c10/core/CPUAllocator.h>
+#include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/TensorFactories.h>
-#include <ATen/native/utils/Allocator.h>
-#include <ATen/quantized/QTensorImpl.h>
+#include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/native/TensorFactories.h>
 #include <ATen/native/quantized/affine_quantizer.h>
-#include <typeinfo>
+#include <ATen/quantized/QTensorImpl.h>
+#include <c10/core/Allocator.h>
+#include <c10/core/CPUAllocator.h>
 #include <cmath>
+#include <typeinfo>
 
 namespace at {
 
@@ -62,18 +61,6 @@ QTensorImpl* get_qtensorimpl(const Tensor& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-#ifdef USE_PYTORCH_QNNPACK
-
-// QNNPACK can access up to 8 bytes beyond the beginning of the tensor's storage
-// boundary which does trigger ASAN, and can result in a segfault if the memory falls
-// on a different page out of the process's address space.
-// Here we define a custom allocator that allocates the extra storage required to keep
-// this behavior safe.  This same allocator can be used for FBGEMM as well.
-
-using QAllocator = native::GuardingAllocator<8u, 0u>;
-
-#endif
-
 inline Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
@@ -81,26 +68,29 @@ inline Tensor new_qtensor(
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   at::Allocator* allocator = GetAllocator(options.device().type());
 
-  #ifdef USE_PYTORCH_QNNPACK
-    if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
-      static QAllocator qallocator;
-      allocator = &qallocator;
-    }
-  #endif
+#ifdef USE_PYTORCH_QNNPACK
+  if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+    allocator = c10::GetDefaultMobileCPUAllocator();
+  }
+#endif
 
   at::DispatchKey tensorDispatchKey = options.computeDispatchKey();
   native::check_size_nonnegative(sizes);
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
-  TORCH_CHECK(isQIntType(typeMetaToScalarType(dtype)),
-           "ScalarType is not supported in new_qtensor.");
+  TORCH_CHECK(
+      isQIntType(typeMetaToScalarType(dtype)),
+      "ScalarType is not supported in new_qtensor.");
+  int64_t size_bytes = nelements * dtype.itemsize();
   auto storage = c10::make_intrusive<StorageImpl>(
+      StorageImpl::use_byte_size_t(),
       dtype,
-      nelements,
-      allocator->allocate(nelements * dtype.itemsize()),
+      size_bytes,
+      allocator->allocate(size_bytes),
       allocator,
       /*resizable=*/true);
-  auto tensor = detail::make_tensor<QTensorImpl>(storage, at::DispatchKeySet(tensorDispatchKey), quantizer);
+  auto tensor = detail::make_tensor<QTensorImpl>(
+      storage, at::DispatchKeySet(tensorDispatchKey), quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   get_qtensorimpl(tensor)->empty_tensor_restride(memory_format);
   return tensor;
@@ -108,8 +98,7 @@ inline Tensor new_qtensor(
 
 Tensor PerTensorAffineQuantizer::quantize(Tensor rtensor) {
   TORCH_CHECK(
-    rtensor.scalar_type() == kFloat,
-    "quantize only works on Float Tensor.");
+      rtensor.scalar_type() == kFloat, "quantize only works on Float Tensor.");
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
   Tensor qtensor = new_qtensor(
@@ -118,14 +107,16 @@ Tensor PerTensorAffineQuantizer::quantize(Tensor rtensor) {
       intrusive_from_this());
 
   rtensor = rtensor.contiguous();
-  native::quantize_tensor_per_tensor_affine(rtensor, qtensor, scale_, zero_point_);
+  native::quantize_tensor_per_tensor_affine(
+      rtensor, qtensor, scale_, zero_point_);
   return qtensor;
 }
 
 Tensor PerTensorAffineQuantizer::dequantize(Tensor qtensor) {
   Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
   qtensor = qtensor.contiguous();
-  native::dequantize_tensor_per_tensor_affine(qtensor, rtensor, scale_, zero_point_);
+  native::dequantize_tensor_per_tensor_affine(
+      qtensor, rtensor, scale_, zero_point_);
   return rtensor;
 }
 
@@ -137,14 +128,16 @@ Tensor PerChannelAffineQuantizer::quantize(Tensor rtensor) {
       rtensor.options().dtype(scalar_type_),
       intrusive_from_this());
   rtensor = rtensor.contiguous();
-  native::quantize_tensor_per_channel_affine(rtensor, qtensor, scales_, zero_points_, axis_);
+  native::quantize_tensor_per_channel_affine(
+      rtensor, qtensor, scales_, zero_points_, axis_);
   return qtensor;
 }
 
 Tensor PerChannelAffineQuantizer::dequantize(Tensor qtensor) {
   Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
   qtensor = qtensor.contiguous();
-  native::dequantize_tensor_per_channel_affine(qtensor, rtensor, scales_, zero_points_, axis_);
+  native::dequantize_tensor_per_channel_affine(
+      qtensor, rtensor, scales_, zero_points_, axis_);
   return rtensor;
 }
 

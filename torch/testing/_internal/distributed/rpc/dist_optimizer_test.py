@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import threading
 
 import torch
@@ -32,7 +34,7 @@ class MyModule:
 
 class FailingOptimizer(optim.Optimizer):
     def __init__(self, params):
-        super(FailingOptimizer, self).__init__(params, {})
+        super().__init__(params, {})
 
     def step(self, closure=None):
         raise ValueError("Error running optimizer.")
@@ -40,7 +42,7 @@ class FailingOptimizer(optim.Optimizer):
 
 class OptimizerFailingOnConstructor(optim.Optimizer):
     def __init__(self, params):
-        super(OptimizerFailingOnConstructor, self).__init__(params, {})
+        super().__init__(params, {})
         raise ValueError("Error creating optimizer.")
 
     def step(self, closure=None):

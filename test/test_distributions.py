@@ -765,10 +765,12 @@ class TestDistributions(TestCase):
             expected = torch.tensor(expected)
             d = dist(**params)
             actual = d.enumerate_support(expand=False)
-            self.assertEqual(actual, expected)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(actual, expected)
             actual = d.enumerate_support(expand=True)
             expected_with_expand = expected.expand((-1,) + d.batch_shape + d.event_shape)
-            self.assertEqual(actual, expected_with_expand)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(actual, expected_with_expand)
 
     def test_repr(self):
         for Dist, params in EXAMPLES:
@@ -982,6 +984,15 @@ class TestDistributions(TestCase):
         self.assertRaises(NotImplementedError, Binomial(10, p).entropy)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_binomial_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for prob in [0.01, 0.1, 0.5, 0.8, 0.9]:
+            for count in [2, 10, 100, 500]:
+                self._check_sampler_discrete(Binomial(total_count=count, probs=prob),
+                                             scipy.stats.binom(count, prob),
+                                             'Binomial(total_count={}, probs={})'.format(count, prob))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_log_prob(self):
         probs = torch.arange(0.05, 1, 0.1)
         for total_count in [1, 2, 10]:
@@ -1040,10 +1051,11 @@ class TestDistributions(TestCase):
         self.assertEqual(bin2.log_prob(zero_counts), zero_counts)
 
     def test_binomial_vectorized_count(self):
-        set_rng_seed(0)
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         total_count = torch.tensor([[4, 7], [3, 8]])
         bin0 = Binomial(total_count, torch.tensor(1.))
-        self.assertEqual(bin0.sample(), total_count)
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(bin0.sample(), total_count)
         bin1 = Binomial(total_count, torch.tensor(0.5))
         samples = bin1.sample(torch.Size((100000,)))
         self.assertTrue((samples <= total_count.type_as(samples)).all())
@@ -1121,8 +1133,9 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
 
         # sample check for extreme value of probs
-        self.assertEqual(Multinomial(total_count, s).sample(),
-                         torch.tensor([[total_count, 0], [0, total_count]]))
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(Multinomial(total_count, s).sample(),
+                                   torch.tensor([[total_count, 0], [0, total_count]]))
 
         # check entropy computation
         self.assertRaises(NotImplementedError, Multinomial(10, p).entropy)

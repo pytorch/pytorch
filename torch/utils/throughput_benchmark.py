@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch._C
 
 def format_time(time_us=None, time_ms=None, time_s=None):

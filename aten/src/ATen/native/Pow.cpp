@@ -22,9 +22,10 @@ Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
   TORCH_CHECK(!(isIntegralType(base.scalar_type(), true) &&
               exp.isIntegral(true) && exp.toLong() < 0),
               "Integers to negative integer powers are not allowed.");
-  if (exp.toDouble() == 0.0) {
+  // Avoid runtime error when typecasting
+  if (!exp.isComplex() && (exp.toDouble() == 0.0)) {
     result.resize_as_(base).fill_(1);
-  } else if (exp.toDouble() == 1.0) {
+  } else if (!exp.isComplex() && (exp.toDouble() == 1.0)) {
     result.resize_as_(base).copy_(base);
   } else {
     auto iter = TensorIterator::unary_op(result, base,
@@ -52,12 +53,28 @@ Tensor& pow_(Tensor& base, Scalar alpha) {
 }
 
 Tensor pow(const Tensor& base, const Tensor& exp) {
-  Tensor result = at::empty({0}, base.options());
+  // If the exponent is complex, the result needs to be complex
+  // we can't rely on result_type because it will break current
+  // handling
+  // TODO: change it to use type promotion after #37098 is merged
+  ScalarType dtype = (exp.is_complex() ? exp.scalar_type() : base.scalar_type());
+  Tensor result = at::empty({0}, base.options().dtype(dtype));
   return native::pow_out(result, base, exp);
 }
 
 Tensor pow(const Tensor& base, Scalar exp) {
-  Tensor result = at::empty_like(base, MemoryFormat::Preserve);
+  // If the exponent is complex, the result needs to be complex
+  // we can't rely on result_type because it will break current
+  // handling for other datatypes
+  // TODO: change it to use type promotion after #37098 is merged
+  ScalarType dtype = (exp.isComplex() ? exp.type() : base.scalar_type());
+  Tensor result = at::empty({0}, base.options().dtype(dtype));
+  if (exp.isComplex()) {
+    // The type checking logic in unary_op TensorIterator does not allow
+    // a float tensor to output to a complex tensor, but binary ops allow it
+    // so we create a tensor for the exponent to avoid using this iterator until its fixed
+    return native::pow_out(result, base, c10::scalar_to_tensor(exp, base.device()));
+  }
   return native::pow_out(result, base, exp);
 }
 
