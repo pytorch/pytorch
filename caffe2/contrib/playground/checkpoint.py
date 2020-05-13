@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import numpy as np
-import cPickle as pickle
+import pickle
 from collections import OrderedDict
 
 from caffe2.proto import caffe2_pb2

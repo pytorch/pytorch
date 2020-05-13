@@ -53,7 +53,8 @@ size_t getInstanceCount() {
   return instance_count;
 }
 
-static auto registry = torch::RegisterOperators()
+void registerOps() {
+  static auto registry = torch::RegisterOperators()
       .op(torch::RegisterOperators::options()
         .schema("aten::random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(random_from_to), &random_from_to>(DispatchKey::CustomRNGKeyId))
@@ -63,8 +64,10 @@ static auto registry = torch::RegisterOperators()
       .op(torch::RegisterOperators::options()
         .schema("aten::random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(random_), &random_>(DispatchKey::CustomRNGKeyId));
+}
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  m.def("registerOps", &registerOps);
   m.def("createTestCPUGenerator", &createTestCPUGenerator);
   m.def("getInstanceCount", &getInstanceCount);
   m.def("identity", &identity);

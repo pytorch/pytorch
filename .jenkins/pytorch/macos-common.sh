@@ -2,6 +2,8 @@
 
 # Common prelude for macos-build.sh and macos-test.sh
 
+sysctl -a | grep machdep.cpu
+
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
