@@ -173,7 +173,7 @@ __host__ __device__ static inline scalar_t arccosh_wrapper(scalar_t v) {
 }
 
 template<typename T>
-__host__ __device__ static inline T arccosh_wrapper(T v) {
+__host__ __device__ static inline thrust::complex<T> arccosh_wrapper(thrust::complex<T> v) {
   return thrust::acosh(v);
 }
 
@@ -193,7 +193,7 @@ __host__ __device__ static inline scalar_t arcsinh_wrapper(scalar_t v) {
 }
 
 template<typename T>
-__host__ __device__ static inline T arcsinh_wrapper(T v) {
+__host__ __device__ static inline thrust::complex<T> arcsinh_wrapper(thrust::complex<T> v) {
   return thrust::asinh(v);
 }
 
@@ -212,7 +212,7 @@ __host__ __device__ static inline scalar_t arctanh_wrapper(scalar_t v) {
 }
 
 template<typename T>
-__host__ __device__ static inline T arctanh_wrapper(T v) {
+__host__ __device__ static inline thrust::complex<T> arctanh_wrapper(thrust::complex<T> v) {
   return thrust::arctanh(v);
 }
 
