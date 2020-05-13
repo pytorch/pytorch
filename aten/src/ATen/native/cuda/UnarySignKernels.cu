@@ -21,13 +21,11 @@ __host__ __device__ static inline c10::complex<scalar_t> abs_wrapper(c10::comple
   return std::abs(v);
 }
 
-template<>
-__host__ __device__ static inline uint8_t abs_wrapper<uint8_t>(uint8_t v) {
+__host__ __device__ static inline uint8_t abs_wrapper(uint8_t v) {
   return v;
 }
 
-template<>
-__host__ __device__ static inline bool abs_wrapper<bool>(bool v) {
+__host__ __device__ static inline bool abs_wrapper(bool v) {
   return v;
 }
 
