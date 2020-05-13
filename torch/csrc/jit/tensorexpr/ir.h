@@ -49,7 +49,6 @@ inline int getPrecedence(IRNodeType ty) {
     case kXor:
       return 12;
     case kCompareSelect:
-    case kLet:
       return 16;
     default:
       return 99;
@@ -155,7 +154,7 @@ class And : public BinaryOpNode<And> {
  public:
   And(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kAnd) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+    if (!lhs->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
@@ -168,7 +167,7 @@ class Or : public BinaryOpNode<Or> {
  public:
   Or(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kOr) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+    if (!lhs->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
@@ -181,7 +180,7 @@ class Xor : public BinaryOpNode<Xor> {
  public:
   Xor(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kXor) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+    if (!lhs->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
@@ -289,7 +288,7 @@ Expr* getImmediateByType(ScalarType immType, T initialVal) {
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
     return new Name##Imm(initialVal);
-    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
       throw unsupported_dtype();
@@ -308,7 +307,7 @@ T immediateAs(const Expr* e) {
   if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
     return imm->value();                                          \
   }
-  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
   throw unsupported_dtype();
   return 0;
@@ -320,7 +319,7 @@ bool immediateEquals(const Expr* e, T val) {
   if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
     return imm->value() == val;                                   \
   }
-  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
   throw unsupported_dtype();
   return false;
@@ -336,38 +335,6 @@ bool immediateIsNegative(const T* e) {
 #undef TYPE_CASE
   return false;
 }
-
-// Bind the value to the var and evaluate the body.
-class Let : public ExprNode<Let> {
- public:
-  const Expr* var() const {
-    return var_;
-  }
-  const Expr* value() const {
-    return value_;
-  }
-  const Expr* body() const {
-    return body_;
-  }
-
-  static ExprHandle make(
-      const ExprHandle& var,
-      const ExprHandle& value,
-      const ExprHandle& body) {
-    return ExprHandle(new Let(var.node(), value.node(), body.node()));
-  }
-
-  Let(const Expr* var, const Expr* value, const Expr* body)
-      : ExprNodeBase(body->dtype(), kLet),
-        var_(var),
-        value_(value),
-        body_(body) {}
-
- private:
-  const Expr* var_;
-  const Expr* value_;
-  const Expr* body_;
-};
 
 // Represents a ramp vector node:
 //     [base, base + 1 * stride, ... , base + (lanes - 1) * stride]
@@ -495,7 +462,7 @@ class IfThenElse : public ExprNode<IfThenElse> {
 
   IfThenElse(const Expr* c, const Expr* t, const Expr* f)
       : ExprNodeBase(t->dtype()), condition_(c), true_(t), false_(f) {
-    if (c->dtype().scalar_type() != ScalarType::Int) {
+    if (!c->dtype().is_integral()) {
       throw unsupported_dtype();
     }
     if (c->dtype().lanes() != 1) {
