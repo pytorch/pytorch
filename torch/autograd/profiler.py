@@ -618,7 +618,8 @@ Kernel = namedtuple('Kernel', ['name', 'device', 'interval'])
 
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
-    def __init__(self, id, name, thread, cpu_start, cpu_end, input_shapes=None,
+    def __init__(
+            self, id, name, thread, cpu_start, cpu_end, input_shapes=None,
             cpu_memory_usage=0, cuda_memory_usage=0, is_async=False):
         self.id = id
         self.name = name
@@ -804,9 +805,10 @@ def parse_cpu_trace(thread_records):
 
         for record in thread_record_list:
             # remove special record_function c10 ops
-            if (record.name() in ["profiler::_record_function_enter",
-                    "profiler::_record_function_exit"] or
-                    record.handle() in filtered_handles):
+            if (record.name() in [
+                    "profiler::_record_function_enter",
+                    "profiler::_record_function_exit"
+                ] or record.handle() in filtered_handles):
                 filtered_handles.add(record.handle())
                 continue
 
@@ -836,10 +838,11 @@ def parse_cpu_trace(thread_records):
                 if not is_async and start.has_cuda():
                     cuda_start = adjusted_time(start)
                     cuda_end = adjusted_time(record)
-                    fe.append_kernel(start.name(),
-                                    start.device(),
-                                    cuda_start,
-                                    cuda_end)
+                    fe.append_kernel(
+                        start.name(),
+                        start.device(),
+                        cuda_start,
+                        cuda_end)
                 functions.append(fe)
                 del range_starts[record.handle()]
                 del cpu_memory_allocs[record.handle()]
