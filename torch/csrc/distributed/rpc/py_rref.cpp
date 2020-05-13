@@ -111,6 +111,9 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         // jit::toIValue takes a py::handle as the first argument, and it calls
         // py::handle.cast<py::object>() to incref of provided value. The
         // returned ivalue will keep the reference alive.
+        // NB: the first argument const py::object& value must be kept alive
+        // until the following jit::toIValue returns (i.e., incref done). That's
+        // why this ctor can only be called while holding GIL.
         IValue ivalue = jit::toIValue(value, elem_type);
         rref->setValue(std::move(ivalue));
         return rref;
