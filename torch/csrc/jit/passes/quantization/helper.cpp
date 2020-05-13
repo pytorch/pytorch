@@ -24,6 +24,7 @@ std::vector<std::string> _static_quantizable_call_funcs = {
 };
 
 std::vector<std::string> _static_quantizable_aten_funcs = {
+    "conv1d",
     "conv2d",
     "conv3d",
     "linear",
@@ -201,7 +202,11 @@ bool matchArgPattern(
 bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv2d", 1}, {"conv3d", 1}, {"linear", 1}, {"lstm", 2}}),
+      AtenFuncArgs({{"conv1d", 1},
+                    {"conv2d", 1},
+                    {"conv3d", 1},
+                    {"linear", 1},
+                    {"lstm", 2}}),
       CallFuncArgs({{"linear", 2}}));
   return result;
 }
@@ -209,7 +214,8 @@ bool isWeight(Value* v) {
 bool isBiasOfConvOrLinear(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv2d", 2}, {"conv3d", 2}, {"linear", 2}}),
+      AtenFuncArgs(
+          {{"conv1d", 2}, {"conv2d", 2}, {"conv3d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
   return result;
 }
