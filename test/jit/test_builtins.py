@@ -74,6 +74,37 @@ class TestBuiltins(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "hasattr"):
             torch.jit.script(Mod())
 
+    def test_del(self):
+        def fn(x):
+            # type: (List[int]) -> List[int]
+            a = x * 2
+            del a
+            return x
+
+        self.checkScript(fn, ([1, 2, 3],))
+
+        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+            @torch.jit.script
+            def fn(x):
+                a = x ** 2
+                del a
+                return a
+
+        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+            @torch.jit.script
+            def fn(x):
+                a = x ** 2
+                if a:
+                    del a
+                return a
+
+        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+            @torch.jit.script
+            def fn(x):
+                a = x ** 2
+                del b
+                return a
+
     def test_del_multiple_operands(self):
 
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
