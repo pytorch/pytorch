@@ -177,7 +177,11 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     c10::raw::intrusive_ptr::incref(old_storage);
     at::Storage new_storage(c10::make_intrusive<at::StorageImpl>(
         c10::StorageImpl::use_byte_size_t(),
+#ifdef THQUANTIZED
+        slicelength * sizeof(quantized_t),
+#else
         slicelength * sizeof(scalar_t),
+#endif
         at::DataPtr(
             static_cast<void*>(data + start),
             old_storage,

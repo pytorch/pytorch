@@ -60,7 +60,12 @@ THTensor *THTensor_(new)(void)
   return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
              c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
              at::DispatchKey::CPU,
-             caffe2::TypeMeta::Make<scalar_t>())
+#ifdef THQUANTIZED
+             caffe2::TypeMeta::Make<quantized_t>()
+#else
+             caffe2::TypeMeta::Make<scalar_t>()
+#endif
+                 )
       .release();
 }
 
@@ -77,7 +82,12 @@ THTensor *THTensor_(newWithStorage1d)(THStorage *storage, ptrdiff_t storageOffse
   THTensor* self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
                        c10::intrusive_ptr<at::StorageImpl>::reclaim(storage),
                        at::DispatchKey::CPU,
-                       caffe2::TypeMeta::Make<scalar_t>())
+#ifdef THQUANTIZED
+                       caffe2::TypeMeta::Make<quantized_t>()
+#else
+                       caffe2::TypeMeta::Make<scalar_t>()
+#endif
+                           )
                        .release();
   THTensor_(setStorage)(self, storage, storageOffset,  {size0}, {stride0});
 
