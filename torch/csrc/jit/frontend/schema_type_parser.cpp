@@ -157,8 +157,8 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       L.expect('*');
       num_dims++;
     });
-    ptr = at::TensorType::create(
-        dtype, at::DeviceType::CPU, num_dims, c10::nullopt);
+    ptr =
+        at::TensorType::create(dtype, DeviceType::CPU, num_dims, c10::nullopt);
   } else {
     std::vector<int64_t> dims;
     bool seen_strides = false;
@@ -186,14 +186,14 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       }
       ptr = at::TensorType::create(
           dtype,
-          at::DeviceType::CPU,
+          DeviceType::CPU,
           c10::VaryingShape<int64_t>(dims),
           c10::VaryingShape<int64_t>(strides),
           c10::nullopt);
     } else {
       ptr = at::TensorType::create(
           dtype,
-          at::DeviceType::CPU,
+          DeviceType::CPU,
           c10::VaryingShape<int64_t>(dims_ref),
           c10::VaryingShape<int64_t>(dims.size()),
           c10::nullopt);

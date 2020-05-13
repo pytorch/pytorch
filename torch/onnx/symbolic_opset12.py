@@ -55,6 +55,7 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
 
     return nllloss
 
+
 def nll_loss2d(g, self, target, weight, reduction, ignore_index):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
 
@@ -62,3 +63,7 @@ def nll_loss2d(g, self, target, weight, reduction, ignore_index):
 def celu(g, self, alpha):
     alpha = sym_help._maybe_get_const(alpha, 'f')
     return g.op("Celu", self, alpha_f=alpha)
+
+
+def pow(g, self, exponent):
+    return g.op("Pow", self, exponent)
