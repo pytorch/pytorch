@@ -613,6 +613,8 @@ Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
   return sum_to(self, size);
 }
 
+// We currently do not support per-channel quant for unfold, diagonal, expand, permute.
+// TODO: Make this an aten function and replace as_strided_qtensorimpl once that is done.
 Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, QuantizerPtr quantizer) {
   auto result = detail::make_tensor<QTensorImpl>(
       Storage(self.storage()), self.key_set(), quantizer);

@@ -559,19 +559,20 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         // On mobile, we release the original weight by resetting the intrusive_ptr.
         // Calling unpack after this will throw an assertion.
         orig_weight.reset();
-        bias.reset();
     }
   }
   TORCH_INTERNAL_ASSERT(pack_w != nullptr, "Packed Weights are NULL");
   const auto output_shape = MakeConvOutputShape<kSpatialDim>(
       N, M, {H, W}, kernel, stride_, padding_, dilation_);
-  TORCH_CHECK(
-      std::all_of(
-          output_shape.begin(),
-          output_shape.end(),
-          [](int64_t i) { return i > 0; }),
-      "quantized::conv2d (qnnpack): each dimension of output tensor should "
-      "be greater than 0.")
+  if (act_nhwc.numel() > 0) {
+    TORCH_CHECK(
+        std::all_of(
+            output_shape.begin(),
+            output_shape.end(),
+            [](int64_t i) { return i > 0; }),
+        "quantized::conv2d (qnnpack): each dimension of output tensor should "
+        "be greater than 0.")
+  }
 
   // Allocate output Tensor and a buffer for QNNPACK to use
   at::Tensor output = at::native::empty_affine_quantized(
@@ -675,12 +676,12 @@ class QConvInt8 final {
   }
 };
 
-template <int kSpatialDim, bool kReluFused>
+template <bool kReluFused>
 class QConv1dInt8 final {
  public:
   static Tensor run(
       Tensor act,
-      const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
+      const c10::intrusive_ptr<ConvPackedParamsBase<2>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
     at::Tensor output;
@@ -726,8 +727,8 @@ class QConvInt8ForBC final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("conv1d",          QConv1dInt8<2, false>::run);
-  m.impl("conv1d_relu",     QConv1dInt8<2, true>::run);
+  m.impl("conv1d",          QConv1dInt8<false>::run);
+  m.impl("conv1d_relu",     QConv1dInt8<true>::run);
   m.impl("conv2d.new",      QConvInt8<2, false>::run);
   m.impl("conv2d_relu.new", QConvInt8<2, true>::run);
   m.impl("conv3d.new",      QConvInt8<3, false>::run);
