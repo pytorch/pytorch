@@ -365,7 +365,7 @@ struct MinMaxReductionOps {
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
   static C10_DEVICE arg_t warp_shfl_down(arg_t arg, int offset) {
-    return arg_t(WARP_SHFL_DOWN<wrap_half<decltype(arg.first)>::type>(arg.first, offset),
+    return arg_t(WARP_SHFL_DOWN<typename wrap_half<decltype(arg.first)>::type>(arg.first, offset),
                  WARP_SHFL_DOWN(arg.second, offset));
   }
 #endif
