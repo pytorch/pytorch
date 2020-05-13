@@ -170,7 +170,7 @@ void RequestCallbackImpl::processRpc(
       {
         // Use GIL to guard the decref of the py::object returned by
         // pythonRpcHandler.runPythonUdf(...)
-        pybind11::gil_scoped_acquire acquire;
+        py::gil_scoped_acquire acquire;
         serializedPyObj =
             std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
                 pythonRpcHandler.runPythonUdf(upc.pythonUdf())));
@@ -283,7 +283,7 @@ void RequestCallbackImpl::processRpc(
         {
           // Use GIL to guard the decref of the py::object returned by
           // pythonRpcHandler.runPythonUdf(...)
-          pybind11::gil_scoped_acquire acquire;
+          py::gil_scoped_acquire acquire;
           py_ivalue = jit::toIValue(
               pythonRpcHandler.runPythonUdf(uprc.pythonUdf()),
               PyObjectType::get());
@@ -358,7 +358,7 @@ void RequestCallbackImpl::processRpc(
         auto& pythonRpcHandler = PythonRpcHandler::getInstance();
         // Need this GIL to guard jit::toPyObj and destruct its returned
         // py::object
-        pybind11::gil_scoped_acquire acquire;
+        py::gil_scoped_acquire acquire;
         return pythonRpcHandler.serialize(jit::toPyObject(std::move(value)));
       };
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
@@ -414,7 +414,7 @@ void RequestCallbackImpl::processRpc(
       auto& ctx = RRefContext::getInstance();
       auto deletedRRef = ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
       if (deletedRRef && deletedRRef->isPyObj()) {
-        pybind11::gil_scoped_acquire acquire;
+        py::gil_scoped_acquire acquire;
         deletedRRef.reset();
       }
       markComplete(std::move(RRefAck()).toMessage());
