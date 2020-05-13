@@ -467,7 +467,6 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
     zip_file.write_record('data.pkl', data_value, len(data_value))
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
-    # cpu_keys = []
     for key in sorted(serialized_storages.keys()):
         name = 'data/{}'.format(key)
         storage = serialized_storages[key]
@@ -475,18 +474,13 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
             # If it's on the CPU we can directly copy it into the zip file
             num_bytes = storage.size() * storage.element_size()
             buf = io.BytesIO()
-            # print("Writing tensor: " + name)
             zip_file.write_record(name, storage.data_ptr(), num_bytes)
-            # cpu_keys.append((name, storage.data_ptr(), num_bytes))
         else:
             # Copy to a buffer, then serialize that
             buf = io.BytesIO()
             storage._write_file(buf, _should_read_directly(buf))
             buf_value = buf.getvalue()
             zip_file.write_record(name, buf_value, len(buf_value))
-    # print("KEYS")
-    # print(cpu_keys)
-    # zip_file.write_records(cpu_keys)
 
 
 def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):

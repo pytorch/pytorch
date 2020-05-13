@@ -1,7 +1,6 @@
 #include <c10/util/Exception.h>
 #include <test/cpp/jit/tests.h>
 #include <test/cpp/tensorexpr/tests.h>
-#include <iostream>
 
 namespace torch {
 namespace jit {
