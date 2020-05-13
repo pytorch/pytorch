@@ -73,8 +73,8 @@ __global__ void gatherKthValue(
     bool inRange = (i < inputSliceSize);
     scalar_t v = inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride])
                          : static_cast<scalar_t>(0);
-    bool isKValue = inRange && THCNumerics<scalar_t>::eq_with_nan(v, kValue);
-
+    bool isKValue = inRange && ((v == kValue)
+                    || THCNumerics<scalar_t>::isnan(v) && THCNumerics<scalar_t>::isnan(kValue));
     if (isKValue) {
       kValueIndex = i;
       foundKValue = true;
