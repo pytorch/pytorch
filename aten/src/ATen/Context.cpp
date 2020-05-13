@@ -149,6 +149,14 @@ bool Context::isXNNPACKAvailable() const {
 #endif
 }
 
+bool Context::releaseWeightsWhenPrepacking() const {
+  return release_original_weights;
+}
+
+void Context::setReleaseWeightsWhenPrepacking(bool e) {
+  release_original_weights = e;
+}
+
 bool Context::setFlushDenormal(bool on) {
   return at::cpu::set_flush_denormal(on);
 }
