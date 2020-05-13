@@ -38,6 +38,10 @@ file(GLOB C10_SRCS
 file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
 file(GLOB_RECURSE C10_HEADERS *.h)
 add_library(c10 ${C10_SRCS} ${C10_HEADERS})
+if(HAVE_SOVERSION)
+  set_target_properties(c10 PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 # If building shared library, set dllimport/dllexport proper.
 target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 # Enable hidden visibility if compiler supports it.

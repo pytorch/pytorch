@@ -13,6 +13,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TypeProperties.h>
 #include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Copy.h>
 #include <ATen/MemoryOverlap.h>
@@ -38,7 +39,9 @@ Tensor _shape_as_tensor(const Tensor& self) {
 }
 
 Tensor& set_(Tensor& result, Storage source) {
-  return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
+  int64_t new_size =
+      static_cast<int64_t>(source.nbytes() / result.dtype().itemsize());
+  return result.set_(source, 0, new_size, {});
 }
 
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
@@ -63,7 +66,12 @@ Tensor& set_tensor_(Tensor& result, const Tensor& source) {
 // way of getting the allocator to use for a device (c10::GetAllocator is not
 // the same as at::cuda::getCUDADeviceAllocator().
 Tensor& set_cpu_(Tensor& result) {
-  Storage storage(result.dtype(), 0, c10::GetAllocator(kCPU), true);
+  Storage storage(
+      Storage::use_byte_size_t(),
+      result.dtype(),
+      0,
+      c10::GetAllocator(kCPU),
+      true);
   return result.set_(storage, 0, {0}, {});
 }
 
@@ -108,15 +116,6 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
         "output memory locations. Found overlap in input tensor ", i);
   }
 
-  // Dtypes should be the same
-  const auto first_in_cat = tensors[0];
-  for (int64_t i = 1; i < tensors.size(); i++) {
-    TORCH_CHECK(first_in_cat.dtype() == tensors[i].dtype(),
-              "Expected object of scalar type ", first_in_cat.dtype(),
-              " but got scalar type ", tensors[i].dtype(),
-              " for sequence element ", i, ".");
-  }
-
   auto should_skip = [](const Tensor& t) { return t.numel() == 0 && t.dim() == 1; };
   for (auto const &tensor : tensors) {
     if (should_skip(tensor)) {
@@ -154,7 +153,8 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
     }
 
     if (tensor.sizes() != notSkippedTensor.sizes() ||
-        tensor.strides() != notSkippedTensor.strides()) {
+        tensor.strides() != notSkippedTensor.strides() ||
+        tensor.dtype() != notSkippedTensor.dtype()) {
       reuse_iterator = false;
     }
   }
@@ -210,6 +210,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       iter.dont_resize_outputs();
       iter.add_output(result_slice);
       iter.add_input(tensor);
+      iter.promote_common_dtype();
       iter.build();
       copy_stub(iter.device_type(), iter, false);
       offset += slice_dim_size;
@@ -220,7 +221,8 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
 }
 
 Tensor _cat_cpu(TensorList tensors, int64_t dim) {
-  Tensor result = at::empty({0}, tensors[0].options());
+  ScalarType high_type = result_type(tensors);
+  Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
   return native::_cat_out_cpu(result, tensors, dim);
 }
 
@@ -379,6 +381,7 @@ Tensor cat(TensorList tensors, int64_t dim) {
         tensors[0].is_sparse()) {
     return cat_sparse(tensors, dim);
   }
+
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
   auto maybe_outnames = namedinference::compute_cat_outnames(tensors);

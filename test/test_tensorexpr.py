@@ -20,14 +20,23 @@ def num_profiled_runs(num_runs):
 
 class BaseTestClass(unittest.TestCase):
     def setUp(self):
-        # TODO: read the old value and restore it rather than always set to True
-        # on exit
+        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
+        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+
+        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
+        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
+        torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)
+        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         torch._C._jit_set_texpr_fuser_enabled(True)
 
     def tearDown(self):
-        torch._C._jit_set_texpr_fuser_enabled(False)
-        torch._C._jit_override_can_fuse_on_gpu(True)
+        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
+        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+
+        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
+        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
 
 class TestTensorExprFuser(BaseTestClass):
     def test_easy(self):
@@ -513,6 +522,42 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(
             traced(a, b), np.maximum(np.minimum(a.numpy(), b.numpy()), [4.0])
         )
+
+
+    def test_min_max_reduction(self):
+        def test(x):
+            return torch.min(x) + torch.max(x)
+
+        traced = torch.jit.trace(test, (torch.zeros(1024)))
+        a = 8.0 * torch.rand(1024)
+        np.testing.assert_allclose(traced(a), np.amin(a.numpy()) + np.amax(a.numpy()))
+
+
+    def test_min_max_reduction2(self):
+        def test(x):
+            return x.min() + x.max()
+
+        traced = torch.jit.trace(test, (torch.zeros(1024)))
+        a = 8.0 * torch.rand(1024)
+        np.testing.assert_allclose(traced(a), np.amin(a.numpy()) + np.amax(a.numpy()))
+
+
+    def test_min_max_reduction_dim1(self):
+        def test(x):
+            return torch.min(x, 1)[0] + torch.max(x, 1)[0]
+
+        traced = torch.jit.trace(test, (torch.zeros(16, 16)))
+        a = 8.0 * torch.rand(16, 16)
+        np.testing.assert_allclose(traced(a), np.amin(a.numpy(), axis=1) + np.amax(a.numpy(), axis=1))
+
+
+    def test_min_max_reduction_dim1_2(self):
+        def test(x):
+            return torch.min(x, 1)
+
+        traced = torch.jit.trace(test, (torch.zeros(16, 16)))
+        a = 8.0 * torch.rand(16, 16)
+        np.testing.assert_allclose(traced(a)[0], np.amin(a.numpy(), axis=1))
 
 
     def test_clamp(self):

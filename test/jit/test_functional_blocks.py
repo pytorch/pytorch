@@ -127,6 +127,52 @@ class TestFunctionalBlocks(JitTestCase):
         FileCheck().check_count("aten::add_", 1).run(graph)
         self.assertEqual(test_intermediary_use(), fn())
 
+    def test_remove_mutation_if_output(self):
+        def foo(x, cond: bool):
+            if cond:
+                y = x + 5
+            else:
+                y = x + 2
+            y.add_(4)
+            return y
+
+        out_eager = foo(torch.tensor(5), True)
+        foo_script = torch.jit.script(foo)
+        FileCheck().check("aten::add_").run(foo_script.graph)
+        self.run_pass('remove_mutation', foo_script.graph)
+        FileCheck().check_not("aten::add_").run(foo_script.graph)
+
+        self.assertEqual(out_eager, foo_script(torch.tensor(5), True))
+
+    def test_remove_mutation_if_output_fail(self):
+        @torch.jit.script
+        def foo(cond: bool):
+            li = []
+            if cond:
+                x = torch.tensor(1)
+                li.append(x)
+            else:
+                x = torch.tensor(2)
+            y = x.add_(2)
+            return y, li
+
+        self.run_pass('inline', foo.graph)
+        self.run_pass('remove_mutation', foo.graph)
+        FileCheck().check("aten::add_").run(foo.graph)
+
+        @torch.jit.script
+        def foo(cond: bool, y):
+            if cond:
+                x = y
+            else:
+                x = torch.tensor(2)
+            z = x.add_(2)
+            return z
+
+        self.run_pass('inline', foo.graph)
+        self.run_pass('remove_mutation', foo.graph)
+        FileCheck().check("aten::add_").run(foo.graph)
+
     def test_remove_mutation_lists_append(self):
         def successful_remove():
             return [i for i in range(5)]  # noqa: C416

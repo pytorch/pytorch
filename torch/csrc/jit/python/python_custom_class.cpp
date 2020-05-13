@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/python/python_custom_class.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 
+#include <fmt/format.h>
+
 namespace torch {
 namespace jit {
 
@@ -36,11 +38,11 @@ void initPythonCustomClassBindings(PyObject* module) {
         auto named_type = getCustomClass(full_qualname);
         TORCH_CHECK(
             named_type,
-            "Tried to instantiate class ",
-            ns + "." + qualname,
-            " but it"
-            " does not exist! Ensure that it is registered via torch::jit"
-            "::class_");
+            fmt::format(
+                "Tried to instantiate class '{}.{}', but it does not exist! "
+                "Ensure that it is registered via torch::jit::class_",
+                ns,
+                qualname));
         c10::ClassTypePtr class_type = named_type->cast<ClassType>();
         return ScriptClass(c10::StrongTypePtr(
             std::shared_ptr<CompilationUnit>(), std::move(class_type)));
