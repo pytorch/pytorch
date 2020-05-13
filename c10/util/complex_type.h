@@ -256,7 +256,7 @@ struct alignas(sizeof(T) * 2) complex_common {
 template<>
 struct alignas(2*sizeof(float)) complex<float>: public complex_common<float> {
   using complex_common<float>::complex_common;
-  constexpr complex(): complex_common() {}; // needed by CUDA 9.x
+  constexpr complex(): complex_common(0.0f, 0.0f) {}; // needed by CUDA 9.x, and ROCm
   explicit constexpr complex(const complex<double> &other);
   using complex_common<float>::operator=;
 };
@@ -264,7 +264,7 @@ struct alignas(2*sizeof(float)) complex<float>: public complex_common<float> {
 template<>
 struct alignas(2*sizeof(double)) complex<double>: public complex_common<double> {
   using complex_common<double>::complex_common;
-  constexpr complex(): complex_common() {}; // needed by CUDA 9.x
+  constexpr complex(): complex_common(0.0, 0.0) {}; // needed by CUDA 9.x, and ROCm
   constexpr complex(const complex<float> &other);
   using complex_common<double>::operator=;
 };
