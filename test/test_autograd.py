@@ -2871,16 +2871,18 @@ class TestAutograd(TestCase):
             print(stats.table(sort_by=metric))
             return stats
 
-        def check_metrics(stats, metric, allocs=[], deallocs=[]):
+        def check_metrics(stats, metric, allocs=None, deallocs=None):
             stat_metrics = {}
             for stat in stats:
                 stat_metrics[stat.key] = getattr(stat, metric)
-            for alloc_fn in allocs:
-                self.assertTrue(alloc_fn in stat_metrics)
-                self.assertTrue(stat_metrics[alloc_fn] > 0)
-            for dealloc_fn in deallocs:
-                self.assertTrue(dealloc_fn in stat_metrics)
-                self.assertTrue(stat_metrics[dealloc_fn] < 0)
+            if allocs is not None:
+                for alloc_fn in allocs:
+                    self.assertTrue(alloc_fn in stat_metrics)
+                    self.assertTrue(stat_metrics[alloc_fn] > 0)
+            if deallocs is not None:
+                for dealloc_fn in deallocs:
+                    self.assertTrue(dealloc_fn in stat_metrics)
+                    self.assertTrue(stat_metrics[dealloc_fn] < 0)
 
         def create_cpu_tensor():
             return torch.rand(10, 10)
@@ -2893,53 +2895,61 @@ class TestAutograd(TestCase):
 
         print("Running CPU test")
         stats = run_profiler(create_cpu_tensor, "cpu_memory_usage")
-        check_metrics(stats,
+        check_metrics(s
+            tats,
             "cpu_memory_usage",
-            allocs = [
+            allocs=[
                 "empty",
                 "rand",
                 "test_user_scope_alloc",
             ],
-            deallocs = [
+            deallocs=[
                 "test_user_scope_dealloc",
-            ])
+            ]
+        )
 
         if torch.cuda.is_available():
             create_cuda_tensor()
             print("Running CUDA test")
             stats = run_profiler(create_cuda_tensor, "cuda_memory_usage")
-            check_metrics(stats,
+            check_metrics(
+                stats,
                 "cuda_memory_usage",
-                allocs = [
+                allocs=[
                     "test_user_scope_alloc",
                     "to",
                     "empty_strided",
                 ],
-                deallocs = [
+                deallocs=[
                     "test_user_scope_dealloc",
-                ])
-            check_metrics(stats,
+                ]
+            )
+            check_metrics(
+                stats,
                 "cpu_memory_usage",
-                allocs = [
+                allocs=[
                     "rand",
                     "empty",
-                ])
+                ]
+            )
 
         if torch._C.has_mkldnn:
             create_mkldnn_tensor()
             print("Running MKLDNN test")
             stats = run_profiler(create_mkldnn_tensor, "cpu_memory_usage")
-            check_metrics(stats,
+            check_metrics(
+                stats,
                 "cpu_memory_usage",
-                allocs = [
+                allocs=[
                     "test_user_scope_alloc",
                     "rand",
                     "empty",
                     "to_mkldnn",
                 ],
-                deallocs = [
+                deallocs=[
                     "test_user_scope_dealloc",
-                ])
+                ]
+            )
 
         # check partial overlap of tensor allocation with memory profiler
         x = torch.rand(10, 10)
@@ -2948,12 +2958,14 @@ class TestAutograd(TestCase):
             x = torch.rand(10, 10)
         del x
         stats = prof.key_averages(group_by_input_shape=True)
-        check_metrics(stats,
+        check_metrics(
+            stats,
             "cpu_memory_usage",
-            allocs = [
+            allocs=[
                 "rand",
                 "empty",
-            ])
+            ]
+        )
 
     def test_record_function(self):
         x = torch.randn(10, 10)
