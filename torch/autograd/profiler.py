@@ -1038,7 +1038,9 @@ def build_table(
     append(row_format.format(*headers))
 
     append(header_sep)
-    for evt in events[:row_limit]:
+    if row_limit > 0:
+        events = events[:row_limit]
+    for evt in events:
         row_values = [
             evt.key,  # Name
             # Self CPU total %
