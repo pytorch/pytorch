@@ -519,7 +519,7 @@ class _TestTorchMixin(object):
             self.assertTrue(np.allclose(n, t.numpy(), equal_nan=True))
 
     def _test_dim_ops(self, pytorch_op, numpy_op,
-                      use_floating=True, use_integral=True):
+                      use_floating=True, use_integral=True, use_complex=False):
         def do_one(tensors_dict, dim):
             for category, tensors in tensors_dict.items():
                 if category == "slice":
@@ -536,36 +536,37 @@ class _TestTorchMixin(object):
                                                               dim).cpu(),
                                                    expected)
         do_one(self._make_tensors((5, 400000), use_floating=use_floating,
-                                  use_integral=use_integral), 1)
+                                  use_integral=use_integral, use_complex=use_complex), 1)
         do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
-                                  use_integral=use_integral), 0)
+                                  use_integral=use_integral, use_complex=use_complex), 0)
         do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
-                                  use_integral=use_integral), 1)
+                                  use_integral=use_integral, use_complex=use_complex), 1)
         do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
-                                  use_integral=use_integral), 2)
+                                  use_integral=use_integral, use_complex=use_complex), 2)
         do_one(self._make_tensors((100000, ), use_floating=use_floating,
-                                  use_integral=use_integral), -1)
+                                  use_integral=use_integral, use_complex=use_complex), -1)
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
-                                  use_integral=use_integral), 0)
+                                  use_integral=use_integral, use_complex=use_complex), 0)
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
-                                  use_integral=use_integral), 1)
+                                  use_integral=use_integral, use_complex=use_complex), 1)
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
-                                  use_integral=use_integral), 2)
+                                  use_integral=use_integral, use_complex=use_complex), 2)
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
-                                  use_integral=use_integral), (1, 2))
+                                  use_integral=use_integral, use_complex=use_complex), (1, 2))
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
-                                  use_integral=use_integral), (1, -1))
+                                  use_integral=use_integral, use_complex=use_complex), (1, -1))
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
-                                  use_integral=use_integral), (0, 2))
+                                  use_integral=use_integral, use_complex=use_complex), (0, 2))
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
-                                  use_integral=use_integral), (0, 2, 1))
+                                  use_integral=use_integral, use_complex=use_complex), (0, 2, 1))
 
     @slowTest
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_sum_dim(self):
         self._test_dim_ops(
             lambda t, d: t.sum(d),
-            lambda n, d: n.sum(d))
+            lambda n, d: n.sum(d),
+            use_floating=True, use_integral=True, use_complex=True)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_mean_dim(self):
