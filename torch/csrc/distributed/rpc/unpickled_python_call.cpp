@@ -9,16 +9,9 @@ namespace rpc {
 
 UnpickledPythonCall::UnpickledPythonCall(
     const SerializedPyObj& serializedPyObj) {
-  pythonUdf_ = PythonRpcHandler::getInstance().deserialize(serializedPyObj);
-}
-
-UnpickledPythonCall::~UnpickledPythonCall() {
-  // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
-  // decref on the PyObject again.
-  // See Note [Destructing py::object] in python_ivalue.h
-  py::gil_scoped_acquire acquire;
-  pythonUdf_.dec_ref();
-  pythonUdf_.ptr() = nullptr;
+  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+  pybind11::gil_scoped_acquire ag;
+  pythonUdf_ = pythonRpcHandler.deserialize(serializedPyObj);
 }
 
 Message UnpickledPythonCall::toMessageImpl() && {
@@ -26,8 +19,8 @@ Message UnpickledPythonCall::toMessageImpl() && {
       false, "UnpickledPythonCall does not support toMessage().");
 }
 
-const py::object& UnpickledPythonCall::pythonUdf() const {
-  return pythonUdf_;
+py::object UnpickledPythonCall::movePythonUdf() && {
+  return std::move(pythonUdf_);
 }
 
 } // namespace rpc
