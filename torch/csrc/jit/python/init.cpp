@@ -1,6 +1,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
@@ -17,6 +18,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
+#include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -37,7 +39,11 @@
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/peephole.h>
-#include <torch/csrc/jit/passes/quantization.h>
+#include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
+#include <torch/csrc/jit/passes/quantization/finalize.h>
+#include <torch/csrc/jit/passes/quantization/insert_observers.h>
+#include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
+#include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -137,7 +143,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_constant_fold",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict,
+             std::map<std::string, IValue>& paramsDict,
              int opset_version) {
             ConstantFoldONNX(
                 graph->block(),
@@ -216,12 +222,6 @@ void initJITBindings(PyObject* module) {
           [](Module& module) { return freeze_module(module); },
           py::arg("module"))
       .def("_jit_pass_fuse_linear", &FuseLinear)
-      .def(
-          "_jit_pass_fold_quantize",
-          [](Module& module, const std::string& method_name) {
-            FoldQuantizeCallIntoBuffer(module, method_name);
-          })
-      .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
       .def("_jit_pass_swap_dequantize", &PropagateQuantizationOps)
@@ -258,11 +258,6 @@ void initJITBindings(PyObject* module) {
             SubgraphRewriter subgraph_rewriter;
             subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
             subgraph_rewriter.runOnGraph(g);
-          })
-      .def(
-          "_jit_pass_fold_quant_inputs",
-          [](std::shared_ptr<Graph>& g) {
-            return FoldQuantNodesIntoInputsOutputs(g);
           })
       .def(
           "_jit_pass_remove_inplace_ops",
@@ -495,6 +490,8 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_set_texpr_fuser_enabled", &setTensorExprFuserEnabled)
       .def("_jit_texpr_fuser_enabled", &tensorExprFuserEnabled)
+      .def("_jit_texpr_fallback_allowed", &tensorexpr::fallbackAllowed)
+      .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
       .def(
           "_jit_pass_fuse_tensorexprs",
           [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
@@ -503,6 +500,9 @@ void initJITBindings(PyObject* module) {
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
           })
+      .def(
+          "_jit_pass_remove_dropout",
+          [](script::Module& module) { return removeDropout(module); })
       .def(
           "_jit_pass_insert_prepacked_ops",
           [](std::shared_ptr<Graph>& graph) {
@@ -525,7 +525,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict) {
+             std::map<std::string, IValue>& paramsDict) {
             UnpackQuantizedWeights(graph, paramsDict);
             return paramsDict;
           },
@@ -533,11 +533,43 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_quantization_insert_permutes",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict) {
+             std::map<std::string, IValue>& paramsDict) {
             insertPermutes(graph, paramsDict);
             return paramsDict;
           },
-          pybind11::return_value_policy::move);
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_pass_filter_non_tensor_arguments",
+          [](std::map<std::string, IValue> params) {
+            std::map<std::string, at::Tensor> retval;
+            for (auto& kv : params) {
+              if (kv.second.isTensor()) {
+                retval[kv.first] = std::move(kv.second).toTensor();
+              }
+            }
+            return retval;
+          })
+      .def("_jit_decay_packed_param_input_types", [](Graph& g) {
+        for (Value* i : g.inputs()) {
+          if (i->type() ==
+                  getCustomClass(
+                      "__torch__.torch.classes.quantized.Conv2dPackedParamsBase") ||
+              i->type() ==
+                  getCustomClass(
+                      "__torch__.torch.classes.quantized.Conv3dPackedParamsBase") ||
+              i->type() ==
+                  getCustomClass(
+                      "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
+            // Dummy CompleteTensorType to appease ONNX validator.
+            i->setType(TensorType::create(
+                at::kQInt8,
+                c10::kCPU,
+                std::vector<int64_t>{1},
+                std::vector<int64_t>{1},
+                c10::nullopt));
+          }
+        }
+      });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
@@ -795,18 +827,15 @@ void initJITBindings(PyObject* module) {
   });
   m.def("_is_tracing", []() { return jit::tracer::isTracing(); });
 
-  py::class_<PythonFutureWrapper>(m, "Future")
+  py::class_<PythonFutureWrapper, std::shared_ptr<PythonFutureWrapper>>(
+      m, "Future")
       .def(
           "wait",
-          [](PythonFutureWrapper& fut) {
-            auto res = fut.wait();
-            {
-              // acquiring GIL as toPyObject creates new py::object
-              // without grabbing the GIL.
-              pybind11::gil_scoped_acquire ag;
-              return toPyObject(std::move(res));
-            }
-          },
+          &PythonFutureWrapper::wait,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_then",
+          &PythonFutureWrapper::then,
           py::call_guard<py::gil_scoped_release>());
 
   m.def("fork", [](py::args args) {
@@ -854,16 +883,18 @@ void initJITBindings(PyObject* module) {
       // stuff the ivalue output in the Future
       retval->markCompleted(output_ivalue);
 
-      return PythonFutureWrapper(retval);
+      return std::make_shared<PythonFutureWrapper>(retval);
     } else {
       auto result = toTypeInferredIValue(f(*args_tup));
       auto retval = c10::make_intrusive<c10::ivalue::Future>(result.type());
       retval->markCompleted(std::move(result));
-      return PythonFutureWrapper(retval);
+      return std::make_shared<PythonFutureWrapper>(retval);
     }
   });
 
-  m.def("wait", [](PythonFutureWrapper& fut) { return fut.wait(); });
+  m.def("wait", [](const std::shared_ptr<PythonFutureWrapper>& fut) {
+    return fut->wait();
+  });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);
@@ -874,6 +905,7 @@ void initJITBindings(PyObject* module) {
   tracer::initPythonTracerBindings(module);
   initTreeViewBindings(module);
   initJitScriptBindings(module);
+  initJitBackendBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;

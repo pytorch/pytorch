@@ -1331,7 +1331,7 @@ bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
 Function* checkSortSchema(const c10::TypePtr& list_element_type) {
   std::stringstream error_str;
   if (auto class_type = list_element_type->cast<ClassType>()) {
-    if (auto method = class_type->getMethod("__lt__")) {
+    if (auto method = class_type->findMethod("__lt__")) {
       const auto& lt_schema = method->getSchema();
       const auto& schema_args = lt_schema.arguments();
       bool error =

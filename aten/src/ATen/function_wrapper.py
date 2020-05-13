@@ -24,27 +24,12 @@ except ImportError:
 # where they can be called directly by a native function, they can be wrapped
 # by a native function that handles dispatch
 
-# Handle broadcasting for TH functions that need it
-LEGACY_TH_DECLARATION_BROADCAST = CodeTemplate("""\
+LEGACY_TH_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals});
 """)
 
-LEGACY_TH_DEFINITION_BROADCAST = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}) {
-    ${named_guard_declaration}
-    ${device_guard_declaration}
-    Tensor ${broadcast_returns};
-    std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
-    return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
-}
-""")
-
-LEGACY_TH_DECLARATION = CodeTemplate("""\
-${return_type} ${method_prefix_derived}${api_name}(${type_method_formals});
-""")
-
 LEGACY_TH_DEFINITION = CodeTemplate("""\
-${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${type_method_formals}) {
     ${named_guard_declaration}
     ${device_guard_declaration}
     ${type_definition_body}
@@ -59,6 +44,7 @@ switch (dispatch_scalar_type) {
     default:
         AT_ERROR("${api_name} not supported on ${Type} for ", dispatch_scalar_type);
 }
+${switch_epilogue}
 """)
 
 LEGACY_TH_DEFINITION_CASE = CodeTemplate("""\
@@ -148,7 +134,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     ${static_dispatch_method_body}
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
-    return op.callUnboxed<${formals_types_with_return}>(${method_actuals});
+    return op.call<${formals_types_with_return}>(${method_actuals});
 #endif
 }
 """)
@@ -173,7 +159,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
-    return op.callUnboxed<${formals_types_with_return}>(${native_actuals});
+    return op.call<${formals_types_with_return}>(${native_actuals});
 #endif
 }
 """)
@@ -210,16 +196,6 @@ case Backend::${backend}:
 NATIVE_DECLARATION = CodeTemplate("""\
 CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
-
-ZERO_DIM_CHECK = CodeTemplate("""\
-if (${check_name}.dim() == 0) {
-    return ${api_name}(${zero_dim_actuals});
-}""")
-
-CONDITIONAL_INITIALIZER = CodeTemplate("""\
-if (${name}.defined()) {
-    ${initializer}
-}""")
 
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
@@ -315,8 +291,6 @@ CHECKED_CAST = {
             'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'DeviceType::${DeviceType}, ScalarType::Long)'),
-    # This is a cast done via direct-construction
-    'IntArrayRefStride': CodeTemplate('at::IntArrayRef ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate(
@@ -337,16 +311,16 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                 '(c10::Storage(scalarTypeToTypeMeta(${ScalarName}), 0, allocator(), true),'
+                 '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(${ScalarName}), 0, allocator(), true),'
                  'DispatchKey::${Backend}).release()',
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
                      'DispatchKey::${Backend}).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
                      'DispatchKey::${Backend}).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
                      'DispatchKey::${Backend}).release()',
 }
 
@@ -414,10 +388,6 @@ THFormal = TypedDict('THFormal', {
     'annotation': str,
     'allocate': bool,
     'mask': bool,
-    # Broadcast is originally a str but gets unwrapped to a List or Dict in-place
-    'broadcast': Any,
-    'resize': str,
-    'zero': bool,
 }, total=False)
 
 # Generic ATen formal or native_functions.yaml formal argument.
@@ -481,10 +451,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'arguments': List[THFormal],
     'backend_types': Dict[str, List[str]],
     'backends': List[str],
-    'broadcast_actuals': List[str],
-    'broadcast_function': str,
-    'broadcast_modified_actuals': List[str],
-    'broadcast_returns': List[str],
     'buffers': List[NNBuffer],
     # cimpls is really a List[FunctionOption]
     'cimpls': List[Any],
@@ -519,7 +485,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'method_actuals': List[str],
     'method_formals_with_defaults': List[str],
     'method_formals': List[str],
-    'method_prefix_derived': str,
     'named_guard_declaration': str,
     'mode': str,
     'python_module': str,
@@ -554,7 +519,6 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('category_override', str),
     ('matches_jit_signature', bool),
     ('schema_string', str),
-    ('method_prefix_derived', str),
     ('arguments', List[AtFormal]),
     ('method_of', List[str]),
     ('mode', str),
@@ -779,15 +743,12 @@ def gen_device_init(option, backend_type_env):
     # type: (FunctionOption, Environment) -> List[str]
     # generate a device init statement, if the passed function option is a Tensor factory.
     #
-    if not is_factory(option):
-        return []
-
-    name = option['name']
-    device_type = backend_type_env['DeviceType']
-    assert device_type in ['CPU', 'CUDA'], \
-        "{}: unsupported device type '{}'".format(name, device_type)
-    return ['globalLegacyTypeDispatch().init{}();'.format(device_type)]
-
+    if is_factory(option):
+        name = option['name']
+        device_type = backend_type_env['DeviceType']
+        if device_type == 'CUDA' or device_type == 'HIP':
+            return ['globalContext().lazyInit{}();'.format(device_type)]
+    return []
 
 def create_generic(top_env, declarations):
     # type: (TopEnvironment, List[FunctionOption]) -> Tuple[List[OutputDeclaration], List[OpRegistration]]
@@ -901,33 +862,6 @@ def create_generic(top_env, declarations):
             return return_types[0]['type']
         return "std::tuple<{}>".format(','.join(r['type'] for r in return_types))
 
-    def get_broadcast_argument(option):
-        # type: (FunctionOption) -> Optional[THFormal]
-        for argument in option['arguments']:
-            if argument.get('broadcast'):
-                return argument
-        return None
-
-    def get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims):
-        # type: (THFormal, bool, bool) -> List[str]
-        # Note: broadcast_dims can change type...
-        # return the actuals that will be passed to the broadcast function.
-        # in the broadcast_dims case (the only currently supported case), this is
-        # the broadcasted argument (e.g. "self") followed by the sizes it is broadcasted
-        # to (as an initializer list), so e.g. the specification:
-        # "mat1.dim0,mat2.dim1"
-        # gets transformed to
-        # "self, {mat1.size(0),mat2.size(1)}"
-        assert broadcast_dims
-        broadcast_dims_spec = broadcast_arg['broadcast'].split()[1].split(':')[1].split(',')
-        # generate size call for each dimension
-        broadcast_dims = ([x.split('.')[0] + '.size(' + x.split('.')[1].replace('dim', '') + ')'  # type: ignore
-                          for x in broadcast_dims_spec])
-        broadcast_dims_init_list = '{' + ','.join(broadcast_dims) + '}'  # type: ignore
-        broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
-
-        return broadcast_actuals
-
     def process_legacy_th_option(option):
         # type: (FunctionOption) -> None
         # Mutably populate option with derived values computed from values
@@ -964,9 +898,6 @@ def create_generic(top_env, declarations):
         dispatch_tensor = find_dispatch_tensor(formals)
         is_namespace_function = is_function and dispatch_tensor is not None
 
-        broadcast_arg = get_broadcast_argument(option)
-        # "s_" for "same size".
-        option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
         if option['mode'] == 'TH':
             option['device_guard'] = False
         option['device_guard_declaration'] = device_guard(option, False, dispatch_tensor)
@@ -975,21 +906,6 @@ def create_generic(top_env, declarations):
         option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, False, dispatch_tensor)
 
         assert option['extended_method'], 'Expected legacy operator to be an extended method'
-
-        if broadcast_arg is not None:
-            broadcast_inplace = 'inplace' in broadcast_arg['broadcast']
-            broadcast_dims = 'dims:' in broadcast_arg['broadcast']
-            option['broadcast_actuals'] = get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims)
-            if not broadcast_dims:
-                option['broadcast_returns'] = (["b_" + x for x in option['broadcast_actuals']
-                                               if x != broadcast_arg['name'] or not broadcast_inplace])
-            else:
-                option['broadcast_returns'] = ["b_" + broadcast_arg['name']]
-
-            option['broadcast_function'] = 'expand_' + ('inplace' if broadcast_inplace
-                                                        else 'size' if broadcast_dims else 'outplace')
-            option['broadcast_modified_actuals'] = ['b_' + y if 'b_' + y in option['broadcast_returns'] else y
-                                                    for y in option['actuals']]
 
     def native_get_formals(option, include_constants=False):
         # type: (FunctionOption, bool) -> List[AtFormal]
@@ -1224,7 +1140,6 @@ def create_generic(top_env, declarations):
 
         check_methods_do_not_start_with_underscore(option['name'], is_method)
 
-        option['method_prefix_derived'] = ''
         # NB: Device guard and scalar type generated code is still based on the
         # first argument.  Scalar type test will be removed once TH is removed.
         # If you need more complex device guard behavior, you should disable
@@ -1236,10 +1151,6 @@ def create_generic(top_env, declarations):
                                                         find_tensorlists(formals))
         option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, dispatch_options, guard_tensor)
 
-        broadcast_arg = get_broadcast_argument(option)
-        if broadcast_arg is not None:
-            raise Exception("broadcasting is not yet supported for native functions, "
-                            "but specified for function {}", option['name'])
         top_env['aten_ops'].append(OPERATOR_NAME_FULL.substitute(option))
 
         option['native_type_method_dispatch'] = type_method_dispatch
@@ -1314,7 +1225,6 @@ def create_generic(top_env, declarations):
             category_override=option['category_override'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
-            method_prefix_derived=option['method_prefix_derived'],
             arguments=formals,
             method_of=method_of,
             mode=option['mode'],
@@ -1413,15 +1323,6 @@ def create_derived(backend_type_env, declarations):
             'auto {} = Tensor({}::reclaim({}));'.format(name, intrusive_ptr_type, tensor_arg),
         ]
 
-    def resize_arg(arg):
-        # type: (THFormal) -> str
-        resize = arg['resize']
-        if isinstance(resize, str):
-            return "{}.resize_({}.sizes());".format(arg['name'], resize)
-        else:
-            dims = ['{}.size({})'.format(name, dim) for name, dim in resize]
-            return "{}.resize_({{ {} }});".format(arg['name'], ','.join(dims))
-
     def handle_call(env, option, cimpl):
         # type: (Environment, FunctionOption, FunctionOption) -> str
         is_nn = option['mode'] == 'NN'
@@ -1505,25 +1406,6 @@ def create_derived(backend_type_env, declarations):
                             case_body.append("auto {}_ = {};".format(
                                 arg['name'], check_cast))
 
-                        initializers = []
-
-                        # resize tensors for special ops that require it
-                        if 'resize' in arg:
-                            initializers.append(resize_arg(arg))
-
-                        # also special handling where we zero some outputs.
-                        if arg.get('zero', False):
-                            initializers.append("{}.zero_();".format(arg['name']))
-
-                        # only initialize non-null arguments
-                        if nullable_argument(arg) and len(initializers) > 0:
-                            case_body.append(CONDITIONAL_INITIALIZER.substitute({
-                                'name': arg['name'],
-                                'initializer': initializers
-                            }))
-                        else:
-                            case_body += initializers
-
                 # cimpls, if it exists, contains the underlying C function names and
                 # arguments. Otherwise use option
                 cimpls = option.get('cimpls', [option])
@@ -1533,19 +1415,7 @@ def create_derived(backend_type_env, declarations):
 
                 if ret['kind'] == 'arguments':
                     case_body.extend([call + ';' for call in calls])
-                    arguments_indices = ret['arguments']
-                    arguments = [option['arguments'][argi]
-                                 for argi in arguments_indices]
-                    if len(arguments_indices) == 1:
-                        arg = arguments[0]
-                        case_body.append("return {};".format(arg['name']))
-                    else:
-                        types = [to_return_type(arg, option)['type']
-                                 for arg in arguments]
-                        # TODO: check for move semantics...
-                        names = [arg['name'] for arg in arguments]
-                        case_body.append(CodeTemplate("return std::tuple<${types}>(${names});").substitute(
-                            types=types, names=names))
+                    # return handled later
                 elif ret['kind'] == 'type':
                     assert len(calls) == 1
                     call = calls[0]
@@ -1563,7 +1433,24 @@ def create_derived(backend_type_env, declarations):
                     raise Exception("NYI - return handling")
 
                 cases.append(LEGACY_TH_DEFINITION_CASE.substitute(case_env, case_body=case_body))
-        body.append(LEGACY_TH_DEFINITION_SWITCH_STATEMENT.substitute(env, cases=cases, switch_prologue=switch_prologue))
+        switch_epilogue = ''
+        if ret['kind'] == 'arguments':
+            arguments_indices = ret['arguments']
+            arguments = [option['arguments'][argi]
+                         for argi in arguments_indices]
+            if len(arguments_indices) == 1:
+                arg = arguments[0]
+                switch_epilogue = "return {};".format(arg['name'])
+            else:
+                types = [to_return_type(arg, option)['type']
+                         for arg in arguments]
+                # TODO: check for move semantics...
+                names = [arg['name'] for arg in arguments]
+                switch_epilogue = CodeTemplate("return std::tuple<${types}>(${names});").substitute(
+                    types=types, names=names)
+        body.append(LEGACY_TH_DEFINITION_SWITCH_STATEMENT.substitute(env, cases=cases,
+                                                                     switch_prologue=switch_prologue,
+                                                                     switch_epilogue=switch_epilogue))
         return body
 
     def process_legacy_th_option(option):
@@ -1573,11 +1460,6 @@ def create_derived(backend_type_env, declarations):
             env = nested_dict(option, backend_type_env)
             body = emit_body(env, option, option['backend_types'][backend])  # type: ignore
             option['type_definition_body'] = body
-            if option.get('broadcast_actuals', None):
-                legacy_th_declarations.append(
-                    LEGACY_TH_DECLARATION_BROADCAST.substitute(env))
-                legacy_th_definitions.append(
-                    LEGACY_TH_DEFINITION_BROADCAST.substitute(env))
             legacy_th_declarations.append(
                 LEGACY_TH_DECLARATION.substitute(env))
             legacy_th_definitions.append(

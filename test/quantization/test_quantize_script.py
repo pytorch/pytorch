@@ -11,15 +11,11 @@ from torch.quantization import QConfig
 from torch.quantization import default_dynamic_qconfig
 from torch.quantization import QConfigDynamic
 from torch.quantization import default_observer
-from torch.quantization import default_weight_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
 from torch.quantization import get_default_qconfig
-from torch.quantization import quantize
 
 # torch.quantization._quantize_script
-from torch.nn.quantized.modules.linear import LinearPackedParams
-from torch.quantization._quantize_script import ConvPackedParams
 from torch.quantization._quantize_script import script_qconfig
 from torch.quantization._quantize_script import prepare_script
 from torch.quantization._quantize_script import convert_script
@@ -28,8 +24,6 @@ from torch.quantization._quantize_script import prepare_dynamic_script
 from torch.quantization._quantize_script import quantize_dynamic_script
 
 # Testing utils
-from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
-from torch.testing._internal.common_quantization import ConvModel, AnnotatedConvModel
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
 
 from torch.testing import FileCheck
@@ -793,105 +787,6 @@ graph(%input, %weight):
                            .check("return") \
                            .run(conv._get_method('_conv_forward').graph)
 
-    def test_fold_quantize(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.weight = torch.nn.Parameter(torch.tensor([2], dtype=torch.float))
-
-            def forward(self, x):
-                return torch.quantize_per_tensor(self.weight, 2.0, 0, torch.quint8)
-
-        m = torch.jit.script(M())
-        torch._C._jit_pass_fold_quantize(m._c, 'forward')
-        self.assertTrue(m._c.hasattr('_quantized_weight'))
-        FileCheck().check_not('GetAttr[name="weight"]') \
-                   .check('GetAttr[name="_quantized_weight"]') \
-                   .run(m._c._get_method('forward').graph)
-
-    @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
-    @unittest.skip("Skip for now since we changed scale/zero_point to attributes."
-                   "We'll enable this in a separate PR")
-    def test_fold_prepack(self):
-        def copy_weights(name, m, ref_m):
-            if name == 'linear':
-                m.fc1.weight = torch.nn.Parameter(ref_m.fc1.module.weight.detach())
-                m.fc1.bias = torch.nn.Parameter(ref_m.fc1.module.bias.detach())
-            else:
-                m.conv.weight = torch.nn.Parameter(ref_m.conv.weight.detach())
-
-        for is_per_channel in [True, False]:
-            for name, M, ref_M, data in [
-                    ('linear',
-                     SingleLayerLinearModel,
-                     AnnotatedSingleLayerLinearModel,
-                     torch.randn((5, 5), dtype=torch.float)),
-                    ('conv',
-                     ConvModel,
-                     AnnotatedConvModel,
-                     torch.randn((1, 3, 7, 7), dtype=torch.float))]:
-                qconfig = QConfig(
-                    activation=default_observer,
-                    weight=default_per_channel_weight_observer if is_per_channel else default_weight_observer)
-                # eager mode
-                ref_m = ref_M()
-                m = M()
-                copy_weights(name, m, ref_m)
-                ref_m.qconfig = qconfig
-                ref_m = quantize(ref_m, _test_only_eval_fn, [(data, torch.randint(0, 1, (5,), dtype=torch.long))])
-                ref_res = ref_m(data)
-                # script mode
-                m = torch.jit.script(m)
-                qconfig_dict = {
-                    '': script_qconfig(qconfig)
-                }
-                m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, 'forward', qconfig_dict, False))
-                get_forward(m._c)(data)
-                m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, 'forward', False))
-                torch._C._jit_pass_insert_prepack_unpack(m._c)
-                linear_packed_params = torch.jit.script(LinearPackedParams())._c
-                conv_packed_params = torch.jit.script(ConvPackedParams())._c
-                torch._C._jit_pass_fold_prepack(m._c,
-                                                linear_packed_params,
-                                                conv_packed_params)
-                res = get_forward(m._c)(data)
-                # check result
-                self.assertEqual(res, ref_res)
-
-                # check attributes
-                # construct a RecursiveScriptModule
-                m = wrap_cpp_module(m._c)
-                mod_to_inspect = m.fc1 if name == 'linear' else m.conv
-                packed_module_list = [x for x, _ in mod_to_inspect._modules._c.items()
-                                      if x.startswith('_' + name + '_packed_params_module')]
-                assert len(packed_module_list) == 1, \
-                    'Expected to have one packed_params_module'
-                packed_module_name = packed_module_list[0]
-                # check values
-                w, _ = mod_to_inspect._c.getattr(packed_module_name)._get_method('_weight_bias')()
-                original_w = mod_to_inspect.weight
-                if is_per_channel:
-                    ref_w = torch.quantize_per_channel(original_w,
-                                                       w.q_per_channel_scales(),
-                                                       w.q_per_channel_zero_points(),
-                                                       w.q_per_channel_axis(),
-                                                       w.dtype).dequantize()
-                else:
-                    ref_w = torch.quantize_per_tensor(original_w, w.q_scale(), w.q_zero_point(), w.dtype).dequantize()
-                self.assertEqual(ref_w, w.dequantize())
-
-                # test serialization
-                buffer = io.BytesIO()
-                torch.jit.save(m, buffer)
-                buffer.seek(0)
-                loaded_mod = torch.jit.load(buffer)
-                loaded_res = loaded_mod(data)
-                self.assertEqual(ref_res, loaded_res)
-
     def test_dedup_module_uses(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1098,15 +993,25 @@ graph(%input, %weight):
             def __init__(self):
                 super(M, self).__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.avgpool = torch.nn.AvgPool2d(3)
 
             def forward(self, x):
-                return self.conv(x)
+                x = self.conv(x)
+                x = self.avgpool(x)
+                return x
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False, debug=True)
         FileCheck().check_not("quantized::conv2d") \
+                   .check("aten::conv2d") \
+                   .check("aten::avg_pool2d") \
+                   .check("aten::q_scale") \
+                   .check_next("aten::q_zero_point") \
+                   .check_next("prim::dtype") \
+                   .check_next("aten::quantize_per_tensor") \
+                   .check("aten::dequantize") \
                    .run(model.graph)
 
     def test_module_list(self):
@@ -1618,9 +1523,10 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         FileCheck().check_not("aten::layer_norm") \
                    .run(m.graph)
 
-    def test_swap_dequantize_all_ops(self):
+    def test_quantize_general_shape_ops(self):
         """ A test that checks dequantize will be swapped for
-        all supported general ops without actually checking for execution of these ops
+        all supported general shape ops like aten::flatten
+        without actually checking for execution of these ops
         """
         class M(torch.nn.Module):
             def __init__(self):
@@ -1628,13 +1534,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.maxpool1d = torch.nn.MaxPool1d(kernel_size=3)
                 self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3)
                 self.maxpool3d = torch.nn.MaxPool3d(kernel_size=3)
-                self.adaptive_avgpool1d = torch.nn.AdaptiveAvgPool1d((1))
-                self.adaptive_avgpool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
-                self.adaptive_avgpool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.dropout = torch.nn.Dropout()
-                self.avgpool1d = torch.nn.AvgPool1d(3)
-                self.avgpool2d = torch.nn.AvgPool2d(3)
-                self.avgpool3d = torch.nn.AvgPool3d(3)
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.sigmoid = torch.nn.Sigmoid()
                 self.tanh = torch.nn.Tanh()
@@ -1650,22 +1550,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = self.maxpool1d(x)
                 x = self.maxpool2d(x)
                 x = self.maxpool3d(x)
-                x = self.adaptive_avgpool1d(x)
-                x = self.adaptive_avgpool2d(x)
-                x = self.adaptive_avgpool3d(x)
-                x = self.avgpool1d(x)
-                x = self.avgpool2d(x)
-                x = self.avgpool3d(x)
                 x = torch.flatten(x)
-                x = F.adaptive_avg_pool1d(x, (1))
-                x = F.adaptive_avg_pool2d(x, (1, 1))
-                x = F.adaptive_avg_pool3d(x, (1, 1, 1))
-                x = F.avg_pool1d(x, 3)
-                x = F.avg_pool2d(x, 3)
-                x = F.avg_pool3d(x, 3)
                 x = torch.max(x)
                 x = torch.min(x)
-                x = torch.mean(x)
                 x = torch.sigmoid(x)
                 x = x.reshape([-1])
                 x = x.resize_(1, 1, x.numel())
@@ -1729,6 +1616,74 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .check_count("quantized::conv2d", 2, exactly=True) \
                    .check("aten::dequantize") \
                    .run(m.graph)
+
+    def test_quantize_general_value_ops(self):
+        """ A test that checks dequantize will be swapped for \
+        all supported general value ops like aten::avg_pool2d \
+        without actually checking for execution of these ops
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.avg_pool1d = torch.nn.AvgPool1d(3)
+                self.avg_pool2d = torch.nn.AvgPool2d(3)
+                self.avg_pool3d = torch.nn.AvgPool2d(3)
+                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
+                self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.avg_pool1d(x)
+                x = self.avg_pool2d(x)
+                x = self.avg_pool3d(x)
+                x = self.adaptive_avg_pool1d(x)
+                x = self.adaptive_avg_pool2d(x)
+                x = self.adaptive_avg_pool3d(x)
+                x = F.avg_pool1d(x, 3)
+                x = F.avg_pool2d(x, 3)
+                x = F.avg_pool3d(x, 3)
+                x = F.adaptive_avg_pool1d(x, (1))
+                x = F.adaptive_avg_pool2d(x, (1, 1))
+                x = F.adaptive_avg_pool3d(x, (1, 1, 1))
+                x = torch.mean(x)
+                x = x.mean()
+                x = self.conv(x)
+                return x
+
+        m = torch.jit.script(M())
+        qconfig = script_qconfig(default_qconfig)
+        # dummy data to suppress warning
+        data = torch.rand((1, 3, 10, 10))
+        get_forward(qconfig.activation)(data)
+        get_forward(qconfig.weight)(data)
+
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
+            m._c, 'forward', {'': qconfig}, inplace=False))
+        # Checking the model before fianlize contain unfused patterns
+        # that numerically matches the model after quantize by checking
+        # number of aten::quantize_per_tensor functions
+        # conv has 3 quantize_per_tensor for activations and 1 for weight
+        # and for N general value op between conv we should have
+        # N + 1 quantize_per_tensor between these ops
+        m1 = convert_script(m, debug=True)
+        conv_op_quant = 4
+        # NB: This Needs to be updated when we add more ops to test
+        general_value_op_quant = 14
+        FileCheck().check_count("aten::quantize_per_tensor(", conv_op_quant + general_value_op_quant + 1, exactly=True) \
+                   .run(m1.graph)
+
+        # This checks that the dequantize from the output of first conv
+        # is being propagated to the end, so that we don't insert extra
+        # observers and also successfully fused two quantized::conv2d
+        # patterns
+        # one quantize_per_tensor for input
+        m2 = convert_script(m, debug=False)
+        FileCheck().check_count("aten::quantize_per_tensor(", 1, exactly=True) \
+                   .check_count("quantized::conv2d(", 2, exactly=True) \
+                   .check("aten::dequantize(") \
+                   .run(m2.graph)
 
 class TestQuantizeDynamicScript(JitTestCase):
     def test_prepare_dynamic(self):
