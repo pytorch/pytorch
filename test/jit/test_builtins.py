@@ -15,10 +15,12 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+
 class TestBuiltins(JitTestCase):
     """
     Tests for TorchScript support of Python builtin functions.
     """
+
     def test_has_attr(self):
         class HasA(torch.nn.Module):
             def __init__(self):
@@ -134,3 +136,34 @@ class TestTensorBuiltins(JitTestCase):
             if p in EQUALITY_MISMATCH:
                 continue
             self.assertEqual(getattr(tensor, p), cu.fn(tensor))
+
+    def test_tensor_subscript_assign(self):
+        def fn1(x):
+            a = torch.zeros_like(x, dtype=torch.uint8)
+            a[torch.tensor(0)] = torch.tensor(2, dtype=torch.uint8)
+            return a
+
+        def fn2(x):
+            a = torch.zeros_like(x, dtype=torch.uint8)
+            a[0] = 2
+            return a
+
+        def fn3(x):
+            a = torch.zeros_like(x, dtype=torch.uint8)
+            a[torch.tensor(0)] = 2
+            return a
+
+        def fn4(x):
+            a = torch.zeros_like(x, dtype=torch.uint8)
+            a[0] = torch.tensor(2, dtype=torch.uint8)
+            return a
+
+        def fn5(x):
+            a = torch.zeros_like(x, dtype=torch.float32)
+            a[torch.tensor(0)] = 2
+            return a
+
+        for fn in (fn1, fn2, fn3, fn4, fn5):
+            result1 = torch.jit.script(fn)(torch.zeros(2, dtype=torch.uint8))
+            result2 = fn(torch.zeros(2, dtype=torch.uint8))
+            self.assertEqual(list(result1), list(result2))

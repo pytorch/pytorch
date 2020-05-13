@@ -2008,6 +2008,31 @@ struct to_ir {
     }
   }
 
+  NamedValue emitValueToTensor(
+      const NamedValue& value,
+      const NamedValue& matchTypeOf) {
+    // Add implicit conversion of int/float/bool types to tensors
+    // Used in emitSubscriptAssign to convert:
+    //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
+    // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
+    const auto kind = value.type()->kind();
+    if (kind == c10::TypeKind::IntType ||
+        kind == c10::TypeKind::BoolType ||
+        kind == c10::TypeKind::FloatType
+    ) {
+      auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
+      auto converted = graph->insert(
+          aten::tensor,
+          {value},
+          {NamedValue("dtype", dtype)});
+      return NamedValue(value.loc(), converted);
+    }
+
+    return value;
+  }
+
+
+
   // Emit mutating assignments like `foo[0] = bar`
   void emitSubscriptAssign(
       const SourceRange& stmtRange,
@@ -2036,10 +2061,15 @@ struct to_ir {
           lhs.range(), sliceable, lhs.subscript_exprs());
 
       const auto slicedArg = NamedValue(lhs.range(), sliced);
+
+      // rhs must be a tensor, implicitly convert int/float/bool
+      const auto convertedRhs = emitValueToTensor(
+          rhs, slicedArg);
+
       if (tensorIndices.size() == 0) {
         // Common case: we only tried to index with int and slices. Copy the
         // RHS into the resulting tensor.
-        graph->insert(aten::copy_, {slicedArg, rhs}, {}, stmtRange);
+        graph->insert(aten::copy_, {slicedArg, convertedRhs}, {}, stmtRange);
       } else {
         // Special case: we tried to do "advanced indexing" with a tensor.
         // Dispatch to `aten::index_put_` with tensorindices of Tensor?[]
@@ -2049,7 +2079,7 @@ struct to_ir {
                                  ->output();
 
         graph->insert(
-            aten::index_put_, {slicedArg, indices, rhs}, {}, stmtRange);
+            aten::index_put_, {slicedArg, indices, convertedRhs}, {}, stmtRange);
       }
       // Otherwise, this is a list or a classtype.
       // Dispatch to aten::_set_item to both select and assign
