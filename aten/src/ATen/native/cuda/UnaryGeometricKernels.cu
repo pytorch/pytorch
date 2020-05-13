@@ -172,8 +172,8 @@ __host__ __device__ static inline scalar_t arccosh_wrapper(scalar_t v) {
   return ::acosh(v);
 }
 
-template<typename scalar_t>
-__host__ __device__ static inline scalar_t arccosh_wrapper(scalar_t v) {
+template<typename T>
+__host__ __device__ static inline T arccosh_wrapper(T v) {
   return thrust::acosh(v);
 }
 
@@ -192,8 +192,8 @@ __host__ __device__ static inline scalar_t arcsinh_wrapper(scalar_t v) {
   return ::asinh(v);
 }
 
-template<typename scalar_t>
-__host__ __device__ static inline scalar_t arcsinh_wrapper(scalar_t v) {
+template<typename T>
+__host__ __device__ static inline T arcsinh_wrapper(T v) {
   return thrust::asinh(v);
 }
 
@@ -211,10 +211,16 @@ __host__ __device__ static inline scalar_t arctanh_wrapper(scalar_t v) {
   return ::atanh(v);
 }
 
+template<typename T>
+__host__ __device__ static inline T arctanh_wrapper(T v) {
+  return thrust::arctanh(v);
+}
+
 void arctanh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "arctanh_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "arctanh_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+  AT_DISPATCH_FLOATING_TYPES_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "arctanh_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(thrust_t, "arctanh_cuda", [&] {
+      gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
         return arctanh_wrapper(a);
       });
     });
