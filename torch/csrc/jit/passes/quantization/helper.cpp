@@ -55,11 +55,6 @@ std::vector<std::string> _dynamic_quantizable_aten_funcs = {
 // Also these ops doesn't do computation on the value of Tensor, the
 // operation only depends on the shape of the Tensor
 std::vector<std::string> _single_input_general_shape_call_funcs = {
-    "adaptive_avg_pool1d",
-    "adaptive_avg_pool2d",
-    "adaptive_avg_pool3d",
-    "avg_pool1d",
-    "avg_pool3d",
     "_max_pool1d",
     "_max_pool2d",
     "_max_pool3d",
@@ -91,8 +86,6 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "max_pool1d",
     "max_pool2d",
     "max_pool3d",
-    "avg_pool1d",
-    "avg_pool3d",
     "flatten",
     "max",
     "min",
@@ -100,9 +93,6 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "upsample_nearest1d",
     "upsample_nearest2d",
     "upsample_nearest3d",
-    "adaptive_avg_pool1d",
-    "adaptive_avg_pool2d",
-    "adaptive_avg_pool3d",
     "upsample_linear1d",
     "upsample_bilinear2d",
     "upsample_trilinear3d",
@@ -136,7 +126,12 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
 // have a single input Tensor
 // Also these ops do computation on the value of Tensor
 std::vector<std::string> _single_input_general_value_call_funcs = {
+    "avg_pool1d",
     "avg_pool2d",
+    "avg_pool3d",
+    "adaptive_avg_pool1d",
+    "adaptive_avg_pool2d",
+    "adaptive_avg_pool3d",
 };
 
 // Theses are aten functions for ops that doesn't require observation and
@@ -144,7 +139,12 @@ std::vector<std::string> _single_input_general_value_call_funcs = {
 // Also these ops do computation on the value of Tensor
 // e.g. `aten::avg_pool2d(%input_tensor, ...)`
 std::vector<std::string> _single_input_general_value_aten_funcs = {
+    "avg_pool1d",
     "avg_pool2d",
+    "avg_pool3d",
+    "adaptive_avg_pool1d",
+    "adaptive_avg_pool2d",
+    "adaptive_avg_pool3d",
 };
 
 // Special checks for ops that do not require observers for all input tensors.
