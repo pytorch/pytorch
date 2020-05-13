@@ -392,10 +392,10 @@ MAYBE_GLOBAL void test_arithmetic() {
 template<typename T, typename int_t>
 static void test_binary_ops_for_int_type_(T real, T img, int_t num) {
   c10::complex<T> c(real, img);
-  ASSERT_EQ(c + num, c10::complex<T>(real + num, img + num));
-  ASSERT_EQ(num + c, c10::complex<T>(num + real, num + img));
-  ASSERT_EQ(c - num, c10::complex<T>(real - num, num - num));
-  ASSERT_EQ(num - c, c10::complex<T>(num - real, num - img));
+  ASSERT_EQ(c + num, c10::complex<T>(real + num, img));
+  ASSERT_EQ(num + c, c10::complex<T>(num + real, img));
+  ASSERT_EQ(c - num, c10::complex<T>(real - num, img));
+  ASSERT_EQ(num - c, c10::complex<T>(num - real, -img));
   ASSERT_EQ(c * num, c10::complex<T>(real * num, img * num));
   ASSERT_EQ(num * c, c10::complex<T>(num * real, num * img));
   ASSERT_EQ(c / num, c10::complex<T>(real / num, img / num));
