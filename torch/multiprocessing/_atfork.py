@@ -1,3 +1,4 @@
+from __future__ import absolute_import
 import sys
 
 __all__ = ['register_after_fork']

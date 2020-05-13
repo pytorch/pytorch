@@ -12,9 +12,9 @@
  * https://github.com/python/cpython#copyright-and-license-information
  */
 
-#include "torch/csrc/utils/structseq.h"
-#include "torch/csrc/utils/six.h"
-#include "structmember.h"
+#include <torch/csrc/utils/structseq.h>
+#include <torch/csrc/utils/six.h>
+#include <structmember.h>
 #include <sstream>
 
 namespace torch {
