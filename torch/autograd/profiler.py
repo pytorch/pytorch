@@ -776,6 +776,11 @@ def parse_cpu_trace(thread_records):
     record_stack = []
     string_table = StringTable()
 
+    filtered_out_names = [
+        "profiler::_record_function_enter",
+        "profiler::_record_function_exit",
+    ]
+
     # cuda start events and the overall profiler start event don't happen
     # at exactly the same time because we need to record an event on each device
     # and each record takes ~4us. So we adjust here by the difference
@@ -805,10 +810,8 @@ def parse_cpu_trace(thread_records):
 
         for record in thread_record_list:
             # remove special record_function c10 ops
-            if (record.name() in [
-                        "profiler::_record_function_enter",
-                        "profiler::_record_function_exit"
-                    ] or record.handle() in filtered_handles):
+            if (record.name() in filtered_out_names or
+                    record.handle() in filtered_handles):
                 filtered_handles.add(record.handle())
                 continue
 
