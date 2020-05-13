@@ -536,6 +536,22 @@ graph(%a_quant, %output_size):
           %r = aten::adaptive_avg_pool3d(%a_quant, %output_size)
           return (%r) )";
 
+  // aten::mean
+  std::string mean = R"(
+graph(%a_quant, %dim):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::mean(%a_dequant, %dim)
+          %r_scale : float = aten::q_scale(%a_quant)
+          %r_zero_point : int = aten::q_zero_point(%a_quant)
+          %r_dtype : int = prim::dtype(%a_quant)
+          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+          return (%r_quant) )";
+
+  std::string aten_mean = R"(
+graph(%a_quant, %dim):
+          %r = aten::mean(%a_quant, %dim)
+          return (%r) )";
+
   return {
       {"quantized::conv2d", conv2d, quantized_conv2d},
       {"quantized::conv2d_relu", conv2d_relu, quantized_conv2d_relu},
@@ -609,6 +625,7 @@ graph(%a_quant, %output_size):
       {"aten::adaptive_avg_pool3d",
        adaptive_avg_pool3d,
        aten_adaptive_avg_pool3d},
+      {"aten::mean", mean, aten_mean},
   };
 }
 
