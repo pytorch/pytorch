@@ -1,6 +1,6 @@
 #include <torch/extension.h>
 
-// test include_dris in setuptools.setup with relative path
+// test include_dirs in setuptools.setup with relative path
 #include <tmp.h>
 
 torch::Tensor sigmoid_add(torch::Tensor x, torch::Tensor y) {

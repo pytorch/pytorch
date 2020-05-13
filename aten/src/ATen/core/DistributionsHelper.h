@@ -57,9 +57,9 @@ struct uniform_int_from_to_distribution {
       std::is_same<T, float>::value ||
       std::is_same<T, at::BFloat16>::value) && range_ >= 1ULL << 32)
     {
-      return uniform_int_from_to_transformation<T>(generator->random64(), range_, base_);
+      return transformation::uniform_int_from_to<T>(generator->random64(), range_, base_);
     } else {
-      return uniform_int_from_to_transformation<T>(generator->random(), range_, base_);
+      return transformation::uniform_int_from_to<T>(generator->random(), range_, base_);
     }
   }
 
@@ -76,7 +76,7 @@ struct uniform_int_full_range_distribution {
 
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
-    return uniform_int_full_range_transformation<T>(generator->random64());
+    return transformation::uniform_int_full_range<T>(generator->random64());
   }
 
 };
@@ -91,9 +91,9 @@ struct uniform_int_distribution {
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
     if (std::is_same<T, double>::value || std::is_same<T, int64_t>::value) {
-      return uniform_int_transformation<T>(generator->random64());
+      return transformation::uniform_int<T>(generator->random64());
     } else {
-      return uniform_int_transformation<T>(generator->random());
+      return transformation::uniform_int<T>(generator->random());
     }
   }
 
@@ -115,9 +115,9 @@ struct uniform_real_distribution {
   template <typename RNG>
   C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator){
     if(std::is_same<T, double>::value) {
-      return uniform_real_transformation<T>(generator->random64(), from_, to_);
+      return transformation::uniform_real<T>(generator->random64(), from_, to_);
     } else {
-      return uniform_real_transformation<T>(generator->random(), from_, to_);
+      return transformation::uniform_real<T>(generator->random(), from_, to_);
     }
   }
 

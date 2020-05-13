@@ -3583,7 +3583,7 @@ std::unique_ptr<Function> CompilationUnit::define(
       TORCH_INTERNAL_ASSERT(atoms.size() >= 2);
       call_name = atoms.at(atoms.size() - 2) + "." + atoms.at(atoms.size() - 1);
     }
-    ErrorReport::CallStack call(call_name);
+    ErrorReport::CallStack call(call_name, def.range());
     to_ir(def, _resolver, self, method);
   };
   auto name = prefix ? QualifiedName(*prefix, def.name().name())
