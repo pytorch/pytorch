@@ -313,7 +313,7 @@ void PyTorchStreamWriter::writeRecord(
     const std::string& name,
     const void* data,
     size_t size,
-    bool compress, int skip) {
+    bool compress) {
   AT_ASSERT(!finalized_);
   AT_ASSERT(!archive_name_plus_slash_.empty());
   std::string full_name = archive_name_plus_slash_ + name;
@@ -334,8 +334,7 @@ void PyTorchStreamWriter::writeRecord(
       padding_.c_str(),
       padding_size,
       nullptr,
-      0, 
-      skip);
+      0);
   valid("writing file ", name.c_str());
 }
 
