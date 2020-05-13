@@ -5597,11 +5597,6 @@
     CPU: _max_out_cpu
     CUDA: legacy::cuda::_th_max_out
 
-- func: _min(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
-  use_c10_dispatcher: full
-
-- func: _min.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!), Tensor(b!))
-
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   use_c10_dispatcher: full
   dispatch:
