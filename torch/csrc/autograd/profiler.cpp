@@ -163,7 +163,8 @@ struct ProfilerThreadLocalState
       const at::StringView& name,
       const char* msg = "",
       int64_t sequence_nr = -1,
-      std::vector<std::vector<int64_t>>&& shapes = {}) {
+      std::vector<std::vector<int64_t>>&& shapes = {},
+      at::RecordFunctionHandle handle = 0) {
     if (config_.state == ProfilerState::Disabled) {
       return;
     }
@@ -176,28 +177,34 @@ struct ProfilerThreadLocalState
           name,
           at::RecordFunction::currentThreadId(),
           config_.state == ProfilerState::CUDA,
+          handle,
           std::move(shapes));
     }
   }
 
-  void popRange(uint64_t thread_id) {
+  void popRange(uint64_t thread_id, at::RecordFunctionHandle handle) {
     if (config_.state == ProfilerState::Disabled) {
       return;
     }
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxRangePop();
     } else {
-      Event evt(
+      // In some cases RecordFunction (and popRange) may be
+      // called on a different thread than pushRange, e.g.
+      // it can happen when using record_function in JIT when
+      // an execution of a JIT function is suspended
+      // (when calling wait on a future) and the continuation
+      // is resumed on a different thread.
+      // Also, some RPC code uses async record_function
+      //
+      // As a convention, we put the async pop on the original
+      // thread and save current thread id in pop event
+      getEventList(thread_id).record(
           EventKind::PopRange,
           at::StringView(""),
-          thread_id,
-          config_.state == ProfilerState::CUDA);
-      if (config_.profile_memory) {
-        std::lock_guard<std::mutex> guard(state_mutex_);
-        evt.updateMemoryStats(mem_usage_[thread_id]);
-        mem_usage_[thread_id].clear();
-      }
-      getEventList(thread_id).record(evt);
+          at::RecordFunction::currentThreadId(),
+          config_.state == ProfilerState::CUDA,
+          handle);
     }
   }
 
@@ -211,10 +218,15 @@ struct ProfilerThreadLocalState
 
   void reportMemoryUsage(
       void* /* unused */, int64_t alloc_size, c10::Device device) override {
-    if (config_.profile_memory) {
-      std::lock_guard<std::mutex> guard(state_mutex_);
-      auto thread_id = at::RecordFunction::currentThreadId();
-      mem_usage_[thread_id][device] += alloc_size;
+    if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
+      uint64_t thread_id = at::RecordFunction::currentThreadId();
+      Event evt(
+          EventKind::MemoryAlloc,
+          at::StringView(""),
+          thread_id,
+          config_.state == ProfilerState::CUDA);
+      evt.updateMemoryStats(alloc_size, device);
+      getEventList(thread_id).record(evt);
     }
   }
 
@@ -283,16 +295,26 @@ struct ProfilerThreadLocalState
 
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false, false);
   at::CallbackHandle handle_ = 0;
-
-  // temporary memory usage per thread
-  // thread_id -> (device -> usage (bytes))
-  std::unordered_map<uint64_t,
-      std::unordered_map<c10::Device, int64_t>> mem_usage_;
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
   const auto& state = c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE);
   return dynamic_cast<ProfilerThreadLocalState*>(state.get());
+}
+
+// Workaround for double logging from op wrappers
+// TODO: remove after #37587
+bool skipSameParentScope(const at::RecordFunction& fn) {
+  at::DisableRecordFunctionGuard g;
+  const auto* parent_ptr = fn.parent();
+  if (!parent_ptr) {
+    return false;
+  }
+  const auto& parent = *parent_ptr;
+  if (strcmp(fn.name().str(), parent.name().str()) != 0) {
+    return false;
+  }
+  return true;
 }
 
 void pushProfilingCallbacks() {
@@ -301,7 +323,9 @@ void pushProfilingCallbacks() {
   auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
       [](const at::RecordFunction& fn) {
         auto state_ptr = getProfilerTLSState();
-        if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
+        if (!state_ptr ||
+            state_ptr->config().state == ProfilerState::Disabled ||
+            skipSameParentScope(fn)) {
           return;
         }
 
@@ -321,17 +345,20 @@ void pushProfilingCallbacks() {
               input_sizes.emplace_back();
             }
           }
-          state_ptr->pushRange(fn.name(), msg, fn.seqNr(), std::move(input_sizes));
+          state_ptr->pushRange(
+              fn.name(), msg, fn.seqNr(), std::move(input_sizes), fn.handle());
         } else {
-          state_ptr->pushRange(fn.name(), msg, fn.seqNr(), {});
+          state_ptr->pushRange(fn.name(), msg, fn.seqNr(), {}, fn.handle());
         }
       },
       [](const at::RecordFunction& fn) {
         auto state_ptr = getProfilerTLSState();
-        if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
+        if (!state_ptr ||
+            state_ptr->config().state == ProfilerState::Disabled ||
+            skipSameParentScope(fn)) {
           return;
         }
-        state_ptr->popRange(fn.getStartCallbacksThreadId());
+        state_ptr->popRange(fn.getStartCallbacksThreadId(), fn.handle());
       })
     .needsInputs(state_ptr->config().report_input_shapes));
   state_ptr->setCallbackHandle(handle);

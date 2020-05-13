@@ -76,6 +76,7 @@ struct TORCH_API StringView {
 constexpr std::size_t kSoftLimitCallbacks = 4;
 
 typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> CallbackHandles;
+typedef uint64_t RecordFunctionHandle;
 
 struct TORCH_API RecordFunction {
   // Default constructor is used with before function called afterwards:
@@ -150,11 +151,20 @@ struct TORCH_API RecordFunction {
   // original value of current() is restored in destructor/_end
   void _setCurrent();
 
+  inline RecordFunction* parent() const {
+    return parent_;
+  }
+
   // Calls end callbacks
   void _end();
 
-  // Returns whether some of the callbacks require function inputs
-  bool _needsInputs();
+  inline RecordFunctionHandle handle() const {
+    return handle_;
+  }
+
+  inline void setHandle(RecordFunctionHandle handle) {
+    handle_ = handle;
+  }
 
   // Used internally to keep track of thread local and global callbacks
   // that were picked to run; must be sorted;
@@ -162,9 +172,9 @@ struct TORCH_API RecordFunction {
   CallbackHandles sorted_active_tls_handles_;
   CallbackHandles sorted_active_global_handles_;
   // Whether this RecordFunction runs any callbacks
-  bool active_ = false;
+  bool active = false;
   /// Whether any of the picked callbacks require inputs
-  bool needs_inputs_ = false;
+  bool needs_inputs = false;
 
  private:
   StringView name_;
@@ -187,6 +197,10 @@ struct TORCH_API RecordFunction {
 
   // The logical thread_id that this RecordFunction was created with
   uint64_t thread_id_ = 0;
+
+  // Unique id for this RecordFunction, used in callbacks to track start
+  // and end of ranges
+  RecordFunctionHandle handle_ {0};
 };
 
 //
@@ -299,17 +313,23 @@ class TORCH_API RecordFunctionCallback {
   static double sample_zero_one();
 };
 
+// Helper macro for RECORD_FUNCTION_WITH_SCOPE
+#define RECORD_FUNCTION_BEFORE(guard, fn, inputs, ...) \
+  if (guard.needs_inputs) { \
+    guard._before(fn, inputs, ##__VA_ARGS__); \
+  } else { \
+    guard._before(fn, ##__VA_ARGS__); \
+  }
+
 // Using macro to minimize inputs copies,
 // optional argument - function's seq_no
+// Note: calling _setCurrent only for stack based
+// RecordFunction
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
   at::RecordFunction guard(scope); \
-  if (guard.active_) { \
+  if (guard.active) { \
     guard._setCurrent(); \
-    if (guard.needs_inputs_) { \
-      guard._before(fn, inputs, ##__VA_ARGS__); \
-    } else { \
-      guard._before(fn, ##__VA_ARGS__); \
-    } \
+    RECORD_FUNCTION_BEFORE(guard, fn, inputs, ##__VA_ARGS__) \
   }
 
 #define RECORD_FUNCTION(fn, inputs, ...) \
