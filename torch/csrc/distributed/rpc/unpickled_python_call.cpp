@@ -9,9 +9,7 @@ namespace rpc {
 
 UnpickledPythonCall::UnpickledPythonCall(
     const SerializedPyObj& serializedPyObj) {
-  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-  pybind11::gil_scoped_acquire ag;
-  pythonUdf_ = pythonRpcHandler.deserialize(serializedPyObj);
+  pythonUdf_ = PythonRpcHandler::getInstance().deserialize(serializedPyObj);
 }
 
 UnpickledPythonCall::~UnpickledPythonCall() {
