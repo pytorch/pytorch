@@ -623,7 +623,7 @@
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
   self: grad.ger(vec)
-  vec: "self.t().mv(grad.device().is_cpu() ? grad : grad.clone())"
+  vec: "self.t().mv(grad.device().is_cpu() ? grad : grad.contiguous())"
 
 - name: mvlgamma(Tensor self, int p) -> Tensor
   self: mvlgamma_backward(grad, self, p)
