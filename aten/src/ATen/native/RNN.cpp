@@ -1477,7 +1477,7 @@ bool _use_cudnn_rnn_flatten_weight() {
         _input.device().type(),                                             \
         bwd_output,                                                         \
         b_hy,                                                               \
-        input,                                                              \
+        rev_input,                                                          \
         _bwd_hx,                                                            \
         bwd_params,                                                         \
         has_biases,                                                         \
@@ -1536,7 +1536,7 @@ bool _use_cudnn_rnn_flatten_weight() {
       _input.device().type(),                                               \
       bwd_output,                                                           \
       b_hy,                                                                 \
-      input,                                                                \
+      rev_input,                                                            \
       _bwd_hx,                                                              \
       bwd_params,                                                           \
       has_biases,                                                           \
