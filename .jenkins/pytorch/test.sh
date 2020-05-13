@@ -61,7 +61,8 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel
   pip_install --user tb-nightly
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
-  pip_install --user mypy || true
+  # Pin MyPy version because new errors are likely to appear with each release
+  pip_install --user "mypy==0.770" || true
 fi
 
 # faulthandler become built-in since 3.3
@@ -138,8 +139,8 @@ test_python_nn() {
   assert_git_not_dirty
 }
 
-test_python_ge_config_simple() {
-  time python test/run_test.py --include test_jit_simple --verbose --determine-from="$DETERMINE_FROM"
+test_python_ge_config_profiling() {
+  time python test/run_test.py --include test_jit_profiling test_jit_fuser_profiling test_jit_fuser_te --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -149,7 +150,7 @@ test_python_ge_config_legacy() {
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude test_nn test_jit_simple test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_profiling test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -289,8 +290,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_legacy* || "${JOB_BASE_NAME}" == *ge_config_legacy* ]]; then
   test_python_ge_config_legacy
-elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_simple* || "${JOB_BASE_NAME}" == *ge_config_simple* ]]; then
-  test_python_ge_config_simple
+elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_profiling* || "${JOB_BASE_NAME}" == *ge_config_profiling* ]]; then
+  test_python_ge_config_profiling
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"

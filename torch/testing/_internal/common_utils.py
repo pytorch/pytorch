@@ -59,7 +59,7 @@ class ProfilingMode(Enum):
     PROFILING = 3
 
 @contextmanager
-def enable_profiling_mode():
+def enable_profiling_mode_for_profiling_tests():
     if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
         old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
         old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
@@ -70,6 +70,16 @@ def enable_profiling_mode():
             torch._C._jit_set_profiling_executor(old_prof_exec_state)
             torch._C._jit_set_profiling_mode(old_prof_mode_state)
 
+@contextmanager
+def enable_profiling_mode():
+    old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
+    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_profiling_executor(old_prof_exec_state)
+        torch._C._jit_set_profiling_mode(old_prof_mode_state)
+
 func_call = torch._C.ScriptFunction.__call__
 meth_call = torch._C.ScriptMethod.__call__
 
@@ -77,7 +87,7 @@ def prof_callable(callable, *args, **kwargs):
     if 'profile_and_replay' in kwargs:
         del kwargs['profile_and_replay']
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 callable(*args, **kwargs)
                 return callable(*args, **kwargs)
 
@@ -92,42 +102,53 @@ def prof_meth_call(*args, **kwargs):
 torch._C.ScriptFunction.__call__ = prof_func_call
 torch._C.ScriptMethod.__call__ = prof_meth_call
 
+def _get_test_report_path():
+    # allow users to override the test file location. We need this
+    # because the distributed tests run the same test file multiple
+    # times with different configurations.
+    override = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
+    test_source = override if override is not None else 'python-unittest'
+    return os.path.join('test-reports', test_source)
+
+
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 parser.add_argument('--ge_config', type=str)
+parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test_bailouts', action='store_true')
+parser.add_argument('--save-xml', nargs='?', type=str,
+                    const=_get_test_report_path(),
+                    default=_get_test_report_path() if bool(os.environ.get('IN_CIRCLECI')) else None)
+parser.add_argument('--discover-tests', action='store_true')
+parser.add_argument('--log-suffix', type=str, default="")
+parser.add_argument('--run-parallel', type=int, default=1)
 
 GRAPH_EXECUTOR = ProfilingMode.SIMPLE if IS_SANDCASTLE else ProfilingMode.PROFILING
 args, remaining = parser.parse_known_args()
 if args.ge_config == 'legacy':
     GRAPH_EXECUTOR = ProfilingMode.LEGACY
-elif args.ge_config == 'simple':
+elif args.ge_config == 'profiling':
+    GRAPH_EXECUTOR = ProfilingMode.PROFILING
+else:
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 
+LOG_SUFFIX = args.log_suffix
+RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
+TEST_DISCOVER = args.discover_tests
 TEST_IN_SUBPROCESS = args.subprocess
+TEST_SAVE_XML = args.save_xml
+REPEAT_COUNT = args.repeat
 SEED = args.seed
 if not expecttest.ACCEPT:
     expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
-
-def shell(command, cwd=None, env=None):
-    sys.stdout.flush()
-    sys.stderr.flush()
-    # The following cool snippet is copied from Py3 core library subprocess.call
-    # only the with
-    #   1. `except KeyboardInterrupt` block added for SIGINT handling.
-    #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do
-    #      `p.wait()` in a `final` block for the code to be portable.
-    #
-    # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
-    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
-    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env)
+def wait_for_process(p):
     try:
         return p.wait()
     except KeyboardInterrupt:
@@ -145,6 +166,20 @@ def shell(command, cwd=None, env=None):
     finally:
         # Always call p.wait() to ensure exit
         p.wait()
+
+def shell(command, cwd=None, env=None):
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # The following cool snippet is copied from Py3 core library subprocess.call
+    # only the with
+    #   1. `except KeyboardInterrupt` block added for SIGINT handling.
+    #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do
+    #      `p.wait()` in a `final` block for the code to be portable.
+    #
+    # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
+    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
+    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env)
+    return wait_for_process(p)
 
 
 # Used to run the same test with different tensor types
@@ -164,25 +199,35 @@ def repeat_test_for_types(dtypes):
 
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
 IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
-IN_CIRCLECI = bool(os.environ.get('IN_CIRCLECI'))
-TEST_REPORT_SOURCE_OVERRIDE = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
 
 PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
 
+def discover_test_cases_recursively(suite_or_case):
+    if isinstance(suite_or_case, unittest.TestCase):
+        return [suite_or_case]
+    rc = []
+    for element in suite_or_case:
+        rc.extend(discover_test_cases_recursively(element))
+    return rc
+
+def get_test_names(test_cases):
+    return ['.'.join(case.id().split('.')[-2:]) for case in test_cases]
+
+def chunk_list(lst, nchunks):
+    return [lst[i::nchunks] for i in range(nchunks)]
+
+
+
 def run_tests(argv=UNITTEST_ARGS):
-    if TEST_IN_SUBPROCESS:
+    if TEST_DISCOVER:
         suite = unittest.TestLoader().loadTestsFromModule(__main__)
-        test_cases = []
-
-        def add_to_test_cases(suite_or_case):
-            if isinstance(suite_or_case, unittest.TestCase):
-                test_cases.append(suite_or_case)
-            else:
-                for element in suite_or_case:
-                    add_to_test_cases(element)
-
-        add_to_test_cases(suite)
+        test_cases = discover_test_cases_recursively(suite)
+        for name in get_test_names(test_cases):
+            print(name)
+    elif TEST_IN_SUBPROCESS:
+        suite = unittest.TestLoader().loadTestsFromModule(__main__)
+        test_cases = discover_test_cases_recursively(suite)
         failed_tests = []
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
@@ -192,26 +237,33 @@ def run_tests(argv=UNITTEST_ARGS):
 
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
+    elif RUN_PARALLEL > 1:
+        suite = unittest.TestLoader().loadTestsFromModule(__main__)
+        test_cases = discover_test_cases_recursively(suite)
+        test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
+        processes = []
+        for i in range(RUN_PARALLEL):
+            command = [sys.executable] + argv + ['--log-suffix=-shard-{}'.format(i + 1)] + test_batches[i]
+            processes.append(subprocess.Popen(command, universal_newlines=True))
+        failed = False
+        for p in processes:
+            failed |= wait_for_process(p) != 0
+        assert not failed, "Some test shards have failed"
+    elif TEST_SAVE_XML is not None:
+        # import here so that non-CI doesn't need xmlrunner installed
+        import xmlrunner
+        test_report_path = TEST_SAVE_XML + LOG_SUFFIX
+        os.makedirs(test_report_path, exist_ok=True)
+        verbose = '--verbose' in argv or '-v' in argv
+        if verbose:
+            print('Test results will be stored in {}'.format(test_report_path))
+        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
+    elif REPEAT_COUNT > 1:
+        for _ in range(REPEAT_COUNT):
+            if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
+                sys.exit(-1)
     else:
-        if IN_CIRCLECI:
-            # import here so that non-CI doesn't need xmlrunner installed
-            import xmlrunner
-            # allow users to override the test file location. We need this
-            # because the distributed tests run the same test file multiple
-            # times with different configurations.
-            if TEST_REPORT_SOURCE_OVERRIDE is not None:
-                test_source = TEST_REPORT_SOURCE_OVERRIDE
-            else:
-                test_source = 'python-unittest'
-
-            test_report_path = os.path.join('test-reports', test_source)
-            os.makedirs(test_report_path, exist_ok=True)
-            verbose = '--verbose' in argv or '-v' in argv
-            if verbose:
-                print('Test results will be stored in {}'.format(test_report_path))
-            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
-        else:
-            unittest.main(argv=argv)
+        unittest.main(argv=argv)
 
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
@@ -377,6 +429,16 @@ def skipIfNotRegistered(op_name, message):
     except ImportError:
         skipper = unittest.skip("Cannot import `caffe2.python.core`")
     return skipper
+
+
+def skipIfNoSciPy(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not TEST_SCIPY:
+            raise unittest.SkipTest("test require SciPy, but SciPy not found")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 
 def slowTest(fn):
@@ -647,7 +709,7 @@ class TestCase(expecttest.TestCase):
     exact_dtype = False
 
     def __init__(self, method_name='runTest'):
-        super(TestCase, self).__init__(method_name)
+        super().__init__(method_name)
 
         test_method = getattr(self, method_name)
         # Wraps the tested method if we should do CUDA memory check.
@@ -818,12 +880,12 @@ class TestCase(expecttest.TestCase):
         b_tol = self.get_default_tolerance(b)
         return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))
 
-    def assertEqual(self, x, y, message='', **kwargs):
-        self.assertIsNone(kwargs.get('prec', None), 'prec is no longer supported. Use atol or rtol.')
-        rtol = kwargs.get('rtol', None)
-        atol = kwargs.get('atol', None)
-        allow_inf = kwargs.get('allow_inf', False)
-        exact_dtype = kwargs.get('exact_dtype', None)
+    def assertEqualIgnoreType(self, *args, **kwargs):
+        # If you are seeing this function used, that means test is written wrongly
+        # and deserves detailed investigation
+        return self.assertEqual(*args, exact_dtype=False, **kwargs)
+
+    def assertEqual(self, x, y, message='', *, atol=None, rtol=None, allow_inf=False, exact_dtype=True):
         # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
         if isinstance(message, Number):
             self.assertIsNone(atol, "don't combine positional prec and atol")
@@ -857,7 +919,7 @@ class TestCase(expecttest.TestCase):
                              allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
-                super(TestCase, self).assertEqual(a.size(), b.size(), message)
+                super(__class__, self).assertEqual(a.size(), b.size(), message)
                 if exact_dtype:
                     self.assertEqual(a.dtype, b.dtype)
                 if a.numel() > 0:
@@ -895,8 +957,8 @@ class TestCase(expecttest.TestCase):
                             max_err = diff.max()
                             self.assertLessEqual(max_err, atol, message)
 
-            super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
-            super(TestCase, self).assertEqual(x.is_quantized, y.is_quantized, message)
+            super().assertEqual(x.is_sparse, y.is_sparse, message)
+            super().assertEqual(x.is_quantized, y.is_quantized, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
@@ -926,9 +988,9 @@ class TestCase(expecttest.TestCase):
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
         elif type(x) == set and type(y) == set:
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
                 self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
@@ -942,22 +1004,22 @@ class TestCase(expecttest.TestCase):
                                  atol=atol, rtol=rtol, message=message,
                                  allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif is_iterable(x) and is_iterable(y):
-            super(TestCase, self).assertEqual(len(x), len(y), message)
+            super().assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, atol=atol, rtol=rtol, message=message,
                                  allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, bool) and isinstance(y, bool):
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
             if abs(x) == inf or abs(y) == inf:
                 if allow_inf:
-                    super(TestCase, self).assertEqual(x, y, message)
+                    super().assertEqual(x, y, message)
                 else:
                     self.fail("Expected finite numeric values - x={}, y={}".format(x, y))
                 return
-            super(TestCase, self).assertLessEqual(abs(x - y), atol, message)
+            super().assertLessEqual(abs(x - y), atol, message)
         else:
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
 
     def assertAlmostEqual(self, x, y, places=None, msg='', delta=None, allow_inf=None):
         prec = delta
@@ -965,7 +1027,7 @@ class TestCase(expecttest.TestCase):
             prec = 10**(-places)
         self.assertEqual(x, y, msg, atol=prec, allow_inf=allow_inf)
 
-    def assertNotEqual(self, x, y, message='', atol=None):
+    def assertNotEqual(self, x, y, message='', *, atol=None):
         if not isinstance(message, str):
             raise Error("fix this test, message should be a string")
         if atol is None:
@@ -973,7 +1035,7 @@ class TestCase(expecttest.TestCase):
 
         if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             if x.size() != y.size():
-                super(TestCase, self).assertNotEqual(x.size(), y.size())
+                super().assertNotEqual(x.size(), y.size())
             self.assertGreater(x.numel(), 0)
             y = y.type_as(x)
             y = y.cuda(device=x.get_device()) if x.is_cuda else y.cpu()
@@ -988,16 +1050,22 @@ class TestCase(expecttest.TestCase):
                 max_err = diff.max().item()
                 self.assertGreater(max_err, atol, message)
         elif type(x) == str and type(y) == str:
-            super(TestCase, self).assertNotEqual(x, y)
+            super().assertNotEqual(x, y)
         elif is_iterable(x) and is_iterable(y):
-            super(TestCase, self).assertNotEqual(x, y)
+            super().assertNotEqual(x, y)
         else:
             try:
                 self.assertGreater(abs(x - y), atol, message)
                 return
             except (TypeError, AssertionError):
                 pass
-            super(TestCase, self).assertNotEqual(x, y, message)
+            super().assertNotEqual(x, y, message)
+
+    def assertEqualTypeString(self, x, y):
+        # This API is used simulate deprecated x.type() == y.type()
+        self.assertEqual(x.device, y.device)
+        self.assertEqual(x.dtype, y.dtype)
+        self.assertEqual(x.is_sparse, y.is_sparse)
 
     def assertObjectIn(self, obj, iterable):
         for elem in iterable:
@@ -1025,7 +1093,7 @@ class TestCase(expecttest.TestCase):
         r"""
         Test if :attr:`callable` does not raise a warning.
         """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
+        with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             callable()
             self.assertTrue(len(ws) == 0, msg)
@@ -1037,7 +1105,7 @@ class TestCase(expecttest.TestCase):
         This filters expected warnings from the test log and fails the test if
         any unexpected warnings are caught.
         """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
+        with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             # Ignore expected warnings
             warnings.filterwarnings("ignore", message=regex, category=category)
@@ -1051,46 +1119,6 @@ class TestCase(expecttest.TestCase):
                             w.message, w.category, w.filename, w.lineno, w.line)
                         msg += '\n'
                     self.fail(msg)
-
-    @contextmanager
-    def _reset_warning_registry(self):
-        r"""
-        warnings.catch_warnings() in Python 2 misses already registered
-        warnings. We need to manually clear the existing warning registries to
-        ensure catching warnings in a scope.
-        """
-        # Python 3 has no problem.
-        if sys.version_info >= (3,):
-            yield
-            return
-
-        # Backup and clear all existing warning registries.
-        backup = {}
-        for name, mod in list(sys.modules.items()):
-            try:
-                reg = mod.__warningregistry__
-            except AttributeError:
-                continue
-            else:
-                backup[name] = reg.copy()
-                reg.clear()
-
-        yield
-
-        # Restore backed up warning registries.
-        for name, reg_orig in backup.items():
-            try:
-                mod = sys.modules[name]
-            except KeyError:
-                continue
-
-            try:
-                reg = mod.__warningregistry__
-            except AttributeError:
-                mod.__warningregistry__ = reg_orig
-            else:
-                reg.clear()
-                reg.update(reg_orig)
 
     def assertExpected(self, s, subname=None):
         r"""
@@ -1251,7 +1279,7 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
 
 
 # Decorator to retry upon certain Exceptions.
-def retry(ExceptionToCheck, tries=3, delay=3):
+def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
     def deco_retry(f):
         @wraps(f)
         def f_retry(*args, **kwargs):
@@ -1264,7 +1292,10 @@ def retry(ExceptionToCheck, tries=3, delay=3):
                     print(msg)
                     time.sleep(mdelay)
                     mtries -= 1
-            return f(*args, **kwargs)
+            try:
+                return f(*args, **kwargs)
+            except ExceptionToCheck as e:
+                raise unittest.SkipTest(f"Skipping after {tries} consecutive {str(e)}") from e if skip_after_retries else e
         return f_retry  # true decorator
     return deco_retry
 

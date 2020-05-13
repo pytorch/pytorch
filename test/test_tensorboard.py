@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import io
 import numpy as np
 import os
@@ -445,6 +440,21 @@ class TestTensorBoardSummary(BaseTestCase):
         with self.assertRaises(NotImplementedError):
             with self.createSummaryWriter() as writer:
                 writer.add_hparams({'pytorch': 1.0}, {'accuracy': [1, 2]})
+
+    def test_hparams_number(self):
+        hp = {'lr': 0.1}
+        mt = {'accuracy': 0.1}
+        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
+
+    def test_hparams_bool(self):
+        hp = {'bool_var': True}
+        mt = {'accuracy': 0.1}
+        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
+
+    def test_hparams_string(self):
+        hp = {'string_var': "hi"}
+        mt = {'accuracy': 0.1}
+        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
 
     def test_mesh(self):
         v = np.array([[[1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, -1]]], dtype=float)

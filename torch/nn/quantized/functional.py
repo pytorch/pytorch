@@ -1,11 +1,8 @@
 r""" Functional interface (quantized)."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+from typing import List, Optional
 
 import torch
-from torch._jit_internal import List as _List
+from torch import Tensor
 from torch.nn.modules.utils import _pair, _triple
 
 # Although some of the functions and docstrings are mirrored from the torch.nn,
@@ -146,12 +143,9 @@ def conv2d(input, weight, bias,
     padding = _pair(padding)
     dilation = _pair(dilation)
 
-    prepacked_weight = torch.ops.quantized.conv2d_prepack(
+    packed_params = torch.ops.quantized.conv2d_prepack(
         weight, bias, stride, padding, dilation, groups)
-    return torch.ops.quantized.conv2d(input,
-                                      prepacked_weight,
-                                      stride, padding, dilation,
-                                      groups, scale, zero_point)
+    return torch.ops.quantized.conv2d(input, packed_params, scale, zero_point)
 
 def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
            padding_mode='zeros', scale=1.0, zero_point=0, dtype=torch.quint8):
@@ -209,11 +203,9 @@ def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
     padding = _triple(padding)
     dilation = _triple(dilation)
 
-    prepacked_weight = torch.ops.quantized.conv3d_prepack(
+    packed_params = torch.ops.quantized.conv3d_prepack(
         weight, bias, stride, padding, dilation, groups)
-    return torch.ops.quantized.conv3d(
-        input, prepacked_weight, stride, padding, dilation, groups, scale,
-        zero_point)
+    return torch.ops.quantized.conv3d(input, packed_params, scale, zero_point)
 
 def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
     r"""Down/up samples the input to either the given :attr:`size` or the given
@@ -301,7 +293,7 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
     if return_indices:
         raise NotImplementedError("return_indices is not yet implemented!")
     if stride is None:
-        stride = torch.jit.annotate(_List[int], [])
+        stride = torch.jit.annotate(List[int], [])
     return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
                                           dilation, ceil_mode, return_indices)
 
@@ -343,8 +335,8 @@ def leaky_relu(input, negative_slope=0.01, inplace=False,
     """
     if scale is not None and zero_point is not None:
         assert not inplace, "Cannot rescale with `inplace`"
-        output = torch.quantize_per_tensor(torch.zeros(input.shape),
-                                           scale, int(zero_point), input.dtype)
+        output = torch._empty_affine_quantized(
+            input.shape, scale=scale, zero_point=int(zero_point), dtype=input.dtype)
         torch._C._nn.leaky_relu(input, negative_slope, out=output)
         return output
     if inplace:
@@ -393,10 +385,7 @@ def hardswish(input, scale, zero_point):
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardswish' must be quantized!")
-    output = torch.quantize_per_tensor(torch.zeros(input.shape),
-                                       scale, int(zero_point), input.dtype)
-    torch._C._nn.hardswish(input, out=output)
-    return output
+    return torch._ops.ops.quantized.hardswish(input, scale, zero_point)
 
 def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
     # type: (Tensor, Optional[float], bool, Optional[float], Optional[int]) -> Tensor
@@ -419,8 +408,8 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
 
     if scale is not None and zero_point is not None:
         assert not inplace, "Cannot rescale with `inplace`"
-        output = torch.quantize_per_tensor(torch.zeros(input.shape),
-                                           scale, int(zero_point), input.dtype)
+        output = torch._empty_affine_quantized(
+            input.shape, scale=scale, zero_point=int(zero_point), dtype=input.dtype)
         torch._C._nn.elu(input, alpha, out=output)
         return output
     elif inplace:
