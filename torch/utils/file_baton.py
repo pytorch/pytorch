@@ -1,3 +1,4 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
 import os
 import sys
 import time
@@ -49,5 +50,7 @@ class FileBaton:
 
     def release(self):
         '''Releases the baton and removes its file.'''
-        os.close(self.fd)
+        if self.fd is not None:
+            os.close(self.fd)
+
         os.remove(self.lock_file_path)

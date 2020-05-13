@@ -1,7 +1,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 
-namespace at {                                                            
+namespace at {
 namespace native {
 
 Tensor int_repr_quant_cuda(const Tensor& self) {
@@ -16,7 +16,9 @@ Tensor int_repr_quant_cuda(const Tensor& self) {
     iter.add_input(self);
     iter.dont_compute_common_dtype();
     iter.build();
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t value) -> underlying_t { return value.val_; });
+    gpu_kernel(iter, [] GPU_LAMBDA(scalar_t value) -> underlying_t {
+      return value.val_;
+    });
   });
   return dst;
 }

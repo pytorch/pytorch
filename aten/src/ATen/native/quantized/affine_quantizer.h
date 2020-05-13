@@ -6,25 +6,32 @@
 namespace at {
 namespace native {
 
-Tensor quantize_tensor_per_tensor_affine(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
-Tensor quantize_tensor_per_channel_affine(Tensor qtensor,
-                                          Tensor rtensor,
-                                          Tensor scales,
-                                          Tensor zero_points,
-                                          int64_t axis);
-
-Tensor dequantize_tensor_per_tensor_affine(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point);
-Tensor dequantize_tensor_per_channel_affine(Tensor qtensor,
-                                            Tensor rtensor,
-                                            Tensor scales,
-                                            Tensor zero_points,
-                                            int64_t axis);
-
-using quantize_tensor_per_tensor_affine_fn = void (*)(
+Tensor quantize_tensor_per_tensor_affine(
     Tensor rtensor,
     Tensor qtensor,
     double scale,
     int64_t zero_point);
+Tensor quantize_tensor_per_channel_affine(
+    Tensor qtensor,
+    Tensor rtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis);
+
+Tensor dequantize_tensor_per_tensor_affine(
+    Tensor qtensor,
+    Tensor rtensor,
+    double scale,
+    int64_t zero_point);
+Tensor dequantize_tensor_per_channel_affine(
+    Tensor qtensor,
+    Tensor rtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis);
+
+using quantize_tensor_per_tensor_affine_fn =
+    void (*)(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 
 using quantize_tensor_per_channel_affine_fn = void (*)(
     Tensor qtensor,
@@ -33,11 +40,8 @@ using quantize_tensor_per_channel_affine_fn = void (*)(
     Tensor zero_points,
     int64_t axis);
 
-using dequantize_tensor_per_tensor_affine_fn = void (*)(
-    Tensor qtensor,
-    Tensor rtensor,
-    double scale,
-    int64_t zero_point);
+using dequantize_tensor_per_tensor_affine_fn =
+    void (*)(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point);
 
 using dequantize_tensor_per_channel_affine_fn = void (*)(
     Tensor qtensor,
@@ -46,27 +50,57 @@ using dequantize_tensor_per_channel_affine_fn = void (*)(
     Tensor zero_points,
     int64_t axis);
 
-DECLARE_DISPATCH(quantize_tensor_per_tensor_affine_fn, quantize_tensor_per_tensor_affine_stub);
-DECLARE_DISPATCH(quantize_tensor_per_channel_affine_fn, quantize_tensor_per_channel_affine_stub);
+DECLARE_DISPATCH(
+    quantize_tensor_per_tensor_affine_fn,
+    quantize_tensor_per_tensor_affine_stub);
+DECLARE_DISPATCH(
+    quantize_tensor_per_channel_affine_fn,
+    quantize_tensor_per_channel_affine_stub);
 
-DECLARE_DISPATCH(dequantize_tensor_per_tensor_affine_fn, dequantize_tensor_per_tensor_affine_stub);
-DECLARE_DISPATCH(dequantize_tensor_per_channel_affine_fn, dequantize_tensor_per_channel_affine_stub);
+DECLARE_DISPATCH(
+    dequantize_tensor_per_tensor_affine_fn,
+    dequantize_tensor_per_tensor_affine_stub);
+DECLARE_DISPATCH(
+    dequantize_tensor_per_channel_affine_fn,
+    dequantize_tensor_per_channel_affine_stub);
 
 // Quantize a float value into a uint value given scale and zero_point
 template <typename T>
 CAFFE2_API T quantize_val(double scale, int64_t zero_point, float value);
-// TODO combine this with quantize_val once the numerics for ARM are aligned with it
-uint8_t quantize_val_arm(const float scale, const int32_t zero_point, const float value);
-template <typename T, int precision=8>
-void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, size_t count=8);
+// TODO combine this with quantize_val once the numerics for ARM are aligned
+// with it
+uint8_t quantize_val_arm(
+    const float scale,
+    const int32_t zero_point,
+    const float value);
+template <typename T, int precision = 8>
+void quantize_vec(
+    double scale,
+    int64_t zero_point,
+    const float* src,
+    T* dst,
+    size_t count = 8);
 template <typename T>
-CAFFE2_API Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+CAFFE2_API Tensor quantize_tensor(
+    Tensor rtensor,
+    Tensor qtensor,
+    double scale,
+    int64_t zero_point);
 template <typename T>
 CAFFE2_API float dequantize_val(double scale, int64_t zero_point, T value);
 template <typename T>
-CAFFE2_API float dequantize_vec(double scale, int64_t zero_point, const T* src, float* dst, size_t count=8);
+CAFFE2_API float dequantize_vec(
+    double scale,
+    int64_t zero_point,
+    const T* src,
+    float* dst,
+    size_t count = 8);
 template <typename T>
-CAFFE2_API Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point);
+CAFFE2_API Tensor dequantize_tensor(
+    Tensor qtensor,
+    Tensor rtensor,
+    double scale,
+    int64_t zero_point);
 template <typename SRC_T, typename DST_T>
 CAFFE2_API DST_T requantize_val(double, int64_t, double, int64_t, SRC_T src);
 

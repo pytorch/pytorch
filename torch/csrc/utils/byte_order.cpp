@@ -1,6 +1,7 @@
 #include <torch/csrc/utils/byte_order.h>
 #include <c10/util/BFloat16.h>
 #include <cstring>
+#include <vector>
 
 #if defined(_MSC_VER)
 #include <stdlib.h>
@@ -189,6 +190,40 @@ void THP_decodeDoubleBuffer(double* dst, const uint8_t* src, THPByteOrder order,
   }
 }
 
+void THP_decodeComplexFloatBuffer(c10::complex<float>* dst, const uint8_t* src, THPByteOrder order, size_t len)
+{
+  for (size_t i = 0; i < len; i++) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    union { uint32_t x; float re; };
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    union { uint32_t y; float im; };
+
+    x = (order == THP_BIG_ENDIAN ? decodeUInt32BE(src) : decodeUInt32LE(src));
+    src += sizeof(float);
+    y = (order == THP_BIG_ENDIAN ? decodeUInt32BE(src) : decodeUInt32LE(src));
+    src += sizeof(float);
+
+    dst[i] = c10::complex<float>(re, im);
+  }
+}
+
+void THP_decodeComplexDoubleBuffer(c10::complex<double>* dst, const uint8_t* src, THPByteOrder order, size_t len)
+{
+  for (size_t i = 0; i < len; i++) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    union { uint32_t x; double re; };
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    union { uint32_t y; double im; };
+
+    x = (order == THP_BIG_ENDIAN ? decodeUInt64BE(src) : decodeUInt64LE(src));
+    src += sizeof(double);
+    y = (order == THP_BIG_ENDIAN ? decodeUInt64BE(src) : decodeUInt64LE(src));
+    src += sizeof(double);
+
+    dst[i] = c10::complex<double>(re, im);
+  }
+}
+
 void THP_encodeInt16Buffer(uint8_t* dst, const int16_t* src, THPByteOrder order, size_t len)
 {
   memcpy(dst, src, sizeof(int16_t) * len);
@@ -238,6 +273,42 @@ void THP_encodeDoubleBuffer(uint8_t* dst, const double* src, THPByteOrder order,
   memcpy(dst, src, sizeof(double) * len);
   if (order != THP_nativeByteOrder()) {
     for (size_t i = 0; i < len; i++) {
+      swapBytes64(dst);
+      dst += sizeof(double);
+    }
+  }
+}
+
+template <typename T>
+std::vector<T> complex_to_float(const c10::complex<T>* src, size_t len) {
+  std::vector<T> new_src;
+  new_src.reserve(2 * len);
+  for (size_t i = 0; i < len; i++) {
+    auto elem = src[i];
+    new_src.emplace_back(elem.real());
+    new_src.emplace_back(elem.imag());
+  }
+  return new_src;
+}
+
+void THP_encodeComplexFloatBuffer(uint8_t* dst, const c10::complex<float>* src, THPByteOrder order, size_t len)
+{
+  auto new_src = complex_to_float(src, len);
+  memcpy(dst, static_cast<void*>(&new_src), 2 * sizeof(float) * len);
+  if (order != THP_nativeByteOrder()) {
+    for (size_t i = 0; i < (2 * len); i++) {
+      swapBytes32(dst);
+      dst += sizeof(float);
+    }
+  }
+}
+
+void THP_encodeCompelxDoubleBuffer(uint8_t* dst, const c10::complex<double>* src, THPByteOrder order, size_t len)
+{
+  auto new_src = complex_to_float(src, len);
+  memcpy(dst, static_cast<void*>(&new_src), 2 * sizeof(double) * len);
+  if (order != THP_nativeByteOrder()) {
+    for (size_t i = 0; i < (2 * len); i++) {
       swapBytes64(dst);
       dst += sizeof(double);
     }
