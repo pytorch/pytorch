@@ -2550,7 +2550,7 @@ class TestQuantizedConv(unittest.TestCase):
            Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
-           use_relu=st.sampled_from([False]),
+           use_relu=st.booleans(),
            use_channelwise=st.booleans())
     @override_qengines
     def test_qconv1d(
