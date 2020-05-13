@@ -252,10 +252,13 @@ struct CauchyKernel {
 // ================================================== LogNormal =======================================================
 
 template<typename RNG>
-void log_normal_kernel(TensorIterator& iter, double mean, double std, RNG generator) {
+void log_normal_kernel(TensorIterator& iter, double mean_, double std_, RNG generator) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "log_normal_cpu", [&]() {
+    using accscalar_t = at::acc_type<scalar_t, false>;
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    at::lognormal_distribution<double> logNormal(mean, std);
+    auto mean = static_cast<accscalar_t>(mean_);
+    auto std = static_cast<accscalar_t>(std_);
+    at::lognormal_distribution<accscalar_t> logNormal(mean, std);
     cpu_serial_kernel(iter, [&logNormal, generator]() -> scalar_t {
       return static_cast<scalar_t>(logNormal(generator));
     });
