@@ -229,10 +229,13 @@ struct UniformKernel {
 // ==================================================== Cauchy ========================================================
 
 template<typename RNG>
-void cauchy_kernel(TensorIterator& iter, double median, double sigma, RNG generator) {
+void cauchy_kernel(TensorIterator& iter, double median_, double sigma_, RNG generator) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "cauchy_cpu", [&]() {
+    using accscalar_t = at::acc_type<scalar_t, false>;
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    at::cauchy_distribution<double> cauchy(median, sigma);
+    auto median = static_cast<accscalar_t>(median_);
+    auto sigma = static_cast<accscalar_t>(sigma_);
+    at::cauchy_distribution<accscalar_t> cauchy(median, sigma);
     cpu_serial_kernel(iter, [&cauchy, generator]() -> scalar_t {
       return static_cast<scalar_t>(cauchy(generator));
     });
@@ -249,10 +252,13 @@ struct CauchyKernel {
 // ================================================== LogNormal =======================================================
 
 template<typename RNG>
-void log_normal_kernel(TensorIterator& iter, double mean, double std, RNG generator) {
+void log_normal_kernel(TensorIterator& iter, double mean_, double std_, RNG generator) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "log_normal_cpu", [&]() {
+    using accscalar_t = at::acc_type<scalar_t, false>;
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    at::lognormal_distribution<double> logNormal(mean, std);
+    auto mean = static_cast<accscalar_t>(mean_);
+    auto std = static_cast<accscalar_t>(std_);
+    at::lognormal_distribution<accscalar_t> logNormal(mean, std);
     cpu_serial_kernel(iter, [&logNormal, generator]() -> scalar_t {
       return static_cast<scalar_t>(logNormal(generator));
     });
@@ -291,10 +297,12 @@ struct GeometricKernel {
 // ================================================== Exponential =====================================================
 
 template<typename RNG>
-void exponential_kernel(TensorIterator& iter, double lambda, RNG generator) {
+void exponential_kernel(TensorIterator& iter, double lambda_, RNG generator) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "exponential_cpu", [&]() {
+    using accscalar_t = at::acc_type<scalar_t, false>;
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    at::exponential_distribution<double> exponential(lambda);
+    auto lambda = static_cast<accscalar_t>(lambda_);
+    at::exponential_distribution<accscalar_t> exponential(lambda);
     cpu_serial_kernel(iter, [&exponential, generator]() -> scalar_t {
       return static_cast<scalar_t>(exponential(generator));
     });
