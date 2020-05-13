@@ -280,7 +280,7 @@ def method_tests():
         ('reciprocal', torch.rand(S, S, S) + 0.1, NO_ARGS, '', (True,)),
         ('reciprocal', uniform_scalar(0.1, requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('reciprocal', torch.randn(S, S, S, dtype=torch.cdouble) + 0.1, NO_ARGS, 'complex', (True,)),
-        ('reciprocal', uniform_scalar(0.1j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        ('reciprocal', uniform_scalar(0.1j), NO_ARGS, 'complex_scalar', (True,)),
         ('round', (S, S, S), NO_ARGS, '', (True,)),
         ('round', (), NO_ARGS, 'scalar', (True,)),
         ('sign', (S, S, S), NO_ARGS),
