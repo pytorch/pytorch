@@ -48,33 +48,37 @@ Tensor reverse_packed_data(const Tensor& input, const Tensor& batch_sizes) {
   Tensor sequence;
   Tensor lengths;
   std::tie(sequence, lengths) = torch::_pad_packed_sequence(
-    data, batch_sizes, false, 0.0, batch_sizes.size(0));
+    input, batch_sizes, false, 0.0, batch_sizes.size(0));
   auto step_inputs = sequence.unbind(1);
   int64_t * lengths_p = lengths.data_ptr<int64_t>();
-  std::vector<Tensor> reverse(lengths.size(0));
+  std::vector<Tensor> reverse_v(lengths.size(0));
 
   for(auto i = 0; i < lengths.size(0); i++) {
     auto input = step_inputs[i];
     auto input_length = lengths_p[i];
-    std::vector<Tensor> reversed_lengths(input_length);
+    std::vector<Tensor> reversed_lengths(input.size(0));
 
-    for(auto j = 0; j < input_length; j++) {
-      reversed_lengths[input_length - j] = input.select(0, j);
+    for(auto j = 1; j < input_length + 1; j++) {
+      reversed_lengths[input_length - j] = input.select(0, j - 1);
     }
+
+    for(auto j = input_length; j < input.size(0); j++) {
+      reversed_lengths[j] = input.select(0, j);
+    }
+
     auto reversed_input = at::stack(reversed_lengths, 0);
-    reverse[i] = reversed_input;
+    reverse_v[i] = reversed_input;
   }
 
-  auto full_output = at::stack(reverse, 1);
-  Tensor output = at::_pack_padded_sequence(full_output, lengths, false)[0];
+  auto full_output = at::stack(reverse_v, 1);
+  Tensor output = std::get<0>(at::_pack_padded_sequence(full_output, lengths, false));
   return output;
 }
 
 std::tuple<std::vector<Tensor>, std::vector<Tensor>> split_params(TensorList _params) {
-  auto _fwd_params = _params.slice(_params.size() / 2);
   std::vector<Tensor> fwd_params;
-  for(auto param = 0; param < _fwd_params.size(); param++){
-    fwd_params.push_back(_fwd_params[param].contiguous());
+  for(auto param = 0; param < _params.size() / 2; param++){
+    fwd_params.push_back(_params[param].contiguous());
   }
 
   std::vector<Tensor> bwd_params;
@@ -2043,7 +2047,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_packed_cudnn_type1(
 
   Tensor bwd_output, b_hy, b_cy;
   lstm_packed_cudnn_stub(data.device().type(), bwd_output, b_hy, b_cy, bwd_data,
-                         batch_sizes, _bwd_hx, fwd_params, has_biases,
+                         batch_sizes, _bwd_hx, bwd_params, has_biases,
                          num_layers, dropout_p, train, bidirectional, type_2);
 
   // Cat forward and backward outputs
@@ -2084,7 +2088,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_packed_miopen_type1(
 
   Tensor bwd_output, b_hy, b_cy;
   lstm_packed_miopen_stub(data.device().type(), bwd_output, b_hy, b_cy, bwd_data,
-                          batch_sizes, _bwd_hx, fwd_params, has_biases,
+                          batch_sizes, _bwd_hx, bwd_params, has_biases,
                           num_layers, dropout_p, train, bidirectional, type_2);
 
   // Cat forward and backward outputs
