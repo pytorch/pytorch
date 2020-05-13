@@ -7754,3 +7754,129 @@ Example::
     >>> g_cpu.device
     device(type='cpu')
 """)
+
+add_docstr(torch.searchsorted,
+           r"""
+searchsorted(sorted_sequence, values, out_int32=False, right=False, out=None) -> Tensor
+
+Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the 
+corresponding values in :attr:`values` were inserted before the indices, the order of the 
+corresponding *innermost* dimension within :attr:`sorted_sequence` would be preserved. 
+Return a new tensor with the same size as :attr:`values`. If :attr:`right` is False (default), 
+then the left boundary of :attr:`sorted_sequence` is closed. More formally, the returned index 
+satisfies the following rules: 
+
+.. list-table:: 
+   :widths: 12 10 78 
+   :header-rows: 1
+
+   * - :attr:`sorted_sequence`
+     - :attr:`right`
+     - *returned index satisfies*
+   * - 1-D
+     - False
+     - ``sorted_sequence[i-1] <= values[m][n]...[l][x] < sorted_sequence[i]``
+   * - 1-D
+     - True
+     - ``sorted_sequence[i-1] < values[m][n]...[l][x] <= sorted_sequence[i]``
+   * - N-D
+     - False
+     - ``sorted_sequence[m][n]...[l][i-1] <= values[m][n]...[l][x] < sorted_sequence[m][n]...[l][i]``
+   * - N-D
+     - True
+     - ``sorted_sequence[m][n]...[l][i-1] < values[m][n]...[l][x] <= sorted_sequence[m][n]...[l][i]``
+
+Args:
+    sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost* 
+                              dimension.
+    values (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
+    out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise. 
+                                Default value is False, i.e. default output data type is torch.int64.
+    right (bool, optional): if False, return the first suitable location that is found. If True, return the 
+                            last such index. If no suitable index found, return 0 for non-numerical value 
+                            (eg. nan, inf) or the size of *innermost* dimension within :attr:`sorted_sequence` 
+                            (one pass the last index of the *innermost* dimension). In other words, if False, 
+                            gets the lower bound index for each value in :attr:`values` on the corresponding 
+                            *innermost* dimension of the :attr:`sorted_sequence`. If True, gets the upper 
+                            bound index instead. Default value is False.
+    out (Tensor, optional): the output tensor, must be the same size as :attr:`values` if provided.
+
+.. note:: If your use case is always 1-D sorted sequence, :func:`torch.bucketize` is preferred, 
+          because it has fewer dimension checks resulting in slightly better performance.
+
+
+Example::
+
+    >>> sorted_sequence = torch.tensor([[1, 3, 5, 7, 9], [2, 4, 6, 8, 10]]) 
+    >>> sorted_sequence
+    tensor([[ 1,  3,  5,  7,  9],
+            [ 2,  4,  6,  8, 10]])
+    >>> values = torch.tensor([[3, 6, 9], [3, 6, 9]])
+    >>> values
+    tensor([[3, 6, 9],
+            [3, 6, 9]])
+    >>> torch.searchsorted(sorted_sequence, values)
+    tensor([[1, 3, 4],
+            [1, 2, 4]])
+    >>> torch.searchsorted(sorted_sequence, values, right=True)
+    tensor([[2, 3, 5],
+            [1, 3, 4]])
+
+    >>> sorted_sequence_1d = torch.tensor([1, 3, 5, 7, 9])
+    >>> sorted_sequence_1d
+    tensor([1, 3, 5, 7, 9])
+    >>> torch.searchsorted(sorted_sequence_1d, values)
+    tensor([[1, 3, 4],
+            [1, 3, 4]])
+""")
+
+add_docstr(torch.bucketize,
+           r"""
+bucketize(input, boundaries, out_int32=False, right=False, out=None) -> Tensor
+
+Returns the indices of the buckets to which each value in the :attr:`input` belongs, where the
+boundaries of the buckets are set by :attr:`boundaries`. Return a new tensor with the same size 
+as :attr:`input`. If :attr:`right` is False (default), then the left boundary is closed. More 
+formally, the returned index satisfies the following rules:
+
+.. list-table:: 
+   :widths: 15 85 
+   :header-rows: 1
+
+   * - :attr:`right`
+     - *returned index satisfies*
+   * - False
+     - ``boundaries[i-1] <= input[m][n]...[l][x] < boundaries[i]``
+   * - True
+     - ``boundaries[i-1] < input[m][n]...[l][x] <= boundaries[i]``
+
+Args:
+    input (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
+    boundaries (Tensor): 1-D tensor, must contain a monotonically increasing sequence.
+    out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise. 
+                                Default value is False, i.e. default output data type is torch.int64.
+    right (bool, optional): if False, return the first suitable location that is found. If True, return the 
+                            last such index. If no suitable index found, return 0 for non-numerical value 
+                            (eg. nan, inf) or the size of :attr:`boundaries` (one pass the last index). 
+                            In other words, if False, gets the lower bound index for each value in :attr:`input` 
+                            from :attr:`boundaries`. If True, gets the upper bound index instead. 
+                            Default value is False. 
+    out (Tensor, optional): the output tensor, must be the same size as :attr:`input` if provided.
+
+
+Example::
+
+    >>> boundaries = torch.tensor([1, 3, 5, 7, 9])
+    >>> boundaries
+    tensor([1, 3, 5, 7, 9])
+    >>> v = torch.tensor([[3, 6, 9], [3, 6, 9]])
+    >>> v
+    tensor([[3, 6, 9],
+            [3, 6, 9]])
+    >>> torch.bucketize(v, boundaries)
+    tensor([[1, 3, 4],
+            [1, 3, 4]])
+    >>> torch.bucketize(v, boundaries, right=True)
+    tensor([[2, 3, 5],
+            [2, 3, 5]])
+""")
