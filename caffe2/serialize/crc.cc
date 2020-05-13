@@ -2,10 +2,16 @@
 #include <iostream>
 
 #include "caffe2/serialize/boost_crc.h"
+#include "caffe2/serialize/folly_cpu_id.h"
 #include <algorithm>
 #include <stdexcept>
 #include <array>
 #include <c10/util/llvmMathExtras.h>
+
+#if FOLLY_SSE_PREREQ(4, 2)
+#include <emmintrin.h>
+#include <nmmintrin.h>
+#endif
 
 
 namespace detail {
@@ -44,6 +50,10 @@ template <uint32_t m>
 struct gf_powers_memo<0, m> {
   static constexpr uint32_t value = m;
 };
+
+template <std::size_t... Is>
+using index_sequence = std::integer_sequence<std::size_t, Is...>;
+
 
 template <uint32_t m>
 struct gf_powers_make {
@@ -136,6 +146,48 @@ uint32_t crc32c_combine_hw(uint32_t crc1, uint32_t crc2, size_t crc2len) {
 uint32_t
 crc32c_sw(const uint8_t* data, size_t nbytes, uint32_t startingChecksum);
 
+
+#if FOLLY_SSE_PREREQ(4, 2)
+
+uint32_t
+crc32_sw(const uint8_t* data, size_t nbytes, uint32_t startingChecksum);
+
+// Fast SIMD implementation of CRC-32 for x86 with pclmul
+uint32_t
+crc32_hw(const uint8_t* data, size_t nbytes, uint32_t startingChecksum) {
+  uint32_t sum = startingChecksum;
+  size_t offset = 0;
+
+  // Process unaligned bytes
+  if ((uintptr_t)data & 15) {
+    size_t limit = std::min(nbytes, -(uintptr_t)data & 15);
+    sum = crc32_sw(data, limit, sum);
+    offset += limit;
+    nbytes -= limit;
+  }
+
+  if (nbytes >= 16) {
+    sum = crc32_hw_aligned(sum, (const __m128i*)(data + offset), nbytes / 16);
+    offset += nbytes & ~15;
+    nbytes &= 15;
+  }
+
+  // Remaining unaligned bytes
+  return crc32_sw(data + offset, nbytes, sum);
+}
+
+bool crc32c_hw_supported() {
+  static folly::CpuId id;
+  return id.sse42();
+}
+
+bool crc32_hw_supported() {
+  static folly::CpuId id;
+  return id.sse42();
+}
+
+#else
+
 uint32_t crc32_hw(
     const uint8_t* /* data */,
     size_t /* nbytes */,
@@ -150,7 +202,8 @@ bool crc32c_hw_supported() {
 bool crc32_hw_supported() {
   return false;
 }
-// #endif
+#endif
+
 
 template <uint32_t CRC_POLYNOMIAL>
 uint32_t crc_sw(const uint8_t* data, size_t nbytes, uint32_t startingChecksum) {
@@ -186,10 +239,15 @@ crc32_sw(const uint8_t* data, size_t nbytes, uint32_t startingChecksum) {
   return crc_sw<CRC32_POLYNOMIAL>(data, nbytes, startingChecksum);
 }
 
+
 } // namespace detail
 
 uint32_t crc32c(const uint8_t* data, size_t nbytes, uint32_t startingChecksum) {
-    return detail::crc32c_sw(data, nbytes, startingChecksum);
+    if (detail::crc32_hw_supported()) {
+      return detail::crc32_hw(data, nbytes, startingChecksum);
+    } else {
+      return detail::crc32_sw(data, nbytes, startingChecksum);
+    }
 }
 
 uint32_t crc32(const uint8_t* data, size_t nbytes, uint32_t startingChecksum) {
