@@ -20,4 +20,3 @@ for with_cuda in [False, True]:
             model(inputs)
 
     print(prof.key_averages(group_by_input_shape=True).table(sort_by=sort_key, row_limit=-1))
-
