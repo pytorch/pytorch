@@ -168,12 +168,10 @@ void RequestCallbackImpl::processRpc(
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       std::shared_ptr<SerializedPyObj> serializedPyObj = nullptr;
       {
-        // Use GIL to guard the decref of the py::object returned by
-        // pythonRpcHandler.runPythonUdf(...)
         py::gil_scoped_acquire acquire;
         serializedPyObj =
             std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
-                pythonRpcHandler.runPythonUdf(upc.pythonUdf())));
+                pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf())));
       }
       markComplete(
           std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
@@ -281,11 +279,9 @@ void RequestCallbackImpl::processRpc(
       IValue py_ivalue;
       try {
         {
-          // Use GIL to guard the decref of the py::object returned by
-          // pythonRpcHandler.runPythonUdf(...)
           py::gil_scoped_acquire acquire;
           py_ivalue = jit::toIValue(
-              pythonRpcHandler.runPythonUdf(uprc.pythonUdf()),
+              pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
               PyObjectType::get());
         }
         ownerRRef->setValue(std::move(py_ivalue));
@@ -380,7 +376,7 @@ void RequestCallbackImpl::processRpc(
       futureOwner->addCallback([responseFuture,
                                 messageId,
                                 futureOwner,
-                                serialize{std::move(serialize)}]() {
+                                serialize{std::move(serialize)}]() mutable {
         const auto& rref = futureOwner->constValue();
         auto whenValueSet = rref->getFuture();
 
@@ -390,7 +386,7 @@ void RequestCallbackImpl::processRpc(
                                    messageId,
                                    rref,
                                    whenValueSet,
-                                   serialize{std::move(serialize)}] {
+                                   serialize{std::move(serialize)}]() mutable {
           if (whenValueSet->hasError()) {
             responseFuture->setError(whenValueSet->error()->what());
             return;
@@ -554,7 +550,6 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
   auto& rrefContext = RRefContext::getInstance();
   try {
     rrefContext.recordThreadLocalPendingRRefs();
-    // Deserialize PythonUDF here to trigger RRef unpickling
     std::unique_ptr<RpcCommandBase> rpc = deserializePythonRpcCommand(
         deserializeRequest(request), request.type());
     auto rrefsReadyFuture = rrefContext.waitForThreadLocalPendingRRefs();
