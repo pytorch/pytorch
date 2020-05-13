@@ -4185,7 +4185,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
         test_case.assertEqualTypeString(self_variable, self_variable.grad)
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
-separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal']
+separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
 
 # white list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
