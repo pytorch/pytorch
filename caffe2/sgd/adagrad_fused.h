@@ -22,10 +22,9 @@ class SparseAdagradFusedWithSparseLengthsSumGradientOp final
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    C10_LOG_FIRST_N(INFO, 1)
-        << "gradient optimization operator in use: "
-        << "SparseAdagradFusedWithSparseLengthsSumGradientOp"
-        << " weight_decay_=" << weight_decay_;
+    VLOG(1) << "gradient optimization operator in use: "
+            << "SparseAdagradFusedWithSparseLengthsSumGradientOp"
+            << " weight_decay_=" << weight_decay_;
     const T decay = this->template GetSingleArgument<T>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
@@ -158,9 +157,8 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    C10_LOG_FIRST_N(INFO, 1)
-        << "gradient optimization operator in use: "
-        << "SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp";
+    VLOG(1) << "gradient optimization operator in use: "
+            << "SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp";
     const T decay = this->template GetSingleArgument<T>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
@@ -332,9 +330,8 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp final
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    C10_LOG_FIRST_N(INFO, 1)
-        << "gradient optimization operator in use: "
-        << "SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp";
+    VLOG(1) << "gradient optimization operator in use: "
+            << "SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp";
     const T decay = this->template GetSingleArgument<T>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
