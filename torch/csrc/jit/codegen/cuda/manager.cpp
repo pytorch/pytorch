@@ -232,7 +232,7 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
     try {
       execute_lambda();
     } catch (...) {
-      TORCH_WARN("FALLBACK path is done. This is an dindication that codegen"
+      TORCH_WARN("FALLBACK path is taken. This is an indication that codegen"
           "Failed for some reason. To debug try disable codegen fallback path"
           "via setting the env variable"
           "`export PYTORCH_CUDA_FUSER_DISABLE_FALLBACK=1`");

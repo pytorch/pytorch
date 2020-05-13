@@ -4,10 +4,12 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import unittest
+import os
 
 import torch
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, skipIfRocm
+from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 
 from test_jit import JitTestCase, RUN_CUDA
 
@@ -347,6 +349,12 @@ class TestCudaFuser(JitTestCase):
         x = torch.randn(8, 17, 8, dtype=torch.float, device="cuda")
         y = torch.randn(8, 17, 1, dtype=torch.float, device="cuda")
         jit_o = t_jit(x, y, 2.0)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @skipIfRocm
+    def test_random_topo(self):
+        os.environ["PYTORCH_CUDA_FUSER_DISABLE_FALLBACK"] = "1"
+        self.assertTrue(runDefaultTestWithSeed(28449))
 
 if __name__ == '__main__':
     run_tests()
