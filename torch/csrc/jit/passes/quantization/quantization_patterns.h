@@ -440,16 +440,20 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
          return (%r) )";
 
   // ============= General Ops that doesn't require observation =============
-  // aten::avg_pool1d
-  std::string avg_pool1d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::avg_pool1d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad)
+  // IR pattern common to all general value ops
+  std::string common_general_value_op = R"(
           %r_scale : float = aten::q_scale(%a_quant)
           %r_zero_point : int = aten::q_zero_point(%a_quant)
           %r_dtype : int = prim::dtype(%a_quant)
           %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
           return (%r_quant) )";
+
+  // aten::avg_pool1d
+  std::string avg_pool1d = R"(
+graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::avg_pool1d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad)
+)" + common_general_value_op;
 
   std::string aten_avg_pool1d = R"(
 graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad):
@@ -461,11 +465,7 @@ graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad)
 graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
           %a_dequant = aten::dequantize(%a_quant)
           %r = aten::avg_pool2d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
-          %r_scale : float = aten::q_scale(%a_quant)
-          %r_zero_point : int = aten::q_zero_point(%a_quant)
-          %r_dtype : int = prim::dtype(%a_quant)
-          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-          return (%r_quant) )";
+)" + common_general_value_op;
 
   std::string aten_avg_pool2d = R"(
 graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
@@ -477,11 +477,7 @@ graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad,
 graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
           %a_dequant = aten::dequantize(%a_quant)
           %r = aten::avg_pool3d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
-          %r_scale : float = aten::q_scale(%a_quant)
-          %r_zero_point : int = aten::q_zero_point(%a_quant)
-          %r_dtype : int = prim::dtype(%a_quant)
-          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-          return (%r_quant) )";
+)" + common_general_value_op;
 
   std::string aten_avg_pool3d = R"(
 graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
@@ -493,11 +489,7 @@ graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad,
 graph(%a_quant, %output_size):
           %a_dequant = aten::dequantize(%a_quant)
           %r = aten::adaptive_avg_pool1d(%a_dequant, %output_size)
-          %r_scale : float = aten::q_scale(%a_quant)
-          %r_zero_point : int = aten::q_zero_point(%a_quant)
-          %r_dtype : int = prim::dtype(%a_quant)
-          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-          return (%r_quant) )";
+)" + common_general_value_op;
 
   std::string aten_adaptive_avg_pool1d = R"(
 graph(%a_quant, %output_size):
@@ -509,11 +501,7 @@ graph(%a_quant, %output_size):
 graph(%a_quant, %output_size):
           %a_dequant = aten::dequantize(%a_quant)
           %r = aten::adaptive_avg_pool2d(%a_dequant, %output_size)
-          %r_scale : float = aten::q_scale(%a_quant)
-          %r_zero_point : int = aten::q_zero_point(%a_quant)
-          %r_dtype : int = prim::dtype(%a_quant)
-          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-          return (%r_quant) )";
+)" + common_general_value_op;
 
   std::string aten_adaptive_avg_pool2d = R"(
 graph(%a_quant, %output_size):
@@ -525,11 +513,7 @@ graph(%a_quant, %output_size):
 graph(%a_quant, %output_size):
           %a_dequant = aten::dequantize(%a_quant)
           %r = aten::adaptive_avg_pool3d(%a_dequant, %output_size)
-          %r_scale : float = aten::q_scale(%a_quant)
-          %r_zero_point : int = aten::q_zero_point(%a_quant)
-          %r_dtype : int = prim::dtype(%a_quant)
-          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-          return (%r_quant) )";
+)" + common_general_value_op;
 
   std::string aten_adaptive_avg_pool3d = R"(
 graph(%a_quant, %output_size):
@@ -541,11 +525,7 @@ graph(%a_quant, %output_size):
 graph(%a_quant, %dim):
           %a_dequant = aten::dequantize(%a_quant)
           %r = aten::mean(%a_dequant, %dim)
-          %r_scale : float = aten::q_scale(%a_quant)
-          %r_zero_point : int = aten::q_zero_point(%a_quant)
-          %r_dtype : int = prim::dtype(%a_quant)
-          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-          return (%r_quant) )";
+)" + common_general_value_op;
 
   std::string aten_mean = R"(
 graph(%a_quant, %dim):
