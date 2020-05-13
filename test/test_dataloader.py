@@ -1318,7 +1318,7 @@ except RuntimeError as e:
         self.assertEqual(len(dl), 5)
         for i, (input, _target) in enumerate(dl):
             self.assertEqual(len(input), 2)
-            self.assertEqual(input, self.data[i * 2:i * 2 + 2])
+            self.assertEqual(input, self.data[i * 2 + 2:i * 2 + 4])
 
     def test_sampler(self):
         self._test_sampler()
