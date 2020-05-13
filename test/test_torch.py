@@ -12262,6 +12262,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.ones((2, 1, 4), device=device, dtype=torch.uint8), xb.all(1, keepdim=True))
         self.assertEqual(torch.ones((), device=device, dtype=torch.uint8), xb.all())
 
+    @onlyOnCPUAndCUDA
     def test_addcdiv(self, device):
         def _test_addcdiv(a, alpha, b, c):
             actual = torch.addcdiv(a, b, c, value=alpha)
