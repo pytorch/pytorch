@@ -1,5 +1,5 @@
-import torch.cuda.comm as comm
-from torch.cuda._utils import _get_device_index
+from . import comm
+from torch._utils import _get_device_index
 
 from collections import OrderedDict
 
