@@ -24,6 +24,7 @@ namespace rpc {
 namespace {
 
 py::object toPyObj(const Message& message) {
+  py::gil_scoped_release release;
   MessageType msgType = message.type();
   auto response = deserializeResponse(message, msgType);
   switch (msgType) {
@@ -32,7 +33,7 @@ py::object toPyObj(const Message& message) {
       Stack stack;
       stack.push_back(ret.value());
       {
-        pybind11::gil_scoped_acquire ag;
+        pybind11::gil_scoped_acquire acquire;
         // The createPyObjectForStack does not acquire GIL, but creating a new
         // py::object requires GIL.
         return torch::jit::createPyObjectForStack(std::move(stack));
@@ -118,21 +119,18 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
 
     futureResponseMessage->addCallback(
         [jitFuture](const FutureMessage& futureResponseMessage) {
-          // Don't need to acquire GIL here, as toPyObj acquires GIL
-          // when creating the py::object
           if (futureResponseMessage.hasError()) {
             jitFuture->setError(futureResponseMessage.error()->what());
           } else {
             IValue value;
             {
-              pybind11::gil_scoped_acquire ag;
+              // Need GIL to destruct the py::object returned by toPyObj
+              py::gil_scoped_acquire acquire;
               value = jit::toIValue(
                   toPyObj(futureResponseMessage.constValue()),
-                  PyObjectType::get())
+                  PyObjectType::get());
             }
             jitFuture->markCompleted(value);
-            // This IValue is a ConcretePyObjectHolder, and its destructor
-            // guards the decref of the py::object.
           }
         });
 
