@@ -349,7 +349,8 @@ void RequestCallbackImpl::processRpc(
       return;
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
-      auto serialize = [](IValue value) -> SerializedPyObj {
+      // Making this lambda mutable to allow move-capture it in callbacks
+      auto serialize = [](IValue value) mutable -> SerializedPyObj {
         auto& pythonRpcHandler = PythonRpcHandler::getInstance();
         // Need this GIL to guard jit::toPyObj and destruct its returned
         // py::object
