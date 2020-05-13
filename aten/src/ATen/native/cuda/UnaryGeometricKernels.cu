@@ -178,7 +178,7 @@ __host__ __device__ static inline thrust::complex<T> arccosh_wrapper(thrust::com
 }
 
 void arccosh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "arccosh_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "arccosh_cuda", [&]() {
     using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
       return arccosh_wrapper(a);
@@ -198,7 +198,7 @@ __host__ __device__ static inline thrust::complex<T> arcsinh_wrapper(thrust::com
 }
 
 void arcsinh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "arcsinh_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "arcsinh_cuda", [&]() {
     using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
       return arcsinh_wrapper(a);
@@ -217,7 +217,7 @@ __host__ __device__ static inline thrust::complex<T> arctanh_wrapper(thrust::com
 }
 
 void arctanh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "arctanh_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "arctanh_cuda", [&]() {
     using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(thrust_t, "arctanh_cuda", [&] {
       gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
