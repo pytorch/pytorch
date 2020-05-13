@@ -46,7 +46,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
     for (auto device : devices.slice(1)) {
       tensors.push_back(
           at::empty(tensor.sizes(),
-          tensor.options().device(Device(kCUDA, device))));
+          tensor.options().device(at::Device(kCUDA, device))));
     }
     nccl::broadcast(tensors);
   } else {
@@ -59,7 +59,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
     IntArrayRef loop_devices = tensor.is_cuda() ? devices.slice(1) : devices;
     for (auto device : loop_devices) {
       tensors.push_back(tensor.to(
-          Device(kCUDA, device),
+          at::Device(kCUDA, device),
           tensor.scalar_type(),
           /*non_blocking=*/true,
           /*copy=*/true));
@@ -238,9 +238,9 @@ at::Tensor gather(
         tensor.suggest_memory_format() == MemoryFormat::ChannelsLast;
   }
   expected_size[dim] = total_size;
-  Device device(DeviceType::CPU);
+  at::Device device(DeviceType::CPU);
   if (!destination_index || *destination_index != -1) {
-    device = Device(DeviceType::CUDA, destination_index ? *destination_index : -1);
+    device = at::Device(DeviceType::CUDA, destination_index ? *destination_index : -1);
   }
 
   auto memory_format = MemoryFormat::Contiguous;

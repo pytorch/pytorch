@@ -34,26 +34,26 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-static std::unordered_map<Device::Type, FusedKernelConstructor>&
+static std::unordered_map<at::Device::Type, FusedKernelConstructor>&
 getFusionBackends() {
-  static std::unordered_map<Device::Type, FusedKernelConstructor>
+  static std::unordered_map<at::Device::Type, FusedKernelConstructor>
       fusion_backends;
   return fusion_backends;
 }
 
 void registerFusionBackend(
-    Device::Type backend_type,
+    at::Device::Type backend_type,
     FusedKernelConstructor ctor) {
   std::lock_guard<std::mutex> guard(fusionBackendLock());
   getFusionBackends()[backend_type] = std::move(ctor);
 }
 
-bool hasFusionBackend(Device::Type backend_type) {
+bool hasFusionBackend(at::Device::Type backend_type) {
   std::lock_guard<std::mutex> guard(fusionBackendLock());
   return getFusionBackends().count(backend_type);
 }
 
-const FusedKernelConstructor& getConstructor(Device::Type backend_type) {
+const FusedKernelConstructor& getConstructor(at::Device::Type backend_type) {
   std::lock_guard<std::mutex> guard(fusionBackendLock());
   return getFusionBackends().at(backend_type);
 }
@@ -202,7 +202,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     const KernelSpec& spec,
     const ArgSpec& arg_spec,
     const std::vector<int64_t>& map_size,
-    const Device device) {
+    const at::Device device) {
   const std::vector<TensorDesc>& input_desc = arg_spec.descs();
 
   auto graph = spec.graph()->copy();

@@ -32,7 +32,7 @@ struct IODescriptor {
 
     std::vector<int64_t> sizes;
     at::ScalarType type;
-    Device device;
+    at::Device device;
     bool requires_grad;
   };
 
@@ -67,7 +67,7 @@ struct IODescriptor {
 static inline std::ostream& operator<<(
     std::ostream& out,
     const IODescriptor::VariableMetadata& meta) {
-  Device meta_device = meta.device;
+  at::Device meta_device = meta.device;
   auto& t = at::getDeprecatedTypeProperties(
       meta_device.is_cpu() ? at::Backend::CPU : at::Backend::CUDA, meta.type);
   out << t << "(requires_grad=" << meta.requires_grad;

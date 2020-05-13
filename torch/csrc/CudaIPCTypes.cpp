@@ -116,7 +116,7 @@ CudaIPCSentData::CudaIPCSentData(
     std::string handle,
     int64_t offset,
     int64_t* counter_ptr,
-    Device device)
+    at::Device device)
     : handle_(handle),
       offset_(offset),
       counter_ptr_(counter_ptr),
@@ -179,7 +179,7 @@ int64_t CudaIPCSentData::counter_value() {
   return *counter_ptr_;
 }
 
-at::DataPtr GetNewRefCountedSentData(void* data, Device device) {
+at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
   {
     std::lock_guard<std::mutex> lock(
         cuda_ipc_global_entities.ref_counters_mutex_);
