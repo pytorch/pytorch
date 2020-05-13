@@ -117,7 +117,8 @@ struct TORCH_API ProfilerConfig {
 enum class TORCH_API EventKind : uint16_t {
   Mark,
   PushRange,
-  PopRange
+  PopRange,
+  MemoryAlloc,
 };
 #ifndef _MSC_VER
 #  pragma GCC diagnostic pop
@@ -129,10 +130,12 @@ struct TORCH_API Event final {
       at::StringView name,
       uint16_t thread_id,
       bool record_cuda,
+      at::RecordFunctionHandle handle = 0,
       std::vector<std::vector<int64_t>>&& shapes = {})
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
+        handle_(handle),
         shapes_(shapes) {
     record(record_cuda);
   }
@@ -143,6 +146,7 @@ struct TORCH_API Event final {
       case EventKind::Mark: return "mark";
       case EventKind::PushRange: return "push";
       case EventKind::PopRange: return "pop";
+      case EventKind::MemoryAlloc: return "memory_alloc";
     }
     throw std::runtime_error("unknown EventKind");
   }
@@ -166,17 +170,15 @@ struct TORCH_API Event final {
     return device_;
   }
 
-  void updateMemoryStats(const std::unordered_map<c10::Device, int64_t>& mem_usage) {
-    cuda_memory_usage_ = 0;
-    cpu_memory_usage_ = 0;
-    for (const auto& item : mem_usage) {
-      if (item.first.type() == c10::DeviceType::CUDA) {
-        cuda_memory_usage_ += item.second;
-      } else if (item.first.type() == c10::DeviceType::CPU ||
-          item.first.type() == c10::DeviceType::MKLDNN ||
-          item.first.type() == c10::DeviceType::IDEEP) {
-        cpu_memory_usage_ += item.second;
-      }
+  void updateMemoryStats(int64_t alloc_size, c10::Device device) {
+    if (device.type() == c10::DeviceType::CUDA) {
+      cuda_memory_usage_ = alloc_size;
+    } else if (device.type() == c10::DeviceType::CPU ||
+        device.type() == c10::DeviceType::MKLDNN ||
+        device.type() == c10::DeviceType::IDEEP) {
+      cpu_memory_usage_ = alloc_size;
+    } else {
+      LOG(WARNING) << "Unsupported memory profiling device: " << device;
     }
   }
 
@@ -188,12 +190,17 @@ struct TORCH_API Event final {
     return cuda_memory_usage_;
   }
 
+  at::RecordFunctionHandle handle() const {
+    return handle_;
+  }
+
 private:
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
   at::StringView name_;
   EventKind kind_;
   uint16_t thread_id_;
+  at::RecordFunctionHandle handle_ {0};
   std::vector<std::vector<int64_t>> shapes_;
   int64_t cpu_memory_usage_ = 0;
   int64_t cuda_memory_usage_ = 0;
