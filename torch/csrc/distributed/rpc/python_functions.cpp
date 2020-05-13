@@ -42,8 +42,7 @@ py::object toPyObj(const Message& message) {
       // TODO: Try to avoid a copy here.
       auto& resp = static_cast<PythonResp&>(*response);
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-      py::object ret = pythonRpcHandler.deserialize(resp.serializedPyObj());
-      return ret;
+      return pythonRpcHandler.deserialize(resp.serializedPyObj());
     }
     default: {
       TORCH_CHECK(false, "Unrecognized response message type ", msgType);
