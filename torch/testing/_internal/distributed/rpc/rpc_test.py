@@ -3,6 +3,7 @@ import sys
 import time
 import unittest
 from collections import namedtuple
+from functools import partial
 from unittest import mock
 
 import torch
@@ -262,6 +263,7 @@ def heavy_rpc(tensor):
         tensor /= i + 1
     return 0
 
+
 @torch.jit.script
 def heavy_rpc_torchscript(tensor):
     for i in range(1, 100):
@@ -269,9 +271,11 @@ def heavy_rpc_torchscript(tensor):
         tensor /= i + 1
     return 0
 
+
 @torch.jit.script
 def my_script_func(tensor):
     return torch.add(tensor, tensor)
+
 
 def raise_func():
     raise ValueError("Expected error")
@@ -296,6 +300,17 @@ def check_rref_confirmed(rref):
 
 def get_rref_debug_info():
     return _rref_context_get_debug_info()
+
+
+def add_use_future_cb(to, x, y, z):
+    out = concurrent.futures.Future()
+
+    def callback(fut):
+        out.set_result(fut.wait() + z)
+
+    fut = rpc.rpc_async(to, torch.add, args=(x, y))
+    fut._then(callback)
+    return out.result()
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -2365,6 +2380,167 @@ class RpcTest(RpcAgentTestFixture):
             # Verify the returned tensor.
             self.assertEqual(t_view, t_ret)
             self.assertFalse(t_ret.is_contiguous())
+
+    @dist_init
+    def test_callback_simple(self):
+        set_by_cb = concurrent.futures.Future()
+        n = self.rank + 1
+
+        def callback(fut):
+            ret = fut.wait()
+            self.assertEqual(ret, torch.ones(n, n) * 2)
+            set_by_cb.set_result(ret.clone() + 1)
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n))
+        )
+
+        fut._then(callback)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+        self.assertEqual(set_by_cb.result(), torch.ones(n, n) * 2 + 1)
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+    @dist_init
+    def test_callback_wrong_arg_num(self):
+        set_by_cb = concurrent.futures.Future()
+        n = self.rank + 1
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n))
+        )
+
+        cb_fut = fut._then(my_function)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "my\\_function\\(\\) missing 2 required positional arguments"
+        ):
+            cb_fut.wait()
+
+    @dist_init
+    def test_callback_wrong_arg_type(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+
+        fut0 = rpc.rpc_async(dst, torch.add, args=(torch.ones(2, 2), 1))
+        fut1 = fut0._then(lambda x: x + 1)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "unsupported operand type\\(s\\) for \\+"
+        ):
+            fut1.wait()
+
+    @dist_init
+    def test_callback_multi(self):
+        num_cbs = 10
+        n = self.rank + 1
+
+        def callback(idx, fut):
+            ret = fut.wait()
+            self.assertEqual(ret, torch.ones(n, n) * 2)
+            return ret + idx
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n))
+        )
+
+        cb_futs = []
+        for idx in range(num_cbs):
+            cb_futs.append(fut._then(partial(callback, idx)))
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+        for idx in range(num_cbs):
+            self.assertEqual(
+                cb_futs[idx].wait(),
+                torch.ones(n, n) * 2 + idx
+            )
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+    @dist_init
+    def test_callback_chain(self):
+        n = self.rank + 1
+        dst = worker_name(n % self.world_size)
+
+        def callback(fut):
+            return fut.wait() + 1
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), 1)
+        )
+
+        num_cbs = 20
+        for _ in range(num_cbs):
+            fut = fut._then(callback)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) + 1 + num_cbs)
+
+    @dist_init
+    def test_callback_in_rpc(self):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        ret = rpc.rpc_sync(
+            dst1,
+            add_use_future_cb,
+            args=(dst2, torch.ones(2, 2), 1, 2)
+        )
+        self.assertEqual(ret, torch.ones(2, 2) + 1 + 2)
+
+    @dist_init
+    def test_callback_with_ret(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+
+        def callback(fut0):
+            fut2 = rpc.rpc_async(
+                dst,
+                torch.add,
+                args=(fut0.wait(), 1)
+            )._then(lambda fut1: fut1.wait() + 1)
+
+            return fut2.wait()
+
+        fut3 = rpc.rpc_async(
+            dst,
+            torch.add,
+            args=(torch.ones(2, 2), 1)
+        )._then(callback)
+
+        self.assertEqual(fut3.wait(), torch.ones(2, 2) + 3)
+
+    @dist_init
+    def test_callback_with_error(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+
+        def callback(fut0):
+            with self.assertRaisesRegex(ValueError, "Expected error"):
+                fut0.wait()
+            raise RuntimeError("Another expected error")
+
+        fut1 = rpc.rpc_async(dst, raise_func)._then(callback)
+        with self.assertRaisesRegex(RuntimeError, "Another expected error"):
+            fut1.wait()
+
+    @dist_init
+    def test_callback_none(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        with self.assertRaisesRegex(
+            TypeError,
+            "incompatible function arguments."
+        ):
+            rpc.rpc_async(dst, raise_func)._then(None)
 
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):

@@ -302,10 +302,9 @@ class QConvPackWeightInt8 final {
   }
 };
 
-template <int kSpatialDim = 2>
 class QConv1dPackWeightInt8 final {
  public:
-  static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> run(
+  static c10::intrusive_ptr<ConvPackedParamsBase<2>> run(
       Tensor weight,
       c10::optional<Tensor> bias,
       torch::List<int64_t> stride,
@@ -321,18 +320,14 @@ class QConv1dPackWeightInt8 final {
     dilation = quant_utils::MakeArgForConv1d(dilation, 1);
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
-      return PackedConvWeight<kSpatialDim>::prepack(
+      return PackedConvWeight<2>::prepack(
           weight, bias, stride, padding, dilation, groups);
     }
 #endif
 
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
-      TORCH_CHECK(
-          kSpatialDim == 1 || kSpatialDim == 2,
-          "quantized::conv_prepack (qnnpack): QNNPACK only supports Conv1d "
-          "and Conv2d now.");
-      return PackedConvWeightsQnnp<kSpatialDim>::prepack(
+      return PackedConvWeightsQnnp<2>::prepack(
           weight, bias, stride, padding, dilation, groups);
     }
 #endif
@@ -346,7 +341,7 @@ class QConv1dPackWeightInt8 final {
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   // conv_prepack is deprecated, please use conv2d_prepack for 2D conv.
   m.impl("conv_prepack", QConvPackWeightInt8<2>::run);
-  m.impl("conv1d_prepack", QConv1dPackWeightInt8<2>::run);
+  m.impl("conv1d_prepack", QConv1dPackWeightInt8::run);
   m.impl("conv2d_prepack", QConvPackWeightInt8<2>::run);
   m.impl("conv3d_prepack", QConvPackWeightInt8<3>::run);
 }
