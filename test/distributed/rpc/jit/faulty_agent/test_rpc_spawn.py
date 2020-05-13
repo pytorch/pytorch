@@ -3,15 +3,17 @@ import unittest
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import TEST_WITH_ASAN, run_tests
-from torch.testing._internal.distributed.rpc.jit.rpc_test import JitRpcTest
+from torch.testing._internal.distributed.rpc.jit.rpc_test_faulty import (
+    JitFaultyAgentRpcTest,
+)
 
 
 @unittest.skipIf(
     TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
-class JitRpcTestWithSpawn(MultiProcessTestCase, JitRpcTest):
+class JitFaultyAgentRpcTestWithSpawn(MultiProcessTestCase, JitFaultyAgentRpcTest):
     def setUp(self):
-        super(JitRpcTestWithSpawn, self).setUp()
+        super(JitFaultyAgentRpcTestWithSpawn, self).setUp()
         self._spawn_processes()
 
 

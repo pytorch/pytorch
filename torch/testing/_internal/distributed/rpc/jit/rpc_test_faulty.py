@@ -86,6 +86,7 @@ class JitFaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         expected_error = get_timeout_error_regex(
             dist_utils.TEST_CONFIG.rpc_backend_name
         )
+        print("Test config is {}".format(dist_utils.TEST_CONFIG.rpc_backend_name))
         # Ensure that we get a timeout if we override the default timeout and
         # the RPC takes longer to execute.
         with self.assertRaisesRegex(RuntimeError, expected_error):
