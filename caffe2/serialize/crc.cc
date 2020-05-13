@@ -56,9 +56,13 @@ struct gf_powers_make {
 } 
 
 static uint32_t gf_multiply_crc32c_hw(uint64_t, uint64_t, uint32_t) {
+  // NOTE - HARDWARE CRC32 IS NOT CURRENTLY SUPPORTED
+  // TODO - voznesenskym - Support hardware CRC32
   return 0;
 }
 static uint32_t gf_multiply_crc32_hw(uint64_t, uint64_t, uint32_t) {
+  // NOTE - HARDWARE CRC32 IS NOT CURRENTLY SUPPORTED
+  // TODO - voznesenskym - Support hardware CRC32
   return 0;
 }
 
@@ -185,11 +189,7 @@ crc32_sw(const uint8_t* data, size_t nbytes, uint32_t startingChecksum) {
 } // namespace detail
 
 uint32_t crc32c(const uint8_t* data, size_t nbytes, uint32_t startingChecksum) {
-//   if (detail::crc32c_hw_supported()) {
-    // return detail::crc32c_hw(data, nbytes, startingChecksum);
-//   } else {
     return detail::crc32c_sw(data, nbytes, startingChecksum);
-//   }
 }
 
 uint32_t crc32(const uint8_t* data, size_t nbytes, uint32_t startingChecksum) {
