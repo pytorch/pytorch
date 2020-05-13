@@ -90,59 +90,6 @@ def pool_output_shape(input_size, kernel_size, padding, stride,
         output_size += 1
     return output_size
 
-"""Common logic for hardswish testing, called from fbgemm and qnnpack testers"""
-def _test_hardswish(self, X, Y_scale, Y_zero_point, engine):
-    if engine not in torch.backends.quantized.supported_engines:
-        return
-    with override_quantized_engine(engine):
-        X, (X_scale, X_zero_point, torch_type) = X
-        X = torch.from_numpy(X)
-        qX = torch.quantize_per_tensor(X, scale=X_scale, zero_point=X_zero_point,
-                                       dtype=torch_type)
-        dqX = qX.dequantize()
-
-        dqY_hat = F.hardswish(dqX)
-        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=Y_scale,
-                                           zero_point=Y_zero_point,
-                                           dtype=torch_type)
-
-        qY = torch.nn.quantized.functional.hardswish(
-            qX, scale=Y_scale, zero_point=Y_zero_point)
-        self.assertEqual(
-            qY, qY_hat,
-            message="Hardswish failed: {} vs {}".format(qY, qY_hat))
-
-"""Common logic for hardswish testing, called from fbgemm and qnnpack testers"""
-def _test_hardsigmoid(self, X, engine):
-    if engine not in torch.backends.quantized.supported_engines:
-        return
-    with override_quantized_engine(engine):
-        X, (scale, zero_point, torch_type) = X
-
-        X = torch.from_numpy(X)
-
-        qX = torch.quantize_per_tensor(X, scale=scale,
-                                       zero_point=zero_point,
-                                       dtype=torch_type)
-        dqX = qX.dequantize()
-
-
-        # Quantize the reference to account for max error.
-        # Note that the output scale has +1, because we use scale of 1.0/2^BITS
-        # in the implementations.
-        f_min, f_max = 0.0, 1.0
-        q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
-        output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
-        output_zero_point = 0 if torch_type == torch.qint32 else q_min
-        dqY_hat = F.hardsigmoid(dqX)
-        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale,
-                                           zero_point=output_zero_point,
-                                           dtype=torch_type)
-
-        qY = torch.nn.quantized.functional.hardsigmoid(qX)
-        self.assertEqual(qY, qY_hat,
-                         message="Hardsigmoid failed: {} vs. {}".format(qY, qY_hat))
-
 """
 Util for creating a random tensor and quantization params when Hypothesis
 is undesirable.
@@ -320,12 +267,43 @@ class TestQuantizedOps(TestCase):
                          message="Sigmoid failed: {} vs. {}".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qhardsigmoid op."""
-    @skipIfNoFBGEMM
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
-                       qparams=hu.qparams()))
-    def test_qhardsigmoid(self, X):
-        _test_hardsigmoid(self, X, 'fbgemm')
+    @override_qengines
+    def test_qhardsigmoid(self):
+        max_sides = (3, 5)
+        side_lens = (1, 7, 8)
+        torch_types = (torch.quint8, torch.qint8)
+        combined = [max_sides, side_lens, torch_types]
+        test_cases = itertools.product(*combined)
+        for test_case in test_cases:
+            max_side, side_len, torch_type = test_case
+
+            if torch.backends.quantized.engine == 'qnnpack' and torch_type != torch.quint8:
+                continue
+
+            shapes = [side_len] * max_side
+            X, X_scale, X_zero_point = \
+                _get_random_tensor_and_q_params(shapes, 2.0, torch_type)
+            qX = torch.quantize_per_tensor(X, scale=X_scale,
+                                           zero_point=X_zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+
+
+            # Quantize the reference to account for max error.
+            # Note that the output scale has +1, because we use scale of 1.0/2^BITS
+            # in the implementations.
+            f_min, f_max = 0.0, 1.0
+            q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
+            output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
+            output_zero_point = 0 if torch_type == torch.qint32 else q_min
+            dqY_hat = F.hardsigmoid(dqX)
+            qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale,
+                                               zero_point=output_zero_point,
+                                               dtype=torch_type)
+
+            qY = torch.nn.quantized.functional.hardsigmoid(qX)
+            self.assertEqual(qY, qY_hat,
+                             message="Hardsigmoid failed: {} vs. {}, {}".format(qY, qY_hat, torch.backends.quantized.engine))
 
 
     """Tests the correctness of the quantized::qlayer_norm op."""
@@ -508,14 +486,38 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
 
     """Tests the correctness of the quantized::hardswish op."""
-    @skipIfNoFBGEMM
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
-                       elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
-                       qparams=hu.qparams()),
-           Y_scale=st.floats(1e-6, 1e6),
-           Y_zero_point=st.integers(0, 10))
-    def test_hardswish(self, X, Y_scale, Y_zero_point):
-        _test_hardswish(self, X, Y_scale, Y_zero_point, 'fbgemm')
+    @override_qengines
+    def test_hardswish(self):
+        max_sides = (3, 5)
+        side_lens = (1, 7, 8)
+        torch_types = (torch.quint8, torch.qint8)
+        y_scales = (0.1, 4.23)
+        y_zero_points = (0, 1)
+        combined = [max_sides, side_lens, torch_types, y_scales, y_zero_points]
+        test_cases = itertools.product(*combined)
+        for test_case in test_cases:
+            max_side, side_len, torch_type, Y_scale, Y_zero_point = test_case
+
+            if torch.backends.quantized.engine == 'qnnpack' and torch_type != torch.quint8:
+                continue
+
+            shapes = [side_len] * max_side
+            X, X_scale, X_zero_point = \
+                _get_random_tensor_and_q_params(shapes, 2.0, torch_type)
+            qX = torch.quantize_per_tensor(X, scale=X_scale, zero_point=X_zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+
+            dqY_hat = F.hardswish(dqX)
+            qY_hat = torch.quantize_per_tensor(dqY_hat, scale=Y_scale,
+                                               zero_point=Y_zero_point,
+                                               dtype=torch_type)
+
+            qY = torch.nn.quantized.functional.hardswish(
+                qX, scale=Y_scale, zero_point=Y_zero_point)
+            self.assertEqual(
+                qY, qY_hat,
+                message="Hardswish failed: {} vs {}, {}".format(qY, qY_hat, torch.backends.quantized.engine))
 
     """Tests the correctness of the scalar addition."""
     @unittest.skip("Failing on MacOS")
@@ -3064,22 +3066,6 @@ class TestQNNPackOps(TestCase):
             Y = torch.quantize_per_tensor(Y, scale, zero_point, torch.quint8)
             qY = torch.mean(qX, dim)
             np.testing.assert_array_almost_equal(Y.int_repr().numpy(), qY.int_repr().numpy(), decimal=0)
-
-    """Tests the correctness of the quantized::hardswish op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
-                       elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
-                       qparams=hu.qparams(dtypes=(torch.quint8))),
-           Y_scale=st.floats(1e-6, 1e6),
-           Y_zero_point=st.integers(0, 10))
-    def test_hardswish(self, X, Y_scale, Y_zero_point):
-        _test_hardswish(self, X, Y_scale, Y_zero_point, 'qnnpack')
-
-    """Tests the correctness of the quantized::hardsigmoid op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
-                       elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
-                       qparams=hu.qparams(dtypes=(torch.quint8))))
-    def test_qhardsigmoid(self, X):
-        _test_hardsigmoid(self, X, 'qnnpack')
 
     """Tests the correctness of the quantized::hardtanh op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
