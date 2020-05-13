@@ -15,7 +15,7 @@ CallbackHandle next_unique_callback_handle() {
 
 RecordFunctionHandle next_unique_record_function_handle() {
   static std::atomic<uint64_t> unique_rf_id {0};
-  return CallbackHandle(++unique_rf_id);
+  return RecordFunctionHandle(++unique_rf_id);
 }
 
 // Thread local vector of callbacks, holds pairs (callbacks, unique_id);
