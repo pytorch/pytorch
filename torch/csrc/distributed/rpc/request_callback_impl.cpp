@@ -33,13 +33,6 @@ using namespace torch::distributed::autograd;
 
 namespace {
 
-SerializedPyObj toSerializedPyObj(IValue value) {
-  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-  // Need this GIL to guard jit::toPyObj and destruct its returned py::object
-  pybind11::gil_scoped_acquire ag;
-  return pythonRpcHandler.serialize(jit::toPyObject(std::move(value)));
-}
-
 std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
     RpcCommandBase& rpc,
     const MessageType& messageType) {
@@ -356,6 +349,13 @@ void RequestCallbackImpl::processRpc(
       return;
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
+      auto serialize = [](IValue value) -> SerializedPyObj {
+        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+        // Need this GIL to guard jit::toPyObj and destruct its returned
+        // py::object
+        pybind11::gil_scoped_acquire ag;
+        return pythonRpcHandler.serialize(jit::toPyObject(std::move(value)));
+      };
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
 
@@ -365,14 +365,17 @@ void RequestCallbackImpl::processRpc(
         // the OwnerRRef has been created
         const auto& rref = futureOwner->constValue();
         if (rref->hasValue()) {
-          SerializedPyObj result = toSerializedPyObj(rref->getValue());
+          SerializedPyObj result = serialize(rref->getValue());
           markComplete(
               PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
           return;
         }
       }
 
-      futureOwner->addCallback([responseFuture, messageId, futureOwner]() {
+      futureOwner->addCallback([responseFuture,
+                                messageId,
+                                futureOwner,
+                                serialize{std::move(serialize)}]() {
         const auto& rref = futureOwner->constValue();
         auto whenValueSet = rref->getFuture();
 
@@ -381,13 +384,14 @@ void RequestCallbackImpl::processRpc(
         whenValueSet->addCallback([responseFuture,
                                    messageId,
                                    rref,
-                                   whenValueSet] {
+                                   whenValueSet,
+                                   serialize{std::move(serialize)}] {
           if (whenValueSet->hasError()) {
             responseFuture->setError(whenValueSet->error()->what());
             return;
           }
           try {
-            SerializedPyObj result = toSerializedPyObj(rref->getValue());
+            SerializedPyObj result = serialize(rref->getValue());
             Message m =
                 PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
             m.setId(messageId);
