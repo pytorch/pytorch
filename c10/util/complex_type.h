@@ -274,6 +274,8 @@ struct alignas(2*sizeof(double)) complex<double>: public complex_common<double> 
   using complex_common<double>::operator=;
 };
 
+#undef CUDA9_AND_ROCM_BUG
+
 constexpr complex<float>::complex(const complex<double> &other): complex_common(other.real(), other.imag()) {}
 constexpr complex<double>::complex(const complex<float> &other): complex_common(other.real(), other.imag()) {}
 
