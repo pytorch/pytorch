@@ -1,6 +1,5 @@
 import os
 import sys
-from textwrap import dedent
 
 import torch
 import unittest
@@ -8,7 +7,7 @@ import unittest
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase, execWrapper
+from torch.testing._internal.jit_utils import JitTestCase
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -58,20 +57,6 @@ class TestUnsupportedOps(JitTestCase):
             print(torch.jit.script(foo).graph)
 
     def test_ops_bound_in_functional(self):
-        ops_bound_in_functional = "unique",
-        tensor = torch.tensor([2])
-        funcs_template = dedent('''
-        def func():
-            return torch.{op}()
-        ''')
-        for op in ops_bound_in_functional:
-            funcs_str = funcs_template.format(op=op)
-            scope = {}
-            execWrapper(funcs_str, globals(), scope)
-            f = scope['func']
-            with self.assertRaisesRegex(Exception, "Unknown builtin op"):
-                cu = torch.jit.CompilationUnit(funcs_str)
-
         def unique_consec():
             x = torch.tensor([1])
             return torch.unique_consecutive(x, return_inverse=False, return_counts=True, dim=0)

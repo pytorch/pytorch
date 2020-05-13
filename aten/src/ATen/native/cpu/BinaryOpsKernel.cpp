@@ -386,7 +386,7 @@ void ge_kernel(TensorIterator& iter) {
 
 void eq_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
-    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "eq_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "eq_cpu", [&]() {
       cpu_kernel(iter,
        [](scalar_t a, scalar_t b) -> bool {
          return a == b;
@@ -408,7 +408,7 @@ void eq_kernel(TensorIterator& iter) {
 
 void ne_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
-    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "ne_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "ne_cpu", [&]() {
       cpu_kernel(iter,
        [](scalar_t a, scalar_t b) -> bool {
          return a != b;
