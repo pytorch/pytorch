@@ -8879,6 +8879,17 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(dims, device=device)
             test_multidim(x, singleton_dim)
 
+            # check reducing median with NaNs
+            # If the element in the median is a NaN, there can be issues
+            # when comparining with other nan elements
+            if fn_name == 'median':
+                y = torch.full((1, 3), np.nan, dtype=torch.float64, device=device)
+                y[:, :1] = 1.1
+                values, indices = fn_tuple(y, dim=1)
+                expected_values = torch.tensor([nan], dtype=torch.float64, device=device)
+                self.assertEqual(values, expected_values)
+                self.assertTrue(torch.isnan(y.flatten()[indices[0]]))
+
             # check reducing with output kwargs
             if fn_name in ['median', 'mode', 'max', 'min']:
                 y = torch.randn(5, 3, device=device)
@@ -10182,8 +10193,7 @@ class TestTorchDeviceType(TestCase):
     def test_uniform_from_to(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            # Crashes with CUDA error: unspecified launch failure
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -14216,6 +14226,24 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(prob_dist.dim(), 1, "wrong number of prob_dist dimensions")
             self.assertEqual(sample_indices.size(0), n_sample, "wrong number of samples")
 
+    @slowTest
+    @dtypes(torch.float)
+    def test_multinomial_rng_state_advance(self, device, dtype):
+        corpus_size = 100000
+        freqs = torch.ones(corpus_size, dtype=torch.float, device=device)
+        n_sample = 100
+        samples1 = torch.multinomial(freqs, n_sample, replacement=True)
+        samples2 = torch.multinomial(freqs, n_sample, replacement=True)
+        samples = torch.cat([samples1, samples2])
+        # expect no more than 1 repeating elements generated in 2 attempts
+        # the probability of at least element being repeated is surprisingly large, 18%
+        self.assertLessEqual(2 * n_sample - samples.unique().size(0), 2)
+        samples1 = torch.multinomial(freqs, n_sample, replacement=False)
+        samples2 = torch.multinomial(freqs, n_sample, replacement=False)
+        samples = torch.cat([samples1, samples2])
+        # expect no more than 1 repeating elements generated in 2 attempts
+        self.assertLessEqual(2 * n_sample - samples.unique().size(0), 1)
+
     def test_var_unbiased(self, device):
         tensor = torch.randn(100, device=device)
         self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
@@ -15905,7 +15933,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_random_full_range(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -15913,14 +15941,22 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         int64_min_val = torch.iinfo(torch.int64).min
         int64_max_val = torch.iinfo(torch.int64).max
 
+        if dtype == torch.double:
+            fp_limit = 2**53
+        elif dtype == torch.float:
+            fp_limit = 2**24
+        elif dtype == torch.half:
+            fp_limit = 2**11
+        elif dtype == torch.bfloat16:
+            fp_limit = 2**8
+        else:
+            fp_limit = 0
+
         t = torch.empty(size, dtype=dtype, device=device)
 
-        if dtype in [torch.float, torch.double, torch.half]:
-            from_ = int(max(torch.finfo(dtype).min, int64_min_val))
-            to_inc_ = int(min(torch.finfo(dtype).max, int64_max_val))
-        elif dtype == torch.bfloat16:
-            from_ = int(max(-3.389531389251535e+38, int64_min_val))
-            to_inc_ = int(min(3.389531389251535e+38, int64_max_val))
+        if dtype in [torch.float, torch.double, torch.half, torch.bfloat16]:
+            from_ = int(max(-fp_limit, int64_min_val))
+            to_inc_ = int(min(fp_limit, int64_max_val))
         else:
             from_ = int(max(torch.iinfo(dtype).min, int64_min_val))
             to_inc_ = int(min(torch.iinfo(dtype).max, int64_max_val))
@@ -15938,7 +15974,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_random_from_to(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -16034,7 +16070,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_random_to(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -16099,7 +16135,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_random_default(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
