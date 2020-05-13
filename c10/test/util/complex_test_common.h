@@ -399,7 +399,7 @@ C10_HOST_DEVICE static void test_binary_ops_for_int_type_(T real, T img, int_t n
   ASSERT_EQ(c * num, c10::complex<T>(real * num, img * num));
   ASSERT_EQ(num * c, c10::complex<T>(num * real, num * img));
   ASSERT_EQ(c / num, c10::complex<T>(real / num, img / num));
-  ASSERT_EQ(num / c, c10::complex<T>(num / real, num / img));
+  ASSERT_EQ(num / c, c10::complex<T>(num * real / c.norm(), -num * img / c.norm()));
 }
 
 template<typename T>
