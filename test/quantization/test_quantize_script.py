@@ -1534,13 +1534,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.maxpool1d = torch.nn.MaxPool1d(kernel_size=3)
                 self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3)
                 self.maxpool3d = torch.nn.MaxPool3d(kernel_size=3)
-                self.adaptive_avgpool1d = torch.nn.AdaptiveAvgPool1d((1))
-                self.adaptive_avgpool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
-                self.adaptive_avgpool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.dropout = torch.nn.Dropout()
-                self.avgpool1d = torch.nn.AvgPool1d(3)
-                self.avgpool2d = torch.nn.AvgPool2d(3)
-                self.avgpool3d = torch.nn.AvgPool3d(3)
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.sigmoid = torch.nn.Sigmoid()
                 self.tanh = torch.nn.Tanh()
@@ -1556,19 +1550,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = self.maxpool1d(x)
                 x = self.maxpool2d(x)
                 x = self.maxpool3d(x)
-                x = self.adaptive_avgpool1d(x)
-                x = self.adaptive_avgpool2d(x)
-                x = self.adaptive_avgpool3d(x)
-                x = self.avgpool1d(x)
-                x = self.avgpool2d(x)
-                x = self.avgpool3d(x)
                 x = torch.flatten(x)
-                x = F.adaptive_avg_pool1d(x, (1))
-                x = F.adaptive_avg_pool2d(x, (1, 1))
-                x = F.adaptive_avg_pool3d(x, (1, 1, 1))
-                x = F.avg_pool1d(x, 3)
-                x = F.avg_pool2d(x, 3)
-                x = F.avg_pool3d(x, 3)
                 x = torch.max(x)
                 x = torch.min(x)
                 x = torch.mean(x)
@@ -1644,13 +1626,28 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.avgpool2d = torch.nn.AvgPool2d(3)
+                self.avg_pool1d = torch.nn.AvgPool1d(3)
+                self.avg_pool2d = torch.nn.AvgPool2d(3)
+                self.avg_pool3d = torch.nn.AvgPool2d(3)
+                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
+                self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.conv = torch.nn.Conv2d(3, 3, 3)
 
             def forward(self, x):
                 x = self.conv(x)
-                x = self.avgpool2d(x)
+                x = self.avg_pool1d(x)
+                x = self.avg_pool2d(x)
+                x = self.avg_pool3d(x)
+                x = self.adaptive_avg_pool1d(x)
+                x = self.adaptive_avg_pool2d(x)
+                x = self.adaptive_avg_pool3d(x)
+                x = F.avg_pool1d(x, 3)
                 x = F.avg_pool2d(x, 3)
+                x = F.avg_pool3d(x, 3)
+                x = F.adaptive_avg_pool1d(x, (1))
+                x = F.adaptive_avg_pool2d(x, (1, 1))
+                x = F.adaptive_avg_pool3d(x, (1, 1, 1))
                 x = self.conv(x)
                 return x
 
@@ -1672,8 +1669,8 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         m1 = convert_script(m, debug=True)
         conv_op_quant = 4
         # NB: This Needs to be updated when we add more ops to test
-        general_value_op_quant = 2
-        FileCheck().check_count("aten::quantize_per_tensor", conv_op_quant + general_value_op_quant + 1, exactly=True) \
+        general_value_op_quant = 12
+        FileCheck().check_count("aten::quantize_per_tensor(", conv_op_quant + general_value_op_quant + 1, exactly=True) \
                    .run(m1.graph)
 
         # This checks that the dequantize from the output of first conv
@@ -1681,8 +1678,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
-            torch.jit.script(M())._c, 'forward', {'': qconfig}, inplace=False))
         m2 = convert_script(m, debug=False)
         FileCheck().check_count("aten::quantize_per_tensor(", 1, exactly=True) \
                    .check_count("quantized::conv2d(", 2, exactly=True) \
