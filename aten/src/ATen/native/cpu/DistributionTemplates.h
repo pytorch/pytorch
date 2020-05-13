@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/TensorIterator.h>
@@ -268,10 +269,12 @@ struct LogNormalKernel {
 // =================================================== Geometric ======================================================
 
 template<typename RNG>
-void geometric_kernel(TensorIterator& iter, double p, RNG generator) {
+void geometric_kernel(TensorIterator& iter, double p_, RNG generator) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "geometric_cpu", [&]() {
+    using accscalar_t = at::GeometricType<scalar_t>::type;
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    at::geometric_distribution<double> geometric(p);
+    auto p = static_cast<accscalar_t>(p_);
+    at::geometric_distribution<accscalar_t> geometric(p);
     cpu_serial_kernel(iter, [&geometric, generator]() -> scalar_t {
       return static_cast<scalar_t>(geometric(generator));
     });
