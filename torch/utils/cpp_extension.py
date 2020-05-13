@@ -7,11 +7,11 @@ import setuptools
 import subprocess
 import sys
 import sysconfig
-import tempfile
 import warnings
 import collections
 
 import torch
+import torch._appdirs
 from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
@@ -23,7 +23,7 @@ from setuptools.command.build_ext import build_ext
 IS_WINDOWS = sys.platform == 'win32'
 
 def _find_cuda_home():
-    '''Finds the CUDA install path.'''
+    r'''Finds the CUDA install path.'''
     # Guess #1
     cuda_home = os.environ.get('CUDA_HOME') or os.environ.get('CUDA_PATH')
     if cuda_home is None:
@@ -52,7 +52,7 @@ def _find_cuda_home():
     return cuda_home
 
 def _find_rocm_home():
-    '''Finds the ROCm install path.'''
+    r'''Finds the ROCm install path.'''
     # Guess #1
     rocm_home = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH')
     if rocm_home is None:
@@ -75,7 +75,7 @@ def _find_rocm_home():
 
 
 def _join_rocm_home(*paths):
-    '''
+    r'''
     Joins paths with ROCM_HOME, or raises an error if it ROCM_HOME is not set.
 
     This is basically a lazy way of raising an error for missing $ROCM_HOME
@@ -134,7 +134,14 @@ CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # it the below pattern.
 BUILT_FROM_SOURCE_VERSION_PATTERN = re.compile(r'\d+\.\d+\.\d+\w+\+\w+')
 
-COMMON_MSVC_FLAGS = ['/MD', '/wd4819', '/wd4251', '/EHsc']
+COMMON_MSVC_FLAGS = ['/MD', '/wd4819', '/wd4251', '/wd4244', '/wd4267', '/wd4275', '/wd4018', '/wd4190', '/EHsc']
+
+MSVC_IGNORE_CUDAFE_WARNINGS = [
+    'base_class_has_different_dll_interface',
+    'field_without_dll_interface',
+    'dll_interface_conflict_none_assumed',
+    'dll_interface_conflict_dllexport_assumed'
+]
 
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
@@ -164,20 +171,22 @@ def _accepted_compilers_for_platform():
 
 
 def get_default_build_root():
-    '''
+    r'''
     Returns the path to the root folder under which extensions will built.
 
     For each extension module built, there will be one folder underneath the
     folder returned by this function. For example, if ``p`` is the path
     returned by this function and ``ext`` the name of an extension, the build
     folder for the extension will be ``p/ext``.
+
+    This directory is **user-specific** so that multiple users on the same
+    machine won't meet permission issues.
     '''
-    # tempfile.gettempdir() will be /tmp on UNIX and \TEMP on Windows.
-    return os.path.realpath(os.path.join(tempfile.gettempdir(), 'torch_extensions'))
+    return os.path.realpath(torch._appdirs.user_cache_dir(appname='torch_extensions'))
 
 
 def check_compiler_ok_for_platform(compiler):
-    '''
+    r'''
     Verifies that the compiler is the expected one for the current platform.
 
     Arguments:
@@ -192,11 +201,27 @@ def check_compiler_ok_for_platform(compiler):
     which = subprocess.check_output(['which', compiler], stderr=subprocess.STDOUT)
     # Use os.path.realpath to resolve any symlinks, in particular from 'c++' to e.g. 'g++'.
     compiler_path = os.path.realpath(which.decode().strip())
-    return any(name in compiler_path for name in _accepted_compilers_for_platform())
+    # Check the compiler name
+    if any(name in compiler_path for name in _accepted_compilers_for_platform()):
+        return True
+    # If ccache is used the compiler path is /usr/bin/ccache. Check by -v flag.
+    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode()
+    if sys.platform.startswith('linux'):
+        # Check for 'gcc' or 'g++'
+        pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
+        results = re.findall(pattern, version_string)
+        if len(results) != 1:
+            return False
+        compiler_path = os.path.realpath(results[0].strip())
+        return any(name in compiler_path for name in _accepted_compilers_for_platform())
+    if sys.platform.startswith('darwin'):
+        # Check for 'clang' or 'clang++'
+        return version_string.startswith("Apple clang")
+    return False
 
 
 def check_compiler_abi_compatibility(compiler):
-    '''
+    r'''
     Verifies that the given compiler is ABI-compatible with PyTorch.
 
     Arguments:
@@ -252,7 +277,7 @@ def check_compiler_abi_compatibility(compiler):
 
 
 class BuildExtension(build_ext, object):
-    '''
+    r'''
     A custom :mod:`setuptools` build extension .
 
     This :class:`setuptools.build_ext` subclass takes care of passing the
@@ -279,7 +304,7 @@ class BuildExtension(build_ext, object):
 
     @classmethod
     def with_options(cls, **options):
-        '''
+        r'''
         Returns an alternative constructor that extends any original keyword
         arguments to the original constructor with the given options.
         '''
@@ -298,10 +323,7 @@ class BuildExtension(build_ext, object):
             # Test if we can use ninja. Fallback otherwise.
             msg = ('Attempted to use ninja as the BuildExtension backend but '
                    '{}. Falling back to using the slow distutils backend.')
-            if IS_HIP_EXTENSION:
-                warnings.warn(msg.format('HIP extensions is not supported yet for ninja.'))
-                self.use_ninja = False
-            elif not _is_ninja_available():
+            if not _is_ninja_available():
                 warnings.warn(msg.format('we could not find ninja.'))
                 self.use_ninja = False
 
@@ -371,7 +393,7 @@ class BuildExtension(build_ext, object):
                                     extra_preargs=None,
                                     extra_postargs=None,
                                     depends=None):
-            """Compiles sources by outputting a ninja file and running it."""
+            r"""Compiles sources by outputting a ninja file and running it."""
             # NB: I copied some lines from self.compiler (which is an instance
             # of distutils.UnixCCompiler). See the following link.
             # https://github.com/python/cpython/blob/f03a8f8d5001963ad5b5b28dbd95497e9cc15596/Lib/distutils/ccompiler.py#L564-L567
@@ -409,7 +431,11 @@ class BuildExtension(build_ext, object):
                     cuda_post_cflags = extra_postargs['nvcc']
                 else:
                     cuda_post_cflags = list(extra_postargs)
-                cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
+                if IS_HIP_EXTENSION:
+                    cuda_post_cflags = cuda_post_cflags + _get_rocm_arch_flags(cuda_post_cflags)
+                    cuda_post_cflags = cuda_post_cflags + COMMON_HIPCC_FLAGS
+                else:
+                    cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
                 append_std14_if_no_std_present(cuda_post_cflags)
 
             _write_ninja_file_and_compile_objects(
@@ -477,6 +503,8 @@ class BuildExtension(build_ext, object):
                         cflags = win_cuda_flags(cflags)
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
+                        for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
+                            cflags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cflags
                         cmd = [nvcc, '-c', src, '-o', obj] + include_list + cflags
                     elif isinstance(self.cflags, dict):
                         cflags = COMMON_MSVC_FLAGS + self.cflags['cxx']
@@ -537,6 +565,9 @@ class BuildExtension(build_ext, object):
                 for common_cflag in common_cflags:
                     cuda_cflags.append('-Xcompiler')
                     cuda_cflags.append(common_cflag)
+                for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
+                    cuda_cflags.append('-Xcudafe')
+                    cuda_cflags.append('--diag_suppress=' + ignore_warning)
                 cuda_cflags.extend(pp_opts)
                 if isinstance(extra_postargs, dict):
                     cuda_post_cflags = extra_postargs['nvcc']
@@ -630,7 +661,7 @@ class BuildExtension(build_ext, object):
 
 
 def CppExtension(name, sources, *args, **kwargs):
-    '''
+    r'''
     Creates a :class:`setuptools.Extension` for C++.
 
     Convenience method that creates a :class:`setuptools.Extension` with the
@@ -674,7 +705,7 @@ def CppExtension(name, sources, *args, **kwargs):
 
 
 def CUDAExtension(name, sources, *args, **kwargs):
-    '''
+    r'''
     Creates a :class:`setuptools.Extension` for CUDA/C++.
 
     Convenience method that creates a :class:`setuptools.Extension` with the
@@ -767,7 +798,7 @@ def include_paths(cuda=False):
 
 
 def library_paths(cuda=False):
-    '''
+    r'''
     Get the library paths required to build a C++ or CUDA extension.
 
     Args:
@@ -816,7 +847,7 @@ def load(name,
          with_cuda=None,
          is_python_module=True,
          keep_intermediates=True):
-    '''
+    r'''
     Loads a PyTorch C++ extension just-in-time (JIT).
 
     To load an extension, a Ninja build file is emitted, which is used to
@@ -914,7 +945,7 @@ def load_inline(name,
                 is_python_module=True,
                 with_pytorch_error_handling=True,
                 keep_intermediates=True):
-    '''
+    r'''
     Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
     This function behaves exactly like :func:`load`, but takes its sources as
@@ -1216,7 +1247,7 @@ def _is_ninja_available():
 
 
 def verify_ninja_availability():
-    '''
+    r'''
     Returns ``True`` if the `ninja <https://ninja-build.org/>`_ build system is
     available on the system.
     '''
@@ -1266,7 +1297,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
             extra_ldflags.append('cudart.lib')
             if CUDNN_HOME is not None:
                 extra_ldflags.append(os.path.join(CUDNN_HOME, 'lib/x64'))
-        else:
+        elif not IS_HIP_EXTENSION:
             extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
             extra_ldflags.append('-lcudart')
             if CUDNN_HOME is not None:
@@ -1276,7 +1307,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
 
 
 def _get_cuda_arch_flags(cflags=None):
-    '''
+    r'''
     Determine CUDA arch flags to use.
 
     For an arch, say "6.1", the added compile flag will be
@@ -1372,7 +1403,7 @@ def _get_build_directory(name, verbose):
         if verbose:
             print('Creating extension directory {}...'.format(build_directory))
         # This is like mkdir -p, i.e. will also create parent directories.
-        os.makedirs(build_directory)
+        os.makedirs(build_directory, exist_ok=True)
 
     return build_directory
 
@@ -1497,6 +1528,8 @@ def _write_ninja_file_to_build_library(path,
         if IS_WINDOWS:
             for flag in COMMON_MSVC_FLAGS:
                 cuda_flags = ['-Xcompiler', flag] + cuda_flags
+            for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
+                cuda_flags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cuda_flags
             cuda_flags = _nt_quote_args(cuda_flags)
             cuda_flags += _nt_quote_args(extra_cuda_cflags)
         else:
@@ -1556,7 +1589,7 @@ def _write_ninja_file(path,
                       ldflags,
                       library_target,
                       with_cuda):
-    """Write a ninja file that does the desired compiling and linking.
+    r"""Write a ninja file that does the desired compiling and linking.
 
     `path`: Where to write this file
     `cflags`: list of flags to pass to $cxx. Can be None.
@@ -1673,7 +1706,7 @@ def _write_ninja_file(path,
 
 
 def _join_cuda_home(*paths):
-    '''
+    r'''
     Joins paths with CUDA_HOME, or raises an error if it CUDA_HOME is not set.
 
     This is basically a lazy way of raising an error for missing $CUDA_HOME

@@ -55,9 +55,12 @@ static inline void setCuFFTParams(CuFFTParams* params,
 
 struct CuFFTHandleDeleter {
   void operator()(cufftHandle* x) {
+// Not using fftDestroy() for rocFFT to work around double freeing of handles
+#ifndef __HIP_PLATFORM_HCC__
     if (x != nullptr) {
       CUFFT_CHECK(cufftDestroy(*x));
     }
+#endif
   }
 };
 

@@ -56,6 +56,7 @@ cc_library(
         "c10/cuda/impl/*.h",
         "c10/macros/*.h",
         "c10/util/*.h",
+        "c10/util/*.hpp",
     ]) + [
         "c10/macros/cmake_macros.h",
         "c10/cuda/impl/cuda_cmake_macros.h",
@@ -289,11 +290,8 @@ filegroup(
     srcs = [
         "aten/src/TH/THAllocator.cpp",
         "aten/src/TH/THBlas.cpp",
-        "aten/src/TH/THDiskFile.cpp",
-        "aten/src/TH/THFile.cpp",
         "aten/src/TH/THGeneral.cpp",
         "aten/src/TH/THLapack.cpp",
-        "aten/src/TH/THMemoryFile.cpp",
         "aten/src/TH/THStorageFunctions.cpp",
         "aten/src/TH/THTensor.cpp",
         "aten/src/TH/THTensorEvenMoreMath.cpp",
@@ -516,6 +514,7 @@ template_rule(
         "@AT_MKL_ENABLED@": "0",
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
+        "@USE_BLAS@": "1",
     },
 )
 
@@ -635,6 +634,7 @@ intern_build_aten_ops(
     copts = ATEN_COPTS,
     deps = [
         ":aten_headers",
+        "@sleef",
         "@fbgemm",
     ],
 )
@@ -1736,6 +1736,8 @@ cc_library(
         "@foxi",
         "@gloo",
         "@onnx",
+        "@fmt",
+        "@tensorpipe",
     ] + if_cuda(
         [
             ":caffe2_cpp_cuda",
@@ -1772,6 +1774,7 @@ cu_library(
         "@cudnn",
         "@eigen",
         "@gloo",
+        "@tensorpipe",
     ],
     alwayslink = True,
 )
@@ -1906,6 +1909,7 @@ cc_library(
             "torch/csrc/generic/*.cpp",
             "torch/csrc/jit/*.h",
             "torch/csrc/jit/api/*.h",
+            "torch/csrc/jit/backends/backend_interface.h",
             "torch/csrc/jit/codegen/cuda/*.h",
             "torch/csrc/jit/codegen/fuser/*.h",
             "torch/csrc/jit/codegen/fuser/cpu/*.h",
@@ -1916,6 +1920,7 @@ cc_library(
             "torch/csrc/jit/fuser/cuda/*.h",
             "torch/csrc/jit/passes/*.h",
             "torch/csrc/jit/passes/onnx/*.h",
+            "torch/csrc/jit/passes/quantization/*.h",
             "torch/csrc/jit/passes/utils/*.h",
             "torch/csrc/jit/python/*.h",
             "torch/csrc/jit/runtime/*.h",
