@@ -203,7 +203,10 @@ RRefForkData UserRRef::fork() const {
 
 const IValue& OwnerRRef::getValue() const {
   future_->wait();
-  return future_->value(); // May throw
+  if (future_->hasError()) {
+    (void)future_->value(); // Throws the error.
+  }
+  return future_->constValue();
 }
 
 bool OwnerRRef::hasValue() const {
