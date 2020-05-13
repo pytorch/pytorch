@@ -193,7 +193,7 @@ class TestQuantizedOps(unittest.TestCase):
                 return self.dequant(res)
 
         x = np.random.rand(1, 2, 8, 8).astype("float32")
-        self.generic_test(QAvgPool2dModule(), (x,), input_names=["x"])
+        self.generic_test(QAvgPool2dModule(), (x,), input_names=["x"], relaxed_check=True)
 
     def test_reshape(self):
         class QReshapeModule(torch.nn.Module):

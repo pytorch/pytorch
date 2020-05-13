@@ -18,6 +18,12 @@ install_ubuntu() {
   apt-get update
 
   case "$PYTHON_VERSION" in
+    2*)
+      apt-get install -y --no-install-recommends \
+              python-dev \
+              python-setuptools
+      PYTHON=python2
+      ;;
     3.5)
       apt-get install -y --no-install-recommends \
               python3-dev \
@@ -58,6 +64,12 @@ install_centos() {
   fi
 
   case "$PYTHON_VERSION" in
+    2*)
+      yum install -y \
+          python-devel \
+          python-setuptools
+      PYTHON=python2
+      ;;
     3.4)
       yum install -y \
           python34-devel \

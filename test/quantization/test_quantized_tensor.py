@@ -7,7 +7,7 @@ from copy import deepcopy
 from hypothesis import given
 from hypothesis import strategies as st
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 import torch.testing._internal.hypothesis_utils as hu
 
 hu.assert_deadline_disabled()
@@ -157,7 +157,8 @@ class TestQuantizedTensor(TestCase):
         for dtype in [torch.qint8, torch.quint8]:
             q = torch._empty_per_channel_affine_quantized(
                 [numel], scales=scales, zero_points=zero_points, axis=ch_axis, dtype=dtype)
-            self.assertEqual(scales, q.q_per_channel_scales())
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(scales, q.q_per_channel_scales())
             self.assertEqual(zero_points, q.q_per_channel_zero_points())
             self.assertEqual(ch_axis, q.q_per_channel_axis())
 
@@ -165,7 +166,8 @@ class TestQuantizedTensor(TestCase):
         int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8)
         q = torch._make_per_channel_quantized_tensor(int_tensor, scales, zero_points, ch_axis)
         self.assertEqual(int_tensor, q.int_repr())
-        self.assertEqual(scales, q.q_per_channel_scales())
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(scales, q.q_per_channel_scales())
         self.assertEqual(zero_points, q.q_per_channel_zero_points())
         self.assertEqual(ch_axis, q.q_per_channel_axis())
 
@@ -288,7 +290,8 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(qr.stride(), list(reversed(sorted(qr.stride()))))
         self.assertNotEqual(qlast.stride(), list(reversed(sorted(qlast.stride()))))
         self.assertEqual(qr.int_repr(), qlast.int_repr())
-        self.assertEqual(scales, qlast.q_per_channel_scales())
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(scales, qlast.q_per_channel_scales())
         self.assertEqual(zero_points, qlast.q_per_channel_zero_points())
         self.assertEqual(1, qlast.q_per_channel_axis())
         self.assertEqual(qlast.dequantize(), qr.dequantize())
@@ -414,6 +417,50 @@ class TestQuantizedTensor(TestCase):
             # view on contiguous tensor is fine
             b.contiguous().view(1, 4, 2, 3)
 
+    def test_qtensor_resize(self):
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        sizes1 = [1, 2, 3, 4]
+        sizes2 = [1 * 2, 3 * 4]
+        sizes3 = [1, 2 * 3, 4]
+        sizes4 = [1 * 2 * 3 * 4]
+        sizes5 = [1, 2, 1, 3, 1, 4]
+
+        q1_int = torch.randint(0, 100, sizes1, dtype=dtype)
+        q1 = torch._make_per_tensor_quantized_tensor(q1_int, scale=scale, zero_point=zero_point)
+        q2 = q1.resize(*sizes2)
+        q3 = q2.resize(*sizes3)
+        q4 = q3.resize(*sizes4)
+        q5 = q4.resize(*sizes5)
+
+        self.assertEqual(q1.numel(), q2.numel())
+        self.assertEqual(q1.numel(), q3.numel())
+        self.assertEqual(q1.numel(), q4.numel())
+        self.assertEqual(q1.numel(), q5.numel())
+
+        # Compare original and post-transpose
+        a_int = torch.randint(0, 100, sizes1, dtype=dtype)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        c = b.resize(*sizes1)  # Change the sizes back to the original
+
+        self.assertEqual(a.size(), c.size())
+        self.assertEqual(b.q_scale(), c.q_scale())
+        self.assertEqual(b.q_zero_point(), c.q_zero_point())
+        self.assertNotEqual(b.stride(), c.stride())
+        # size is the same but the underlying data is different
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+        self.assertFalse(torch.equal(b, c))
+
+        # Throws an error if numel is wrong
+        q1_int = torch.randint(0, 100, sizes1, dtype=dtype)
+        q1 = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
+        err_str = "requested resize to*"
+        with self.assertRaisesRegex(RuntimeError, err_str):
+            q2 = q1.resize(*sizes1[:-1])
+        # resize on both contiguous and non-contiguous tensor should be fine
+        q3 = q1.resize(*sizes2)
+        q4 = q1.contiguous().resize(*sizes2)
+
     def test_qtensor_reshape(self):
         scale, zero_point, dtype = 1.0, 2, torch.uint8
         for device in get_supported_device_types():
@@ -481,6 +528,3 @@ class TestQuantizedTensor(TestCase):
             # dequantized values must be the same
             r_cpu, r_cuda = qr_cpu.dequantize().numpy(), qr_cuda.dequantize().cpu().numpy()
             np.testing.assert_almost_equal(r_cuda, r_cpu, decimal=5)
-
-if __name__ == "__main__":
-    run_tests()
