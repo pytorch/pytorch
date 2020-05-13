@@ -1553,7 +1553,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = torch.flatten(x)
                 x = torch.max(x)
                 x = torch.min(x)
-                x = torch.mean(x)
                 x = torch.sigmoid(x)
                 x = x.reshape([-1])
                 x = x.resize_(1, 1, x.numel())
@@ -1648,6 +1647,8 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = F.adaptive_avg_pool1d(x, (1))
                 x = F.adaptive_avg_pool2d(x, (1, 1))
                 x = F.adaptive_avg_pool3d(x, (1, 1, 1))
+                x = torch.mean(x)
+                x = x.mean()
                 x = self.conv(x)
                 return x
 
@@ -1669,7 +1670,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         m1 = convert_script(m, debug=True)
         conv_op_quant = 4
         # NB: This Needs to be updated when we add more ops to test
-        general_value_op_quant = 12
+        general_value_op_quant = 14
         FileCheck().check_count("aten::quantize_per_tensor(", conv_op_quant + general_value_op_quant + 1, exactly=True) \
                    .run(m1.graph)
 
