@@ -332,14 +332,23 @@ struct GreaterOrNan {
   }
 };
 
+namespace {
+template <typename T>
+struct wrap_half { using type = T; };
+#if defined(__CUDACC__) || defined(__HIPCC__)
+template <>
+struct wrap_half<c10::Half> { using type = __half; };
+#endif
+}
+
 template <typename comp_t>
-struct ArgReductionOps {
+struct MinMaxReductionOps {
   using scalar_t = typename binary_function_traits<comp_t>::arg1_t;
   using index_t = int64_t;
   using arg_t = detail::pair<scalar_t, index_t>;
 
-  static C10_DEVICE index_t project(arg_t arg) {
-    return arg.second;
+  static C10_DEVICE arg_t project(arg_t arg) {
+    return arg;
   }
 
   static C10_DEVICE arg_t reduce(arg_t arg, scalar_t val, int64_t idx) {
@@ -356,10 +365,21 @@ struct ArgReductionOps {
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
   static C10_DEVICE arg_t warp_shfl_down(arg_t arg, int offset) {
-    return arg_t(WARP_SHFL_DOWN(arg.first, offset),
+    return arg_t(WARP_SHFL_DOWN<wrap_half<decltype(arg.first)>::type>(arg.first, offset),
                  WARP_SHFL_DOWN(arg.second, offset));
   }
 #endif
+};
+
+template <typename comp_t>
+struct ArgReductionOps : public MinMaxReductionOps<comp_t> {
+  using typename MinMaxReductionOps<comp_t>::scalar_t;
+  using typename MinMaxReductionOps<comp_t>::index_t;
+  using typename MinMaxReductionOps<comp_t>::arg_t;
+
+  static C10_DEVICE index_t project(arg_t arg) {
+    return arg.second;
+  }
 };
 
 } // namespace detail
@@ -372,6 +392,11 @@ struct ArgMaxOps :
 template <typename scalar_t>
 struct ArgMinOps :
   public detail::ArgReductionOps<detail::LessOrNan<scalar_t>> {
+};
+
+template <typename scalar_t>
+struct MinOps :
+  public detail::MinMaxReductionOps<detail::LessOrNan<scalar_t>> {
 };
 
 }} // namespace at::native
