@@ -15,6 +15,5 @@ namespace at { namespace native {
   }
 
 IMPLEMENT_UNARY_OP_PREQUEL(erfc, legacy::cuda::_th_erfc)
-IMPLEMENT_UNARY_OP_PREQUEL(exp,  legacy::cuda::_th_exp)
 
 }}
