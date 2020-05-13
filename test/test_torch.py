@@ -5191,6 +5191,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             out = model(input)
 
     def test_cpp_stacktraces(self):
+        # These messages can be changed if the `torch.rand` implementation is changed.
+        # They are just here to make sure that the stack traces are in the message.
         python_error_msg = "Trying to create tensor with negative dimension"
         cpp_stack_msg = "Exception raised from check_size_nonnegative at"
 
@@ -5204,12 +5206,16 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 self.assertTrue(python_error_msg in err_msg)
                 self.assertTrue((cpp_stack_msg in err_msg) == has_cpp_stack_trace)
 
+            self.assertTrue(raised)
+
         orig = torch.utils.debug.is_cpp_stacktraces_enabled()
-        torch.utils.debug.set_cpp_stacktraces_enabled(False)
-        check_error(False)
-        torch.utils.debug.set_cpp_stacktraces_enabled(True)
-        check_error(True)
-        torch.utils.debug.set_cpp_stacktraces_enabled(orig)
+        try:
+            torch.utils.debug.set_cpp_stacktraces_enabled(False)
+            check_error(False)
+            torch.utils.debug.set_cpp_stacktraces_enabled(True)
+            check_error(True)
+        finally:
+            torch.utils.debug.set_cpp_stacktraces_enabled(orig)
 
 
 # Functions to test negative dimension wrapping

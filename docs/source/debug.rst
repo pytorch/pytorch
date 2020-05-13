@@ -5,10 +5,10 @@ torch.utils.debug
     These functions are provided for debugging only.
     They will set a process-wide flag.
 
-CPP Stacktraces
+C++ Stacktraces
 ^^^^^^^^^^^^^^^
 
-These functions allow you to print the complete cpp stacktrace when
+These functions allow you to print the complete c++ stacktrace when
 an error happens.
 This can also be enabled by setting ``TORCH_CPP_STACKTRACES=1`` as an
 environment variable before importing ``torch``.
