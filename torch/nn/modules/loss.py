@@ -788,7 +788,7 @@ class SmoothL1Loss(_Loss):
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
-        delta (float,optional): Specifies the hyperparameter delta to be used. The value determines
+        delta (float, optional): Specifies the hyperparameter delta to be used. The value determines
             how large the errors need to be to use L1. Errors smaller than delta are minimized with
             L2. Parameter is ignored for negative/zero values. Default = 1.
 
