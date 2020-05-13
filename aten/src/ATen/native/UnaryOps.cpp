@@ -198,7 +198,7 @@ Tensor& frac_(Tensor& self) { return unary_op_impl_(self, at::frac_out); }
 Tensor& floor_out(Tensor& result, const Tensor& self) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
-    "floor is not supported for complex inputs")
+    "floor is not supported for complex inputs");
 
   return unary_op_impl_out(result, self, floor_stub);
 }
