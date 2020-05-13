@@ -1103,8 +1103,10 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
     def _test_op_impl(self, module, data, quantized_op):
         qengine = torch.backends.quantized.engine
         if qengine == 'none':
-            qengine = 'fbgemm'
-        qconfig_dict = {'': get_default_qconfig(qengine)}
+            qconfig = default_qconfig
+        else:
+            qconfig = get_default_qconfig(qengine)
+        qconfig_dict = {'': qconfig}
         model = torch.jit.script(module).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
         FileCheck().check(quantized_op) \
