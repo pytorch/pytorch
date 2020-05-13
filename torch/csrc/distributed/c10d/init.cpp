@@ -750,10 +750,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
     return ::c10d::DEFAULT_FIRST_BUCKET_BYTES;
   });
 
-  module.def("_default_bucket_bytes_cap", []() {
-    return ::c10d::DEFAULT_BUCKET_BYTES_CAP;
-  });
-
   module.def("_default_broadcast_bucket_bytes", []() {
     return ::c10d::DEFAULT_BROADCAST_BUCKET_BYTES;
   });

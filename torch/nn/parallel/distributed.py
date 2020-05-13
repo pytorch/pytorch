@@ -211,7 +211,7 @@ class DistributedDataParallel(Module):
     def __init__(self, module, device_ids=None,
                  output_device=None, dim=0, broadcast_buffers=True,
                  process_group=None,
-                 bucket_cap_mb=dist._default_bucket_bytes_cap() / (1024 * 1024),
+                 bucket_cap_mb=25,
                  find_unused_parameters=False,
                  check_reduction=False):
 

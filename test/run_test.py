@@ -91,7 +91,6 @@ WINDOWS_BLACKLIST = [
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
     'distributed/test_distributed',
-    'distributed/test_c10d',
 ]
 
 ROCM_BLACKLIST = [
