@@ -31,26 +31,22 @@ IValue toIValue(const Message& message) {
       auto& ret = static_cast<ScriptResp&>(*response);
       Stack stack;
       stack.push_back(ret.value());
-      {
-        // Need GIL to guard createPyObjectForStack() and its returned
-        // py::object
-        py::gil_scoped_acquire acquire;
-        return jit::toIValue(
-            torch::jit::createPyObjectForStack(std::move(stack)),
-            PyObjectType::get());
-      }
+      // Need GIL to guard createPyObjectForStack() and its returned
+      // py::object
+      py::gil_scoped_acquire acquire;
+      return jit::toIValue(
+          torch::jit::createPyObjectForStack(std::move(stack)),
+          PyObjectType::get());
     }
     case MessageType::PYTHON_RET: {
       // TODO: Try to avoid a copy here.
       auto& resp = static_cast<PythonResp&>(*response);
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-      {
-        // Need GIL to destruct the py::object returned by deserialize()
-        py::gil_scoped_acquire acquire;
-        return jit::toIValue(
-            pythonRpcHandler.deserialize(resp.serializedPyObj()),
-            PyObjectType::get());
-      }
+      // Need GIL to destruct the py::object returned by deserialize()
+      py::gil_scoped_acquire acquire;
+      return jit::toIValue(
+          pythonRpcHandler.deserialize(resp.serializedPyObj()),
+          PyObjectType::get());
     }
     default: {
       TORCH_CHECK(false, "Unrecognized response message type ", msgType);
