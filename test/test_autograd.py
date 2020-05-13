@@ -4187,6 +4187,9 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 
 # this list corresponds to ops which have separate tests defined for complex dtypes in
 # common_methods_invocations.py
+# test for these ops with 'complex' in variant should only run for complex and
+# the tests for these ops which do not have 'complex' in variant should not run for complex
+# and only run for floating point
 separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
 
 # white list for complex

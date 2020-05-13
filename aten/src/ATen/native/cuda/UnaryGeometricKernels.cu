@@ -180,8 +180,10 @@ void tan_kernel_cuda(TensorIterator& iter) {
     using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
       return tan_wrapper(a);
+      });
     });
   });
+}
 
 REGISTER_DISPATCH(acos_stub, &acos_kernel_cuda);
 REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda);
