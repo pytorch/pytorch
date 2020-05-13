@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
@@ -2016,22 +2016,16 @@ struct to_ir {
     //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
     // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
     const auto kind = value.type()->kind();
-    if (kind == c10::TypeKind::IntType ||
-        kind == c10::TypeKind::BoolType ||
-        kind == c10::TypeKind::FloatType
-    ) {
+    if (kind == c10::TypeKind::IntType || kind == c10::TypeKind::BoolType ||
+        kind == c10::TypeKind::FloatType) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
-      auto converted = graph->insert(
-          aten::tensor,
-          {value},
-          {NamedValue("dtype", dtype)});
+      auto converted =
+          graph->insert(aten::tensor, {value}, {NamedValue("dtype", dtype)});
       return NamedValue(value.loc(), converted);
     }
 
     return value;
   }
-
-
 
   // Emit mutating assignments like `foo[0] = bar`
   void emitSubscriptAssign(
@@ -2063,8 +2057,7 @@ struct to_ir {
       const auto slicedArg = NamedValue(lhs.range(), sliced);
 
       // rhs must be a tensor, implicitly convert int/float/bool
-      const auto convertedRhs = emitValueToTensor(
-          rhs, slicedArg);
+      const auto convertedRhs = emitValueToTensor(rhs, slicedArg);
 
       if (tensorIndices.size() == 0) {
         // Common case: we only tried to index with int and slices. Copy the
@@ -2079,7 +2072,10 @@ struct to_ir {
                                  ->output();
 
         graph->insert(
-            aten::index_put_, {slicedArg, indices, convertedRhs}, {}, stmtRange);
+            aten::index_put_,
+            {slicedArg, indices, convertedRhs},
+            {},
+            stmtRange);
       }
       // Otherwise, this is a list or a classtype.
       // Dispatch to aten::_set_item to both select and assign
