@@ -397,7 +397,7 @@ inline at::Device PythonArgs::device(int i) {
   if (THPUtils_checkLong(args[i])) {
     const auto device_index = THPUtils_unpackLong(args[i]);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(at::DeviceType::CUDA, device_index);
+    return at::Device(DeviceType::CUDA, device_index);
   }
   const std::string &device_str = THPUtils_unpackString(args[i]);
   return at::Device(device_str);

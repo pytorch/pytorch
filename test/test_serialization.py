@@ -551,14 +551,10 @@ class TestOldSerialization(TestCase, SerializationMixin):
         tmpmodule_name = 'tmpmodule{}'.format(unique_key)
 
         def import_module(name, filename):
-            if sys.version_info >= (3, 5):
-                import importlib.util
-                spec = importlib.util.spec_from_file_location(name, filename)
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-            else:
-                import imp
-                module = imp.load_source(name, filename)
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(name, filename)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
             sys.modules[module.__name__] = module
             return module
 

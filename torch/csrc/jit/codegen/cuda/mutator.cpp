@@ -102,7 +102,13 @@ Statement* OptOutMutator::mutate(TensorIndex* ti) {
   return mutated_val;
 }
 
+Statement* OptOutMutator::mutate(Bool* n) {
+  return n;
+}
 Statement* OptOutMutator::mutate(Float* n) {
+  return n;
+}
+Statement* OptOutMutator::mutate(Half* n) {
   return n;
 }
 Statement* OptOutMutator::mutate(Int* n) {
@@ -174,6 +180,18 @@ Statement* OptOutMutator::mutate(BinaryOp* bop) {
     return bop;
   FusionGuard::getCurFusion()->removeExpr(bop);
   return new BinaryOp(bop->getBinaryOpType(), out, lhs, rhs);
+}
+
+Statement* OptOutMutator::mutate(TernaryOp* top) {
+  Val* out = mutateAsVal(top->out())->asVal();
+  Val* in1 = mutateAsVal(top->in1())->asVal();
+  Val* in2 = mutateAsVal(top->in2())->asVal();
+  Val* in3 = mutateAsVal(top->in3())->asVal();
+  if (out == top->out() && in1 == top->in1() && in2 == top->in2() &&
+      in3 == top->in3())
+    return top;
+  FusionGuard::getCurFusion()->removeExpr(top);
+  return new TernaryOp(top->getTernaryOpType(), out, in1, in2, in3);
 }
 
 Statement* OptOutMutator::mutate(ForLoop* fl) {

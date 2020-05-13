@@ -8,30 +8,12 @@
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/utils/hash.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
 namespace {
-
-// Turns lambda without input/output into a torch::autograd::FunctionPostHook.
-class LambdaPostHook : public torch::autograd::FunctionPostHook {
-  using variable_list = std::vector<torch::autograd::Variable>;
-
- public:
-  /* implicit */ LambdaPostHook(std::function<void(void)> fn)
-      : fn_(std::move(fn)) {}
-
-  variable_list operator()(
-      const variable_list& outputs,
-      const variable_list& /* unused */) override {
-    fn_();
-    return outputs;
-  }
-
- protected:
-  std::function<void(void)> fn_;
-};
 
 inline int64_t current_time_in_nanos() {
   return torch::autograd::profiler::getTime();
@@ -135,8 +117,13 @@ Reducer::Reducer(
 
         // Hook to execute after the gradient accumulator has executed.
         hooks_.emplace_back(
-            grad_accumulator->add_post_hook(torch::make_unique<LambdaPostHook>(
-                [=] { this->autograd_hook(index); })),
+            grad_accumulator->add_post_hook(
+                torch::make_unique<torch::autograd::utils::LambdaPostHook>(
+                    [=](const torch::autograd::variable_list& outputs,
+                        const torch::autograd::variable_list& /* unused */) {
+                      this->autograd_hook(index);
+                      return outputs;
+                    })),
             grad_accumulator);
 
         // Map raw function pointer to replica index and parameter index.

@@ -719,6 +719,11 @@ void Value::inferTypeFrom(const at::Tensor& output) {
   setType(TensorType::create(output));
 }
 
+void Value::inferTypeFrom(
+    const c10::intrusive_ptr<c10::ivalue::Object>& output) {
+  setType(output->type());
+}
+
 bool Value::mustBeNone() const {
   return type()->cast<NoneType>() || node_->mustBeNone();
 }
@@ -1005,6 +1010,7 @@ bool Node::isNondeterministic() const {
       "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
       "aten::poisson(Tensor self, Generator? generator) -> Tensor",
+      "aten::binomial(Tensor count, Tensor prob, Generator? generator=None) -> Tensor",
       "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",

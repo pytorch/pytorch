@@ -296,6 +296,19 @@ class DistributedDataParallel(Module):
         (4) registering the grad hooks
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
+
+        def parameters(m, recurse=True):
+            def model_parameters(m):
+                ps = m._former_parameters.values() \
+                    if hasattr(m, "_former_parameters") \
+                    else m.parameters(recurse=False)
+                for p in ps:
+                    yield p
+
+            for m in m.modules() if recurse else [m]:
+                for p in model_parameters(m):
+                    yield p
+
         if self.device_ids and len(self.device_ids) > 1:
 
             import warnings
@@ -322,13 +335,13 @@ class DistributedDataParallel(Module):
             self._module_copies[0] = self.module
 
             for module_copy in self._module_copies[1:]:
-                for param, copy_param in zip(self.module.parameters(), module_copy.parameters()):
+                for param, copy_param in zip(self.module.parameters(), parameters(module_copy)):
                     copy_param.requires_grad = param.requires_grad
 
         else:
             self._module_copies = [self.module]
 
-        self.modules_params = [list(m.parameters()) for m in self._module_copies]
+        self.modules_params = [list(parameters(m)) for m in self._module_copies]
         self.modules_buffers = [list(m.buffers()) for m in self._module_copies]
 
         # Build tuple of (module, parameter) for all parameters that require grads.
@@ -338,7 +351,7 @@ class DistributedDataParallel(Module):
                 for module in replica.modules()
                 for parameter in filter(
                     lambda parameter: parameter.requires_grad,
-                    module.parameters(recurse=False))
+                    parameters(module, recurse=False))
             ] for replica in self._module_copies]
 
         # Build list of parameters.

@@ -14,9 +14,8 @@ namespace at { namespace native {
 
 void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, iter.common_dtype(), "add_cuda/sub_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-    auto alpha = thrust_t(alpha_scalar.to<scalar_t>());
-    gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
+    auto alpha = alpha_scalar.to<scalar_t>();
+    gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return a + alpha * b;
     });
   });
@@ -40,9 +39,8 @@ void div_kernel_cuda(TensorIterator& iter) {
       });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
-      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
+    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a / b;
       });
     });
@@ -56,9 +54,8 @@ void mul_kernel_cuda(TensorIterator& iter) {
       return a && b;
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
-      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
+    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a * b;
       });
     });
@@ -68,9 +65,8 @@ void mul_kernel_cuda(TensorIterator& iter) {
 void remainder_kernel_cuda(TensorIterator& iter) {
   if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "remainder_cuda", [&]() {
-      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
-        thrust_t r = a % b;
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        scalar_t r = a % b;
         if ((r != 0) && ((r < 0) != (b < 0))) {
           r += b;
         }
@@ -79,10 +75,11 @@ void remainder_kernel_cuda(TensorIterator& iter) {
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "remainder_cuda", [&]() {
-      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
       gpu_kernel_with_scalars(iter,
-        []GPU_LAMBDA(thrust_t a, thrust_t b) __ubsan_ignore_float_divide_by_zero__ -> thrust_t {
-          return a - b * static_cast<thrust_t>(std::floor(a / b));
+        []GPU_LAMBDA(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+          auto mod = ::fmod(a, b);
+          if ((mod != 0) && ((b < 0) != (mod < 0))) mod += b;
+          return mod;
         });
     });
   }
