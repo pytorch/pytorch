@@ -118,7 +118,7 @@ namespace torch { namespace autograd {
   }
 }
 
-auto InputBuffer::device() const -> Device {
+auto InputBuffer::device() const -> at::Device {
   // Since we pick the first non-CPU tensor, this won't work with
   // mixed device-type operations (e.g., an op that is both CUDA
   // and XLA).  This is *incredibly* unlikely, so we don't worry

@@ -188,7 +188,7 @@ struct TORCH_API Module : public Object {
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  void to(Device device, at::ScalarType dtype, bool non_blocking = false);
+  void to(at::Device device, at::ScalarType dtype, bool non_blocking = false);
 
   /// Recursively casts all parameters to the given dtype.
   ///
@@ -204,7 +204,7 @@ struct TORCH_API Module : public Object {
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  void to(Device device, bool non_blocking = false);
+  void to(at::Device device, bool non_blocking = false);
 
   void save(
       std::ostream& out,
@@ -262,7 +262,7 @@ struct TORCH_API Module : public Object {
   }
 
   void to_impl(
-      const c10::optional<Device>& device,
+      const c10::optional<at::Device>& device,
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
 };

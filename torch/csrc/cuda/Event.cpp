@@ -54,7 +54,7 @@ static PyObject * THCPEvent_from_ipc_handle(
   torch::ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
-  Device device = r.device(0);
+  at::Device device = r.device(0);
   std::string handle_string = r.string(1);
 
   TORCH_CHECK(handle_string.size() == sizeof(cudaIpcEventHandle_t),
@@ -90,7 +90,7 @@ static PyObject * THCPEvent_get_cuda_event(THCPEvent *self, void *unused) {
 
 static PyObject * THCPEvent_get_device(THCPEvent *self, void *unused) {
   HANDLE_TH_ERRORS
-  at::optional<Device> device = self->cuda_event.device();
+  at::optional<at::Device> device = self->cuda_event.device();
   if (!device) {
     Py_RETURN_NONE;
   }

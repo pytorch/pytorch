@@ -121,7 +121,7 @@ double radians(double x);
 // reference function THPVariable_to in python_variable_methods.cpp
 static at::Tensor to_dispatch(
     at::Tensor self,
-    c10::optional<Device> device,
+    c10::optional<at::Device> device,
     c10::optional<at::ScalarType> scalarType,
     bool non_blocking,
     bool copy) {

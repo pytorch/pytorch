@@ -17,8 +17,8 @@ namespace jit {
 // GraphExecutor creates specializations of Graphs for different
 // dimensionalitities and types of inputs.
 
-inline static Device ConvertIntToCPUOrCUDA(int device) {
-  return device < 0 ? at::kCPU : Device(DeviceType::CUDA, device);
+inline static at::Device ConvertIntToCPUOrCUDA(int device) {
+  return device < 0 ? at::kCPU : at::Device(DeviceType::CUDA, device);
 }
 struct ArgumentInfo {
   friend struct ArgumentSpec;

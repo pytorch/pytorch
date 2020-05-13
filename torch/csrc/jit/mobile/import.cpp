@@ -156,7 +156,7 @@ void parseMethods(
 class BytecodeDeserializer final {
  public:
   explicit BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader);
-  mobile::Module deserialize(c10::optional<Device> device);
+  mobile::Module deserialize(c10::optional<at::Device> device);
 
  private:
   c10::IValue readArchive(
@@ -165,7 +165,7 @@ class BytecodeDeserializer final {
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_;
-  c10::optional<Device> device_;
+  c10::optional<at::Device> device_;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(
@@ -173,7 +173,8 @@ BytecodeDeserializer::BytecodeDeserializer(
     : compilation_unit_(std::make_shared<CompilationUnit>()),
       reader_(std::move(reader)) {}
 
-mobile::Module BytecodeDeserializer::deserialize(c10::optional<Device> device) {
+mobile::Module BytecodeDeserializer::deserialize(
+    c10::optional<at::Device> device) {
   device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
   auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
@@ -279,7 +280,7 @@ c10::IValue BytecodeDeserializer::readArchive(
 
 mobile::Module _load_for_mobile(
     std::istream& in,
-    c10::optional<Device> device) {
+    c10::optional<at::Device> device) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
   auto module = _load_for_mobile(std::move(rai), device);
   return module;
@@ -287,7 +288,7 @@ mobile::Module _load_for_mobile(
 
 mobile::Module _load_for_mobile(
     const std::string& filename,
-    c10::optional<Device> device) {
+    c10::optional<at::Device> device) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto module = _load_for_mobile(std::move(rai), device);
   return module;
