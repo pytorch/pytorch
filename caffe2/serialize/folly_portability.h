@@ -569,6 +569,7 @@ constexpr auto kIsLittleEndian = __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__;
 constexpr auto kIsBigEndian = !kIsLittleEndian;
 } // namespace folly
 
+
 #ifndef FOLLY_SSE
 #if defined(__SSE4_2__)
 #define FOLLY_SSE 4
@@ -589,14 +590,14 @@ constexpr auto kIsBigEndian = !kIsLittleEndian;
 #define FOLLY_SSE 1
 #define FOLLY_SSE_MINOR 0
 #else
-#define FOLLY_SSE 0
-#define FOLLY_SSE_MINOR 0
+#define FOLLY_SSE 4
+#define FOLLY_SSE_MINOR 2
 #endif
 #endif
 
 #ifndef FOLLY_SSSE
 #if defined(__SSSE3__)
-#define FOLLY_SSSE 3
+#define FOLLY_SSSE 
 #else
 #define FOLLY_SSSE 0
 #endif
