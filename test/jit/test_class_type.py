@@ -23,7 +23,6 @@ if __name__ == '__main__':
 
 class TestClassType(JitTestCase):
     def test_get_with_method(self):
-        @torch.jit.script
         class FooTest(object):
             def __init__(self, x):
                 self.foo = x
@@ -31,7 +30,6 @@ class TestClassType(JitTestCase):
             def getFooTest(self):
                 return self.foo
 
-        @torch.jit.script
         def fn(x):
             foo = FooTest(x)
             return foo.getFooTest()
@@ -40,7 +38,6 @@ class TestClassType(JitTestCase):
         self.assertEqual(fn(input), input)
 
     def test_get_attr(self):
-        @torch.jit.script  # noqa: B903
         class FooTest(object):  # noqa: B903
             def __init__(self, x):
                 self.foo = x
@@ -54,7 +51,6 @@ class TestClassType(JitTestCase):
         self.assertEqual(fn(input), input)
 
     def test_in(self):
-        @torch.jit.script  # noqa: B903
         class FooTest(object):  # noqa: B903
             def __init__(self):
                 pass
@@ -71,7 +67,6 @@ class TestClassType(JitTestCase):
         self.assertEqual(fn(), (True, False))
 
     def test_set_attr_in_method(self):
-        @torch.jit.script
         class FooTest(object):
             def __init__(self, x):
                 # type: (int) -> None
@@ -169,7 +164,7 @@ class TestClassType(JitTestCase):
 
     def test_class_type_as_param(self):
         global FooTest  # see [local resolution in python]
-        @torch.jit.script  # noqa: B903
+
         class FooTest(object):  # noqa: B903
             def __init__(self, x):
                 self.attr = x
@@ -188,7 +183,6 @@ class TestClassType(JitTestCase):
         self.assertEqual(fn2(input), input)
 
     def test_out_of_order_methods(self):
-        @torch.jit.script
         class FooTest(object):
             def __init__(self, x):
                 self.x = x
@@ -206,7 +200,6 @@ class TestClassType(JitTestCase):
         self.assertEqual(fn(input), input + input)
 
     def test_save_load_with_classes(self):
-        @torch.jit.script
         class FooTest(object):
             def __init__(self, x):
                 self.x = x
@@ -237,7 +230,6 @@ class TestClassType(JitTestCase):
         self.assertEqual(input, output)
 
     def test_save_load_with_classes_returned(self):
-        @torch.jit.script
         class FooTest(object):
             def __init__(self, x):
                 self.x = x
@@ -270,18 +262,15 @@ class TestClassType(JitTestCase):
         self.assertEqual(input, output)
 
     def test_save_load_with_classes_nested(self):
-        @torch.jit.script  # noqa: B903
         class FooNestedTest(object):  # noqa: B903
             def __init__(self, y):
                 self.y = y
 
-        @torch.jit.script
         class FooNestedTest2(object):
             def __init__(self, y):
                 self.y = y
                 self.nested = FooNestedTest(y)
 
-        @torch.jit.script
         class FooTest(object):
             def __init__(self, x):
                 self.class_attr = FooNestedTest(x)
@@ -312,7 +301,7 @@ class TestClassType(JitTestCase):
 
     def test_python_interop(self):
         global Foo   # see [local resolution in python]
-        @torch.jit.script  # noqa: B903
+
         class Foo(object):  # noqa: B903
             def __init__(self, x, y):
                 self.x = x
@@ -339,7 +328,7 @@ class TestClassType(JitTestCase):
 
     def test_class_specialization(self):
         global Foo  # see [local resolution in python]
-        @torch.jit.script  # noqa: B903
+
         class Foo(object):  # noqa: B903
             def __init__(self, x, y):
                 self.x = x
@@ -364,7 +353,7 @@ class TestClassType(JitTestCase):
 
     def test_class_sorting(self):
         global Foo  # see [local resolution in python]
-        @torch.jit.script  # noqa: B903
+
         class Foo(object):  # noqa: B903
             def __init__(self, x):
                 # type: (int) -> None

@@ -1029,7 +1029,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           at::RecordScope::TORCHSCRIPT_FUNCTION);
       if (rec_fn->active) {
         frames.back().record_function = rec_fn;
-        RECORD_FUNCTION_BEFORE((*rec_fn), fn->name(), last(stack, code.num_inputs()))
+        RECORD_FUNCTION_BEFORE(
+            (*rec_fn), fn->name(), last(stack, code.num_inputs()))
       }
     }
     *af = ActiveFrame(frames.back());
