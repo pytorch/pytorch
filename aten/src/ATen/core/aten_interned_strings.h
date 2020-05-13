@@ -76,6 +76,7 @@ _(aten, _embedding_bag_sparse_backward) \
 _(aten, _erf) \
 _(aten, _erfc) \
 _(aten, _exp) \
+_(aten, _exp2) \
 _(aten, _expm1) \
 _(aten, _fft_with_size) \
 _(aten, _fill) \
@@ -319,6 +320,7 @@ _(aten, erf) \
 _(aten, erfc) \
 _(aten, erfinv) \
 _(aten, exp) \
+_(aten, exp2) \
 _(aten, expand) \
 _(aten, expand_as) \
 _(aten, expm1) \
