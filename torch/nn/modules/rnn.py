@@ -152,7 +152,7 @@ class RNNBase(Module):
                             self.hidden_size, self.num_layers,
                             self.batch_first, bool(self.bidirectional),
                             bool(self.cat_layer_fwd_bwd_states))
-            else:
+            elif not self.cat_layer_fwd_bwd_states and self.bidirectional:
                 # Rearrange weights in order to have them in
                 # (forward_weights, backward_weights) order
                 offset = 4 if self.bias else 2
