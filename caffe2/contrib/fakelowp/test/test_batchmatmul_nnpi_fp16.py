@@ -27,12 +27,14 @@ class TestBatchMatMul(serial.SerializedTestCase):
         M=st.integers(min_value=1, max_value=10),
         K=st.integers(min_value=1, max_value=10),
         N=st.integers(min_value=1, max_value=10),
+        rand_seed=st.integers(0, 65534),
         trans_a=st.booleans(),
         trans_b=st.booleans(),
         run_ints=st.booleans(),
         **hu.gcs
     )
-    def test_batch_matmul(self, M, K, N, trans_a, trans_b, run_ints, gc, dc):
+    def test_batch_matmul(self, M, K, N, rand_seed, trans_a, trans_b, run_ints, gc, dc):
+        np.random.seed(rand_seed)
         workspace.ResetWorkspace()
         C = 0  # TODO
         batch_dims = np.random.randint(
@@ -107,11 +109,14 @@ class TestBatchMatMul(serial.SerializedTestCase):
                 success = False
 
         if not success:
-            print_test_debug_info("bmm",
-                {"m": M, "k": K, "n": N, "X": X, "Y": Y,
-                 "out_glow": out_glow,
-                 "out_c2_fakefp16": out_c2_fakefp16,
-                 "diff": diff})
+            print_test_debug_info("bmm", {
+                "seed": rand_seed,
+                "m": M, "k": K,
+                "n": N, "X": X, "Y": Y,
+                "out_glow": out_glow,
+                "out_c2_fakefp16": out_c2_fakefp16,
+                "diff": diff
+            })
             assert(0)
 
 
