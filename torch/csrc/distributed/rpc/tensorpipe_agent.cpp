@@ -22,6 +22,9 @@ constexpr long kToMilliseconds = 1000;
 const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
 const std::string kThreadPoolSize = "agent.thread_pool_size";
 const std::string kNumIdleThreads = "agent.num_idle_threads";
+const std::string kClientActiveCalls = "agent.client_active_calls";
+const std::string kServerActiveCalls = "agent.server_active_calls";
+const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
 
 //////////////////////////  MetricsTracker  /////////////////////////////////
 
@@ -245,6 +248,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
         respond(pipe);
 
         uint64_t messageId = requestMessage.id();
+        ++serverActiveCalls_;
 
         // Defer user RPC UDF run to thread pool
         threadPool_.run([this,
@@ -261,13 +265,16 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           // Shortcut if immediately done
           if (futureResponseMessage->completed()) {
+            --serverActiveCalls_;
             sendCompletedResponseMessage(
                 pipe, futureResponseMessage, messageId);
           } else {
             // Not complete yet
+            ++serverActiveAsyncCalls_;
             futureResponseMessage->addCallback(
                 [this, pipe, futureResponseMessage, messageId]() mutable {
-                  // Done
+                  --serverActiveCalls_;
+                  --serverActiveAsyncCalls_;
                   sendCompletedResponseMessage(
                       pipe, futureResponseMessage, messageId);
                 });
@@ -312,6 +319,8 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   requestMessage.setId(nextMessageID_++);
   pendingResponseMessage[requestMessage.id()] = futureResponseMessage;
 
+  ++clientActiveCalls_;
+
   // Don't need to hold lock while calling tensorpipe API.
   lock.unlock();
 
@@ -322,6 +331,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
           const tensorpipe::Error& error) {
         if (error) {
           LOG(WARNING) << "client write error: " << error.what();
+          --clientActiveCalls_;
           futureResponseMessage->setError(error.what());
           return;
         }
@@ -337,6 +347,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                 // Flushing all future messages belonging to this pipe due to
                 // error state.
                 for (auto& p : clientPipe.pendingResponseMessage_) {
+                  --clientActiveCalls_;
                   std::shared_ptr<FutureMessage>& futureMessage = p.second;
                   futureMessage->setError(error.what());
                 }
@@ -365,8 +376,10 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
               }
 
               threadPool_.run(
-                  [futureResponseMessage,
+                  [this,
+                   futureResponseMessage,
                    responseMessage{std::move(responseMessage)}]() mutable {
+                    --clientActiveCalls_;
                     if (responseMessage.type() == MessageType::EXCEPTION) {
                       futureResponseMessage->setError(std::string(
                           responseMessage.payload().begin(),
@@ -446,6 +459,10 @@ std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
   metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
   metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
+  metrics[kClientActiveCalls] = c10::to_string(clientActiveCalls_.load());
+  metrics[kServerActiveCalls] = c10::to_string(serverActiveCalls_.load());
+  metrics[kServerActiveAsyncCalls] =
+      c10::to_string(serverActiveAsyncCalls_.load());
   if (isGILProfilingEnabled()) {
     {
       std::unique_lock<std::mutex> lock(metricsMutex_);

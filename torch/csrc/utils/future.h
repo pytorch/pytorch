@@ -132,7 +132,7 @@ class TORCH_API Future final {
   }
 
   void addCallback(std::function<void(const Future<T>& future)> cb) {
-    addCallback([this, cb]() { cb(*this); });
+    addCallback([this, cb = std::move(cb)]() { cb(*this); });
   }
 
  private:
