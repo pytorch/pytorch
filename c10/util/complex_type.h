@@ -252,16 +252,15 @@ struct alignas(sizeof(T) * 2) complex_common {
   }
 };
 
-#if (defined(CUDA_VERSION) && (CUDA_VERSION < 10000)) || defined(__HIP_PLATFORM_HCC__)
-#define CUDA9_AND_ROCM_BUG(TYPE) constexpr complex(): complex_common(TYPE(), TYPE()) {}
-#else
-#define CUDA9_AND_ROCM_BUG(TYPE)
-#endif
+// In principle, `using complex_common<??>::complex_common;` should be enough
+// to for default constructor, but multiple compilers are having multiple bugs on
+// this at different contexts
+#define COMPILER_BUGS(TYPE) constexpr complex(): complex_common(TYPE(), TYPE()) {}
 
 template<>
 struct alignas(2*sizeof(float)) complex<float>: public complex_common<float> {
   using complex_common<float>::complex_common;
-  CUDA9_AND_ROCM_BUG(float);
+  COMPILER_BUGS(float);
   explicit constexpr complex(const complex<double> &other);
   using complex_common<float>::operator=;
 };
@@ -269,12 +268,12 @@ struct alignas(2*sizeof(float)) complex<float>: public complex_common<float> {
 template<>
 struct alignas(2*sizeof(double)) complex<double>: public complex_common<double> {
   using complex_common<double>::complex_common;
-  CUDA9_AND_ROCM_BUG(double);
+  COMPILER_BUGS(double);
   constexpr complex(const complex<float> &other);
   using complex_common<double>::operator=;
 };
 
-#undef CUDA9_AND_ROCM_BUG
+#undef COMPILER_BUGS
 
 constexpr complex<float>::complex(const complex<double> &other): complex_common(other.real(), other.imag()) {}
 constexpr complex<double>::complex(const complex<float> &other): complex_common(other.real(), other.imag()) {}
