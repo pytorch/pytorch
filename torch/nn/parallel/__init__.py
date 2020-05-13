@@ -2,17 +2,10 @@ from .parallel_apply import parallel_apply
 from .replicate import replicate
 from .data_parallel import DataParallel, data_parallel
 from .scatter_gather import scatter, gather
-
-import torch.distributed as dist
-
-if dist.is_available():
-    from .distributed import DistributedDataParallel
+from .distributed import DistributedDataParallel
 
 __all__ = ['replicate', 'scatter', 'parallel_apply', 'gather', 'data_parallel',
-           'DataParallel']
-
-if dist.is_available():
-    __all__ = __all__ + ['DistributedDataParallel']
+           'DataParallel', 'DistributedDataParallel']
 
 def DistributedDataParallelCPU(*args, **kwargs):
     import warnings
