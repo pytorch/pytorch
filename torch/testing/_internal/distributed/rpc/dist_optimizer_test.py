@@ -11,6 +11,9 @@ from torch.testing._internal.dist_utils import dist_init
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
+    TensorPipeRpcAgentTestFixture,
+)
 
 
 class MyModule:
@@ -199,3 +202,10 @@ class DistOptimizerTest(RpcAgentTestFixture):
             # ensure local equals remote
             self.assertEqual(new_w1, module1.get_w())
             self.assertEqual(new_w2, module2.get_w())
+
+class TensorPipeRpcAgentDistOptimizerTest(TensorPipeRpcAgentTestFixture,
+                                          DistOptimizerTest):
+
+    @dist_init
+    def test_verify_backend_options(self):
+        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.TENSORPIPE)
