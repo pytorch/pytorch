@@ -80,20 +80,21 @@ _builtin_ops = [
     (torch._VF.stft, "aten::stft"),
     (torch._VF.cdist, "aten::cdist"),
     (torch._VF.norm, "aten::norm"),
+    (torch._VF.unique_dim, "aten::unique_dim"),
     (torch._VF.nuclear_norm, "aten::nuclear_norm"),
     (torch._VF.frobenius_norm, "aten::frobenius_norm"),
 ]
 
-# ops in torch.functional are bound to torch 
-# in these cases, we want to resolve the function to their python implementation 
+# ops in torch.functional are bound to torch
+# in these cases, we want to resolve the function to their python implementation
 # instead looking up a builtin "aten::" schema
 
 def _gen_torch_functional_registered_ops():
-    # eventually ops should encompass all of torch/functional.py, (torch.functional.__all__) 
-    # but we are currently only able to compile some of the functions. additionally, 
-    # some functions directly map to their aten:: implementations. 
+    # eventually ops should encompass all of torch/functional.py, (torch.functional.__all__)
+    # but we are currently only able to compile some of the functions. additionally,
+    # some functions directly map to their aten:: implementations.
     # TODO: add support for more ops
-    ops = ["stft", "lu", "lu_unpack", "cdist", "norm"]
+    ops = ["stft", "lu", "lu_unpack", "cdist", "norm", "unique"]
     return set(getattr(torch.functional, name) for name in ops)
 
 _functional_registered_ops = _gen_torch_functional_registered_ops()
