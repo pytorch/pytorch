@@ -25,6 +25,7 @@ VALGRIND=${VALGRIND:=ON}
 ./Dict_test
 ./NamedTensor_test
 ./cpu_generator_test
+./vmap_test
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
 fi

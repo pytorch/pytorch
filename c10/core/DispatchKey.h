@@ -150,6 +150,7 @@ enum class DispatchKey : uint8_t {
   // There are a number of alternative modes which may want to handle before
   // autograd; for example, error checking, tracing, profiling or vmap.  They
   // go here.
+  Vmap,
 
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single
