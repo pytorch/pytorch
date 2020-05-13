@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include <ATen/ThreadLocalDebugInfo.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 
@@ -54,6 +53,7 @@
 #include "onnx/onnx_pb.h"
 
 #include <c10/util/Exception.h>
+#include <c10/util/ThreadLocalDebugInfo.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -1082,7 +1082,7 @@ void testRecordFunction() {
   t.join();
 }
 
-class TestThreadLocalDebugInfo : public at::DebugInfoBase {
+class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
  public:
   int getModelId() const {
     return model_id_;
@@ -1098,8 +1098,8 @@ class TestThreadLocalDebugInfo : public at::DebugInfoBase {
   int model_id_ = 0;
 };
 
-void checkDebugInfo(at::DebugInfoKind kind, int model_id) {
-  auto debug_info = at::ThreadLocalDebugInfo::get(kind);
+void checkDebugInfo(c10::DebugInfoKind kind, int model_id) {
+  auto debug_info = c10::ThreadLocalDebugInfo::get(kind);
   TORCH_CHECK(debug_info != nullptr);
   auto* test_debug_info =
       dynamic_cast<TestThreadLocalDebugInfo*>(debug_info.get());
@@ -1112,22 +1112,22 @@ void testThreadLocalDebugInfo() {
   c10::impl::IncludeDispatchKeyGuard observer_guard(c10::DispatchKey::Profiler);
 
   TORCH_CHECK(
-      at::ThreadLocalDebugInfo::get(at::DebugInfoKind::TEST_INFO) == nullptr);
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
   auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
   debug_info->setModelId(42);
   {
-    at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO, debug_info);
-    checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
+    c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
+    checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
   }
 
   // check that thread local debug info is propagated through fork calls
   TORCH_CHECK(
-      at::ThreadLocalDebugInfo::get(at::DebugInfoKind::TEST_INFO) == nullptr);
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
   std::atomic<bool> done{false};
   {
-    at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO, debug_info);
+    c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
     at::launch([&done]() {
-      checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
+      checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
       done = true;
     });
   }
@@ -1136,17 +1136,17 @@ void testThreadLocalDebugInfo() {
 
   // check that thread local debug info is propagated through backward pass
   TORCH_CHECK(
-      at::ThreadLocalDebugInfo::get(at::DebugInfoKind::TEST_INFO) == nullptr);
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
   done = false;
   auto handle = addGlobalCallback(RecordFunctionCallback(
       [&done](const RecordFunction&) {
-        checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
+        checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
         done = true;
         return true;
       },
       [](const RecordFunction&) {}));
   {
-    at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO, debug_info);
+    c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
     auto t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
     auto t2 = t.pow(2);
@@ -1157,22 +1157,22 @@ void testThreadLocalDebugInfo() {
 
   // check nested debug info
   TORCH_CHECK(
-      at::ThreadLocalDebugInfo::get(at::DebugInfoKind::TEST_INFO) == nullptr);
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
   {
-    at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO, debug_info);
+    c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
     {
-      checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
+      checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
       {
         auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
         debug_info->setModelId(314);
-        at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO_2, debug_info);
+        c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO_2, debug_info);
         {
-          checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
-          checkDebugInfo(at::DebugInfoKind::TEST_INFO_2, 314);
+          checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
+          checkDebugInfo(c10::DebugInfoKind::TEST_INFO_2, 314);
           done = false;
           at::launch([&done]() {
-            checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
-            checkDebugInfo(at::DebugInfoKind::TEST_INFO_2, 314);
+            checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
+            checkDebugInfo(c10::DebugInfoKind::TEST_INFO_2, 314);
             done = true;
           });
           while (!done) {

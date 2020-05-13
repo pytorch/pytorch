@@ -14,7 +14,6 @@ namespace at { namespace native {
     return _th_op##_out(result, self);                           \
   }
 
-IMPLEMENT_UNARY_OP_PREQUEL(atan, legacy::cuda::_th_atan)
 IMPLEMENT_UNARY_OP_PREQUEL(erfc, legacy::cuda::_th_erfc)
 IMPLEMENT_UNARY_OP_PREQUEL(exp,  legacy::cuda::_th_exp)
 
