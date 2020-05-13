@@ -52,9 +52,6 @@ UPTOa( Tensor, chain_matmul               , (TensorList    A) )
 
 // fp32
 UPTOa( Tensor, acos                            , (const Tensor &A) )
-UPTOa( Tensor, arcosh                          , (const Tensor &A) )
-UPTOa( Tensor, arcsinh                         , (const Tensor &A) )
-UPTOa( Tensor, arctanh                         , (const Tensor &A) )
 UPTOa( Tensor, asin                            , (const Tensor &A) )
 UPTOa( Tensor, cosh                            , (const Tensor &A) )
 UPTOa( Tensor, erfinv                          , (const Tensor &A) )
