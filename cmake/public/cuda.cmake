@@ -221,6 +221,34 @@ set_property(
     TARGET torch::cudart PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
+# nvToolsExt
+add_library(torch::nvtoolsext INTERFACE IMPORTED)
+if(MSVC)
+  if(NOT NVTOOLEXT_HOME)
+    set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
+  endif()
+  if(DEFINED ENV{NVTOOLSEXT_PATH})
+    set(NVTOOLEXT_HOME $ENV{NVTOOLSEXT_PATH})
+    file(TO_CMAKE_PATH ${NVTOOLEXT_HOME} NVTOOLEXT_HOME)
+  endif()
+  set_target_properties(
+      torch::nvtoolsext PROPERTIES
+      INTERFACE_LINK_LIBRARIES ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
+      INTERFACE_INCLUDE_DIRECTORIES ${NVTOOLEXT_HOME}/include)
+
+elseif(APPLE)
+  set_property(
+      TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvrtc.dylib
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib)
+
+else()
+  find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
+  set_property(
+      TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES
+      ${LIBNVTOOLSEXT})
+endif()
+
 # cudnn
 # static linking is handled by USE_STATIC_CUDNN environment variable
 if(CAFFE2_USE_CUDNN)
@@ -422,14 +450,23 @@ list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA}")
 
 # disable some nvcc diagnostic that appears in boost, glog, glags, opencv, etc.
-foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration set_but_not_used)
+foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration
+             set_but_not_used field_without_dll_interface
+             base_class_has_different_dll_interface
+             dll_interface_conflict_none_assumed
+             dll_interface_conflict_dllexport_assumed
+             implicit_return_from_non_void_function
+             unsigned_compare_with_zero
+             declared_but_not_referenced
+             bad_friend_decl)
   list(APPEND CUDA_NVCC_FLAGS -Xcudafe --diag_suppress=${diag})
 endforeach()
 
 # Set C++14 support
 set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
 if(MSVC)
-  list(APPEND CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "/EHa")
+  list(APPEND CUDA_NVCC_FLAGS "--Werror" "cross-execution-space-call")
+  list(APPEND CUDA_NVCC_FLAGS "--no-host-device-move-forward")
 else()
   list(APPEND CUDA_NVCC_FLAGS "-std=c++14")
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")

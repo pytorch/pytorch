@@ -143,7 +143,7 @@ Python wheels for NVIDIA's Jetson Nano, Jetson TX2, and Jetson AGX Xavier are av
 - Rolling weekly binaries:
   - Python 3.6: https://nvidia.box.com/v/torch-weekly-cp36-jetson-jp42
 
-They require JetPack 4.2 and above, and @dusty-nv maintains them
+They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv) maintains them
 
 
 ### From Source
@@ -156,11 +156,12 @@ Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section
 If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9 or above
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
+- [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
 If you want to disable CUDA support, export environment variable `USE_CUDA=0`.
 Other potentially useful environment variables may be found in `setup.py`.
 
-If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to [are available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
+If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to install PyTorch for Jetson Nano are [available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
 
 
 #### Install Dependencies
@@ -350,4 +351,4 @@ Note: this project is unrelated to [hughperkins/pytorch](https://github.com/hugh
 
 ## License
 
-PyTorch is BSD-style licensed, as found in the LICENSE file.
+PyTorch is BSD-style licensed, as found in the [LICENSE](LICENSE) file.
