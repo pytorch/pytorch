@@ -66,11 +66,11 @@ def cppProfilingFlagsToProfilingMode():
 
     if old_prof_exec_state:
         if old_prof_mode_state:
-            return PROFILING
+            return ProfilingMode.PROFILING
         else:
-            return SIMPLE
+            return ProfilingMode.SIMPLE
     else:
-        return LEGACY
+        return ProfilingMode.LEGACY
 
 @contextmanager
 def enable_profiling_mode_for_profiling_tests():
