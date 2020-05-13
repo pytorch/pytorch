@@ -416,10 +416,14 @@ Tensor* TensorExprKernel::computeFourOperand(
 Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   switch (v->node()->kind()) {
     case aten::add: {
-      return computeTwoOperandWithAlpha(
-          "aten_add", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs + rhs;
-          });
+      auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return lhs + rhs;
+      };
+      TORCH_INTERNAL_ASSERT(
+          v->node()->inputs().size() == 2 || v->node()->inputs().size() == 3);
+      return (v->node()->inputs().size() > 2)
+          ? computeTwoOperandWithAlpha("aten_add", v, add_lambda)
+          : computeTwoOperand("aten_add", v, add_lambda);
     } break;
 
     case aten::_cast_Float: {
@@ -429,10 +433,14 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::sub: {
-      return computeTwoOperandWithAlpha(
-          "aten_sub", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs - rhs;
-          });
+      auto sub_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return lhs - rhs;
+      };
+      TORCH_INTERNAL_ASSERT(
+          v->node()->inputs().size() == 2 || v->node()->inputs().size() == 3);
+      return (v->node()->inputs().size() > 2)
+          ? computeTwoOperandWithAlpha("aten_sub", v, sub_lambda)
+          : computeTwoOperand("aten_sub", v, sub_lambda);
     } break;
 
     case aten::mul: {
