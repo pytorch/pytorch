@@ -177,14 +177,16 @@ class RNNBase(Module):
                 fwd_names = [y for x in fwd_names for y in x]
                 bwd_names = [y for x in bwd_names for y in x]
                 # See above note regarding gradient disabling
-                with torch.no_grad():
-                    for weight_pack in (fwd_weights, bwd_weights):
-                        torch._cudnn_rnn_flatten_weight(
-                            weight_pack, offset,
-                            self.input_size, rnn.get_cudnn_mode(self.mode),
-                            self.hidden_size, self.num_layers,
-                            self.batch_first, False,
-                            bool(self.cat_layer_fwd_bwd_states))
+                if torch._use_cudnn_rnn_flatten_weight():
+                    with torch.no_grad():
+                        for weight_pack in (fwd_weights, bwd_weights):
+                            torch._cudnn_rnn_flatten_weight(
+                                weight_pack, offset,
+                                self.input_size,
+                                rnn.get_cudnn_mode(self.mode),
+                                self.hidden_size, self.num_layers,
+                                self.batch_first, False,
+                                bool(self.cat_layer_fwd_bwd_states))
                 self._flat_weights = fwd_weights + bwd_weights
                 self._flat_weights_names = fwd_names + bwd_names
 
@@ -326,6 +328,7 @@ class RNNBase(Module):
                     self._all_weights += [weights[:2]]
                     self._flat_weights_names.extend(weights[:2])
         self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
+        self.flatten_parameters()
 
     @property
     def all_weights(self):

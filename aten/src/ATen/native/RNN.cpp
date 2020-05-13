@@ -92,15 +92,33 @@ std::tuple<std::vector<Tensor>, std::vector<Tensor>> split_lstm_hidden(TensorLis
   auto h = hx[0];
   auto c = hx[1];
 
-  auto h_slices = h.chunk(2, 0);
-  auto c_slices = c.chunk(2, 0);
-  auto h_fwd = h_slices[0];
-  auto h_bwd = h_slices[1];
-  auto c_fwd = c_slices[0];
-  auto c_bwd = c_slices[1];
+  auto h_slices = h.split(1, 0);
+  auto c_slices = c.split(1, 0);
+
+  std::vector<Tensor> h_fwds;
+  std::vector<Tensor> c_fwds;
+
+  std::vector<Tensor> h_bwds;
+  std::vector<Tensor> c_bwds;
+
+  for(int i = 0; i < h.size(0); i++) {
+    if(i % 2 == 0) {
+      h_fwds.push_back(h_slices[i]);
+      c_fwds.push_back(c_slices[i]);
+    } else {
+      h_bwds.push_back(h_slices[i]);
+      c_bwds.push_back(c_slices[i]);
+    }
+  }
 
   std::vector<Tensor> _fwd_hx;
   std::vector<Tensor> _bwd_hx;
+
+  auto h_fwd = at::cat(h_fwds, 0);
+  auto c_fwd = at::cat(c_fwds, 0);
+  auto h_bwd = at::cat(h_bwds, 0);
+  auto c_bwd = at::cat(c_bwds, 0);
+
   _fwd_hx.push_back(h_fwd.contiguous());
   _fwd_hx.push_back(c_fwd.contiguous());
   _bwd_hx.push_back(h_bwd.contiguous());
@@ -109,9 +127,21 @@ std::tuple<std::vector<Tensor>, std::vector<Tensor>> split_lstm_hidden(TensorLis
 }
 
 std::tuple<Tensor, Tensor> split_rnn_hidden(const Tensor& hx) {
-  auto h_slices = hx.chunk(2, 0);
-  auto h_fwd = h_slices[0];
-  auto h_bwd = h_slices[1];
+  auto h_slices = hx.split(1, 0);
+  std::vector<Tensor> h_fwds;
+  std::vector<Tensor> h_bwds;
+
+  for(int i = 0; i < hx.size(0); i++) {
+    if(i % 2 == 0) {
+      h_fwds.push_back(h_slices[i]);
+    } else {
+      h_bwds.push_back(h_slices[i]);
+    }
+  }
+
+  auto h_fwd = at::cat(h_fwds, 0);
+  auto h_bwd = at::cat(h_bwds, 0);
+
   return std::make_tuple(std::move(h_fwd), std::move(h_bwd));
 }
 
