@@ -11054,8 +11054,9 @@ class TestNNDeviceType(NNTestCase):
         out2 = op_bfp16(input2)
         out2.backward(grad_input2)
 
-        self.assertEqual(out1, out2, atol=prec, exact_dtype=False)
-        self.assertEqual(input1.grad.data, input2.grad.data, atol=prec, exact_dtype=False)
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(out1, out2, atol=prec, exact_dtype=False)
+        self.assertEqualIgnoreType(input1.grad, input2.grad, atol=prec, exact_dtype=False)
 
     @onlyCUDA
     @skipCUDAIfNotRocm
