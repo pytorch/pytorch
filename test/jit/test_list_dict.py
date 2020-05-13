@@ -122,11 +122,6 @@ class TestList(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "out of range"):
             fn2([])
 
-        with self.assertRaisesRegex(RuntimeError, "only supported for list and dict"):
-            @torch.jit.script
-            def fn(x):
-                del x
-
         with self.assertRaisesRegex(RuntimeError, "deletion at a single index"):
             @torch.jit.script
             def fn(x):
