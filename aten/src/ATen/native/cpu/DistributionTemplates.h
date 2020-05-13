@@ -230,7 +230,7 @@ struct UniformKernel {
 
 template<typename RNG>
 void cauchy_kernel(TensorIterator& iter, double median_, double sigma_, RNG generator) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "cauchy_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "cauchy_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     std::lock_guard<std::mutex> lock(generator->mutex_);
     auto median = static_cast<accscalar_t>(median_);
@@ -253,7 +253,7 @@ struct CauchyKernel {
 
 template<typename RNG>
 void log_normal_kernel(TensorIterator& iter, double mean_, double std_, RNG generator) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "log_normal_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "log_normal_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     std::lock_guard<std::mutex> lock(generator->mutex_);
     auto mean = static_cast<accscalar_t>(mean_);
@@ -298,7 +298,7 @@ struct GeometricKernel {
 
 template<typename RNG>
 void exponential_kernel(TensorIterator& iter, double lambda_, RNG generator) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "exponential_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "exponential_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     std::lock_guard<std::mutex> lock(generator->mutex_);
     auto lambda = static_cast<accscalar_t>(lambda_);
