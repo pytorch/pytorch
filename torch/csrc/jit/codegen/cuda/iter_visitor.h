@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
 #include <deque>
+#include <set>
 #include <vector>
 
 namespace torch {
@@ -73,6 +74,12 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   // throughout traversal).
   std::vector<std::vector<Statement*>> stmt_stack;
 
+  void traverse_(
+      Fusion* const fusion,
+      bool from_outputs_only = false,
+      bool breadth_first = false,
+      bool traverse_all_paths = false);
+
  public:
   // Starts at nodes provided in from, traverses from these nodes to inputs.
   // Calls handle on all Statement*s in topological sorted order.
@@ -121,6 +128,8 @@ struct TORCH_CUDA_API DependencyCheck {
   // paths. deque[i].back() are leaf nodes, and deque[i][0] is "dependency".
   // Returns an empty deque if there are no uses of dependency found.
   static std::deque<std::deque<Val*>> getAllDependencyChainsTo(Val* dependency);
+
+  static std::vector<Val*> getTerminatingOutputs(Fusion* const);
 };
 
 } // namespace fuser

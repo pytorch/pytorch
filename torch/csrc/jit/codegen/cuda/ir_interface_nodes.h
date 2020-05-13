@@ -292,7 +292,7 @@ struct TORCH_CUDA_API TensorView : public Val {
 
   void setComputeAt(TensorView* computeAtView, int axis) {
     TORCH_INTERNAL_ASSERT(
-        axis > 0 && axis <= nDims(),
+        axis >= 0 && axis <= nDims(),
         "Invalid computeAt on ",
         this,
         " tried to set to ",

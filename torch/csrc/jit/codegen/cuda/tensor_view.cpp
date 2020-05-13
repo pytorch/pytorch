@@ -264,12 +264,11 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
 
   std::set<TensorView*> common_consumers(
       all_consumer_chains.front().begin(), all_consumer_chains.front().end());
-  for (auto dep_chain : all_consumer_chains) {
-    std::set<TensorView*> chain_consumers(dep_chain.begin(), dep_chain.end());
+
+  for (auto dep_chain : all_consumer_chains)
     common_consumers = set_intersection(
         common_consumers,
         std::set<TensorView*>(dep_chain.begin(), dep_chain.end()));
-  }
 
   // Remove all TVs between producer and consumer
   for (auto dep_chain : dep_chains) {
@@ -313,11 +312,10 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
     }
   }
 
-  for (decltype(ordered_outputs.size()) i{0};
-       i < ordered_outputs.size() - 1 && ordered_outputs.size() > 0;
-       i++) {
-    ordered_outputs[i]->computeAt_impl(ordered_outputs[i + 1], axis);
-  }
+  if (!ordered_outputs.empty())
+    for (auto it = ordered_outputs.begin(); it + 1 != ordered_outputs.end();
+         it++)
+      (*it)->computeAt_impl((*(it + 1)), axis);
 
   return this;
 }

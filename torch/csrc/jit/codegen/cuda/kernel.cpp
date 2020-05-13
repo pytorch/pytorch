@@ -158,7 +158,8 @@ std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
 } // namespace
 
 bool NaivePWKernelArgsReq::matchKernelSize(const at::ArrayRef<IValue> inputs) {
-  TORCH_INTERNAL_ASSERT(inputs.size()== dims_.size(),
+  TORCH_INTERNAL_ASSERT(
+      inputs.size() == dims_.size(),
       "wrong number of inputs feed to generated kernel!");
   for (size_t i = 0; i < dims_.size(); i++) {
     if (inputs[i].isTensor()) {

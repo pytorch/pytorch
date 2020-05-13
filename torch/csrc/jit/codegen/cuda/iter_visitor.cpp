@@ -94,53 +94,44 @@ void IterVisitor::traverseFrom(
   }
 }
 
-void IterVisitor::traverse(
+void IterVisitor::traverse_(
     Fusion* const fusion,
     bool from_outputs_only,
-    bool breadth_first) {
+    bool breadth_first,
+    bool traverse_all_paths) {
   FusionGuard fg(fusion);
   if (breadth_first)
     TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 
-  std::vector<Val*> outputs;
-  for (Val* out : fusion->outputs()) {
-    outputs.push_back(out);
-  }
-  // Search for Vals with no uses (output edges)
-  if (!from_outputs_only)
-    for (Val* val : fusion->vals()) {
-      if (!fusion->used(val))
-        if (!fusion->hasOutput(val))
-          outputs.push_back(val);
-    }
-
-  if (outputs.empty())
+  if (from_outputs_only) {
+    auto term_outs = DependencyCheck::getTerminatingOutputs(fusion);
+    if (!term_outs.empty())
+      traverseFrom(fusion, term_outs, traverse_all_paths);
     return;
+  }
 
-  traverseFrom(fusion, outputs, false);
+  std::vector<Val*> leaves;
+  // Search for Vals with no uses (output edges)
+  for (Val* val : fusion->deterministic_vals())
+    if (!fusion->used(val))
+      leaves.push_back(val);
+
+  if (!leaves.empty())
+    traverseFrom(fusion, leaves, traverse_all_paths);
+}
+
+void IterVisitor::traverse(
+    Fusion* const fusion,
+    bool from_outputs_only,
+    bool breadth_first) {
+  traverse_(fusion, from_outputs_only, breadth_first, false);
 }
 
 void IterVisitor::traverseAllPaths(
     Fusion* const fusion,
     bool from_outputs_only,
     bool breadth_first) {
-  FusionGuard fg(fusion);
-  if (breadth_first)
-    TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
-
-  std::vector<Val*> outputs;
-  for (Val* out : fusion->outputs()) {
-    outputs.push_back(out);
-  }
-  // Search for Vals with no uses (output edges)
-  if (!from_outputs_only)
-    for (Val* val : fusion->vals()) {
-      if (!fusion->used(val))
-        if (!fusion->hasOutput(val))
-          outputs.push_back(val);
-    }
-
-  traverseFrom(fusion, outputs, true);
+  traverse_(fusion, from_outputs_only, breadth_first, true);
 }
 
 /* DEPENDENCY CHECKING */
@@ -151,10 +142,10 @@ namespace {
 struct DependencyChains : public IterVisitor {
   std::deque<std::deque<Val*>> dep_chains;
   bool is_dependency = false;
-  Val* dependency_;
+  std::set<Val*> dependencies_;
 
   void handle(Val* val) {
-    if (val->sameAs(dependency_)) {
+    if (dependencies_.find(val) != dependencies_.end()) {
       is_dependency = true;
       std::deque<Val*> deps;
       for (auto stack : stmt_stack) {
@@ -167,16 +158,27 @@ struct DependencyChains : public IterVisitor {
   }
 
   DependencyChains(Val* _dependency, Val* _of, bool all_chains_ = false)
-      : dependency_(_dependency) {
+      : dependencies_({_dependency}) {
     traverseFrom(_of->fusion(), {_of}, all_chains_);
   }
 
   DependencyChains(Val* _dependency, bool all_chains_ = false)
-      : dependency_(_dependency) {
+      : dependencies_({_dependency}) {
     if (all_chains_)
       traverseAllPaths(_dependency->fusion(), false);
     else
       traverse(_dependency->fusion(), false);
+  }
+
+  DependencyChains(std::set<Val*> _dependencies, bool all_chains_ = false)
+      : dependencies_(_dependencies) {
+    if (dependencies_.empty())
+      return;
+
+    if (all_chains_)
+      traverseAllPaths((*dependencies_.begin())->fusion(), false);
+    else
+      traverse((*dependencies_.begin())->fusion(), false);
   }
 
   static std::deque<Val*> getDependencyChain(Val* dependency, Val* of) {
@@ -201,6 +203,32 @@ struct DependencyChains : public IterVisitor {
       return std::deque<std::deque<Val*>>();
     return dp.dep_chains;
   }
+
+  static std::deque<std::deque<Val*>> getDependencyChainsTo(
+      std::set<Val*> dependencies) {
+    DependencyChains dp(dependencies, true);
+    if (dp.dep_chains.empty())
+      return std::deque<std::deque<Val*>>();
+    return dp.dep_chains;
+  }
+};
+
+// Expr sort will take a fusion and return a topologically sorted list of
+// expressions.
+struct Exprs : public IterVisitor {
+ private:
+  std::vector<Expr*> exprs;
+
+  void handle(Expr* expr) override {
+    exprs.push_back(expr);
+  }
+
+ public:
+  static std::vector<Expr*> getExprs(Fusion* fusion, std::vector<Val*> from) {
+    Exprs ex;
+    ex.traverseFrom(fusion, from, false);
+    return ex.exprs;
+  }
 };
 
 } // namespace
@@ -224,6 +252,26 @@ std::deque<std::deque<Val*>> DependencyCheck::getAllDependencyChains(
 std::deque<std::deque<Val*>> DependencyCheck::getAllDependencyChainsTo(
     Val* dependency) {
   return DependencyChains::getDependencyChainsTo(dependency);
+}
+
+std::vector<Val*> DependencyCheck::getTerminatingOutputs(Fusion* const fusion) {
+  FusionGuard fg(fusion);
+
+  std::set<Val*> used_vals;
+  for (auto expr : Exprs::getExprs(
+           fusion,
+           std::vector<Val*>(
+               fusion->outputs().begin(), fusion->outputs().end()))) {
+    for (auto inp : expr->inputs())
+      used_vals.emplace(inp);
+  }
+
+  std::vector<Val*> terminating_outputs;
+  for (auto out : fusion->outputs())
+    if (used_vals.find(out) == used_vals.end())
+      terminating_outputs.push_back(out);
+
+  return terminating_outputs;
 }
 
 } // namespace fuser

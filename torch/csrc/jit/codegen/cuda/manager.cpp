@@ -3,8 +3,8 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/shape_inference.h>
-#include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -91,8 +91,7 @@ class CudaFusionManager {
         kernel_cache_.count(kernel_id) != 0, "kernel id not recognized");
 
     // TODO: temporary hack
-    auto cuda_kernel =
-        kernel_cache_[kernel_id].getKernelPtr(inputs);
+    auto cuda_kernel = kernel_cache_[kernel_id].getKernelPtr(inputs);
     if (cuda_kernel) {
       // TODO: update launch config for specific sizes;
       //       maybe we should store it in CudaKernel and compute it later
@@ -100,8 +99,8 @@ class CudaFusionManager {
     } else {
       // TODO: this should somehow be done after kernel compilation.
       //       we will want compileKernel to return a heuristic
-      cuda_kernel =
-          kernel_cache_[kernel_id].allocateKernelInCache(makePWKernelSupport(inputs));
+      cuda_kernel = kernel_cache_[kernel_id].allocateKernelInCache(
+          makePWKernelSupport(inputs));
 
       // lower torch::jit::Graph to torch::jit::fuser::cuda::fusion
       Fusion fusion;
@@ -177,51 +176,51 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
   // Currently we just construct I/O tensors for static graph;
   std::shared_ptr<Graph> graph = fusion_node->g(attr::Subgraph)->copy();
 
-  auto execute_lambda = [&] () {
-      const auto nInputs = graph->inputs().size();
-      at::ArrayRef<IValue> inputs = last(stack, nInputs);
+  auto execute_lambda = [&]() {
+    const auto nInputs = graph->inputs().size();
+    at::ArrayRef<IValue> inputs = last(stack, nInputs);
 
-      // shape inference in graph
-      // update shape information per the new inputs;
-      EraseShapeInformation(graph);
-      for (int i = 0; i < nInputs; i++) {
-        graph->inputs()[i]->setType(inputs[i].type());
-      }
-      // shape inference
-      ShapeTypePropagate(graph);
+    // shape inference in graph
+    // update shape information per the new inputs;
+    EraseShapeInformation(graph);
+    for (int i = 0; i < nInputs; i++) {
+      graph->inputs()[i]->setType(inputs[i].type());
+    }
+    // shape inference
+    ShapeTypePropagate(graph);
 
-      // we need to construct outputs;
-      std::vector<at::Tensor> outputs;
-      for (const auto* const output : graph->outputs()) {
-        auto type = output->type()->expect<TensorType>();
-        // Expect output to be tensor;
-        TORCH_CHECK(
-            type && type->isComplete(),
-            "Complete TensorType for output is expected.");
+    // we need to construct outputs;
+    std::vector<at::Tensor> outputs;
+    for (const auto* const output : graph->outputs()) {
+      auto type = output->type()->expect<TensorType>();
+      // Expect output to be tensor;
+      TORCH_CHECK(
+          type && type->isComplete(),
+          "Complete TensorType for output is expected.");
 
-        const auto device = *(type->device());
-        const auto scalar_type = *(type->scalarType());
+      const auto device = *(type->device());
+      const auto scalar_type = *(type->scalarType());
 
-        auto options = at::TensorOptions()
-                           .dtype(scalar_type)
-                           .layout(at::kStrided)
-                           .device(device)
-                           .requires_grad(type->requires_grad());
+      auto options = at::TensorOptions()
+                         .dtype(scalar_type)
+                         .layout(at::kStrided)
+                         .device(device)
+                         .requires_grad(type->requires_grad());
 
-        // TODO: We should infer output shape from `inputs`
-        const auto sizes = extractSizes(type);
-        const auto strides = extractStrides(type);
+      // TODO: We should infer output shape from `inputs`
+      const auto sizes = extractSizes(type);
+      const auto strides = extractStrides(type);
 
-        auto tensor = at::empty_strided(sizes, strides, options);
-        outputs.push_back(tensor);
-      }
-      CudaFusionManager::getManager().runFusionNode(
-          kernel_id, graph, inputs, outputs);
-      drop(stack, inputs.size());
-      stack.insert(
-          stack.end(),
-          std::make_move_iterator(outputs.begin()),
-          std::make_move_iterator(outputs.end()));
+      auto tensor = at::empty_strided(sizes, strides, options);
+      outputs.push_back(tensor);
+    }
+    CudaFusionManager::getManager().runFusionNode(
+        kernel_id, graph, inputs, outputs);
+    drop(stack, inputs.size());
+    stack.insert(
+        stack.end(),
+        std::make_move_iterator(outputs.begin()),
+        std::make_move_iterator(outputs.end()));
   };
 
   const char* disable_fb_env = getenv("PYTORCH_CUDA_FUSER_DISABLE_FALLBACK");
@@ -232,7 +231,8 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
     try {
       execute_lambda();
     } catch (...) {
-      TORCH_WARN("FALLBACK path is taken. This is an indication that codegen"
+      TORCH_WARN(
+          "FALLBACK path is taken. This is an indication that codegen"
           "Failed for some reason. To debug try disable codegen fallback path"
           "via setting the env variable"
           "`export PYTORCH_CUDA_FUSER_DISABLE_FALLBACK=1`");
