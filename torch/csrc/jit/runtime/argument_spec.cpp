@@ -53,7 +53,7 @@ void ArgumentSpecCreator::scan(
     instructions_.emplace_back(ENTER_OBJECT);
     for (size_t i = 0; i < cls->numAttributes(); ++i) {
       auto key = cls->name()->qualifiedName() +
-          cls->getAllAttributes().at(i).getName();
+          cls->getAttributes().at(i).getName();
       // it is only safe to specialize because someone might have written to it
       if (!written_slots.count(key)) {
         scan(cls->containedTypes().at(i), depth + 1, written_slots);

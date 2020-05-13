@@ -286,7 +286,7 @@ std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredNamedBufferDict(
 
   const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
-    if (selfType->is_buffer_written_attribute(i)) {
+    if (selfType->is_buffer(i)) {
       paramNames.push_back(selfType->getAttributeName(i));
     }
   }

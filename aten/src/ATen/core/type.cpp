@@ -1138,9 +1138,9 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
   }
 }
 
-void ClassType::provideNewAttributeKind(AttributeKind attributeKind) {
-    attributes_.push_back(attributeKind);
-    attributeTypes_.push_back(attributeKind.getType());
+void ClassType::addAttribute(ClassAttribute classAttribute) {
+    attributes_.push_back(classAttribute);
+    attributeTypes_.push_back(classAttribute.getType());
     AT_ASSERT(attributes_.size() == attributeTypes_.size());
 }
 
@@ -1149,10 +1149,14 @@ size_t ClassType::addAttribute(
     const TypePtr& type,
     bool is_parameter,
     bool allow_any,
-    bool was_registered_as_buffer) {
+    bool is_buffer) {
+
+  if (is_parameter && is_buffer){
+    TORCH_INTERNAL_ASSERT(false, "Attribute cannot be both a parameter and a buffer!");
+  }
 
   std::string what = is_parameter ? "parameter" : "attribute";
-  what += (was_registered_as_buffer? "buffer" : "not buffer");
+  what += (is_buffer? "buffer" : "not buffer");
   checkNotExist(name, what);
   if (!allow_any) {
     checkNoAny(*this, what.c_str(), name, type);
@@ -1160,32 +1164,26 @@ size_t ClassType::addAttribute(
 
   size_t slot = attributes_.size();
 
-  ATTRIBUTE_KIND_ENUM kind = ATTRIBUTE_KIND_ENUM::REGULAR_ATTRIBUTE;
+  AttributeKind kind = AttributeKind::REGULAR_ATTRIBUTE;
   if (is_parameter) {
-    kind = ATTRIBUTE_KIND_ENUM::PARAMETER;
-  } else if (was_registered_as_buffer) {
-    kind = ATTRIBUTE_KIND_ENUM::BUFFER;
+    kind = AttributeKind::PARAMETER;
+  } else if (is_buffer) {
+    kind = AttributeKind::BUFFER;
   }
 
-  AttributeKind attributeKind(kind, type, name);
+  ClassAttribute ClassAttribute(kind, type, name);
 
-  provideNewAttributeKind(attributeKind);
+  addAttribute(ClassAttribute);
 
-  if (is_parameter) {
-    TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter to a non module");
+  if (is_parameter || is_buffer) {
+    TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter or buffer to a non module");
     TORCH_CHECK(
         (type->kind() == TensorType::Kind) ||
             (type->kind() == OptionalType::Kind &&
             type->expect<OptionalType>()->getElementType()->kind() ==
                 TensorType::Kind) ||
             (type->kind() == NoneType::Kind),
-        "Expecting parameter to have either None, Tensor or Optional[Tensor] type, but got: ",
-        toString(type));
-  }
-  if (was_registered_as_buffer) {
-      TORCH_INTERNAL_ASSERT(is_module(), "attempting to register a buffer on a non module");
-    TORCH_CHECK((type->kind() == TensorType::Kind),
-        "Expecting registered buffer to be a Tensor, but got: ",
+        "Expecting parameter or buffer to have either None, Tensor or Optional[Tensor] type, but got: ",
         toString(type));
   }
 

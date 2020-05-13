@@ -24,8 +24,8 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
     const auto& name = pr.key();
     const auto& type = pr.value().type_;
     const auto& isParameter = pr.value().isParam_;
-    const auto& wasRegisteredAsBuffer = pr.value().wasRegisteredAsBuffer_;
-    cls->addAttribute(name, type, isParameter, wasRegisteredAsBuffer);
+    const auto& isBuffer = pr.value().isBuffer_;
+    cls->addAttribute(name, type, isParameter, isBuffer);
   }
 
   for (const auto& pr : constants_) {
@@ -202,14 +202,14 @@ void ConcreteModuleTypeBuilder::addAttribute(
     std::string name,
     TypePtr type,
     bool isParameter,
-    bool wasRegisteredAsBuffer) {
+    bool isBuffer) {
   TORCH_INTERNAL_ASSERT(type);
   // Function attributes should be handled separately
   TORCH_INTERNAL_ASSERT(type->cast<FunctionType>() == nullptr);
   attributes_.insert(
       std::move(name),
       ConcreteModuleTypeBuilder::Attribute(
-          unshapedType(type), isParameter, wasRegisteredAsBuffer));
+          unshapedType(type), isParameter, isBuffer));
 }
 
 void ConcreteModuleTypeBuilder::addFunctionAttribute(

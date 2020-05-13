@@ -1600,22 +1600,22 @@ CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
 CAFFE2_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type);
 
-enum ATTRIBUTE_KIND_ENUM {
+enum class AttributeKind {
   BUFFER,
   PARAMETER,
   REGULAR_ATTRIBUTE
 };
 
-struct CAFFE2_API AttributeKind {
+struct CAFFE2_API ClassAttribute {
   public:
-  AttributeKind(ATTRIBUTE_KIND_ENUM kind,
+  ClassAttribute(AttributeKind kind,
   TypePtr attributeType,
   std::string attributeName) :
     kind_(kind),
     attributeType_(attributeType),
     attributeName_(std::move(attributeName)) {}
 
-  ATTRIBUTE_KIND_ENUM getKind() const {
+  AttributeKind getKind() const {
     return kind_;
   }
 
@@ -1623,12 +1623,12 @@ struct CAFFE2_API AttributeKind {
     return attributeType_;
   }
 
-  std::string getName() const {
+  const std::string& getName() const {
     return attributeName_;
   }
 
   private:
-  ATTRIBUTE_KIND_ENUM kind_;
+  AttributeKind kind_;
   TypePtr attributeType_;
   std::string attributeName_;
 };
@@ -1737,7 +1737,7 @@ struct CAFFE2_API ClassType : public NamedType {
     return std::find_if(
                attributes_.cbegin(),
                attributes_.cend(),
-               [&](const AttributeKind& attr) { return attr.getName() == name; }) !=
+               [&](const ClassAttribute& attr) { return attr.getName() == name; }) !=
         attributes_.cend();
   }
   
@@ -1750,7 +1750,7 @@ struct CAFFE2_API ClassType : public NamedType {
       const TypePtr& type,
       bool is_parameter = false,
       bool allow_any = false,
-      bool was_registered_as_buffer = false);
+      bool is_buffer = false);
 
   // [Internal Only] Remove attribute from the ClassType,
   // caller is responsible to make sure the modification is safe:
@@ -1767,10 +1767,10 @@ struct CAFFE2_API ClassType : public NamedType {
       TypePtr ty,
       bool is_parameter = false,
       bool allow_any = false,
-      bool was_registered_as_buffer = false) {
+      bool is_buffer = false) {
     auto slot_idx = findAttributeSlot(name);
     if (!slot_idx) {
-      return addAttribute(name, ty, is_parameter, allow_any, was_registered_as_buffer);
+      return addAttribute(name, ty, is_parameter, allow_any, is_buffer);
     }
 
     TORCH_CHECK(
@@ -1876,20 +1876,20 @@ struct CAFFE2_API ClassType : public NamedType {
     return isModule_;
   }
 
-  const std::vector<AttributeKind>& getAllAttributes() const {
+  const std::vector<ClassAttribute>& getAttributes() const {
     return attributes_;
   }
 
   bool is_parameter(size_t slot) const {
     TORCH_INTERNAL_ASSERT(
         is_module(), "asking for parameterSlots of non-Module");
-    return attributes_.at(slot).getKind() == ATTRIBUTE_KIND_ENUM::PARAMETER;
+    return attributes_.at(slot).getKind() == AttributeKind::PARAMETER;
   }
 
-  bool is_buffer_written_attribute(size_t slot) const {
+  bool is_buffer(size_t slot) const {
     TORCH_INTERNAL_ASSERT(
         is_module(), "asking for bufferWrittenSlots of non-Module");
-    return attributes_.at(slot).getKind() == ATTRIBUTE_KIND_ENUM::BUFFER;
+    return attributes_.at(slot).getKind() == AttributeKind::BUFFER;
   }
 
   void addMethod(torch::jit::Function* method);
@@ -1933,7 +1933,7 @@ struct CAFFE2_API ClassType : public NamedType {
     return n.qualifiedName();
   }
 
-  void provideNewAttributeKind(AttributeKind attributeKind);
+  void addAttribute(ClassAttribute classAttribute);
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module
@@ -1948,10 +1948,10 @@ struct CAFFE2_API ClassType : public NamedType {
   // Holds method attributes
   std::weak_ptr<CompilationUnit> compilation_unit_;
 
-  // Holds all atrributes, attribute details are found on AttributeKind
-  std::vector<AttributeKind> attributes_;
+  // Holds all atrributes, attribute details are found on ClassAttribute
+  std::vector<ClassAttribute> attributes_;
   // Construct mirroring attributes_, only around due to the fact that `containedTypes()` method returns an ArrayRef.
-  // Never fill this without using the appropriate provideNewAttributeKind method
+  // Never fill this without using the appropriate provideNewClassAttribute method
   std::vector<TypePtr> attributeTypes_;
 
   // List of methods associated with this class.

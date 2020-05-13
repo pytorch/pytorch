@@ -17140,7 +17140,7 @@ a")
         torch.jit.script(f)
 
 
-    def named_buffers_are_iterable(self):
+    def test_named_buffers_are_iterable(self):
         class MyMod(torch.nn.Module):
             def __init__(self):
                 super(MyMod, self).__init__()

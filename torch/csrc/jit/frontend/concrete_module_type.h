@@ -65,7 +65,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
       std::string name,
       TypePtr type,
       bool isParameter,
-      bool wasRegisteredAsBuffer);
+      bool isBuffer);
   void addFunctionAttribute(
       std::string name,
       const TypePtr& type,
@@ -121,17 +121,17 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   };
 
   struct Attribute {
-    Attribute(TypePtr type, bool isParam, bool wasRegisteredAsBuffer)
+    Attribute(TypePtr type, bool isParam, bool isBuffer)
         : type_(std::move(type)),
           isParam_(isParam),
-          wasRegisteredAsBuffer_(wasRegisteredAsBuffer) {}
+          isBuffer_(isBuffer) {}
 
     friend bool operator==(const Attribute& lhs, const Attribute& rhs) {
       return *(lhs.type_) == *(rhs.type_) && lhs.isParam_ == rhs.isParam_;
     }
     TypePtr type_;
     bool isParam_;
-    bool wasRegisteredAsBuffer_;
+    bool isBuffer_;
   };
 
   struct ModuleInfo {

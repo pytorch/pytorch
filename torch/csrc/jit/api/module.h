@@ -118,9 +118,9 @@ struct TORCH_API Module : public Object {
   // whether a slot is a parameter to be able to classify it.
   void register_buffer(const std::string& name, at::Tensor v) {
     bool is_param = false;
-    bool was_registered_as_buffer = true;
+    bool is_buffer = true;
     type()->addOrCheckAttribute(
-        name, TensorType::get(), is_param, was_registered_as_buffer);
+        name, TensorType::get(), is_param, is_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
 
@@ -138,9 +138,9 @@ struct TORCH_API Module : public Object {
       IValue v,
       bool is_param = false,
       bool allow_any = false,
-      bool was_registered_as_buffer = false) {
+      bool is_buffer = false) {
     type()->addOrCheckAttribute(
-        name, t, is_param, allow_any, was_registered_as_buffer);
+        name, t, is_param, allow_any, is_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
 
