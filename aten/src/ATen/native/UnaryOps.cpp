@@ -144,6 +144,10 @@ Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor sinh(const Tensor& self) { return unary_op_impl(self, at::sinh_out); }
 Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
 
+Tensor& arcosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, arcosh_stub); }
+Tensor arcosh(const Tensor& self) { return unary_op_impl(self, at::arcosh_out); }
+Tensor& arcosh_(Tensor& self) { return unary_op_impl_(self, at::arcosh_out); }
+
 Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
 Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
 Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
