@@ -33,9 +33,11 @@ using namespace torch::distributed::autograd;
 
 namespace {
 
-py::object toPyObj(IValue value) {
+SerializedPyObj toSerializedPyObj(IValue value) {
+  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+  // Need this GIL to guard jit::toPyObj and destruct its returned py::object
   pybind11::gil_scoped_acquire ag;
-  return torch::jit::toPyObject(std::move(value));
+  return pythonRpcHandler.serialize(jit::toPyObject(std::move(value)));
 }
 
 std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
@@ -363,8 +365,7 @@ void RequestCallbackImpl::processRpc(
         // the OwnerRRef has been created
         const auto& rref = futureOwner->constValue();
         if (rref->hasValue()) {
-          SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
-              toPyObj(rref->getValue()));
+          SerializedPyObj result = toSerializedPyObj(rref->getValue());
           markComplete(
               PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
           return;
@@ -386,8 +387,7 @@ void RequestCallbackImpl::processRpc(
             return;
           }
           try {
-            SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
-                toPyObj(rref->getValue()));
+            SerializedPyObj result = toSerializedPyObj(rref->getValue());
             Message m =
                 PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
             m.setId(messageId);
