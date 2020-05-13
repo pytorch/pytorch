@@ -5,8 +5,8 @@
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
+#include <ATen/record_function.h>
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
-#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #endif
 
@@ -19,6 +19,8 @@ InterpreterState::InterpreterState(std::shared_ptr<Code> code)
     : code_(std::move(code)) {
   registers_.resize(code_->register_size_);
 }
+
+using namespace at;
 
 bool InterpreterState::run(Stack& stack) {
   size_t pc = 0;
@@ -36,15 +38,25 @@ bool InterpreterState::run(Stack& stack) {
     switch (inst.op) {
       case OP: {
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
-        if (auto debug_info = at::ThreadLocalDebugInfo::get(
-                at::DebugInfoKind::MOBILE_RUNTIME_INFO)) {
+        if (auto debug_info = c10::ThreadLocalDebugInfo::get(
+                c10::DebugInfoKind::MOBILE_RUNTIME_INFO)) {
           if (auto* mobile_debug_info =
                   dynamic_cast<MobileDebugInfo*>(debug_info.get())) {
             mobile_debug_info->setOpIdx(pc);
           }
         }
-        RECORD_FUNCTION(code_->op_names_[inst.X].name, stack);
 #endif
+        // TODO(iliacher): remove the workaround after RecordFunction is in
+        // Dispatcher
+        bool prev_value = isRecordFunctionEnabled();
+        if (!prev_value) {
+          // enable only for the RecordFunction
+          enableRecordFunction(true);
+        }
+        RECORD_FUNCTION(code_->op_names_[inst.X].name, stack);
+        if (!prev_value) {
+          enableRecordFunction(false);
+        }
         code_->operators_[inst.X](stack);
         ++pc;
       } break;

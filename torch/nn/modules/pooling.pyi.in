@@ -1,6 +1,7 @@
 from .module import Module
 from typing import Optional
-from ... import Tensor, _size
+from torch import Tensor
+from torch.types import _size
 from ..common_types import _size_any_t, _maybe_indices_t, _size_1_t, _size_2_t, _size_3_t, _ratio_3_t, _ratio_2_t
 
 

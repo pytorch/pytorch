@@ -281,7 +281,7 @@ class Hardsigmoid(Module):
         \text{Hardsigmoid}(x) = \begin{cases}
             0 & \text{if~} x \le -3, \\
             1 & \text{if~} x \ge +3, \\
-            x / 6 & \text{otherwise}
+            x / 6 + 1 / 2 & \text{otherwise}
         \end{cases}
 
 
@@ -334,7 +334,7 @@ class Hardswish(Module):
         \text{Hardswish}(x) = \begin{cases}
             0 & \text{if~} x \le -3, \\
             x & \text{if~} x \ge +3, \\
-            x^2/6 & \text{otherwise}
+            x \cdot (x + 3) /6 & \text{otherwise}
         \end{cases}
 
     Shape:
