@@ -376,7 +376,7 @@ void RequestCallbackImpl::processRpc(
       futureOwner->addCallback([responseFuture,
                                 messageId,
                                 futureOwner,
-                                serialize{std::move(serialize)}]() {
+                                serialize{std::move(serialize)}]() mutable {
         const auto& rref = futureOwner->constValue();
         auto whenValueSet = rref->getFuture();
 
@@ -386,7 +386,7 @@ void RequestCallbackImpl::processRpc(
                                    messageId,
                                    rref,
                                    whenValueSet,
-                                   serialize{std::move(serialize)}] {
+                                   serialize{std::move(serialize)}]() mutable {
           if (whenValueSet->hasError()) {
             responseFuture->setError(whenValueSet->error()->what());
             return;
