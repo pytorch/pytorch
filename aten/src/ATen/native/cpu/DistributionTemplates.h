@@ -291,10 +291,12 @@ struct GeometricKernel {
 // ================================================== Exponential =====================================================
 
 template<typename RNG>
-void exponential_kernel(TensorIterator& iter, double lambda, RNG generator) {
+void exponential_kernel(TensorIterator& iter, double lambda_, RNG generator) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "exponential_cpu", [&]() {
+    using accscalar_t = at::acc_type<scalar_t, false>;
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    at::exponential_distribution<double> exponential(lambda);
+    auto lambda = static_cast<accscalar_t>(lambda_);
+    at::exponential_distribution<accscalar_t> exponential(lambda);
     cpu_serial_kernel(iter, [&exponential, generator]() -> scalar_t {
       return static_cast<scalar_t>(exponential(generator));
     });
