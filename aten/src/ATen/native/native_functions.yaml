@@ -4101,9 +4101,6 @@
 
 - func: masked_fill_.Scalar(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: masked_fill__cpu
-    CUDA: masked_fill__cuda
   supports_named_tensor: True
 
 - func: masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor
@@ -4113,9 +4110,6 @@
 
 - func: masked_fill_.Tensor(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: masked_fill__cpu
-    CUDA: masked_fill__cuda
   supports_named_tensor: True
 
 - func: masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor

@@ -588,7 +588,7 @@ static Tensor & masked_fill_impl(Tensor & self, const Tensor & mask, Scalar valu
   return self;
 }
 
-Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, Scalar value) {
+Tensor & masked_fill_(Tensor& self, const Tensor & mask, Scalar value) {
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
 
   masked_fill_impl(self, mask, value);
@@ -596,25 +596,7 @@ Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, Scalar value) {
   return self;
 }
 
-Tensor & masked_fill__cuda(Tensor& self, const Tensor& mask, Scalar value) {
-  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
-
-  masked_fill_impl(self, mask, value);
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
-  return self;
-}
-
-Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, const Tensor & value) {
-  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
-  TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
-      "with ", value.dim(), " dimension(s).");
-
-  masked_fill_impl(self, mask, value.item());
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
-  return self;
-}
-
-Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & value) {
+Tensor & masked_fill_(Tensor& self, const Tensor & mask, const Tensor & value) {
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
       "with ", value.dim(), " dimension(s).");
