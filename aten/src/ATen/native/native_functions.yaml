@@ -1262,6 +1262,21 @@
 - func: exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
+- func: exp2(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: exp2_(Tensor(a!) self) -> Tensor(a!)
+  supports_named_tensor: True
+  variants: function, method
+
+- func: exp2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+  dispatch:
+    CPU: exp2_out
+    CUDA: exp2_out
+
 - func: expm1(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True

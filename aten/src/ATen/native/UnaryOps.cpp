@@ -175,6 +175,10 @@ Tensor& exp_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(r
 Tensor exp(const Tensor& self) { return unary_op_impl(self, at::exp_out); }
 Tensor& exp_(Tensor& self) { return unary_op_impl_(self, at::exp_out); }
 
+Tensor& exp2_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, exp2_stub); }
+Tensor exp2(const Tensor& self) { return unary_op_impl(self, at::exp2_out); }
+Tensor& exp2_(Tensor& self) { return unary_op_impl_(self, at::exp2_out); }
+
 Tensor& expm1_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, expm1_stub); }
 Tensor expm1(const Tensor& self) { return unary_op_impl(self, at::expm1_out); }
 Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
@@ -194,7 +198,7 @@ Tensor& frac_(Tensor& self) { return unary_op_impl_(self, at::frac_out); }
 Tensor& floor_out(Tensor& result, const Tensor& self) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
-    "floor is not supported for complex inputs");
+    "floor is not supported for complex inputs")
 
   return unary_op_impl_out(result, self, floor_stub);
 }
@@ -469,6 +473,7 @@ DEFINE_DISPATCH(erf_stub);
 DEFINE_DISPATCH(erfc_stub);
 DEFINE_DISPATCH(erfinv_stub);
 DEFINE_DISPATCH(exp_stub);
+DEFINE_DISPATCH(exp2_stub);
 DEFINE_DISPATCH(expm1_stub);
 DEFINE_DISPATCH(floor_stub);
 DEFINE_DISPATCH(frac_stub);
