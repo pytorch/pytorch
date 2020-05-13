@@ -122,11 +122,6 @@ class TestList(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "out of range"):
             fn2([])
 
-        with self.assertRaisesRegex(RuntimeError, "only supported for list and dict"):
-            @torch.jit.script
-            def fn(x):
-                del x
-
         with self.assertRaisesRegex(RuntimeError, "deletion at a single index"):
             @torch.jit.script
             def fn(x):
@@ -1096,6 +1091,19 @@ class TestList(JitTestCase):
             [1, 2, 3, 4], dtype=torch.long).cuda(),))
         self.checkScript(to_list_float_1D, (torch.randn(
             5, dtype=torch.double).cuda(),))
+
+    def test_no_element_type_annotation(self):
+        def fn(x):
+            # type: (torch.Tensor) -> List
+            a: List = x.tolist()
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+            torch.jit.script(fn)
 
 
 class TestDict(JitTestCase):
