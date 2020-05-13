@@ -1711,7 +1711,7 @@ def hardswish(input, inplace=False):
         \text{Hardswish}(x) = \begin{cases}
             0 & \text{if~} x \le -3, \\
             x & \text{if~} x \ge +3, \\
-            x^2/6 & \text{otherwise}
+            x \cdot (x + 3) /6 & \text{otherwise}
         \end{cases}
 
     See :class:`~torch.nn.Hardswish` for more details.

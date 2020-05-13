@@ -33,7 +33,7 @@ struct RpcBackendOptions {
   RpcBackendOptions(float rpcTimeoutSeconds, std::string initMethod)
       : rpcTimeoutSeconds(rpcTimeoutSeconds),
         initMethod(std::move(initMethod)) {
-    TORCH_CHECK(rpcTimeoutSeconds > 0, "RPC Timeout must be greater than 0");
+    TORCH_CHECK(rpcTimeoutSeconds >= 0, "RPC Timeout must be non-negative");
   }
 
   float rpcTimeoutSeconds;
