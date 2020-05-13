@@ -130,7 +130,7 @@ std::vector<std::vector<int64_t>> get_pools(const Tensor& indices, const IntArra
       }
     }
     while (pool_index >= pools.size()) {
-      pools.emplace_back();
+      pools.emplace_back();  // create empty pool
     }
     pools[pool_index].push_back(i);
   }
@@ -303,7 +303,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
   auto sizes = input.sizes();
   auto nvalues = get_nvalues(sizes, sparse_dim);
 
-  /* Prepare scratch space and accessors */
+  /* Prepare accessors */
   auto values_2 = values.view({nnz, nvalues});
   auto values_accessor = values_2.accessor<scalar_t, 2>();
 
@@ -318,9 +318,15 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
       for (auto p = begin; p < end; p++) {
         auto pool_indices = pools[p];
 
+        // Skip empty pools
+        if (pool_indices.size() == 0)
+          continue;
+
+        /* Prepare scratch space */
         std::vector<scalar_t> mx_row(nvalues, -std::numeric_limits<scalar_t>::infinity());
         std::vector<scalar_t> exp_sums_row(nvalues, 0);
 
+        /* Compute mx */
         for (int64_t i : pool_indices) {
           auto values_row = values_accessor[i];
           for (int64_t j=0; j < nvalues; j++) {
@@ -441,6 +447,10 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
   parallel_for(0, pools.size(), grain_size, [&](int64_t begin, int64_t end) {
       for (auto p = begin; p < end; p++) {
         auto pool_indices = pools[p];
+
+        // Skip empty pools
+        if (pool_indices.size() == 0)
+          continue;
 
         std::vector<scalar_t> tmp_row(nvalues, 0);
 
