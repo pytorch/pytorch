@@ -361,11 +361,10 @@ class BuildExtension(build_ext, object):
 
         def convert_to_absolute_paths_inplace(paths):
             # Helper function. See Note [Absolute include_dirs]
-            if not paths:
-                return
-            for i in range(len(paths)):
-                if not os.path.isabs(paths[i]):
-                    paths[i] = os.path.abspath(paths[i])
+            if paths is not None:
+                for i in range(len(paths)):
+                    if not os.path.isabs(paths[i]):
+                        paths[i] = os.path.abspath(paths[i])
 
         def unix_wrap_single_compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
             # Copy before we make any modifications.
