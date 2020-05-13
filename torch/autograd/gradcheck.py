@@ -290,7 +290,7 @@ def gradcheck(
                 return _as_tuple(func(*input))[i]
             numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
             for n in numerical:
-                if len(torch.nonzero(n)) > 0:
+                if torch.ne(n, 0).sum() > 0:
                     return fail_test('Numerical gradient for function expected to be zero')
         return True
 
