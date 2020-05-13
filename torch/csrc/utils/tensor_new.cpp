@@ -492,7 +492,13 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
         reinterpret_cast<THPDtype*>(
             PyObject_GetAttrString(r.pyobject(0), "dtype"))
             ->scalar_type;
-    TORCH_INTERNAL_ASSERT(storage_scalar_type == scalar_type);
+    TORCH_CHECK(
+        storage_scalar_type == scalar_type,
+        "Expected Storage of type ",
+        scalar_type,
+        " but got type ",
+        storage_scalar_type,
+        " for argument 1 'storage'");
     return new_with_storage(dispatch_key, scalar_type, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
@@ -544,7 +550,13 @@ Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_ty
         reinterpret_cast<THPDtype*>(
             PyObject_GetAttrString(r.pyobject(0), "dtype"))
             ->scalar_type;
-    TORCH_INTERNAL_ASSERT(storage_scalar_type == scalar_type);
+    TORCH_CHECK(
+        storage_scalar_type == scalar_type,
+        "Expected Storage of type ",
+        scalar_type,
+        " but got type ",
+        storage_scalar_type,
+        " for argument 1 'storage'");
     return new_with_storage(dispatch_key, scalar_type, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));

@@ -54,7 +54,6 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
 
   template <typename T>
   inline T* data() const {
-    auto data_type = caffe2::TypeMeta::Make<T>();
     return unsafe_data<T>();
   }
 

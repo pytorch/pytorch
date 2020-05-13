@@ -66,12 +66,15 @@ Tensor& set_tensor_(Tensor& result, const Tensor& source) {
 // way of getting the allocator to use for a device (c10::GetAllocator is not
 // the same as at::cuda::getCUDADeviceAllocator().
 Tensor& set_cpu_(Tensor& result) {
+  caffe2::TypeMeta dtype = result.dtype();
   Storage storage(
       Storage::use_byte_size_t(),
       0,
       c10::GetAllocator(kCPU),
       true);
-  return result.set_(storage, 0, {0}, {});
+  result.set_(storage, 0, {0}, {});
+  TORCH_INTERNAL_ASSERT(dtype == result.dtype());
+  return result;
 }
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
