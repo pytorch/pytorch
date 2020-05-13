@@ -351,7 +351,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "_set_profiling_future",
               [](PyRRef& self,
-                 std::shared_ptr<jit::PythonFutureWrapper> wrappedFuture) {
+                 const std::shared_ptr<jit::PythonFutureWrapper>&
+                     wrappedFuture) {
                 self.setProfilingFuture(wrappedFuture->fut);
               },
               py::call_guard<py::gil_scoped_release>(),
