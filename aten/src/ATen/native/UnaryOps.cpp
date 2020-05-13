@@ -462,6 +462,8 @@ DEFINE_DISPATCH(imag_stub);
 DEFINE_DISPATCH(conj_stub);
 DEFINE_DISPATCH(acos_stub);
 DEFINE_DISPATCH(arcosh_stub);
+DEFINE_DISPATCH(arcsinh_stub);
+DEFINE_DISPATCH(arctanh_stub);
 DEFINE_DISPATCH(asin_stub);
 DEFINE_DISPATCH(atan_stub);
 DEFINE_DISPATCH(bitwise_not_stub);
