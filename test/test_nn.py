@@ -11054,8 +11054,8 @@ class TestNNDeviceType(NNTestCase):
         out2 = op_bfp16(input2)
         out2.backward(grad_input2)
 
-        self.assertEqual(out1, out2, atol=prec)
-        self.assertEqual(input1.grad.data, input2.grad.data, atol=prec)
+        self.assertEqual(out1, out2, atol=prec, exact_dtype=False)
+        self.assertEqual(input1.grad.data, input2.grad.data, atol=prec, exact_dtype=False)
 
     @onlyCUDA
     @skipCUDAIfNotRocm

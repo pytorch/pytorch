@@ -86,6 +86,11 @@ class TensorPipeAgent : public RpcAgent {
   std::string createUniqueShmAddr();
 #endif
 
+  // Retrieve IP address for a given network device for corss-hosts
+  // to set up tensorpipe connection. For now we default the device
+  // name eth0.
+  static std::string getDefaultIPAddress();
+
   // TensorPipe read function that could be used to read response messages
   // by client, and read request messages by server.
   void pipeRead(
@@ -186,6 +191,13 @@ class TensorPipeAgent : public RpcAgent {
   NetworkDataDict networkData_;
   // Mutex to guarg networkData_
   std::mutex networkDataMutex_;
+
+  // Running total of un-processed, un-errored RPC calls sent
+  std::atomic<int32_t> clientActiveCalls_{0};
+  // Running total of un-processed RPC requests received
+  std::atomic<int32_t> serverActiveCalls_{0};
+  // Running total of RPC requests that will be completed asynchronously
+  std::atomic<int32_t> serverActiveAsyncCalls_{0};
 };
 
 } // namespace rpc
