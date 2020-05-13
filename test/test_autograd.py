@@ -4185,13 +4185,14 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
         test_case.assertEqualTypeString(self_variable, self_variable.grad)
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
+# this list corresponds to ops which have separate tests defined for complex dtypes in
+# common_methods_invocations.py
 separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
 
 # white list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
-                '__rmul__', '__rdiv__']
                 '__rmul__', '__rdiv__', 'transpose', 'round'] + separate_complex_tests
 
 def add_test(
