@@ -29,6 +29,20 @@ graph(%a_dequant, %w_quant, %b):
 }
 
 void insertPrepackUnpackForConv(std::shared_ptr<Graph>& graph) {
+  std::string conv1d_with_quant = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv1d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv1d_with_quant_prepack = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv1d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv1d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::conv1d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
   std::string conv2d_with_quant = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
         %w_dequant = aten::dequantize(%w_quant)
@@ -58,6 +72,7 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
         return (%r) )";
 
   std::vector<std::vector<std::string>> patterns_and_replacements = {
+      {conv1d_with_quant, conv1d_with_quant_prepack},
       {conv2d_with_quant, conv2d_with_quant_prepack},
       {conv3d_with_quant, conv3d_with_quant_prepack}};
   for (const auto& item : patterns_and_replacements) {
@@ -104,6 +119,7 @@ void FoldQuantizedPrepackingOps(Module& module) {
   auto filter_fn = [](const Node* n) -> bool {
     return (
         (n->kind() == Symbol::fromQualString("quantized::linear_prepack")) ||
+        n->kind() == Symbol::fromQualString("quantized::conv1d_prepack") ||
         n->kind() == Symbol::fromQualString("quantized::conv2d_prepack") ||
         n->kind() == Symbol::fromQualString("quantized::conv3d_prepack"));
   };
