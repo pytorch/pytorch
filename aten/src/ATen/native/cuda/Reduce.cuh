@@ -429,7 +429,12 @@ struct ReduceOp {
     const index_t stride = config.step_input;
 
     // Multiple accumulators to remove dependency between unrolled loops.
-    arg_t value_list[vec_size];
+    arg_t value_list[vec_size]
+#ifdef __HIP_PLATFORM_HCC__
+    // ROCm bug
+    = {}
+#endif
+    ;
     value_list[0] = value;
     #pragma unroll
     for (int i = 1; i < vec_size; i++) {
