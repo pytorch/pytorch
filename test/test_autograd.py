@@ -2895,8 +2895,8 @@ class TestAutograd(TestCase):
 
         print("Running CPU test")
         stats = run_profiler(create_cpu_tensor, "cpu_memory_usage")
-        check_metrics(s
-            tats,
+        check_metrics(
+            stats,
             "cpu_memory_usage",
             allocs=[
                 "empty",
