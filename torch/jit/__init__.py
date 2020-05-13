@@ -1129,6 +1129,14 @@ def whichmodule(obj):
             pass
     return '__main__'
 
+def _recursive_compile_class(obj, loc):
+    _qual_name = _qualified_name(obj)
+    # We're starting a new compilation, so update the error call stack in
+    # case it fails
+    error_stack = torch._C.CallStack(_qual_name, loc)
+    rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
+    _compile_and_register_class(obj, rcb, _qual_name)
+
 def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)
     _jit_script_class_compile(qualified_name, ast, rcb)
@@ -1310,7 +1318,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         maybe_already_compiled_fn = _try_get_jit_cached_function(obj)
         if maybe_already_compiled_fn:
             return maybe_already_compiled_fn
-        ast = get_jit_def(obj)
+        ast = get_jit_def(obj, obj.__name__)
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
         fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
@@ -1385,7 +1393,7 @@ def script_method(fn):
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
     _rcb = _jit_internal.createResolutionCallbackFromFrame(frames_up=2)
-    ast = get_jit_def(fn, self_name="ScriptModule")
+    ast = get_jit_def(fn, fn.__name__, self_name="ScriptModule")
     return ScriptMethodStub(_rcb, ast, fn)
 
 
@@ -2093,9 +2101,9 @@ def _check_overload_defaults(impl_defaults, overload_defaults, loc):
                 "parameter {name}".format(name=name))
 
 def _compile_function_with_overload(overload_fn, qual_name, impl_fn):
-    overload_decl = torch.jit.get_jit_def(overload_fn).decl()
+    overload_decl = torch.jit.get_jit_def(overload_fn, overload_fn.__name__).decl()
     overload_signature = torch.jit.annotations.get_signature(overload_fn, None, None, inspect.ismethod(overload_fn))
-    impl_ast = torch.jit.get_jit_def(impl_fn)
+    impl_ast = torch.jit.get_jit_def(impl_fn, impl_fn.__name__)
     overload_defaults = get_default_args(overload_fn)
     implementation_defaults = get_default_args(impl_fn)
     _rcb = _jit_internal.createResolutionCallbackFromClosure(impl_fn)

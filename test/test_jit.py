@@ -4819,6 +4819,25 @@ def foo(x):
         mod = TorchBindOptionalExplicitAttr()
         scripted = torch.jit.script(mod)
 
+    @skipIfRocm
+    def test_torchbind_str(self):
+        foo = torch.classes._TorchScriptTesting._StackString(["foo", "bar", "baz"])
+        self.assertEqual(str(foo), "[foo, bar, baz]")
+
+    def test_module_str(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+
+        f = torch.jit.script(Foo())
+        self.assertEqual('ScriptObject', str(f._c))
+
+    @skipIfRocm
+    def test_torchbind_magic_unimplemented(self):
+        foo = torch.classes._TorchScriptTesting._StackString(["foo", "bar", "baz"])
+        with self.assertRaises(NotImplementedError):
+            foo[3]
+
     def _test_lower_graph_impl(self, model, data):
         model.qconfig = torch.quantization.default_qconfig
         model = torch.quantization.prepare(model)
@@ -6877,13 +6896,13 @@ a")
             assert 1 == 1, "hello"
             return x
 
-        ast = torch.jit.frontend.get_jit_def(fn)
+        ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
         self.assertExpected(str(ast))
 
     def test_python_frontend_py3(self):
         def fn():
             raise Exception("hello")
-        ast = torch.jit.frontend.get_jit_def(fn)
+        ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
         self.assertExpected(str(ast))
 
     def _make_scalar_vars(self, arr, dtype):
@@ -10309,6 +10328,17 @@ a")
 
         self.checkScript(norm, ())
 
+        def torch_unique(dim: Optional[int]):
+            ten = torch.unique(torch.tensor([[1, 3], [2, 3]], dtype=torch.long))
+            a = torch.unique(ten, dim=dim)
+            b = torch.unique(ten, return_counts=True, dim=dim)
+            c = torch.unique(ten, return_inverse=True, dim=dim)
+            d = torch.unique(ten, return_counts=True, return_inverse=True, dim=dim)
+            return a, b, c, d
+
+        self.checkScript(torch_unique, (None,))
+        self.checkScript(torch_unique, (0,))
+
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -12518,6 +12548,39 @@ a")
         self.run_pass('remove_inplace_ops', graph)
         self.run_pass('erase_number_types', graph)
         FileCheck().check_not("int = prim::Constant").check_not("aten::add_").run(str(graph))
+
+    def test_remove_dropout(self):
+        weight_0_shape = (20, 5)
+        weight_1_shape = (20, 20)
+        input_shape = (10, 5)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.weight_0 = torch.nn.Parameter(torch.Tensor(torch.rand(weight_0_shape)))
+                self.weight_1 = torch.nn.Parameter(torch.Tensor(torch.rand(weight_1_shape)))
+
+            def forward(self, x):
+                o = F.linear(x, self.weight_0)
+                o = F.dropout(o, training=self.training)
+                o = F.linear(o, self.weight_1)
+                return o
+
+        data = torch.rand(input_shape)
+        m = M()
+        m = torch.jit.script(m)
+        with self.assertRaisesRegex(RuntimeError, r'Dropout removal module in training mode is not yet supported'):
+            torch._C._jit_pass_remove_dropout(m._c)
+        m.eval()
+        ref_res = m(data)
+        # Need to inline otherwise we see instances of Function.
+        # We would have to use torch.linear/dropout to get around it otherwise.
+        from torch.jit._recursive import wrap_cpp_module
+        m = wrap_cpp_module(torch._C._freeze_module(m._c))
+        torch._C._jit_pass_remove_dropout(m._c)
+        res = m(data)
+        FileCheck().check_not("aten::dropout").run(str(m.graph))
+        torch.testing.assert_allclose(ref_res, res, rtol=1e-2, atol=1e-3)
 
     def test_mm_batching(self):
 
@@ -17615,6 +17678,20 @@ a")
                 self.b = b  # type: int
 
         torch.jit.script(M(2, 3))
+
+    def test_module_method_reassignment(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def _forward(self, x):
+                return x
+
+            forward = _forward
+
+        sm = torch.jit.script(Foo())
+        input = torch.ones(2, 2)
+        self.assertEqual(input, sm(input))
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
