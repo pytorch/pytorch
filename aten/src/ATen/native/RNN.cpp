@@ -47,7 +47,7 @@ Tensor reverse(const Tensor& input) {
 Tensor reverse_packed_data(const Tensor& input, const Tensor& batch_sizes) {
   Tensor sequence;
   Tensor lengths;
-  std::tie(sequence, lengths) = torch::_pad_packed_sequence(
+  std::tie(sequence, lengths) = at::_pad_packed_sequence(
     input, batch_sizes, false, 0.0, batch_sizes.size(0));
   auto step_inputs = sequence.unbind(1);
   int64_t * lengths_p = lengths.data_ptr<int64_t>();
