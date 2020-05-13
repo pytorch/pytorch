@@ -401,33 +401,37 @@ struct RandomKernel {
   }
 };
 
-// ==================================================== Macros ========================================================
+// ====================================================================================================================
 
-#define UNIFORM_AND_TRANSFORM(scalar_t, accscalar_t, curand4_engine_calls, iter, gen, transform)                      \
-  if (std::is_same<scalar_t, double>::value) {                                                                        \
-    distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,                                  \
-      gen,                                                                                                            \
-      [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },                    \
-      transform);                                                                                                     \
-  } else {                                                                                                            \
-    distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,                                    \
-      gen,                                                                                                            \
-      [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },                           \
-      transform);                                                                                                     \
+template<typename scalar_t, typename accscalar_t, size_t curand4_engine_calls, typename RNG, typename transform_t>
+void uniform_and_transform(TensorIterator& iter, RNG gen, transform_t transform) {
+  if (std::is_same<scalar_t, double>::value) {
+    distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+      gen,
+      [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
+      transform);
+  } else {
+    distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+      gen,
+      [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
+      transform);
   }
+}
 
-#define NORMAL_AND_TRANSFORM(scalar_t, accscalar_t, curand4_engine_calls, iter, gen, transform)                       \
-  if (std::is_same<scalar_t, double>::value) {                                                                        \
-    distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,                                  \
-      gen,                                                                                                            \
-      [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal2_double(state); },                     \
-      transform);                                                                                                     \
-  } else {                                                                                                            \
-    distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,                                    \
-      gen,                                                                                                            \
-      [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal4(state); },                            \
-      transform);                                                                                                     \
+template<typename scalar_t, typename accscalar_t, size_t curand4_engine_calls, typename RNG, typename transform_t>
+void normal_and_transform(TensorIterator& iter, RNG gen, transform_t transform) {
+  if (std::is_same<scalar_t, double>::value) {
+    distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+      gen,
+      [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal2_double(state); },
+      transform);
+  } else {
+    distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+      gen,
+      [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal4(state); },
+      transform);
   }
+}
 
 // ==================================================== Normal ========================================================
 
@@ -442,7 +446,7 @@ void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
     auto normal_func = [mean, std] __device__ (accscalar_t rand) {
       return static_cast<scalar_t>(transformation::normal<accscalar_t>(rand, mean, std));
     };
-    NORMAL_AND_TRANSFORM(scalar_t, accscalar_t, curand4_engine_calls, iter, gen, normal_func);
+    normal_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, normal_func);
    });
 }
 
@@ -477,7 +481,7 @@ void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG gen) {
       auto reverse_bound_rand = rand == static_cast<accscalar_t>(1.0) ? static_cast<accscalar_t>(0.0) : rand; // faster than 1 - rand
       return static_cast<scalar_t>(reverse_bound_rand * range + from);
     };
-    UNIFORM_AND_TRANSFORM(scalar_t, accscalar_t, curand4_engine_calls, iter, gen, uniform_func);
+    uniform_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, uniform_func);
    });
 }
 
@@ -500,7 +504,7 @@ void log_normal_kernel(TensorIterator& iter, double mean_, double std_, RNG gen)
     auto log_normal_func = [mean, std] __device__ (accscalar_t rand) {
       return static_cast<scalar_t>(transformation::log_normal<accscalar_t>(rand, mean, std));
     };
-    NORMAL_AND_TRANSFORM(scalar_t, accscalar_t, curand4_engine_calls, iter, gen, log_normal_func);
+    normal_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, log_normal_func);
    });
 }
 
@@ -521,7 +525,7 @@ void geometric_kernel(TensorIterator& iter, double p, RNG gen) {
     auto geometric_func = [p] __device__ (accscalar_t rand) {
       return static_cast<scalar_t>(transformation::geometric<accscalar_t>(rand, p));
     };
-    UNIFORM_AND_TRANSFORM(scalar_t, accscalar_t, curand4_engine_calls, iter, gen, geometric_func);
+    uniform_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, geometric_func);
   });
 }
 
@@ -545,7 +549,7 @@ void exponential_kernel(TensorIterator& iter, double lambda_, RNG gen) {
       auto reverse_bound_rand = rand == static_cast<accscalar_t>(1.0) ? static_cast<accscalar_t>(0.0) : rand; // faster than 1 - rand
       return static_cast<scalar_t>(transformation::exponential<accscalar_t>(reverse_bound_rand, lambda));
     };
-    UNIFORM_AND_TRANSFORM(scalar_t, accscalar_t, curand4_engine_calls, iter, gen, exponential_func);
+    uniform_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, exponential_func);
    });
 }
 
@@ -568,7 +572,7 @@ void cauchy_kernel(TensorIterator& iter, double median_, double sigma_, RNG gen)
     auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
       return static_cast<scalar_t>(transformation::cauchy<accscalar_t>(rand, median, sigma));
     };
-    UNIFORM_AND_TRANSFORM(scalar_t, accscalar_t, curand4_engine_calls, iter, gen, cauchy_func);
+    uniform_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, cauchy_func);
    });
 }
 
