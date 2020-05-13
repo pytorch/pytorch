@@ -74,6 +74,55 @@ class TestBuiltins(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "hasattr"):
             torch.jit.script(Mod())
 
+    def test_del(self):
+        def fn(x):
+            # type: (List[int]) -> List[int]
+            a = x * 2
+            del a
+            return x
+
+        self.checkScript(fn, ([1, 2, 3],))
+
+        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+            @torch.jit.script
+            def fn(x):
+                a = x ** 2
+                del a
+                return a
+
+        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+            @torch.jit.script
+            def fn(x):
+                a = x ** 2
+                if a:
+                    del a
+                return a
+
+        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+            @torch.jit.script
+            def fn(x):
+                a = x ** 2
+                del b
+                return a
+
+    def test_del_multiple_operands(self):
+
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
+                                    "with more than one operand"):
+            @torch.jit.script
+            def del_list_multiple_operands(x):
+                # type: (List[int]) -> List[int]
+                del x[0], x[1]
+                return x
+
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
+                                    "with more than one operand"):
+            @torch.jit.script
+            def del_dict_multiple_operands(x):
+                # type: (Dict[str, int]) -> Dict[str, int]
+                del x['hi'], x['there']
+                return x
+
 
 class TestTensorBuiltins(JitTestCase):
     def test_tensor_properties(self):

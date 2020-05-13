@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -90,8 +90,6 @@ bool isSupported(Node* node) {
     case aten::gt:
     case aten::le:
     case aten::lt:
-    case aten::min:
-    case aten::max:
     case aten::pow:
     case aten::clamp:
     case aten::lerp:
@@ -134,7 +132,8 @@ bool isSupported(Node* node) {
     case aten::slice:
     case aten::unsqueeze:
     case aten::frac:
-    case aten::rand_like:
+    // TODO: uncomment once we can handle rand+broadcasts
+    // case aten::rand_like:
     case aten::_sigmoid_backward:
     case aten::_tanh_backward:
     case aten::__and__:
@@ -144,6 +143,17 @@ bool isSupported(Node* node) {
     case aten::__rshift__:
     case aten::where:
       return true;
+    // Operators that can be both elementwise or reductions:
+    case aten::min:
+    case aten::max:
+      if (node->inputs().size() != 2) {
+        return false;
+      }
+      if (!node->inputs()[0]->type()->cast<TensorType>() ||
+          !node->inputs()[1]->type()->cast<TensorType>()) {
+        return false;
+      }
+      return true;
     default:
       return false;
   }
@@ -151,6 +161,10 @@ bool isSupported(Node* node) {
 
 bool canHandle(Node* node, AliasDb& aliasDb) {
   if (node->kind() == prim::Constant) {
+    if (node->output()->type()->cast<TensorType>()) {
+      // TODO: add support for tensor constants.
+      return false;
+    }
     return true;
   }
   if (node->kind() == prim::Loop) {
@@ -158,6 +172,16 @@ bool canHandle(Node* node, AliasDb& aliasDb) {
   }
   if (!allShapesAreKnown(node)) {
     return false;
+  }
+
+  // Don't include nodes whose inputs are tensor constants - we cannot handle
+  // them at the moment.
+  // TODO: actually support tensor constants and remove this.
+  for (torch::jit::Value* input : node->inputs()) {
+    if (input->node()->kind() == prim::Constant &&
+        input->type()->cast<TensorType>()) {
+      return false;
+    }
   }
   return isSupported(node);
 }

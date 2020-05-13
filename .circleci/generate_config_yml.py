@@ -11,6 +11,7 @@ import shutil
 from collections import namedtuple, OrderedDict
 
 import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
+import cimodel.data.windows_build_definitions as windows_build_definitions
 import cimodel.data.binary_build_definitions as binary_build_definitions
 import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
 import cimodel.lib.miniutils as miniutils
@@ -94,7 +95,7 @@ YAML_SOURCES = [
     File("workflows.yml"),
 
     File("workflows-setup-job.yml"),
-    File("windows-build-test.yml"),
+    Listgen(windows_build_definitions.get_windows_workflows, 3),
     Listgen(pytorch_build_definitions.get_workflow_jobs, 3),
     File("workflows-pytorch-macos-builds.yml"),
     File("workflows-pytorch-android-gradle-build.yml"),
