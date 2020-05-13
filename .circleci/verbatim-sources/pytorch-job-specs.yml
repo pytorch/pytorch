@@ -114,7 +114,7 @@ jobs:
             if [ "${BUILD_ENVIRONMENT}" == "pytorch-linux-bionic-py3.6-clang9-test" ]; then
               return 0
             fi
-            if [ "${BUILD_ENVIRONMENT}" == "pytorch-linux-xenial-py3.6-gcc-5.4-test" ]; then
+            if [ "${BUILD_ENVIRONMENT}" == "pytorch-linux-xenial-py3.6-gcc5.4-test" ]; then
               return 0
             fi
             return 1
