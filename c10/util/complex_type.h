@@ -125,9 +125,9 @@ template<typename T>
 struct alignas(sizeof(T) * 2) complex_common {
   using value_type = T;
 
-  T storage[2];
+  T storage[2] = {T(), T()};
 
-  constexpr complex_common(): storage{T(), T()} {}
+  constexpr complex_common() = default;
   constexpr complex_common(const T& re, const T& im = T()): storage{re, im} {}
   template<typename U>
   explicit constexpr complex_common(const std::complex<U> &other): complex_common(other.real(), other.imag()) {}
@@ -255,12 +255,12 @@ struct alignas(sizeof(T) * 2) complex_common {
 // In principle, `using complex_common<??>::complex_common;` should be enough
 // to for default constructor, but multiple compilers are having multiple bugs on
 // this at different contexts
-#define COMPILER_BUGS(TYPE) constexpr complex(): complex_common(TYPE(), TYPE()) {}
+#define COMPILER_BUGS constexpr complex() = default;
 
 template<>
 struct alignas(2*sizeof(float)) complex<float>: public complex_common<float> {
   using complex_common<float>::complex_common;
-  COMPILER_BUGS(float);
+  COMPILER_BUGS
   explicit constexpr complex(const complex<double> &other);
   using complex_common<float>::operator=;
 };
@@ -268,7 +268,7 @@ struct alignas(2*sizeof(float)) complex<float>: public complex_common<float> {
 template<>
 struct alignas(2*sizeof(double)) complex<double>: public complex_common<double> {
   using complex_common<double>::complex_common;
-  COMPILER_BUGS(double);
+  COMPILER_BUGS
   constexpr complex(const complex<float> &other);
   using complex_common<double>::operator=;
 };
