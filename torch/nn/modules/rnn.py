@@ -140,19 +140,7 @@ class RNNBase(Module):
         with torch.cuda.device_of(first_fw):
             import torch.backends.cudnn.rnn as rnn
 
-            if self.cat_layer_fwd_bwd_states:
-                if torch._use_cudnn_rnn_flatten_weight():
-                    # Note: no_grad() is necessary since
-                    # _cudnn_rnn_flatten_weight is an inplace operation
-                    # on self._flat_weights
-                    with torch.no_grad():
-                        torch._cudnn_rnn_flatten_weight(
-                            self._flat_weights, (4 if self.bias else 2),
-                            self.input_size, rnn.get_cudnn_mode(self.mode),
-                            self.hidden_size, self.num_layers,
-                            self.batch_first, bool(self.bidirectional),
-                            bool(self.cat_layer_fwd_bwd_states))
-            elif not self.cat_layer_fwd_bwd_states and self.bidirectional:
+            if not self.cat_layer_fwd_bwd_states and self.bidirectional:
                 # Rearrange weights in order to have them in
                 # (forward_weights, backward_weights) order
                 offset = 4 if self.bias else 2
@@ -189,6 +177,18 @@ class RNNBase(Module):
                                 bool(self.cat_layer_fwd_bwd_states))
                 self._flat_weights = fwd_weights + bwd_weights
                 self._flat_weights_names = fwd_names + bwd_names
+            else:
+                if torch._use_cudnn_rnn_flatten_weight():
+                    # Note: no_grad() is necessary since
+                    # _cudnn_rnn_flatten_weight is an inplace operation
+                    # on self._flat_weights
+                    with torch.no_grad():
+                        torch._cudnn_rnn_flatten_weight(
+                            self._flat_weights, (4 if self.bias else 2),
+                            self.input_size, rnn.get_cudnn_mode(self.mode),
+                            self.hidden_size, self.num_layers,
+                            self.batch_first, bool(self.bidirectional),
+                            bool(self.cat_layer_fwd_bwd_states))
 
     def _apply(self, fn):
         ret = super(RNNBase, self)._apply(fn)
