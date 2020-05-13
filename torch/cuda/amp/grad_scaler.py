@@ -2,6 +2,7 @@ import torch
 from collections import defaultdict
 from torch._six import container_abcs
 import warnings
+from enum import Enum
 
 
 class _MultiDeviceReplicator(object):
@@ -26,13 +27,14 @@ class _MultiDeviceReplicator(object):
 # - Lambdas can't be pickled, so we don't want to supply a lambda as the factory.
 # - Defining READY, UNSCALED, STEPPED and _refresh_per_optimizer_state within GradScaler
 #   causes a circular reference, which we'd rather avoid.
-READY = 0
-UNSCALED = 1
-STEPPED = 2
+class OptState(Enum):
+    READY = 0
+    UNSCALED = 1
+    STEPPED = 2
 
 
 def _refresh_per_optimizer_state():
-    return {"stage": READY, "found_inf_per_device": {}}
+    return {"stage": OptState.READY, "found_inf_per_device": {}}
 
 
 class GradScaler(object):
@@ -226,9 +228,9 @@ class GradScaler(object):
 
         optimizer_state = self._per_optimizer_states[id(optimizer)]
 
-        if optimizer_state["stage"] == UNSCALED:
+        if optimizer_state["stage"] is OptState.UNSCALED:
             raise RuntimeError("unscale_() has already been called on this optimizer since the last update().")
-        elif optimizer_state["stage"] == STEPPED:
+        elif optimizer_state["stage"] is OptState.STEPPED:
             raise RuntimeError("unscale_() is being called after step().")
 
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
@@ -236,7 +238,7 @@ class GradScaler(object):
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=self._scale.device)
 
         optimizer_state["found_inf_per_device"] = self._unscale_grads_(optimizer, inv_scale, found_inf, False)
-        optimizer_state["stage"] = UNSCALED
+        optimizer_state["stage"] = OptState.UNSCALED
 
     def step(self, optimizer, *args, **kwargs):
         """
@@ -269,7 +271,7 @@ class GradScaler(object):
 
         optimizer_state = self._per_optimizer_states[id(optimizer)]
 
-        if optimizer_state["stage"] == STEPPED:
+        if optimizer_state["stage"] is OptState.STEPPED:
             raise RuntimeError("step() has already been called since the last update().")
 
         retval = None
@@ -280,10 +282,10 @@ class GradScaler(object):
             # optional grad_scaler kwarg.  We append self to the kwargs so the custom optimizer has full information:
             # it can query its own state, invoke unscale_ on itself, etc
             retval = optimizer.step(*args, **dict(kwargs, grad_scaler=self))
-            optimizer_state["stage"] == STEPPED
+            optimizer_state["stage"] = OptState.STEPPED
             return retval
 
-        if optimizer_state["stage"] == READY:
+        if optimizer_state["stage"] is OptState.READY:
             self.unscale_(optimizer)
 
         assert len(optimizer_state["found_inf_per_device"]) > 0, "No inf checks were recorded for this optimizer."
@@ -291,7 +293,7 @@ class GradScaler(object):
         if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
             retval = optimizer.step(*args, **kwargs)
 
-        optimizer_state["stage"] == STEPPED
+        optimizer_state["stage"] = OptState.STEPPED
 
         return retval
 
