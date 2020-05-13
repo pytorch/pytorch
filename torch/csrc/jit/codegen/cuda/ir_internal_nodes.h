@@ -347,7 +347,7 @@ struct TORCH_CUDA_API TensorDomain : public Val {
   TensorDomain* reorder(const std::unordered_map<int, int>& old2new);
 
   // pair is in order where second is the consumer of first
-  std::pair<TensorDomain*, TensorDomain*> rFactor(const std::vector<int> axes);
+  std::pair<TensorDomain*, TensorDomain*> rFactor(const std::vector<int>& axes);
 
   TensorDomain* rootDomain();
 

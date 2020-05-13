@@ -264,7 +264,7 @@ struct TORCH_CUDA_API TensorView : public Val {
    * reduction will now beset as: TV1[I0, R1, I1] = TV2[I0, R0, I3, I1] TV0[I0,
    * I1] = TV1[I0, R1, I1]
    */
-  TensorView* rFactor(const std::vector<int> axes);
+  TensorView* rFactor(const std::vector<int>& axes);
 
   MemoryType getMemoryType() {
     return memory_type_;

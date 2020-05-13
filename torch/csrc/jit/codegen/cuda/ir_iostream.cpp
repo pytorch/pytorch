@@ -364,35 +364,33 @@ void IRPrinter::handle(const ReductionOp* const rop) {
     os << rop->out() << " = reduction( " << rop->in()
        << ", op = " << rop->getReductionOpType()
        << ", initial value = " << rop->init() << " )\n";
+    return;
   }
 
   TensorIndex* out = static_cast<TensorIndex*>(rop->out());
   auto vec_domain = out->view()->domain()->domain();
 
   IterDomain *tidx = nullptr, *tidy = nullptr, *tidz = nullptr;
-  bool is_thread_reduce = std::any_of(
-      vec_domain.begin(),
-      vec_domain.end(),
-      [&tidx, &tidy, &tidz](IterDomain* id) {
-        if (id->isThreadDim() && id->isReduction()) {
-          switch (id->parallel_method()) {
-            case (ParallelType::TIDz):
-              tidz = id;
-              break;
-            case (ParallelType::TIDy):
-              tidy = id;
-              break;
-            case (ParallelType::TIDx):
-              tidx = id;
-              break;
-            default:
-              TORCH_INTERNAL_ASSERT(
-                  false, "Did not recognize parallel type for reduction.");
-          }
-          return true;
-        }
-        return false;
-      });
+  bool is_thread_reduce = false;
+  for (auto id : vec_domain) {
+    if (id->isThreadDim() && id->isReduction()) {
+      switch (id->parallel_method()) {
+        case (ParallelType::TIDz):
+          tidz = id;
+          break;
+        case (ParallelType::TIDy):
+          tidy = id;
+          break;
+        case (ParallelType::TIDx):
+          tidx = id;
+          break;
+        default:
+          TORCH_INTERNAL_ASSERT(
+              false, "Did not recognize parallel type for reduction.");
+      }
+      is_thread_reduce = true;
+    }
+  }
 
   if (!is_thread_reduce) {
     handle(new BinaryOp(rop->getReductionOpType(), out, out, rop->in()));
@@ -402,25 +400,10 @@ void IRPrinter::handle(const ReductionOp* const rop) {
   auto op_type = rop->getReductionOpType();
   indent();
   // Thread all reduce.
-  os << "blockReduce< ";
-  if (tidx != nullptr) {
-    print_inline(tidx->extent());
-  } else {
-    os << 0;
-  }
-  os << ", ";
-  if (tidy != nullptr) {
-    print_inline(tidy->extent());
-  } else {
-    os << 0;
-  }
-  os << ", ";
-  if (tidz != nullptr) {
-    print_inline(tidz->extent());
-  } else {
-    os << 0;
-  }
-  os << " > ( ";
+  os << "blockReduce< " << (tidx != nullptr ? "true" : "false") << ", "
+     << (tidy != nullptr ? "true" : "false") << ", "
+     << (tidz != nullptr ? "true" : "false") << " >"
+     << " ( ";
   handle(rop->out());
   os << ", ";
   handle(rop->in());
@@ -558,8 +541,8 @@ void IRPrinter::printReductionOps(Fusion* fusion) {
     auto d_type = rop_pair.second;
 
     indent();
-    os << "void reduction_" << op_type << "_" << d_type << "(" << d_type
-       << "& a, "
+    os << "__global__ void reduction_" << op_type << "_" << d_type << "("
+       << d_type << "& a, "
        << "const " << d_type << " b) {\n";
     indent_size++;
     handle(new BinaryOp(op_type, a, a, b));

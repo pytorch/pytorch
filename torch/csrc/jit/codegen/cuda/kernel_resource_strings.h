@@ -182,83 +182,79 @@ static auto code_template_block_reduction = R"(
 // participate, otherwise it is the number of threads. We could start with warp
 // reductions, then reduce the warps, this could save some shared memory, but
 // may actually be slower.
-template<int X_THREADS, int Y_THREADS, int Z_THREADS, typename T, typename Func>
+template<bool X_REDUCE, bool Y_REDUCE, bool Z_REDUCE, typename T, typename Func>
 __inline__ __device__
 void blockReduce(T& out, const T inp_val, Func reduction_op) {
 
-  static constexpr int X_STRIDE = (X_THREADS > 0 ? X_THREADS: 1);
-  static constexpr int Y_STRIDE = (Y_THREADS > 0 ? Y_THREADS: 1);
-  static constexpr int Z_STRIDE = (Z_THREADS > 0 ? Z_THREADS: 1);
+  // Use worst case for memory.
+  __shared__ T shared_mem[1024];
 
-  static constexpr int numel = X_STRIDE * Y_STRIDE * Z_STRIDE;
+  unsigned int reduction_size 
+    = (X_REDUCE ? blockDim.x : 1) 
+    * (Y_REDUCE ? blockDim.y : 1)
+    * (Z_REDUCE ? blockDim.z : 1);
 
-  __shared__ T shared_mem[numel];
+  // If this thread will output a final result
+  bool should_write = true;
 
-  unsigned int reduction_size = 1;
-  unsigned int linear_tid = 0;
+  if (X_REDUCE)
+    should_write = should_write && threadIdx.x == 0;
+  if (Y_REDUCE)
+    should_write = should_write && threadIdx.y == 0;
+  if (Z_REDUCE)
+    should_write = should_write && threadIdx.z == 0;
 
-  if(X_THREADS > 0){
-    linear_tid += threadIdx.x;
-    reduction_size *= X_STRIDE;
+  unsigned int reduction_stride;
+  unsigned int reduction_tid;
+  unsigned int linear_tid;
+
+  if(X_REDUCE && !Y_REDUCE && Z_REDUCE){
+    // Transpose Z and Y in the shared memory so Z and X dims are contiguous in smem
+    reduction_stride = 1;
+    linear_tid = threadIdx.y * blockDim.z * blockDim.x + threadIdx.z * blockDim.x + threadIdx.x;
+    reduction_tid
+    = threadIdx.y * blockDim.z * blockDim.x
+    + threadIdx.z              * blockDim.x
+    + threadIdx.x;
+  } else {
+    // Normal reduction in order
+    reduction_stride 
+    = (X_REDUCE ? 1 
+    : (Y_REDUCE ? blockDim.x
+    : (Z_REDUCE ? blockDim.x * blockDim.y : 0)));
+
+    linear_tid = threadIdx.z * blockDim.y * blockDim.x + threadIdx.y * blockDim.x + threadIdx.x;
+
+    reduction_tid
+    = ( Z_REDUCE ? threadIdx.z : 0 ) * ( Y_REDUCE ? blockDim.y : 1 ) * ( X_REDUCE ? blockDim.x : 1 )
+    + ( Y_REDUCE ? threadIdx.y : 0 )                                 * ( X_REDUCE ? blockDim.x : 1 )
+    + ( X_REDUCE ? threadIdx.x : 0 );
   }
-  if(Y_THREADS > 0){
-    linear_tid += threadIdx.y * X_STRIDE;
-    reduction_size *= Y_STRIDE;
-  }
-  if(Z_THREADS > 0){
-    linear_tid += threadIdx.z * Y_STRIDE * X_STRIDE;
-    reduction_size *= Z_STRIDE;
-  }
 
-  // how many threads in inner most contig reduction, i.e. if this is >32 we can
-  // do warp shuffles. We could do some template magic to make this a constexpr
-  // value.
-  int contig_threads = X_STRIDE;
-  if(Y_THREADS > 0){
-    contig_threads*=Y_THREADS;
-    if(Z_THREADS>0)
-      contig_threads*=Z_THREADS;
-  }
-
-  // Round contig_threads down to nearest power of 2
-  contig_threads = 1 << (31 - __clz(contig_threads));
-  // If greater than a warp round down to a warp
-  contig_threads = contig_threads > 32 ? 32 : contig_threads;
+  assert( reduction_stride != 0 );
 
   shared_mem[linear_tid] = inp_val;
   __syncthreads();
   // Reduce down to nearest power of 2:
   int np2 =  1 << (31 - __clz(reduction_size));
 
-  if( linear_tid < np2 ){
-    if( linear_tid + np2 < reduction_size){
-      reduction_op( shared_mem[linear_tid], shared_mem[linear_tid + np2] );
+  if( reduction_tid < np2 ){
+    if( reduction_tid + np2 < reduction_size){
+      reduction_op( shared_mem[linear_tid], shared_mem[linear_tid + np2 * reduction_stride] );
     }
   }
   __syncthreads();
-  for (int factor = np2/2; factor >= contig_threads; factor>>=1) {
-    if (linear_tid < factor) {
-      reduction_op( shared_mem[linear_tid], shared_mem[linear_tid + factor] );
+  //for (int factor = np2/2; factor > contig_threads / 2; factor>>=1) {
+  for (int factor = np2/2; factor > 0; factor>>=1) {
+    if (reduction_tid < factor) {
+      reduction_op( shared_mem[linear_tid], shared_mem[linear_tid + factor * reduction_stride] );
     }
     __syncthreads();
   }
-
-  unsigned int mask = 0;
-  mask = ~mask; // flip all bits to 1
-  mask >>= (32 - contig_threads); // Move bits right
-
-  T val = shared_mem[linear_tid];
-  if( linear_tid < contig_threads / 2){
-     reduction_op(val, shared_mem[linear_tid + contig_threads / 2] );
-    for (int offset = contig_threads/2; offset > 0; offset /= 2){
-      reduction_op(val, __shfl_down_sync(mask, val, offset));
-    }
-  }
-
-  if(linear_tid == 0)
-    out = val;
+  if(should_write)
+    out = shared_mem[linear_tid];
+  
 }
-
 )";
 
 } // namespace cuda

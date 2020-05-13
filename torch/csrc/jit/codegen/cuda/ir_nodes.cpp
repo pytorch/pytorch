@@ -416,7 +416,7 @@ TensorDomain* TensorDomain::reorder(
       old2new.end(),
       std::inserter(new_pos_set, new_pos_set.begin()),
       [](std::unordered_map<int, int>::value_type entry) {
-        return entry.first;
+        return entry.second;
       });
 
   // Error out if duplicate values are found.
@@ -485,10 +485,25 @@ TensorDomain* TensorDomain::reorder(
 
 // pair is in order where second is the consumer of first
 std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
-    const std::vector<int> axes) {
-  std::set<int> axes_set(axes.begin(), axes.end());
+    const std::vector<int>& axes_) {
+  std::vector<int> axes(axes_.size());
+
+  auto ndims = nDims();
+  std::transform(axes_.begin(), axes_.end(), axes.begin(), [ndims](int i) {
+    return i < 0 ? i + ndims : i;
+  });
+
+  TORCH_CHECK(
+      std::none_of(
+          axes.begin(),
+          axes.end(),
+          [ndims](int i) { return i < 0 || i >= ndims; }),
+      "RFactor axes less than 0 or >= ndims.");
+
   TORCH_CHECK(
       !hasRFactor(), "Cannot call rfactor on the same tensor domain twice.");
+
+  std::set<int> axes_set(axes.begin(), axes.end());
 
   bool rfactor_found = false;
   bool reduction_found = false;

@@ -1990,7 +1990,9 @@ void testGPU_FusionRFactorReplay() {
       "Error in rFactor, there seems to be something wrong in root domain.");
 }
 
-void testGPU_FusionSimpleReduction() {
+// Start off simple, block on the outer dim
+// block stride + thread all reduce + unrolling on inner dim
+void testGPU_FusionReduction() {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2054,6 +2056,145 @@ void testGPU_FusionSimpleReduction() {
 
   auto aten_output = input.sum({1});
   TORCH_CHECK(aten_output.allclose(cg_output));
+}
+
+void testGPU_FusionReduction2() {
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    // Set up your input tensor views
+    TensorView* tv0 = makeDummyTensor(2);
+    fusion.addInput(tv0);
+
+    // tv1[I0, R1] = tv0[I0, I1]
+    TensorView* tv1 = static_cast<TensorView*>(
+        reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0));
+
+    fusion.addOutput(tv1);
+
+    bool bind_bidx = false;
+    bool bind_tidx = true;
+    bool bind_tidy = true;
+    bool bind_unroll = false;
+
+    int numel_x = 1025; // Cannot exceed block dim max size / tidy
+    int numel_y = 129;
+    int tidx = 16;
+    int tidy = 8;
+    int unroll_factor = 4;
+
+    int bidx = bind_tidy ? ceilDiv_(numel_x, tidy) : numel_x;
+
+    tv1->split(1, tidx);
+    // tv1[I0, R1o, R1i{tidx}] = tv0[I0, I1]
+
+    tv1->split(1, unroll_factor);
+    // tv1[I0, R1oo, R1oi{unroll}, R1i{tidx}] = tv0[I0, I1]
+
+    tv1->split(0, tidy);
+
+    TensorView* tv2 = tv1->rFactor({-3});
+    // tv2[I0,             >R1oo<, Ir1oi{unroll}, Ir1i{tidx}]
+    // tv1[I0o, I0i{tidy},          R1oi{unroll},  R1i{tidx}]
+
+    TensorView* tv3 = tv1->rFactor({-2});
+    // tv2[I0,             >R1oo<, Ir1oi{unroll}, Ir1i{tidx}]
+    // tv3[I0,                      R1oi{unroll}, Ir1i{tidx}]
+    // tv1[I0o, I0i{tidy},                         R1i{tidx}]
+
+    tv0->computeAt(tv1, -2);
+
+    if (bind_unroll)
+      tv2->axis(-2)->parallelize(ParallelType::Unroll);
+    if (bind_bidx)
+      tv1->axis(0)->parallelize(ParallelType::BIDx);
+    if (bind_tidy)
+      tv1->axis(1)->parallelize(ParallelType::TIDy);
+
+    if (bind_tidx) {
+      tv2->axis(-1)->parallelize(ParallelType::TIDx);
+      tv3->axis(-1)->parallelize(ParallelType::TIDx);
+      tv1->axis(-1)->parallelize(ParallelType::TIDx);
+    }
+
+    torch::jit::fuser::cuda::CudaKernel prog;
+    prog.device_ = 0;
+    prog.grid(bind_bidx ? bidx : 1);
+    prog.block(bind_tidx ? tidx : 1, bind_tidy ? tidy : 1);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor input = at::rand({numel_x, numel_y}, options);
+    at::Tensor cg_output = at::empty({numel_x}, options);
+
+    torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+    torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+
+    c10::cuda::CUDAStream stream = c10::cuda::getCurrentCUDAStream();
+    AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+
+    auto aten_output = input.sum({1});
+    TORCH_CHECK(aten_output.allclose(cg_output));
+  }
+
+  {
+    // What if Z participates in the reduction with X?
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    // Set up your input tensor views
+    TensorView* tv0 = makeDummyTensor(2);
+    fusion.addInput(tv0);
+
+    // tv1[I0, R1] = tv0[I0, I1]
+    TensorView* tv1 = static_cast<TensorView*>(
+        reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0));
+
+    fusion.addOutput(tv1);
+
+    int numel_x = 1025; // Cannot exceed block dim max size / tidy
+    int numel_y = 129;
+    int tidx = 16;
+    int tidz = 8;
+    int unroll_factor = 4;
+
+    tv1->split(1, tidz);
+    // tv1[I0, R1o, R1i{tidz}] = tv0[I0, I1]
+
+    tv1->split(1, tidx);
+    // tv1[I0, R1oo, R1oi{tidx}, R1i{tidz}] = tv0[I0, I1]
+
+    TensorView* tv2 = tv1->rFactor({-3});
+    // tv2[I0,  >R1oo<, Ir1oi{tidx}, Ir1i{tidz}]
+    // tv1[I0o,          R1oi{tidx},  R1i{tidz}]
+
+    tv0->computeAt(tv1, -3);
+
+    tv1->axis(0)->parallelize(ParallelType::BIDx);
+    tv1->axis(-2)->parallelize(ParallelType::TIDx);
+    tv1->axis(-1)->parallelize(ParallelType::TIDz);
+
+    tv2->axis(-2)->parallelize(ParallelType::TIDx);
+    tv2->axis(-1)->parallelize(ParallelType::TIDz);
+
+    torch::jit::fuser::cuda::CudaKernel prog;
+    prog.device_ = 0;
+    prog.grid(numel_x);
+    prog.block(tidx, 1, tidz);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor input = at::rand({numel_x, numel_y}, options);
+    at::Tensor cg_output = at::empty({numel_x}, options);
+
+    torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+    torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+
+    c10::cuda::CUDAStream stream = c10::cuda::getCurrentCUDAStream();
+    AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+
+    auto aten_output = input.sum({1});
+    TORCH_CHECK(aten_output.allclose(cg_output));
+  }
 }
 
 } // namespace jit

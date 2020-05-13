@@ -133,6 +133,7 @@ void TensorView::copyDomain(const TensorDomain* td) {
   setDomain(new TensorDomain(idv));
 }
 
+// Actually applies transformation
 void TensorView::computeAt_impl(TensorView* consumer, int axis) {
   // Reset view otherwise will conflict with replay.
   this->compute_at_view_ = nullptr;
@@ -143,6 +144,7 @@ void TensorView::computeAt_impl(TensorView* consumer, int axis) {
   this->compute_at_axis_ = (unsigned int)axis;
 }
 
+// Actually applies transformation
 void TensorView::forwardComputeAt_impl(TensorView* producer, int axis) {
   // Reset view otherwise will conflict with replay.
   producer->compute_at_view_ = nullptr;
@@ -367,10 +369,8 @@ TensorView* TensorView::reorder(const std::unordered_map<int, int>& old2new_) {
  * TensorView returned is: TV2[I0, R0, I3, I1] The reduction will now beset
  * as: TV1[I0, R1, I1] = TV2[I0, R0, I3, I1] TV0[I0, I1] = TV1[I0, R1, I1]
  */
-TensorView* TensorView::rFactor(const std::vector<int> axes) {
-  auto domain_pair = domain()->rFactor(axes);
-  auto producer_domain = domain_pair.first;
-  auto consumer_domain = domain_pair.second;
+
+TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   FusionGuard fg(this->fusion());
   Expr* origin_expr = this->fusion()->origin(this);
   TORCH_CHECK(
@@ -381,19 +381,32 @@ TensorView* TensorView::rFactor(const std::vector<int> axes) {
       " its origin is either a nullptr or not a reduction.");
   TORCH_CHECK(
       !domain()->hasRFactor(), "Cannot call rfactor on the same view twice.");
+
   ReductionOp* this_origin = static_cast<ReductionOp*>(origin_expr);
 
+  // Split tensor view into 2 parts
+  auto domain_pair = domain()->rFactor(axes);
+
+  // Producer in the pair
+  auto producer_domain = domain_pair.first;
+  // Consumer in the pair
+  auto consumer_domain = domain_pair.second;
+
+  // This domain will be the consumer, so create the producer
   TensorView* producer =
       new TensorView(producer_domain, this->getDataType().value());
 
+  // Set domain of consumer
   this->setDomain(consumer_domain);
   TensorView* consumer = this;
 
+  // Setup dependency chain, inserting producer before this op.
   Expr* producer_origin = new ReductionOp(
       this_origin->getReductionOpType(),
       this_origin->init(),
       producer,
       this_origin->in());
+
   Expr* consumer_origin = new ReductionOp(
       this_origin->getReductionOpType(),
       this_origin->init(),

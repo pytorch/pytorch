@@ -155,6 +155,9 @@ TensorDomain* TransformReplay::replayPasC(
     root_axis_map[new_position[ax]] = replay_axis_map[i];
   }
 
+  // root_axis_map is now mapping from producer_replay_root -> consumer_root
+  // Take producer_replay_root transform for all modified axes are in correct
+  // relative order, matching how it was in replay_axis_map
   producer_replay_root = producer_replay_root->reorder(root_axis_map);
 
   // Finally replay producer as consumer on marked axes
@@ -172,7 +175,7 @@ TensorDomain* TransformReplay::replayPasC(
   return replayed;
 }
 
-// Replay producer as consumer.
+// Replay consumer as producer.
 TensorDomain* TransformReplay::replayCasP(
     TensorDomain* consumer,
     TensorDomain* producer,
@@ -296,6 +299,7 @@ TensorDomain* TransformReplay::replayCasP(
   return replayed;
 }
 
+// replay Producer as Consumer
 TensorView* TransformReplay::replayPasC(
     TensorView* producer,
     TensorView* consumer,
