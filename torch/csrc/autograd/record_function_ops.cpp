@@ -1,6 +1,7 @@
-#include <torch/csrc/autograd/record_function_ops.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/record_function.h>
+#include <ATen/ThreadLocalState.h>
+
 #include <torch/csrc/jit/runtime/custom_operator.h>
 
 namespace caffe2 {
