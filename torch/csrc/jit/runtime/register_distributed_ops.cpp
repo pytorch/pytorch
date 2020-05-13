@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/library.h>
 
 using at::Scalar;
 using at::Tensor;
@@ -222,16 +223,16 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisSpecialCase())});
 
-auto reg_distributed_ops = torch::RegisterOperators().op(
-    "aten::get_gradients(int context_id) -> Dict(Tensor, Tensor)",
-    torch::RegisterOperators::options()
-        .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-        .catchAllKernel([](int64_t context_id) {
-          const auto& autogradContext =
-              dist_autograd::DistAutogradContainer::getInstance()
-                  .retrieveContext(context_id);
-          return autogradContext->getGradients();
-        }));
+// Implementations located in
+// torch/csrc/jit/runtime/register_distributed_ops.cpp
+TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
+  m.impl("get_gradients", [](int64_t context_id) {
+    const auto& autogradContext =
+        dist_autograd::DistAutogradContainer::getInstance().retrieveContext(
+            context_id);
+    return autogradContext->getGradients();
+  });
+}
 
 } // namespace
 } // namespace jit

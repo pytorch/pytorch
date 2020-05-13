@@ -139,13 +139,15 @@ class TestE2EBase : public ::testing::Test {
 
   DistAutogradContainer* autogradContainer;
   std::shared_ptr<RpcAgent> rpcAgent;
-  static constexpr size_t numIters = 100;
-  static constexpr size_t numWorkers = 1;
+  static const size_t numIters;
+  static const size_t numWorkers;
   std::shared_ptr<c10d::Store> store;
   static const char* serverAddress;
 };
 
 const char* TestE2EBase::serverAddress = "127.0.0.1";
+const size_t TestE2EBase::numIters = 100;
+const size_t TestE2EBase::numWorkers = 1;
 
 } // namespace rpc
 } // namespace distributed

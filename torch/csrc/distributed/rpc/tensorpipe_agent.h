@@ -15,14 +15,8 @@ namespace distributed {
 namespace rpc {
 
 struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
-  TensorPipeRpcBackendOptions(
-      std::map<std::string, worker_id_t> worker_name_to_id,
-      float rpc_timeout,
-      std::string init_method)
-      : RpcBackendOptions(rpc_timeout, init_method),
-        workerNameToId(std::move(worker_name_to_id)) {}
-
-  std::map<std::string, worker_id_t> workerNameToId;
+  TensorPipeRpcBackendOptions(float rpc_timeout, std::string init_method)
+      : RpcBackendOptions(rpc_timeout, init_method) {}
 };
 
 // Struct to track the network source metrics
@@ -46,9 +40,10 @@ struct AggregatedNetworkData {
 class TensorPipeAgent : public RpcAgent {
  public:
   TensorPipeAgent(
-      worker_id_t selfId,
-      std::string selfName,
       std::shared_ptr<::c10d::Store> addressStore,
+      std::string selfName,
+      worker_id_t selfId,
+      int worldSize,
       TensorPipeRpcBackendOptions opts);
 
   TensorPipeAgent(const TensorPipeAgent&) = delete;
@@ -83,11 +78,18 @@ class TensorPipeAgent : public RpcAgent {
   NetworkSourceInfo getNetworkSourceInfo();
 
  private:
+  void collectNames();
+
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
 
 #ifdef TP_ENABLE_SHM
   std::string createUniqueShmAddr();
 #endif
+
+  // Retrieve IP address for a given network device for corss-hosts
+  // to set up tensorpipe connection. For now we default the device
+  // name eth0.
+  static std::string getDefaultIPAddress();
 
   // TensorPipe read function that could be used to read response messages
   // by client, and read request messages by server.
@@ -151,6 +153,7 @@ class TensorPipeAgent : public RpcAgent {
   std::unordered_map<std::string, std::string> workerNameToURL_;
 
   const std::shared_ptr<::c10d::Store> addressStore_;
+  const int worldSize_;
   const TensorPipeRpcBackendOptions opts_;
 
   mutable std::mutex mutex_;
@@ -188,6 +191,13 @@ class TensorPipeAgent : public RpcAgent {
   NetworkDataDict networkData_;
   // Mutex to guarg networkData_
   std::mutex networkDataMutex_;
+
+  // Running total of un-processed, un-errored RPC calls sent
+  std::atomic<int32_t> clientActiveCalls_{0};
+  // Running total of un-processed RPC requests received
+  std::atomic<int32_t> serverActiveCalls_{0};
+  // Running total of RPC requests that will be completed asynchronously
+  std::atomic<int32_t> serverActiveAsyncCalls_{0};
 };
 
 } // namespace rpc
