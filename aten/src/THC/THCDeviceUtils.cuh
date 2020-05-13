@@ -104,7 +104,7 @@ __device__ __forceinline__ __half WARP_SHFL_DOWN(__half value, unsigned int delt
   //(HIP doesn't support int64_t). Trick from https://devblogs.nvidia.com/faster-parallel-reductions-kepler/
   int2 a = *reinterpret_cast<short*>(&__half);
   a = __shfl_down(a, delta);
-  return *reinterpret_cast<int64_t*>(&a);
+  return *reinterpret_cast<__half*>(&a);
 }
 #endif
 template <typename T>
