@@ -139,6 +139,8 @@ class QuantizationTestCase(TestCase):
         self.train_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
         self.img_data = [(torch.rand(2, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                          for _ in range(2)]
+        self.img_data_1d = [(torch.rand(2, 3, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
+                            for _ in range(2)]
 
     def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
@@ -616,12 +618,12 @@ class SubModelWithoutFusion(nn.Module):
 class ModelForFusion(nn.Module):
     def __init__(self, qconfig):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 2, 5, bias=None).to(dtype=torch.float)
+        self.conv1 = nn.Conv2d(3, 2, 1, bias=None).to(dtype=torch.float)
         self.bn1 = nn.BatchNorm2d(2).to(dtype=torch.float)
         self.relu1 = nn.ReLU(inplace=True).to(dtype=torch.float)
         self.sub1 = SubModelForFusion()
         self.sub2 = SubModelWithoutFusion()
-        self.fc = nn.Linear(72, 10).to(dtype=torch.float)
+        self.fc = nn.Linear(36, 10).to(dtype=torch.float)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.qconfig = qconfig
@@ -629,22 +631,27 @@ class ModelForFusion(nn.Module):
         self.relu2 = nn.ReLU(inplace=False).to(dtype=torch.float)
         self.bn2 = nn.BatchNorm3d(2).to(dtype=torch.float)
         self.relu3 = nn.ReLU(inplace=True).to(dtype=torch.float)
+        self.conv3 = nn.Conv1d(3, 3, 2).to(dtype=torch.float)
+        self.relu4 = nn.ReLU(inplace=True).to(dtype=torch.float)
         # don't quantize sub2
         self.sub2.qconfig = None
         self.fc.qconfig = None
 
     def forward(self, x):
-        y = x.unsqueeze(2)
+        x = x.squeeze(2)
         x = self.quant(x)
+        x = self.conv3(x)
+        x = self.relu4(x)
+        x = x.unsqueeze(2)
+        y = x.unsqueeze(2)
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu1(x)
         x = self.sub1(x)
         x = self.dequant(x)
         x = self.sub2(x)
-        x = x.view(-1, 72).contiguous()
+        x = x.view(-1, 36).contiguous()
         x = self.fc(x)
-        y = self.quant(y)
         y = self.conv2(y)
         y = self.relu2(y)
         y = self.bn2(y)
