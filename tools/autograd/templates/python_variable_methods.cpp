@@ -872,12 +872,10 @@ static PyObject* THPVariable_set_(
     case 1: {
       // aten::set_.source_Storage(Tensor(a!) self, Storage source) ->
       // Tensor(a!)
-      PyObject* storage_pyobject = _r.pyobject(0);
-      at::ScalarType storage_scalar_type =
-          reinterpret_cast<THPDtype*>(
-              PyObject_GetAttrString(storage_pyobject, "dtype"))
-              ->scalar_type;
-      Py_DECREF(storage_pyobject);
+      THPObjectPtr dtype_attr(PyObject_GetAttrString(_r.pyobject(0), "dtype"));
+      if (!dtype_attr) throw python_error();
+      at::ScalarType storage_scalar_type = reinterpret_cast<THPDtype*>(
+        dtype_attr.get())->scalar_type;
       TORCH_INTERNAL_ASSERT(storage_scalar_type == self.dtype());
       auto dispatch_set_ = [](Tensor& self, Storage source) -> Tensor {
         pybind11::gil_scoped_release no_gil;
@@ -888,12 +886,10 @@ static PyObject* THPVariable_set_(
     case 2: {
       // aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage
       // source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
-      PyObject* storage_pyobject = _r.pyobject(0);
-      at::ScalarType storage_scalar_type =
-          reinterpret_cast<THPDtype*>(
-              PyObject_GetAttrString(storage_pyobject, "dtype"))
-              ->scalar_type;
-      Py_DECREF(storage_pyobject);
+      THPObjectPtr dtype_attr(PyObject_GetAttrString(_r.pyobject(0), "dtype"));
+      if (!dtype_attr) throw python_error();
+      at::ScalarType storage_scalar_type = reinterpret_cast<THPDtype*>(
+        dtype_attr.get())->scalar_type;
       TORCH_INTERNAL_ASSERT(storage_scalar_type == self.dtype());
       auto dispatch_set_ = [](Tensor& self,
                               Storage source,

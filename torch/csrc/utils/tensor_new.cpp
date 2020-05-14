@@ -488,12 +488,10 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, options(dispatch_key, scalar_type));
   } else if (r.idx == 1) {
-    PyObject* storage_pyobject = r.pyobject(0);
-    at::ScalarType storage_scalar_type =
-        reinterpret_cast<THPDtype*>(
-            PyObject_GetAttrString(storage_pyobject, "dtype"))
-            ->scalar_type;
-    Py_DECREF(storage_pyobject);
+    THPObjectPtr dtype_attr(PyObject_GetAttrString(r.pyobject(0), "dtype"));
+    if (!dtype_attr) throw python_error();
+    at::ScalarType storage_scalar_type = reinterpret_cast<THPDtype*>(
+        dtype_attr.get())->scalar_type;
     TORCH_CHECK(
         storage_scalar_type == scalar_type,
         "Expected Storage of type ",
@@ -548,12 +546,10 @@ Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_ty
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, options(dispatch_key, scalar_type));
   } else if (r.idx == 1) {
-    PyObject* storage_pyobject = r.pyobject(0);
-    at::ScalarType storage_scalar_type =
-        reinterpret_cast<THPDtype*>(
-            PyObject_GetAttrString(storage_pyobject, "dtype"))
-            ->scalar_type;
-    Py_DECREF(storage_pyobject);
+    THPObjectPtr dtype_attr(PyObject_GetAttrString(r.pyobject(0), "dtype"));
+    if (!dtype_attr) throw python_error();
+    at::ScalarType storage_scalar_type = reinterpret_cast<THPDtype*>(
+        dtype_attr.get())->scalar_type;
     TORCH_CHECK(
         storage_scalar_type == scalar_type,
         "Expected Storage of type ",
