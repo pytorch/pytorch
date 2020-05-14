@@ -27,7 +27,13 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.bn = bn
-        self.freeze_bn = freeze_bn if self.training else True
+        if self.training:
+            if freeze_bn:
+                self.freeze_bn_stats()
+            else:
+                self.update_bn_stats()
+        else:
+            self.freeze_bn_stats()
         self.num_features = out_channels
         self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
@@ -57,48 +63,17 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
 
     def reset_parameters(self):
         super(_ConvBnNd, self).reset_parameters()
-        # A hack to avoid resetting on undefined parameters
-        # if hasattr(self, 'gamma'):
-            # self.reset_bn_parameters()
+        # TODO: verify nothing else is needed
 
     def update_bn_stats(self):
-        # self.freeze_bn = False
-        # TODO: verify that this doesn't break anything
         self.bn.train()
         return self
 
     def freeze_bn_stats(self):
-        # self.freeze_bn = True
         self.bn.eval()
         return self
 
     def _forward(self, input):
-
-        # TODO: remove the old version before landing (keeping for easier debugging)
-
-        # exponential_average_factor is self.momentum set to
-        # (when it is available) only so that if gets updated
-        # in ONNX graph when this node is exported to ONNX.
-        # if self.momentum is None:
-            # exponential_average_factor = 0.0
-        # else:
-            # exponential_average_factor = self.momentum
-
-        # if self.training and not self.freeze_bn and self.track_running_stats:
-            # TODO: if statement only here to tell the jit to skip emitting this when it is None
-            # if self.num_batches_tracked is not None:
-                # self.num_batches_tracked += 1
-                # if self.momentum is None:  # use cumulative moving average
-                    # exponential_average_factor = 1.0 / float(self.num_batches_tracked)
-                # else:  # use exponential moving average
-                    # exponential_average_factor = self.momentum
-
-        # we use running statistics from the previous batch, so this is an
-        # approximation of the approach mentioned in the whitepaper, but we only
-        # need to do one convolution in this case instead of two
-        # running_std = torch.sqrt(self.running_var + self.eps)
-        # scale_factor = self.gamma / running_std
-
         running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
         scale_factor = self.bn.weight / running_std
         scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
@@ -109,33 +84,6 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
             conv_orig = conv_orig + self.bias.reshape([1, -1, 1, 1])
         conv = self.bn(conv_orig)
         return conv
-
-        # if self.training and not self.freeze_bn:
-            # recovering original conv to get original batch_mean and batch_var
-            # if self.bias is not None:
-                # conv_orig = conv / scale_factor.reshape([1, -1, 1, 1]) + self.bias.reshape([1, -1, 1, 1])
-            # else:
-                # conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
-
-            # batch_mean = torch.mean(conv_orig, dim=[0, 2, 3])
-            # batch_var = torch.var(conv_orig, dim=[0, 2, 3], unbiased=False)
-            # n = float(conv_orig.numel() / conv_orig.size()[1])
-            # unbiased_batch_var = batch_var * (n / (n - 1))
-            # batch_rstd = torch.ones_like(batch_var, memory_format=torch.contiguous_format) / torch.sqrt(batch_var + self.eps)
-
-            # conv = (self.gamma * batch_rstd).reshape([1, -1, 1, 1]) * conv_orig + \
-                # (self.beta - self.gamma * batch_rstd * batch_mean).reshape([1, -1, 1, 1])
-            # self.running_mean = exponential_average_factor * batch_mean.detach() + \
-                # (1 - exponential_average_factor) * self.running_mean
-            # self.running_var = exponential_average_factor * unbiased_batch_var.detach() + \
-                # (1 - exponential_average_factor) * self.running_var
-        # else:
-            # if self.bias is None:
-                # conv = conv + (self.beta - self.gamma * self.running_mean /
-                               # running_std).reshape([1, -1, 1, 1])
-            # else:
-                # conv = conv + (self.gamma * (self.bias - self.running_mean) / running_std + self.beta).reshape([1, -1, 1, 1])
-        # return conv
 
     def extra_repr(self):
         # TODO(jerryzh): extend
@@ -169,6 +117,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         return qat_convbn
 
 class ConvBn2d(_ConvBnNd, nn.Conv2d):
+    # TODO before land: update docs everywhere with new params and updated approach
     r"""
     A ConvBn2d module is a module fused from Conv2d and BatchNorm2d,
     attached with FakeQuantize modules for both output activation and weight,
