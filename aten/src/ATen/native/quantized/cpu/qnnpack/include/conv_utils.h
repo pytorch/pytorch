@@ -29,46 +29,35 @@ static inline size_t compute_output_dimension(
 }  // namespace
 
 struct conv_param_t {
-  std::array<uint32_t, 2> kernel_dims; // kernel width, height
-  std::array<uint32_t, 2> stride_dims; // subsampling width, height
-  std::array<uint32_t, 2> dilation; // dilation width, height
-  std::array<uint32_t, 4> padding; // input padding top, left, bottom, right
-  std::array<uint32_t, 2> adjustment_dims; // output adjustment
+  const std::array<uint32_t, 2> kernel_dims; // kernel width, height
+  const std::array<uint32_t, 2> stride_dims; // subsampling width, height
+  const std::array<uint32_t, 2> dilation; // dilation width, height
+  const std::array<uint32_t, 4> padding; // input padding top, left, bottom, right
+  const std::array<uint32_t, 2> adjustment_dims; // output adjustment
 
-  uint32_t groups;
-  size_t input_channels;
-  size_t output_channels;
-  uint8_t* kernel_zero_points{nullptr};
-  float* requantization_scales{nullptr};
-  uint8_t output_min;
-  uint8_t output_max;
-  bool transpose;
-  bool is_initialized;
+  const uint32_t groups;
+  const size_t input_channels;
+  const size_t output_channels;
+  const bool transpose;
 
   // The following are derived parameters
   enum pytorch_qnnp_ukernel_type ukernel_type; // kernel type based on input params
   size_t group_input_channels;
   size_t group_output_channels;
 
-  conv_param_t() : is_initialized(false) {}
-
   /**
    * @brief Constructor for initializing the convolution/deconvolution
    * parameters.
    */
-  conv_param_t(std::array<uint32_t, 2> kernel_,
-               std::array<uint32_t, 2> stride_,
-               std::array<uint32_t, 2> dilation_,
-               std::array<uint32_t, 4> padding_,
-               std::array<uint32_t, 2> adjustment_,
-               uint32_t groups_,
-               size_t input_channels_,
-               size_t output_channels_,
-               uint8_t* kernel_zp_,
-               float* scale_,
-               uint8_t out_min_,
-               uint8_t out_max_,
-               bool transpose_)
+  conv_param_t(const std::array<uint32_t, 2> kernel_,
+               const std::array<uint32_t, 2> stride_,
+               const std::array<uint32_t, 2> dilation_,
+               const std::array<uint32_t, 4> padding_,
+               const std::array<uint32_t, 2> adjustment_,
+               const uint32_t groups_,
+               const size_t input_channels_,
+               const size_t output_channels_,
+               const bool transpose_)
       : kernel_dims(kernel_),
         stride_dims(stride_),
         dilation(dilation_),
@@ -77,12 +66,7 @@ struct conv_param_t {
         groups(groups_),
         input_channels(input_channels_),
         output_channels(output_channels_),
-        kernel_zero_points(kernel_zp_),
-        requantization_scales(scale_),
-        output_min(out_min_),
-        output_max(out_max_),
-        transpose(transpose_),
-        is_initialized(true) {
+        transpose(transpose_) {
     const uint32_t kernel_width = kernel_dims[0];
     const uint32_t kernel_height = kernel_dims[1];
 
@@ -143,17 +127,6 @@ struct conv_param_t {
           _name,
           dilation[0],
           dilation[1]);
-      assert("Failed to initialize QNNPACK conv_param_t struct.");
-    }
-
-    //if (kernel_scale <= 0.0f || !std::isnormal(kernel_scale)) {
-    // This has to be checked for all the output channel requant scales.
-    // TODO
-    if (requantization_scales[0] <= 0.0f || !std::isnormal(requantization_scales[0])) {
-      pytorch_qnnp_log_error(
-          "failed to create convolution with %.7g kernel scale: scale must be"
-          "finite and positive",
-          requantization_scales[0]);
       assert("Failed to initialize QNNPACK conv_param_t struct.");
     }
 

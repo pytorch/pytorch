@@ -4,7 +4,11 @@
 namespace qnnpack {
 class PrePackConvWeights final {
  public:
-  PrePackConvWeights(const conv_param_t& conv_param, const uint8_t* kernel, const int32_t* bias);
+  PrePackConvWeights(
+      const conv_param_t& conv_param,
+      const uint8_t* kernel_zero_points,
+      const uint8_t* kernel,
+      const int32_t* bias);
 
   void* getPackedWeights() const
   {
@@ -79,8 +83,8 @@ enum pytorch_qnnp_status qnnpackLinear(
     const size_t input_channels,
     const size_t output_channels,
     const uint8_t input_zero_point,
-    const uint8_t* kernel_zero_point,
-    const float* requantization_scale_ptr,
+    const uint8_t* kernel_zero_points,
+    const float* requantization_scales,
     const uint8_t output_zero_point,
     const uint8_t output_min,
     const uint8_t output_max,
@@ -99,7 +103,11 @@ enum pytorch_qnnp_status qnnpackConv(
     const size_t input_width,
     const uint8_t input_zero_point,
     const uint8_t* input,
+    const uint8_t* kernel_zero_points,
+    const float* requantization_scales,
     const uint8_t output_zero_point,
+    const uint8_t output_min,
+    const uint8_t output_max,
     uint8_t* output,
     pthreadpool_t threadpool);
 

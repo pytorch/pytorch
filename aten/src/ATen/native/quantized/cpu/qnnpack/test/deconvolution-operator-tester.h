@@ -565,7 +565,7 @@ class DeconvolutionOperatorTester {
                           g) *
                              groupOutputChannels() +
                          c] /
-                         requantization_scale[g * groupOutputChannels() + c];
+                         requantization_scales[g * groupOutputChannels() + c];
                 const double clampedAccumulator = std::max(
                     std::min(
                         scaledAccumulator,

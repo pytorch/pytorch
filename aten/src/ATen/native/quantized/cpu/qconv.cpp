@@ -473,8 +473,6 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
 
   auto* pack_w = w.get();
 
-  const uint32_t kernel_h = kernel[0];
-  const uint32_t kernel_w = kernel[1];
   // TODO Can be replaced with packB->getOutputChannels() when update pre-pack
   // to actually do the packing.
   const auto out_ch = bias.size(0);
@@ -485,14 +483,12 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
   const int W = act.size(3);
   const int M = out_ch; // output channels
 
-  const at::Tensor act_nhwc = act.contiguous(c10::MemoryFormat::ChannelsLast);
+  TORCH_CHECK( M == orig_weight.size(0),
+      "Output channel size of weight and bias must match.");
+  TORCH_CHECK( C == groups_ * orig_weight.size(1),
+      "Output channel size of weight and bias must match.");
 
-  const uint32_t stride_h = stride_[0];
-  const uint32_t stride_w = stride_[1];
-  const uint32_t pad_h = padding_[0];
-  const uint32_t pad_w = padding_[1];
-  const uint32_t dilation_h = dilation_[0];
-  const uint32_t dilation_w = dilation_[1];
+  const at::Tensor act_nhwc = act.contiguous(c10::MemoryFormat::ChannelsLast);
 
   auto output_min = kReluFused
       ? activationLimits(output_scale, output_zero_point, Activation::RELU)
@@ -514,12 +510,10 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     int8_t* w_data =
         reinterpret_cast<int8_t*>(weight_contig.template data_ptr<c10::qint8>());
 
-    uint8_t* weight_zp_data =
-        reinterpret_cast<uint8_t*>(w_zero_points.data_ptr<c10::quint8>());
     float* weight_scales_data = w_scales.data_ptr<float>();
     // We calculate requant scale here as the vector holding the requant scale
     // is owned by this module. The pointer is then passed to qnnpack backend.
-    requantization_scale = generate_requantization_scales(
+    requantization_scales = generate_requantization_scales(
         w_scales, act_input_scale, output_scale);
 
     at::Tensor qnnp_weight = at::_empty_affine_quantized(
@@ -528,7 +522,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
             .dtype(c10::kQUInt8)
             .memory_format(c10::MemoryFormat::ChannelsLast),
         weight_scales_data[0],
-        weight_zp_data[0],
+        w_zero_points[0],
         c10::nullopt);
     auto* qnnp_w_data = qnnp_weight.template data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
@@ -539,26 +533,12 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     auto qbias = at::quantize_per_tensor(
         bias_fp32, weight_scales_data[0] * act_input_scale, 0, c10::kQInt32);
 
-    conv_p = qnnpack::conv_param_t(
-        {kernel_w, kernel_h},
-        {stride_w, stride_h},
-        {dilation_w, dilation_h},
-        {pad_h, pad_w, pad_h, pad_w},
-        /*adjustment=*/{0, 0},
-        groups_,
-        C,
-        M,
-        weight_zp_data,
-        requantization_scale.data(),
-        output_min,
-        output_max,
-        /*transpose=*/false);
-
     // Update the input scale to not pack again.
     input_scale = act_input_scale;
     w.reset();
     w = std::make_unique<qnnpack::PrePackConvWeights>(
         conv_p,
+        w_zero_points.data(),
         reinterpret_cast<uint8_t*>(qnnp_w_data),
         reinterpret_cast<int32_t*>(qbias.template data_ptr<c10::qint32>()));
     pack_w = w.get();
@@ -569,13 +549,9 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     }
   }
 
-  TORCH_CHECK(
-      conv_p.is_initialized,
-      "Conv parameters must have been initialized. Something went wrong.");
-
   TORCH_INTERNAL_ASSERT(pack_w != nullptr, "Packed Weights are NULL");
   const auto output_shape = MakeConvOutputShape<kSpatialDim>(
-      N, M, {H, W}, kernel, stride_, padding_, dilation_);
+      N, M, {H, W}, kernel_, stride_, padding_, dilation_);
   if (act_nhwc.numel() > 0) {
     TORCH_CHECK(
         std::all_of(
@@ -604,7 +580,11 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       W,
       act_nhwc.q_zero_point(),
       reinterpret_cast<uint8_t*>(act_nhwc.template data_ptr<c10::quint8>()),
+      w_zero_points.data(),
+      requantization_scales.data(),
       output.q_zero_point(),
+      output_min,
+      output_max,
       reinterpret_cast<uint8_t*>(output.template data_ptr<c10::quint8>()),
       caffe2::mobile_pthreadpool());
 
