@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <ostream>
 #include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include "ATen/core/interned_strings.h"
 
 namespace torch {
@@ -149,12 +150,14 @@ void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
 
 bool isProfilable(Node* n) {
 
-  if (IsFusibleOperation(n)) {
+  if (IsFusibleOperation(n) || isSupported(n)) {
     return true;
   }
 
   switch (n->kind()) {
     case prim::Return:
+    case prim::Param:
+    case prim::GetAttr:
       return true;
     default:
     return false;
@@ -165,7 +168,7 @@ void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
     for (auto i : n->inputs()) {
-      if (i->type()->isSubtypeOf(TensorType::get()) && (isProfilable(n) || i->node()->kind() == prim::Param || i->node()->kind() == prim::GetAttr)) {
+      if (i->type()->isSubtypeOf(TensorType::get()) && (isProfilable(n) || isProfilable(i->node()))) {
         insertShapeProfile(n, i);
       }
     }
