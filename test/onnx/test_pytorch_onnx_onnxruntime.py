@@ -1524,7 +1524,7 @@ class TestONNXRuntime(unittest.TestCase):
         k = torch.tensor(3)
         self.run_test(MyModuleDynamic(), [x, k])
 
-    @skipIfUnsupportedOpsetVersion([7, 12])
+    @skipIfUnsupportedMinOpsetVersion(8)
     def test_normalize(self):
         class Model(torch.nn.Module):
             def forward(self, x):
