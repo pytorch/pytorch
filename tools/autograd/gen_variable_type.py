@@ -1131,9 +1131,7 @@ def emit_body(declaration):
 
     body = []
 
-    # TODO(REMOVE ME!!!) pre_record_trace, post_record_trace = format_trace(declaration)
     declare_returned_variables, tie_return_values, get_return_value = format_return_variables(declaration)
-    # TODO(REMOVE ME!!!) body.append(pre_record_trace)
 
     if strategy != 'use_type':
         body.extend(unpack_args(env, declaration))
@@ -1157,7 +1155,6 @@ def emit_body(declaration):
         # remove this assert but the code generation will get more elaborate
         assert inplace
         body.append('reset_grad_accumulator(self);')
-    # TODO(REMOVE ME!!!) body.append(post_record_trace)
     if not returns_void:
         body.append('return {};'.format(get_return_value))
     return body
