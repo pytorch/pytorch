@@ -10,17 +10,14 @@ from torch.nn.parameter import Parameter
 
 class _ConvBnNd(nn.modules.conv._ConvNd):
     def __init__(self,
+                 # BN args
+                 bn,
                  # ConvNd args
                  in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
                  groups,
                  bias,
                  padding_mode,
-                 # BatchNormNd args
-                 # num_features: out_channels
-                 eps=1e-05, momentum=0.1,
-                 # affine: True
-                 # track_running_stats: True
                  # Args for this module
                  freeze_bn=False,
                  qconfig=None):
@@ -29,17 +26,9 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                                          output_padding, groups, False, padding_mode)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
-        self.eps = eps
-        self.momentum = momentum
+        self.bn = bn
         self.freeze_bn = freeze_bn if self.training else True
         self.num_features = out_channels
-        self.gamma = nn.Parameter(torch.Tensor(out_channels))
-        self.beta = nn.Parameter(torch.Tensor(out_channels))
-        self.affine = True
-        self.track_running_stats = True
-        self.register_buffer('running_mean', torch.zeros(out_channels))
-        self.register_buffer('running_var', torch.ones(out_channels))
-        self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
         self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
         self.reset_bn_parameters()
@@ -49,14 +38,18 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
             self.register_parameter('bias', None)
 
     def reset_running_stats(self):
-        self.running_mean.zero_()
-        self.running_var.fill_(1)
-        self.num_batches_tracked.zero_()
+        # TODO: handle this
+        # self.running_mean.zero_()
+        # self.running_var.fill_(1)
+        # self.num_batches_tracked.zero_()
+        pass
 
     def reset_bn_parameters(self):
-        self.reset_running_stats()
-        init.uniform_(self.gamma)
-        init.zeros_(self.beta)
+        # TODO: handle this
+        # self.reset_running_stats()
+        # init.uniform_(self.gamma)
+        # init.zeros_(self.beta)
+        # TODO: below is actully for conv, not BN
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_in)
@@ -65,68 +58,84 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
     def reset_parameters(self):
         super(_ConvBnNd, self).reset_parameters()
         # A hack to avoid resetting on undefined parameters
-        if hasattr(self, 'gamma'):
-            self.reset_bn_parameters()
+        # if hasattr(self, 'gamma'):
+            # self.reset_bn_parameters()
 
     def update_bn_stats(self):
-        self.freeze_bn = False
+        # self.freeze_bn = False
+        # TODO: verify that this doesn't break anything
+        self.bn.train()
         return self
 
     def freeze_bn_stats(self):
-        self.freeze_bn = True
+        # self.freeze_bn = True
+        self.bn.eval()
         return self
 
     def _forward(self, input):
+
+        # TODO: remove the old version before landing (keeping for easier debugging)
+
         # exponential_average_factor is self.momentum set to
         # (when it is available) only so that if gets updated
         # in ONNX graph when this node is exported to ONNX.
-        if self.momentum is None:
-            exponential_average_factor = 0.0
-        else:
-            exponential_average_factor = self.momentum
+        # if self.momentum is None:
+            # exponential_average_factor = 0.0
+        # else:
+            # exponential_average_factor = self.momentum
 
-        if self.training and not self.freeze_bn and self.track_running_stats:
+        # if self.training and not self.freeze_bn and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
-            if self.num_batches_tracked is not None:
-                self.num_batches_tracked += 1
-                if self.momentum is None:  # use cumulative moving average
-                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
-                else:  # use exponential moving average
-                    exponential_average_factor = self.momentum
+            # if self.num_batches_tracked is not None:
+                # self.num_batches_tracked += 1
+                # if self.momentum is None:  # use cumulative moving average
+                    # exponential_average_factor = 1.0 / float(self.num_batches_tracked)
+                # else:  # use exponential moving average
+                    # exponential_average_factor = self.momentum
 
         # we use running statistics from the previous batch, so this is an
         # approximation of the approach mentioned in the whitepaper, but we only
         # need to do one convolution in this case instead of two
-        running_std = torch.sqrt(self.running_var + self.eps)
-        scale_factor = self.gamma / running_std
+        # running_std = torch.sqrt(self.running_var + self.eps)
+        # scale_factor = self.gamma / running_std
+
+        running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
+        scale_factor = self.bn.weight / running_std
         scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
+        # this does not include the conv bias
         conv = self._conv_forward(input, self.weight_fake_quant(scaled_weight))
-
-        if self.training and not self.freeze_bn:
-            # recovering original conv to get original batch_mean and batch_var
-            if self.bias is not None:
-                conv_orig = conv / scale_factor.reshape([1, -1, 1, 1]) + self.bias.reshape([1, -1, 1, 1])
-            else:
-                conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
-            batch_mean = torch.mean(conv_orig, dim=[0, 2, 3])
-            batch_var = torch.var(conv_orig, dim=[0, 2, 3], unbiased=False)
-            n = float(conv_orig.numel() / conv_orig.size()[1])
-            unbiased_batch_var = batch_var * (n / (n - 1))
-            batch_rstd = torch.ones_like(batch_var, memory_format=torch.contiguous_format) / torch.sqrt(batch_var + self.eps)
-
-            conv = (self.gamma * batch_rstd).reshape([1, -1, 1, 1]) * conv_orig + \
-                (self.beta - self.gamma * batch_rstd * batch_mean).reshape([1, -1, 1, 1])
-            self.running_mean = exponential_average_factor * batch_mean.detach() + \
-                (1 - exponential_average_factor) * self.running_mean
-            self.running_var = exponential_average_factor * unbiased_batch_var.detach() + \
-                (1 - exponential_average_factor) * self.running_var
-        else:
-            if self.bias is None:
-                conv = conv + (self.beta - self.gamma * self.running_mean /
-                               running_std).reshape([1, -1, 1, 1])
-            else:
-                conv = conv + (self.gamma * (self.bias - self.running_mean) / running_std + self.beta).reshape([1, -1, 1, 1])
+        conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
+        if self.bias is not None:
+            conv_orig = conv_orig + self.bias.reshape([1, -1, 1, 1])
+        conv = self.bn(conv_orig)
         return conv
+
+        # if self.training and not self.freeze_bn:
+            # recovering original conv to get original batch_mean and batch_var
+            # if self.bias is not None:
+                # conv_orig = conv / scale_factor.reshape([1, -1, 1, 1]) + self.bias.reshape([1, -1, 1, 1])
+            # else:
+                # conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
+
+            # batch_mean = torch.mean(conv_orig, dim=[0, 2, 3])
+            # batch_var = torch.var(conv_orig, dim=[0, 2, 3], unbiased=False)
+            # n = float(conv_orig.numel() / conv_orig.size()[1])
+            # unbiased_batch_var = batch_var * (n / (n - 1))
+            # batch_rstd = torch.ones_like(batch_var, memory_format=torch.contiguous_format) / torch.sqrt(batch_var + self.eps)
+
+            # conv = (self.gamma * batch_rstd).reshape([1, -1, 1, 1]) * conv_orig + \
+                # (self.beta - self.gamma * batch_rstd * batch_mean).reshape([1, -1, 1, 1])
+            # self.running_mean = exponential_average_factor * batch_mean.detach() + \
+                # (1 - exponential_average_factor) * self.running_mean
+            # self.running_var = exponential_average_factor * unbiased_batch_var.detach() + \
+                # (1 - exponential_average_factor) * self.running_var
+        # else:
+            # if self.bias is None:
+                # conv = conv + (self.beta - self.gamma * self.running_mean /
+                               # running_std).reshape([1, -1, 1, 1])
+            # else:
+                # conv = conv + (self.gamma * (self.bias - self.running_mean) / running_std + self.beta).reshape([1, -1, 1, 1])
+        # return conv
 
     def extra_repr(self):
         # TODO(jerryzh): extend
@@ -149,20 +158,14 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
             assert mod.qconfig, 'Input float module must have a valid qconfig'
             qconfig = mod.qconfig
         conv, bn = mod[0], mod[1]
-        qat_convbn = cls(conv.in_channels, conv.out_channels, conv.kernel_size,
+        qat_convbn = cls(bn, conv.in_channels, conv.out_channels, conv.kernel_size,
                          conv.stride, conv.padding, conv.dilation,
                          conv.groups, conv.bias is not None,
                          conv.padding_mode,
-                         bn.eps, bn.momentum,
                          False,
                          qconfig)
         qat_convbn.weight = conv.weight
         qat_convbn.bias = conv.bias
-        qat_convbn.gamma = bn.weight
-        qat_convbn.beta = bn.bias
-        qat_convbn.running_mean = bn.running_mean
-        qat_convbn.running_var = bn.running_var
-        qat_convbn.num_batches_tracked = bn.num_batches_tracked
         return qat_convbn
 
 class ConvBn2d(_ConvBnNd, nn.Conv2d):
@@ -188,16 +191,13 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
     _FLOAT_MODULE = torch.nn.intrinsic.ConvBn2d
 
     def __init__(self,
+                 # BN args
+                 bn,
                  # ConvNd args
                  in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
                  bias=None,
                  padding_mode='zeros',
-                 # BatchNorm2d args
-                 # num_features: out_channels
-                 eps=1e-05, momentum=0.1,
-                 # affine: True
-                 # track_running_stats: True
                  # Args for this module
                  freeze_bn=False,
                  qconfig=None):
@@ -205,9 +205,9 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
         stride = _pair(stride)
         padding = _pair(padding)
         dilation = _pair(dilation)
-        _ConvBnNd.__init__(self, in_channels, out_channels, kernel_size, stride,
+        _ConvBnNd.__init__(self, bn, in_channels, out_channels, kernel_size, stride,
                            padding, dilation, False, _pair(0), groups, bias, padding_mode,
-                           eps, momentum, freeze_bn, qconfig)
+                           freeze_bn, qconfig)
 
 class ConvBnReLU2d(ConvBn2d):
     r"""
@@ -232,22 +232,19 @@ class ConvBnReLU2d(ConvBn2d):
     _FLOAT_MODULE = torch.nn.intrinsic.ConvBnReLU2d
 
     def __init__(self,
+                 # BN args
+                 bn,
                  # Conv2d args
                  in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
                  bias=None,
                  padding_mode='zeros',
-                 # BatchNorm2d args
-                 # num_features: out_channels
-                 eps=1e-05, momentum=0.1,
-                 # affine: True
-                 # track_running_stats: True
                  # Args for this module
                  freeze_bn=False,
                  qconfig=None):
-        super(ConvBnReLU2d, self).__init__(in_channels, out_channels, kernel_size, stride,
+        super(ConvBnReLU2d, self).__init__(bn, in_channels, out_channels, kernel_size, stride,
                                            padding, dilation, groups, bias,
-                                           padding_mode, eps, momentum,
+                                           padding_mode,
                                            freeze_bn,
                                            qconfig)
 

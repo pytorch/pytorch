@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import copy
 import torch
 from torch.nn import Conv2d, BatchNorm2d, ReLU
 from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
@@ -82,6 +83,7 @@ class TestQATModule(TestCase):
 
             cls = ConvBnReLU2d if use_relu else ConvBn2d
             qat_op = cls(
+                copy.deepcopy(bn_op),
                 input_channels,
                 output_channels,
                 (kernel_h, kernel_w),
@@ -91,8 +93,6 @@ class TestQATModule(TestCase):
                 groups,
                 None,  # bias
                 padding_mode,
-                eps,
-                momentum,
                 freeze_bn=True,
                 qconfig=default_qat_qconfig
             ).to(dtype=torch.double)
@@ -105,10 +105,10 @@ class TestQATModule(TestCase):
             # align inputs and internal parameters
             input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)
             conv_op.weight = torch.nn.Parameter(qat_op.weight.detach())
-            bn_op.running_mean = qat_op.running_mean.clone()
-            bn_op.running_var = qat_op.running_var.clone()
-            bn_op.weight = torch.nn.Parameter(qat_op.gamma.detach())
-            bn_op.bias = torch.nn.Parameter(qat_op.beta.detach())
+            bn_op.running_mean = qat_op.bn.running_mean.clone()
+            bn_op.running_var = qat_op.bn.running_var.clone()
+            bn_op.weight = torch.nn.Parameter(qat_op.bn.weight.detach())
+            bn_op.bias = torch.nn.Parameter(qat_op.bn.bias.detach())
 
             def compose(functions):
                 # functions are reversed for natural reading order
@@ -150,11 +150,11 @@ class TestQATModule(TestCase):
                 loss.backward()
                 input_grad_actual = input_clone.grad.cpu()
                 weight_grad_actual = qat_op.weight.grad.cpu()
-                gamma_grad_actual = qat_op.gamma.grad.cpu()
-                beta_grad_actual = qat_op.beta.grad.cpu()
-                running_mean_actual = qat_op.running_mean
-                running_var_actual = qat_op.running_var
-                num_batches_tracked_actual = qat_op.num_batches_tracked
+                gamma_grad_actual = qat_op.bn.weight.grad.cpu()
+                beta_grad_actual = qat_op.bn.bias.grad.cpu()
+                running_mean_actual = qat_op.bn.running_mean
+                running_var_actual = qat_op.bn.running_var
+                num_batches_tracked_actual = qat_op.bn.num_batches_tracked
                 precision = 1e-10
                 self.assertEqual(input_grad_ref, input_grad_actual, atol=precision)
                 self.assertEqual(weight_grad_ref, weight_grad_actual, atol=precision)
