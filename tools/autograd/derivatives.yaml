@@ -194,7 +194,7 @@
   self: not_implemented("inplace version of asinh")
 
 - name: atanh(Tensor self) -> Tensor
-  self: grad * 1 / (-self.pow(2) + 1)
+  self: grad * 1 / (1 - self.pow(2))
 
 - name: atanh_(Tensor self) -> Tensor(a!)
   self: not_implemented("inplace version of atanh")
