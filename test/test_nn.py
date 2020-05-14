@@ -5666,6 +5666,333 @@ class TestNN(NNTestCase):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_cudnn(1)
 
+    def _test_RNN_type1(self, device):
+        dropout = 0
+        input_size = 10
+        hidden_size = 6
+        num_layers = 2
+        seq_length = 7
+        num_directions = 2
+        lengths = [7, 5, 5, 2, 1, 1]
+
+        dtype = torch.double
+        batch = 6
+
+        def reverse_padded_data(x, batch_first):
+            rev_x = []
+            batch_dim = 0 if batch_first else 1
+            time_dim = 1 if batch_first else 0
+            for input, length in zip(x.split(1, batch_dim), lengths):
+                split_input = input.split(1, time_dim)
+                reversed_input = split_input[:length][::-1] + split_input[length:]
+                reversed_input = torch.cat(reversed_input, time_dim)
+                rev_x.append(reversed_input)
+
+            rev_x = torch.cat(rev_x, batch_dim)
+            return rev_x
+
+        def reverse_packed_data(x):
+            x_unpacked, _ = rnn_utils.pad_packed_sequence(x, batch_first=True)
+            rev_x = []
+            for input, length in zip(x_unpacked.split(1, 0), lengths):
+                split_input = input.split(1, 1)
+                reversed_input = split_input[:length][::-1] + split_input[length:]
+                reversed_input = torch.cat(reversed_input, 1)
+                rev_x.append(reversed_input)
+
+            rev_x = torch.cat(rev_x, 0)
+            rev_x = rnn_utils.pack_padded_sequence(
+                rev_x, lengths, batch_first=True)
+            return rev_x
+
+        def reverse(x, batch_first):
+            rev_x = []
+            batch_dim = 0 if batch_first else 1
+            time_dim = 1 if batch_first else 0
+            for input in x.split(1, batch_dim):
+                split_input = input.split(1, time_dim)
+                reversed_input = split_input[::-1]
+                reversed_input = torch.cat(reversed_input, time_dim)
+                rev_x.append(reversed_input)
+
+            rev_x = torch.cat(rev_x, batch_dim)
+            return rev_x
+
+        def merge_direction_states(fwd_h, bwd_h, is_lstm):
+            if not is_lstm:
+                result = []
+                for fwd, bwd in zip(fwd_h.split(1, 0), bwd_h.split(1, 0)):
+                    result.append(fwd)
+                    result.append(bwd)
+                result = torch.cat(result, 0)
+            else:
+                hx = []
+                cx = []
+                f_hs, f_cs = fwd_h
+                b_hs, b_cs = bwd_h
+                for f_h, b_h in zip(f_hs.split(1, 0), b_hs.split(1, 0)):
+                    hx.append(f_h)
+                    hx.append(b_h)
+
+                for f_c, b_c in zip(f_cs.split(1, 0), b_cs.split(1, 0)):
+                    cx.append(f_c)
+                    cx.append(b_c)
+                hx = torch.cat(hx, 0)
+                cx = torch.cat(cx, 0)
+                result = (hx, cx)
+            return result
+
+        for module in (nn.RNN, nn.LSTM, nn.GRU):
+            for params in product((True, False), repeat=3):
+                (bias, batch_first, variable_len) = params
+                is_lstm = isinstance(module, nn.LSTM)
+                if batch_first:
+                    input_val = torch.randn(
+                        batch, seq_length, input_size, dtype=dtype).to(device)
+                    grad_output = torch.randn(
+                        batch, seq_length, hidden_size * num_directions,
+                        dtype=dtype).to(device)
+
+                else:
+                    input_val = torch.randn(
+                        seq_length, batch, input_size, dtype=dtype).to(device)
+                    grad_output = torch.randn(
+                        seq_length, batch, hidden_size * num_directions,
+                        dtype=dtype).to(device)
+
+                with torch.no_grad():
+                    fwd_grad_output = grad_output[:, :, :hidden_size]
+                    bwd_grad_output = grad_output[:, :, hidden_size:]
+
+                reversed_val = reverse(
+                    input_val.detach(), batch_first).requires_grad_(True)
+
+                cx_val = None
+                grad_cy = None
+                hx_val = torch.randn(num_layers * num_directions, batch,
+                                     hidden_size, dtype=dtype).to(device)
+                hx_val.requires_grad_(True)
+                grad_hy = torch.randn(num_layers * num_directions, batch,
+                                      hidden_size, dtype=dtype).to(device)
+                if is_lstm:
+                    cx_val = torch.randn(num_layers * num_directions, batch,
+                                         hidden_size, dtype=dtype).to(device)
+                    cx_val.requires_grad_(True)
+                    grad_cy = torch.randn(num_layers * num_directions, batch,
+                                          hidden_size, dtype=dtype).to(device)
+
+                if variable_len:
+                    reversed_val = reverse_padded_data(
+                        input_val.detach(), batch_first).requires_grad_(True)
+                    reversed_val = rnn_utils.pack_padded_sequence(
+                        reversed_val, lengths, batch_first=batch_first)
+                    reversed_val = reversed_val.to(device)
+                    input_val = rnn_utils.pack_padded_sequence(
+                        input_val, lengths, batch_first=batch_first)
+                    input_val = input_val.to(device)
+                    grad_output = rnn_utils.pack_padded_sequence(
+                        grad_output, lengths, batch_first=batch_first).data
+                    grad_output = grad_output.to(device)
+
+                    with torch.no_grad():
+                        fwd_grad_output = grad_output.data[:, :hidden_size]
+                        bwd_grad_output = grad_output.data[:, hidden_size:]
+
+                    fwd_grad_output = rnn_utils.PackedSequence(
+                        fwd_grad_output, grad_output.batch_sizes)
+
+                    bwd_grad_output = rnn_utils.PackedSequence(
+                        bwd_grad_output, grad_output.batch_sizes)
+
+                    fwd_val = rnn_utils.PackedSequence(
+                        input_val.data.detach().requires_grad_(True),
+                        input_val.batch_sizes)
+
+                # fwd_val = input_val.detach().requires_grad_(True)
+                if not variable_len:
+                    fwd_val = input_val.detach().requires_grad_(True)
+                    input_val = input_val.requires_grad_(True)
+                    reversed_val = reversed_val.requires_grad_(True)
+                else:
+                    fwd_val = rnn_utils.PackedSequence(
+                        input_val.data.detach().requires_grad_(True),
+                        input_val.batch_sizes)
+
+                # Joint Type-1 RNN
+                full_rnn = module(input_size,
+                                  hidden_size,
+                                  num_layers,
+                                  bias=bias,
+                                  dropout=dropout,
+                                  bidirectional=True,
+                                  cat_layer_fwd_bwd_states=False,
+                                  batch_first=batch_first).to(dtype)
+                full_rnn.to(device)
+
+                # Individual forward RNN
+                fwd_rnn = module(input_size,
+                                 hidden_size,
+                                 num_layers,
+                                 bias=bias,
+                                 dropout=dropout,
+                                 bidirectional=False,
+                                 batch_first=batch_first).to(dtype)
+                fwd_rnn.to(device)
+
+                # Individual backward RNN
+                bwd_rnn = module(input_size,
+                                 hidden_size,
+                                 num_layers,
+                                 bias=bias,
+                                 dropout=dropout,
+                                 bidirectional=False,
+                                 batch_first=batch_first).to(dtype)
+                bwd_rnn.to(device)
+
+                # Split weights into forward and backward directions
+                state_dict = full_rnn.state_dict()
+                fwd_weights = {k: state_dict[k] for k in state_dict
+                               if not k.endswith('reverse')}
+                bwd_weights = {k.replace('_reverse', ''): state_dict[k]
+                               for k in state_dict if k.endswith('reverse')}
+                fwd_rnn.load_state_dict(fwd_weights)
+                bwd_rnn.load_state_dict(bwd_weights)
+
+                # Split input hidden states
+                with torch.no_grad():
+                    hx = hx_val.split(1, 0)
+                    hx_fwd = torch.cat([h for i, h in enumerate(hx)
+                                        if i % 2 == 0], 0)
+                    hx_bwd = torch.cat([h for i, h in enumerate(hx)
+                                        if i % 2 != 0], 0)
+                    g_hy = grad_hy.split(1, 0)
+                    grad_hy_fwd = torch.cat([h for i, h in enumerate(g_hy)
+                                             if i % 2 == 0], 0)
+                    grad_hy_bwd = torch.cat([h for i, h in enumerate(g_hy)
+                                             if i % 2 != 0], 0)
+
+                hx_fwd = hx_fwd.requires_grad_(True)
+                hx_bwd = hx_bwd.requires_grad_(True)
+
+                if is_lstm:
+                    with torch.no_grad():
+                        cx = cx_val.split(1, 0)
+                        cx_fwd = torch.cat([h for i, h in enumerate(cx)
+                                            if i % 2 == 0], 0)
+                        cx_bwd = torch.cat([h for i, h in enumerate(cx)
+                                            if i % 2 != 0], 0)
+                        g_cy = grad_cy.split(1, 0)
+                        grad_cy_fwd = torch.cat([h for i, h in enumerate(g_cy)
+                                                 if i % 2 == 0], 0)
+                        grad_cy_bwd = torch.cat([h for i, h in enumerate(g_cy)
+                                                 if i % 2 != 0], 0)
+                    cx_fwd = cx_fwd.requires_grad_(True)
+                    cx_fwd = cx_bwd.requires_grad_(True)
+                    hx_fwd = (hx_fwd, cx_fwd)
+                    hx_bwd = (hx_bwd, cx_bwd)
+                    hx_val = (hx_val, cx_val)
+
+                output, hy = full_rnn(input_val, hx_val)
+                fwd_output, fwd_hy = fwd_rnn(fwd_val, hx_fwd)
+                bwd_output, bwd_hy = bwd_rnn(reversed_val, hx_bwd)
+
+                if variable_len:
+                    bwd_output = reverse_packed_data(bwd_output)
+
+                # Check forward results
+                with torch.no_grad():
+                    complete_hy = merge_direction_states(
+                        fwd_hy, bwd_hy, is_lstm)
+                    if variable_len:
+                        complete_output = torch.cat(
+                            [fwd_output.data, bwd_output.data], -1)
+                        self.assertEqual(output.data, complete_output,
+                                        atol=5e-5, message='output')
+                    else:
+                        complete_output = torch.cat(
+                            [fwd_output, bwd_output], -1)
+                        self.assertEqual(output, complete_output,
+                                        atol=5e-5, message='output')
+                    if is_lstm:
+                        exp_hy, exp_cy = complete_hy
+                        t_hy, t_cy = hy
+                        self.assertEqual(t_hy, exp_hy, atol=5e-5, message='hy')
+                        self.assertEqual(t_cy, exp_cy, atol=5e-5, message='cy')
+                    else:
+                        self.assertEqual(hy, complete_hy,
+                                         atol=5e-5, message='hy')
+
+                # Compute backward gradients
+                if is_lstm:
+                    torch.autograd.backward(
+                        [output if not variable_len else output.data,
+                         hy[0], hy[1]],
+                        [grad_output if not variable_len else grad_output.data,
+                         grad_hy, grad_cy]
+                    )
+                    torch.autograd.backward(
+                        [fwd_output if not variable_len else fwd_output.data,
+                         fwd_hy[0], fwd_hy[1]],
+                        [(fwd_grad_output if not variable_len
+                          else fwd_grad_output.data),
+                         grad_hy_fwd, grad_cy_fwd]
+                    )
+                    torch.autograd.backward(
+                        [bwd_output if not variable_len else bwd_output.data,
+                         bwd_hy[0], bwd_hy[1]],
+                        [(bwd_grad_output if not variable_len
+                          else bwd_grad_output.data),
+                         grad_hy_bwd, grad_cy_bwd]
+                    )
+                else:
+                    torch.autograd.backward(
+                        [output if not variable_len else output.data, hy],
+                        [grad_output if not variable_len else grad_output.data,
+                         grad_hy])
+                    torch.autograd.backward(
+                        [fwd_output if not variable_len else fwd_output.data,
+                         fwd_hy],
+                        [(fwd_grad_output if not variable_len
+                          else fwd_grad_output.data), grad_hy_fwd])
+                    torch.autograd.backward(
+                        [bwd_output if not variable_len else bwd_output.data,
+                         bwd_hy],
+                        [(bwd_grad_output if not variable_len
+                          else bwd_grad_output.data), grad_hy_bwd])
+
+                # Check gradients
+                output_grad = output.grad
+                fwd_output_grad = fwd_output.grad
+                bwd_output_grad = bwd_output.grad
+                complete_output_grad = torch.cat(
+                    [fwd_output_grad, bwd_output_grad], -1)
+                self.assertEqual(output_grad, complete_output_grad,
+                                 atol=5e-5, message='output_grad')
+                if is_lstm:
+                    hx, cx = hx_val
+                    hx_fwd, cx_fwd = hx_fwd
+                    hx_bwd, cx_bwd = hx_bwd
+                    hx_complete_grad = merge_direction_states(
+                        hx_fwd.grad, hx_bwd.grad)
+                    cx_complete_grad = merge_direction_states(
+                        cx_fwd.grad, cx_bwd.grad)
+                    self.assertEqual(hx.grad, hx_complete_grad,
+                                     atol=5e-5, message='hx_grad')
+                    self.assertEqual(cx.grad, cx_complete_grad,
+                                     atol=5e-5, message='cx_grad')
+                else:
+                    hx_complete_grad = merge_direction_states(
+                        hx_fwd.grad, hx_bwd.grad)
+                    self.assertEqual(hx_val.grad, hx_complete_grad,
+                                     atol=5e-5, message='hx_grad')
+
+    def test_RNN_type1(self):
+        self._test_RNN_type1(torch.device('cpu'))
+
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    def test_RNN_type1_cudnn(self):
+        self._test_RNN_type1(torch.device('cuda'))
+
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cudnn_weight_norm(self):
         input_size = 10
