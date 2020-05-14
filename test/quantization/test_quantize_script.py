@@ -1576,11 +1576,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.maxpool3d = torch.nn.MaxPool3d(kernel_size=3)
                 self.dropout = torch.nn.Dropout()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.sigmoid = torch.nn.Sigmoid()
-                self.tanh = torch.nn.Tanh()
-                self.hardsigmoid = torch.nn.Hardsigmoid()
                 self.relu = torch.nn.ReLU()
-                self.relu6 = torch.nn.ReLU6()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1590,10 +1586,8 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = torch.flatten(x)
                 x = torch.max(x)
                 x = torch.min(x)
-                x = torch.sigmoid(x)
                 x = x.reshape([-1])
                 x = x.resize_(1, 1, x.numel())
-                x = self.sigmoid(x)
                 x = x.view(-1)
                 x = x.transpose(1, 2)
                 x = x.contiguous()
@@ -1601,20 +1595,11 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = F.dropout(x)
                 x = self.dropout(x)
                 x, _ = torch.sort(x)
-                x = F.sigmoid(x)
                 x = x.permute(0, 2, 3, 1)
                 x = torch.repeat_interleave(x, 3, 1)
-                x = self.tanh(x)
-                x = F.tanh(x)
-                x = torch.tanh(x)
-                x = self.hardsigmoid(x)
-                x = F.hardsigmoid(x)
-                x.hardsigmoid_()
                 x = self.relu(x)
                 x = F.relu(x)
                 x.relu_()
-                x = self.relu6(x)
-                x = F.relu6(x)
                 x = self.conv(x)
                 return x
 
@@ -1639,7 +1624,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .run(m.graph)
 
     def test_quantize_general_value_ops(self):
-        """ A test that checks dequantize will be swapped for \
+        """ A test that checks correct patterns are produced for
         all supported general value ops like aten::avg_pool2d \
         without actually checking for execution of these ops
         """
@@ -1649,13 +1634,17 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.avg_pool1d = torch.nn.AvgPool1d(3)
                 self.avg_pool2d = torch.nn.AvgPool2d(3)
-                self.avg_pool3d = torch.nn.AvgPool2d(3)
+                self.avg_pool3d = torch.nn.AvgPool3d(3)
                 self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.hardtanh = torch.nn.Hardtanh()
+                self.relu6 = torch.nn.ReLU6()
                 self.elu = torch.nn.ELU()
                 self.leaky_relu = torch.nn.LeakyReLU()
+                self.hardsigmoid = torch.nn.Hardsigmoid()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.tanh = torch.nn.Tanh()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1685,12 +1674,27 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = self.hardtanh(x)
                 x = F.hardtanh(x)
                 x.hardtanh_()
+                x = self.relu6(x)
+                x = F.relu6(x)
                 x = self.elu(x)
                 x = F.elu(x)
                 x.elu_()
                 x = self.leaky_relu(x)
                 x = F.leaky_relu(x)
                 x.leaky_relu_()
+                x = self.hardsigmoid(x)
+                x = F.hardsigmoid(x)
+                x.hardsigmoid_()
+                x = self.sigmoid(x)
+                x = torch.sigmoid(x)
+                # F.sigmoid is deprecated
+                x = x.sigmoid()
+                x.sigmoid_()
+                x = self.tanh(x)
+                # F.tanh is deprecated
+                x = torch.tanh(x)
+                x = x.tanh()
+                x.tanh_()
                 x = self.conv(x)
                 return x
 
@@ -1711,13 +1715,13 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # N + 1 quantize_per_tensor between these ops
         m1 = convert_script(m, debug=True)
         # NB: This Needs to be updated when we add more ops to test
-        # number of quantize_per_tensor op for type
-        num_quant_by_op_type = {'conv': 2, 'common': 1, 'interpolate': 3}
-        # number of ops for each type
-        num_op_by_op_type = {'conv': 2, 'common': 27, 'interpolate': 3}
+        # mapping from number of quant for the op to the number of these ops
+        # for example, for `3` in the key means for this type of op
+        # we'll have 3 quantize_per_tensor
+        num_op_by_num_quant = {1: 40, 2: 2, 3: 3}
         num_quantize_per_tensor = 1  # for output
-        for op_type, num_op in num_op_by_op_type.items():
-            num_quantize_per_tensor += num_op * num_quant_by_op_type[op_type]
+        for num_quant, num_op in num_op_by_num_quant.items():
+            num_quantize_per_tensor += num_op * num_quant
         FileCheck().check_count("aten::quantize_per_tensor(", num_quantize_per_tensor, exactly=True) \
                    .run(m1.graph)
 
@@ -1728,7 +1732,8 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # one quantize_per_tensor for input
         m2 = convert_script(m, debug=False)
         FileCheck().check_count("aten::quantize_per_tensor(", 1, exactly=True) \
-                   .check_count("quantized::conv2d(", 2, exactly=True) \
+                   .run(m2.graph)
+        FileCheck().check_count("quantized::conv2d(", 2, exactly=True) \
                    .check("aten::dequantize(") \
                    .run(m2.graph)
 
