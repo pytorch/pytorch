@@ -1,0 +1,31 @@
+#include "torch/csrc/autograd/VariableTypeUtils.h"
+
+#include <ATen/TypeDefault.h>
+#include <torch/library.h>
+
+#include "torch/csrc/autograd/function.h"
+
+// ${generated_comment}
+
+// NOTE See [Sharded File] comment in VariableType
+
+using namespace at;
+
+namespace torch {
+
+namespace TraceType {
+
+namespace {
+${trace_method_definitions}
+}  // namespace
+}  // namespace TraceType
+
+namespace {
+
+TORCH_LIBRARY_IMPL(aten, Tracer, m) {
+  ${trace_wrapper_registrations};
+}
+
+}  // namespace
+
+} // namespace torch

@@ -350,6 +350,18 @@ RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::pee
 return c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
 """)
 
+
+# TraceType templates
+TRACE_DISPATCH_FIND_OP = CodeTemplate("""\
+static auto op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"});
+TORCH_INTERNAL_ASSERT(op);
+""")
+
+TRACE_DISPATCH_CALL_OP = CodeTemplate("""\
+c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${trace_dispatch_args});
+""")
+
+
 FACTORY_FUNCTION_NAMES = None
 
 
@@ -510,6 +522,48 @@ def format_trace(declaration):
     return (format_prerecord_trace(declaration), format_postrecord_trace(declaration))
 
 
+# Methods shared by TraceType and VariableType to handle return variable declaration, tie and tuple.
+def format_return_variables(declaration):
+    name = declaration['name']
+    arguments = declaration['arguments']
+    inplace = declaration['inplace']
+    is_out_fn = name.endswith('_out')
+    modifies_arguments = inplace or is_out_fn
+
+    def declare_returned_variables():
+        if modifies_arguments:
+            return ''
+        if len(declaration['returns']) == 1:
+            return ''
+        # TODO: this will be ugly
+        names = [ret['type'] + ' ' + ret['name'] + ';' for ret in declaration['returns']]
+        return '\n'.join(names)
+
+    def tie_return_values():
+        if len(declaration['returns']) == 1:
+            return 'auto {}'.format(declaration['returns'][0]['name'])
+        names = [ret['name'] for ret in declaration['returns']]
+        return 'std::tie({})'.format(', '.join(names))
+
+    def get_return_value():
+        if inplace:
+            return 'self'
+        if is_out_fn:
+            return_names = [arg['name'] for arg in arguments
+                            if arg.get('output', False)]
+            if len(return_names) == 1:
+                return return_names[0]
+            return 'std::forward_as_tuple({})'.format(', '.join(return_names))
+
+        returns = declaration['returns']
+        if len(returns) == 1:
+            return returns[0]['name']
+        moved = ['std::move({})'.format(r['name']) for r in returns]
+        return 'std::make_tuple({})'.format(', '.join(moved))
+
+    return (declare_returned_variables(), tie_return_values(), get_return_value())
+
+
 def gen_variable_type(out, aten_declarations, template_path):
 
     """VariableType.h and VariableType.cpp body
@@ -554,16 +608,20 @@ def gen_variable_type(out, aten_declarations, template_path):
     }
     write(out, 'RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, env)
 
+
 def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
     VARIABLE_TYPE_CPP = CodeTemplate.from_file(template_path + '/VariableType.cpp')
     PROFILED_TYPE_CPP = CodeTemplate.from_file(template_path + '/ProfiledType.cpp')
+    TRACE_TYPE_CPP = CodeTemplate.from_file(template_path + '/TraceType.cpp')
 
     type_declarations = []
     type_definitions = []
     wrapper_registrations = []
     profiled_method_definitions = []
     profiled_wrapper_registrations = []
+    trace_method_definitions = []
+    trace_wrapper_registrations = []
 
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
@@ -592,12 +650,26 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
             profiled_wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                 declaration, class_type='ProfiledType'))
 
+        # Emit TraceType code
+        trace_body = emit_trace_body(declaration)
+        trace_method_definitions.append(METHOD_DEFINITION.substitute(
+            declaration, type_definition_body=trace_body))
+
+        if declaration['use_c10_dispatcher'] == 'full':
+            trace_wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+                declaration, class_type='TraceType'))
+        else:
+            trace_wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                declaration, class_type='TraceType'))
+
     env = {
         'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
         'wrapper_registrations': wrapper_registrations,
         'profiled_method_definitions': profiled_method_definitions,
-        'profiled_wrapper_registrations': profiled_wrapper_registrations
+        'profiled_wrapper_registrations': profiled_wrapper_registrations,
+        'trace_method_definitions': trace_method_definitions,
+        'trace_wrapper_registrations': trace_wrapper_registrations,
     }
     if header:
         write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
@@ -605,6 +677,8 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
 
     write(out, 'ProfiledType%s.cpp' % suffix, PROFILED_TYPE_CPP, env)
+    write(out, 'TraceType%s.cpp' % suffix, TRACE_TYPE_CPP, env)
+
 
 def emit_profiled_body(declaration):
     arguments = declaration['arguments']
@@ -641,6 +715,38 @@ def emit_profiled_body(declaration):
     )
 
     return [call]
+
+
+def emit_trace_body(declaration):
+    returns = declaration['returns']
+    name = declaration['name']
+    inplace = declaration['inplace']
+    is_out_fn = name.endswith('_out')
+    modifies_arguments = inplace or is_out_fn
+    returns_void = len(returns) == 0
+
+    trace_body = []
+    pre_record_trace, post_record_trace = format_trace(declaration)
+    declare_returned_variables, tie_return_values, get_return_value = format_return_variables(declaration)
+
+    trace_body.append(pre_record_trace)
+    trace_body.append(declare_returned_variables)
+    trace_body.append(TRACE_DISPATCH_FIND_OP.substitute(declaration))
+
+    ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['arguments']])
+    trace_dispatch_args = ['*op', 'c10::DispatchKey::Tracer'] + declaration['args']
+    call = TRACE_DISPATCH_CALL_OP.substitute(
+        ret_and_arg_types=ret_and_arg_types,
+        trace_dispatch_args=trace_dispatch_args,
+    )
+    if not modifies_arguments and not returns_void:
+        call = '{} = {}'.format(tie_return_values, call)
+    trace_body.append(call)
+    trace_body.append(post_record_trace)
+    if not returns_void:
+        trace_body.append('return {};'.format(get_return_value))
+    return trace_body
+
 
 def emit_body(declaration):
     strategy = dispatch_strategy(declaration)
@@ -846,15 +952,6 @@ def emit_body(declaration):
                 stmts.append('}')
         return stmts
 
-    def declare_returned_variables():
-        if modifies_arguments:
-            return ''
-        if len(declaration['returns']) == 1:
-            return ''
-        # TODO: this will be ugly
-        names = [ret['type'] + ' ' + ret['name'] + ';' for ret in declaration['returns']]
-        return '\n'.join(names)
-
     def emit_dispatch_call(api_name, input_base, unpacked_args):
         """ Dispatch call via function in a namespace or method on Tensor."""
         if 'namespace' in declaration['method_of']:
@@ -988,39 +1085,17 @@ def emit_body(declaration):
                 call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
 
-                call += wrap_output(tie_return_values(), 'tmp')
+                call += wrap_output(tie_return_values, 'tmp')
             else:
                 call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
         else:
             call = CALL_DEFAULT.substitute(declaration)
             if not modifies_arguments and not returns_void:
-                call = '{} = {}'.format(tie_return_values(), call)
+                call = '{} = {}'.format(tie_return_values, call)
             call = call + ';'
         call = enforce_same_tensorimpl_and_storage(env, call)
         return call
-
-    def tie_return_values():
-        if len(declaration['returns']) == 1:
-            return 'auto {}'.format(declaration['returns'][0]['name'])
-        names = [ret['name'] for ret in declaration['returns']]
-        return 'std::tie({})'.format(', '.join(names))
-
-    def get_return_value():
-        if inplace:
-            return 'self'
-        if is_out_fn:
-            return_names = [arg['name'] for arg in arguments
-                            if arg.get('output', False)]
-            if len(return_names) == 1:
-                return return_names[0]
-            return 'std::forward_as_tuple({})'.format(', '.join(return_names))
-
-        returns = declaration['returns']
-        if len(returns) == 1:
-            return returns[0]['name']
-        moved = ['std::move({})'.format(r['name']) for r in returns]
-        return 'std::make_tuple({})'.format(', '.join(moved))
 
     def emit_history():
         fn = 'rebase' if modifies_arguments and view_info is None else 'set'
@@ -1056,15 +1131,16 @@ def emit_body(declaration):
 
     body = []
 
-    pre_record_trace, post_record_trace = format_trace(declaration)
-    body.append(pre_record_trace)
+    # TODO(REMOVE ME!!!) pre_record_trace, post_record_trace = format_trace(declaration)
+    declare_returned_variables, tie_return_values, get_return_value = format_return_variables(declaration)
+    # TODO(REMOVE ME!!!) body.append(pre_record_trace)
 
     if strategy != 'use_type':
         body.extend(unpack_args(env, declaration))
     if requires_derivative:
         body.extend(emit_check_inplace())
         body.extend(setup_derivative(differentiable_inputs))
-    body.append(declare_returned_variables())
+    body.append(declare_returned_variables)
 
     body.append(emit_call(env))
     if requires_derivative:
@@ -1081,9 +1157,9 @@ def emit_body(declaration):
         # remove this assert but the code generation will get more elaborate
         assert inplace
         body.append('reset_grad_accumulator(self);')
-    body.append(post_record_trace)
+    # TODO(REMOVE ME!!!) body.append(post_record_trace)
     if not returns_void:
-        body.append('return {};'.format(get_return_value()))
+        body.append('return {};'.format(get_return_value))
     return body
 
 
