@@ -75,6 +75,10 @@ def default_collate(batch):
     elif isinstance(elem, tuple) and hasattr(elem, '_fields'):  # namedtuple
         return elem_type(*(default_collate(samples) for samples in zip(*batch)))
     elif isinstance(elem, container_abcs.Sequence):
+        it = iter(batch)
+        elem_size = len(next(it))
+        assert all(len(elem) == elem_size for elem in it), \
+            "each element in list of batch to be equal size"
         transposed = zip(*batch)
         return [default_collate(samples) for samples in transposed]
 
