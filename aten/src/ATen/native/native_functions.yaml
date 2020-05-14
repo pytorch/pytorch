@@ -452,40 +452,40 @@
     CPU: argmin
     CUDA: argmin
 
-- func: arccosh(Tensor self) -> Tensor
+- func: acosh(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
   variants: function, method
 
-- func: arccosh_(Tensor(a!) self) -> Tensor(a!)
+- func: acosh_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
 
-- func: arccosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+- func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
-- func: arcsinh(Tensor self) -> Tensor
+- func: asinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
   variants: function, method
 
-- func: arcsinh_(Tensor(a!) self) -> Tensor(a!)
+- func: asinh_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
 
-- func: arcsinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+- func: asinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
-- func: arctanh(Tensor self) -> Tensor
+- func: atanh(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
   variants: function, method
 
-- func: arctanh_(Tensor(a!) self) -> Tensor(a!)
+- func: atanh_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
 
-- func: arctanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+- func: atanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)

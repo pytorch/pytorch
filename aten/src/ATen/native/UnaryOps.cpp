@@ -245,17 +245,17 @@ Tensor& cosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor cosh(const Tensor& self) { return unary_op_impl(self, at::cosh_out); }
 Tensor& cosh_(Tensor& self) { return unary_op_impl_(self, at::cosh_out); }
 
-Tensor& arccosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, arccosh_stub); }
-Tensor arccosh(const Tensor& self) { return unary_op_impl(self, at::arccosh_out); }
-Tensor& arccosh_(Tensor& self) { return unary_op_impl_(self, at::arccosh_out); }
+Tensor& acosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, acosh_stub); }
+Tensor acosh(const Tensor& self) { return unary_op_impl(self, at::acosh_out); }
+Tensor& acosh_(Tensor& self) { return unary_op_impl_(self, at::acosh_out); }
 
-Tensor& arcsinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, arcsinh_stub); }
-Tensor arcsinh(const Tensor& self) { return unary_op_impl(self, at::arcsinh_out); }
-Tensor& arcsinh_(Tensor& self) { return unary_op_impl_(self, at::arcsinh_out); }
+Tensor& asinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asinh_stub); }
+Tensor asinh(const Tensor& self) { return unary_op_impl(self, at::asinh_out); }
+Tensor& asinh_(Tensor& self) { return unary_op_impl_(self, at::asinh_out); }
 
-Tensor& arctanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, arctanh_stub); }
-Tensor arctanh(const Tensor& self) { return unary_op_impl(self, at::arctanh_out); }
-Tensor& arctanh_(Tensor& self) { return unary_op_impl_(self, at::arctanh_out); }
+Tensor& atanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atanh_stub); }
+Tensor atanh(const Tensor& self) { return unary_op_impl(self, at::atanh_out); }
+Tensor& atanh_(Tensor& self) { return unary_op_impl_(self, at::atanh_out); }
 
 Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
 Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
@@ -461,9 +461,9 @@ DEFINE_DISPATCH(real_stub);
 DEFINE_DISPATCH(imag_stub);
 DEFINE_DISPATCH(conj_stub);
 DEFINE_DISPATCH(acos_stub);
-DEFINE_DISPATCH(arccosh_stub);
-DEFINE_DISPATCH(arcsinh_stub);
-DEFINE_DISPATCH(arctanh_stub);
+DEFINE_DISPATCH(acosh_stub);
+DEFINE_DISPATCH(asinh_stub);
+DEFINE_DISPATCH(atanh_stub);
 DEFINE_DISPATCH(asin_stub);
 DEFINE_DISPATCH(atan_stub);
 DEFINE_DISPATCH(bitwise_not_stub);

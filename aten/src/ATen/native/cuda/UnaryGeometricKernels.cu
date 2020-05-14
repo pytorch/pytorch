@@ -166,62 +166,63 @@ void tanh_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-// We manually overload arccosh because std::acosh does not work with thrust::complex types.
+// We manually overload acosh because std::acosh does not work with thrust::complex types.
 template<typename scalar_t>
-__host__ __device__ static inline scalar_t arccosh_wrapper(scalar_t v) {
+__host__ __device__ static inline scalar_t acosh_wrapper(scalar_t v) {
   return ::acosh(v);
 }
 
 template<typename T>
-__host__ __device__ static inline thrust::complex<T> arccosh_wrapper(thrust::complex<T> v) {
+__host__ __device__ static inline thrust::complex<T> acosh_wrapper(thrust::complex<T> v) {
   return thrust::acosh(v);
 }
 
-void arccosh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "arccosh_cuda", [&]() {
+void acosh_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "acosh_cuda", [&]() {
     using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
-      return arccosh_wrapper(a);
+      return acosh_wrapper(a);
     });
   });
 }
 
-// We manually overload arcsinh because std::asinh does not work with thrust::complex types.
+// We manually overload asinh because std::asinh does not work with thrust::complex types.
 template<typename scalar_t>
-__host__ __device__ static inline scalar_t arcsinh_wrapper(scalar_t v) {
+__host__ __device__ static inline scalar_t asinh_wrapper(scalar_t v) {
   return ::asinh(v);
 }
 
 template<typename T>
-__host__ __device__ static inline thrust::complex<T> arcsinh_wrapper(thrust::complex<T> v) {
+__host__ __device__ static inline thrust::complex<T> asinh_wrapper(thrust::complex<T> v) {
   return thrust::asinh(v);
 }
 
-void arcsinh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "arcsinh_cuda", [&]() {
+void asinh_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "asinh_cuda", [&]() {
     using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
-      return arcsinh_wrapper(a);
+      return asinh_wrapper(a);
     });
   });
 }
 
+// We manually overload atanh because std::atanh does not work with thrust::complex types.
 template<typename scalar_t>
-__host__ __device__ static inline scalar_t arctanh_wrapper(scalar_t v) {
+__host__ __device__ static inline scalar_t atanh_wrapper(scalar_t v) {
   return ::atanh(v);
 }
 
 template<typename T>
-__host__ __device__ static inline thrust::complex<T> arctanh_wrapper(thrust::complex<T> v) {
+__host__ __device__ static inline thrust::complex<T> atanh_wrapper(thrust::complex<T> v) {
   return thrust::atanh(v);
 }
 
-void arctanh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "arctanh_cuda", [&]() {
+void atanh_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "atanh_cuda", [&]() {
     using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(thrust_t, "arctanh_cuda", [&] {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(thrust_t, "atanh_cuda", [&] {
       gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
-        return arctanh_wrapper(a);
+        return atanh_wrapper(a);
       });
     });
   });
@@ -241,9 +242,9 @@ void tan_kernel_cuda(TensorIterator& iter) {
 }
 
 REGISTER_DISPATCH(acos_stub, &acos_kernel_cuda);
-REGISTER_DISPATCH(arccosh_stub, &arccosh_kernel_cuda);
-REGISTER_DISPATCH(arcsinh_stub, &arcsinh_kernel_cuda);
-REGISTER_DISPATCH(arctanh_stub, &arctanh_kernel_cuda);
+REGISTER_DISPATCH(acosh_stub, &acosh_kernel_cuda);
+REGISTER_DISPATCH(asinh_stub, &asinh_kernel_cuda);
+REGISTER_DISPATCH(atanh_stub, &atanh_kernel_cuda);
 REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda);
 REGISTER_DISPATCH(atan_stub, &atan_kernel_cuda);
 REGISTER_DISPATCH(sin_stub, &sin_kernel_cuda);
