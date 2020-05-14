@@ -548,6 +548,78 @@ graph(%a_quant, %dim):
           %r = aten::mean(%a_quant, %dim)
           return (%r) )";
 
+  // aten::upsample_nearest1d
+  std::string upsample_nearest1d = R"(
+graph(%a_quant, %size, %scale_factor):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::upsample_nearest1d(%a_dequant, %size, %scale_factor)
+)" + common_general_value_op;
+
+  std::string aten_upsample_nearest1d = R"(
+graph(%a_quant, %size, %scale_factor):
+          %r = aten::upsample_nearest1d(%a_quant, %size, %scale_factor)
+          return (%r) )";
+
+  // aten::upsample_nearest2d
+  std::string upsample_nearest2d = R"(
+graph(%a_quant, %size, %scale_h, %scale_w):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::upsample_nearest2d(%a_dequant, %size, %scale_h, %scale_w)
+)" + common_general_value_op;
+
+  std::string aten_upsample_nearest2d = R"(
+graph(%a_quant, %size, %scale_h, %scale_w):
+          %r = aten::upsample_nearest2d(%a_quant, %size, %scale_h, %scale_w)
+          return (%r) )";
+
+  // aten::upsample_nearest3d
+  std::string upsample_nearest3d = R"(
+graph(%a_quant, %size, %scale_d, %scale_h, %scale_w):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::upsample_nearest3d(%a_dequant, %size, %scale_d, %scale_h, %scale_w)
+)" + common_general_value_op;
+
+  std::string aten_upsample_nearest3d = R"(
+graph(%a_quant, %size, %scale_d, %scale_h, %scale_w):
+          %r = aten::upsample_nearest3d(%a_quant, %size, %scale_d, %scale_h, %scale_w)
+          return (%r) )";
+
+  // aten::upsample_linear1d
+  std::string upsample_linear1d = R"(
+graph(%a_quant, %size, %align_corners, %scales):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::upsample_linear1d(%a_dequant, %size, %align_corners, %scales)
+)" + common_general_value_op;
+
+  std::string aten_upsample_linear1d = R"(
+graph(%a_quant, %size, %align_corners, %scales):
+          %r = aten::upsample_linear1d(%a_quant, %size, %align_corners, %scales)
+          return (%r) )";
+
+  // aten::upsample_bilinear2d
+  std::string upsample_bilinear2d = R"(
+graph(%a_quant, %size, %align_corners, %scales_h, %scales_w):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::upsample_bilinear2d(%a_dequant, %size, %align_corners, %scales_h, %scales_w)
+)" + common_general_value_op;
+
+  std::string aten_upsample_bilinear2d = R"(
+graph(%a_quant, %size, %align_corners, %scales_h, %scales_w):
+          %r = aten::upsample_bilinear2d(%a_quant, %size, %align_corners, %scales_h, %scales_w)
+          return (%r) )";
+
+  // aten::upsample_trilinear3d
+  std::string upsample_trilinear3d = R"(
+graph(%a_quant, %size, %align_corners, %scales_d, %scales_h, %scales_w):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::upsample_trilinear3d(%a_dequant, %size, %align_corners, %scales_h, %scales_w)
+)" + common_general_value_op;
+
+  std::string aten_upsample_trilinear3d = R"(
+graph(%a_quant, %size, %align_corners, %scales_d, %scales_h, %scales_w):
+          %r = aten::upsample_trilinear3d(%a_quant, %size, %align_corners, %scales_d, %scales_h, %scales_w)
+          return (%r) )";
+
   return {
       {"quantized::conv1d", conv1d, quantized_conv1d},
       {"quantized::conv2d", conv2d, quantized_conv2d},
@@ -623,6 +695,16 @@ graph(%a_quant, %dim):
        adaptive_avg_pool3d,
        aten_adaptive_avg_pool3d},
       {"aten::mean", mean, aten_mean},
+      {"aten::upsample_nearest1d", upsample_nearest1d, aten_upsample_nearest1d},
+      {"aten::upsample_nearest2d", upsample_nearest2d, aten_upsample_nearest2d},
+      {"aten::upsample_nearest3d", upsample_nearest3d, aten_upsample_nearest3d},
+      {"aten::upsample_linea1d", upsample_linear1d, aten_upsample_linear1d},
+      {"aten::upsample_bilinear2d",
+       upsample_bilinear2d,
+       aten_upsample_bilinear2d},
+      {"aten::upsample_trilinear3d",
+       upsample_trilinear3d,
+       aten_upsample_trilinear3d},
   };
 }
 
