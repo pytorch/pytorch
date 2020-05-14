@@ -8,7 +8,6 @@ import unittest.mock as mock
 import itertools
 import warnings
 import pickle
-import contextlib
 from copy import deepcopy
 from itertools import repeat, product
 from functools import reduce
