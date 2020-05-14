@@ -533,14 +533,22 @@ bool inlineConsecutiveIfs(Node* node) {
   }
 
   bool then_value = maybe_then_value->toBool();
-  auto else_value = maybe_else_value->toBool();
+  bool else_value = maybe_else_value->toBool();
 
   for (auto i = 0; i < 2; ++i) {
-    bool input_value = i == 0 ? then_value : else_value;
-    Block* second_if_block =
-        input_value ? second_if.thenBlock() : second_if.elseBlock();
-    Block* first_if_block =
-        i == 0 ? first_if.thenBlock() : first_if.elseBlock();
+    Block* first_if_block;
+    Block* second_if_block;
+
+    if (i == 0) {
+      first_if_block = first_if.thenBlock();
+      second_if_block =
+          then_value ? second_if.thenBlock() : second_if.elseBlock();
+    } else {
+      first_if_block = first_if.elseBlock();
+      second_if_block =
+          else_value ? second_if.thenBlock() : second_if.elseBlock();
+      ;
+    }
 
     // we need to replace values that were used in the second if that were
     // outputs of the first if with the equivalent value in the scope of the
@@ -579,13 +587,14 @@ bool inlineConsecutiveIfs(Node* node) {
 // else:
 //   return 2
 void inlineConsecutiveIfs(Block* block) {
-  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+  for (auto it = block->nodes().begin(), end = block->nodes().end();
+       it != end;) {
     for (Block* b : it->blocks()) {
       inlineConsecutiveIfs(b);
     }
 
-    Node* node = *it;
-    if (!inlineConsecutiveIfs(node)) {
+    // if we fused two ifs, we need to check current node and new next node
+    if (!inlineConsecutiveIfs(*it)) {
       it++;
     }
   }
