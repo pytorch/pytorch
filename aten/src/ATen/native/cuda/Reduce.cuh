@@ -22,6 +22,16 @@
 
 namespace at { namespace native {
 
+#ifdef __HIP_PLATFORM_HCC__
+template <typename T>
+struct ROCm_Bug {
+  char bytes[sizeof(T)];
+  C10_HOST_DEVICE operator T() {
+    return *reinterpret_cast<T*>(this);
+  }
+}
+#endif
+
 using at::detail::Array;
 
 static inline int64_t div_up(int64_t a, int64_t b) {
@@ -431,8 +441,7 @@ struct ReduceOp {
     // Multiple accumulators to remove dependency between unrolled loops.
     arg_t value_list[vec_size]
 #ifdef __HIP_PLATFORM_HCC__
-    // ROCm bug
-    = {arg_t(0)}
+    = {static_cast<arg_t>(ROCm_Bug<arg_t>())}
 #endif
     ;
     value_list[0] = value;
