@@ -4,7 +4,6 @@ import ast
 import inspect
 import string
 from textwrap import dedent
-from torch._six import PY2
 from torch._C._jit_tree_views import (
     ClassDef, Ident, Stmt, Decl, Def, Var,
     EmptyTypeAnnotation, Param, ExprStmt, Assign,
