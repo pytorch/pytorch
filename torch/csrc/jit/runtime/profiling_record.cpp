@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <ostream>
 #include <torch/csrc/jit/passes/graph_fuser.h>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -164,7 +165,7 @@ void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
     for (auto i : n->inputs()) {
-      if (i->type()->isSubtypeOf(TensorType::get()) && isProfilable(n)) {
+      if (i->type()->isSubtypeOf(TensorType::get()) && (isProfilable(n) || i->node()->kind() == prim::Param || i->node()->kind() == prim::GetAttr)) {
         insertShapeProfile(n, i);
       }
     }
@@ -189,6 +190,7 @@ void ProfilingRecord::instrumentBlock(Block* block) {
 std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
     const std::shared_ptr<Graph>& graph) {
   auto new_g = graph->copy();
+  
   auto pr = std::unique_ptr<ProfilingRecord>(new ProfilingRecord(new_g));
   auto raw_pr = pr.get();
   unprofileGraphInputs(new_g);
@@ -270,6 +272,7 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
 
   auto pop = pr->createProfileNode(counter, {});
   new_g->appendNode(pop);
+  GRAPH_DUMP("Instrumented Graph: ", new_g);
   return pr;
 }
 
