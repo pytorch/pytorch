@@ -1,3 +1,4 @@
+import functools
 
 import numpy as np
 import torch
@@ -127,7 +128,9 @@ class FuzzedTensor(object):
 
     def satisfies_constraints(self, params):
         size = self._get_concrete_size(params)
-        num_elements = np.prod(size)
+        # Product is computed in Python to avoid integer overflow.
+        num_elements = functools.reduce(lambda x, y: x * y, size, 1)
+        assert num_elements >= 0
         if self._max_elements is not None and num_elements > self._max_elements:
             return False
         if self._min_elements is not None and num_elements < self._min_elements:
