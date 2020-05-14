@@ -190,13 +190,7 @@ struct ProfilerThreadLocalState
       cuda_stubs->nvtxRangePop();
     } else {
       // In some cases RecordFunction (and popRange) may be
-      // called on a different thread than pushRange, e.g.
-      // it can happen when using record_function in JIT when
-      // an execution of a JIT function is suspended
-      // (when calling wait on a future) and the continuation
-      // is resumed on a different thread.
-      // Also, some RPC code uses async record_function
-      //
+      // called on a different thread than pushRange
       // As a convention, we put the async pop on the original
       // thread and save current thread id in pop event
       getEventList(thread_id).record(
@@ -314,30 +308,29 @@ void pushProfilingCallbacks() {
 
         auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
         if (state_ptr->config().report_input_shapes) {
-          std::vector<std::vector<int64_t>> input_sizes;
-          input_sizes.reserve(fn.inputs().size());
+          std::vector<std::vector<int64_t>> inputSizes;
+          inputSizes.reserve(fn.inputs().size());
           for (const c10::IValue& input : fn.inputs()) {
             if (!input.isTensor()) {
-              input_sizes.emplace_back();
+              inputSizes.emplace_back();
               continue;
             }
             const at::Tensor& tensor = input.toTensor();
             if (tensor.defined()) {
-              input_sizes.push_back(input.toTensor().sizes().vec());
+              inputSizes.push_back(input.toTensor().sizes().vec());
             } else {
-              input_sizes.emplace_back();
+              inputSizes.emplace_back();
             }
           }
           state_ptr->pushRange(
-              fn.name(), msg, fn.seqNr(), std::move(input_sizes), fn.handle());
+              fn.name(), msg, fn.seqNr(), std::move(inputSizes), fn.handle());
         } else {
           state_ptr->pushRange(fn.name(), msg, fn.seqNr(), {}, fn.handle());
         }
       },
       [](const at::RecordFunction& fn) {
         auto state_ptr = getProfilerTLSState();
-        if (!state_ptr ||
-            state_ptr->config().state == ProfilerState::Disabled) {
+        if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
         }
         state_ptr->popRange(fn.getStartCallbacksThreadId(), fn.handle());
