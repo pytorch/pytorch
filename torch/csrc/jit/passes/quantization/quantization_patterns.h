@@ -656,6 +656,30 @@ graph(%a_quant, %min, %max):
           %r = aten::hardtanh_(%a_quant, %min, %max)
           return (%r) )";
 
+  // aten::elu
+  std::string elu = R"(
+graph(%a_quant, %alpha, %scale, %input_scale):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::elu(%a_dequant, %alpha, %scale, %input_scale)
+)" + common_general_value_op;
+
+  std::string aten_elu = R"(
+graph(%a_quant, %alpha, %scale, %input_scale):
+          %r = aten::elu_(%a_quant, %alpha, %scale, %input_scale)
+          return (%r) )";
+
+  // aten::elu_
+  std::string elu_ = R"(
+graph(%a_quant, %alpha, %scale, %input_scale):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::elu_(%a_dequant, %alpha, %scale, %input_scale)
+)" + common_general_value_op;
+
+  std::string aten_elu_ = R"(
+graph(%a_quant, %alpha, %scale, %input_scale):
+          %r = aten::elu_(%a_quant, %alpha, %scale, %input_scale)
+          return (%r) )";
+
   return {
       {"quantized::conv1d", conv1d, quantized_conv1d},
       {"quantized::conv2d", conv2d, quantized_conv2d},
@@ -744,6 +768,8 @@ graph(%a_quant, %min, %max):
       {"aten::clamp", clamp, aten_clamp},
       {"aten::hardtanh", hardtanh, aten_hardtanh},
       {"aten::hardtanh_", hardtanh_, aten_hardtanh_},
+      {"aten::elu", elu, aten_elu},
+      {"aten::elu_", elu_, aten_elu_},
   };
 }
 
