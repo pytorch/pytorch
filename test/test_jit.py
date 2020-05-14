@@ -6889,7 +6889,7 @@ a")
                 self.checkScript(test_bool_cast_tensor, (torch.tensor(inp_val),))
 
         self.checkScriptRaisesRegex(test_bool_cast_tensor, (torch.tensor([1, 1]),), Exception,
-                                    "bool value of Tensor with more than one value")
+                                    "Boolean value of Tensor with more than one value")
 
         def test_not_cast(x):
             if not x:
