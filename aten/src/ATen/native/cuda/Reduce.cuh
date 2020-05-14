@@ -29,7 +29,7 @@ struct ROCm_Bug {
   C10_HOST_DEVICE operator T() {
     return *reinterpret_cast<T*>(this);
   }
-}
+};
 #endif
 
 using at::detail::Array;
