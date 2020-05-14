@@ -12,6 +12,10 @@ namespace at {
 // but there isn't a centralized definition.
 constexpr int64_t kVmapMaxTensorDims = 64;
 
+// Store this number of elements of BatchDims on the stack. Most people will
+// probably use <= 5 nested vmaps, but adjust this number as necessary.
+constexpr int64_t kBatchDimsStackSize = 5;
+
 struct BatchDim {
   BatchDim(int64_t dim, int64_t level) : dim_(dim), level_(level) {}
   int64_t dim() const {
@@ -25,7 +29,7 @@ struct BatchDim {
   int64_t level_;
 };
 
-using BatchDims = SmallVector<BatchDim, 5>;
+using BatchDims = SmallVector<BatchDim, kBatchDimsStackSize>;
 using BatchDimsRef = ArrayRef<BatchDim>;
 
 struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
@@ -61,7 +65,7 @@ inline BatchedTensorImpl* getBatched(Tensor tensor) {
 }
 
 // Returns a bitset. If bit i is set, then that means dim i is a batchdim.
-inline std::bitset<kVmapMaxTensorDims> createIsBdimBitset(BatchDimsRef bdims) {
+inline std::bitset<kVmapMaxTensorDims> createBatchDimBitset(BatchDimsRef bdims) {
   std::bitset<kVmapMaxTensorDims> is_bdim;
   for (const auto& bdim : bdims) {
     is_bdim.set(bdim.dim());
@@ -76,6 +80,11 @@ inline std::ostream& operator<<(std::ostream& out, const BatchDim& bdim) {
 
 inline Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
   TORCH_INTERNAL_ASSERT(!isBatched(tensor));
+  auto tensor_dim = tensor.dim();
+  TORCH_CHECK(
+      tensor_dim < kVmapMaxTensorDims,
+      "vmap only supports tensors of dimensionality up to ", kVmapMaxTensorDims,
+      "; got a tensor with dim ", tensor_dim);
   return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
 }
 

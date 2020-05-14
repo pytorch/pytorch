@@ -28,6 +28,18 @@ TEST(VmapTest, TestBatchedTensor) {
     ASSERT_EQ(x.dim(), 1);
     ASSERT_EQ(x.numel(), 2);
   }
+  {
+    // Test vmap tensor dimensionality limit
+
+    // Should not throw
+    std::vector<int64_t> sizes(kVmapMaxTensorDims, 1);
+    Tensor x = addBatchDim(ones(sizes), /*lvl=*/1, /*dim=*/1);
+
+    // Should throw
+    std::vector<int64_t> too_many_sizes(kVmapMaxTensorDims + 1, 1);
+    auto big_dim_tensor = ones(too_many_sizes);
+    ASSERT_THROW(addBatchDim(big_dim_tensor, /*lvl=*/1, /*dim=*/1), c10::Error);
+  }
 }
 
 }

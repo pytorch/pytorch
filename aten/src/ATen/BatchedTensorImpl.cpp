@@ -32,8 +32,13 @@ int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
     const auto ndim = sizes_.size();
     dim = maybe_wrap_dim(dim, ndim);
   }
+  auto is_bdim = createBatchDimBitset(bdims_);
 
-  auto is_bdim = createIsBdimBitset(bdims_);
+  // Example: assume dim = 3, and is_bdim = 10010011000...
+  // The 1's are batch dims and 0's are normal dims of the underlying value_ Tensor.
+  // actualDim gives us the index of `dim` in the `value_` Tensor, which is equivalent
+  // to asking "where does the 3rd (0-indexed) zero occur in the bitset?".
+  // The answer to that is index 5.
   int64_t non_bdim_count = 0;
   for (int64_t actual_dim = 0; actual_dim < kVmapMaxTensorDims; actual_dim++) {
     if (is_bdim[actual_dim]) {
@@ -44,6 +49,10 @@ int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
     }
     non_bdim_count++;
   }
+  // If we hit this assert, then that means
+  // `non_bdim_count` + #num_bdims > kVmapMaxTensorDims. We restrict the number
+  // of dims a BatchedTensorImpl can have to kVmapMaxTensorDims so this should
+  // never be hit.
   TORCH_INTERNAL_ASSERT(false);
 }
 
