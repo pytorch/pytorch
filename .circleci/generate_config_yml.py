@@ -14,6 +14,10 @@ import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
 import cimodel.data.windows_build_definitions as windows_build_definitions
 import cimodel.data.binary_build_definitions as binary_build_definitions
 import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
+import cimodel.data.simple.macos_definitions
+import cimodel.data.simple.mobile_definitions
+import cimodel.data.simple.ios_definitions
+import cimodel.data.simple.android_gradle
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.miniyaml as miniyaml
 
@@ -97,10 +101,10 @@ YAML_SOURCES = [
     File("workflows-setup-job.yml"),
     Listgen(windows_build_definitions.get_windows_workflows, 3),
     Listgen(pytorch_build_definitions.get_workflow_jobs, 3),
-    File("workflows-pytorch-macos-builds.yml"),
-    File("workflows-pytorch-android-gradle-build.yml"),
-    File("workflows-pytorch-ios-builds.yml"),
-    File("workflows-pytorch-mobile-builds.yml"),
+    Listgen(cimodel.data.simple.macos_definitions.get_workflow_jobs, 3),
+    Listgen(cimodel.data.simple.android_gradle.get_workflow_jobs, 3),
+    Listgen(cimodel.data.simple.ios_definitions.get_workflow_jobs, 3),
+    Listgen(cimodel.data.simple.mobile_definitions.get_workflow_jobs, 3),
     File("workflows-pytorch-ge-config-tests.yml"),
     File("workflows-pytorch-bazel-builds.yml"),
     Listgen(caffe2_build_definitions.get_workflow_jobs, 3),
