@@ -2,12 +2,14 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/library.h>
 
 using at::Scalar;
 using at::Tensor;
@@ -121,13 +123,20 @@ RegisterOperators reg_rpc_ops(
              IValue emptyTuple(c10::ivalue::Tuple::create({}));
              IValue emptyDict{
                  c10::impl::GenericDict(AnyType::get(), AnyType::get())};
-             // Equavalent to Python statment
+             // Equivalent to Python statement
              // `args = args if args is not None else ()`.
              auto& argsTupleIValue =
                  num_inputs >= 3 ? *stackIter++ : emptyTuple;
              // `kwargs = kwargs if kwargs is not None else {}`.
              auto& kwargsDictIValue =
                  num_inputs >= 4 ? *stackIter++ : emptyDict;
+
+             // IValue corresponding to placeholder for RPC timeout. Used if no
+             // rpc timeout is specified by user.
+             IValue noTimeout(torch::distributed::rpc::kUnsetRpcTimeout);
+             const auto rpcMaxInputs = 5;
+             auto& timeoutIValue =
+                 num_inputs >= rpcMaxInputs ? *stackIter++ : noTimeout;
              TORCH_INTERNAL_ASSERT(
                  dstWorkerIValue.isString() ||
                  c10::getCustomClassType<
@@ -136,6 +145,7 @@ RegisterOperators reg_rpc_ops(
              TORCH_INTERNAL_ASSERT(qualifiedNameIValue.isString());
              TORCH_INTERNAL_ASSERT(argsTupleIValue.isTuple());
              TORCH_INTERNAL_ASSERT(kwargsDictIValue.isGenericDict());
+             TORCH_INTERNAL_ASSERT(timeoutIValue.isDouble());
 
              // Get FunctionSchema for qualifiedName.
              auto qualifiedName =
@@ -206,13 +216,15 @@ RegisterOperators reg_rpc_ops(
                dstWorkerNameStr =
                    dstWorkerIValue.toCustomClass<dist_rpc::WorkerInfo>()->name_;
              }
-
+             // Get RPC timeout, if specified by user.
+             const auto rpcTimeout = timeoutIValue.toDouble();
              // Send RPC request.
              auto futureIValuePtr = dist_rpc::rpcTorchscript(
                  dstWorkerNameStr,
                  qualifiedName,
                  functionSchema,
-                 userCallableStack);
+                 userCallableStack,
+                 rpcTimeout);
 
              // Push output to the stack.
              drop(stack, num_inputs);
@@ -222,16 +234,16 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisSpecialCase())});
 
-auto reg_distributed_ops = torch::RegisterOperators().op(
-    "aten::get_gradients(int context_id) -> Dict(Tensor, Tensor)",
-    torch::RegisterOperators::options()
-        .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-        .catchAllKernel([](int64_t context_id) {
-          const auto& autogradContext =
-              dist_autograd::DistAutogradContainer::getInstance()
-                  .retrieveContext(context_id);
-          return autogradContext->getGradients();
-        }));
+// Implementations located in
+// torch/csrc/jit/runtime/register_distributed_ops.cpp
+TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
+  m.impl("get_gradients", [](int64_t context_id) {
+    const auto& autogradContext =
+        dist_autograd::DistAutogradContainer::getInstance().retrieveContext(
+            context_id);
+    return autogradContext->getGradients();
+  });
+}
 
 } // namespace
 } // namespace jit
