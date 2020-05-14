@@ -1957,17 +1957,18 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(DimArange(), x)
 
     def _test_compare_ops(self, model, num_inputs):
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        x_float = torch.randn(1, 2, 3, 4, requires_grad=True)
+        x_int = torch.randint(10, (3, 4), dtype=torch.int32)
         if num_inputs > 1:
-            y = torch.randn(1, 2, 3, 4, requires_grad=True)
-            x = (x, y)
-        self.run_test(model, x)
-
-        x = torch.randint(10, (3, 4), dtype=torch.int32)
-        if num_inputs > 1:
-            y = torch.randint(10, (3, 4), dtype=torch.int32)
-            x = (x, y)
-        self.run_test(model, x)
+            y_float = torch.randn(1, 2, 3, 4, requires_grad=True)
+            y_int = torch.randint(10, (3, 4), dtype=torch.int32)
+            self.run_test(model, (x_float, y_float))
+            self.run_test(model, (x_float, y_int))
+            self.run_test(model, (x_int, y_float))
+            self.run_test(model, (x_int, y_int))
+        else:
+            self.run_test(model, x_float)
+            self.run_test(model, x_int)
 
     def test_gt(self):
         class GreaterModel(torch.nn.Module):
