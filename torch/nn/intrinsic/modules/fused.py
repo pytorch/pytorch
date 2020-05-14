@@ -1,6 +1,15 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
-from torch.nn import Conv2d, Conv3d, ReLU, Linear, BatchNorm2d, BatchNorm3d
+from torch.nn import Conv1d, Conv2d, Conv3d, ReLU, Linear, BatchNorm2d, BatchNorm3d
+
+class ConvReLU1d(torch.nn.Sequential):
+    r"""This is a sequential container which calls the Conv 1d and ReLU modules.
+    During quantization this will be replaced with the corresponding fused module."""
+    def __init__(self, conv, relu):
+        assert type(conv) == Conv1d and type(relu) == ReLU, \
+            'Incorrect types for input modules{}{}'.format(
+                type(conv), type(relu))
+        super(ConvReLU1d, self).__init__(conv, relu)
 
 class ConvReLU2d(torch.nn.Sequential):
     r"""This is a sequential container which calls the Conv 2d and ReLU modules.

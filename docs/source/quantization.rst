@@ -189,12 +189,13 @@ Basic activations are supported.
 
 * :meth:`~torch.nn.functional.relu` — Rectified linear unit (copy)
 * :meth:`~torch.nn.functional.relu_` — Rectified linear unit (inplace)
-* :meth:`~torch.nn.functional.max_pool2d` - Maximum pooling 
+* :meth:`~torch.nn.functional.max_pool2d` - Maximum pooling
 * :meth:`~torch.nn.functional.adaptive_avg_pool2d` - Adaptive average pooling
 * :meth:`~torch.nn.functional.avg_pool2d` - Average pooling
 * :meth:`~torch.nn.functional.interpolate` - Interpolation
+* :meth:`~torch.nn.functional.hardswish` - Hard Swish
 * :meth:`~torch.nn.functional.upsample` - Upsampling
-* :meth:`~torch.nn.functional.upsample_bilinear` - Bilinear Upsampling 
+* :meth:`~torch.nn.functional.upsample_bilinear` - Bilinear Upsampling
 * :meth:`~torch.nn.functional.upsample_nearest` - Upsampling Nearest
 
 ``torch.nn.intrinsic``
@@ -209,6 +210,7 @@ accuracy
 
   * :class:`~torch.nn.intrinsic.ConvBn2d` — Conv2d + BatchNorm
   * :class:`~torch.nn.intrinsic.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
+  * :class:`~torch.nn.intrinsic.ConvReLU1d` — Conv1d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU2d` — Conv2d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU3d` — Conv3d + ReLU
   * :class:`~torch.nn.intrinsic.LinearReLU` — Linear + ReLU
@@ -223,6 +225,7 @@ accuracy
   inference (no BatchNorm variants as it's usually folded into convolution for
   inference):
   * :class:`~torch.nn.intrinsic.quantized.LinearReLU` — Linear + ReLU
+  * :class:`~torch.nn.intrinsic.quantized.ConvReLU1d` — 1D Convolution + ReLU
   * :class:`~torch.nn.intrinsic.quantized.ConvReLU2d` — 2D Convolution + ReLU
   * :class:`~torch.nn.intrinsic.quantized.ConvReLU3d` — 3D Convolution + ReLU
 
@@ -365,6 +368,7 @@ quantization output parameters)
 * :func:`~torch.nn.quantized.functional.linear` — Linear (fully-connected) op
 * :func:`~torch.nn.quantized.functional.max_pool2d` — 2D max pooling
 * :func:`~torch.nn.quantized.functional.relu` — Rectified linear unit
+* :func:`~torch.nn.quantized.functional.hardswish` — Hard Swish
 * :func:`~torch.nn.quantized.functional.upsample` — Upsampler. Will be
   deprecated in favor of :func:`~torch.nn.quantized.functional.interpolate`
 * :func:`~torch.nn.quantized.functional.upsample_bilinear` — Bilenear
@@ -588,6 +592,11 @@ ConvBnReLU2d
 .. autoclass:: ConvBnReLU2d
     :members:
 
+ConvReLU1d
+~~~~~~~~~~~~~~~
+.. autoclass:: ConvReLU1d
+    :members:
+
 ConvReLU2d
 ~~~~~~~~~~~~~~~
 .. autoclass:: ConvReLU2d
@@ -691,6 +700,7 @@ Functional interface
 .. autofunction:: adaptive_avg_pool2d
 .. autofunction:: avg_pool2d
 .. autofunction:: interpolate
+.. autofunction:: hardswish
 .. autofunction:: upsample
 .. autofunction:: upsample_bilinear
 .. autofunction:: upsample_nearest

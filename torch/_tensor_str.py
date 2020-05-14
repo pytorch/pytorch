@@ -280,7 +280,9 @@ def _str(self):
             or (self.device.type == 'cuda' and torch.cuda.current_device() != self.device.index):
         suffixes.append('device=\'' + str(self.device) + '\'')
 
-    has_default_dtype = self.dtype in (torch.get_default_dtype(), torch.int64, torch.bool)
+    # TODO: add an API to map real -> complex dtypes
+    _default_complex_dtype = torch.cdouble if torch.get_default_dtype() == torch.double else torch.cfloat
+    has_default_dtype = self.dtype in (torch.get_default_dtype(), _default_complex_dtype, torch.int64, torch.bool)
     if self.is_sparse:
         suffixes.append('size=' + str(tuple(self.shape)))
         suffixes.append('nnz=' + str(self._nnz()))
