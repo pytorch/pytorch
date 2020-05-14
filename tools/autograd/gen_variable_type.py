@@ -219,7 +219,7 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_DEFAULT = CodeTemplate("""\
-TypeDefault::${type_wrapper_name}(${type_method_args})""")
+TypeDefault::${type_wrapper_name}(${args})""")
 
 CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
 at::${api_name}(${unpacked_args})""")
@@ -545,10 +545,8 @@ def gen_variable_type(out, aten_declarations, template_path):
 
     for declaration in aten_declarations:
         if dispatch_strategy(declaration) == 'use_derived':
-            assert declaration['type_method_formals'] == declaration['formals']
             registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration, compound='false'))
         else:
-            assert declaration['type_method_formals'] == declaration['formals']
             registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration, compound='true'))
 
     env = {
@@ -569,11 +567,9 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
 
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
-        assert declaration['type_method_formals'] == declaration['formals']
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if not declaration['manual_kernel_registration']:
             body = emit_body(declaration)
-            assert declaration['type_method_formals'] == declaration['formals']
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body))
             if declaration['use_c10_dispatcher'] == 'full':

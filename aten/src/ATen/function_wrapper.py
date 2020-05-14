@@ -490,7 +490,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'name': str,
     'operator_name': str,
     'overload_name': str,
-    'native_actuals': List[str],
     'native_type_method_dispatch': str,
     # options should be List[FunctionOption]
     'options': Any,
@@ -502,9 +501,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'returns': List[ReturnType],
     'sparse': bool,
     'type_definition_body': List[str],
-    'type_method_actuals': List[str],
     'type_method_definition_dispatch': str,
-    'type_method_formals': List[str],
     'variants': str,
     'with_gil': bool,
 })
@@ -887,12 +884,6 @@ def create_generic(top_env, declarations):
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
 
-        # There are no cases where these differ, but they do in native_functions
-        option['type_method_formals'] = option['formals']
-        assert option['type_method_formals'] == option['formals']
-        option['type_method_actuals'] = option['actuals']
-        assert option['type_method_actuals'] == option['actuals']
-
         assert 'method' not in option['variants'], 'TH functions cannot be methods'
         is_function = 'function' in option['variants']
         # NB: TH functions don't support multiple dispatch
@@ -1024,8 +1015,6 @@ def create_generic(top_env, declarations):
         option['actuals'] = [f['name'] for f in formals]
 
         option['formals_types'] = [f['type'] for f in option['formals_list']]
-        option['native_actuals'] = [f['name'] for f in option['formals_list']]
-        assert option['native_actuals'] == option['actuals']
 
         option['formals_types_with_return'] = [option['return_type']]
         if len(option['formals_types']) > 0:
@@ -1104,7 +1093,6 @@ def create_generic(top_env, declarations):
                 static_dispatch_function_cases = []
                 for backend in static_dispatch_backends:
                     if backend in type_method_dispatch:
-                        assert option['native_actuals'] == option['actuals']
                         static_dispatch_function_cases.append(STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
                             option,
                             backend=backend,
@@ -1116,11 +1104,9 @@ def create_generic(top_env, declarations):
                     dispatch_key_init=dispatch_key_init,
                     static_dispatch_function_cases=static_dispatch_function_cases)
             else:
-                assert option['native_actuals'] == option['actuals']
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, actuals=option['actuals'])
 
-            assert option['native_actuals'] == option['actuals']
             fn_definition = C10_FUNCTION_DEFINITION.substitute(
                 option, static_dispatch_function_body=static_dispatch_function_body)
 
@@ -1131,13 +1117,6 @@ def create_generic(top_env, declarations):
                 option['name'], ", ".join(option['method_formals_with_defaults']))
 
         type_method_dispatch = option['type_method_definition_dispatch']
-
-        option['type_method_formals'] = [format_formal(f) for f in formals]
-        assert option['type_method_formals'] == option['formals']
-        option['type_method_actuals'] = [f['name'] for f in formals]
-        assert option['type_method_actuals'] == option['actuals']
-        option['native_actuals'] = [f['name'] for f in formals]
-        assert option['native_actuals'] == option['actuals']
 
         is_method = 'method' in option['variants']
         is_namespace_function = 'function' in option['variants']
@@ -1181,8 +1160,6 @@ def create_generic(top_env, declarations):
             # Having manual_kernel_registration for an abstract method doesn't make sense.
             assert not option['manual_kernel_registration']
         else:
-            assert option['type_method_formals'] == option['formals']
-            assert option['native_actuals'] == option['actuals']
             top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
             if not option['manual_kernel_registration']:
@@ -1465,7 +1442,6 @@ def create_derived(backend_type_env, declarations):
             env = nested_dict(option, backend_type_env)
             body = emit_body(env, option, option['backend_types'][backend])  # type: ignore
             option['type_definition_body'] = body
-            assert env['type_method_formals'] == env['formals']
             legacy_th_declarations.append(
                 LEGACY_TH_DECLARATION.substitute(env))
             legacy_th_definitions.append(
@@ -1486,15 +1462,12 @@ def create_derived(backend_type_env, declarations):
 
                 native_dispatch = dispatch.get(backend)
 
-                assert env['type_method_formals'] == env['formals']
                 type_object_declarations.append(
                     NATIVE_DISPATCH_DECLARATION.substitute(env))
 
                 option['native_type_method_dispatch'] = native_dispatch
                 option['device_init'] = gen_device_init(option, backend_type_env)
 
-                assert option['type_method_formals'] == option['formals']
-                assert option['native_actuals'] == option['actuals']
                 type_object_definitions.append(
                     NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
 

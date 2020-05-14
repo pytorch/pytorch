@@ -68,7 +68,6 @@ def register_backend_select_methods(declarations, template_path, file_manager):
 
                 dispatch_key_init = gen_dispatch_key_init('_dk', option['formals_list'])
 
-                assert option['actuals'] == option['type_method_actuals']
                 method_def = FUNCTION_DEFINITION.substitute(function_name=name,
                                                             schema_string=option['schema_string'],
                                                             method_formals=option['formals_with_defaults'],
