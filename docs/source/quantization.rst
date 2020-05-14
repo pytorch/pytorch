@@ -208,7 +208,9 @@ accuracy
 * ``torch.nn.intrinsic`` — float versions of the modules, can be swapped with
   quantized version 1 to 1:
 
+  * :class:`~torch.nn.intrinsic.ConvBn1d` — Conv1d + BatchNorm1d
   * :class:`~torch.nn.intrinsic.ConvBn2d` — Conv2d + BatchNorm
+  * :class:`~torch.nn.intrinsic.ConvBnReLU1d` — Conv1d + BatchNorm1d + ReLU
   * :class:`~torch.nn.intrinsic.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU1d` — Conv1d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU2d` — Conv2d + ReLU
@@ -584,9 +586,19 @@ then quantized.
 
 .. automodule:: torch.nn.intrinsic
 
+ConvBn1d
+~~~~~~~~~~~~~~~
+.. autoclass:: ConvBn1d
+    :members:
+
 ConvBn2d
 ~~~~~~~~~~~~~~~
 .. autoclass:: ConvBn2d
+    :members:
+
+ConvBnReLU1d
+~~~~~~~~~~~~~~~
+.. autoclass:: ConvBnReLU1d
     :members:
 
 ConvBnReLU2d

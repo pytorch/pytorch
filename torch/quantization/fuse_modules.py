@@ -48,6 +48,7 @@ def fuse_conv_bn_relu(conv, bn, relu):
     assert(conv.training == bn.training == relu.training),\
         "Conv and BN both must be in the same mode (train or eval)."
     is_3d = isinstance(conv, torch.nn.Conv3d)
+    is_1d = isinstance(conv, torch.nn.Conv1d)
     if conv.training:
         assert bn.num_features == conv.out_channels, 'Output channel of Conv must match num_features of BatchNorm'
         assert bn.affine, 'Only support fusing BatchNorm with affine set to True'
@@ -56,9 +57,14 @@ def fuse_conv_bn_relu(conv, bn, relu):
         return torch_fused.ConvBnReLU3d(conv, bn, relu) if is_3d \
             else torch_fused.ConvBnReLU2d(conv, bn, relu)
     else:
-        return torch_fused.ConvReLU3d(
-            torch.nn.utils.fusion.fuse_conv_bn_eval(conv, bn), relu) if is_3d \
-            else torch_fused.ConvReLU2d(
+        if is_1d:
+            return torch_fused.ConvReLU1d(
+                torch.nn.utils.fusion.fuse_conv_bn_eval(conv, bn), relu)
+        elif is_3d:
+            return torch_fused.ConvReLU3d(
+                torch.nn.utils.fusion.fuse_conv_bn_eval(conv, bn), relu)
+        else:
+            return torch_fused.ConvReLU2d(
                 torch.nn.utils.fusion.fuse_conv_bn_eval(conv, bn), relu)
 
 # Generalization of getattr
@@ -93,6 +99,8 @@ def fuse_known_modules(mod_list):
     """
 
     OP_LIST_TO_FUSER_METHOD = {
+        (torch.nn.Conv1d, torch.nn.BatchNorm1d): fuse_conv_bn,
+        (torch.nn.Conv1d, torch.nn.BatchNorm1d, torch.nn.ReLU): fuse_conv_bn_relu,
         (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn,
         (torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU): fuse_conv_bn_relu,
         (torch.nn.Conv3d, torch.nn.BatchNorm3d): fuse_conv_bn,
