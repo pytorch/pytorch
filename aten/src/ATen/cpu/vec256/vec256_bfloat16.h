@@ -252,6 +252,15 @@ public:
   Vec256<BFloat16> expm1() const {
     return map(Sleef_expm1f8_u10);
   }
+  Vec256<BFloat16> fmod(const Vec256<BFloat16> & q) const {
+    __m256 x_lo, x_hi;
+    cvtbf16_fp32(values, x_lo, x_hi);
+    __m256 q_lo, q_hi;
+    cvtbf16_fp32(q.values, q_lo, q_hi);
+    auto o1 = Sleef_fmodf8(x_lo, q_lo);
+    auto o2 = Sleef_fmodf8(x_hi, q_hi);
+    return cvtfp32_bf16(o1, o2);
+  }
   Vec256<BFloat16> log() const {
     return map(Sleef_logf8_u10);
   }

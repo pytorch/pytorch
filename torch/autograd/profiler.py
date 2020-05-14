@@ -389,8 +389,13 @@ class record_function(ContextDecorator):
         times.
 
         Arguments:
-            fut: (torch.distributed.rpc.Future or torch._C.Future): future for which to schedule
+            fut: (torch._C.Future): future for which to schedule
             callback for.
+
+        Returns:
+            A future that completes with the value of the passed in future when
+            the profiling callbacks have ran.
+
         """
         # Throw if we have already attached a callback onto the future.
         if not self.run_callbacks_on_exit:
@@ -399,14 +404,8 @@ class record_function(ContextDecorator):
         # We are scheduling to run this RecordFunction's end callbacks when the
         # passed in future completes, so don't run end callbacks on exit.
         self.run_callbacks_on_exit = False
-        # TODO: Currently, we have two different futures that can be returned,
-        # thus, two different code paths. We should clean this up when the
-        # futures are merged and rpc_async returns a consistent type (https://github.com/pytorch/pytorch/issues/34999).
-        if isinstance(fut, torch.distributed.rpc.Future):
-            torch.autograd._call_end_callbacks_on_fut(self.handle, fut)
-        else:
-            # jit Future, call jit operator
-            torch.ops.profiler._call_end_callbacks_on_jit_fut(self.handle, fut)
+        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(self.handle, fut)
+        return profiled_future
 
 
 class emit_nvtx(object):
