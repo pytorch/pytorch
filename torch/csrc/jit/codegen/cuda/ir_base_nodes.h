@@ -185,9 +185,9 @@ struct TORCH_CUDA_API Val : public Statement {
   // was found
   Expr* getOrigin();
 
-  virtual bool sameType(const Statement* const other) {
+  virtual bool sameType(const Statement* other) {
     return Statement::sameType(other) &&
-        getDataType() == static_cast<const Val* const>(other)->getDataType();
+        getDataType() == static_cast<const Val*>(other)->getDataType();
   }
 
   // TODO: Make this more sophisticated. A value being the same as another value
