@@ -169,7 +169,9 @@ void IRPrinter::handle(const Float* const f) {
   if (f->isSymbolic()) {
     os << "f" << f->name();
   } else {
-    os << "float(" << std::setprecision(std::numeric_limits<float>::max_digits10) << *(f->value()) << ")";
+    os << "float("
+       << std::setprecision(std::numeric_limits<float>::max_digits10)
+       << *(f->value()) << ")";
   }
 }
 
