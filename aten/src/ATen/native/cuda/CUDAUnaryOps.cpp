@@ -14,6 +14,4 @@ namespace at { namespace native {
     return _th_op##_out(result, self);                           \
   }
 
-IMPLEMENT_UNARY_OP_PREQUEL(erfc, legacy::cuda::_th_erfc)
-
 }}
