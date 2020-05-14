@@ -6446,7 +6446,7 @@ class TestTorchDeviceType(TestCase):
         out = torch.empty(a.shape, dtype=out_dtype, device=device)
 
         if (dtype == torch.bfloat16 or dtype.is_complex or
-            out_dtype == torch.bfloat16 or out_dtype.is_complex):
+                out_dtype == torch.bfloat16 or out_dtype.is_complex):
             self.assertRaises(RuntimeError, lambda: torch.logical_not(a, out=out))
             raise unittest.SkipTest('logical_not not supported on {}'.format(out_dtype))
 
