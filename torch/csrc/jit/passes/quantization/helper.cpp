@@ -140,10 +140,10 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     "leaky_relu_",
 };
 
-float _asym_scale = 1.0f / 256.0f;
-int _asym_zero_point = 0;
-float _sym_scale = 2.0f / 256.0f;
-int _sym_zero_point = 128;
+const float _asym_scale = 1.0f / 256.0f;
+const int _asym_zero_point = 0;
+const float _sym_scale = 2.0f / 256.0f;
+const int _sym_zero_point = 128;
 // quantization parameters for ops with range 0 to 1
 // for example: aten/src/ATen/native/quantized/cpu/qsigmoid.cpp
 std::tuple<c10::QScheme, QParamVector> _per_tensor_asym_qparam =
