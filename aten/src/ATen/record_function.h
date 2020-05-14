@@ -151,10 +151,6 @@ struct TORCH_API RecordFunction {
   // original value of current() is restored in destructor/_end
   void _setCurrent();
 
-  inline RecordFunction* parent() const {
-    return parent_;
-  }
-
   // Calls end callbacks
   void _end();
 
@@ -172,9 +168,9 @@ struct TORCH_API RecordFunction {
   CallbackHandles sorted_active_tls_handles_;
   CallbackHandles sorted_active_global_handles_;
   // Whether this RecordFunction runs any callbacks
-  bool active = false;
+  bool active_ = false;
   /// Whether any of the picked callbacks require inputs
-  bool needs_inputs = false;
+  bool needs_inputs_ = false;
 
  private:
   StringView name_;
@@ -313,23 +309,17 @@ class TORCH_API RecordFunctionCallback {
   static double sample_zero_one();
 };
 
-// Helper macro for RECORD_FUNCTION_WITH_SCOPE
-#define RECORD_FUNCTION_BEFORE(guard, fn, inputs, ...) \
-  if (guard.needs_inputs) { \
-    guard._before(fn, inputs, ##__VA_ARGS__); \
-  } else { \
-    guard._before(fn, ##__VA_ARGS__); \
-  }
-
 // Using macro to minimize inputs copies,
 // optional argument - function's seq_no
-// Note: calling _setCurrent only for stack based
-// RecordFunction
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
   at::RecordFunction guard(scope); \
-  if (guard.active) { \
+  if (guard.active_) { \
     guard._setCurrent(); \
-    RECORD_FUNCTION_BEFORE(guard, fn, inputs, ##__VA_ARGS__) \
+    if (guard.needs_inputs_) { \
+      guard._before(fn, inputs, ##__VA_ARGS__); \
+    } else { \
+      guard._before(fn, ##__VA_ARGS__); \
+    } \
   }
 
 #define RECORD_FUNCTION(fn, inputs, ...) \

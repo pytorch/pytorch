@@ -164,7 +164,7 @@ struct TORCH_API Event final {
   }
   double cuda_elapsed_us(const Event & e);
   bool has_cuda() const {
-    return event != nullptr;
+    return cuda_event != nullptr;
   }
   int device() const {
     return device_;
@@ -205,7 +205,7 @@ private:
   int64_t cpu_memory_usage_ = 0;
   int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
-  struct CUevent_st* event = nullptr;
+  struct CUevent_st* cuda_event = nullptr;
 };
 
 // a linked-list of fixed sized vectors, to avoid
