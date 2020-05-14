@@ -632,6 +632,30 @@ graph(%a_quant, %min, %max):
           %r = aten::clamp(%a_quant, %min, %max)
           return (%r) )";
 
+  // aten::hardtanh
+  std::string hardtanh = R"(
+graph(%a_quant, %min, %max):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::hardtanh(%a_dequant, %min, %max)
+)" + common_general_value_op;
+
+  std::string aten_hardtanh = R"(
+graph(%a_quant, %min, %max):
+          %r = aten::hardtanh(%a_quant, %min, %max)
+          return (%r) )";
+
+  // aten::hardtanh_
+  std::string hardtanh_ = R"(
+graph(%a_quant, %min, %max):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::hardtanh_(%a_dequant, %min, %max)
+)" + common_general_value_op;
+
+  std::string aten_hardtanh_ = R"(
+graph(%a_quant, %min, %max):
+          %r = aten::hardtanh_(%a_quant, %min, %max)
+          return (%r) )";
+
   return {
       {"quantized::conv1d", conv1d, quantized_conv1d},
       {"quantized::conv2d", conv2d, quantized_conv2d},
@@ -718,6 +742,8 @@ graph(%a_quant, %min, %max):
        upsample_trilinear3d,
        aten_upsample_trilinear3d},
       {"aten::clamp", clamp, aten_clamp},
+      {"aten::hardtanh", hardtanh, aten_hardtanh},
+      {"aten::hardtanh_", hardtanh_, aten_hardtanh_},
   };
 }
 
