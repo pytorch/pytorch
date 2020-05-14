@@ -64,8 +64,6 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "relu_",
     "sigmoid",
     "tanh",
-    "elu",
-    "elu_",
     "hardsigmoid",
     "hardsigmoid_",
     "leaky_relu",
@@ -78,16 +76,15 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
 // operation only depends on the shape of the Tensor
 // e.g. `aten::flatten(%input_tensor, ...)`
 std::vector<std::string> _single_input_general_shape_aten_funcs = {
-    "max_pool1d",  "max_pool2d",   "max_pool3d",
-    "flatten",     "max",          "min",
-    "dropout",     "reshape",
+    "max_pool1d", "max_pool2d",  "max_pool3d",
+    "flatten",    "max",         "min",
+    "dropout",    "reshape",
     "resize_", // Non-inplace resize is deprecated
-    "chunk",       "view",         "transpose",
-    "contiguous",  "permute",      "repeat_interleave",
-    "relu",        "relu_",        "sigmoid",
-    "tanh",        "elu",          "elu_",
-    "hardsigmoid", "hardsigmoid_", "leaky_relu",
-    "leaky_relu_",
+    "chunk",      "view",        "transpose",
+    "contiguous", "permute",     "repeat_interleave",
+    "relu",       "relu_",       "sigmoid",
+    "tanh",       "hardsigmoid", "hardsigmoid_",
+    "leaky_relu", "leaky_relu_",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
@@ -107,6 +104,7 @@ std::vector<std::string> _single_input_general_value_call_funcs = {
     "upsample_bilinear",
     "upsample_nearest",
     "hardtanh",
+    "elu",
 };
 
 // Theses are aten functions for ops that doesn't require observation and
@@ -132,6 +130,8 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     // "clamp_",  // Enable when quantized `clamp_` is ready
     "hardtanh",
     "hardtanh_",
+    "elu",
+    "elu_",
 };
 
 // Special checks for ops that do not require observers for all input tensors.
