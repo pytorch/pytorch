@@ -5666,7 +5666,7 @@ class TestNN(NNTestCase):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_cudnn(1)
 
-    def _test_RNN_type1(self, device):
+    def _test_RNN_type1(self, device, dtype=torch.double):
         dropout = 0
         input_size = 10
         hidden_size = 6
@@ -5674,8 +5674,6 @@ class TestNN(NNTestCase):
         seq_length = 7
         num_directions = 2
         lengths = [7, 5, 5, 2, 1, 1]
-
-        dtype = torch.double
         batch = 6
 
         def reverse_padded_data(x, batch_first):
@@ -5877,7 +5875,10 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_type1_cudnn(self):
-        self._test_RNN_type1(torch.device('cuda'))
+        dtype = torch.double
+        if TEST_WITH_ROCM:
+            dtype = torch.float
+        self._test_RNN_type1(torch.device('cuda'), dtype=dtype)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cudnn_weight_norm(self):
