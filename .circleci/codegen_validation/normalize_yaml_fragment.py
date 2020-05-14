@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-import os, sys
+import os
+import sys
 
 sys.path.append(os.path.join(sys.path[0], '..'))
 

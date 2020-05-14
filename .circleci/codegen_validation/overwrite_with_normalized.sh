@@ -1,7 +1,7 @@
 #!/bin/bash -xe
 
 
-YAML_FILENAME=verbatim-sources/workflows-pytorch-mobile-builds.yml
+YAML_FILENAME=$1
 
 
 # Allows this script to be invoked from any directory:
