@@ -15490,8 +15490,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 long_res1 = long_m1.clone()
                 long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
 
-    # remove onlyCUDA after CPU impl of remainder_kernel be fixed
-    @onlyCUDA
     @dtypes(torch.float, torch.double)
     def test_remainder_fmod_large_dividend(self, device, dtype):
         alarge = 1e9
