@@ -732,6 +732,94 @@ graph(%a_quant, %negative_slope):
           %r = aten::leaky_relu_(%a_quant, %negative_slope)
           return (%r) )";
 
+  // IR pattern common to all ops with fixed quantization parameters for
+  // asymetric quantization
+  std::string asym_fixed_qparam_op_suffix = R"(
+          %r_scale : float = prim::Constant[value=0.00390625]()
+          %r_zero_point : int = prim::Constant[value=0]()
+          %r_dtype : int = prim::Constant[value=13]()
+          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+          return (%r_quant) )";
+
+  std::string sym_fixed_qparam_op_suffix = R"(
+          %r_scale : float = prim::Constant[value=0.0078125]()
+          %r_zero_point : int = prim::Constant[value=128]()
+          %r_dtype : int = prim::Constant[value=13]()
+          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+          return (%r_quant) )";
+
+  // aten::hardsigmoid
+  std::string hardsigmoid = R"(
+graph(%a_quant):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::hardsigmoid(%a_dequant)
+)" + asym_fixed_qparam_op_suffix;
+
+  std::string aten_hardsigmoid = R"(
+graph(%a_quant):
+          %r = aten::hardsigmoid(%a_quant)
+          return (%r) )";
+
+  // aten::hardsigmoid_
+  std::string hardsigmoid_ = R"(
+graph(%a_quant):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::hardsigmoid_(%a_dequant)
+)" + asym_fixed_qparam_op_suffix;
+
+  std::string aten_hardsigmoid_ = R"(
+graph(%a_quant):
+          %r = aten::hardsigmoid_(%a_quant)
+          return (%r) )";
+
+  // aten::sigmoid
+  std::string sigmoid = R"(
+graph(%a_quant):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::sigmoid(%a_dequant)
+)" + asym_fixed_qparam_op_suffix;
+
+  std::string aten_sigmoid = R"(
+graph(%a_quant):
+          %r = aten::sigmoid(%a_quant)
+          return (%r) )";
+
+  // aten::sigmoid_
+  std::string sigmoid_ = R"(
+graph(%a_quant):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::sigmoid_(%a_dequant)
+)" + asym_fixed_qparam_op_suffix;
+
+  std::string aten_sigmoid_ = R"(
+graph(%a_quant):
+          %r = aten::sigmoid_(%a_quant)
+          return (%r) )";
+
+  // aten::tanh
+  std::string tanh = R"(
+graph(%a_quant):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::tanh(%a_dequant)
+)" + sym_fixed_qparam_op_suffix;
+
+  std::string aten_tanh = R"(
+graph(%a_quant):
+          %r = aten::tanh(%a_quant)
+          return (%r) )";
+
+  // aten::tanh_
+  std::string tanh_ = R"(
+graph(%a_quant):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::tanh_(%a_dequant)
+)" + sym_fixed_qparam_op_suffix;
+
+  std::string aten_tanh_ = R"(
+graph(%a_quant):
+          %r = aten::tanh_(%a_quant)
+          return (%r) )";
+
   return {
       {"quantized::conv1d", conv1d, quantized_conv1d},
       {"quantized::conv1d_relu", conv1d_relu, quantized_conv1d_relu},
@@ -826,6 +914,13 @@ graph(%a_quant, %negative_slope):
       {"aten::elu_", elu_, aten_elu_},
       {"aten::leaky_relu", leaky_relu, aten_leaky_relu},
       {"aten::leaky_relu_", leaky_relu_, aten_leaky_relu_},
+      // fixed qparam ops
+      {"aten::hardsigmoid", hardsigmoid, aten_hardsigmoid},
+      {"aten::hardsigmoid_", hardsigmoid_, aten_hardsigmoid_},
+      {"aten::sigmoid", sigmoid, aten_sigmoid},
+      {"aten::sigmoid_", sigmoid_, aten_sigmoid_},
+      {"aten::tanh", tanh, aten_tanh},
+      {"aten::tanh_", tanh_, aten_tanh_},
   };
 }
 
