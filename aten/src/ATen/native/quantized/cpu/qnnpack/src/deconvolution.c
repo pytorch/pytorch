@@ -107,7 +107,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
     if (requantization_scales[i] <= 0.0f ||
         !isnormal(requantization_scales[i])) {
       pytorch_qnnp_log_error(
-          "failed to create convolution operator with %.7g requantization scale for "
+          "failed to create deconvolution operator with %.7g requantization scale for "
           "channel %d scale must be finite and positive",
           requantization_scales[i], i);
       goto error;
