@@ -100,7 +100,8 @@ TypePtr tryInferTypeWithTypeHint(
 
 ///////////////////////////  PyRRef  //////////////////////////////////
 
-PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {
+PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref)
+    : rref_(std::move(rref)), profilingFuture_(c10::nullopt) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
 
@@ -125,6 +126,15 @@ c10::intrusive_ptr<JitFuture> PyRRef::getFuture() const {
   // any value from it.
   return wrapFutureMessageInJitFuture(
       rref_->getOwnerCreationFuture(), false /* hasValue */);
+}
+
+c10::intrusive_ptr<JitFuture> PyRRef::getProfilingFuture() const {
+  TORCH_INTERNAL_ASSERT(profilingFuture_, "Profiling future has not been set!");
+  return *profilingFuture_;
+}
+
+void PyRRef::setProfilingFuture(c10::intrusive_ptr<JitFuture> profilingFuture) {
+  profilingFuture_ = std::move(profilingFuture);
 }
 
 bool PyRRef::isOwner() const {
