@@ -153,7 +153,7 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.acosh,
-          r"""
+           r"""
 acosh(input, out=None) -> Tensor
 
 Returns a new tensor with arccosh (inverse hyperbolic cosine) of the elements of :attr:`input`.
@@ -635,7 +635,7 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.asinh,
-          r"""
+           r"""
 asinh(input, out=None) -> Tensor
 
 Returns a new tensor with arcsinh (inverse hyperbolic sine) of the elements of :attr:`input`.
@@ -707,7 +707,7 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.atanh,
-          r"""
+           r"""
 atanh(input, out=None) -> Tensor
 
 Returns a new tensor with arctanh (inverse hyperbolic tangent) of the elements of :attr:`input`.
