@@ -9,6 +9,23 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include <regex>
+
+// Check if compiler has working std::regex implementation
+//
+// Test below is adapted from https://stackoverflow.com/a/41186162
+#if defined(_MSVC_LANG) && _MSVC_LANG >= 201103L
+  // Compiler has working regex. MSVC has erroneous __cplusplus.
+#elif __cplusplus >= 201103L &&                           \
+    (!defined(__GLIBCXX__) || (__cplusplus >= 201402L) || \
+        (defined(_GLIBCXX_REGEX_DFS_QUANTIFIERS_LIMIT) || \
+         defined(_GLIBCXX_REGEX_STATE_LIMIT)           || \
+             (defined(_GLIBCXX_RELEASE)                && \
+             _GLIBCXX_RELEASE > 4)))
+  // Compiler has working regex.
+#else
+  static_assert(false, "Compiler does not have proper regex support.");
+#endif
 
 namespace c10 {
 namespace {
@@ -38,49 +55,24 @@ DeviceType parse_type(const std::string& device_string) {
 }
 } // namespace
 
-// `std::regex` is still in a very incomplete state in GCC 4.8.x,
-// so we have to do our own parsing, like peasants.
-// https://stackoverflow.com/questions/12530406/is-gcc-4-8-or-earlier-buggy-about-regular-expressions
-//
-// Replace with the following code once we shed our GCC skin:
-//
-// static const std::regex regex(
-//     "(cuda|cpu)|(cuda|cpu):([0-9]+)|([0-9]+)",
-//     std::regex_constants::basic);
-// std::smatch match;
-// const bool ok = std::regex_match(device_string, match, regex);
-// TORCH_CHECK(ok, "Invalid device string: '", device_string, "'");
-// if (match[1].matched) {
-//   type_ = parse_type_from_string(match[1].str());
-// } else {
-//   if (match[2].matched) {
-//     type_ = parse_type_from_string(match[1].str());
-//   } else {
-//     type_ = Type::CUDA;
-//   }
-//   AT_ASSERT(match[3].matched);
-//   index_ = std::stoi(match[3].str());
-// }
 Device::Device(const std::string& device_string) : Device(Type::CPU) {
   TORCH_CHECK(!device_string.empty(), "Device string must not be empty");
-  auto index = device_string.find(':');
-  if (index == std::string::npos) {
-    type_ = parse_type(device_string);
-  } else {
-    std::string s;
-    s = device_string.substr(0, index);
-    TORCH_CHECK(!s.empty(), "Device string must not be empty");
-    type_ = parse_type(s);
 
-    std::string device_index = device_string.substr(index + 1);
+  // We assume gcc 5+, so we can use proper regex.
+  static const std::regex regex("([a-zA-Z_]+)(?::([1-9]\\d*|0))?");
+  std::smatch match;
+  TORCH_CHECK(
+    std::regex_match(device_string, match, regex),
+    "Invalid device string: '", device_string, "'");
+  type_ = parse_type(match[1].str());
+  if (match[2].matched) {
     try {
-      index_ = c10::stoi(device_index);
+      index_ = c10::stoi(match[2].str());
     } catch (const std::exception &) {
-      AT_ERROR("Could not parse device index '", device_index,
-               "' in device string '", device_string, "'");
+      AT_ERROR(
+        "Could not parse device index '", match[2].str(),
+        "' in device string '", device_string, "'");
     }
-    TORCH_CHECK(index_ >= 0,
-             "Device index must be non-negative, got ", index_);
   }
   validate();
 }

@@ -4,26 +4,11 @@
 #include <ATen/native/cuda/zmath.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
-#include <c10/macros/Macros.h>
-
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
 namespace at { namespace native {
-
-void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, iter.common_dtype(), "add_cuda/sub_cuda", [&]() {
-    auto alpha = alpha_scalar.to<scalar_t>();
-    gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return a + alpha * b;
-    });
-  });
-}
-
-static void sub_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
-  add_kernel_cuda(iter, -alpha_scalar);
-}
 
 void div_kernel_cuda(TensorIterator& iter) {
   if (!isIntegralType(iter.common_dtype(), /*includeBool*/ false) && iter.is_cpu_scalar(2)) {
@@ -62,33 +47,7 @@ void mul_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void remainder_kernel_cuda(TensorIterator& iter) {
-  if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "remainder_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        scalar_t r = a % b;
-        if ((r != 0) && ((r < 0) != (b < 0))) {
-          r += b;
-        }
-        return r;
-      });
-    });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "remainder_cuda", [&]() {
-      gpu_kernel_with_scalars(iter,
-        []GPU_LAMBDA(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          auto mod = ::fmod(a, b);
-          if ((mod != 0) && ((b < 0) != (mod < 0))) mod += b;
-          return mod;
-        });
-    });
-  }
-}
-
-REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
-REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
 REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
-REGISTER_DISPATCH(remainder_stub, &remainder_kernel_cuda);
 
 }} // namespace at::native
