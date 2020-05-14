@@ -140,7 +140,8 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
       " instead");
 
   at::Tensor weight_contig = weight.contiguous();
-  at::Tensor w_zero_points, w_scales;
+  std::vector<uint8_t> w_zero_points;
+  at::Tensor  w_scales;
   std::tie(w_zero_points, w_scales) =
       make_zero_points_and_scales_tensor(weight_contig);
 
@@ -156,7 +157,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
       bias_fp32.contiguous(), /* fp32 bias */
       c10::nullopt, /* input_scale */
       w_scales,
-      w_zero_points);
+      std::move(w_zero_points));
   return wt_ptr;
 }
 #endif // USE_PYTORCH_QNNPACK
