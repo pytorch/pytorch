@@ -66,6 +66,10 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
         at::ThreadLocalStateGuard g(tls_state);
         auto& rec = getRecordFunctionFromTensor(handle);
         rec._end();
+        // Note: this future is returned to the user to ensure that a call to wait()
+        // ensures that profiling callbacks have ran. To ensure that this is
+        // transparent, we must make this future propagate the value of the RPC
+        // future.
         return fut->constValue();
       };
   // Define a future that completes after the profiling callbacks are run.
@@ -93,7 +97,7 @@ jit::RegisterOperators reg_fut_ops({
           auto tensor = jit::pop(stack).toTensor();
           auto profiledFut = _call_end_callbacks_on_fut(tensor, fut);
           // return future that completes when profiling callbacks have run.
-          jit::push(stack, profiledFut);
+          jit::push(stack, std::move(profiledFut));
           return 0;
         },
         aliasAnalysisFromSchema()),

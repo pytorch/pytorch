@@ -343,7 +343,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
                 return std::make_shared<jit::PythonFutureWrapper>(
                     self.getProfilingFuture());
               },
-              py::call_guard<py::gil_scoped_release>(),
+              py::call_guard<py::gil_scoped_acquire>(),
               R"(
                   Returns future that completes when the profiling event corresponding
                   to the creation of this RRef on the remote node has been recorded.
@@ -355,7 +355,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
                      wrappedFuture) {
                 self.setProfilingFuture(wrappedFuture->fut);
               },
-              py::call_guard<py::gil_scoped_release>(),
+              py::call_guard<py::gil_scoped_acquire>(),
               R"(
                   Set future that is completed when the profiling event corresponding
                   to the creation of this RRef on the remote node has been recorded.
