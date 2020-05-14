@@ -1572,8 +1572,16 @@ class TestONNXRuntime(unittest.TestCase):
     def test_select(self):
         class Select(torch.nn.Module):
             def forward(self, x):
-                return torch.select(x, 0, 1)
+                return x[:, 1]
         
+        x = torch.randn(3, 4)
+        self.run_test(Select(), x)
+
+    def test_select_negative_index(self):
+        class Select(torch.nn.Module):
+            def forward(self, x):
+                return x[:, -1]
+
         x = torch.randn(3, 4)
         self.run_test(Select(), x)
 
