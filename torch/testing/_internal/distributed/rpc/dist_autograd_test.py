@@ -2131,9 +2131,9 @@ class DistAutogradTest(RpcAgentTestFixture):
             grads = dist_autograd.get_gradients(context_id)
             self.assertTrue(
                 rpc.rpc_sync(
-                  dst,
-                  _compare_owner_value,
-                  args=(context_id, rref, t3.grad)
+                    dst,
+                    _compare_owner_value,
+                    args=(context_id, rref, t3.grad)
                 )
             )
 
