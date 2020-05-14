@@ -63,7 +63,11 @@ inline Return KernelFunction::call(const OperatorHandle& opHandle, Args... args)
     // want callers to explicitly specify the Args.
 
     TORCH_INTERNAL_ASSERT(!signature_hash_.has_value() || (detail::hashFunctionSignature<Return (Args...)>() == *signature_hash_),
-        "Called KernelFunction::call with wrong argument types");
+        "Called KernelFunction::call with wrong argument types. Called with ",
+        detail::hashFunctionSignature<Return (Args...)>().name(),
+        " but kernel expects ",
+        signature_hash_->name()
+    );
 
     if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
         using ActualSignature = Return (OperatorKernel*, Args...);
