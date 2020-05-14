@@ -403,7 +403,7 @@ inline void test_binary_ops_for_int_type_(T real, T img, int_t num) {
 }
 
 template<typename T>
-C10_HOST_DEVICE void test_binary_ops_for_all_int_types_(T real, T img, int8_t i) {
+inline void test_binary_ops_for_all_int_types_(T real, T img, int8_t i) {
   test_binary_ops_for_int_type_<T, int8_t>(real, img, i);
   test_binary_ops_for_int_type_<T, int16_t>(real, img, i);
   test_binary_ops_for_int_type_<T, int32_t>(real, img, i);
