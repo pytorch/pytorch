@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
+// #include <torch/csrc/distributed/autograd/autograd.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
@@ -14,6 +15,8 @@ using at::Scalar;
 using at::Tensor;
 namespace dist_autograd = torch::distributed::autograd;
 namespace dist_rpc = torch::distributed::rpc;
+
+// using torch::distributed::autograd::kDistAutogradBackwardProfilingKey;
 
 namespace torch {
 namespace jit {
@@ -37,6 +40,10 @@ at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
 
 c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
+}
+
+c10::AliasAnalysisKind aliasAnalysisConservative() {
+  return c10::AliasAnalysisKind::CONSERVATIVE;
 }
 
 c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
@@ -110,6 +117,26 @@ RegisterOperators reg_rpc_ops(
            return 0;
          },
          aliasAnalysisFromSchema()),
+     Operator(
+         "aten::backward(int context_id, Tensor[] roots, bool retain_graph=False) -> ()",
+         [](Stack& stack) {
+           bool retain_graph = pop(stack).toBool();
+           auto roots = pop(stack).toTensorList();
+           int64_t context_id = pop(stack).toInt();
+           torch::autograd::variable_list variables;
+           for (const auto& root : roots) {
+             variables.emplace_back(root);
+           }
+           try {
+             dist_autograd::DistEngine::getInstance().execute(
+                 context_id, variables, retain_graph);
+           } catch (python_error& e) {
+             // FIXME: crashes if exception type is not RuntimeError
+             throw std::runtime_error(e.what());
+           }
+           return 0;
+         },
+         aliasAnalysisConservative()),
      Operator(
          prim::rpc_async,
          [](const Node* node) -> Operation {
@@ -232,6 +259,22 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
             context_id);
     return autogradContext->getGradients();
   });
+
+  // m.impl("dist_backward", [](int64_t context_id, TensorList roots, bool
+  // retain_graph = false) {
+  //   // RECORD_FUNCTION(kDistAutogradBackwardProfilingKey,
+  //   std::vector<c10::IValue>()); torch::autograd::variable_list variables;
+  //   for (const auto& root : roots) {
+  //     variables.emplace_back(root);
+  //   }
+  //   try {
+  //     dist_autograd::DistEngine::getInstance().execute(context_id, variables,
+  //     retain_graph);
+  //   } catch (python_error& e) {
+  //     // FIXME: crashes if exception type is not RuntimeError
+  //     throw std::runtime_error(e.what());
+  //   }
+  // });
 }
 
 } // namespace
