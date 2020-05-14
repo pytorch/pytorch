@@ -239,3 +239,7 @@ class TestTorchbind(JitTestCase):
 
         mod = TorchBindOptionalExplicitAttr()
         scripted = torch.jit.script(mod)
+
+    def test_torchbind_no_init(self):
+        with self.assertRaisesRegex(RuntimeError, 'torch::init'):
+            x = torch.classes._TorchScriptTesting._NoInit()
