@@ -127,7 +127,6 @@ def _get_builtin_table():
     import torch.distributed.autograd as dist_autograd
     if dist_autograd.is_available():
         _builtin_ops.append((dist_autograd.get_gradients, "aten::get_gradients"))
-        # _builtin_ops.append((dist_autograd.backward, "aten::dist_backward"))
         _builtin_ops.append((dist_autograd.backward, "aten::backward"))
 
     # populate the _builtin_table from _builtin_ops
