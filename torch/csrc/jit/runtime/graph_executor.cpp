@@ -772,13 +772,17 @@ void runNondiffOptimization(
   // and must be removed for fusion.
   LowerSimpleTuples(graph);
 
+  if (!getProfilingMode()) {
   // Rewrite subgraphs with many MMs into expressions that batch them.
-  BatchMM(graph);
+    BatchMM(graph, !getProfilingMode());
+  }
 
   if (tensorExprFuserEnabled()) {
     FuseTensorExprs(graph);
   } else {
-    FuseGraph(graph, strict_fuser_check);
+    if (!getProfilingMode()) {
+      FuseGraph(graph, strict_fuser_check);
+    }
   }
 
   // Run custom post-fusion passes

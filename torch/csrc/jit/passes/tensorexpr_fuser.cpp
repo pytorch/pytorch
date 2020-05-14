@@ -53,22 +53,22 @@ value_list sortReverseTopological(
   return result;
 }
 
-bool allShapesAreKnown(Value* v) {
+bool allShapesAreKnownAndGradFalse(Value* v) {
   if (!v->type()->cast<TensorType>()) {
     return true;
   }
-  return v->isCompleteTensor();
+  return v->isCompleteTensor() && !v->requires_grad();
 }
 
-bool allShapesAreKnown(Node* node) {
+bool allShapesAreKnownAndGradFalse(Node* node) {
   // TODO: Relax the checks to support dynamic shapes
   for (torch::jit::Value* output : node->outputs()) {
-    if (!allShapesAreKnown(output)) {
+    if (!allShapesAreKnownAndGradFalse(output)) {
       return false;
     }
   }
   for (torch::jit::Value* input : node->inputs()) {
-    if (!allShapesAreKnown(input)) {
+    if (!allShapesAreKnownAndGradFalse(input)) {
       return false;
     }
   }
@@ -170,7 +170,7 @@ bool canHandle(Node* node, AliasDb& aliasDb) {
   if (node->kind() == prim::Loop) {
     return false; // TODO
   }
-  if (!allShapesAreKnown(node)) {
+  if (!allShapesAreKnownAndGradFalse(node)) {
     return false;
   }
 

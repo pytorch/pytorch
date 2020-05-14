@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-TORCH_API void BatchMM(std::shared_ptr<Graph>& graph);
+TORCH_API void BatchMM(std::shared_ptr<Graph>& graph, bool allow_diff_inputs);
 
 }
 } // namespace torch

@@ -98,7 +98,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   ConstantPropagation(copy);
   runOptimization(copy);
 
-  if (needsGradientInProfilingMode(copy->block())) {
+  if (false) {
     auto diff_nodes = CreateAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);

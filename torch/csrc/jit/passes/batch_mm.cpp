@@ -249,22 +249,30 @@ struct TreeToken {
 
 enum class Side { LHS, RHS };
 
-void BatchMMTreeReduce(Block* block) {
+void BatchMMTreeReduce(Block* block, bool allow_diff_inputs) {
   auto graph = block->owningGraph();
 
   // Look for trees in the block
   std::unordered_map<Node*, TreeToken> tokens;
   for (auto node : block->nodes()) {
     if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
-      tokens[node] = TreeToken::mm(node);
+      if (allow_diff_inputs || (!node->input(0)->requires_grad() && !node->input(1)->requires_grad())) {
+        tokens[node] = TreeToken::mm(node);
+      }
     } else if (node->matches("aten::t(Tensor self) -> Tensor")) {
       auto input_it = tokens.find(node->input()->node());
+      if (!allow_diff_inputs && node->input()->requires_grad()) {
+        continue;
+      }
       if (input_it != tokens.end()) {
         tokens[node] = TreeToken::transpose(node, input_it->second);
       }
     } else if (
         node->matches(
             "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
+      if (!allow_diff_inputs && (node->input(0)->requires_grad() || node->input(1)->requires_grad())) {
+        continue;
+      }
       Node* lhs = node->inputs()[0]->node();
       Node* rhs = node->inputs()[1]->node();
       auto lhs_it = tokens.find(lhs);
@@ -285,7 +293,7 @@ void BatchMMTreeReduce(Block* block) {
       }
     } else {
       for (auto block : node->blocks()) {
-        BatchMMTreeReduce(block);
+        BatchMMTreeReduce(block, allow_diff_inputs);
       }
     }
   }
@@ -407,7 +415,7 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
   return std::make_pair(postprocess(lhses), postprocess(rhses));
 }
 
-void BatchMMSide(Block* block, AliasDb& alias_db) {
+void BatchMMSide(Block* block, bool allow_diff_inputs, AliasDb& alias_db) {
   // NB: 8 is the current loop unrolling factor
   static constexpr size_t how_many_is_many = 8;
   const auto batch_side = [&](std::vector<Node*>& mms, Side side) {
@@ -435,8 +443,12 @@ void BatchMMSide(Block* block, AliasDb& alias_db) {
   std::unordered_set<Value*> considered_values;
   for (Node* node : block->nodes()) {
     if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+      bool allowed = true; 
       for (Value* input : node->inputs()) {
-        if (/*bool not_inserted = */ !considered_values.emplace(input).second) {
+        if (!allow_diff_inputs && input->requires_grad()) {
+          allowed = false;
+        }
+        if (/*bool not_inserted = */ !considered_values.emplace(input).second || !allowed) {
           continue;
         }
         auto uses_with_many = gatherIndependentMMUses(input, alias_db);
@@ -449,7 +461,7 @@ void BatchMMSide(Block* block, AliasDb& alias_db) {
       }
     } else {
       for (Block* subblock : node->blocks()) {
-        BatchMMSide(subblock, alias_db);
+        BatchMMSide(subblock, allow_diff_inputs, alias_db);
       }
     }
   }
@@ -467,14 +479,14 @@ bool hasMutableOperators(Block* block) {
   return false;
 }
 
-void BatchMM(std::shared_ptr<Graph>& graph) {
+void BatchMM(std::shared_ptr<Graph>& graph, bool allow_diff_inputs) {
   if (hasMutableOperators(graph->block())) {
     // TODO(suo): make BatchMM mutability-safe
     return;
   }
   AliasDb alias_db(graph);
-  BatchMMTreeReduce(graph->block());
-  BatchMMSide(graph->block(), alias_db);
+  BatchMMTreeReduce(graph->block(), allow_diff_inputs);
+  BatchMMSide(graph->block(), allow_diff_inputs, alias_db);
   EliminateDeadCode(graph);
   // It's possible that transpose rearrangements have created sequences of
   // consecutive transposes that didn't exist before.
