@@ -12,6 +12,7 @@ import io
 import itertools
 import copy
 
+from torch import select
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
@@ -1567,6 +1568,14 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(IndexCopyModel(), x)
+
+    def test_select(self):
+        class Select(torch.nn.Module):
+            def forward(self, x):
+                return torch.select(x, 0, 1)
+        
+        x = torch.randn(3, 4)
+        self.run_test(Select(), x)
 
     # TODO: enable for opset 10 when ONNXRuntime version will be updated
 
