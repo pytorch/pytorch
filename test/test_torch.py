@@ -5708,6 +5708,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), torch.cosh(zero_d).shape)
         self.assertEqual((), torch.tan(zero_d).shape)
         self.assertEqual((), torch.atan(zero_d).shape)
+        self.assertEqual((), torch.acosh(zero_d).shape)
+        self.assertEqual((), torch.asinh(zero_d).shape)
+        self.assertEqual((), torch.atanh(zero_d).shape)
         self.assertEqual((), torch.tanh(zero_d).shape)
         self.assertEqual((), torch.erf(zero_d).shape)
         self.assertEqual((), torch.erfc(zero_d).shape)
@@ -5717,6 +5720,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.cosh(one_d).shape)
         self.assertEqual((1,), torch.tan(one_d).shape)
         self.assertEqual((1,), torch.atan(one_d).shape)
+        self.assertEqual((1,), torch.acosh(one_d).shape)
+        self.assertEqual((1,), torch.asinh(one_d).shape)
+        self.assertEqual((1,), torch.atanh(one_d).shape)
         self.assertEqual((1,), torch.tanh(one_d).shape)
         self.assertEqual((1,), torch.erf(one_d).shape)
         self.assertEqual((1,), torch.erfc(one_d).shape)
@@ -12319,6 +12325,12 @@ class TestTorchDeviceType(TestCase):
             ("asin", doubles, True, True, 'cuda'),
             ("atan", doubles, True, True, 'cpu'),
             ("atan", doubles, True, True, 'cuda'),
+            ("acosh", doubles, True, True, 'cpu'),
+            ("acosh", doubles, True, True, 'cuda'),
+            ("asinh", doubles, True, True, 'cpu'),
+            ("asinh", doubles, True, True, 'cuda'),
+            ("atanh", doubles, True, True, 'cpu'),
+            ("atanh", doubles, True, True, 'cuda'),
             ("bitwise_not", ints, True, True, 'cpu'),
             ("bitwise_not", ints, True, True, 'cuda'),
             ("ceil", doubles, True, True, 'cpu'),
@@ -13648,6 +13660,12 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.addcmul(y, y, value=2),
                 lambda x, y: x.addcmul_(y, y, value=2),
                 lambda x, y: y.addcmul(x, y, value=2),
+                lambda x, y: y.acosh(),
+                lambda x, y: y.acosh_(),
+                lambda x, y: y.asinh(),
+                lambda x, y: y.asinh_(),
+                lambda x, y: y.atanh(),
+                lambda x, y: y.atanh_(),
                 lambda x, y: x.asin(),
                 lambda x, y: x.asin_(),
                 lambda x, y: x.atan(),
@@ -17747,6 +17765,9 @@ tensor_op_tests = [
     ('acos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('asin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('atan', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
+    ('acosh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
+    ('asinh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
+    ('atanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('cos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('cosh', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, 1e-5, _float_types),
     ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
@@ -17925,12 +17946,15 @@ class _TorchMathTestMeta(object):
 
 torch_op_tests = [_TorchMathTestMeta('sin'),
                   _TorchMathTestMeta('asin', reffn='arcsin'),
+                  _TorchMathTestMeta('asinh', reffn='arcsinh'),
                   _TorchMathTestMeta('sinh'),
                   _TorchMathTestMeta('cos'),
                   _TorchMathTestMeta('acos', reffn='arccos'),
+                  _TorchMathTestMeta('acosh', reffn='arccosh'),
                   _TorchMathTestMeta('cosh'),
                   _TorchMathTestMeta('tan'),
                   _TorchMathTestMeta('atan', reffn='arctan'),
+                  _TorchMathTestMeta('atanh', reffn='arctanh'),
                   _TorchMathTestMeta('tanh'),
                   _TorchMathTestMeta('log'),
                   _TorchMathTestMeta('log10'),
