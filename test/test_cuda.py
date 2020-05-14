@@ -853,7 +853,7 @@ class TestCuda(TestCase):
         import os
         fname = "tempfile.pt"
         try:
-            with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+            with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
                 torch.save([torch.nn.Parameter(torch.randn(10, 10))], fname,
                            _use_new_zipfile_serialization=True)
                 torch.load(fname, 'cuda0')
@@ -863,7 +863,7 @@ class TestCuda(TestCase):
 
     def test_get_device_index(self):
         from torch.cuda._utils import _get_device_index
-        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+        with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             _get_device_index('cuda0', optional=True)
 
         with self.assertRaisesRegex(ValueError, "Expected a cuda device"):
