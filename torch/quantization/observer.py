@@ -879,15 +879,10 @@ class HistogramObserver(_ObserverBase):
         self.histogram.resize_(histogram.shape)
         self.histogram.copy_(histogram)
 
-    @torch.jit._overload_method
-    def forward(self, x_orig):  # noqa: F811
-        # type: (List[Tensor]) -> List[Tensor]
-        pass
-
-    @torch.jit._overload_method
-    def forward(self, x_orig):  # noqa: F811
-        # type: (Tensor) -> Tensor
-        pass
+    @torch.jit._overload
+    def forward(self, x_orig: List[torch.Tensor]) -> List[torch.Tensor]: ...
+    @torch.jit._overload
+    def forward(self, x_orig: torch.Tensor) -> torch.Tensor: ...
 
     def forward(self, x_orig):  # noqa: F811
         if isinstance(x_orig, torch.Tensor):
