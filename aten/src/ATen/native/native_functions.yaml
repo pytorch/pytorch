@@ -1246,15 +1246,9 @@
 - func: erfc_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _erfc__cpu
-    CUDA: _erfc__cuda
 
 - func: erfc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _erfc_out_cpu
-    CUDA: _erfc_out_cuda
 
 - func: exp(Tensor self) -> Tensor
   use_c10_dispatcher: full
