@@ -17,7 +17,7 @@ constexpr int64_t kVmapMaxTensorDims = 64;
 constexpr int64_t kBatchDimsStackSize = 5;
 
 struct BatchDim {
-  BatchDim(int64_t dim, int64_t level) : dim_(dim), level_(level) {}
+  BatchDim(int64_t level, int64_t dim) : dim_(dim), level_(level) {}
   int64_t dim() const {
     return dim_;
   }

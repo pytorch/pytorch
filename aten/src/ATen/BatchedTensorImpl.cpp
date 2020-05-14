@@ -91,7 +91,7 @@ bool BatchedTensorImpl::has_storage() const {
 Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim) {
   if (!isBatched(tensor)) {
     BatchDims bdims;
-    bdims.push_back({dim, level});
+    bdims.push_back({level, dim});
     return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
   }
   const auto* batched = getBatched(tensor);
