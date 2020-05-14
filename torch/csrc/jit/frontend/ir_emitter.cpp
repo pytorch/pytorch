@@ -2043,8 +2043,11 @@ struct to_ir {
     if (kind == c10::TypeKind::IntType || kind == c10::TypeKind::BoolType ||
         kind == c10::TypeKind::FloatType) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
-      auto converted =
-          graph->insert(aten::tensor, {value}, {NamedValue("dtype", dtype)});
+      auto device = graph->insert(prim::device, {matchTypeOf}, {});
+      auto converted = graph->insert(
+          aten::tensor,
+          {value},
+          {NamedValue("dtype", dtype), NamedValue("device", device)});
       return NamedValue(value.loc(), converted);
     }
 

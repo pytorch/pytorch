@@ -1,6 +1,7 @@
 import os
 import sys
 import inspect
+import unittest
 from typing import List
 
 import torch
@@ -8,7 +9,7 @@ import torch
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -195,6 +196,13 @@ class TestTensorBuiltins(JitTestCase):
             return a
 
         for fn in (fn1, fn2, fn3, fn4, fn5):
-            result1 = torch.jit.script(fn)(torch.zeros(2, dtype=torch.uint8))
-            result2 = fn(torch.zeros(2, dtype=torch.uint8))
-            self.assertEqual(list(result1), list(result2))
+            self.checkScript(fn, (torch.zeros(2, dtype=torch.uint8),))
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_tensor_subscript_assign_cuda(self):
+        def fn6(x):
+            a = torch.zeros_like(x, dtype=torch.float32, device="cuda")
+            a[torch.tensor(0)] = 2
+            return a
+
+        self.checkScript(fn6, (torch.zeros(2, dtype=torch.float32, device="cuda"),))
