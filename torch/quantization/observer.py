@@ -904,15 +904,15 @@ class HistogramObserver(_ObserverBase):
             for i in range(num_tensors):
                 if initialized:
                     min_val, max_val, histogram = min_vals[i], max_vals[i], \
-                        histograms[self.bins * i : self.bins * (i+1)]
+                        histograms[self.bins * i : self.bins * (i + 1)]
                 else:
                     min_val, max_val, histogram = torch.tensor([]), torch.tensor([]), \
                         torch.zeros(self.bins)
-                min_val, max_val, histogram = self._forward(x_orig[i], min_val, \
-                                                            max_val, histogram)
+                min_val, max_val, histogram = \
+                    self._forward(x_orig[i], min_val, max_val, histogram)
                 min_vals[i] = min_val
                 max_vals[i] = max_val
-                histograms[self.bins * i : self.bins * (i+1)] = histogram
+                histograms[self.bins * i : self.bins * (i + 1)] = histogram
                 self.update_stats(min_vals, max_vals, histograms)
             return x_orig
 
@@ -966,7 +966,7 @@ class HistogramObserver(_ObserverBase):
                 new_min, new_max = \
                     self._non_linear_param_search(
                         self.min_val[i], self.max_val[i],
-                        self.histogram[self.bins * i : self.bins * (i+1)])
+                        self.histogram[self.bins * i : self.bins * (i + 1)])
                 qparams.append(self._calculate_qparams(new_min, new_max))
             return qparams
         else:
