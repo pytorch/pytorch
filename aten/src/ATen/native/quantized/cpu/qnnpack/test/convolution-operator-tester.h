@@ -557,14 +557,11 @@ class ConvolutionOperatorTester {
             groups(),
             groupInputChannels() * groups(),
             groupOutputChannels() * groups(),
-            kernelZeroPoint.data(),
-            requantization_scale.data(),
-            qmin(),
-            qmax(),
             /*transpose=*/false);
           auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
               new qnnpack::PrePackConvWeights(
                   conv_p,
+                  kernelZeroPoint.data(),
                   kernel.data(),
                   bias.data()));
           const pytorch_qnnp_status runStatus = qnnpack::qnnpackConv(
@@ -575,7 +572,11 @@ class ConvolutionOperatorTester {
               inputWidth(),
               inputZeroPoint,
               inputPtr,
+              kernelZeroPoint.data(),
+              requantization_scale.data(),
               outputZeroPoint,
+              qmin(),
+              qmax(),
               output.data(),
               nullptr);
           ASSERT_EQ(pytorch_qnnp_status_success, runStatus);
