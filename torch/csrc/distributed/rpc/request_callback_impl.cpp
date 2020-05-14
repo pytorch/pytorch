@@ -452,7 +452,6 @@ void RequestCallbackImpl::processRpc(
           "or create valid autogradContext in addRecvRpcBackward.");
 
       DistAutogradContextGuard ctxGuard(autogradContext->contextId());
-      //autogradContainer.setCurrentContextId(autogradContext->contextId());
 
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
