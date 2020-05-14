@@ -14,7 +14,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/StringUtil.h>
 #include <ATen/detail/FunctionTraits.h>
-#include <torch/csrc/utils/cpp_stacktraces.h>
 
 /// NOTE [ Conversion Cpp Python Warning ]
 /// The warning handler cannot set python warnings immediately
@@ -52,19 +51,19 @@
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::IndexError& e) {                               \
-      auto msg = torch::utils::CPPStackTraces::is_enabled() ?        \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
                     e.what() : e.what_without_backtrace();           \
       PyErr_SetString(PyExc_IndexError, torch::processErrorMsg(msg).c_str()); \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::ValueError& e) {                               \
-      auto msg = torch::utils::CPPStackTraces::is_enabled() ?        \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
                     e.what() : e.what_without_backtrace();           \
       PyErr_SetString(PyExc_ValueError, torch::processErrorMsg(msg).c_str()); \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::Error& e) {                                    \
-      auto msg = torch::utils::CPPStackTraces::is_enabled() ?        \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
                     e.what() : e.what_without_backtrace();           \
       PyErr_SetString(PyExc_RuntimeError, torch::processErrorMsg(msg).c_str()); \
       retstmnt;                                                      \
@@ -226,6 +225,8 @@ bool THPException_init(PyObject *module);
 namespace torch {
 
 THP_CLASS std::string processErrorMsg(std::string str);
+
+THP_API bool get_cpp_stacktraces_enabled();
 
 // Abstract base class for exceptions which translate to specific Python types
 struct PyTorchError : public std::exception {
