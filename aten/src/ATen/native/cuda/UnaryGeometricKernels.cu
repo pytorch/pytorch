@@ -178,10 +178,12 @@ __host__ __device__ static inline thrust::complex<T> acosh_wrapper(thrust::compl
 }
 
 void acosh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "acosh_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "acosh_cuda", [&]() {
     using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
-      return acosh_wrapper(a);
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(thrust_t, "atanh_cuda", [&] {
+      gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+        return acosh_wrapper(a);
+      });
     });
   });
 }
@@ -198,12 +200,14 @@ __host__ __device__ static inline thrust::complex<T> asinh_wrapper(thrust::compl
 }
 
 void asinh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "asinh_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "asinh_cuda", [&]() {
     using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
-      return asinh_wrapper(a);
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(thrust_t, "asinh_cuda", [&] {
+      gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+        return asinh_wrapper(a);
+      });
     });
-  });
+  });  
 }
 
 // We manually overload atanh because std::atanh does not work with thrust::complex types.
