@@ -1193,8 +1193,8 @@ class TestGraphModePostTrainingStatic(QuantizationTestCase):
         r"""Compare the result of dynamic quantization of single linear layer in
         eager mode and graph mode.
         """
-        for qengine in supported_qengines:
-            with override_quantized_engine(qengine):
+        if 'qnnpack' in supported_qengines:
+            with override_quantized_engine('qnnpack'):
                 # eager mode
                 annotated_linear_model = AnnotatedSingleLayerLinearModel('qnnpack').eval()
                 linear_model = SingleLayerLinearModel().eval()
