@@ -20,6 +20,7 @@ Tensors
     is_storage
     is_complex
     is_floating_point
+    is_nonzero
     set_default_dtype
     get_default_dtype
     set_default_tensor_type
@@ -380,6 +381,7 @@ Other Operations
     bincount
     block_diag
     broadcast_tensors
+    bucketize
     cartesian_prod
     cdist
     combinations
@@ -401,6 +403,7 @@ Other Operations
     renorm
     repeat_interleave
     roll
+    searchsorted
     tensordot
     trace
     tril

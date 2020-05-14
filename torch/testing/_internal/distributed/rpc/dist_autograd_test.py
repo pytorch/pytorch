@@ -30,6 +30,7 @@ from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture i
     TensorPipeRpcAgentTestFixture,
 )
 
+
 # Right now we test up to 3-layer nested rpc calls.
 # rpc_done[1] and ctx_ids[1] represent rpc is done in prev rank, and context id
 # sent from prev rank respectively.
@@ -950,8 +951,6 @@ class DistAutogradTest(RpcAgentTestFixture):
         local_grads = None
         t1 = torch.ones((3, 3), requires_grad=True)
         t2 = torch.zeros((3, 3), requires_grad=True)
-        print("inside function")
-        print(dist_utils.TEST_CONFIG.rpc_backend_name)
 
         local_ret = torch.add(t1, t2)
         local_ret.sum().backward()
