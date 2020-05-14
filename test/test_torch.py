@@ -16618,6 +16618,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 if lazy_init_scale:
                     self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
 
+    @onlyCUDA
+    def test_mv_stride_0(self, device):
+        # Reference: https://github.com/pytorch/pytorch/issues/38315
+        mat = torch.randn(2, 2, device=device)
+        vec = torch.tensor(2., device=device).expand(2)
+        mat_cpu = mat.cpu()
+        vec_cpu = vec.cpu()
+        self.assertEqual(mat @ vec, mat_cpu @ vec_cpu)
+
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
