@@ -34,9 +34,13 @@ if(USE_ROCM)
 endif()
 
 # NB: If you edit these globs, you'll have to update setup.py package_data as well
+file(GLOB_RECURSE ATen_CORE_HEADERS  "core/*.h")
+file(GLOB_RECURSE ATen_CORE_SRCS "core/*.cpp")
+file(GLOB_RECURSE ATen_CORE_TEST_SRCS "core/*_test.cpp")
+EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
+
 file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec256/*.h" "quantized/*.h")
 file(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp")
-add_subdirectory(core)
 file(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
 file(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
 file(GLOB cuda_nvrtc_stub_h "cuda/nvrtc_stub/*.h")
@@ -88,6 +92,26 @@ file(GLOB native_quantized_hip_cpp "native/quantized/hip/*.cpp")
 
 # XNNPACK
 file(GLOB native_xnnpack "native/xnnpack/*.cpp")
+
+# Add files needed from jit folders
+list(APPEND ATen_CORE_HEADERS
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/source_range.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/function_schema_parser.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/lexer.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/strtod.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/parse_string_literal.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/schema_type_parser.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/error_report.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/tree.h
+)
+list(APPEND ATen_CORE_SRCS
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/error_report.cpp
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/function_schema_parser.cpp
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/lexer.cpp
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/strtod.cpp
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/schema_type_parser.cpp
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/source_range.cpp
+)
 
 add_subdirectory(quantized)
 set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})

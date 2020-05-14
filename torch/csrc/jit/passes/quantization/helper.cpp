@@ -24,6 +24,7 @@ std::vector<std::string> _static_quantizable_call_funcs = {
 };
 
 std::vector<std::string> _static_quantizable_aten_funcs = {
+    "conv1d",
     "conv2d",
     "conv3d",
     "linear",
@@ -139,17 +140,25 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     "leaky_relu_",
 };
 
+float _asym_scale = 1.0f / 256.0f;
+int _asym_zero_point = 0;
+float _sym_scale = 2.0f / 256.0f;
+int _sym_zero_point = 128;
+// quantization parameters for ops with range 0 to 1
+// for example: aten/src/ATen/native/quantized/cpu/qsigmoid.cpp
 std::tuple<c10::QScheme, QParamVector> _per_tensor_asym_qparam =
     std::make_tuple(
         c10::kPerTensorAffine,
-        QParamVector({std::make_pair(".scale", IValue(1.0f / 256.0f)),
-                      std::make_pair(".zero_point", IValue(0)),
+        QParamVector({std::make_pair(".scale", IValue(_asym_scale)),
+                      std::make_pair(".zero_point", IValue(_asym_zero_point)),
                       std::make_pair(".scalar_type", IValue(c10::kQUInt8))}));
 
+// quantization parrameters for ops with range -1 to 1
+// for example: aten/src/ATen/native/quantized/cpu/qtanh.cpp
 std::tuple<c10::QScheme, QParamVector> _per_tensor_sym_qparam = std::make_tuple(
     c10::kPerTensorAffine,
-    QParamVector({std::make_pair(".scale", IValue(2.0f / 256.0f)),
-                  std::make_pair(".zero_point", IValue(128)),
+    QParamVector({std::make_pair(".scale", IValue(_sym_scale)),
+                  std::make_pair(".zero_point", IValue(_sym_zero_point)),
                   std::make_pair(".scalar_type", IValue(c10::kQUInt8))}));
 
 // Map from aten op symbol to the quantization parameters
@@ -218,7 +227,11 @@ bool matchArgPattern(
 bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv2d", 1}, {"conv3d", 1}, {"linear", 1}, {"lstm", 2}}),
+      AtenFuncArgs({{"conv1d", 1},
+                    {"conv2d", 1},
+                    {"conv3d", 1},
+                    {"linear", 1},
+                    {"lstm", 2}}),
       CallFuncArgs({{"linear", 2}}));
   return result;
 }
@@ -226,7 +239,8 @@ bool isWeight(Value* v) {
 bool isBiasOfConvOrLinear(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv2d", 2}, {"conv3d", 2}, {"linear", 2}}),
+      AtenFuncArgs(
+          {{"conv1d", 2}, {"conv2d", 2}, {"conv3d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
   return result;
 }
