@@ -117,8 +117,10 @@ Node* insertDeQuant(
 void insertDeQuantForAllUse(
     Graph* graph,
     Value* quantized_val,
-    Value* original_val,
-    const std::vector<Use>& uses) {
+    Value* original_val) {
+  // copy uses to vector since value->uses() is a reference
+  // and changing the graph will also change the uses() list
+  const std::vector<Use> uses = original_val->uses();
   for (size_t i = 0; i < uses.size(); ++i) {
     auto* user = uses[i].user;
     // Insert dequantize node right before use node, because
@@ -648,10 +650,7 @@ void propagateQuantizationParamsFromInput(
   // replace uses of original output of the general op with quantized
   // output
   original_output->replaceAllUsesAfterNodeWith(quant, quantized_output);
-  std::vector<Use> quantized_uses = quantized_output->uses();
-  GRAPH_DEBUG("quantized uses: ", quantized_uses.size());
-  insertDeQuantForAllUse(
-      graph, quantized_output, quantized_output, quantized_uses);
+  insertDeQuantForAllUse(graph, quantized_output, quantized_output);
 }
 
 void propagateDequantize(Value* output, const std::vector<Value*> inputs) {
@@ -670,9 +669,7 @@ void propagateDequantize(Value* output, const std::vector<Value*> inputs) {
     dequantize_node->removeAllInputs();
     dequantize_node->destroy();
   }
-  std::vector<Use> uses = output->uses();
-  // Insert new dequantize node for each use of the output
-  insertDeQuantForAllUse(graph, output, output, uses);
+  insertDeQuantForAllUse(graph, output, output);
 }
 
 void propagateQuantizationOps(Block* block) {
@@ -905,17 +902,15 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
     }
   }
   for (Node* n : dequant_nodes_to_rewrite) {
-    auto* quantized_val = n->inputs()[0];
+    auto* quantized_val = n->input(0);
     auto* dequantized_val = n->output();
-    // copy uses to vector since value->uses() is a reference
-    // and changing the graph will also change the uses() list
-    std::vector<Use> uses = dequantized_val->uses();
-    insertDeQuantForAllUse(graph.get(), quantized_val, dequantized_val, uses);
+    insertDeQuantForAllUse(graph.get(), quantized_val, dequantized_val);
   }
 
   for (Node* n : dequant_nodes_to_rewrite) {
     n->removeAllInputs();
   }
+
   for (Node* n : dequant_nodes_to_rewrite) {
     n->destroy();
   }
