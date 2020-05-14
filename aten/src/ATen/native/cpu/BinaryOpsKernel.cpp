@@ -630,6 +630,23 @@ void logaddexp_kernel(TensorIterator& iter) {
   });
 }
 
+void logaddexp2_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp2_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          scalar_t m = std::max(a, b);
+          return m + std::log2((scalar_t)(1.0) + std::pow((scalar_t)(2), -std::abs(a - b)));
+        },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+          Vec256<scalar_t> one(1.0);
+          Vec256<scalar_t> two(2.0);
+          Vec256<scalar_t> m = maximum(a, b);
+          return m + (one + two.pow((a - b).abs().neg())).log2();
+        });
+  });
+}
+
 } // anonymous namespace
 
 
@@ -662,5 +679,6 @@ REGISTER_DISPATCH(mse_stub, &mse_kernel);
 REGISTER_DISPATCH(fmod_stub, &fmod_kernel);
 REGISTER_DISPATCH(fmod_scalar_stub, &fmod_scalar_kernel);
 REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel);
+REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
 
 }} // namespace at::native
