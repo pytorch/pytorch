@@ -87,10 +87,10 @@ class GeneratedFileCleaner:
     def __enter__(self):
         return self
 
-    def open(self, fn, *args):
+    def open(self, fn, *args, **kwargs):
         if not os.path.exists(fn):
             self.files_to_clean.add(os.path.abspath(fn))
-        return open(fn, *args)
+        return open(fn, *args, **kwargs)
 
     def makedirs(self, dn, exist_ok=False):
         parent, n = os.path.split(dn)
@@ -650,7 +650,7 @@ RE_CU_SUFFIX = re.compile(r'\.cu\b')  # be careful not to pick up .cuh
 def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension, clean_ctx):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
-    with open(fin_path, 'r') as fin:
+    with open(fin_path, 'r', encoding='utf-8') as fin:
         output_source = fin.read()
 
     fout_path = os.path.join(output_directory, get_hip_file_path(filepath))
@@ -713,10 +713,10 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch
 
     do_write = True
     if os.path.exists(fout_path):
-        with open(fout_path, 'r') as fout_old:
+        with open(fout_path, 'r', encoding='utf-8') as fout_old:
             do_write = fout_old.read() != output_source
     if do_write:
-        with clean_ctx.open(fout_path, 'w') as fout:
+        with clean_ctx.open(fout_path, 'w', encoding='utf-8') as fout:
             fout.write(output_source)
         return "ok"
     else:

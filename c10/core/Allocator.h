@@ -222,7 +222,7 @@ struct AllocatorRegisterer {
 
 // An interface for reporting thread local memory usage
 // per device
-struct MemoryReportingInfoBase : public c10::DebugInfoBase {
+struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
   MemoryReportingInfoBase() {}
   virtual ~MemoryReportingInfoBase() {}
 
