@@ -962,6 +962,9 @@ InsertObserversHelper::insertObserversFor(
         std::vector<size_t> aggregated_observed_outputs;
         std::vector<c10::optional<script::Module>> aggregated_output_observers;
         for (Block* subblock : n->blocks()) {
+          if (alwaysRaisesException(subblock)) {
+            continue;
+          }
           // subblock has access to all the values in the scope of prim::If,
           // so subblock_observed_values == block_observed_values
           auto info_from_subblock =
