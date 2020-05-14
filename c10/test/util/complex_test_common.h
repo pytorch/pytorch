@@ -390,7 +390,7 @@ MAYBE_GLOBAL void test_arithmetic() {
 }
 
 template<typename T, typename int_t>
-inline void test_binary_ops_for_int_type_(T real, T img, int_t num) {
+C10_HOST_DEVICE void test_binary_ops_for_int_type_(T real, T img, int_t num) {
   c10::complex<T> c(real, img);
   ASSERT_EQ(c + num, c10::complex<T>(real + num, img));
   ASSERT_EQ(num + c, c10::complex<T>(num + real, img));
@@ -403,7 +403,7 @@ inline void test_binary_ops_for_int_type_(T real, T img, int_t num) {
 }
 
 template<typename T>
-inline void test_binary_ops_for_all_int_types_(T real, T img, int8_t i) {
+C10_HOST_DEVICE void test_binary_ops_for_all_int_types_(T real, T img, int8_t i) {
   test_binary_ops_for_int_type_<T, int8_t>(real, img, i);
   test_binary_ops_for_int_type_<T, int16_t>(real, img, i);
   test_binary_ops_for_int_type_<T, int32_t>(real, img, i);
