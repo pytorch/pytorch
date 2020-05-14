@@ -232,8 +232,9 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
 
   const std::string compute = "--gpu-architecture=compute_" +
       std::to_string(major) + std::to_string(minor);
+  std::cout << "compute flag: " << compute << std::endl;
   const std::vector<const char*> args = {
-      "--std=c++11", compute.c_str(), "-default-device"};
+      "--std=c++14", compute.c_str(), "-default-device"};
 
   nvrtc().nvrtcAddNameExpression(program, func_name.c_str());
   const auto result =

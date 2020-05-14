@@ -13,7 +13,7 @@ MAX_TENSOR=6
 # maximum tensor rank
 MAX_TENSOR_DIM=5
 # maximum tensor size
-MAX_TENSOR_SIZE=2*20
+MAX_TENSOR_SIZE=2**20
 # use a size 1 tensor for debug
 DEBUG_TENSOR=False
 # tensor device
@@ -70,8 +70,7 @@ def random_topology_test(seed, *inp_tensor_list):
   num_sets = num_tensor
   candidate = list(range(num_tensor))
 
-  #unary_operations = [torch.sigmoid, torch.relu]
-  unary_operations = []
+  unary_operations = [torch.sigmoid, torch.relu]
   binary_operations = [torch.add, torch.sub, torch.mul]
   u_op_size = len(unary_operations)
   b_op_size = len(binary_operations)
@@ -217,6 +216,7 @@ def prepareInputTensorsToRandomTopoTest(seed,
   
   # vvv BROADCASTING vvv
   # select tensors to be broadcasted
+  # TODO: enable broadcasting when we fully support it.
   #num_broadcasted_tensors = np.random.randint(0, num_tensor)
   num_broadcasted_tensors = np.random.randint(0, 1)
   # we leave at least one tensor not broadcasted
@@ -232,9 +232,9 @@ def prepareInputTensorsToRandomTopoTest(seed,
       # Note that we are not playing with stride here, as stride doesn't affect
       # codegen meaningfully.
       compatible_shape = get_broadcast_compatible_shape(tensor_shape)
-      tensor_list.append(torch.randn(compatible_shape, device=device, dtype=dtype))
+      tensor_list.append(torch.randn(compatible_shape, device=device, dtype=dtype)*100)
     else:
-      tensor_list.append(torch.randn(tensor_shape, device=device, dtype=dtype))
+      tensor_list.append(torch.randn(tensor_shape, device=device, dtype=dtype)*100)
   return seed_tensor, tensor_list
 
 def reproString(current_seed, args):
