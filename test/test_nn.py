@@ -5745,77 +5745,41 @@ class TestNN(NNTestCase):
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             for params in product((True, False), repeat=3):
                 (bias, batch_first, variable_len) = params
-                is_lstm = isinstance(module, nn.LSTM)
+                is_lstm = module is nn.LSTM
                 if batch_first:
                     input_val = torch.randn(
                         batch, seq_length, input_size, dtype=dtype).to(device)
-                    grad_output = torch.randn(
-                        batch, seq_length, hidden_size * num_directions,
-                        dtype=dtype).to(device)
 
                 else:
                     input_val = torch.randn(
                         seq_length, batch, input_size, dtype=dtype).to(device)
-                    grad_output = torch.randn(
-                        seq_length, batch, hidden_size * num_directions,
-                        dtype=dtype).to(device)
 
-                with torch.no_grad():
-                    fwd_grad_output = grad_output[:, :, :hidden_size]
-                    bwd_grad_output = grad_output[:, :, hidden_size:]
-
-                reversed_val = reverse(
-                    input_val.detach(), batch_first).requires_grad_(True)
+                reversed_val = reverse(input_val.clone(), batch_first)
 
                 cx_val = None
-                grad_cy = None
                 hx_val = torch.randn(num_layers * num_directions, batch,
                                      hidden_size, dtype=dtype).to(device)
-                hx_val.requires_grad_(True)
-                grad_hy = torch.randn(num_layers * num_directions, batch,
-                                      hidden_size, dtype=dtype).to(device)
                 if is_lstm:
                     cx_val = torch.randn(num_layers * num_directions, batch,
                                          hidden_size, dtype=dtype).to(device)
-                    cx_val.requires_grad_(True)
-                    grad_cy = torch.randn(num_layers * num_directions, batch,
-                                          hidden_size, dtype=dtype).to(device)
 
                 if variable_len:
                     reversed_val = reverse_padded_data(
-                        input_val.detach(), batch_first).requires_grad_(True)
+                        input_val.clone(), batch_first)
                     reversed_val = rnn_utils.pack_padded_sequence(
                         reversed_val, lengths, batch_first=batch_first)
                     reversed_val = reversed_val.to(device)
+
                     input_val = rnn_utils.pack_padded_sequence(
-                        input_val, lengths, batch_first=batch_first)
+                        input_val.clone(), lengths,
+                        batch_first=batch_first)
                     input_val = input_val.to(device)
-                    grad_output = rnn_utils.pack_padded_sequence(
-                        grad_output, lengths, batch_first=batch_first).data
-                    grad_output = grad_output.to(device)
 
-                    with torch.no_grad():
-                        fwd_grad_output = grad_output.data[:, :hidden_size]
-                        bwd_grad_output = grad_output.data[:, hidden_size:]
-
-                    fwd_grad_output = rnn_utils.PackedSequence(
-                        fwd_grad_output, grad_output.batch_sizes)
-
-                    bwd_grad_output = rnn_utils.PackedSequence(
-                        bwd_grad_output, grad_output.batch_sizes)
-
-                    fwd_val = rnn_utils.PackedSequence(
-                        input_val.data.detach().requires_grad_(True),
-                        input_val.batch_sizes)
-
-                # fwd_val = input_val.detach().requires_grad_(True)
                 if not variable_len:
-                    fwd_val = input_val.detach().requires_grad_(True)
-                    input_val = input_val.requires_grad_(True)
-                    reversed_val = reversed_val.requires_grad_(True)
+                    fwd_val = input_val.clone()
                 else:
                     fwd_val = rnn_utils.PackedSequence(
-                        input_val.data.detach().requires_grad_(True),
+                        input_val.data.clone(),
                         input_val.batch_sizes)
 
                 # Joint Type-1 RNN
@@ -5865,15 +5829,6 @@ class TestNN(NNTestCase):
                                         if i % 2 == 0], 0)
                     hx_bwd = torch.cat([h for i, h in enumerate(hx)
                                         if i % 2 != 0], 0)
-                    g_hy = grad_hy.split(1, 0)
-                    grad_hy_fwd = torch.cat([h for i, h in enumerate(g_hy)
-                                             if i % 2 == 0], 0)
-                    grad_hy_bwd = torch.cat([h for i, h in enumerate(g_hy)
-                                             if i % 2 != 0], 0)
-
-                hx_fwd = hx_fwd.requires_grad_(True)
-                hx_bwd = hx_bwd.requires_grad_(True)
-
                 if is_lstm:
                     with torch.no_grad():
                         cx = cx_val.split(1, 0)
@@ -5881,13 +5836,6 @@ class TestNN(NNTestCase):
                                             if i % 2 == 0], 0)
                         cx_bwd = torch.cat([h for i, h in enumerate(cx)
                                             if i % 2 != 0], 0)
-                        g_cy = grad_cy.split(1, 0)
-                        grad_cy_fwd = torch.cat([h for i, h in enumerate(g_cy)
-                                                 if i % 2 == 0], 0)
-                        grad_cy_bwd = torch.cat([h for i, h in enumerate(g_cy)
-                                                 if i % 2 != 0], 0)
-                    cx_fwd = cx_fwd.requires_grad_(True)
-                    cx_fwd = cx_bwd.requires_grad_(True)
                     hx_fwd = (hx_fwd, cx_fwd)
                     hx_bwd = (hx_bwd, cx_bwd)
                     hx_val = (hx_val, cx_val)
@@ -5898,6 +5846,8 @@ class TestNN(NNTestCase):
 
                 if variable_len:
                     bwd_output = reverse_packed_data(bwd_output)
+                else:
+                    bwd_output = reverse(bwd_output, batch_first)
 
                 # Check forward results
                 with torch.no_grad():
@@ -5907,12 +5857,12 @@ class TestNN(NNTestCase):
                         complete_output = torch.cat(
                             [fwd_output.data, bwd_output.data], -1)
                         self.assertEqual(output.data, complete_output,
-                                        atol=5e-5, message='output')
+                                         atol=5e-5, message='output')
                     else:
                         complete_output = torch.cat(
                             [fwd_output, bwd_output], -1)
                         self.assertEqual(output, complete_output,
-                                        atol=5e-5, message='output')
+                                         atol=5e-5, message='output')
                     if is_lstm:
                         exp_hy, exp_cy = complete_hy
                         t_hy, t_cy = hy
@@ -5921,70 +5871,6 @@ class TestNN(NNTestCase):
                     else:
                         self.assertEqual(hy, complete_hy,
                                          atol=5e-5, message='hy')
-
-                # Compute backward gradients
-                if is_lstm:
-                    torch.autograd.backward(
-                        [output if not variable_len else output.data,
-                         hy[0], hy[1]],
-                        [grad_output if not variable_len else grad_output.data,
-                         grad_hy, grad_cy]
-                    )
-                    torch.autograd.backward(
-                        [fwd_output if not variable_len else fwd_output.data,
-                         fwd_hy[0], fwd_hy[1]],
-                        [(fwd_grad_output if not variable_len
-                          else fwd_grad_output.data),
-                         grad_hy_fwd, grad_cy_fwd]
-                    )
-                    torch.autograd.backward(
-                        [bwd_output if not variable_len else bwd_output.data,
-                         bwd_hy[0], bwd_hy[1]],
-                        [(bwd_grad_output if not variable_len
-                          else bwd_grad_output.data),
-                         grad_hy_bwd, grad_cy_bwd]
-                    )
-                else:
-                    torch.autograd.backward(
-                        [output if not variable_len else output.data, hy],
-                        [grad_output if not variable_len else grad_output.data,
-                         grad_hy])
-                    torch.autograd.backward(
-                        [fwd_output if not variable_len else fwd_output.data,
-                         fwd_hy],
-                        [(fwd_grad_output if not variable_len
-                          else fwd_grad_output.data), grad_hy_fwd])
-                    torch.autograd.backward(
-                        [bwd_output if not variable_len else bwd_output.data,
-                         bwd_hy],
-                        [(bwd_grad_output if not variable_len
-                          else bwd_grad_output.data), grad_hy_bwd])
-
-                # Check gradients
-                output_grad = output.grad
-                fwd_output_grad = fwd_output.grad
-                bwd_output_grad = bwd_output.grad
-                complete_output_grad = torch.cat(
-                    [fwd_output_grad, bwd_output_grad], -1)
-                self.assertEqual(output_grad, complete_output_grad,
-                                 atol=5e-5, message='output_grad')
-                if is_lstm:
-                    hx, cx = hx_val
-                    hx_fwd, cx_fwd = hx_fwd
-                    hx_bwd, cx_bwd = hx_bwd
-                    hx_complete_grad = merge_direction_states(
-                        hx_fwd.grad, hx_bwd.grad)
-                    cx_complete_grad = merge_direction_states(
-                        cx_fwd.grad, cx_bwd.grad)
-                    self.assertEqual(hx.grad, hx_complete_grad,
-                                     atol=5e-5, message='hx_grad')
-                    self.assertEqual(cx.grad, cx_complete_grad,
-                                     atol=5e-5, message='cx_grad')
-                else:
-                    hx_complete_grad = merge_direction_states(
-                        hx_fwd.grad, hx_bwd.grad)
-                    self.assertEqual(hx_val.grad, hx_complete_grad,
-                                     atol=5e-5, message='hx_grad')
 
     def test_RNN_type1(self):
         self._test_RNN_type1(torch.device('cpu'))
