@@ -5791,6 +5791,10 @@ a")
         def tensor_to_int_script(x, tensor):
             return x.unsqueeze(tensor)
 
+        # location present in error message
+        with self.assertRaisesRegex(RuntimeError, "x.unsqueeze"):
+            tensor_to_int_script(torch.tensor([2]), torch.tensor([2, 2]))
+
         def tensor_to_int(x, tensor):
             return x.unsqueeze(tensor)
 
