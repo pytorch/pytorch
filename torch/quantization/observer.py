@@ -4,7 +4,7 @@ import math
 import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
-from typing import List, Tuple, Optional, Union
+from typing import List, Tuple, Optional
 
 import torch
 import torch.nn as nn
@@ -475,7 +475,7 @@ class _MinMaxTensorListObserver(MinMaxObserver):
                                                         reduce_range=reduce_range)
 
     def forward(self, tensor_list):
-        # type: (List[Tensor]) -> (List[Tensor])
+        # type: (List[Tensor]) -> List[Tensor]
         r"""Records the running minimum and maximum of ``tensor_list``."""
         min_val = self.min_val
         max_val = self.max_val
@@ -895,13 +895,13 @@ class HistogramObserver(_ObserverBase):
             initialized = False
         for i in range(num_tensors):
             if initialized:
-                min_val, max_val, histogram = min_vals[i], max_vals[i], histograms[self.bins * i: self.bins * (i+1)]
+                min_val, max_val, histogram = min_vals[i], max_vals[i], histograms[self.bins * i : self.bins * (i+1)]
             else:
                 min_val, max_val, histogram = torch.tensor([]), torch.tensor([]), torch.zeros(self.bins)
             min_val, max_val, histogram = self._forward(x_orig[i], min_val, max_val, histogram)
             min_vals[i] = min_val
             max_vals[i] = max_val
-            histograms[self.bins * i: self.bins * (i+1)] = histogram
+            histograms[self.bins * i : self.bins * (i+1)] = histogram
         self.update_stats(min_vals, max_vals, histograms)
         return x_orig
 
@@ -959,7 +959,7 @@ class HistogramObserver(_ObserverBase):
         qparams = []
         if num_tensors > 1:
             for i in range(num_tensors):
-                new_min, new_max = self._non_linear_param_search(self.min_val[i], self.max_val[i], self.histogram[self.bins * i: self.bins * (i+1)])
+                new_min, new_max = self._non_linear_param_search(self.min_val[i], self.max_val[i], self.histogram[self.bins * i : self.bins * (i+1)])
                 qparams.push_back(self._calculate_qparams(new_min, new_max))
             return qparams
         else:
