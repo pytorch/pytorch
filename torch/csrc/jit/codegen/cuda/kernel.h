@@ -30,11 +30,12 @@ namespace cuda {
 // configuration could/should be handled.
 struct KernelArgsReq {
   virtual bool matchKernelSize(const at::ArrayRef<IValue> inputs) = 0;
+  virtual ~KernelArgsReq() = default;
 };
 
 // naive P-wise kernel only requires same dimensionality for input tensors.
 struct NaivePWKernelArgsReq : KernelArgsReq {
-  virtual bool matchKernelSize(const at::ArrayRef<IValue> inputs);
+  bool matchKernelSize(const at::ArrayRef<IValue> inputs) override;
   std::vector<int> dims_;
 };
 

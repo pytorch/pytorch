@@ -255,7 +255,11 @@ IterDomain* TensorDomain::axis(int i) const {
   if (i < 0)
     i += nDims();
   TORCH_CHECK(
-      i >= 0 && i < nDims(), "Tried to access axis ", i, " in domain ", this);
+      i >= 0 && (unsigned int)i < nDims(),
+      "Tried to access axis ",
+      i,
+      " in domain ",
+      this);
   return domain_[i];
 }
 
@@ -266,7 +270,7 @@ TensorDomain* TensorDomain::split(int axis_, int factor) {
     axis_ += nDims();
 
   TORCH_INTERNAL_ASSERT(
-      axis_ >= 0 && axis_ < nDims(),
+      axis_ >= 0 && (unsigned int)axis_ < nDims(),
       "Tried to split on axis outside TensorDomain's range.");
 
   IterDomain* id = axis(axis_);
@@ -284,10 +288,8 @@ TensorDomain* TensorDomain::split(int axis_, int factor) {
   std::vector<IterDomain*> new_domain;
 
   Int* fact = new Int(factor);
-  Int* one = new Int(1);
-
   for (decltype(nDims()) i = 0; i < nDims(); i++) {
-    if (i != axis_)
+    if (i != (unsigned int)axis_)
       new_domain.push_back(axis(i));
     else {
       // outer loop size
@@ -313,9 +315,9 @@ TensorDomain* TensorDomain::split(int axis_, int factor) {
       new_domain.push_back(idi);
     }
   }
+
   TensorDomain* split_td = new TensorDomain(new_domain);
-  Split* split_node =
-      new Split(split_td, this, axis_, fact); // For record keeping
+  new Split(split_td, this, axis_, fact); // For record keeping
   return split_td;
 }
 
@@ -325,7 +327,7 @@ TensorDomain* TensorDomain::merge(int axis_) {
     axis_ += nDims();
 
   TORCH_CHECK(
-      axis_ >= 0 && axis_ + 1 < nDims(),
+      axis_ >= 0 && (unsigned int)(axis_ + 1) < nDims(),
       "Trying to merge axis_ outside of TensorView's range.");
 
   IterDomain* first = axis(axis_);
@@ -351,14 +353,14 @@ TensorDomain* TensorDomain::merge(int axis_) {
 
   std::vector<IterDomain*> new_domain;
   for (decltype(nDims()) i = 0; i < nDims(); i++) {
-    if (i < axis_ || i > axis_ + 1)
+    if (i < (unsigned int)axis_ || i > (unsigned int)(axis_ + 1))
       new_domain.push_back(axis(i));
-    else if (i == axis_) {
+    else if (i == (unsigned int)axis_) {
       new_domain.push_back(merged_id);
     }
   }
   TensorDomain* merged_td = new TensorDomain(new_domain);
-  Merge* merge_node = new Merge(merged_td, this, axis_); // For record keeping
+  new Merge(merged_td, this, axis_); // For record keeping
   return merged_td;
 }
 
@@ -389,8 +391,8 @@ TensorDomain* TensorDomain::reorder(
       old2new.begin(),
       old2new.end(),
       [ndims](std::unordered_map<int, int>::value_type entry) {
-        return entry.first < 0 || entry.first >= ndims || entry.second < 0 ||
-            entry.second >= ndims;
+        return entry.first < 0 || (unsigned int)entry.first >= ndims ||
+            entry.second < 0 || (unsigned int)entry.second >= ndims;
       });
 
   TORCH_CHECK(
@@ -479,7 +481,7 @@ TensorDomain* TensorDomain::reorder(
       [this](int i) -> IterDomain* { return this->axis(i); });
 
   TensorDomain* reordered_td = new TensorDomain(reordered_domain);
-  Reorder* merge_node = new Reorder(reordered_td, this, new2old);
+  new Reorder(reordered_td, this, new2old);
   return reordered_td;
 }
 
@@ -497,7 +499,7 @@ std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
       std::none_of(
           axes.begin(),
           axes.end(),
-          [ndims](int i) { return i < 0 || i >= ndims; }),
+          [ndims](int i) { return i < 0 || (unsigned int)i >= ndims; }),
       "RFactor axes less than 0 or >= ndims.");
 
   TORCH_CHECK(

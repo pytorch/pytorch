@@ -160,7 +160,6 @@ void UnrollPass::handle(ForLoop* fl) {
 
     loop_replacement_map.insert({first_unroll, unroll_ite});
 
-    bool first_expr = true;
     for (auto expr : fl->body().exprs()) {
       if (!ir_utils::isTVOp(expr))
         continue;
@@ -329,7 +328,7 @@ void LoopNestGenerator::initReduction(TensorView* tv, Val* init_val) {
   auto clone = tv->unsafeClone();
   pushBack(new UnaryOp(UnaryOpType::Set, clone, init_val));
 
-  while (for_loops.size() > depth)
+  while (for_loops.size() > (unsigned int)depth)
     popFor();
 }
 

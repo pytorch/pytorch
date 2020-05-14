@@ -18,7 +18,6 @@ namespace fuser {
 
 struct TORCH_CUDA_API GPULower : public OptOutMutator {
  private:
-  bool lowered = false;
   Fusion* const fusion_;
   std::vector<Expr*> lowered_exprs;
   Expr* active_scope = nullptr;

@@ -26,7 +26,9 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
   std::vector<IterDomain*> sizes;
   TORCH_CHECK(
       tensor_type->dim().has_value(), "Requires static rank for Tensor");
-  for (int i = 0; i < tensor_type->dim().value(); i++) {
+  for (decltype(tensor_type->dim().value()) i = 0;
+       i < tensor_type->dim().value();
+       i++) {
     sizes.push_back(new IterDomain(new Int(0), new Int()));
   }
   domain_ = new TensorDomain(sizes);
@@ -107,7 +109,7 @@ IterDomain* TensorView::axis(int pos) const {
   if (pos < 0)
     pos += domain()->nDims();
   TORCH_CHECK(
-      pos >= 0 && pos < domain()->nDims(),
+      pos >= 0 && (unsigned int)pos < domain()->nDims(),
       "Tried to access position ",
       pos,
       " in domain: ",
@@ -121,7 +123,6 @@ TensorView* TensorView::unsafeClone() const {
   new_view->compute_at_axis_ = compute_at_axis_;
   new_view->setMemoryType(memory_type_);
   new_view->name_ = name();
-  MemoryType memory_type_ = MemoryType::Global;
 
   return new_view;
 }
@@ -205,7 +206,7 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
     axis += int(consumer->nDims()) + 1;
 
   TORCH_CHECK(
-      axis >= 0 && axis < consumer->nDims() + 1,
+      axis >= 0 && (unsigned int)axis < consumer->nDims() + 1,
       "Compute at called on an axis outside valid range.");
 
   // If not direct relationship follow dependency chain.
@@ -327,7 +328,7 @@ TensorView* TensorView::split(int axis, int factor) {
     axis += domain()->nDims();
 
   if (getComputeAtView() != nullptr)
-    if (axis < getComputeAtAxis())
+    if (axis < (int)getComputeAtAxis())
       TORCH_CHECK(
           false,
           "Cannot split axis within compute at range. Axis = ",
@@ -345,7 +346,7 @@ TensorView* TensorView::merge(int axis) {
     axis += domain()->nDims();
 
   if (getComputeAtView() != nullptr)
-    if (axis + 1 < getComputeAtAxis())
+    if (axis + 1 < (int)getComputeAtAxis())
       TORCH_CHECK(
           false,
           "Cannot merge axis within compute at range. Axis = ",
@@ -401,13 +402,15 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   TensorView* consumer = this;
 
   // Setup dependency chain, inserting producer before this op.
-  Expr* producer_origin = new ReductionOp(
+  // Expr* producer_origin =
+  new ReductionOp(
       this_origin->getReductionOpType(),
       this_origin->init(),
       producer,
       this_origin->in());
 
-  Expr* consumer_origin = new ReductionOp(
+  // Expr* consumer_origin =
+  new ReductionOp(
       this_origin->getReductionOpType(),
       this_origin->init(),
       consumer,

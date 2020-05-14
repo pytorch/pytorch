@@ -10,7 +10,7 @@ namespace fuser {
 TensorDomain* IndexCompute::replayBackward(Split* split, TensorDomain*) {
   int ax = split->axis();
   TORCH_INTERNAL_ASSERT(
-      ax >= 0 && ax + 1 < indices.size(),
+      ax >= 0 && (unsigned int)(ax + 1) < indices.size(),
       "Hit an invalid Split transformation during IndexCompute, axis is not within bounds.");
   indices[ax] = add(mul(indices[ax], split->factor()), indices[ax + 1]);
   indices.erase(indices.begin() + ax + 1);
@@ -20,7 +20,7 @@ TensorDomain* IndexCompute::replayBackward(Split* split, TensorDomain*) {
 TensorDomain* IndexCompute::replayBackward(Merge* merge, TensorDomain*) {
   int ax = merge->axis();
   TORCH_INTERNAL_ASSERT(
-      ax >= 0 && ax < indices.size(),
+      ax >= 0 && (unsigned int)ax < indices.size(),
       "Hit an invalid MERGE transformation during IndexCompute, axis is not within bounds.");
 
   Val* I = merge->in()->axis(ax + 1)->extent();
@@ -44,15 +44,15 @@ TensorDomain* IndexCompute::replayBackward(Reorder* reorder, TensorDomain*) {
     int new_pos = i;
     int old_pos = new2old[i];
     TORCH_INTERNAL_ASSERT(
-        new_pos >= 0 && new_pos < indices.size() && old_pos >= 0 &&
-            old_pos < indices.size(),
+        new_pos >= 0 && (unsigned int)new_pos < indices.size() &&
+            old_pos >= 0 && (unsigned int)old_pos < indices.size(),
         "Hit an invalid reorder transformation during IndexCompute,"
         " at least one move position is not within bounds.");
     old2new[old_pos] = new_pos;
   }
   for (decltype(old2new.size()) i = 0; i < old2new.size(); i++) {
     int new_pos = old2new[i];
-    int old_pos = i;
+    // int old_pos = i;
     // reordered_indices[old_pos] = indices[new_pos];
     reordered_indices.push_back(indices[new_pos]);
   }
@@ -220,8 +220,6 @@ TensorIndex* Index::getGlobalConsumerIndex(
     std::vector<ForLoop*> loops) {
   // If we're initializing a reduction buffer, we won't have the reduction
   // loops. If we're actually performing the reduction, we will.
-
-  bool ignore_reduction = loops.size() < consumer->nDims();
 
   std::vector<Val*> indices(loops.size());
   std::transform(loops.begin(), loops.end(), indices.begin(), [](ForLoop* fl) {

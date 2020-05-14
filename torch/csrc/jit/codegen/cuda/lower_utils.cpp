@@ -141,7 +141,6 @@ struct parentScope : private OptInDispatch {
 
 struct scopeClearExprs : private OptInDispatch {
  private:
-  Expr* _expr = nullptr;
   void handle(ForLoop* fl) final {
     fl->body().clear();
   }

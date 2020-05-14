@@ -1,4 +1,4 @@
-#if defined(USE_CUDA)
+// #if defined(USE_CUDA)
 #include <test/cpp/jit/test_base.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -66,7 +66,7 @@ void testGPU_FusionSimpleArith() {
 
     Float* f1 = new Float(1.f);
     Float* f2 = new Float(2.f);
-    auto f3 = add(f1, f2);
+    add(f1, f2);
     ss2 << fusion2;
   }
 
@@ -283,12 +283,12 @@ void testGPU_FusionTensorContiguity() {
     auto strides = tensor.strides().vec();
     auto dim = sizes.size();
     TensorContiguity t_c(sizes, strides);
-    TORCH_CHECK(t_c.rank() == sizes.size());
+    TORCH_CHECK(t_c.rank() == (int)sizes.size());
     auto b_dims = t_c.getBroadcastDims();
     TORCH_CHECK(b_dims.size() == 0);
     TORCH_CHECK(t_c.getFCD() == 2);
     TORCH_CHECK(t_c.hasContiguousFCD());
-    for (int i = 0; i < dim; i++) {
+    for (decltype(dim) i = 0; i < dim; i++) {
       TORCH_CHECK(!t_c.isBroadcastDim(i));
       if (i < dim - 1) {
         TORCH_CHECK(t_c.canCollapseToHigher(i));
@@ -426,17 +426,17 @@ void testGPU_FusionTVReorder() {
   TensorView* tv = dummyTensor->clone();
 
   TensorView* s_leftl = tv->reorder(shift_left);
-  for (int i = 0; i < tv->nDims(); i++)
+  for (int i = 0; i < (int)tv->nDims(); i++)
     TORCH_CHECK(ref->axis(i) == s_leftl->axis(i - 1));
 
   tv = dummyTensor->clone();
   TensorView* s_left2 = tv->reorder(shift_left);
-  for (int i = 0; i < tv->nDims(); i++)
+  for (int i = 0; i < (int)tv->nDims(); i++)
     TORCH_CHECK(ref->axis(i) == s_left2->axis(i - 1));
 
   tv = dummyTensor->clone();
   TensorView* s_right = tv->reorder(shift_right);
-  for (int i = 0; i < tv->nDims(); i++)
+  for (int i = 0; i < (int)tv->nDims(); i++)
     TORCH_CHECK(ref->axis(i - 1) == s_right->axis(i));
 
   tv = dummyTensor->clone();
@@ -549,32 +549,32 @@ void testGPU_FusionParser() {
   ref << "__global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3){\n"
       << "  float T2[4];\n"
       << "  if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T1.size[0] ) ) { \n"
-      << "    for(size_t i128 = 0; i128 < 4; ++i128 ) {\n"
-      << "      T2[ i128 ]\n"
-      << "         = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i128 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]\n"
-      << "         * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i128 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];\n"
+      << "    for(size_t i108 = 0; i108 < 4; ++i108 ) {\n"
+      << "      T2[ i108 ]\n"
+      << "         = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i108 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]\n"
+      << "         * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i108 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];\n"
       << "    }\n"
       << "  } else { \n"
-      << "    for(size_t i128 = 0; i128 < 4; ++i128 ) {\n"
-      << "      if ( ( ( ( ( ( blockIdx.x * 4 ) + i128 ) * 128 ) + threadIdx.x ) < T1.size[0] ) ) { \n"
-      << "        T2[ i128 ]\n"
-      << "           = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i128 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]\n"
-      << "           * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i128 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];\n"
+      << "    for(size_t i108 = 0; i108 < 4; ++i108 ) {\n"
+      << "      if ( ( ( ( ( ( blockIdx.x * 4 ) + i108 ) * 128 ) + threadIdx.x ) < T1.size[0] ) ) { \n"
+      << "        T2[ i108 ]\n"
+      << "           = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i108 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]\n"
+      << "           * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i108 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];\n"
       << "      }\n"
       << "    }\n"
       << "  }\n"
       << "  if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { \n"
-      << "    for(size_t i129 = 0; i129 < 4; ++i129 ) {\n"
-      << "      T3[ ( ( ( ( ( blockIdx.x * 4 ) + i129 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]\n"
-      << "         = T2[ i129 ]\n"
-      << "         * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i129 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];\n"
+      << "    for(size_t i109 = 0; i109 < 4; ++i109 ) {\n"
+      << "      T3[ ( ( ( ( ( blockIdx.x * 4 ) + i109 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]\n"
+      << "         = T2[ i109 ]\n"
+      << "         * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i109 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];\n"
       << "    }\n"
       << "  } else { \n"
-      << "    for(size_t i129 = 0; i129 < 4; ++i129 ) {\n"
-      << "      if ( ( ( ( ( ( blockIdx.x * 4 ) + i129 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { \n"
-      << "        T3[ ( ( ( ( ( blockIdx.x * 4 ) + i129 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]\n"
-      << "           = T2[ i129 ]\n"
-      << "           * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i129 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];\n"
+      << "    for(size_t i109 = 0; i109 < 4; ++i109 ) {\n"
+      << "      if ( ( ( ( ( ( blockIdx.x * 4 ) + i109 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { \n"
+      << "        T3[ ( ( ( ( ( blockIdx.x * 4 ) + i109 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]\n"
+      << "           = T2[ i109 ]\n"
+      << "           * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i109 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];\n"
       << "      }\n"
       << "    }\n"
       << "  }\n"
@@ -2156,7 +2156,6 @@ void testGPU_FusionReduction2() {
     int numel_y = 129;
     int tidx = 16;
     int tidz = 8;
-    int unroll_factor = 4;
 
     tv1->split(1, tidz);
     // tv1[I0, R1o, R1i{tidz}] = tv0[I0, I1]
@@ -2199,4 +2198,4 @@ void testGPU_FusionReduction2() {
 
 } // namespace jit
 } // namespace torch
-#endif // #if defined(USE_CUDA)
+// #endif // #if defined(USE_CUDA)

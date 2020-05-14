@@ -209,7 +209,6 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
   }
 
   // set device for the operation;
-  const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry->device_);
   entry->has_random_ = fusion.random();
 

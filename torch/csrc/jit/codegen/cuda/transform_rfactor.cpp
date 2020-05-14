@@ -116,7 +116,7 @@ TensorDomain* TransformRFactor::runReplay(
 
   for (decltype(out_td->nDims()) i{0}; i < out_td->nDims(); i++)
     if (orig_rfactor_axis_map[i] != -1) {
-      int orig_td_pos = i;
+      // int orig_td_pos = i;
       int out_td_pos = orig_rfactor_axis_map[i];
       TORCH_INTERNAL_ASSERT(
           new_pos.find(out_td->axis(out_td_pos)) != new_pos.end(),
@@ -209,7 +209,8 @@ TensorDomain* TransformRFactor::runReplay2(
   // Setup axis map before we add back in the rfactor_axes
   std::vector<int> replay_axis_map(root_dom->nDims(), -1);
   {
-    int it = 0, ir = 0;
+    decltype(domain_copy.size()) it = 0;
+    decltype(root_dom->nDims()) ir = 0;
     while (it < domain_copy.size() && ir < root_dom->nDims()) {
       if (root_rfactor_axes[ir]) {
         ir++;

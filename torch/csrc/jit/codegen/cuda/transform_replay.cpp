@@ -51,7 +51,8 @@ TensorDomain* TransformReplay::replayPasC(
   if (compute_at_axis < 0)
     compute_at_axis += consumer->nDims() + 1;
   TORCH_INTERNAL_ASSERT(
-      compute_at_axis >= 0 && compute_at_axis <= consumer->nDims(),
+      compute_at_axis >= 0 &&
+          (unsigned int)compute_at_axis <= consumer->nDims(),
       "Invalid axis in transform replayPasC.");
 
   // Consumer in rfactor cases is based off producer's rfactor root, not
@@ -183,7 +184,8 @@ TensorDomain* TransformReplay::replayCasP(
   if (compute_at_axis < 0)
     compute_at_axis += producer->nDims() + 1;
   TORCH_INTERNAL_ASSERT(
-      compute_at_axis >= 0 && compute_at_axis <= producer->nDims(),
+      compute_at_axis >= 0 &&
+          (unsigned int)compute_at_axis <= producer->nDims(),
       "Invalid axis in transform replayPasC.");
 
   // Want producer root with no reductions, rfactor included

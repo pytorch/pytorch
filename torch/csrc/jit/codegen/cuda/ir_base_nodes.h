@@ -387,7 +387,7 @@ struct TORCH_CUDA_API Expr : public Statement, IRInputOutput {
     if (inputs().size() != other->inputs().size() ||
         outputs().size() != other->outputs().size())
       return false;
-    for (int i = 0; i < inputs().size(); i++) {
+    for (decltype(inputs().size()) i{0}; i < inputs().size(); i++) {
       if (!input(i)->sameAs(other->input(i)))
         return false;
     }

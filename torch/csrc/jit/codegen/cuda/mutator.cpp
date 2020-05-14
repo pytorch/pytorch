@@ -244,7 +244,7 @@ Statement* OptOutMutator::mutate(IfThenElse* ite) {
   TORCH_INTERNAL_ASSERT(
       val_cond->getValType().value() == ValType::Scalar &&
       val_cond->getDataType().value() == DataType::Bool);
-  Bool* cond = static_cast<Bool*>(cond);
+  Bool* cond = static_cast<Bool*>(val_cond);
 
   bool is_mutated = !cond->sameAs(ite->cond());
 
@@ -296,20 +296,17 @@ void ReplaceAll::replaceInpOut() {
 }
 
 void ReplaceAll::instancesOf(Val* instance, Val* with) {
-  Fusion* fusion = FusionGuard::getCurFusion();
   std::unordered_map<Val*, Val*> replacement_map;
   replacement_map[instance] = with;
   ReplaceAll::instancesOf(replacement_map);
 }
 
 void ReplaceAll::instancesOf(std::unordered_map<Val*, Val*> replacement_map) {
-  Fusion* fusion = FusionGuard::getCurFusion();
-
   ReplaceAll ra(std::move(replacement_map));
   // Get a copy because this will be modified in place, we shouldn't auto
   // iterate on it
   std::vector<Expr*> to_mutate;
-  for (Expr* expr : fusion->unordered_exprs())
+  for (Expr* expr : FusionGuard::getCurFusion()->unordered_exprs())
     to_mutate.push_back(expr);
 
   for (Expr* expr : to_mutate)

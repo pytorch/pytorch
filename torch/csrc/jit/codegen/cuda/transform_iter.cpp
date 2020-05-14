@@ -79,8 +79,6 @@ TensorDomain* TransformIter::runBackward(TensorDomain* td) {
   // We want to iterate backwards, reverse history.
   ops = std::vector<Expr*>(ops.rbegin(), ops.rend());
 
-  Fusion* fusion = FusionGuard::getCurFusion();
-
   TensorDomain* running_td = td;
   for (Expr* op : ops)
     running_td = replayBackward(op, running_td);
@@ -130,7 +128,7 @@ namespace {
 
 void validate_axis_map(int nDims, std::vector<int> axis_map) {
   TORCH_INTERNAL_ASSERT(
-      axis_map.size() == nDims,
+      axis_map.size() == (unsigned int)nDims,
       "Invalid axis map in replay transform. NDims doesn't match.");
 
   TORCH_INTERNAL_ASSERT(
@@ -144,7 +142,8 @@ void validate_axis_map(int nDims, std::vector<int> axis_map) {
 void validate_history_entry(Expr* expr, int nDims) {
   TORCH_INTERNAL_ASSERT(
       expr->input(0)->getValType().value() == ValType::TensorDomain &&
-          static_cast<TensorDomain*>(expr->input(0))->nDims() == nDims,
+          static_cast<TensorDomain*>(expr->input(0))->nDims() ==
+              (unsigned int)nDims,
       "Invalid history, or invalid axis_map in TransformIter.");
 }
 
@@ -156,7 +155,7 @@ struct Influence : public TransformIter {
     int axis = split->axis();
 
     TORCH_INTERNAL_ASSERT(
-        axis + 1 < influence.size(),
+        (unsigned int)(axis + 1) < influence.size(),
         "Error during replay backwards, td/influence size mismatch.");
     influence[axis] = influence[axis] | influence[axis + 1];
     influence.erase(influence.begin() + axis + 1);
@@ -167,7 +166,7 @@ struct Influence : public TransformIter {
   TensorDomain* replayBackward(Merge* merge, TensorDomain* td) override {
     int axis = merge->axis();
     TORCH_INTERNAL_ASSERT(
-        axis < influence.size(),
+        (unsigned int)axis < influence.size(),
         "Error during replay backwards, td/influence size mismatch.");
     influence.insert(influence.begin() + axis + 1, influence[axis]);
 
@@ -183,7 +182,8 @@ struct Influence : public TransformIter {
       int new_pos = i;
       int old_pos = new2old[i];
       TORCH_INTERNAL_ASSERT(
-          new_pos < influence.size() && old_pos < reorder_influence.size(),
+          new_pos < (int)influence.size() &&
+              old_pos < (int)reorder_influence.size(),
           "Error during replay backwards, td/influence size mismatch.");
       reorder_influence[old_pos] = influence[new_pos];
     }
@@ -197,7 +197,7 @@ struct Influence : public TransformIter {
   TensorDomain* replay(Split* split, TensorDomain* td) {
     int axis = split->axis();
     TORCH_INTERNAL_ASSERT(
-        axis < influence.size(),
+        (unsigned int)axis < influence.size(),
         "Error during replay, td/influence size mismatch.");
     influence.insert(influence.begin() + axis + 1, influence[axis]);
     return nullptr;
@@ -206,7 +206,7 @@ struct Influence : public TransformIter {
   TensorDomain* replay(Merge* merge, TensorDomain* td) {
     int axis = merge->axis();
     TORCH_INTERNAL_ASSERT(
-        axis >= 0 && axis + 1 < influence.size(),
+        axis >= 0 && (unsigned int)(axis + 1) < influence.size(),
         "Error during replay, td/influence size mismatch.");
     influence[axis] = influence[axis] | influence[axis + 1];
     influence.erase(influence.begin() + axis + 1);
@@ -222,7 +222,8 @@ struct Influence : public TransformIter {
       int new_pos = i;
       int old_pos = new2old[i];
       TORCH_INTERNAL_ASSERT(
-          new_pos < influence.size() && old_pos < reorder_influence.size(),
+          new_pos < (int)influence.size() &&
+              old_pos < (int)reorder_influence.size(),
           "Error during replay, td/influence size mismatch.");
       reorder_influence[new_pos] = influence[old_pos];
     }
@@ -290,7 +291,7 @@ struct Replay : public TransformIter {
     int saxis = split->axis();
 
     TORCH_INTERNAL_ASSERT(
-        saxis >= 0 && saxis < axis_map.size(),
+        saxis >= 0 && (unsigned int)saxis < axis_map.size(),
         "TransformReplay tried to modify an axis out of range, recieved ",
         saxis,
         " but this value should be >=0 and <",
@@ -327,7 +328,7 @@ struct Replay : public TransformIter {
     int maxis = merge->axis();
 
     TORCH_INTERNAL_ASSERT(
-        maxis >= 0 && maxis < axis_map.size(),
+        maxis >= 0 && (unsigned int)maxis < axis_map.size(),
         "TransformReplay tried to modify an axis out of range, recieved ",
         maxis,
         " but this value should be >= 0 and < axis_map.size()");
@@ -475,7 +476,7 @@ struct Replay : public TransformIter {
     bool nullopt = true;
     std::unordered_map<int, int> old2new_map;
     for (decltype(td->nDims()) i{0}; i < td->nDims(); i++) {
-      if (old2new[i] != i) {
+      if (old2new[i] != (int)i) {
         nullopt = false;
       }
       old2new_map[i] = old2new[i];
@@ -543,7 +544,7 @@ struct ReplaySelf : public TransformIter {
     int saxis = split->axis();
 
     TORCH_INTERNAL_ASSERT(
-        saxis >= 0 && saxis < axis_map.size(),
+        saxis >= 0 && (unsigned int)saxis < axis_map.size(),
         "TransformReplay tried to modify an axis out of range, recieved ",
         saxis,
         " but this value should be >=0 and <",
@@ -575,7 +576,7 @@ struct ReplaySelf : public TransformIter {
     // Create new domain reflecting split
     std::vector<IterDomain*> new_domain;
     for (decltype(td->nDims()) i{0}; i < td->nDims(); i++) {
-      if (i == axis) {
+      if ((int)i == axis) {
         // We want to support cases where our root domain has changed sizes
         // this happens in lowering when we replace sizes with runtime look ups
         IterDomain* td_axis = td->axis(axis);
@@ -610,7 +611,7 @@ struct ReplaySelf : public TransformIter {
     }
 
     TensorDomain* replayed = new TensorDomain(new_domain);
-    Split* replayed_split = new Split(replayed, td, axis, split->factor());
+    new Split(replayed, td, axis, split->factor());
     return replayed;
   }
 
@@ -618,7 +619,7 @@ struct ReplaySelf : public TransformIter {
     int maxis = merge->axis();
 
     TORCH_INTERNAL_ASSERT(
-        maxis >= 0 && maxis < axis_map.size(),
+        maxis >= 0 && (unsigned int)maxis < axis_map.size(),
         "TransformReplay tried to modify an axis out of range, recieved ",
         maxis,
         " but this value should be >= 0 and < axis_map.size()");
@@ -646,7 +647,7 @@ struct ReplaySelf : public TransformIter {
     // Create new domain reflecting post-merge
     std::vector<IterDomain*> new_domain;
     for (decltype(td->nDims()) i{0}; i < td->nDims(); i++) {
-      if (i == axis) {
+      if ((int)i == axis) {
         // We want to support cases where our root domain has changed sizes
         // this happens in lowering when we replace sizes with runtime look ups
         IterDomain* td_axis1 = td->axis(axis);
@@ -665,14 +666,14 @@ struct ReplaySelf : public TransformIter {
             m_axis->isRFactorProduct());
         new_domain.push_back(merged);
 
-      } else if (i != axis_p_1) {
+      } else if ((int)i != axis_p_1) {
         // Add in all other axes, these may not match the input td to the split.
         new_domain.push_back(td->axis(i));
       }
     }
 
     TensorDomain* replayed = new TensorDomain(new_domain);
-    Merge* replayed_merge = new Merge(replayed, td, axis);
+    new Merge(replayed, td, axis);
     return replayed;
   }
 
@@ -787,7 +788,7 @@ struct ReplaySelf : public TransformIter {
     bool nullopt = true;
     std::unordered_map<int, int> old2new_map;
     for (decltype(td->nDims()) i{0}; i < td->nDims(); i++) {
-      if (old2new[i] != i) {
+      if (old2new[i] != (int)i) {
         nullopt = false;
       }
       old2new_map[i] = old2new[i];
@@ -850,7 +851,7 @@ struct TORCH_CUDA_API TransformBackward : public TransformIter {
     int saxis = split->axis();
 
     TORCH_INTERNAL_ASSERT(
-        saxis >= 0 && saxis < axis_map.size(),
+        saxis >= 0 && (unsigned int)saxis < axis_map.size(),
         "TransformBackward tried to modify an axis out of range, recieved ",
         saxis,
         " but this value should be >= 0 and < axis_map.size()");
@@ -878,7 +879,7 @@ struct TORCH_CUDA_API TransformBackward : public TransformIter {
     // Create new domain reflecting pre-split
     std::vector<IterDomain*> new_domain;
     for (decltype(td->nDims()) i{0}; i < td->nDims(); i++) {
-      if (i == axis) {
+      if ((int)i == axis) {
         IterDomain* orig_axis = split->in()->axis(saxis);
         // Insert pre-split axis, make sure isReduction matches what is expected
         new_domain.push_back(new IterDomain(
@@ -887,14 +888,14 @@ struct TORCH_CUDA_API TransformBackward : public TransformIter {
             orig_axis->parallel_method(),
             td->axis(axis)->isReduction(),
             td->axis(axis)->isRFactorProduct()));
-      } else if (i != axis_p_1) {
+      } else if ((int)i != axis_p_1) {
         // Add in all other axes, these may not match the input td to the split.
         new_domain.push_back(td->axis(i));
       }
     }
 
     TensorDomain* replayed_inp = new TensorDomain(new_domain);
-    Split* replayed_split = new Split(td, replayed_inp, axis, split->factor());
+    new Split(td, replayed_inp, axis, split->factor());
     return replayed_inp;
   }
 
@@ -908,7 +909,7 @@ struct TORCH_CUDA_API TransformBackward : public TransformIter {
     int maxis = merge->axis();
 
     TORCH_INTERNAL_ASSERT(
-        maxis >= 0 && maxis < axis_map.size(),
+        maxis >= 0 && (unsigned int)maxis < axis_map.size(),
         "TransformBackward tried to modify an axis out of range, recieved ",
         maxis,
         " but this value should be >=0 and <",
@@ -935,7 +936,7 @@ struct TORCH_CUDA_API TransformBackward : public TransformIter {
     // Create new domain reflecting pre-merge
     std::vector<IterDomain*> new_domain;
     for (decltype(td->nDims()) i{0}; i < td->nDims(); i++) {
-      if (i == axis) {
+      if ((int)i == axis) {
         IterDomain* td_axis = td->axis(axis);
         IterDomain* maxis_1 = merge->in()->axis(maxis);
         IterDomain* maxis_2 = merge->in()->axis(maxis + 1);
@@ -958,7 +959,7 @@ struct TORCH_CUDA_API TransformBackward : public TransformIter {
     }
 
     TensorDomain* replayed_inp = new TensorDomain(new_domain);
-    Merge* replayed_merge = new Merge(td, replayed_inp, axis);
+    new Merge(td, replayed_inp, axis);
     return replayed_inp;
   }
 
@@ -968,7 +969,6 @@ struct TORCH_CUDA_API TransformBackward : public TransformIter {
     // We want to convert new2old to something with td->nDims which it isn't
     // guarenteed to be
     std::vector<int> new2old(td->nDims(), -1);
-    auto extent = axis_map.size() > td->nDims() ? axis_map.size() : td->nDims();
 
     for (decltype(new2old_orig.size()) i{0}; i < new2old_orig.size(); i++) {
       int new_pos = axis_map[i]; // position in td
@@ -1049,7 +1049,7 @@ struct TORCH_CUDA_API TransformBackward : public TransformIter {
     }
 
     TensorDomain* replayed_inp = new TensorDomain(old_td);
-    Reorder* replayed_split = new Reorder(td, replayed_inp, new2old);
+    new Reorder(td, replayed_inp, new2old);
     return replayed_inp;
   }
 

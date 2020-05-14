@@ -107,7 +107,7 @@ TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1) {
   }
 
   Val* out = newValLike(v1, dtype);
-  Statement* expr = new UnaryOp(UnaryOpType::Cast, out, v1);
+  new UnaryOp(UnaryOpType::Cast, out, v1);
   return out;
 }
 
@@ -115,7 +115,7 @@ TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1) {
 
 TORCH_CUDA_API Val* unaryOp(UnaryOpType type, Val* v1) {
   Val* out = newValLike(v1);
-  Statement* expr = new UnaryOp(type, out, v1);
+  new UnaryOp(type, out, v1);
   return out;
 }
 
@@ -130,7 +130,7 @@ TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
     if (out->getDataType().value() != DataType::Int)
       out = newValLike(out, DataType::Int);
   }
-  Statement* expr = new BinaryOp(type, out, v1, v2);
+  new BinaryOp(type, out, v1, v2);
   return out;
 }
 
@@ -202,7 +202,7 @@ Val* reductionOp(
       axis += int(tv->nDims());
 
     TORCH_CHECK(
-        axis >= 0 && axis < tv->nDims(),
+        axis >= 0 && (unsigned int)axis < tv->nDims(),
         "Reduction on invalid axis, recieved: ",
         axis,
         " however tensor view only has ",
@@ -273,7 +273,7 @@ TORCH_CUDA_API Val* where(Val* c, Val* v1, Val* v2) {
       c->getDataType().value());
 
   Val* out = promoteNew(v1, v2);
-  Statement* expr = new TernaryOp(TernaryOpType::Where, out, c, v1, v2);
+  new TernaryOp(TernaryOpType::Where, out, c, v1, v2);
   return out;
 }
 
@@ -291,8 +291,8 @@ TORCH_CUDA_API Val* threshold(Val* in, Val* thresh, Val* value) {
       "Thresh and Value values should be Scalars");
 
   Val* out = newValLike(in);
-  Statement* expr =
-      new TernaryOp(TernaryOpType::Threshold, out, in, thresh, value);
+
+  new TernaryOp(TernaryOpType::Threshold, out, in, thresh, value);
   return out;
 }
 
@@ -308,8 +308,8 @@ TORCH_CUDA_API Val* clamp(Val* in, Val* min_val, Val* max_val) {
       "Min and Max values should be Scalars");
 
   Val* out = newValLike(in);
-  Statement* expr =
-      new TernaryOp(TernaryOpType::Clamp, out, in, min_val, max_val);
+
+  new TernaryOp(TernaryOpType::Clamp, out, in, min_val, max_val);
   return out;
 }
 

@@ -177,13 +177,13 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
   std::shared_ptr<Graph> graph = fusion_node->g(attr::Subgraph)->copy();
 
   auto execute_lambda = [&]() {
-    const auto nInputs = graph->inputs().size();
+    auto nInputs = graph->inputs().size();
     at::ArrayRef<IValue> inputs = last(stack, nInputs);
 
     // shape inference in graph
     // update shape information per the new inputs;
     EraseShapeInformation(graph);
-    for (int i = 0; i < nInputs; i++) {
+    for (decltype(nInputs) i = 0; i < nInputs; i++) {
       graph->inputs()[i]->setType(inputs[i].type());
     }
     // shape inference
