@@ -24,6 +24,7 @@ std::vector<std::string> _static_quantizable_call_funcs = {
 };
 
 std::vector<std::string> _static_quantizable_aten_funcs = {
+    "conv1d",
     "conv2d",
     "conv3d",
     "linear",
@@ -59,22 +60,12 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "_max_pool2d",
     "_max_pool3d",
     "dropout",
-    "interpolate",
-    "upsample",
-    "upsample_bilinear",
-    "upsample_nearest",
     "relu",
     "relu_",
     "sigmoid",
     "tanh",
-    "hardtanh",
-    "hardtanh_",
-    "elu",
-    "elu_",
     "hardsigmoid",
     "hardsigmoid_",
-    "leaky_relu",
-    "leaky_relu_",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
@@ -83,47 +74,21 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
 // operation only depends on the shape of the Tensor
 // e.g. `aten::flatten(%input_tensor, ...)`
 std::vector<std::string> _single_input_general_shape_aten_funcs = {
-    "max_pool1d",
-    "max_pool2d",
-    "max_pool3d",
-    "flatten",
-    "max",
-    "min",
-    "upsample_nearest1d",
-    "upsample_nearest2d",
-    "upsample_nearest3d",
-    "upsample_linear1d",
-    "upsample_bilinear2d",
-    "upsample_trilinear3d",
-    "upsample_bicubic2d",
-    "dropout",
-    "reshape",
+    "max_pool1d", "max_pool2d",  "max_pool3d",
+    "flatten",    "max",         "min",
+    "dropout",    "reshape",
     "resize_", // Non-inplace resize is deprecated
-    "chunk",
-    "view",
-    "transpose",
-    "contiguous",
-    "permute",
-    "repeat_interleave",
-    "clamp",
-    // "clamp_",  // Enable when quantized `clamp_` is ready
-    "relu",
-    "relu_",
-    "sigmoid",
-    "tanh",
-    "hardtanh",
-    "hardtanh_",
-    "elu",
-    "elu_",
-    "hardsigmoid",
-    "hardsigmoid_",
-    "leaky_relu",
-    "leaky_relu_",
+    "chunk",      "view",        "transpose",
+    "contiguous", "permute",     "repeat_interleave",
+    "relu",       "relu_",       "sigmoid",
+    "tanh",       "hardsigmoid", "hardsigmoid_",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
 // have a single input Tensor
 // Also these ops do computation on the value of Tensor
+// TODO: [Need verify] looks like we can quantize simple functionals that just
+// call into aten functions
 std::vector<std::string> _single_input_general_value_call_funcs = {
     "avg_pool1d",
     "avg_pool2d",
@@ -131,6 +96,13 @@ std::vector<std::string> _single_input_general_value_call_funcs = {
     "adaptive_avg_pool1d",
     "adaptive_avg_pool2d",
     "adaptive_avg_pool3d",
+    "interpolate",
+    "upsample",
+    "upsample_bilinear",
+    "upsample_nearest",
+    "hardtanh",
+    "elu",
+    "leaky_relu",
 };
 
 // Theses are aten functions for ops that doesn't require observation and
@@ -145,6 +117,21 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     "adaptive_avg_pool2d",
     "adaptive_avg_pool3d",
     "mean",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "upsample_linear1d",
+    "upsample_bilinear2d",
+    "upsample_trilinear3d",
+    "upsample_bicubic2d",
+    "clamp",
+    // "clamp_",  // Enable when quantized `clamp_` is ready
+    "hardtanh",
+    "hardtanh_",
+    "elu",
+    "elu_",
+    "leaky_relu",
+    "leaky_relu_",
 };
 
 // Special checks for ops that do not require observers for all input tensors.
@@ -201,7 +188,11 @@ bool matchArgPattern(
 bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv2d", 1}, {"conv3d", 1}, {"linear", 1}, {"lstm", 2}}),
+      AtenFuncArgs({{"conv1d", 1},
+                    {"conv2d", 1},
+                    {"conv3d", 1},
+                    {"linear", 1},
+                    {"lstm", 2}}),
       CallFuncArgs({{"linear", 2}}));
   return result;
 }
@@ -209,7 +200,8 @@ bool isWeight(Value* v) {
 bool isBiasOfConvOrLinear(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv2d", 2}, {"conv3d", 2}, {"linear", 2}}),
+      AtenFuncArgs(
+          {{"conv1d", 2}, {"conv2d", 2}, {"conv3d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
   return result;
 }
