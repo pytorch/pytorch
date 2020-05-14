@@ -51,6 +51,26 @@ void asin_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+// We manually overload asin because std::atan does not work with thrust::complex types.
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t atan_wrapper(scalar_t v) {
+  return ::atan(v);
+}
+
+template<typename T>
+__host__ __device__ static inline thrust::complex<T> atan_wrapper(thrust::complex<T> v) {
+  return thrust::atan(v);
+}
+
+void atan_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "atan_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return atan_wrapper(a);
+    });
+  });
+}
+
 
 // We manually overload sin because std::sin does not work with thrust::complex types.
 template<typename scalar_t>
@@ -160,6 +180,7 @@ void tan_kernel_cuda(TensorIterator& iter) {
 
 REGISTER_DISPATCH(acos_stub, &acos_kernel_cuda);
 REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda);
+REGISTER_DISPATCH(atan_stub, &atan_kernel_cuda);
 REGISTER_DISPATCH(sin_stub, &sin_kernel_cuda);
 REGISTER_DISPATCH(cos_stub, &cos_kernel_cuda);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel_cuda);
