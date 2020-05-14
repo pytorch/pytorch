@@ -1,3 +1,4 @@
+from __future__ import division
 import io
 import os
 import sys

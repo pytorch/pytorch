@@ -1,4 +1,6 @@
 r"""Functional interface"""
+from __future__ import division
+
 import warnings
 import math
 
