@@ -2648,8 +2648,8 @@ class TestAutograd(TestCase):
         self.assertFalse(torch.autograd._profiler_enabled())
 
         last_end = 0
-        names = ['is_complex', 'mul', 'mul', 'to', 'empty_strided', 'copy_', 'empty', 'is_complex',
-                 'add', 'add', 'to', 'empty_strided', 'copy_', 'empty']
+        names = ['is_complex', 'mul', 'to', 'empty_strided', 'copy_', 'empty', 'is_complex',
+                 'add', 'to', 'empty_strided', 'copy_', 'empty']
         top_level_names = ['is_complex', 'mul', 'is_complex', 'add']
         top_level_iter = iter(top_level_names)
         self.assertEqual(len(p.function_events), len(names))
@@ -2998,26 +2998,6 @@ class TestAutograd(TestCase):
             if idx == len(important_events):
                 break
         self.assertEqual(idx, len(important_events))
-
-        def count_events_before(before, target):
-            matches = [e for e in events if e.name == before]
-            self.assertEqual(len(matches), 1)
-            match = matches[0]
-
-            count = 0
-            for e in events:
-                if e.name == target and e.cpu_interval.end <= match.cpu_interval.end:
-                    count += 1
-            return count
-
-        self.assertEqual(
-            count_events_before("inner", "profiler::_record_function_exit"),
-            1,
-        )
-        self.assertEqual(
-            count_events_before("outer", "profiler::_record_function_exit"),
-            2,
-        )
 
         # We can also use record_function to decorate arbitrary function
         @record_function('my_func')
