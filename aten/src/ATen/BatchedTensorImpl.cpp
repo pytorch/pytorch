@@ -97,7 +97,7 @@ Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim) {
   const auto* batched = getBatched(tensor);
   BatchDims new_bdims = { batched->bdims().begin(), batched->bdims().end() };
   auto actual_bdim = batched->actualDim(dim, /*wrap_dim=*/true);
-  new_bdims.push_back({actual_bdim, level});
+  new_bdims.push_back({level, actual_bdim});
   return makeBatched(batched->value(), std::move(new_bdims));
 }
 
