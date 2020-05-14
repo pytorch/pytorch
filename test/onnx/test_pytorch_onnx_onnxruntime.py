@@ -3182,6 +3182,19 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.randn(2)
         self.run_test(Celu(), (input,))
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_celu_dim(self):
+        class Celu(torch.nn.Module):
+            def __init__(self):
+                super(Celu, self).__init__()
+                self.celu = torch.nn.CELU()
+
+            def forward(self, input):
+                return self.celu(input)
+
+        input = torch.randn(2, 5, 7)
+        self.run_test(Celu(), (input,))
+
     def test_empty_branch(self):
         class EmptyBranchModel(torch.jit.ScriptModule):
             @torch.jit.script_method
