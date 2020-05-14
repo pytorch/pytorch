@@ -33,21 +33,21 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
       at::Tensor bias,
       c10::optional<double> input_scale,
       at::Tensor w_scales,
-      at::Tensor w_zps)
+      std::vector<uint8_t>&& w_zps)
       : w(std::move(w)),
         orig_weight(std::move(orig_weight)),
         bias_(std::move(bias)),
         input_scale(std::move(input_scale)),
         w_scales(w_scales),
-        w_zero_points(w_zps) {}
+        w_zero_points(std::move(w_zps)) {}
 
   std::unique_ptr<qnnpack::PackBMatrix> w;
   at::Tensor orig_weight;
   at::Tensor bias_;
   c10::optional<double> input_scale;
   at::Tensor w_scales;
-  at::Tensor w_zero_points;
-  std::vector<float> requantization_scale;
+  std::vector<uint8_t> w_zero_points;
+  std::vector<float> requantization_scales;
 
   at::Tensor apply(
       at::Tensor input,
@@ -95,7 +95,8 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       c10::optional<double> input_scale,
       std::vector<int64_t> kernel,
       at::Tensor w_scale,
-      at::Tensor w_zp)
+      std::vector<uint8_t>&& w_zps,
+      bool is_per_channel)
       : w(std::move(w)),
         orig_weight(std::move(orig_weight)),
         bias(std::move(bias)),
@@ -104,9 +105,22 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
         dilation_(std::move(dilation)),
         groups_(groups),
         input_scale(input_scale),
-        kernel(std::move(kernel)),
+        kernel_(std::move(kernel)),
         w_scales(w_scale),
-        w_zero_points(w_zp) {}
+        w_zero_points(std::move(w_zps)),
+        conv_p(
+            {(uint32_t)kernel_[1], (uint32_t)kernel_[0]},
+            {(uint32_t)stride_[1], (uint32_t)stride_[0]},
+            {(uint32_t)dilation_[1], (uint32_t)dilation_[0]},
+            {(uint32_t)padding_[0], (uint32_t)padding_[1],
+             (uint32_t)padding_[0], (uint32_t)padding_[1]},
+            /*adjustment=*/{0, 0},
+            groups_,
+            groups_ * this->orig_weight.size(1),
+            this->orig_weight.size(0),
+            /*transpose=*/false,
+            is_per_channel)
+        {}
 
   std::unique_ptr<qnnpack::PrePackConvWeights> w;
   at::Tensor orig_weight;
@@ -116,10 +130,10 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   torch::List<int64_t> dilation_;
   int64_t groups_;
   c10::optional<double> input_scale;
-  std::vector<int64_t> kernel;
+  std::vector<int64_t> kernel_;
   at::Tensor w_scales;
-  at::Tensor w_zero_points;
-  std::vector<float> requantization_scale;
+  std::vector<uint8_t> w_zero_points;
+  std::vector<float> requantization_scales;
   qnnpack::conv_param_t conv_p;
 
   at::Tensor apply(
@@ -240,31 +254,31 @@ std::vector<float> generate_requantization_scales(
   std::vector<float> requant_scales(num_output_channels_padded, 1.f);
   for (int i = 0; i < num_output_channels_padded; ++i) {
     requant_scales[i] = weight_scales_data[i] * input_scale / output_scale;
+    TORCH_CHECK(
+        (requant_scales[i] > 0.0f && std::isnormal(requant_scales[i])),
+        "failed to create op with requantization scale: ",
+        requant_scales[i],
+        ": requantization scale must be finite and positive");
   }
   return requant_scales;
 }
 
-std::pair<at::Tensor, at::Tensor> make_zero_points_and_scales_tensor(
+std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
     const at::Tensor& weight_contig
     ) {
   auto num_output_channels = weight_contig.size(0);
   // Add 8 to account for bufferring needed by QNNPACK.
   auto num_output_channels_padded = weight_contig.size(0) + 8;
   const auto qtype = weight_contig.qscheme();
-  at::Tensor weight_zp =
-    at::_empty_affine_quantized(
-        {num_output_channels_padded},
-        at::device(at::kCPU).dtype(at::kQUInt8),
-        1.f, 0);
+  std::vector<uint8_t> weight_zp(num_output_channels_padded, 0);
   // Adjust weight zero point, similar to weight data.
-  uint8_t* weight_zp_data = (uint8_t*)weight_zp.data_ptr<c10::quint8>();
   if (qtype == at::kPerTensorAffine) {
     for (int i = 0; i < num_output_channels; ++i) {
-      weight_zp_data[i] = (uint8_t)(weight_contig.q_zero_point() + 128);
+      weight_zp[i] = (uint8_t)(weight_contig.q_zero_point() + 128);
     }
   } else if (qtype == at::kPerChannelAffine) {
     for (int i = 0; i < num_output_channels; ++i) {
-      weight_zp_data[i] =
+      weight_zp[i] =
           (uint8_t)(
               weight_contig.q_per_channel_zero_points()[i].item<int32_t>() +
               128);
@@ -288,6 +302,9 @@ std::pair<at::Tensor, at::Tensor> make_zero_points_and_scales_tensor(
     }
   } else {
     TORCH_INTERNAL_ASSERT("Unsupported quantization scheme.");
+  }
+  for (int i = num_output_channels; i <  num_output_channels_padded; ++i) {
+    weight_scales_data[i] = 1.f;
   }
   return {weight_zp, weight_scales};
 }
