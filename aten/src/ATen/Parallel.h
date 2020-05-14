@@ -4,7 +4,7 @@
 #include <c10/macros/Macros.h>
 
 namespace at {
-namespace internal {
+namespace internal {//
 // This parameter is heuristically chosen to determine the minimum number of
 // work that warrants parallelism. For example, when summing an array, it is
 // deemed inefficient to parallelise over arrays shorter than 32768. Further,

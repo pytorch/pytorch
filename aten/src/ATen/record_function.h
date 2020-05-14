@@ -122,41 +122,37 @@ struct TORCH_API RecordFunction {
   // Internal functions, do not use directly;
   // used in python's context manager
 
-  // _before functions initialize RecordFunction members and call
+  // before functions initialize RecordFunction members and call
   // start callbacks
-  void _before(const char* name, int64_t sequence_nr = -1);
-  void _before(std::string name, int64_t sequence_nr = -1);
+  void before(const char* name, int64_t sequence_nr = -1);
+  void before(std::string name, int64_t sequence_nr = -1);
 
   template<typename F>
-  void _before(
+  void before(
       F fn,
       c10::ArrayRef<c10::IValue> args,
       int64_t current_sequence_nr = -1) {
     inputs_ = args.vec();
-    _before(fn, current_sequence_nr);
+    before(fn, current_sequence_nr);
   }
 
   template<typename F>
-  void _before(
+  void before(
       F fn,
       std::vector<c10::IValue>&& args,
       int64_t current_sequence_nr = -1) {
     inputs_ = std::move(args);
-    _before(fn, current_sequence_nr);
+    before(fn, current_sequence_nr);
   }
 
   // Internal, only for the use within RECORD_FUNCTION macro
   // (i.e. stack based RecordFunctions with scope lifetime);
   // sets this function as the current() thread local function;
-  // original value of current() is restored in destructor/_end
+  // original value of current() is restored in destructor/end
   void _setCurrent();
 
-  inline RecordFunction* parent() const {
-    return parent_;
-  }
-
   // Calls end callbacks
-  void _end();
+  void end();
 
   inline RecordFunctionHandle handle() const {
     return handle_;
@@ -313,23 +309,17 @@ class TORCH_API RecordFunctionCallback {
   static double sample_zero_one();
 };
 
-// Helper macro for RECORD_FUNCTION_WITH_SCOPE
-#define RECORD_FUNCTION_BEFORE(guard, fn, inputs, ...) \
-  if (guard.needs_inputs) { \
-    guard._before(fn, inputs, ##__VA_ARGS__); \
-  } else { \
-    guard._before(fn, ##__VA_ARGS__); \
-  }
-
 // Using macro to minimize inputs copies,
 // optional argument - function's seq_no
-// Note: calling _setCurrent only for stack based
-// RecordFunction
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
   at::RecordFunction guard(scope); \
   if (guard.active) { \
     guard._setCurrent(); \
-    RECORD_FUNCTION_BEFORE(guard, fn, inputs, ##__VA_ARGS__) \
+    if (guard.needs_inputs) { \
+      guard.before(fn, inputs, ##__VA_ARGS__); \
+    } else { \
+      guard.before(fn, ##__VA_ARGS__); \
+    } \
   }
 
 #define RECORD_FUNCTION(fn, inputs, ...) \

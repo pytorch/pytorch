@@ -299,7 +299,7 @@ uint64_t RecordFunction::currentThreadId() {
   return current_thread_id_;
 }
 
-void RecordFunction::_before(const char* name, int64_t sequence_nr) {
+void RecordFunction::before(const char* name, int64_t sequence_nr) {
   if (!active) {
     return;
   }
@@ -310,7 +310,7 @@ void RecordFunction::_before(const char* name, int64_t sequence_nr) {
   manager().runStartCallbacks(*this);
 }
 
-void RecordFunction::_before(std::string name, int64_t sequence_nr) {
+void RecordFunction::before(std::string name, int64_t sequence_nr) {
   if (!active) {
     return;
   }
@@ -322,10 +322,10 @@ void RecordFunction::_before(std::string name, int64_t sequence_nr) {
 }
 
 RecordFunction::~RecordFunction() {
-  _end();
+  end();
 }
 
-void RecordFunction::_end() {
+void RecordFunction::end() {
   if (active) {
     manager().runEndCallbacks(*this);
     active = false;
