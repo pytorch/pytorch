@@ -16584,6 +16584,40 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         test_output_dtype(torch.int32, False)
         test_output_dtype(torch.int64, True)
 
+    def test_pickle_gradscaler(self, device):
+        # This test is not in test_cuda.py because it should pass in 3 cases:
+        #  1. cuda is not available.
+        #  2. cuda is available but device is not cuda.
+        #  3. cuda is available and device is cuda.
+        # In case 1, a and b disable themselves on construction and shouldn't try to pickle workhorse attributes.
+        # In case 2, a and b are enabled.  Workhorse attributes participate in pickling, but none are lazy-inited
+        # to cuda Tensors, because I don't want to do cuda things if device is not cuda.
+        # In case 3, a and b are enabled and we may also try lazy-initing _scale to a cuda tensor.
+        device = torch.device(device)
+        try_lazy_inits = (True, False) if device.type == "cuda" else (False,)
+        for lazy_init_scale in try_lazy_inits:
+            a = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
+            self.assertTrue(a.is_enabled() if torch.cuda.is_available() else not a.is_enabled())
+            if lazy_init_scale:
+                # Dummy a.scale() call lazy-inits a._scale Tensor.
+                a.scale(torch.tensor([4.0], dtype=torch.float32, device=device))
+                self.assertTrue(isinstance(a._scale, torch.cuda.FloatTensor))
+            # The following three lines should work whether or not cuda is available.
+            serialized = pickle.dumps(a)
+            b = pickle.loads(serialized)
+            self.assertEqual(b.is_enabled(), a.is_enabled())
+            if a.is_enabled():
+                self.assertEqual(b.get_scale(), 3.)
+                self.assertEqual(b.get_growth_factor(), 4.)
+                self.assertEqual(b.get_backoff_factor(), .5)
+                self.assertEqual(b.get_growth_interval(), 2)
+                self.assertEqual(b._init_growth_tracker, 0)
+                # supplies a dummy key to test the defaultdict's default_factory
+                self.assertEqual(b._per_optimizer_states["fdsa"],
+                                 torch.cuda.amp.grad_scaler._refresh_per_optimizer_state())
+                if lazy_init_scale:
+                    self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
+
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
