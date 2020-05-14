@@ -338,6 +338,7 @@ Quantized version of standard NN layers.
   quantized versions
 * :class:`~torch.nn.quantized.QFunctional` — Wrapper class for quantized
   versions of stateless operations like ``torch.add``
+* :class:`~torch.nn.quantized.Conv1d` — 1D convolution
 * :class:`~torch.nn.quantized.Conv2d` — 2D convolution
 * :class:`~torch.nn.quantized.Conv3d` — 3D convolution
 * :class:`~torch.nn.quantized.Linear` — Linear (fully-connected) layer
@@ -362,6 +363,7 @@ quantization output parameters)
 
 * :func:`~torch.nn.quantized.functional.adaptive_avg_pool2d` — 2D adaptive average pooling
 * :func:`~torch.nn.quantized.functional.avg_pool2d` — 2D average pooling
+* :func:`~torch.nn.quantized.functional.conv1d` — 1D convolution
 * :func:`~torch.nn.quantized.functional.conv2d` — 2D convolution
 * :func:`~torch.nn.quantized.functional.conv3d` — 3D convolution
 * :func:`~torch.nn.quantized.functional.interpolate` — Down-/up- sampler
@@ -694,6 +696,7 @@ Functional interface
 
 .. autofunction:: relu
 .. autofunction:: linear
+.. autofunction:: conv1d
 .. autofunction:: conv2d
 .. autofunction:: conv3d
 .. autofunction:: max_pool2d
@@ -716,6 +719,11 @@ ReLU
 ReLU6
 ~~~~~~~~~~~~~~~
 .. autoclass:: ReLU6
+    :members:
+
+Conv1d
+~~~~~~~~~~~~~~~
+.. autoclass:: Conv1d
     :members:
 
 Conv2d
