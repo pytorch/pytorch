@@ -83,6 +83,40 @@ C10_DEFINE_TEST(TestLog10, Rev) {
   }
 }
 
+C10_DEFINE_TEST(TestLog1p, Normal) {
+  // log1p(x) = log(1+x)
+  {
+  c10::complex<float> x(0.1, 1.2);
+  c10::complex<float> l1 = std::log1p(x);
+  c10::complex<float> l2 = std::log(1.0f + x);
+  C10_ASSERT_NEAR(l1.real(), l2.real(), tol);
+  C10_ASSERT_NEAR(l1.imag(), l2.imag(), tol);
+  }
+  {
+  c10::complex<double> x(0.1, 1.2);
+  c10::complex<double> l1 = std::log1p(x);
+  c10::complex<double> l2 = std::log(1.0 + x);
+  C10_ASSERT_NEAR(l1.real(), l2.real(), tol);
+  C10_ASSERT_NEAR(l1.imag(), l2.imag(), tol);
+  }
+}
+
+C10_DEFINE_TEST(TestLog1p, Small) {
+  // log(1 + x) ~ x for |x| << 1
+  {
+  c10::complex<float> x(1e-9, 2e-9);
+  c10::complex<float> l = std::log1p(x);
+  C10_ASSERT_NEAR(l.real() / x.real(), 1, tol);
+  C10_ASSERT_NEAR(l.imag() / x.imag(), 1, tol);
+  }
+  {
+  c10::complex<double> x(1e-100, 2e-100);
+  c10::complex<double> l = std::log1p(x);
+  C10_ASSERT_NEAR(l.real() / x.real(), 1, tol);
+  C10_ASSERT_NEAR(l.imag() / x.imag(), 1, tol);
+  }
+}
+
 // Power functions
 
 C10_DEFINE_TEST(TestPowSqrt, Equal) {

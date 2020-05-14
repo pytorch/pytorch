@@ -212,6 +212,28 @@ C10_HOST_DEVICE inline c10::complex<T> atanh(const c10::complex<T> &x) {
 #endif
 }
 
+// We also support some math functions that is not supported by standard library:
+
+template<typename T>
+C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T> &z) {
+  // log1p(z) = log(1+z)
+  // Let's define 1 + z = r*e^(i*a), then we have
+  // log(r*e^(i*a)) = log(r) + i*a
+  // but log(r) could have precision issue when |z| << 1, so we should really
+  // be using log1p(r-1), where the r-1 should be computed in high precision.
+  // to do so, we are doing the following transformation: (assuming z = x+iy)
+  // r-1 = (r-1)*(r+1)/(r+1) = (r^2-1) / (r+1)
+  //     = ((x+1)^2 + y^2 - 1) / (r+1)
+  //     = (x^2 + y^2 + 2x) / (r+1)
+  T x = z.real();
+  T y = z.imag();
+  c10::complex<T> p1 = z + T(1);
+  T r = std::abs(p1);
+  T a = std::arg(p1);
+  T rm1 = (x * x + y * y + x * T(2)) / (r + 1);
+  return {std::log1p(rm1), a};
+}
+
 #undef CUDA92_BUG
 
 } // namespace std
