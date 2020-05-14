@@ -392,14 +392,14 @@ MAYBE_GLOBAL void test_arithmetic() {
 template<typename T, typename int_t>
 C10_HOST_DEVICE void test_binary_ops_for_int_type_(T real, T img, int_t num) {
   c10::complex<T> c(real, img);
-  ASSERT_EQ(c + num, c10::complex<T>(real + num, img));
-  ASSERT_EQ(num + c, c10::complex<T>(num + real, img));
-  ASSERT_EQ(c - num, c10::complex<T>(real - num, img));
-  ASSERT_EQ(num - c, c10::complex<T>(num - real, -img));
-  ASSERT_EQ(c * num, c10::complex<T>(real * num, img * num));
-  ASSERT_EQ(num * c, c10::complex<T>(num * real, num * img));
-  ASSERT_EQ(c / num, c10::complex<T>(real / num, img / num));
-  ASSERT_EQ(num / c, c10::complex<T>(num * real / std::norm(c), -num * img / std::norm(c)));
+  static_assert(c + num == c10::complex<T>(real + num, img), "");
+  static_assert(num + c == c10::complex<T>(num + real, img), "");
+  static_assert(c - num == c10::complex<T>(real - num, img), "");
+  static_assert(num - c == c10::complex<T>(num - real, -img), "");
+  static_assert(c * num == c10::complex<T>(real * num, img * num), "");
+  static_assert(num * c == c10::complex<T>(num * real, num * img), "");
+  static_assert(c / num == c10::complex<T>(real / num, img / num), "");
+  static_assert(num / c == c10::complex<T>(num * real / std::norm(c), -num * img / std::norm(c)), "");
 }
 
 template<typename T>
