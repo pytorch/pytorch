@@ -1893,7 +1893,6 @@ class TestONNXRuntime(unittest.TestCase):
         model = make_model(3, 2)
         self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
 
-    @unittest.skip("Possible ORT bug?")
     def test_gru_no_bias(self):
         class GruNet(torch.nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):
