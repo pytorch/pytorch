@@ -220,11 +220,22 @@ Val* reductionOp(
 }
 
 TORCH_CUDA_API Val* sum(Val* v1, std::vector<int> axes) {
-  return reductionOp(
-      BinaryOpType::Add,
-      axes,
-      newConstScalar(v1->getDataType().value(), 0.0),
-      v1);
+  Val* init;
+  switch (v1->getDataType().value()) {
+    case (DataType::Float):
+      init = new Float(0.0);
+      break;
+    case (DataType::Int):
+      init = new Int(0);
+      break;
+    default:
+      TORCH_CHECK(
+          false,
+          "Could not generate a sum op for tensor with type: ",
+          v1->getDataType().value());
+  }
+
+  return reductionOp(BinaryOpType::Add, axes, init, v1);
 }
 
 // COMPOUND OPERATIONS
