@@ -1623,7 +1623,7 @@ struct CAFFE2_API ClassAttribute {
     return attributeType_;
   }
 
-  const std::string& getName() const {
+  const std::string getName() const {
     return attributeName_;
   }
 

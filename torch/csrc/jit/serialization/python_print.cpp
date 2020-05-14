@@ -1229,17 +1229,27 @@ struct PythonPrintImpl {
       // attributes and parameters.
       if (is_module) {
         std::vector<std::string> params;
+        std::vector<std::string> buffers;
         // Populate the __parameters__ field. This tells the importer which
         // attributes are parameters.
         for (size_t i = 0; i < numAttrs; i++) {
           if (classType->is_parameter(i)) {
             params.push_back(classType->getAttributeName(i));
           }
+          if (classType->is_buffer(i)) {
+            buffers.push_back(classType->getAttributeName(i));
+          }
         }
         indent();
         body_ << "__parameters__ = [";
         for (const auto& param : params) {
           body_ << "\"" << param << "\", ";
+        }
+        body_ << "]\n";
+        indent();
+        body_ << "__buffers__ = [";
+        for (const auto& buffer : buffers) {
+          body_ << "\"" << buffer << "\", ";
         }
         body_ << "]\n";
       }

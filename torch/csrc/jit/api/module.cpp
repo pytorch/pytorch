@@ -213,7 +213,8 @@ Module Module::clone_impl(
           type()->getAttributeName(i),
           type()->getAttribute(i),
           s,
-          type()->is_parameter(i));
+          type()->is_parameter(i),
+          type()->is_buffer(i));
     }
   }
 

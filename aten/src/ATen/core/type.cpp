@@ -968,7 +968,8 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   AT_ASSERT(numAttributes() == refined_slots.size());
   for (size_t i = 0; i < attributes_.size(); ++i) {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(attributes_[i].getType()));
-    ptr->addAttribute(attributes_[i].getName(), refined_slots[i]);
+    ptr->addAttribute(attributes_[i].getName(), refined_slots[i], (attributes_[i].getKind() == AttributeKind::PARAMETER), false,
+    (attributes_[i].getKind() == AttributeKind::BUFFER));
   }
   // Copy methods over
   for (const auto& method : methods()) {
@@ -1150,7 +1151,6 @@ size_t ClassType::addAttribute(
     bool is_parameter,
     bool allow_any,
     bool is_buffer) {
-
   if (is_parameter && is_buffer){
     TORCH_INTERNAL_ASSERT(false, "Attribute cannot be both a parameter and a buffer!");
   }
