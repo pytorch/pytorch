@@ -33,6 +33,13 @@ class PyRRef {
   // This is only used to get the future corresponding to the rref for profiling
   // use cases.
   c10::intrusive_ptr<JitFuture> getFuture() const;
+  // Keeps track of the future responsible for profiling owner creation
+  // acknowledgement
+  c10::intrusive_ptr<JitFuture> getProfilingFuture() const;
+  // Sets the future responsible for profiling owner creation acknowledgement.
+  // This future is set from python to be a future that returns when profiling
+  // callbacks have been run.
+  void setProfilingFuture(c10::intrusive_ptr<JitFuture> profilingFuture);
 
   // create a proxy on this RRef, which can be used to launch RPC on the owner
   // of this RRef to run functions on the object referenced by this RRef.
@@ -40,6 +47,7 @@ class PyRRef {
 
  private:
   c10::intrusive_ptr<RRef> rref_;
+  c10::optional<c10::intrusive_ptr<JitFuture>> profilingFuture_;
 };
 
 } // namespace rpc
