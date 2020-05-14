@@ -122,9 +122,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
 
   struct Attribute {
     Attribute(TypePtr type, bool isParam, bool isBuffer)
-        : type_(std::move(type)),
-          isParam_(isParam),
-          isBuffer_(isBuffer) {}
+        : type_(std::move(type)), isParam_(isParam), isBuffer_(isBuffer) {}
 
     friend bool operator==(const Attribute& lhs, const Attribute& rhs) {
       return *(lhs.type_) == *(rhs.type_) && lhs.isParam_ == rhs.isParam_;

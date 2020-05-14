@@ -17043,7 +17043,6 @@ a")
         self.assertEqual(z.method(), x.method())
         self.assertEqual(z.method(), model.method())
         self.assertEqual(x.method(), model.method())
-        
         names = x.method()
         for name in names:
             self.assertNotEqual('z', name)

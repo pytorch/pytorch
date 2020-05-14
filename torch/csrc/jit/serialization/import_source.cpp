@@ -386,9 +386,8 @@ struct SourceImporterImpl : public Resolver,
                 // This is to initialize the annotations dict, just ignore.
                 continue;
               } else if (name == "__buffers__") {
-                  TORCH_INTERNAL_ASSERT(
-                    is_module,
-                    "Buffers only exist on modules at the moment");
+                TORCH_INTERNAL_ASSERT(
+                    is_module, "Buffers only exist on modules at the moment");
                 const auto buffer_list =
                     ListLiteral(assign.rhs().get()).inputs();
                 for (const auto& buffer : buffer_list) {
