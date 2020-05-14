@@ -359,6 +359,13 @@ class BuildExtension(build_ext, object):
                     ['--compiler-options', "'-fPIC'"] +
                     cflags + _get_cuda_arch_flags(cflags))
 
+        def convert_to_absolute_paths_inplace(paths):
+            # Helper function. See Note [Absolute include_dirs]
+            if paths is not None:
+                for i in range(len(paths)):
+                    if not os.path.isabs(paths[i]):
+                        paths[i] = os.path.abspath(paths[i])
+
         def unix_wrap_single_compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
             # Copy before we make any modifications.
             cflags = copy.deepcopy(extra_postargs)
@@ -407,6 +414,10 @@ class BuildExtension(build_ext, object):
             # Use absolute path for output_dir so that the object file paths
             # (`objects`) get generated with absolute paths.
             output_dir = os.path.abspath(output_dir)
+
+            # See Note [Absolute include_dirs]
+            convert_to_absolute_paths_inplace(self.compiler.include_dirs)
+
             _, objects, extra_postargs, pp_opts, _ = \
                 self.compiler._setup_compile(output_dir, macros,
                                              include_dirs, sources,
@@ -536,6 +547,15 @@ class BuildExtension(build_ext, object):
             if not self.compiler.initialized:
                 self.compiler.initialize()
             output_dir = os.path.abspath(output_dir)
+
+            # Note [Absolute include_dirs]
+            # Convert relative path in self.compiler.include_dirs to absolute path if any,
+            # For ninja build, the build location is not local, the build happens
+            # in a in script created build folder, relative path lost their correctness.
+            # To be consistent with jit extension, we allow user to enter relative include_dirs
+            # in setuptools.setup, and we convert the relative path to absolute path here
+            convert_to_absolute_paths_inplace(self.compiler.include_dirs)
+
             _, objects, extra_postargs, pp_opts, _ = \
                 self.compiler._setup_compile(output_dir, macros,
                                              include_dirs, sources,
