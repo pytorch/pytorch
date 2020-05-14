@@ -1123,17 +1123,6 @@ inline py::object invokeScriptMethodFromPython(
       });
 }
 
-inline py::object invokeScriptMethodFromPython(
-    Object& object,
-    const std::string& method_name,
-    tuple_slice args,
-    py::kwargs kwargs) {
-  auto type = object.type();
-  Method init_method(object._ivalue(), &type->getMethod(method_name));
-  invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
-  return py::cast(Object(object));
-}
-
 inline py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
