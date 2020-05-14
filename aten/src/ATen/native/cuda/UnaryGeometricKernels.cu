@@ -207,7 +207,7 @@ void asinh_kernel_cuda(TensorIterator& iter) {
         return asinh_wrapper(a);
       });
     });
-  });  
+  });
 }
 
 // We manually overload atanh because std::atanh does not work with thrust::complex types.
