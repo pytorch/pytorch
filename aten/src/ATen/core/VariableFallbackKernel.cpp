@@ -32,8 +32,4 @@ TORCH_LIBRARY_IMPL(_, Autograd, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
 
-TORCH_LIBRARY_IMPL(_, Tracer, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
-}
-
 }
