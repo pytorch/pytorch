@@ -1899,13 +1899,13 @@ class TestQuantizedOps(TestCase):
         np.testing.assert_equal(qY.size(), (0, 2, 3, 3),
                                 "Quantized adaptive_avg_pool2d with batch size 0 failed.")
 
-        #max_pool
+        # max_pool
         dilation = (1, 1)
         qY = torch.ops.quantized.max_pool2d(qX, kernel, stride, padding, dilation, ceil_mode=False)
         oH = pool_output_shape(4, 2, 0, 1, 1)
         oW = pool_output_shape(4, 2, 0, 1, 1)
         np.testing.assert_equal(qY.size(), (0, 2, oH, oW),
-                                    "Quantized maxpool2d with batch size 0 failed.")
+                                "Quantized maxpool2d with batch size 0 failed.")
 
         # hardtanh
         qY = torch.nn.quantized.functional.hardtanh(qX, -1, 6)
