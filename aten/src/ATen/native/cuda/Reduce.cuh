@@ -450,7 +450,11 @@ struct ReduceOp {
       value_list[i] = ident;
     }
 
-    scalar_t values[vec_size];
+    scalar_t values[vec_size]
+#ifdef __HIP_PLATFORM_HCC__
+    = {static_cast<scalar_t>(ROCm_Bug<scalar_t>())}
+#endif
+    ;
     load_t *values_vector = reinterpret_cast<load_t*>(values);
 
     while (idx * vec_size + vec_size - 1 < end) {
@@ -486,13 +490,22 @@ struct ReduceOp {
     const index_t stride = config.step_input;
 
     // Multiple accumulators to remove dependency between unrolled loops.
-    arg_t value_list[vt0];
+    arg_t value_list[vt0]
+#ifdef __HIP_PLATFORM_HCC__
+    = {static_cast<arg_t>(ROCm_Bug<arg_t>())}
+#endif
+    ;
+
     #pragma unroll
     for (int i = 0; i < vt0; i++) {
       value_list[i] = ident;
     }
 
-    scalar_t values[vt0];
+    scalar_t values[vt0]
+#ifdef __HIP_PLATFORM_HCC__
+    = {static_cast<scalar_t>(ROCm_Bug<scalar_t>())}
+#endif
+    ;
 
     while (idx + (vt0 - 1) * stride < end) {
       #pragma unroll
