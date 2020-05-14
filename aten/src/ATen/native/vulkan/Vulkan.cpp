@@ -5,6 +5,7 @@
 #include <iostream>
 #include <numeric>
 
+#include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
 #ifdef USE_VULKAN_WRAPPER
@@ -75,7 +76,6 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugReportCallbackFn(
   }
   s << pLayerPrefix << " " << msgCode << " " << pMsg << std::endl;
   std::cout << s.str();
-  // TODO Where to log if VLOG,LOG disabled?
   return VK_FALSE;
 }
 
@@ -323,16 +323,22 @@ VBuffer::~VBuffer() {
   vkDestroyBuffer(context().device(), buffer_, nullptr);
 }
 
-void VBuffer::copyFromDeviceToHost(void* outputData, int64_t size) {
+void VBuffer::copy_from_device_to_host(void* outputData, int64_t size) {
   auto mm = map();
   TORCH_INTERNAL_ASSERT(mm.ptr(), "Vulkan: Failed to map Vulkan Buffer memory");
   ::memcpy(outputData, mm.ptr(), size);
 }
 
-void VBuffer::copyFromHostToDevice(void* data, int64_t size) {
+void VBuffer::copy_from_host_to_device(void* data, int64_t size) {
   auto mm = map();
   TORCH_INTERNAL_ASSERT(mm.ptr(), "Vulkan: Failed to map Vulkan Buffer memory");
   ::memcpy(mm.ptr(), data, size);
+}
+
+void VBuffer::set_zeros() {
+  auto mm = map();
+  TORCH_INTERNAL_ASSERT(mm.ptr(), "Vulkan: Failed to map Vulkan Buffer memory");
+  ::memset(mm.ptr(), 0, bufferSizeBytes_);
 }
 
 VkDescriptorBufferInfo VBuffer::makeDescriptorBufferInfo() const {
@@ -398,17 +404,17 @@ void VBuffer::addBufferMemoryBarrier(
       nullptr);
 }
 
-VImage::VImage(uint32_t W, uint32_t H, uint32_t C)
-    : W_(W), H_(H), C_(C), D_(UP_DIV(C, 4)) {
+VImage::VImage(ImageSize imageSize, ImageSize dataSize)
+    : imageSize_(imageSize), dataSize_(dataSize) {
   auto device = context().device();
   auto physicalDevice = context().physicalDevice();
 
   VkImageCreateInfo imageInfo{};
   imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   imageInfo.imageType = kImageType;
-  imageInfo.extent.width = W_;
-  imageInfo.extent.height = H_;
-  imageInfo.extent.depth = D_;
+  imageInfo.extent.width = imageSize_[0];
+  imageInfo.extent.height = imageSize_[1];
+  imageInfo.extent.depth = imageSize_[2];
 
   imageInfo.mipLevels = 1;
   imageInfo.arrayLayers = 1;
@@ -443,6 +449,7 @@ VImage::VImage(uint32_t W, uint32_t H, uint32_t C)
   VkSamplerCreateInfo samplerCreateInfo = makeSamplerCreateInfo();
   VK_CHECK(vkCreateSampler(device, &samplerCreateInfo, nullptr, &sampler_));
 }
+
 VImage::~VImage() {
   vkFreeMemory(context().device(), imageMemory_, nullptr);
   vkDestroySampler(context().device(), sampler_, nullptr);
@@ -840,19 +847,19 @@ VBuffer makeUniformConstBuffer(void* ptr, VkDeviceSize size) {
   auto sizeAligned =
       ROUND_UP(size, context().limits().minUniformBufferOffsetAlignment);
   VBuffer constBuffer = VBuffer::makeUniformBuffer(sizeAligned);
-  constBuffer.copyFromHostToDevice(ptr, size);
+  constBuffer.copy_from_host_to_device(ptr, size);
   return constBuffer;
 }
 
 // VBuffer <-> VImage
-void copyFromBufferToImage(const VBuffer& buffer, VImage& image) {
+void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
   auto device = context().device();
   auto physicalDevice = context().physicalDevice();
   struct ConstBlock {
-    int32_t W;
-    int32_t H;
+    int32_t w;
+    int32_t h;
   };
-  ConstBlock constBlock{image.W(), image.H()};
+  ConstBlock constBlock{image.w(), image.h()};
   VBuffer constBuffer =
       makeUniformConstBuffer((void*)&constBlock, sizeof(constBlock));
 
@@ -874,8 +881,7 @@ void copyFromBufferToImage(const VBuffer& buffer, VImage& image) {
   VkDescriptorSet descrSet{};
   allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
 
-  image.bind(
-      descrSet, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
+  image.bindStorageImage(descrSet, 0);
   buffer.bind(descrSet, 1);
   constBuffer.bind(descrSet, 2);
   WorkGroupSize workGroupSize{8, 8, 1};
@@ -884,17 +890,11 @@ void copyFromBufferToImage(const VBuffer& buffer, VImage& image) {
                           workGroupSize};
   computeUnit.createCommandBuffer(descrSet);
 
-  image.addImageMemoryBarrier(
-      computeUnit.commandBuffer(),
-      VK_IMAGE_LAYOUT_UNDEFINED,
-      VK_IMAGE_LAYOUT_GENERAL);
-
+  image.addImageMemoryBarrierUndefinedToGeneral(computeUnit.commandBuffer());
   buffer.addBufferMemoryBarrier(
       computeUnit.commandBuffer(), 0, buffer.sizeBytes());
   computeUnit.dispatchCommandBuffer(
-      UP_DIV(image.W(), workGroupSize.x),
-      UP_DIV(image.H(), workGroupSize.y),
-      UP_DIV(image.D(), workGroupSize.z));
+      image.w(), image.h(), image.d(), workGroupSize);
   computeUnit.runCommandBuffer();
 
   vkDestroyDescriptorPool(device, descrPool, nullptr);
@@ -908,10 +908,10 @@ void copyFromImageToBuffer(const VImage& image, VBuffer& buffer) {
       buffer.sizeBytes() >= image.capacityBytes(),
       "VulkanBuffer's capacity is less than VulkanImage capacity to copy from");
   struct ConstBlock {
-    int32_t W;
-    int32_t H;
+    int32_t w;
+    int32_t h;
   };
-  ConstBlock constBlock{image.W(), image.H()};
+  ConstBlock constBlock{image.w(), image.h()};
   VBuffer constBuffer =
       makeUniformConstBuffer((void*)&constBlock, sizeof(constBlock));
 
@@ -934,11 +934,7 @@ void copyFromImageToBuffer(const VImage& image, VBuffer& buffer) {
   VkDescriptorSet descrSet{};
   allocateDescriptorSet(device, descrPool, &descrSetLayout, &descrSet);
 
-  image.bind(
-      descrSet,
-      0,
-      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  image.bindShaderRead(descrSet, 0);
   buffer.bind(descrSet, 1);
   constBuffer.bind(descrSet, 2);
 
@@ -948,14 +944,9 @@ void copyFromImageToBuffer(const VImage& image, VBuffer& buffer) {
                           workGroupSize};
 
   computeUnit.createCommandBuffer(descrSet);
-  image.addImageMemoryBarrier(
-      computeUnit.commandBuffer(),
-      VK_IMAGE_LAYOUT_GENERAL,
-      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  image.addImageMemoryBarrierGeneralToShaderRead(computeUnit.commandBuffer());
   computeUnit.dispatchCommandBuffer(
-      UP_DIV(image.W(), workGroupSize.x),
-      UP_DIV(image.H(), workGroupSize.y),
-      UP_DIV(image.D(), workGroupSize.z));
+      image.w(), image.h(), image.d(), workGroupSize);
   computeUnit.runCommandBuffer();
 
   vkDestroyDescriptorPool(device, descrPool, nullptr);
@@ -983,7 +974,7 @@ class VulkanTensor::Impl {
     return numel_;
   }
 
-  inline bool hasBuffer() const {
+  inline bool has_buffer() const {
     return static_cast<bool>(buffer_);
   }
 
@@ -994,55 +985,67 @@ class VulkanTensor::Impl {
   const VBuffer* buffer() const {
     return buffer_.get();
   }
-  inline bool canBeImage() const {
+  inline bool can_be_image() const {
     return dim() <= 4;
   }
 
-  inline bool hasImage() const {
+  inline bool has_image() const {
     return static_cast<bool>(image_);
   }
 
-  inline bool hasStorage() {
-    return hasBuffer();
+  inline bool has_storage() {
+    return has_buffer();
   }
 
-  VImage* image() {
+  ImageSizes imageSizes_W_H_NC4() {
     auto d = dim();
     TORCH_INTERNAL_ASSERT(
         d <= 4,
         "Vulkan: Only Tensors with dim <= 4 can be represented as Vulkam Image");
-    if (!image_ && buffer_) {
-      auto W = 0;
-      auto H = 0;
-      auto C = 0;
-      if (d == 4) {
-        W = sizes_[3];
-        H = sizes_[2];
-        C = sizes_[1] * sizes_[0];
-      } else if (d == 3) {
-        W = sizes_[2];
-        H = sizes_[1];
-        C = sizes_[0];
-      } else if (d == 2) {
-        W = sizes_[1];
-        H = sizes_[0];
-        C = 1;
-      } else if (d == 1) {
-        W = sizes_[0];
-        H = 1;
-        C = 1;
-      }
-      image_ = std::make_unique<VImage>(W, H, C);
-      copyFromBufferToImage(*buffer_, *image_);
+    uint32_t wd = 1;
+    uint32_t hd = 1;
+    uint32_t dd = 1;
+    if (d == 4) {
+      wd = sizes_[3];
+      hd = sizes_[2];
+      dd = sizes_[1] * sizes_[0];
+    } else if (d == 3) {
+      wd = sizes_[2];
+      hd = sizes_[1];
+      dd = sizes_[0];
+    } else if (d == 2) {
+      wd = sizes_[1];
+      hd = sizes_[0];
+    } else if (d == 1) {
+      wd = sizes_[0];
+    }
+
+    return {{wd, hd, UP_DIV(dd, 4)}, {wd, hd, dd}};
+  }
+
+  VImage* image(c10::optional<ImageSizes> imageSizes = c10::nullopt) {
+    if (image_) {
+      return image_.get();
+    }
+
+    if (imageSizes.has_value()) {
+      image_ = std::make_unique<VImage>(*imageSizes);
+      return image_.get();
+    }
+
+    image_ = std::make_unique<VImage>(imageSizes_W_H_NC4());
+    if (buffer_) {
+      copy_buffer_to_image(*buffer_, *image_);
     }
     return image_.get();
   }
 
-  const VImage* image() const {
-    return const_cast<VulkanTensor::Impl*>(this)->image();
+  const VImage* image(
+      c10::optional<ImageSizes> imageSizes = c10::nullopt) const {
+    return const_cast<VulkanTensor::Impl*>(this)->image(imageSizes);
   }
 
-  void allocateStorage() {
+  void allocate_storage() {
     auto bufferSize = sizeof(float) * numel_;
     const auto d = dim();
     if (d == 4) {
@@ -1060,18 +1063,18 @@ class VulkanTensor::Impl {
     buffer_ = std::make_unique<VBuffer>(bufferSizeAligned);
   }
 
-  void setDataFromHost(const float* inputData) {
-    if (!hasStorage()) {
-      allocateStorage();
+  void set_data_from_host(const float* inputData) {
+    if (!has_storage()) {
+      allocate_storage();
     }
-    buffer_->copyFromHostToDevice((void*)inputData, sizeof(float) * numel_);
+    buffer_->copy_from_host_to_device((void*)inputData, sizeof(float) * numel_);
   }
 
-  void copyDataToHost(float* outputData) const {
-    if (hasImage()) {
+  void copy_data_to_host(float* outputData) const {
+    if (has_image()) {
       copyFromImageToBuffer(*image(), *(const_cast<VBuffer*>(buffer())));
     }
-    buffer_->copyFromDeviceToHost(outputData, sizeof(float) * numel_);
+    buffer_->copy_from_device_to_host(outputData, sizeof(float) * numel_);
   }
 
  private:
@@ -1101,24 +1104,24 @@ int64_t VulkanTensor::numel() const {
   return impl()->numel();
 }
 
-bool VulkanTensor::hasStorage() const {
-  return impl()->hasBuffer();
+bool VulkanTensor::has_storage() const {
+  return impl()->has_buffer();
 }
 
-void VulkanTensor::allocateStorage() {
-  impl()->allocateStorage();
+void VulkanTensor::allocate_storage() {
+  impl()->allocate_storage();
 }
 
-void VulkanTensor::setDataFromHost(const float* inputData) {
-  impl()->setDataFromHost(inputData);
+void VulkanTensor::set_data_from_host(const float* inputData) {
+  impl()->set_data_from_host(inputData);
 }
 
-void VulkanTensor::copyDataToHost(float* outputData) {
-  impl()->copyDataToHost(outputData);
+void VulkanTensor::copy_data_to_host(float* outputData) {
+  impl()->copy_data_to_host(outputData);
 }
 
-bool VulkanTensor::hasBuffer() const {
-  return impl()->hasBuffer();
+bool VulkanTensor::has_buffer() const {
+  return impl()->has_buffer();
 }
 
 VBuffer* VulkanTensor::buffer() {
@@ -1129,26 +1132,43 @@ const VBuffer* VulkanTensor::buffer() const {
   return impl()->buffer();
 }
 
-bool VulkanTensor::canBeImage() const {
-  return impl()->canBeImage();
+bool VulkanTensor::can_be_image() const {
+  return impl()->can_be_image();
 }
 
-bool VulkanTensor::hasImage() const {
-  return impl()->hasImage();
+bool VulkanTensor::has_image() const {
+  return impl()->has_image();
 }
 
-VImage* VulkanTensor::image() {
-  return impl()->image();
+VImage* VulkanTensor::image(c10::optional<ImageSizes> imageSizes) {
+  return impl()->image(imageSizes);
 }
 
-const VImage* VulkanTensor::image() const {
-  return impl()->image();
+const VImage* VulkanTensor::image(c10::optional<ImageSizes> imageSizes) const {
+  return impl()->image(imageSizes);
 }
 
 VulkanTensor::VulkanTensor(std::vector<int64_t> sizes)
     : impl_(std::make_shared<Impl>(std::move(sizes))) {
   TORCH_CHECK(
       initVulkanContextOnce(), "Vulkan Failed to create Vulkan Context");
+}
+
+std::ostream& operator<<(std::ostream& s, const ImageSize& imageSize) {
+  s << "ImageSize{" << imageSize[0] << ", " << imageSize[1] << ", "
+    << imageSize[2] << "}";
+  return s;
+}
+std::ostream& operator<<(std::ostream& s, const ImageSizes& imageSizes) {
+  s << "ImageSizes{imageSize:" << imageSizes.imageSize
+    << ", dataSize:" << imageSizes.dataSize << "}";
+  return s;
+}
+
+std::ostream& operator<<(std::ostream& s, const WorkGroupSize& workGroupSize) {
+  s << "WorkGroupSize{" << workGroupSize.x << " " << workGroupSize.y << " "
+    << workGroupSize.z << "}";
+  return s;
 }
 
 } // namespace vulkan

@@ -25,13 +25,51 @@ void add(
     const VulkanTensor& input1,
     float alpha);
 
+void conv2d_prepack_weights(
+    VulkanTensor& output,
+    const float* weight,
+    int64_t OC,
+    int64_t C,
+    int64_t KH,
+    int64_t KW);
+
 void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const float* weight,
     int64_t KH,
     int64_t KW,
-    const float* bias,
+    const c10::optional<float*> bias,
+    int64_t SY,
+    int64_t SX,
+    int64_t PY,
+    int64_t PX,
+    int64_t DY,
+    int64_t DX,
+    int64_t G);
+
+void conv2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    const VulkanTensor& weight_prepacked,
+    int64_t KH,
+    int64_t KW,
+    const c10::optional<float*> bias,
+    int64_t SY,
+    int64_t SX,
+    int64_t PY,
+    int64_t PX,
+    int64_t DY,
+    int64_t DX,
+    int64_t G);
+
+void conv2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    const VulkanTensor& weight_prepacked,
+    int64_t KH,
+    int64_t KW,
+    const VulkanTensor& bias,
     int64_t SY,
     int64_t SX,
     int64_t PY,

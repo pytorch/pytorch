@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/Optional.h>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -72,16 +73,23 @@ const VContext& context();
 // fails for dimensions > 4.
 //
 // Tensor data can be in 0.VBuffer and/or 1.VImage(TexC4),
-// If Tensor can be represented as image - VulkanTensor::Impl::canBeImage()
+// If Tensor can be represented as image - VulkanTensor::Impl::can_be_image()
 // returns true. Image representation created lazily by call
-// VulkanTensor::Impl::image(), if it is called on Tensor with !canBeImage() -
+// VulkanTensor::Impl::image(), if it is called on Tensor with !can_be_image() -
 // it fails.
 //
 // If image allocated - image data has priority.
-// VulkanTensor::copyDataToHost checks if image allocated -
-// copyFromImageToBuffer first.
+// VulkanTensor::copy_data_to_host checks if image allocated -
+// copy_from_image_to_buffer first.
 class VBuffer;
 class VImage;
+
+using ImageSize = std::array<uint32_t, 3>;
+struct ImageSizes {
+  ImageSize imageSize;
+  ImageSize dataSize;
+};
+
 class VulkanTensor final {
   class Impl;
 
@@ -104,19 +112,21 @@ class VulkanTensor final {
   int64_t dim() const;
   int64_t numel() const;
 
-  bool hasStorage() const;
-  void allocateStorage();
-  void setDataFromHost(const float* inputData);
-  void copyDataToHost(float* outputData);
+  bool has_storage() const;
+  void allocate_storage();
+  void set_data_from_host(const float* inputData);
+  void copy_data_to_host(float* outputData);
 
-  bool hasBuffer() const;
+  bool has_buffer() const;
   VBuffer* buffer();
   const VBuffer* buffer() const;
 
-  bool canBeImage() const;
-  bool hasImage() const;
-  VImage* image();
-  const VImage* image() const;
+  bool can_be_image() const;
+  bool has_image() const;
+
+  VImage* image(c10::optional<ImageSizes> imageSizes = c10::nullopt);
+  const VImage* image(
+      c10::optional<ImageSizes> imageSizes = c10::nullopt) const;
 
  private:
   std::shared_ptr<Impl> impl();
@@ -219,8 +229,9 @@ class VBuffer final {
     return MapMemory{context().device(), bufferMemory_, 0, bufferSizeBytes_};
   }
 
-  void copyFromDeviceToHost(void* outputData, int64_t size);
-  void copyFromHostToDevice(void* data, int64_t size);
+  void copy_from_device_to_host(void* outputData, int64_t size);
+  void copy_from_host_to_device(void* data, int64_t size);
+  void set_zeros();
 
   VkDescriptorBufferInfo makeDescriptorBufferInfo() const;
   VkWriteDescriptorSet makeWriteDescriptorSet(
@@ -260,25 +271,23 @@ class VImage final {
       VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
   static constexpr VkImageViewType kImageViewType = VK_IMAGE_VIEW_TYPE_3D;
 
-  explicit VImage(uint32_t W, uint32_t H, uint32_t C);
-
+  explicit VImage(ImageSize imageSize, ImageSize dataSize);
+  explicit VImage(ImageSizes imageSizes)
+      : VImage(imageSizes.imageSize, imageSizes.dataSize) {}
   ~VImage();
   VImage(const VImage&) = delete;
   VImage& operator=(const VImage&) = delete;
   VImage(VImage&&) = default;
   VImage& operator=(VImage&&) = default;
 
-  inline auto W() const {
-    return W_;
+  inline auto w() const {
+    return imageSize_[0];
   }
-  inline auto H() const {
-    return H_;
+  inline auto h() const {
+    return imageSize_[1];
   }
-  inline auto C() const {
-    return C_;
-  }
-  inline auto D() const {
-    return D_;
+  inline auto d() const {
+    return imageSize_[2];
   }
 
   VkImageViewCreateInfo makeImageViewCreateInfo() const;
@@ -298,11 +307,15 @@ class VImage final {
   void bindShaderRead(VkDescriptorSet descriptorSet, uint32_t binding) const;
   void bindStorageImage(VkDescriptorSet descriptorSet, uint32_t binding) const;
   inline VkDeviceSize sizeBytes() const {
-    return sizeof(float) * W_ * H_ * C_;
+    return sizeof(float) * imageSize_[0] * imageSize_[1] * imageSize_[2];
   }
 
   inline VkDeviceSize capacityBytes() const {
-    return sizeof(float) * W_ * H_ * D_ * 4;
+    return sizeof(float) * imageSize_[0] * imageSize_[1] * imageSize_[2] * 4;
+  }
+
+  ImageSize sizes() const {
+    return imageSize_;
   }
 
   void addImageMemoryBarrier(
@@ -315,11 +328,8 @@ class VImage final {
       VkCommandBuffer commandBuffer) const;
 
  private:
-  uint32_t W_;
-  uint32_t H_;
-  uint32_t C_;
-  uint32_t D_;
-
+  ImageSize imageSize_;
+  ImageSize dataSize_;
   VkImage image_;
   VkDeviceMemory imageMemory_;
   VkImageView imageView_;
@@ -327,9 +337,9 @@ class VImage final {
 
 }; // class VImage
 
-void copyFromBufferToImage(const VBuffer& buffer, VImage& image);
+void copy_buffer_to_image(const VBuffer& buffer, VImage& image);
 
-void copyFromImageToBuffer(const VImage& image, VBuffer& buffer);
+void copy_from_image_to_buffer(const VImage& image, VBuffer& buffer);
 
 VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(
     uint32_t binding,
@@ -431,6 +441,11 @@ class ComputeUnit final {
   VkPipelineLayout pipelineLayout_;
   VkShaderModule computeShaderModule_;
 }; // class ComputeUnit
+
+std::ostream& operator<<(std::ostream& s, const WorkGroupSize& workGroupSize);
+std::ostream& operator<<(std::ostream& s, const ImageSize& imageSize);
+std::ostream& operator<<(std::ostream& s, const ImageSizes& imageSizes);
+
 } // namespace vulkan
 } // namespace details
 } // namespace vulkan
