@@ -1029,8 +1029,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           at::RecordScope::TORCHSCRIPT_FUNCTION);
       if (rec_fn->active) {
         frames.back().record_function = rec_fn;
-        RECORD_FUNCTION_BEFORE(
-            (*rec_fn), fn->name(), last(stack, code.num_inputs()))
+        if (rec_fn->needs_inputs) {
+          rec_fn->before(fn->name(), last(stack, code.num_inputs()));
+        } else {
+          rec_fn->before(fn->name());
+        }
       }
     }
     *af = ActiveFrame(frames.back());
@@ -1206,7 +1209,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 InterpreterState state_;
                 Stack stack_;
                 int64_t dist_autograd_context_id_;
-                // make sure the original ThreadLocalState is preserved
+                // preserve the original ThreadLocalState
                 at::ThreadLocalState tls_state_;
               };
 

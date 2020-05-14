@@ -47,6 +47,10 @@ class EventList(list):
         """
         if self.cpu_children_populated:
             return
+
+        # Some events can be async (i.e. start and end on different threads),
+        # since it's generally undefined how to attribute children ranges to
+        # async ranges, we do not use them when calculating nested ranges and stats
         sync_events = [evt for evt in self if not evt.is_async]
         events = sorted(
             sync_events,
@@ -645,6 +649,9 @@ class FunctionEvent(FormattedTimesMixin):
         assert(isinstance(child, FunctionEvent))
         self.cpu_children.append(child)
 
+    # Note: async events don't have children, are not used when computing 'self'
+    # metrics of other events, have only total cpu time
+
     @property
     def self_cpu_memory_usage(self):
         if self.is_async:
@@ -744,14 +751,14 @@ class FunctionEventAvg(FormattedTimesMixin):
         return (
             '<FunctionEventAvg key={} self_cpu_time={} cpu_time={} '
             'cuda_time={} input_shapes={}> '
-            'self_cpu_memory_usage={} self_cuda_memory_usage={}'.format(
+            'cpu_memory_usage={} cuda_memory_usage={}'.format(
                 self.key,
                 self.self_cpu_time_total_str,
                 self.cpu_time_str,
                 self.cuda_time_str,
                 str(self.input_shapes),
-                self.self_cpu_memory_usage,
-                self.self_cuda_memory_usage,
+                self.cpu_memory_usage,
+                self.cuda_memory_usage,
             )
         )
 
@@ -776,6 +783,8 @@ def parse_cpu_trace(thread_records):
     record_stack = []
     string_table = StringTable()
 
+    # remove special record_function c10 ops, use the actual
+    # range name passed into record_function instead
     filtered_out_names = [
         "profiler::_record_function_enter",
         "profiler::_record_function_exit",
@@ -806,16 +815,24 @@ def parse_cpu_trace(thread_records):
         cuda_memory_allocs = {}
         # ranges per handle
         range_starts = {}
-        filtered_handles = set()
 
+        filtered_handles = set()
+        prev_record = None
         for record in thread_record_list:
-            # remove special record_function c10 ops
             if (record.name() in filtered_out_names or
                     record.handle() in filtered_handles):
                 filtered_handles.add(record.handle())
                 continue
 
             if record.kind() == 'push':
+                # workaround to reduce double logging from operator
+                # wrappers and redispatch
+                if prev_record is not None:
+                    if (prev_record.name() == record.name() and
+                            prev_record.kind() == record.kind()):
+                        filtered_handles.add(record.handle())
+                        continue
+
                 range_starts[record.handle()] = record
                 cpu_memory_allocs[record.handle()] = 0
                 cuda_memory_allocs[record.handle()] = 0
@@ -838,6 +855,7 @@ def parse_cpu_trace(thread_records):
                     cpu_memory_usage=cpu_memory_usage,
                     cuda_memory_usage=cuda_memory_usage,
                     is_async=is_async)
+                # note: async events have only cpu total time
                 if not is_async and start.has_cuda():
                     cuda_start = adjusted_time(start)
                     cuda_end = adjusted_time(record)
@@ -855,6 +873,7 @@ def parse_cpu_trace(thread_records):
                     cpu_memory_allocs[handle] += record.cpu_memory_usage()
                 for handle in cuda_memory_allocs.keys():
                     cuda_memory_allocs[handle] += record.cuda_memory_usage()
+            prev_record = record
 
     # Sort functions by start time then by end time ascending.
     # This ensures that--in the case of nested events which

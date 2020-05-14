@@ -24,10 +24,10 @@ at::Tensor record_function_enter(const std::string& name) {
       // Since the currently active RecordFunction will only live for the lifetime
       // of this op we need to end it early so the new RecordFunction we create is
       // a direct child of the parent RecordFunction.
-      current->_end();
+      current->end();
     }
   }
-  rec->_before(name);
+  rec->before(name);
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
 }
 
@@ -43,10 +43,10 @@ void record_function_exit(const at::Tensor& handle) {
   auto& rec = getRecordFunctionFromTensor(handle);
   if (auto* current = rec.current()) {
     if (current->name().str() == std::string("profiler::_record_function_exit")) {
-      current->_end();
+      current->end();
     }
   }
-  rec._end();
+  rec.end();
 }
 
 void _call_end_callbacks_on_fut(
@@ -67,7 +67,7 @@ void _call_end_callbacks_on_fut(
             "realized.");
         at::ThreadLocalStateGuard g(tls_state);
         auto& rec = getRecordFunctionFromTensor(handle);
-        rec._end();
+        rec.end();
       });
 }
 
