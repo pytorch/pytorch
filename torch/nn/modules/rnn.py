@@ -109,7 +109,7 @@ class RNNBase(Module):
             return
 
         for w in self._flat_weights:
-            if not torch.is_tensor(w):
+            if not isinstance(w, Tensor):
                 return
         # Short-circuits if any tensor in self._flat_weights is not acceptable to cuDNN
         # or the tensors in _flat_weights are of different dtypes
@@ -117,7 +117,7 @@ class RNNBase(Module):
         first_fw = self._flat_weights[0]
         dtype = first_fw.dtype
         for fw in self._flat_weights:
-            if (not torch.is_tensor(fw.data) or not (fw.data.dtype == dtype) or
+            if (not isinstance(fw.data, Tensor) or not (fw.data.dtype == dtype) or
                     not fw.data.is_cuda or
                     not torch.backends.cudnn.is_acceptable(fw.data)):
                 return

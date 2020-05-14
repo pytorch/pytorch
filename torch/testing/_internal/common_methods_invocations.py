@@ -176,8 +176,8 @@ def method_tests():
         ('transpose', (1, 2, 3), (1, 2), 'dim', (True,), [0, 1]),
         ('transpose', (), (0, 0), 'scalar', (True,)),
         ('transpose', (1,), (0, 0), '1d', (True,)),
-        ('transpose', torch.rand(L, L), (0, 1), '2d', (True,)),
-        ('transpose', torch.rand(S, S, S), (2, 0), '3d', (True,)),
+        ('transpose', (L, L), (0, 1), '2d', (True,)),
+        ('transpose', (S, S, S), (2, 0), '3d', (True,)),
         ('t', (1, 2), NO_ARGS, '', (True,)),
         ('view', (S, S, S), (S * S, S), '', (True,)),
         ('view', (S, S, S), (torch.Size([S * S, S]),), 'size', (True,)),
@@ -238,6 +238,12 @@ def method_tests():
         ('log1p', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('log2', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
         ('log2', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
+        ('log', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
+        ('log', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        ('log10', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
+        ('log10', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        ('log2', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
+        ('log2', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
         ('tanh', (S, S, S), NO_ARGS, '', (True,)),
         ('tanh', (), NO_ARGS, 'scalar', (True,)),
         ('sigmoid', (S, S, S), NO_ARGS, '', (True,)),
@@ -273,6 +279,8 @@ def method_tests():
         ('atan2', (S, 1, S), ((S, S),), 'broadcast_all'),
         ('reciprocal', torch.rand(S, S, S) + 0.1, NO_ARGS, '', (True,)),
         ('reciprocal', uniform_scalar(0.1, requires_grad=True), NO_ARGS, 'scalar', (True,)),
+        ('reciprocal', torch.randn(S, S, S, dtype=torch.cdouble) + 0.1, NO_ARGS, 'complex', (True,)),
+        ('reciprocal', uniform_scalar(0.1j), NO_ARGS, 'complex_scalar', (True,)),
         ('round', (S, S, S), NO_ARGS, '', (True,)),
         ('round', (), NO_ARGS, 'scalar', (True,)),
         ('sign', (S, S, S), NO_ARGS),
@@ -441,7 +449,26 @@ def method_tests():
         ('cumprod', prod_zeros(S, [1, 2]), (1,), 'zeros_dim0_cast', (), [0], (), ident, {'dtype': torch.float64}),
         ('log_softmax', (S, S, S), (1, torch.float64,), 'kwarg_dtype_would_break_jit_loader', (True,)),
         ('unfold', (), (0, 1, 1), 'scalar', (), [0]),
-        ('unfold', (S, S, S, S), (1, 3, 1), '', (), [0]),
+        ('unfold', (S, S, S, S), (0, 3, 1), '4d_dim0_step1', (), [0]),
+        ('unfold', (S, S, S, S), (1, 3, 1), '4d_dim1_step1', (), [0]),
+        ('unfold', (S, S, S, S), (2, 3, 1), '4d_dim2_step1', (), [0]),
+        ('unfold', (S, S, S, S), (3, 3, 1), '4d_dim3_step1', (), [0]),
+        ('unfold', (S, S, S, S), (0, 3, 2), '4d_dim0_step2', (), [0]),
+        ('unfold', (S, S, S, S), (1, 3, 2), '4d_dim1_step2', (), [0]),
+        ('unfold', (S, S, S, S), (2, 3, 2), '4d_dim2_step2', (), [0]),
+        ('unfold', (S, S, S, S), (3, 3, 2), '4d_dim3_step2', (), [0]),
+        ('unfold', (S, S, S, S), (0, 4, 1), '4d_dim0_size4', (), [0]),
+        ('unfold', (S, S, S, S), (1, 4, 1), '4d_dim1_size4', (), [0]),
+        ('unfold', (S, S, S, S), (2, 4, 1), '4d_dim2_size4', (), [0]),
+        ('unfold', (S, S, S, S), (3, 4, 1), '4d_dim3_size4', (), [0]),
+        ('unfold', (M,), (0, 3, 1), '1d_step1', (), [0]),
+        ('unfold', (M,), (0, 3, 2), '1d_step2', (), [0]),
+        ('unfold', (M,), (0, 3, 3), '1d_step3', (), [0]),
+        ('unfold', (1000,), (0, 3, 11), '1d_step_gt_size', (), [0]),
+        ('unfold', (1000,), (0, 2, 27), '1d_step_gt_size2', (), [0]),
+        ('unfold', (10, 10), (0, 1, 2), '2d_step_gt_size', (), [0]),
+        ('unfold', (10, 10), (1, 2, 3), '2d_step_gt_size2', (), [0]),
+        ('unfold', (10, 10), (1, 2, 2), '2d_step_ge_size2', (), [0]),
         ('unfold', (S, S, S), (2, 3, 2), 'lastdim', (), [0]),
         ('addmm', (S, M), ((S, S), (S, M)), '', (True, ['aten::add', 'aten::mm'])),
         ('addmm', (1,), ((S, S), (S, M)), 'broadcast_lhs', (True, ['aten::add', 'aten::mm'])),
@@ -957,12 +984,14 @@ def _compare_trilu_indices(
             torch.triu_indices(row, col, offset, dtype=dtype, device=device))
 
     else:
-        self.assertEqual(
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(
             torch.ones(row, col, device='cpu')
                  .tril(offset).nonzero().to(dtype).transpose(0, 1),
             torch.tril_indices(row, col, offset, dtype=dtype, device=device))
 
-        self.assertEqual(
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(
             torch.ones(row, col, device='cpu')
                  .tril(offset).nonzero().to(dtype).transpose(0, 1),
             torch.tril_indices(row, col, offset, dtype=dtype, device=device))

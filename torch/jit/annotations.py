@@ -244,51 +244,55 @@ def try_real_annotations(fn, loc):
 def try_ann_to_type(ann, loc):
     if ann is None:
         return TensorType.get()
-    elif ann is torch.Tensor:
+    if ann is torch.Tensor:
         return TensorType.get()
-    elif is_tuple(ann):
+    if is_tuple(ann):
         return TupleType([try_ann_to_type(a, loc) for a in ann.__args__])
-    elif is_list(ann):
-        return ListType(try_ann_to_type(ann.__args__[0], loc))
-    elif is_dict(ann):
+    if is_list(ann):
+        elem_type = try_ann_to_type(ann.__args__[0], loc)
+        if elem_type:
+            return ListType(elem_type)
+    if is_dict(ann):
         key = try_ann_to_type(ann.__args__[0], loc)
         value = try_ann_to_type(ann.__args__[1], loc)
         return DictType(key, value)
-    elif is_optional(ann):
+    if is_optional(ann):
         if issubclass(ann.__args__[1], type(None)):
             return OptionalType(try_ann_to_type(ann.__args__[0], loc))
         else:
             return OptionalType(try_ann_to_type(ann.__args__[1], loc))
-    elif is_rref(ann):
+    if is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
-    elif is_future(ann):
+    if is_future(ann):
         return FutureType(try_ann_to_type(ann.__args__[0], loc))
-    elif ann is float:
+    if ann is float:
         return FloatType.get()
-    elif ann is int:
+    if ann is int:
         return IntType.get()
-    elif ann is str:
+    if ann is str:
         return StringType.get()
-    elif ann is bool:
+    if ann is bool:
         return BoolType.get()
-    elif ann is Any:
+    if ann is Any:
         return AnyType.get()
-    elif ann is type(None):
+    if ann is type(None):
         return NoneType.get()
-    elif inspect.isclass(ann) and hasattr(ann, "__torch_script_class__"):
-        return ClassType(_qualified_name(ann))
-    elif inspect.isclass(ann) and hasattr(ann, "__torch_script_interface__"):
+    if inspect.isclass(ann) and hasattr(ann, "__torch_script_interface__"):
         return InterfaceType(_qualified_name(ann))
-    elif ann is torch.device:
+    if ann is torch.device:
         return DeviceObjType.get()
-    else:
-        # Maybe resolve a NamedTuple to a Tuple Type
-        def fake_rcb(key):
-            return None
-        the_type = torch._C._resolve_type_from_object(ann, loc, fake_rcb)
-        if the_type is not None:
-            return the_type
-    return None
+    if inspect.isclass(ann):
+        if hasattr(ann, "__torch_script_class__"):
+            return ClassType(_qualified_name(ann))
+        ignored_builtin_classes = (torch.nn.Module, tuple, list)
+        if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
+            torch.jit._recursive_compile_class(ann, loc)
+            return ClassType(_qualified_name(ann))
+
+    # Maybe resolve a NamedTuple to a Tuple Type
+    def fake_rcb(key):
+        return None
+    return torch._C._resolve_type_from_object(ann, loc, fake_rcb)
 
 
 def ann_to_type(ann, loc):
