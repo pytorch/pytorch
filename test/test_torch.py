@@ -410,7 +410,7 @@ class _TestTorchMixin(object):
                 x = torch.rand(16, device=devices[1])
                 y = torch.rand(16, device=devices[2])
                 with self.assertRaisesRegex(RuntimeError,
-                                            "expected condition, x and y to be on the same device"):
+                                            "Expected condition, x and y to be on the same device"):
                     torch.where(condition, x, y)
 
     def test_where_bool_tensor(self):
@@ -4721,12 +4721,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertExpectedRaisesInline(
             RuntimeError,
             lambda: torch.tensor([]).is_nonzero(),
-            "bool value of Tensor with no values is ambiguous",
+            "Boolean value of Tensor with no values is ambiguous",
         )
         self.assertExpectedRaisesInline(
             RuntimeError,
             lambda: torch.tensor([0, 0]).is_nonzero(),
-            "bool value of Tensor with more than one value is ambiguous",
+            "Boolean value of Tensor with more than one value is ambiguous",
         )
         self.assertFalse(torch.tensor(0).is_nonzero())
         self.assertTrue(torch.tensor(1).is_nonzero())
@@ -12331,7 +12331,7 @@ class TestTorchDeviceType(TestCase):
             ("erf", doubles, True, True, 'cpu'),
             ("erf", doubles, True, True, 'cuda'),
             ("erfc", doubles, True, True, 'cpu'),
-            ("erfc", doubles, False, True, 'cuda'),
+            ("erfc", doubles, True, True, 'cuda'),
             ("erfinv", doubles, True, True, 'cpu'),
             ("erfinv", doubles, True, True, 'cuda'),
             ("exp", doubles, True, True, 'cpu'),
@@ -13665,7 +13665,7 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.digamma(),
                 lambda x, y: x.digamma_(),
                 # lambda x, y: x.erf(), # https://github.com/pytorch/pytorch/issues/24558
-                # lambda x, y: x.erfc(), # https://github.com/pytorch/pytorch/issues/24559
+                lambda x, y: x.erfc(),
                 lambda x, y: x.erfinv(),
                 lambda x, y: x.erfinv_(),
                 # lambda x, y: x.exp(), # https://github.com/pytorch/pytorch/issues/24561
