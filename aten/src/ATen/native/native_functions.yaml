@@ -3250,6 +3250,40 @@
       SparseCPU: _sparse_sum_backward_cpu
       SparseCUDA: _sparse_sum_backward_cuda
 
+- func: _sparse_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+  variants: function
+  supports_named_tensor: True
+
+- func: _sparse_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function
+  supports_named_tensor: True
+
+- func: _sparse_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    SparseCPU: softmax_sparse_cpu
+
+- func: _sparse_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
+  dispatch:
+    SparseCPU: softmax_backward_sparse_cpu
+
+- func: _sparse_log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+  variants: function
+  supports_named_tensor: True
+
+- func: _sparse_log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function
+  supports_named_tensor: True
+
+- func: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    SparseCPU: log_softmax_sparse_cpu
+
+- func: _sparse_log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
+  dispatch:
+    SparseCPU: log_softmax_backward_sparse_cpu
+
 - func: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   variants: function, method
 
