@@ -92,7 +92,7 @@ void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
   pool->run(
     // PThreadPool::run() is blocking.  A std::function [const] reference to
     // this lambda cannot go out of scope before PThreadPool::run() returns.
-    [&fn, range](const size_t task_id) {
+    [&fn](const size_t task_id) {
       fn(0 /* unused */, task_id);
     }, range);
 #endif // C10_MOBILE
