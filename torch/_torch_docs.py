@@ -152,6 +152,28 @@ Example::
     tensor([ 1.2294,  2.2004,  1.3690,  1.7298])
 """.format(**common_args))
 
+add_docstr(torch.acosh,
+          r"""
+acosh(input, out=None) -> Tensor
+
+Returns a new tensor with arccosh (inverse hyperbolic cosine) of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \cosh^{-1}(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4).uniform_(1, 2)
+    >>> a
+    tensor([ 1.3192, 1.9915, 1.9674, 1.7151 ])
+    >>> torch.acosh(a)
+    tensor([ 0.7791, 1.3120, 1.2980, 1.1342 ])
+""".format(**common_args))
+
 add_docstr(torch.add,
            r"""
 add(input, other, out=None)
@@ -612,6 +634,28 @@ Example::
     tensor([-0.6387,     nan, -0.4552,     nan])
 """.format(**common_args))
 
+add_docstr(torch.asinh,
+          r"""
+asinh(input, out=None) -> Tensor
+
+Returns a new tensor with arcsinh (inverse hyperbolic sine) of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \sinh^{-1}(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4).uniform_(1, 2)
+    >>> a
+    tensor([ 1.1678, 1.4004, 1.6039, 1.8095 ])
+    >>> torch.asinh(a)
+    tensor([ 1.2885, 1.1382, 1.2510, 1.3551 ])
+""".format(**common_args))
+
 add_docstr(torch.atan,
            r"""
 atan(input, out=None) -> Tensor
@@ -660,6 +704,28 @@ Example::
     tensor([ 0.9041,  0.0196, -0.3108, -2.4423])
     >>> torch.atan2(a, torch.randn(4))
     tensor([ 0.9833,  0.0811, -1.9743, -1.4151])
+""".format(**common_args))
+
+add_docstr(torch.atanh,
+          r"""
+atanh(input, out=None) -> Tensor
+
+Returns a new tensor with arctanh (inverse hyperbolic tangent) of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \tanh^{-1}(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4).uniform_(-1, 1)
+    >>> a
+    tensor([ -0.9385, 0.2968, -0.8591, -0.1871 ])
+    >>> torch.atanh(a)
+    tensor([ -1.7251, 0.3060, -1.2898, -0.1897 ])
 """.format(**common_args))
 
 add_docstr(torch.baddbmm,
