@@ -410,7 +410,7 @@ class _TestTorchMixin(object):
                 x = torch.rand(16, device=devices[1])
                 y = torch.rand(16, device=devices[2])
                 with self.assertRaisesRegex(RuntimeError,
-                                            "expected condition, x and y to be on the same device"):
+                                            "Expected condition, x and y to be on the same device"):
                     torch.where(condition, x, y)
 
     def test_where_bool_tensor(self):
@@ -4721,12 +4721,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertExpectedRaisesInline(
             RuntimeError,
             lambda: torch.tensor([]).is_nonzero(),
-            "bool value of Tensor with no values is ambiguous",
+            "Boolean value of Tensor with no values is ambiguous",
         )
         self.assertExpectedRaisesInline(
             RuntimeError,
             lambda: torch.tensor([0, 0]).is_nonzero(),
-            "bool value of Tensor with more than one value is ambiguous",
+            "Boolean value of Tensor with more than one value is ambiguous",
         )
         self.assertFalse(torch.tensor(0).is_nonzero())
         self.assertTrue(torch.tensor(1).is_nonzero())
@@ -12331,11 +12331,11 @@ class TestTorchDeviceType(TestCase):
             ("erf", doubles, True, True, 'cpu'),
             ("erf", doubles, True, True, 'cuda'),
             ("erfc", doubles, True, True, 'cpu'),
-            ("erfc", doubles, False, True, 'cuda'),
+            ("erfc", doubles, True, True, 'cuda'),
             ("erfinv", doubles, True, True, 'cpu'),
             ("erfinv", doubles, True, True, 'cuda'),
             ("exp", doubles, True, True, 'cpu'),
-            ("exp", doubles, False, True, 'cuda'),
+            ("exp", doubles, True, True, 'cuda'),
             ("expm1", doubles, True, True, 'cpu'),
             ("expm1", doubles, True, True, 'cuda'),
             ("floor", doubles, True, True, 'cpu'),
@@ -13665,7 +13665,7 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.digamma(),
                 lambda x, y: x.digamma_(),
                 # lambda x, y: x.erf(), # https://github.com/pytorch/pytorch/issues/24558
-                # lambda x, y: x.erfc(), # https://github.com/pytorch/pytorch/issues/24559
+                lambda x, y: x.erfc(),
                 lambda x, y: x.erfinv(),
                 lambda x, y: x.erfinv_(),
                 # lambda x, y: x.exp(), # https://github.com/pytorch/pytorch/issues/24561
@@ -14225,6 +14225,24 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(sample_indices.dim(), 1, "wrong number of dimensions")
             self.assertEqual(prob_dist.dim(), 1, "wrong number of prob_dist dimensions")
             self.assertEqual(sample_indices.size(0), n_sample, "wrong number of samples")
+
+    @slowTest
+    @dtypes(torch.float)
+    def test_multinomial_rng_state_advance(self, device, dtype):
+        corpus_size = 100000
+        freqs = torch.ones(corpus_size, dtype=torch.float, device=device)
+        n_sample = 100
+        samples1 = torch.multinomial(freqs, n_sample, replacement=True)
+        samples2 = torch.multinomial(freqs, n_sample, replacement=True)
+        samples = torch.cat([samples1, samples2])
+        # expect no more than 1 repeating elements generated in 2 attempts
+        # the probability of at least element being repeated is surprisingly large, 18%
+        self.assertLessEqual(2 * n_sample - samples.unique().size(0), 2)
+        samples1 = torch.multinomial(freqs, n_sample, replacement=False)
+        samples2 = torch.multinomial(freqs, n_sample, replacement=False)
+        samples = torch.cat([samples1, samples2])
+        # expect no more than 1 repeating elements generated in 2 attempts
+        self.assertLessEqual(2 * n_sample - samples.unique().size(0), 1)
 
     def test_var_unbiased(self, device):
         tensor = torch.randn(100, device=device)
