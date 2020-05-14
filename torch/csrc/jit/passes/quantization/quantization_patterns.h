@@ -680,6 +680,30 @@ graph(%a_quant, %alpha, %scale, %input_scale):
           %r = aten::elu_(%a_quant, %alpha, %scale, %input_scale)
           return (%r) )";
 
+  // aten::leaky_relu
+  std::string leaky_relu = R"(
+graph(%a_quant, %negative_slope):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::leaky_relu(%a_dequant, %negative_slope)
+)" + common_general_value_op;
+
+  std::string aten_leaky_relu = R"(
+graph(%a_quant, %negative_slope):
+          %r = aten::leaky_relu(%a_quant, %negative_slope)
+          return (%r) )";
+
+  // aten::leaky_relu_
+  std::string leaky_relu_ = R"(
+graph(%a_quant, %negative_slope):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::leaky_relu_(%a_dequant, %negative_slope)
+)" + common_general_value_op;
+
+  std::string aten_leaky_relu_ = R"(
+graph(%a_quant, %negative_slope):
+          %r = aten::leaky_relu_(%a_quant, %negative_slope)
+          return (%r) )";
+
   return {
       {"quantized::conv1d", conv1d, quantized_conv1d},
       {"quantized::conv2d", conv2d, quantized_conv2d},
@@ -770,6 +794,8 @@ graph(%a_quant, %alpha, %scale, %input_scale):
       {"aten::hardtanh_", hardtanh_, aten_hardtanh_},
       {"aten::elu", elu, aten_elu},
       {"aten::elu_", elu_, aten_elu_},
+      {"aten::leaky_relu", leaky_relu, aten_leaky_relu},
+      {"aten::leaky_relu_", leaky_relu_, aten_leaky_relu_},
   };
 }
 

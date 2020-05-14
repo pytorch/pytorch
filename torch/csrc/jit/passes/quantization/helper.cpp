@@ -66,8 +66,6 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "tanh",
     "hardsigmoid",
     "hardsigmoid_",
-    "leaky_relu",
-    "leaky_relu_",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
@@ -84,7 +82,6 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "contiguous", "permute",     "repeat_interleave",
     "relu",       "relu_",       "sigmoid",
     "tanh",       "hardsigmoid", "hardsigmoid_",
-    "leaky_relu", "leaky_relu_",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
@@ -105,6 +102,7 @@ std::vector<std::string> _single_input_general_value_call_funcs = {
     "upsample_nearest",
     "hardtanh",
     "elu",
+    "leaky_relu",
 };
 
 // Theses are aten functions for ops that doesn't require observation and
@@ -132,6 +130,8 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     "hardtanh_",
     "elu",
     "elu_",
+    "leaky_relu",
+    "leaky_relu_",
 };
 
 // Special checks for ops that do not require observers for all input tensors.
