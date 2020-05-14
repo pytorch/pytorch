@@ -1099,8 +1099,14 @@ def _try_get_overloaded_fn(mod, field):
 class ScriptWarning(Warning):
     pass
 
+@contextlib.contextmanager
+def _disable_emit_hooks():
+    hooks = torch._C._jit_get_emit_hooks()
+    torch._C._jit_set_emit_hooks(None, None)
+    yield
 
-def _disable_emit_hooks(_DecoratorContextManager):  # noqa: F811
+
+def _disable_emit_hooks_decorator(_DecoratorContextManager):  # noqa: F811
     def __enter__(self):
         self.hooks = torch._C._jit_get_emit_hooks()
         torch._C._jit_set_emit_hooks(None, None)
