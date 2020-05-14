@@ -186,6 +186,7 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
             print_test_debug_info(
                 "slws_fused_8bit_rowwise",
                 {
+                    "seed": seed,
                     "indices": indices,
                     "data": data,
                     "lengths": lengths,
@@ -218,7 +219,7 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
         indices = np.asarray(indices).astype(np.int64)
 
         weights = np.random.uniform(
-            low=0, 
+            low=0,
             high=max_weight,
             size=[len(indices)]
         ).astype(np.float32)

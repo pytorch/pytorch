@@ -6,8 +6,6 @@
 #include <c10/util/TypeCast.h>
 #include <ATen/core/Range.h>
 #include <bitset>
-#include <c10/util/Optional.h>
-#include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 
