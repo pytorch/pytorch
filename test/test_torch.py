@@ -12331,7 +12331,7 @@ class TestTorchDeviceType(TestCase):
             ("erf", doubles, True, True, 'cpu'),
             ("erf", doubles, True, True, 'cuda'),
             ("erfc", doubles, True, True, 'cpu'),
-            ("erfc", doubles, False, True, 'cuda'),
+            ("erfc", doubles, True, True, 'cuda'),
             ("erfinv", doubles, True, True, 'cpu'),
             ("erfinv", doubles, True, True, 'cuda'),
             ("exp", doubles, True, True, 'cpu'),
@@ -13665,7 +13665,7 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.digamma(),
                 lambda x, y: x.digamma_(),
                 # lambda x, y: x.erf(), # https://github.com/pytorch/pytorch/issues/24558
-                # lambda x, y: x.erfc(), # https://github.com/pytorch/pytorch/issues/24559
+                lambda x, y: x.erfc(),
                 lambda x, y: x.erfinv(),
                 lambda x, y: x.erfinv_(),
                 # lambda x, y: x.exp(), # https://github.com/pytorch/pytorch/issues/24561

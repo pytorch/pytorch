@@ -233,13 +233,15 @@ void ProfiledCPUMemoryReporter::New(void* ptr, size_t nbytes) {
     return;
   }
   auto profile_memory = memoryProfilingEnabled();
+  size_t allocated = 0;
   if (FLAGS_caffe2_report_cpu_memory_usage || profile_memory) {
     std::lock_guard<std::mutex> guard(mutex_);
     size_table_[ptr] = nbytes;
     allocated_ += nbytes;
+    allocated = allocated_;
   }
   if (FLAGS_caffe2_report_cpu_memory_usage) {
-    LOG(INFO) << "C10 alloc " << nbytes << " bytes, total alloc " << allocated_
+    LOG(INFO) << "C10 alloc " << nbytes << " bytes, total alloc " << allocated
               << " bytes.";
   }
   if (profile_memory) {
@@ -250,11 +252,13 @@ void ProfiledCPUMemoryReporter::New(void* ptr, size_t nbytes) {
 void ProfiledCPUMemoryReporter::Delete(void* ptr) {
   size_t nbytes = 0;
   auto profile_memory = memoryProfilingEnabled();
+  size_t allocated = 0;
   if (FLAGS_caffe2_report_cpu_memory_usage || profile_memory) {
     std::lock_guard<std::mutex> guard(mutex_);
     auto it = size_table_.find(ptr);
     if (it != size_table_.end()) {
       allocated_ -= it->second;
+      allocated = allocated_;
       nbytes = it->second;
       size_table_.erase(it);
     }
@@ -264,7 +268,7 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
   }
   if (FLAGS_caffe2_report_cpu_memory_usage) {
     LOG(INFO) << "C10 deleted " << nbytes << " bytes, total alloc "
-              << allocated_ << " bytes.";
+              << allocated << " bytes.";
   }
   if (profile_memory) {
     reportMemoryUsageToProfiler(ptr, -nbytes, c10::Device(c10::DeviceType::CPU));
