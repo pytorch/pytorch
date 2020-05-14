@@ -35,7 +35,7 @@ import __main__
 import errno
 
 from torch.testing._internal import expecttest
-from torch.testing import _compare_tensors_internal
+from torch.testing import _compare_tensors_internal, _compare_scalars_internal
 
 import torch
 import torch.cuda
@@ -699,94 +699,21 @@ def check_disabled(test_name):
             "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
             " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
 
-
-# Data structures and a function for returning the appropriate dtype to
-# compare two tensors in.
-# NOTE: dtypes for Comparing Tensors in the Test Framework
-# When two tensors are compared they may be of different dtypes.
-# In PyTorch, the typical type promotion rules are biased towards float
-# types, so tensors with dtypes float16 and int64 produce tensors of
-# dtype float16 when added together.
-# If we used typical PyTorch type promotion to determine the dtype that tensors
-# should be compared in, however, then the test framework would assert
-# that tensors which are actually very different were "equal" to each other.
-# For example, torch.tensor((50000), dtype=torch.long) would be "equal" to
-# torch.tensor(49984., dtype=torch.float16), regardless of the rtol and atol.
-# These cases are admittedly, unlikely, but the test framework is not intended
-# to reflect only likely or common scenarios.
-# In an attempt to better preserve numerical accuracy, the following
-# returns a comparison dtype that - when possible - preserves the numerical
-# values in each tensor. For example, when float16 and bfloat16 values
-# are compared the comparison_dtype is float32, since float32 can
-# represent all float16 and bfloat16 values.
-# It is not always possible, however, to preserve all possible values
-# in each tensor type. In these cases the "maximally preserving" dtype is
-# returned. For example, there is no PyTorch dtype that can preserve
-# all possible int64 and float32 values, but float64 at least preserves all
-# float32 values and more int64 values than comparing in float32 would.
-
-# TODO: if we take a NumPy dependency then this function can be greatly
-# simplified.
-# TODO: we may want to implement this casting as a casting rule
-
-# Short-hand for dtypes map
-b = torch.bool
-ui8 = torch.uint8
-i8 = torch.int8
-i16 = torch.int16
-i32 = torch.int32
-i64 = torch.int64
-f16 = torch.float16
-bf16 = torch.bfloat16
-f32 = torch.float32
-f64 = torch.float64
-c64 = torch.complex64
-c128 = torch.complex128
-
-_dtype_to_num = {
-    b    : 0,
-    ui8  : 1,
-    i8   : 2,
-    i16  : 3,
-    i32  : 4,
-    i64  : 5,
-    f16  : 6,
-    bf16 : 7,
-    f32  : 8,
-    f64  : 9,
-    c64  : 10,
-    c128 : 11
-}
-
-#    b     ui8   i8    i16   i32   i64   f16   bf16  f32   f64   c64   c128
-_preserving_comparison_dtypes_map = [
-    [b,    ui8,  i8,   i16,  i32,  i64,  f16,  bf16, f32,  f64,  c64,  c128],  # b     # noqa: E241
-    [ui8,  ui8,  i16,  i16,  i32,  i64,  f16,  bf16, f32,  f64,  c64,  c128],  # ui8   # noqa: E241
-    [i8,   i16,  i8,   i16,  i32,  i64,  f16,  bf16, f32,  f64,  c64,  c128],  # i8    # noqa: E241
-    [i16,  i16,  i16,  i16,  i32,  i64,  f32,  f32,  f32,  f64,  c64,  c128],  # i16   # noqa: E241
-    [i32,  i32,  i32,  i32,  i32,  i64,  f64,  f64,  f64,  f64,  c128, c128],  # i32   # noqa: E241
-    [i64,  i64,  i64,  i64,  i64,  i64,  f64,  f64,  f64,  f64,  c128, c128],  # i64   # noqa: E241
-    [f16,  f16,  f16,  f32,  f64,  f64,  f16,  f32,  f32,  f64,  c64,  c128],  # f16   # noqa: E241
-    [bf16, bf16, bf16, f32,  f64,  f64,  f32,  bf16, f32,  f64,  c64,  c128],  # bf16  # noqa: E241
-    [f32,  f32,  f32,  f32,  f64,  f64,  f32,  f32,  f32,  f64,  c64,  c128],  # f32   # noqa: E241
-    [f64,  f64,  f64,  f64,  f64,  f64,  f64,  f64,  f64,  f64,  c128, c128],  # f64   # noqa: E241
-    [c64,  c64,  c64,  c64,  c128, c128, c64,  c64,  c64,  c128, c64,  c128],  # c64   # noqa: E241
-    [c128, c128, c128, c128, c128, c128, c128, c128, c128, c128, c128, c128]   # c128  # noqa: E241
-]
-
-# Acquires the "preserving" comparison dtype
-# (see Note: dtypes for Comparing Tensors in the Test Framework)
+# Acquires the comparison dtype, required since isclose
+# requires both inputs have the same dtype, and isclose is not supported
+# for some device x dtype combinations.
 # NOTE: Remaps bfloat16 to float32 since neither the CPU or CUDA device types
 #  support needed bfloat16 comparison methods.
 # NOTE: Remaps float16 to float32 on CPU since the CPU device type doesn't
 #   support needed float16 comparison methods.
 # TODO: Update this once bfloat16 and float16 are better supported.
 def get_comparison_dtype(a, b):
-    compare_dtype = _preserving_comparison_dtypes_map[_dtype_to_num[a.dtype]][_dtype_to_num[b.dtype]]
+    # TODO: update this when promote_types supports bfloat16 and/or
+    # isclose supports bfloat16.
+    a_dtype = torch.float32 if a.dtype is torch.bfloat16 else a.dtype
+    b_dtype = torch.float32 if b.dtype is torch.bfloat16 else b.dtype
 
-    # TODO: update this when isclose is implemented for CPU/CUDA bfloat16
-    if compare_dtype is torch.bfloat16:
-        compare_dtype = torch.float32
+    compare_dtype = torch.promote_types(a_dtype, b_dtype)
 
     # non-CUDA (CPU, for example) float16 -> float32
     # TODO: update this when isclose is implemented for CPU float16
@@ -799,14 +726,10 @@ def get_comparison_dtype(a, b):
 
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
-    # atol values when comparing tensors.
+    # atol values when comparing tensors. Used by @precisionOverride, for
+    # example.
     # TODO: provide a better mechanism for generated tests to set rtol/atol.
     precision = 0
-
-    # exact_dtype controls whether comparison tensors checks their dtypes
-    # by default, too.
-    # TODO: default this to True and remove it at the class level
-    exact_dtype = False
 
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
@@ -955,17 +878,17 @@ class TestCase(expecttest.TestCase):
     }
 
     # Checks if two dense tensors are equal(-ish), returning (True, None)
-    # when they are and (False, debug_msg) when they are not, where the
-    # debug_msg is a string containing information about why the tensors
-    # failed to compare as equal(-ish).
+    #   when they are and (False, debug_msg) when they are not.
     # If exact_dtype is true both tensors must have the same dtype.
     # If exact_device is true both tensors must be on the same device.
-    # See NOTE Test Framework Tensor "Equality" for more information on
-    # how tensors are compared.
+    # See the "Test Framework Tensor 'Equality'" note for more details.
     # NOTE: tensors on different devices are moved to the CPU to be compared when
-    # exact_device is False.
+    #   exact_device is False.
+    # NOTE: this function checks the tensors' devices, sizes, and dtypes
+    #  and acquires the appropriate device, dtype, rtol and atol to compare
+    #  them with. It then calls _compare_tensors_internal.
     def _compareTensors(self, a, b, *, rtol=None, atol=None, equal_nan=True,
-                        exact_dtype=False, exact_device=False):
+                        exact_dtype=True, exact_device=False):
         if not isinstance(a, torch.Tensor):
             return (False, "argument a, {0}, to _compareTensors is not a tensor!".format(a))
         if not isinstance(b, torch.Tensor):
@@ -993,12 +916,19 @@ class TestCase(expecttest.TestCase):
                             "different dtypes. Got dtypes {0} and {1}.").format(a.dtype, b.dtype))
 
         # Acquires atol and rtol
-        # NOTE: atol can be overriden by a class's precision value. This
-        # legacy behavior allows generated tests to customize their precision.
+        # TODO: for legacy reasons when only atol is set then rtol is
+        #   zeroed. In the future they should be acquired independently,
+        #   but this will require updating the precision values in all tests
+        #   that explicitly set atol (since they set their precision for a
+        #   test framework that didn't use rtol.)
+        rtol = 0 if ((atol is not None or self.precision != 0) and rtol is None) else rtol
+
         rtol = rtol if rtol is not None else max(self.dtype_precisions.get(a.dtype, (0, 0))[0],
                                                  self.dtype_precisions.get(b.dtype, (0, 0))[0])
         atol = atol if atol is not None else max(self.dtype_precisions.get(a.dtype, (0, 0))[1],
                                                  self.dtype_precisions.get(b.dtype, (0, 0))[1])
+        # NOTE: legacy mechanism for setting the atol
+        #  used by @precisionOverride, for example.
         atol = max(atol, self.precision)
 
         # Converts to comparison dtype
@@ -1008,6 +938,34 @@ class TestCase(expecttest.TestCase):
 
         return _compare_tensors_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
+    # Checks if two scalars are equal(-ish), returning (True, None)
+    #   when they are and (False, debug_msg) when they are not.
+    # NOTE: this function just acquires rtol and atol
+    #   before calling _compare_scalars_internal.
+    def _compareScalars(self, a, b, *, rtol=None, atol=None, equal_nan=True):
+        # TODO: for legacy reasons when only atol is set then rtol is
+        #   zeroed. In the future they should be acquired independently,
+        #   but this will require updating the precision values in all tests
+        #   that explicitly set atol (since they set their precision for a
+        #   test framework that didn't use rtol.)
+        rtol = 0 if ((atol is not None or self.precision != 0) and rtol is None) else rtol
+
+        # NOTE: Complex number comparisons compare the real and imaginary parts
+        #   separately, just like complex tensor comparisons.
+        if isinstance(a, complex) or isinstance(b, complex):
+            rtol = self.dtype_precisions[torch.complex64][0] if rtol is None else rtol
+            atol = self.dtype_precisions[torch.complex64][1] if atol is None else atol
+        elif isinstance(a, float) or isinstance(b, float):
+            rtol = self.dtype_precisions[torch.float32][0] if rtol is None else rtol
+            atol = self.dtype_precisions[torch.float32][1] if atol is None else atol
+        else:
+            rtol = 0 if rtol is None else rtol
+            atol = 0 if atol is None else atol
+
+        # NOTE: legacy mechanism for setting the atol
+        #   (used by @precisionOverride, for example)
+        atol = max(atol, self.precision)
+        return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
     def assertEqualIgnoreType(self, *args, **kwargs):
         # If you are seeing this function used, that means test is written wrongly
@@ -1016,6 +974,7 @@ class TestCase(expecttest.TestCase):
 
     # Compares x and y
     # TODO: make message kwarg-only
+    # TODO: default exact_device to True
     def assertEqual(self, x, y, message=None, *, atol=None, rtol=None, equal_nan=True,
                     exact_dtype=True, exact_device=False):
         # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
@@ -1024,10 +983,6 @@ class TestCase(expecttest.TestCase):
             self.assertIsNone(rtol, "don't combine positionial prec and rtol")
             atol = message
             message = None
-            rtol = 0
-
-        if exact_dtype is None:
-            exact_dtype = self.exact_dtype
 
         # Tensor x Number and Number x Tensor comparisons
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
@@ -1043,6 +998,7 @@ class TestCase(expecttest.TestCase):
         elif isinstance(y, torch.Tensor) and isinstance(x, numpy.bool_):
             self.assertEqual(x, y.item(), atol=atol, rtol=rtol, message=message,
                              exact_dtype=exact_dtype, exact_device=exact_device)
+        # Tensor x Tensor
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             super().assertEqual(x.is_sparse, y.is_sparse, message)
             super().assertEqual(x.is_quantized, y.is_quantized, message)
@@ -1089,10 +1045,6 @@ class TestCase(expecttest.TestCase):
                                      atol=atol, rtol=rtol, message=message,
                                      exact_dtype=exact_dtype, exact_device=exact_device)
 
-                # TODO: the following line should be removed once exact_dtype
-                # defaults to True.
-                self.assertTrue(x.dtype is y.dtype, msg=message)
-
                 result, debug_msg = self._compareTensors(x.int_repr().to(torch.int32),
                                                          y.int_repr().to(torch.int32),
                                                          atol=atol, rtol=rtol,
@@ -1135,44 +1087,14 @@ class TestCase(expecttest.TestCase):
                                  exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(x, bool) and isinstance(y, bool):
             self.assertTrue(x == y, msg=message)
+
+        # Scalar x Scalar
         elif isinstance(x, Number) and isinstance(y, Number):
-            # Short-circuits on identity
-            if x == y or (equal_nan and x != x and y != y):
-                return
-
-            # Helper for comparing scalars and formatting debug info
-            def _scalar_compare_helper(message, s, x, y, rtol, atol):
-                diff = abs(x - y)
-                allowed_diff = atol + rtol * abs(y)
-                result = diff <= allowed_diff
-
-                if not result and message is None:
-                    message = ("Comparing " + s + "{0} and {1} gives a "
-                               "difference of {2}, but the allowed difference "
-                               "with rtol={3} and atol={4} is "
-                               "only {5}!").format(x, y, diff,
-                                                   rtol, atol, allowed_diff)
-
-                self.assertTrue(result, msg=message)
-
-            # Acquires rtol and atol based on number type
-            # NOTE: Complex number comparisons compare the real and imaginary parts
-            # separately, just like complex tensor comparisons.
-            if isinstance(x, complex) or isinstance(y, complex):
-                rtol = self.dtype_precisions[torch.complex64][0] if rtol is None else rtol
-                atol = self.dtype_precisions[torch.complex64][1] if atol is None else atol
-
-                _scalar_compare_helper(message, "the real part ", x.real, y.real, rtol, atol)
-                _scalar_compare_helper(message, "the imaginary part ", x.imag, y.imag, rtol, atol)
-            else:
-                if isinstance(x, float) or isinstance(y, float):
-                    rtol = self.dtype_precisions[torch.float32][0] if rtol is None else rtol
-                    atol = self.dtype_precisions[torch.float32][1] if atol is None else atol
-                else:
-                    rtol = 0 if rtol is None else rtol
-                    atol = 0 if atol is None else atol
-
-                _scalar_compare_helper(message, "", x.real, y.real, rtol, atol)
+            result, debug_msg = self._compareScalars(x, y, rtol=rtol, atol=atol,
+                                                     equal_nan=equal_nan)
+            if not result and message is None:
+                message = "Scalars failed to compare as equal! " + debug_msg
+            self.assertTrue(result, msg=message)
         else:
             super().assertEqual(x, y, msg=message)
 

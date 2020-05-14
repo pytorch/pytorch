@@ -4,6 +4,7 @@ The testing package contains testing-specific utilities.
 
 import torch
 import random
+import math
 
 FileCheck = torch._C.FileCheck
 
@@ -40,26 +41,31 @@ def _unravel_index(flat_index, shape):
 
     return tuple(res[::-1])
 
-# Compares tensors for equality, returning a tuple (bool, msg).
-# The bool value returned is True when the tensors are "equal" and
-# False otherwise.
+# Compares two tensors with the same size on the same device and with the same
+# dtype for equality.
+# Returns a tuple (bool, msg). The bool value returned is True when the tensors
+# are "equal" and False otherwise.
 # The msg value is a debug string, and is None if the tensors are "equal."
-# NOTE: Test Framework Tensor "Equality"
-# Two tensors are "equal" if they are "close", in the sense of torch.allclose.
-# The only exceptions are complex tensors and bool tensors.
-# Complex tensors are "equal" if both the
-# real and complex parts (separately) are close. This is divergent from
-# torch.allclose's behavior, which compares the absolute values of the
-# complex numbers instead.
-# Using torch.allclose would be a less strict
-# comparison that would allow large complex values with
-# significant real or imaginary differences to be considered "equal,"
-# and would make setting rtol and atol for complex tensors distinct from
-# other tensor types.
-# Bool tensors are equal only if they are identical, regardless of
-# the rtol and atol values.
-def _compare_tensors_internal(a, b, *, rtol=0, atol=0, equal_nan=True):
+# NOTE: Test Framework Tensor 'Equality'
+#   Two tensors are "equal" if they are "close", in the sense of torch.allclose.
+#   The only exceptions are complex tensors and bool tensors.
+#
+#   Complex tensors are "equal" if both the
+#   real and complex parts (separately) are close. This is divergent from
+#   torch.allclose's behavior, which compares the absolute values of the
+#   complex numbers instead.
+#
+#   Using torch.allclose would be a less strict
+#   comparison that would allow large complex values with
+#   significant real or imaginary differences to be considered "equal,"
+#   and would make setting rtol and atol for complex tensors distinct from
+#   other tensor types.
+#
+#   Bool tensors are equal only if they are identical, regardless of
+#   the rtol and atol values.
+def _compare_tensors_internal(a, b, *, rtol, atol, equal_nan):
     # Integer (including bool) comparisons are identity comparisons
+    # when rtol is zero and atol is less than one
     if (is_integral(a.dtype) and rtol == 0 and atol < 1) or a.dtype is torch.bool:
         if (a == b).all().item():
             return (True, None)
@@ -109,7 +115,7 @@ def _compare_tensors_internal(a, b, *, rtol=0, atol=0, equal_nan=True):
 
         return (True, None)
 
-    # All other types use torch.allclose directly
+    # All other comparisons use torch.allclose directly
     if torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan):
         return (True, None)
 
@@ -119,8 +125,8 @@ def _compare_tensors_internal(a, b, *, rtol=0, atol=0, equal_nan=True):
     b_flat = b.to(torch.float64).flatten()
     diff = torch.abs(a_flat - b_flat)
 
-    # Masks close and NaN values
-    # NOTE: this avoids (inf - inf) and (NaN vs 5) oddities
+    # Masks close values
+    # NOTE: this avoids (inf - inf) oddities when computing the difference
     close = torch.isclose(a_flat, b_flat, rtol, atol, equal_nan)
     diff[close] = 0
     nans = torch.isnan(diff)
@@ -142,6 +148,45 @@ def _compare_tensors_internal(a, b, *, rtol=0, atol=0, equal_nan=True):
                                                  _unravel_index(greatest_diff_index, a.shape)))
     return (False, debug_msg)
 
+# Checks if two scalars are equal(-ish), returning (True, None)
+# when they are and (False, debug_msg) when they are not.
+def _compare_scalars_internal(a, b, *, rtol, atol, equal_nan):
+    def _helper(a, b, s):
+        # Short-circuits on identity
+        if a == b or (equal_nan and a != a and b != b):
+            return (True, None)
+
+        diff = abs(a - b)
+        allowed_diff = atol + rtol * abs(b)
+        result = diff <= allowed_diff
+
+        # Special-case for infinity comparisons
+        # NOTE: if b is inf then allowed_diff will be inf when rtol is not 0
+        if ((math.isinf(a) or math.isinf(b)) and a != b):
+            result = False
+
+        msg = None
+        if not result:
+            msg = ("Comparing " + s + "{0} and {1} gives a "
+                   "difference of {2}, but the allowed difference "
+                   "with rtol={3} and atol={4} is "
+                   "only {5}!").format(a, b, diff,
+                                       rtol, atol, allowed_diff)
+
+        return result, msg
+
+    if isinstance(a, complex) or isinstance(b, complex):
+        a = complex(a)
+        b = complex(b)
+
+        result, msg = _helper(a.real, b.real, "the real part ")
+
+        if not result:
+            return (False, msg)
+
+        return _helper(a.imag, b.imag, "the imaginary part ")
+
+    return _helper(a, b, "")
 
 def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg=''):
     if not isinstance(actual, torch.Tensor):

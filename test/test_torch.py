@@ -26,8 +26,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
-    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict, \
-    get_comparison_dtype
+    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -5296,57 +5295,101 @@ def add_neg_dim_tests():
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
-    def test_assertEqual_debug(self, device):
-        # Scalar comparison
-        s = ".+Comparing 4.0 and 7.0 gives a difference of 3.0.+"
-        with self.assertRaisesRegex(AssertionError, s):
-            self.assertEqual(4., 7.)
+    @dtypes(torch.float32, torch.complex64)
+    def test_storage(self, device, dtype):
+        v = torch.randn(3, 5, dtype=dtype, device=device)
+        self.assertEqual(v.storage()[0], v[0][0])
+        self.assertEqual(v.storage()[14], v[2][4])
 
-        # Scalar complex comparison, real part
-        s = ".+Comparing the real part 1.0 and 3.0 gives a difference of 2.0.+"
-        with self.assertRaisesRegex(AssertionError, s):
-            self.assertEqual(complex(1, 3), complex(3, 1))
+    @dtypes(torch.float32, torch.complex64)
+    def test_deepcopy(self, device, dtype):
+        from copy import deepcopy
+        a = torch.randn(5, 5, dtype=dtype, device=device)
+        b = torch.randn(5, 5, dtype=dtype, device=device)
+        c = a.view(25)
+        q = [a, [a.storage(), b.storage()], b, c]
+        w = deepcopy(q)
+        self.assertEqual(w[0], q[0], 0)
+        self.assertEqual(w[1][0], q[1][0], 0)
+        self.assertEqual(w[1][1], q[1][1], 0)
+        self.assertEqual(w[1], q[1], 0)
+        self.assertEqual(w[2], q[2], 0)
 
-        # Scalar complex comparison, imaginary part
-        s = ".+Comparing the imaginary part 3.0 and 5.5 gives a difference of 2.5.+"
-        with self.assertRaisesRegex(AssertionError, s):
-            self.assertEqual(complex(1, 3), complex(1, 5.5))
+        # Check that deepcopy preserves sharing
+        w[0].add_(1)
+        for i in range(a.numel()):
+            self.assertEqual(w[1][0][i], q[1][0][i] + 1)
+        self.assertEqual(w[3], c + 1)
+        w[2].sub_(1)
+        for i in range(a.numel()):
+            self.assertEqual(w[1][1][i], q[1][1][i] - 1)
 
-    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
-    @dtypes(*list(product(torch_to_numpy_dtype_dict.keys(),
-                          torch_to_numpy_dtype_dict.keys())))
-    def test_get_comparison_dtype(self, device, dtypes):
-        a = torch.empty(0, device=device, dtype=dtypes[0])
-        b = torch.empty(0, device=device, dtype=dtypes[1])
+    @dtypes(torch.float32, torch.complex64)
+    def test_deepcopy_scalar(self, device, dtype):
+        from copy import deepcopy
+        a = torch.tensor(5, dtype=dtype, device=device)
+        self.assertEqual(a.size(), deepcopy(a).size())
+        self.assertEqual(a, deepcopy(a))
 
-        torch_compare_dtype = get_comparison_dtype(a, b)
-        np_compare_dtype = np.promote_types(
-            torch_to_numpy_dtype_dict[dtypes[0]],
-            torch_to_numpy_dtype_dict[dtypes[1]])
+    # Tests that when atol is set, either via self.precision or explicitly,
+    # the rtol is zeroed (unless given)
+    # TODO: this is legacy behavior and should be updated after test
+    # precisions are reviewed to be consistent with torch.isclose.
+    @onlyOnCPUAndCUDA
+    def test__comparetensors_legacy_atol(self, device):
+        a = torch.tensor((10000000.,))
+        b = torch.tensor((10000002.,))
 
-        # Note: NumPy returns instances of dtypes so this converts them
-        # to their more commonly used representation
-        # (ex. dtype('int16') -> np.int16)
-        np_compare_dtype = getattr(np, str(np_compare_dtype))
+        # Helper for reusing the tensor values as scalars
+        def _scalar_helper(a, b, atol=None):
+            return self._compareScalars(a.item(), b.item(), atol=atol)
 
-        # Special-cases float16 inputs on non-CUDA devices
-        if np_compare_dtype is np.float16 and self.device_type != 'cuda':
-            self.assertEqual(torch_compare_dtype, torch.float32)
-            return
+        for op in (self._compareTensors, _scalar_helper):
+            # Tests default
+            result, debug_msg = op(a, b)
+            self.assertTrue(result)
 
-        # Checks that float16 and bfloat16 have the same promotion on CPU
-        # NOTE: on CUDA float16 is an allowable comparison type while bfloat16
-        #   is not.
-        if self.device_type == 'cpu' and dtypes[0] is torch.float16:
-            c = torch.empty(0, device=device, dtype=torch.bfloat16)
-            bfloat16_type = get_comparison_dtype(c, b)
-            self.assertEqual(torch_compare_dtype, bfloat16_type)
+            # Tests setting atol
+            result, debug_msg = op(a, b, atol=2)
+            self.assertTrue(result)
 
-        self.assertEqual(torch_compare_dtype, numpy_to_torch_dtype_dict[np_compare_dtype])
+            # Tests setting atol too small
+            result, debug_msg = op(a, b, atol=1)
+            self.assertFalse(result)
+
+    @onlyOnCPUAndCUDA
+    def test__comparescalars_debug_msg(self, device):
+        # float x float
+        result, debug_msg = self._compareScalars(4., 7.)
+        expected_msg = ("Comparing 4.0 and 7.0 gives a difference of 3.0, "
+                        "but the allowed difference with rtol=1.3e-06 and "
+                        "atol=1e-05 is only 1.9100000000000003e-05!")
+        self.assertEqual(debug_msg, expected_msg)
+
+        # complex x complex, real difference
+        result, debug_msg = self._compareScalars(complex(1, 3), complex(3, 1))
+        expected_msg = ("Comparing the real part 1.0 and 3.0 gives a difference "
+                        "of 2.0, but the allowed difference with rtol=1.3e-06 "
+                        "and atol=1e-05 is only 1.39e-05!")
+        self.assertEqual(debug_msg, expected_msg)
+
+        # complex x complex, imaginary difference
+        result, debug_msg = self._compareScalars(complex(1, 3), complex(1, 5.5))
+        expected_msg = ("Comparing the imaginary part 3.0 and 5.5 gives a "
+                        "difference of 2.5, but the allowed difference with "
+                        "rtol=1.3e-06 and atol=1e-05 is only 1.715e-05!")
+        self.assertEqual(debug_msg, expected_msg)
+
+        # complex x int
+        result, debug_msg = self._compareScalars(complex(1, -2), 1)
+        expected_msg = ("Comparing the imaginary part -2.0 and 0.0 gives a "
+                        "difference of 2.0, but the allowed difference with "
+                        "rtol=1.3e-06 and atol=1e-05 is only 1e-05!")
+        self.assertEqual(debug_msg, expected_msg)
 
     # Checks that compareTensors provides the correct debug info
     @onlyOnCPUAndCUDA
-    def test__comparetensors_debug(self, device):
+    def test__comparetensors_debug_msg(self, device):
         # Acquires atol that will be used
         atol = max(1e-05, self.precision)
 
@@ -5445,50 +5488,24 @@ class TestTorchDeviceType(TestCase):
                             "on different devices! Got devices cpu and cuda:0.")
             self.assertEqual(debug_msg, expected_msg)
 
+    # Helper for testing _compareTensors and _compareScalars
+    # Works on single element tensors
     def _comparetensors_helper(self, tests, device, dtype, equal_nan, exact_dtype=True, atol=1e-08, rtol=1e-05):
         for test in tests:
             a = torch.tensor((test[0],), device=device, dtype=dtype)
             b = torch.tensor((test[1],), device=device, dtype=dtype)
+
+            # Tensor x Tensor comparison
             compare_result, debug_msg = self._compareTensors(a, b, rtol=rtol, atol=atol,
                                                              equal_nan=equal_nan,
                                                              exact_dtype=exact_dtype)
             self.assertEqual(compare_result, test[2])
 
-    @dtypes(torch.float32, torch.complex64)
-    def test_storage(self, device, dtype):
-        v = torch.randn(3, 5, dtype=dtype, device=device)
-        self.assertEqual(v.storage()[0], v[0][0])
-        self.assertEqual(v.storage()[14], v[2][4])
-
-    @dtypes(torch.float32, torch.complex64)
-    def test_deepcopy(self, device, dtype):
-        from copy import deepcopy
-        a = torch.randn(5, 5, dtype=dtype, device=device)
-        b = torch.randn(5, 5, dtype=dtype, device=device)
-        c = a.view(25)
-        q = [a, [a.storage(), b.storage()], b, c]
-        w = deepcopy(q)
-        self.assertEqual(w[0], q[0], 0)
-        self.assertEqual(w[1][0], q[1][0], 0)
-        self.assertEqual(w[1][1], q[1][1], 0)
-        self.assertEqual(w[1], q[1], 0)
-        self.assertEqual(w[2], q[2], 0)
-
-        # Check that deepcopy preserves sharing
-        w[0].add_(1)
-        for i in range(a.numel()):
-            self.assertEqual(w[1][0][i], q[1][0][i] + 1)
-        self.assertEqual(w[3], c + 1)
-        w[2].sub_(1)
-        for i in range(a.numel()):
-            self.assertEqual(w[1][1][i], q[1][1][i] - 1)
-
-    @dtypes(torch.float32, torch.complex64)
-    def test_deepcopy_scalar(self, device, dtype):
-        from copy import deepcopy
-        a = torch.tensor(5, dtype=dtype, device=device)
-        self.assertEqual(a.size(), deepcopy(a).size())
-        self.assertEqual(a, deepcopy(a))
+            # Scalar x Scalar comparison
+            compare_result, debug_msg = self._compareScalars(a.item(), b.item(),
+                                                             rtol=rtol, atol=atol,
+                                                             equal_nan=equal_nan)
+            self.assertEqual(compare_result, test[2])
 
     def _isclose_helper(self, tests, device, dtype, equal_nan, atol=1e-08, rtol=1e-05):
         for test in tests:
@@ -5564,7 +5581,6 @@ class TestTorchDeviceType(TestCase):
         )
 
         self._isclose_helper(tests, device, dtype, False)
-
         self._comparetensors_helper(tests, device, dtype, False)
 
         # atol and rtol tests
@@ -5582,7 +5598,6 @@ class TestTorchDeviceType(TestCase):
         )
 
         self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
-
         self._comparetensors_helper(tests, device, dtype, False, atol=.5, rtol=.5)
 
         # equal_nan = True tests
@@ -5686,7 +5701,8 @@ class TestTorchDeviceType(TestCase):
 
         self._comparetensors_helper(tests, device, dtype, True)
 
-    # Tests that rtol or atol values less than zero thow RuntimeErrors
+    # Tests that isclose with rtol or atol values less than zero throws a
+    #   RuntimeError
     @dtypes(torch.bool, torch.uint8,
             torch.int8, torch.int16, torch.int32, torch.int64,
             torch.float16, torch.float32, torch.float64)
