@@ -207,6 +207,7 @@ top_env = {
     'function_definitions': [],
     'type_ids': [],
     'native_function_declarations': [],
+    'meta_function_declarations': [],
 }
 
 

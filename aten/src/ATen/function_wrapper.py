@@ -369,6 +369,7 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'function_definitions': List[str],
     'type_ids': List[str],
     'native_function_declarations': List[str],
+    'meta_function_declarations': List[str],
 })
 
 # A Declarations.cwrap formal argument
@@ -1196,11 +1197,18 @@ def create_generic(top_env, declarations):
                 if "::" in value:
                     continue
                 if value not in generated_native_functions:
+                    # WARNING: CLOBBERS option!!!
                     option['native_type_method_dispatch'] = value
                     top_env['native_function_declarations'].append(NATIVE_DECLARATION.substitute(option))
                     generated_native_functions.append(value)
         else:
             top_env['native_function_declarations'].append(NATIVE_DECLARATION.substitute(option))
+
+        if option['overload_name']:
+            option['native_type_method_dispatch'] = option['operator_name'] + '_' + option['overload_name']
+        else:
+            option['native_type_method_dispatch'] = option['operator_name']
+        top_env['meta_function_declarations'].append(NATIVE_DECLARATION.substitute(option))
 
         method_of = ['Type']
         if is_method:

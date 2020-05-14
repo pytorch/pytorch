@@ -49,5 +49,12 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 
 ${native_function_declarations}
 
+namespace meta {
+
+${meta_function_declarations}
+
+} // namespace meta
+
 } // namespace native
+
 } // namespace at

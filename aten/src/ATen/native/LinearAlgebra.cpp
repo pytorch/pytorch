@@ -1,3 +1,4 @@
+#include <ATen/TensorMeta.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Dispatch.h>
@@ -155,19 +156,35 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
   return at::_addr_out(result, b_self, vec1, vec2, beta, alpha);
 }
 
-Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
-  check_1d(self, "self", "ger");
-  check_1d(vec2, "vec2", "ger");
-  if (result.dim() != 2 || result.size(0) != self.size(0) || result.size(1) != vec2.size(0)) {
-    result.resize_({ self.size(0), vec2.size(0) });
+namespace meta {
+  TensorMeta ger_meta(const Tensor& self, const Tensor& vec2) {
+    check_1d(self, "self", "ger");
+    check_1d(vec2, "vec2", "ger");
+    return TensorMeta({self.size(0), vec2.size(0)}, self.options());
   }
-  // resize_ does the "broadcasting", don't need to broadcast again.
+
+  Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
+    return meta_wrapper_out<decltype(meta::ger_meta), meta::ger_meta>(result, self, vec2);
+  }
+
+  Tensor ger(const Tensor& self, const Tensor& vec2) {
+    return meta_wrapper<decltype(meta::ger_meta), meta::ger_meta>(self, vec2);
+  }
+} // namespace meta
+
+Tensor& ger_impl(Tensor &result, const Tensor& self, const Tensor& vec2) {
   return at::_addr_out(result, result, self, vec2, Scalar(0), Scalar(1));
 }
 
+Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
+  meta::ger_out(result, self, vec2);
+  ger_impl(result, self, vec2);
+  return result;
+}
+
 Tensor ger(const Tensor& self, const Tensor& vec2) {
-  Tensor result = at::empty({0}, self.options());
-  at::ger_out(result, self, vec2);
+  auto result = meta::ger(self, vec2);
+  ger_impl(result, self, vec2);
   return result;
 }
 
