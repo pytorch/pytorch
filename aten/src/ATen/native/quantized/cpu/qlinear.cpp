@@ -247,19 +247,17 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     auto bias_fp32 = bias_;
     int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
 
-    uint8_t* weight_zp_data =
-        reinterpret_cast<uint8_t*>(w_zero_points.data_ptr<c10::quint8>());
     float* weight_scales_data = w_scales.data_ptr<float>();
     // We calculate requant scale here as the vector holding the requant scale
     // is owned by this module. The pointer is then passed to qnnpack backend.
-    requantization_scale =
+    requantization_scales =
         generate_requantization_scales(w_scales, input_scale, output_scale);
 
     at::Tensor qnnp_weight = at::_empty_affine_quantized(
         weight_contig.sizes(),
         at::device(c10::kCPU).dtype(c10::kQUInt8),
         weight_scales_data[0],
-        weight_zp_data[0]);
+        w_zero_points[0]);
     auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
     for (int i = 0; i < wt_numel; ++i) {
@@ -275,8 +273,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     w = std::make_unique<qnnpack::PackBMatrix>(
         cols_w /* input_channels */,
         rows_w /* output_channels */,
-        weight_zp_data[0],
-        requantization_scale.data()[0],
+        w_zero_points[0],
+        requantization_scales.data()[0],
         reinterpret_cast<uint8_t*>(qnnp_w_data),
         reinterpret_cast<int32_t*>(qbias.data_ptr<c10::qint32>()));
     packB = w.get();
@@ -322,8 +320,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       cols_input /* input_channels */,
       rows_w /* output_channels */,
       input_contig.q_zero_point(),
-      reinterpret_cast<uint8_t*>(w_zero_points.data_ptr<c10::quint8>()),
-      requantization_scale.data(),
+      w_zero_points.data(),
+      requantization_scales.data(),
       output_zero_point,
       output_min,
       output_max,
