@@ -118,7 +118,7 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::backward(int context_id, Tensor[] roots, bool retain_graph=False) -> ()",
+         "aten::dist_backward(int context_id, Tensor[] roots, bool retain_graph=False) -> ()",
          [](Stack& stack) {
            RECORD_FUNCTION(
                kDistAutogradBackwardProfilingKey, std::vector<c10::IValue>());
