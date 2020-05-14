@@ -1554,44 +1554,22 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.maxpool1d = torch.nn.MaxPool1d(kernel_size=3)
                 self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3)
                 self.maxpool3d = torch.nn.MaxPool3d(kernel_size=3)
-                self.adaptive_avgpool1d = torch.nn.AdaptiveAvgPool1d((1))
-                self.adaptive_avgpool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
-                self.adaptive_avgpool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.dropout = torch.nn.Dropout()
-                self.avgpool1d = torch.nn.AvgPool1d(3)
-                self.avgpool2d = torch.nn.AvgPool2d(3)
-                self.avgpool3d = torch.nn.AvgPool3d(3)
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.sigmoid = torch.nn.Sigmoid()
                 self.tanh = torch.nn.Tanh()
-                self.hardtanh = torch.nn.Hardtanh()
-                self.elu = torch.nn.ELU()
                 self.hardsigmoid = torch.nn.Hardsigmoid()
                 self.relu = torch.nn.ReLU()
                 self.relu6 = torch.nn.ReLU6()
-                self.leaky_relu = torch.nn.LeakyReLU()
 
             def forward(self, x):
                 x = self.conv(x)
                 x = self.maxpool1d(x)
                 x = self.maxpool2d(x)
                 x = self.maxpool3d(x)
-                x = self.adaptive_avgpool1d(x)
-                x = self.adaptive_avgpool2d(x)
-                x = self.adaptive_avgpool3d(x)
-                x = self.avgpool1d(x)
-                x = self.avgpool2d(x)
-                x = self.avgpool3d(x)
                 x = torch.flatten(x)
-                x = F.adaptive_avg_pool1d(x, (1))
-                x = F.adaptive_avg_pool2d(x, (1, 1))
-                x = F.adaptive_avg_pool3d(x, (1, 1, 1))
-                x = F.avg_pool1d(x, 3)
-                x = F.avg_pool2d(x, 3)
-                x = F.avg_pool3d(x, 3)
                 x = torch.max(x)
                 x = torch.min(x)
-                x = torch.mean(x)
                 x = torch.sigmoid(x)
                 x = x.reshape([-1])
                 x = x.resize_(1, 1, x.numel())
@@ -1603,25 +1581,12 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = F.dropout(x)
                 x = self.dropout(x)
                 x, _ = torch.sort(x)
-                x = F.interpolate(x, 4, mode='nearest')
-                x = F.upsample(x, (32, 32))
-                x = F.upsample_bilinear(x, (32, 32))
-                x = F.upsample_nearest(x, (32, 32))
-                x = torch.clamp(x, -3, 3)
-                x = x.clamp(-2.5, 2.5)
-                # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
                 x = F.sigmoid(x)
                 x = x.permute(0, 2, 3, 1)
                 x = torch.repeat_interleave(x, 3, 1)
                 x = self.tanh(x)
                 x = F.tanh(x)
                 x = torch.tanh(x)
-                x = self.hardtanh(x)
-                x = F.hardtanh(x)
-                x.hardtanh_()
-                x = self.elu(x)
-                x = F.elu(x)
-                x.elu_()
                 x = self.hardsigmoid(x)
                 x = F.hardsigmoid(x)
                 x.hardsigmoid_()
@@ -1630,9 +1595,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x.relu_()
                 x = self.relu6(x)
                 x = F.relu6(x)
-                x = self.leaky_relu(x)
-                x = F.leaky_relu(x)
-                x.leaky_relu_()
                 x = self.conv(x)
                 return x
 
@@ -1664,13 +1626,51 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.avgpool2d = torch.nn.AvgPool2d(3)
                 self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.avg_pool1d = torch.nn.AvgPool1d(3)
+                self.avg_pool2d = torch.nn.AvgPool2d(3)
+                self.avg_pool3d = torch.nn.AvgPool2d(3)
+                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
+                self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
+                self.hardtanh = torch.nn.Hardtanh()
+                self.elu = torch.nn.ELU()
+                self.leaky_relu = torch.nn.LeakyReLU()
 
             def forward(self, x):
                 x = self.conv(x)
-                x = self.avgpool2d(x)
+                x = self.avg_pool1d(x)
+                x = self.avg_pool2d(x)
+                x = self.avg_pool3d(x)
+                x = self.adaptive_avg_pool1d(x)
+                x = self.adaptive_avg_pool2d(x)
+                x = self.adaptive_avg_pool3d(x)
+                x = F.avg_pool1d(x, 3)
                 x = F.avg_pool2d(x, 3)
+                x = F.avg_pool3d(x, 3)
+                x = F.adaptive_avg_pool1d(x, (1))
+                x = F.adaptive_avg_pool2d(x, (1, 1))
+                x = F.adaptive_avg_pool3d(x, (1, 1, 1))
+                x = torch.mean(x)
+                x = x.mean()
+                # interpolate node will introduce 3 quantize_per_tensor ops
+                x = F.interpolate(x, 4, mode='nearest')  # interpolate node
+                x = F.upsample(x, (32, 32))  # interpolate node
+                x = F.upsample_nearest(x, (32, 32))  # interpolate node
+                x = F.interpolate(x, 4, mode='linear')  # common node
+                x = F.upsample_bilinear(x, (32, 32))  # common node
+                x = torch.clamp(x, -3, 3)
+                x = x.clamp(-2.5, 2.5)
+                # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
+                x = self.hardtanh(x)
+                x = F.hardtanh(x)
+                x.hardtanh_()
+                x = self.elu(x)
+                x = F.elu(x)
+                x.elu_()
+                x = self.leaky_relu(x)
+                x = F.leaky_relu(x)
+                x.leaky_relu_()
                 x = self.conv(x)
                 return x
 
@@ -1690,10 +1690,15 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # and for N general value op between conv we should have
         # N + 1 quantize_per_tensor between these ops
         m1 = convert_script(m, debug=True)
-        conv_op_quant = 4
         # NB: This Needs to be updated when we add more ops to test
-        general_value_op_quant = 2
-        FileCheck().check_count("aten::quantize_per_tensor", conv_op_quant + general_value_op_quant + 1, exactly=True) \
+        # number of quantize_per_tensor op for type
+        num_quant_by_op_type = {'conv': 2, 'common': 1, 'interpolate': 3}
+        # number of ops for each type
+        num_op_by_op_type = {'conv': 2, 'common': 27, 'interpolate': 3}
+        num_quantize_per_tensor = 1  # for output
+        for op_type, num_op in num_op_by_op_type.items():
+            num_quantize_per_tensor += num_op * num_quant_by_op_type[op_type]
+        FileCheck().check_count("aten::quantize_per_tensor(", num_quantize_per_tensor, exactly=True) \
                    .run(m1.graph)
 
         # This checks that the dequantize from the output of first conv
@@ -1701,8 +1706,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
-            torch.jit.script(M())._c, 'forward', {'': qconfig}, inplace=False))
         m2 = convert_script(m, debug=False)
         FileCheck().check_count("aten::quantize_per_tensor(", 1, exactly=True) \
                    .check_count("quantized::conv2d(", 2, exactly=True) \
