@@ -227,6 +227,10 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
   // matrices, respectively.
 
   auto packB = w.get();
+  // Adjust weight zero point, similar to weight data.
+  float* weight_scales_data = w_scales.data_ptr<float>();
+  auto kernel_zp = w_zero_points[0];
+  auto kernel_scale = weight_scales_data[0];
   size_t rows_w = bias_.size(0);
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
 
@@ -251,9 +255,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
     // Get the original weight and adjust it to uint8 from int8
     auto weight_contig = orig_weight;
 
-    uint8_t* weight_zp_data = (uint8_t*)w_zero_points.data_ptr<c10::quint8>();
     float* weight_scales_data = w_scales.data_ptr<float>();
-    requantization_scale =
+    requantization_scales =
         generate_requantization_scales(w_scales, q_params.scale, 1.f);
 
     // TODO Kimish, we are allocating affine_quantized regardless of per channel or not.
@@ -263,7 +266,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
         weight_contig.sizes(),
         at::device(c10::kCPU).dtype(c10::kQUInt8),
         weight_scales_data[0],
-        weight_zp_data[0]);
+        w_zero_points[0]);
     auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
     int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
     auto wt_numel = weight_contig.numel();
@@ -278,8 +281,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
     w = std::make_unique<qnnpack::PackBMatrix>(
         cols_w /* input_channels */,
         rows_w /* output_channels */,
-        weight_zp_data,
-        requantization_scale.data(),
+        w_zero_points.data(),
+        requantization_scales.data(),
         (uint8_t*)qnnp_w_data,
         nullptr);
     packB = w.get();
@@ -313,9 +316,9 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
       cols_input /* input_channels */,
       rows_w /* output_channels */,
       q_input.q_zero_point(),
-      (uint8_t*)w_zero_points.data_ptr<c10::quint8>(),
+      w_zero_points.data(),
       /* for dynamic should really be called dequant scale */
-      requantization_scale.data(),
+      requantization_scales.data(),
       (uint8_t*)q_input.data_ptr<c10::quint8>(),
       cols_input /* input_stride */,
       packB->getPackedWeights(),

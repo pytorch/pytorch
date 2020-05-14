@@ -283,7 +283,11 @@ enum pytorch_qnnp_status qnnpackConv(
     const size_t input_width,
     const uint8_t input_zero_point,
     const uint8_t* input,
+    const uint8_t* kernel_zero_points,
+    const float* requantization_scales,
     const uint8_t output_zero_point,
+    const uint8_t output_min,
+    const uint8_t output_max,
     uint8_t* output,
     pthreadpool_t threadpool) {
   const size_t input_pixel_stride = conv_p.input_channels;
@@ -305,18 +309,18 @@ enum pytorch_qnnp_status qnnpackConv(
   if (conv_p.ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
     requantization_params = pytorch_qnnp_compute_requantization_params(
         // Note. XZP kernels are not changed for per channel quant.
-        conv_p.requantization_scales[0],
+        requantization_scales[0],
         output_zero_point,
-        conv_p.output_min,
-        conv_p.output_max);
+        output_min,
+        output_max);
   } else {
     conv_quantization_params = pytorch_qnnp_compute_conv_quantization_params(
         input_zero_point,
-        conv_p.kernel_zero_points,
-        conv_p.requantization_scales,
+        kernel_zero_points,
+        requantization_scales,
         output_zero_point,
-        conv_p.output_min,
-        conv_p.output_max);
+        output_min,
+        output_max);
   }
   uint32_t stride_width = conv_p.stride_dims[0];
   uint32_t stride_height = conv_p.stride_dims[1];
@@ -513,7 +517,7 @@ enum pytorch_qnnp_status qnnpackConv(
           // XZP kernels are not supporting per channel quant.
           // We dont really use XZP kernels ATM.
           // Thus assigning the zero point of first channel.
-          .multiplier = (int32_t)-conv_p.kernel_zero_points[0],
+          .multiplier = (int32_t)-kernel_zero_points[0],
           .a_sum = a_sum,
           .a_sum_stride = input_size,
           .ukernel = pytorch_qnnp_params.q8sum_rows.sum_rows,

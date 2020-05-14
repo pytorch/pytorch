@@ -205,8 +205,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<kSpa
       " instead");
 
   auto weight_contig = weight.contiguous(c10::MemoryFormat::ChannelsLast);
+  const bool is_per_channel = weight_contig.qscheme() == at::kPerChannelAffine;
 
-  at::Tensor w_zero_points, w_scales;
+  std::vector<uint8_t> w_zero_points;
+  at::Tensor  w_scales;
   std::tie(w_zero_points, w_scales) =
       make_zero_points_and_scales_tensor(weight_contig);
   // We set the pre-packed conv weights to nullptr below as we call pre-pack
@@ -226,7 +228,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<kSpa
               c10::nullopt, /* input_scale */
               {kernel_h, kernel_w},
               w_scales,
-              w_zero_points});
+              std::move(w_zero_points),
+              is_per_channel});
 
   return ret_ptr;
 }
