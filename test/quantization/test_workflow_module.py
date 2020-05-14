@@ -430,7 +430,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertEqual(obs_list.min_val, [2.0, 2.0])
         self.assertEqual(obs_list.max_val, [8.0, 8.0])
         self.assertEqual(obs_list.histogram, [2., 3., 3., 2., 3., 3.])
-        qparams = myobs.calculate_qparams()
+        qparams = obs_list.calculate_qparams()
         for i in range(2):
             self.assertEqual(qparams[i][1].item(), ref_zero_point)
             self.assertAlmostEqual(qparams[i][0].item(), ref_scale, delta=1e-5)

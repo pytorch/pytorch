@@ -879,38 +879,44 @@ class HistogramObserver(_ObserverBase):
         self.histogram.resize_(histogram.shape)
         self.histogram.copy_(histogram)
 
-    @torch.jit._overload_method
+    @torch.jit._overload_method  # noqa: F811
     def forward(self, x_orig):  # noqa: F811
         # type: (List[Tensor]]) -> List[Tensor]
-        min_vals = self.min_val
-        max_vals = self.max_val
-        histograms = self.histogram
-        num_tensors = len(x_orig)
-        initilized = True
-        if min_vals.numel() != num_tensors or max_vals.numel() != num_tensors or \
-           histograms.numel() != num_tensors * self.bins:
-            min_vals = torch.empty(num_tensors, dtype=torch.float32)
-            max_vals = torch.empty(num_tensors, dtype=torch.float32)
-            histograms = torch.empty(num_tensors * self.bins, dtype=torch.float32)
-            initialized = False
-        for i in range(num_tensors):
-            if initialized:
-                min_val, max_val, histogram = min_vals[i], max_vals[i], histograms[self.bins * i : self.bins * (i+1)]
-            else:
-                min_val, max_val, histogram = torch.tensor([]), torch.tensor([]), torch.zeros(self.bins)
-            min_val, max_val, histogram = self._forward(x_orig[i], min_val, max_val, histogram)
-            min_vals[i] = min_val
-            max_vals[i] = max_val
-            histograms[self.bins * i : self.bins * (i+1)] = histogram
-        self.update_stats(min_vals, max_vals, histograms)
-        return x_orig
+        pass
 
     @torch.jit._overload_method
     def forward(self, x_orig):  # noqa: F811
         # type: (Tensor) -> Tensor
-        min_val, max_val, histogram = self._forward(x_orig, self.min_val, self.max_val, self.histogram)
-        self.update_stats(min_val, max_val, histogram)
-        return x_orig
+        pass
+
+    def forward(self, x_orig):  # noqa: F811
+        if isinstance(x_orig, torch.Tensor):
+            min_val, max_val, histogram = self._forward(x_orig, self.min_val, self.max_val, self.histogram)
+            self.update_stats(min_val, max_val, histogram)
+            return x_orig
+        else:
+            min_vals = self.min_val
+            max_vals = self.max_val
+            histograms = self.histogram
+            num_tensors = len(x_orig)
+            initialized = True
+            if min_vals.numel() != num_tensors or max_vals.numel() != num_tensors or \
+               histograms.numel() != num_tensors * self.bins:
+                min_vals = torch.empty(num_tensors, dtype=torch.float32)
+                max_vals = torch.empty(num_tensors, dtype=torch.float32)
+                histograms = torch.empty(num_tensors * self.bins, dtype=torch.float32)
+                initialized = False
+            for i in range(num_tensors):
+                if initialized:
+                    min_val, max_val, histogram = min_vals[i], max_vals[i], histograms[self.bins * i : self.bins * (i+1)]
+                else:
+                    min_val, max_val, histogram = torch.tensor([]), torch.tensor([]), torch.zeros(self.bins)
+                min_val, max_val, histogram = self._forward(x_orig[i], min_val, max_val, histogram)
+                min_vals[i] = min_val
+                max_vals[i] = max_val
+                histograms[self.bins * i : self.bins * (i+1)] = histogram
+                self.update_stats(min_vals, max_vals, histograms)
+            return x_orig
 
     def _forward(self, x_orig, min_val, max_val, histogram):
         # type: (Tensor, Tensor, Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
@@ -960,7 +966,7 @@ class HistogramObserver(_ObserverBase):
         if num_tensors > 1:
             for i in range(num_tensors):
                 new_min, new_max = self._non_linear_param_search(self.min_val[i], self.max_val[i], self.histogram[self.bins * i : self.bins * (i+1)])
-                qparams.push_back(self._calculate_qparams(new_min, new_max))
+                qparams.append(self._calculate_qparams(new_min, new_max))
             return qparams
         else:
             new_min, new_max = self._non_linear_param_search(self.min_val, self.max_val, self.histogram)
