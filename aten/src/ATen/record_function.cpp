@@ -103,8 +103,8 @@ class CallbackManager {
 
     init_handles(rec_fn.sorted_active_tls_handles_, sorted_tls_callbacks_);
     init_handles(rec_fn.sorted_active_global_handles_, sorted_global_callbacks_);
-    rec_fn.active_ = found_active_cb;
-    rec_fn.needs_inputs_ = found_needs_inputs;
+    rec_fn.active = found_active_cb;
+    rec_fn.needs_inputs = found_needs_inputs;
     rec_fn.setHandle(next_unique_record_function_handle());
   }
 
@@ -299,8 +299,8 @@ uint64_t RecordFunction::currentThreadId() {
   return current_thread_id_;
 }
 
-void RecordFunction::_before(const char* name, int64_t sequence_nr) {
-  if (!active_) {
+void RecordFunction::before(const char* name, int64_t sequence_nr) {
+  if (!active) {
     return;
   }
   name_ = StringView(name);
@@ -310,8 +310,8 @@ void RecordFunction::_before(const char* name, int64_t sequence_nr) {
   manager().runStartCallbacks(*this);
 }
 
-void RecordFunction::_before(std::string name, int64_t sequence_nr) {
-  if (!active_) {
+void RecordFunction::before(std::string name, int64_t sequence_nr) {
+  if (!active) {
     return;
   }
   name_ = StringView(std::move(name));
@@ -322,13 +322,13 @@ void RecordFunction::_before(std::string name, int64_t sequence_nr) {
 }
 
 RecordFunction::~RecordFunction() {
-  _end();
+  end();
 }
 
-void RecordFunction::_end() {
-  if (active_) {
+void RecordFunction::end() {
+  if (active) {
     manager().runEndCallbacks(*this);
-    active_ = false;
+    active = false;
   }
   if (is_current_) {
     current_record_func_ = parent_;
