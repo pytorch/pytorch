@@ -432,7 +432,7 @@ struct ReduceOp {
     arg_t value_list[vec_size]
 #ifdef __HIP_PLATFORM_HCC__
     // ROCm bug
-    = {}
+    = {arg_t(0)}
 #endif
     ;
     value_list[0] = value;
