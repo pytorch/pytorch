@@ -881,7 +881,7 @@ class HistogramObserver(_ObserverBase):
 
     @torch.jit._overload_method  # noqa: F811
     def forward(self, x_orig):  # noqa: F811
-        # type: (List[Tensor]]) -> List[Tensor]
+        # type: (List[Tensor]) -> List[Tensor]
         pass
 
     @torch.jit._overload_method
@@ -908,10 +908,13 @@ class HistogramObserver(_ObserverBase):
                 initialized = False
             for i in range(num_tensors):
                 if initialized:
-                    min_val, max_val, histogram = min_vals[i], max_vals[i], histograms[self.bins * i : self.bins * (i+1)]
+                    min_val, max_val, histogram = min_vals[i], max_vals[i], \
+                        histograms[self.bins * i : self.bins * (i+1)]
                 else:
-                    min_val, max_val, histogram = torch.tensor([]), torch.tensor([]), torch.zeros(self.bins)
-                min_val, max_val, histogram = self._forward(x_orig[i], min_val, max_val, histogram)
+                    min_val, max_val, histogram = torch.tensor([]), torch.tensor([]), \
+                        torch.zeros(self.bins)
+                min_val, max_val, histogram = self._forward(x_orig[i], min_val, \
+                                                            max_val, histogram)
                 min_vals[i] = min_val
                 max_vals[i] = max_val
                 histograms[self.bins * i : self.bins * (i+1)] = histogram
@@ -965,11 +968,15 @@ class HistogramObserver(_ObserverBase):
         qparams = []
         if num_tensors > 1:
             for i in range(num_tensors):
-                new_min, new_max = self._non_linear_param_search(self.min_val[i], self.max_val[i], self.histogram[self.bins * i : self.bins * (i+1)])
+                new_min, new_max = \
+                    self._non_linear_param_search(
+                        self.min_val[i], self.max_val[i],
+                        self.histogram[self.bins * i : self.bins * (i+1)])
                 qparams.append(self._calculate_qparams(new_min, new_max))
             return qparams
         else:
-            new_min, new_max = self._non_linear_param_search(self.min_val, self.max_val, self.histogram)
+            new_min, new_max = \
+                self._non_linear_param_search(self.min_val, self.max_val, self.histogram)
             return self._calculate_qparams(new_min, new_max)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
