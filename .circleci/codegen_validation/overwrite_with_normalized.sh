@@ -1,14 +1,11 @@
 #!/bin/bash -xe
 
-
 YAML_FILENAME=$1
-
 
 # Allows this script to be invoked from any directory:
 cd $(dirname "$0")
 
 pushd ..
-
 
 TEMP_FILENAME=$(mktemp)
 
