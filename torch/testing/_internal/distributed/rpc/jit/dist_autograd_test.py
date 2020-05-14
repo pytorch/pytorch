@@ -62,7 +62,7 @@ class JitDistAutogradTest(RpcAgentTestFixture):
         def dist_backward_script(context_id: int, loss: torch.Tensor):
             dist_autograd.backward(context_id, [loss])
 
-        FileCheck().check("backward").run(str(dist_backward_script.graph))
+        FileCheck().check("dist_backward").run(str(dist_backward_script.graph))
         with dist_autograd.context() as context_id:
             t1 = torch.rand(3, 3, requires_grad=True)
             t2 = torch.rand(3, 3, requires_grad=True)
