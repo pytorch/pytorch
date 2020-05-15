@@ -5331,18 +5331,21 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.size(), deepcopy(a).size())
         self.assertEqual(a, deepcopy(a))
 
-    # Tests that when atol is set, either via self.precision or explicitly,
-    # the rtol is zeroed (unless given)
+    # Tests that when rtol or atol (including self.precision) is set, then
+    # the other is zeroed.
     # TODO: this is legacy behavior and should be updated after test
     # precisions are reviewed to be consistent with torch.isclose.
     @onlyOnCPUAndCUDA
-    def test__comparetensors_legacy_atol(self, device):
+    def test__comparetensors_legacy(self, device):
         a = torch.tensor((10000000.,))
         b = torch.tensor((10000002.,))
 
+        x = torch.tensor((1.,))
+        y = torch.tensor((1. + 1e-5,))
+
         # Helper for reusing the tensor values as scalars
-        def _scalar_helper(a, b, atol=None):
-            return self._compareScalars(a.item(), b.item(), atol=atol)
+        def _scalar_helper(a, b, rtol=None, atol=None):
+            return self._compareScalars(a.item(), b.item(), rtol=rtol, atol=atol)
 
         for op in (self._compareTensors, _scalar_helper):
             # Tests default
@@ -5355,6 +5358,14 @@ class TestTorchDeviceType(TestCase):
 
             # Tests setting atol too small
             result, debug_msg = op(a, b, atol=1)
+            self.assertFalse(result)
+
+            # Tests setting rtol too small
+            result, debug_msg = op(x, y, rtol=1.05e-5)
+            self.assertTrue(result)
+
+            # Tests setting rtol too small
+            result, debug_msg = op(x, y, rtol=1e-5)
             self.assertFalse(result)
 
     @onlyOnCPUAndCUDA
@@ -5386,6 +5397,14 @@ class TestTorchDeviceType(TestCase):
                         "difference of 2.0, but the allowed difference with "
                         "rtol=1.3e-06 and atol=1e-05 is only 1e-05!")
         self.assertEqual(debug_msg, expected_msg)
+
+        # NaN x NaN, equal_nan=False
+        result, debug_msg = self._compareScalars(float('nan'), float('nan'), equal_nan=False)
+        expected_msg = ("Found nan and nan while comparing and either one is "
+                        "nan and the other isn't, or both are nan and equal_nan "
+                        "is False")
+        self.assertEqual(debug_msg, expected_msg)
+
 
     # Checks that compareTensors provides the correct debug info
     @onlyOnCPUAndCUDA

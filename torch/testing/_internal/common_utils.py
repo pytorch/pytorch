@@ -877,6 +877,16 @@ class TestCase(expecttest.TestCase):
         torch.complex128 : (1e-7, 1e-7),
     }
 
+    # Returns the "default" rtol and atol for comparing scalars or
+    # tensors of the given dtypes.
+    def _getDefaultRtolAndAtol(self, dtype0, dtype1):
+        rtol = max(self.dtype_precisions.get(dtype0, (0, 0))[0],
+                   self.dtype_precisions.get(dtype1, (0, 0))[0])
+        atol = max(self.dtype_precisions.get(dtype0, (0, 0))[1],
+                   self.dtype_precisions.get(dtype1, (0, 0))[1])
+
+        return rtol, atol
+
     # Checks if two dense tensors are equal(-ish), returning (True, None)
     #   when they are and (False, debug_msg) when they are not.
     # If exact_dtype is true both tensors must have the same dtype.
@@ -915,21 +925,17 @@ class TestCase(expecttest.TestCase):
             return (False, ("Attempted to compare equality of tensors with "
                             "different dtypes. Got dtypes {0} and {1}.").format(a.dtype, b.dtype))
 
-        # Acquires atol and rtol
-        # TODO: for legacy reasons when only atol is set then rtol is
-        #   zeroed. In the future they should be acquired independently,
-        #   but this will require updating the precision values in all tests
-        #   that explicitly set atol (since they set their precision for a
-        #   test framework that didn't use rtol.)
-        rtol = 0 if ((atol is not None or self.precision != 0) and rtol is None) else rtol
-
-        rtol = rtol if rtol is not None else max(self.dtype_precisions.get(a.dtype, (0, 0))[0],
-                                                 self.dtype_precisions.get(b.dtype, (0, 0))[0])
-        atol = atol if atol is not None else max(self.dtype_precisions.get(a.dtype, (0, 0))[1],
-                                                 self.dtype_precisions.get(b.dtype, (0, 0))[1])
-        # NOTE: legacy mechanism for setting the atol
-        #  used by @precisionOverride, for example.
-        atol = max(atol, self.precision)
+        # Acquires rtol and atol
+        if rtol is None and atol is None and self.precision == 0:
+            rtol, atol = self._getDefaultRtolAndAtol(a.dtype, b.dtype)
+        else:
+            # TODO: for legacy reasons when only rtol or atol is set then the other
+            #   is zeroed. In the future they should be acquired independently,
+            #   but this will require updating the precision values in all tests
+            #   that explicitly set them.
+            rtol = rtol if rtol is not None else 0
+            atol = atol if atol is not None else 0
+            atol = max(atol, self.precision)
 
         # Converts to comparison dtype
         dtype = get_comparison_dtype(a, b)
@@ -943,28 +949,24 @@ class TestCase(expecttest.TestCase):
     # NOTE: this function just acquires rtol and atol
     #   before calling _compare_scalars_internal.
     def _compareScalars(self, a, b, *, rtol=None, atol=None, equal_nan=True):
-        # TODO: for legacy reasons when only atol is set then rtol is
-        #   zeroed. In the future they should be acquired independently,
-        #   but this will require updating the precision values in all tests
-        #   that explicitly set atol (since they set their precision for a
-        #   test framework that didn't use rtol.)
-        rtol = 0 if ((atol is not None or self.precision != 0) and rtol is None) else rtol
-
-        # NOTE: Complex number comparisons compare the real and imaginary parts
-        #   separately, just like complex tensor comparisons.
-        if isinstance(a, complex) or isinstance(b, complex):
-            rtol = self.dtype_precisions[torch.complex64][0] if rtol is None else rtol
-            atol = self.dtype_precisions[torch.complex64][1] if atol is None else atol
-        elif isinstance(a, float) or isinstance(b, float):
-            rtol = self.dtype_precisions[torch.float32][0] if rtol is None else rtol
-            atol = self.dtype_precisions[torch.float32][1] if atol is None else atol
+        # Acquires rtol and atol
+        if rtol is None and atol is None and self.precision == 0:
+            if isinstance(a, complex) or isinstance(b, complex):
+                rtol, atol = self._getDefaultRtolAndAtol(torch.complex64, torch.complex64)
+            elif isinstance(a, float) or isinstance(b, float):
+                rtol, atol = self._getDefaultRtolAndAtol(torch.float32, torch.float32)
+            else:
+                rtol = 0
+                atol = 0
         else:
-            rtol = 0 if rtol is None else rtol
-            atol = 0 if atol is None else atol
+            # TODO: for legacy reasons when only rtol or atol is set then the other
+            #   is zeroed. In the future they should be acquired independently,
+            #   but this will require updating the precision values in all tests
+            #   that explicitly set them.
+            rtol = rtol if rtol is not None else 0
+            atol = atol if atol is not None else 0
+            atol = max(atol, self.precision)
 
-        # NOTE: legacy mechanism for setting the atol
-        #   (used by @precisionOverride, for example)
-        atol = max(atol, self.precision)
         return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
     def assertEqualIgnoreType(self, *args, **kwargs):
