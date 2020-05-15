@@ -26,7 +26,9 @@ namespace rpc {
 
 constexpr long kToMilliseconds = 1000;
 // This large time duration is for the timeoutMapCV_. We cannot use
-// std::chrono::time_point::max() due to a known overflow-related bug.
+// std::chrono::time_point::max() due to a known overflow-related bug. Here is
+// an explanation of the bug:
+// https://stackoverflow.com/questions/42638847/what-is-the-maximum-value-i-can-pass-to-stdthreadsleep-for-and-sleep-until
 constexpr auto kLargeTimeDuration = std::chrono::hours(10000);
 
 const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
@@ -428,10 +430,6 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
 }
 
 void TensorPipeAgent::pollTimeoutRpcs() {
-  // Stores incomplete Futures at this timestep so we can mark them with errors
-  // outside the lock.
-  std::vector<std::shared_ptr<FutureMessage>> errorFutures;
-
   while (rpcAgentRunning_.load()) {
     std::unique_lock<std::mutex> lock(timeoutMapMutex_);
 
@@ -454,43 +452,32 @@ void TensorPipeAgent::pollTimeoutRpcs() {
       timeoutThreadCV_.wait_until(lock, earliestTimeout);
     }
 
-    // Update these in case something was added to the map while sleeping.
-    earliestTimeout = timeoutMap_.begin()->first;
-    auto timeoutFuturesVector = timeoutMap_.begin()->second;
-
-    for (auto it = timeoutFuturesVector.begin();
-         it != timeoutFuturesVector.end();
-         /* no increment*/) {
-      auto& future = *it;
-      // We add all incomplete futures to the errorFutures vector, so we can
-      // set them with errors outside the lock. We can ignore the completed
-      // futures, and those entries will simply be deleted from the map.
-      if (!future->completed()) {
-        errorFutures.emplace_back(future);
-      }
-      it = timeoutFuturesVector.erase(it);
-    }
-
-    // If there are no more futures set to expire at the current timepoint
-    // (which we expect to be the case since we've processed the entire vector
-    // in the loop above), we can safely remove this key from the timeoutMap_.
-    if (timeoutFuturesVector.empty()) {
-      timeoutMap_.erase(earliestTimeout);
-    }
+    // Move all these futures to a separate vector so we can process them
+    // outside the lock.
+    std::vector<std::shared_ptr<FutureMessage>> timedOutFutures =
+        std::move(timeoutMap_.begin()->second);
+    // We can safely remove this key from the timeoutMap_ since all these
+    // futures will be processed.
+    timeoutMap_.erase(timeoutMap_.begin());
 
     lock.unlock();
 
-    // Set an error on futures added to the errorFutures map. We do this
+    // Set an error on futures added to the timedOutFutures vector. We do this
     // outside the lock to prevent potential lock-order-inversions by callbacks
     // triggered by the serError call.
-    for (const auto& future : errorFutures) {
+    for (const auto& future : timedOutFutures) {
       std::string errorMsg = c10::str(
           "RPC ran for more than set timeout and will now be marked with an error");
-      // Using setErrorIfNeeded so we don't set an error if the future was
-      // completed since adding to the errorFutures vector.
+      // Using setErrorIfNeeded so completed futures are ignored.
       future->setErrorIfNeeded(errorMsg);
+      if (future->hasError()) {
+        // We only want to decrease the active call count if the future has an
+        // error. If it was successful, the counter was already updated in the
+        // send() function above.
+        --clientActiveCalls_;
+      }
     }
-    errorFutures.clear();
+    timedOutFutures.clear();
   }
 }
 
