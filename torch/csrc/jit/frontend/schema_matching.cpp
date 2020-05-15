@@ -95,17 +95,17 @@ Value* tryConvertToType(
     bool concrete_number = *concrete_type == *NumberType::get();
     if (value_isa_tensor) {
       if (concrete_float) {
-        value = graph.insert(aten::FloatImplicit, {value});
+        value = graph.insert(aten::FloatImplicit, {value}, {}, loc);
       } else if (concrete_int) {
-        value = graph.insert(aten::IntImplicit, {value});
+        value = graph.insert(aten::IntImplicit, {value}, {}, loc);
       } else if (concrete_number) {
-        value = graph.insert(aten::ScalarImplicit, {value});
+        value = graph.insert(aten::ScalarImplicit, {value}, {}, loc);
       }
     } else if (value_equals_number) {
       if (concrete_float) {
-        value = graph.insert(aten::Float, {value});
+        value = graph.insert(aten::Float, {value}, {}, loc);
       } else if (concrete_int) {
-        value = graph.insert(aten::Int, {value});
+        value = graph.insert(aten::Int, {value}, {}, loc);
       }
     }
 

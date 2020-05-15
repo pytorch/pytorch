@@ -67,7 +67,7 @@ template <> struct UIntType<bool> { using type = uint32_t; };
 template<typename RNG>
 struct RandomKernel {
   void operator()(TensorIterator& iter, c10::optional<Generator> generator) {
-    const auto key_t = key_tensor(generator, aes::block_t_size, iter.device());
+    const Tensor key_t = key_tensor<RNG>(generator, aes::block_t_size, iter.device());
     const auto key = key_t.data_ptr<uint8_t>();
     AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, iter.dtype(), "my_random_kernel_cuda", [&] {
       aes_helper<scalar_t, UIntType<scalar_t>::type>(iter, key,
@@ -103,7 +103,7 @@ void random_full_range_kernel_helper(TensorIterator& iter, const uint8_t* key) {
 template<typename RNG>
 struct RandomFromToKernel {
   void operator()(TensorIterator& iter, uint64_t range, int64_t base, c10::optional<Generator> generator) {
-    const auto key_t = key_tensor(generator, aes::block_t_size, iter.device());
+    const Tensor key_t = key_tensor<RNG>(generator, aes::block_t_size, iter.device());
     const auto key = key_t.data_ptr<uint8_t>();
     AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_from_to_kernel_cuda", [&] {
       if ((
@@ -119,7 +119,7 @@ struct RandomFromToKernel {
     });
   }
   void operator()(TensorIterator& iter, c10::optional<Generator> generator) {
-    const auto key_t = key_tensor(generator, aes::block_t_size, iter.device());
+    const Tensor key_t = key_tensor<RNG>(generator, aes::block_t_size, iter.device());
     const auto key = key_t.data_ptr<uint8_t>();
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, iter.dtype(), "random_full_64_bits_range_kernel_cuda", [&] {
       if (std::is_same<scalar_t, int64_t>::value ||
@@ -152,7 +152,7 @@ Tensor& random_to(Tensor& self, int64_t to, c10::optional<Generator> generator) 
 template<typename RNG>
 struct UniformKernel {
   void operator()(TensorIterator& iter, double from, double to, c10::optional<Generator> generator) {
-    const auto key_t = key_tensor(generator, aes::block_t_size, iter.device());
+    const Tensor key_t = key_tensor<RNG>(generator, aes::block_t_size, iter.device());
     const auto key = key_t.data_ptr<uint8_t>();
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "uniform_kernel_cuda", [&] {
       aes_helper<scalar_t, UIntType<scalar_t>::type>(iter, key,
@@ -175,7 +175,7 @@ template<typename RNG>
 struct NormalKernel {
   void operator()(Tensor& self, double mean, double std, c10::optional<Generator> generator) {
     auto iter = TensorIterator::nullary_op(self);
-    const auto key_t = key_tensor(generator, aes::block_t_size, iter.device());
+    const Tensor key_t = key_tensor<RNG>(generator, aes::block_t_size, iter.device());
     const auto key = key_t.data_ptr<uint8_t>();
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "normal_kernel_cuda", [&] {
       aes_helper<scalar_t, UIntType<scalar_t>::type, 2>(iter, key,
@@ -221,7 +221,7 @@ Tensor normal_Tensor_Tensor(const Tensor& mean, const Tensor& std, c10::optional
 template<typename RNG>
 struct CauchyKernel {
   void operator()(TensorIterator& iter, double median, double sigma, c10::optional<Generator> generator) {
-    const auto key_t = key_tensor(generator, aes::block_t_size, iter.device());
+    const Tensor key_t = key_tensor<RNG>(generator, aes::block_t_size, iter.device());
     const auto key = key_t.data_ptr<uint8_t>();
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "cauchy_kernel_cuda", [&] {
       aes_helper<scalar_t, UIntType<scalar_t>::type, 1>(iter, key,
@@ -243,7 +243,7 @@ Tensor& cauchy_(Tensor& self, double median, double sigma, c10::optional<Generat
 template<typename RNG>
 struct LogNormalKernel {
   void operator()(TensorIterator& iter, double mean, double std, c10::optional<Generator> generator) {
-    const auto key_t = key_tensor(generator, aes::block_t_size, iter.device());
+    const Tensor key_t = key_tensor<RNG>(generator, aes::block_t_size, iter.device());
     const auto key = key_t.data_ptr<uint8_t>();
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_normal_cuda", [&] {
       aes_helper<scalar_t, UIntType<scalar_t>::type, 2>(iter, key,
@@ -265,7 +265,7 @@ Tensor& log_normal_(Tensor& self, double mean, double std, c10::optional<Generat
 template<typename RNG>
 struct GeometricKernel {
   void operator()(TensorIterator& iter, double p, c10::optional<Generator> generator) {
-    const auto key_t = key_tensor(generator, aes::block_t_size, iter.device());
+    const Tensor key_t = key_tensor<RNG>(generator, aes::block_t_size, iter.device());
     const auto key = key_t.data_ptr<uint8_t>();
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "geometric_kernel_cuda", [&] {
       aes_helper<scalar_t, UIntType<scalar_t>::type, 1>(iter, key,
@@ -287,7 +287,7 @@ Tensor& geometric_(Tensor& self, double p, c10::optional<Generator> gen) {
 template<typename RNG>
 struct ExponentialKernel {
   void operator()(TensorIterator& iter, double lambda, c10::optional<Generator> generator) {
-    const auto key_t = key_tensor(generator, aes::block_t_size, iter.device());
+    const Tensor key_t = key_tensor<RNG>(generator, aes::block_t_size, iter.device());
     const auto key = key_t.data_ptr<uint8_t>();
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "exponential_kernel_cuda", [&] {
       aes_helper<scalar_t, UIntType<scalar_t>::type, 1>(iter, key,

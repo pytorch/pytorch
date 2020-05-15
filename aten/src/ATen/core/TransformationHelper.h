@@ -100,7 +100,8 @@ C10_HOST_DEVICE inline T cauchy(T val, T median, T sigma) {
  */
 template <typename T>
 C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val, T lambda) {
-  return static_cast<T>(-1.0) / lambda * at::log(static_cast<T>(1.0) - val);
+  // https://en.wikipedia.org/wiki/Exponential_distribution#Generating_exponential_variates
+  return -at::log(val) / lambda;
 }
 
 /**

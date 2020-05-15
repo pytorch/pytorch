@@ -277,21 +277,22 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_normal2(self):
         import torch_test_cpp_extension.csprng as csprng_extension
+        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
 
         def helper(self, device, dtype, ptype, t_transform, std_transform):
             q = torch.empty(100, 100, dtype=dtype, device=device)
 
-            q.normal_()
+            q.normal_(generator=gen)
             self.assertEqual(t_transform(q).mean(), 0, 0.2)
             self.assertEqual(t_transform(q).std(), std_transform(1), 0.2)
 
-            q.normal_(2, 3)
+            q.normal_(2, 3, generator=gen)
             self.assertEqual(t_transform(q).mean(), 2, 0.3)
             self.assertEqual(t_transform(q).std(), std_transform(3), 0.3)
 
             q = torch.empty(100, 100, dtype=dtype, device=device)
             q_row1 = q[0:1].clone()
-            q[99:100].normal_()
+            q[99:100].normal_(generator=gen)
             self.assertEqual(t_transform(q[99:100]).mean(), 0, 0.2)
             self.assertEqual(t_transform(q[99:100]).std(), std_transform(1), 0.2)
             self.assertEqual(t_transform(q[0:1]).clone(), t_transform(q_row1))
@@ -304,7 +305,7 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
             std[:, :50] = 4
             std[:, 50:] = 1
 
-            r = torch.normal(mean)
+            r = torch.normal(mean, generator=gen)
             self.assertEqual(r.dtype, dtype)
             self.assertEqual(str(r.device), device)
             self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
@@ -312,7 +313,7 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
             self.assertEqual(t_transform(r).std(), std_transform(1), 0.2)
 
             r.fill_(42)
-            r = torch.normal(mean, 3)
+            r = torch.normal(mean, 3, generator=gen)
             self.assertEqual(r.dtype, dtype)
             self.assertEqual(str(r.device), device)
             self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
@@ -320,7 +321,7 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
             self.assertEqual(t_transform(r).std(), std_transform(3), 0.2)
 
             r.fill_(42)
-            torch.normal(mean, 3, out=r)
+            torch.normal(mean, 3, generator=gen, out=r)
             self.assertEqual(r.dtype, dtype)
             self.assertEqual(str(r.device), device)
             self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
@@ -328,7 +329,7 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
             self.assertEqual(t_transform(r).std(), std_transform(3), 0.2)
 
             r.fill_(42)
-            r = torch.normal(2, std)
+            r = torch.normal(2, std, generator=gen)
             self.assertFalse(r.dtype.is_complex)
             self.assertEqual(str(r.device), device)
             self.assertEqual(r.mean(), 2, 0.2)
@@ -336,7 +337,7 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
             self.assertEqual(r[:, 50:].std(), 1, 0.2)
 
             r.fill_(42)
-            torch.normal(2, std, out=r)
+            torch.normal(2, std, generator=gen, out=r)
             self.assertFalse(r.dtype.is_complex)
             self.assertEqual(str(r.device), device)
             self.assertEqual(r.mean(), 2, 0.2)
@@ -344,7 +345,7 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
             self.assertEqual(r[:, 50:].std(), 1, 0.2)
 
             r.fill_(42)
-            r = torch.normal(mean, std)
+            r = torch.normal(mean, std, generator=gen)
             self.assertEqual(r.dtype, dtype)
             self.assertEqual(str(r.device), device)
             self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
@@ -353,7 +354,7 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
             self.assertEqual(t_transform(r[:, 50:]).std(), std_transform(1), 0.2)
 
             r.fill_(42)
-            torch.normal(mean, std, out=r)
+            torch.normal(mean, std, generator=gen, out=r)
             self.assertEqual(r.dtype, dtype)
             self.assertEqual(str(r.device), device)
             self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
@@ -362,14 +363,14 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
             self.assertEqual(t_transform(r[:, 50:]).std(), std_transform(1), 0.2)
 
             r.fill_(42)
-            r = torch.normal(2, 3, (100, 100), dtype=dtype, device=device)
+            r = torch.normal(2, 3, (100, 100), dtype=dtype, device=device, generator=gen)
             self.assertEqual(r.dtype, dtype)
             self.assertEqual(str(r.device), device)
             self.assertEqual(t_transform(r).mean(), 2, 0.3)
             self.assertEqual(t_transform(r).std(), std_transform(3), 0.3)
 
             r.fill_(42)
-            torch.normal(2, 3, (100, 100), dtype=dtype, device=device, out=r)
+            torch.normal(2, 3, (100, 100), dtype=dtype, device=device, generator=gen, out=r)
             self.assertEqual(r.dtype, dtype)
             self.assertEqual(str(r.device), device)
             self.assertEqual(t_transform(r).mean(), 2, 0.3)
@@ -384,11 +385,11 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
                     lambda t: torch.imag(t).to(torch.float), lambda mean: mean / math.sqrt(2))
                 self.assertRaisesRegex(
                     RuntimeError, "normal expects standard deviation to be non-complex",
-                    lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device)))
+                    lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device), generator=gen))
                 out = torch.empty(100, 100, dtype=dtype, device=device)
                 self.assertRaisesRegex(
                     RuntimeError, "normal expects standard deviation to be non-complex",
-                    lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device), out=out))
+                    lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device), generator=gen, out=out))
             else:
                 helper(self, device, dtype, lambda x: x, lambda t: t, lambda mean: mean)
 

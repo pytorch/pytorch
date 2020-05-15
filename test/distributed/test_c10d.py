@@ -2949,10 +2949,10 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         # Need to skip return code checking for these tests since the child
         # processes don't exit cleanly.
         self.skip_return_code_checks = [
-            self._get_wrapped_func(self.test_nccl_errors_blocking_abort),
-            self._get_wrapped_func(self.test_nccl_errors_blocking_sigkill),
-            self._get_wrapped_func(self.test_nccl_errors_blocking_sigterm),
-            self._get_wrapped_func(self.test_nccl_errors_blocking_nonzero_exit),
+            self.test_nccl_errors_blocking_abort.__wrapped__,
+            self.test_nccl_errors_blocking_sigkill.__wrapped__,
+            self.test_nccl_errors_blocking_sigterm.__wrapped__,
+            self.test_nccl_errors_blocking_nonzero_exit.__wrapped__,
         ]
         self._fork_processes()
 
@@ -2970,15 +2970,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @property
     def world_size(self):
         return 3
-
-    def _get_wrapped_func(self, func):
-        # Get the original function which was wrapped in the decorator.
-        if hasattr(func, '__wrapped__'):
-            # py3 way.
-            return func.__wrapped__
-        else:
-            # py2 way.
-            return func.func_closure[0].cell_contents
 
     def _run_all_reduce(self, pg):
         pg.allreduce(torch.rand(10).cuda(self.rank))

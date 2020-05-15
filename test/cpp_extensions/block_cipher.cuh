@@ -13,10 +13,11 @@ namespace custom_prng {
 // Generates `block_t_size`-bytes random key Tensor on CPU 
 // using `generator`, which must be an instance of `at::CPUGeneratorImpl`
 // and passes it to the `device`.
-at::Tensor key_tensor(c10::optional<at::Generator> generator, int block_t_size, at::Device device) {
+template<typename RNG>
+at::Tensor key_tensor(c10::optional<at::Generator> generator, size_t block_t_size, at::Device device) {
   std::lock_guard<std::mutex> lock(generator->mutex());
-  auto gen = at::check_generator<at::CPUGeneratorImpl>(generator);
-  auto t = torch::empty({block_t_size}, torch::kUInt8);
+  auto gen = at::check_generator<RNG>(generator);
+  auto t = torch::empty({static_cast<signed long>(block_t_size)}, torch::kUInt8);
   for (int i = 0; i < block_t_size; i++) {
     t[i] = static_cast<uint8_t>(gen->random());
   }
