@@ -848,7 +848,7 @@ class HistogramObserver(_ObserverBase):
 
     @torch.jit.ignore
     def _adjust_min_max(self, current_min, current_max, combined_min, combined_max, upsample_rate):
-        # type: (Tensor, Tensor, int) -> Tuple[Tensor, Tensor, int, int]
+        # type: (Tensor, Tensor, Tensor, Tensor, int) -> Tuple[Tensor, Tensor, int, int]
         # We ensure that:
         # (combined_max - combined_min)/(downsample_rate*Nbins) = (max - min)/(upsample_rate*Nbins)
         # This allows us to have a common grid of resolution s, where we can align
@@ -927,7 +927,7 @@ class HistogramObserver(_ObserverBase):
         return x_orig
 
     def _forward(self, x_orig, min_val, max_val, histogram, initialized):
-        # type: (Tensor, Tensor, Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
+        # type: (Tensor, Tensor, Tensor, Tensor, bool) -> Tuple[Tensor, Tensor, Tensor]
         x = x_orig.detach()
         if not initialized:
             min_val = torch.min(x)
@@ -979,10 +979,11 @@ class HistogramObserver(_ObserverBase):
                         self.histogram[self.bins * i : self.bins * (i + 1)])
                 min_val.append(new_min_i)
                 max_val.append(new_max_i)
+            return self._calculate_qparams(min_val, max_val)
         else:
             min_val, max_val = \
                 self._non_linear_param_search(self.min_val, self.max_val, self.histogram)
-        return self._calculate_qparams(min_val, max_val)
+            return self._calculate_qparams(min_val, max_val)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(HistogramObserver, self)._save_to_state_dict(destination, prefix, keep_vars)

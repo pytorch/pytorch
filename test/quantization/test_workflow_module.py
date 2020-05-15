@@ -293,8 +293,9 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
     def test_observer_scriptable(self):
-        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver(), MinMaxDynamicQuantObserver(), HistogramObsrever()]
+        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver(), MinMaxDynamicQuantObserver(), HistogramObserver()]
         for obs in obs_list:
+            print(obs)
             scripted = torch.jit.script(obs)
 
             x = torch.rand(3, 4)
