@@ -474,7 +474,6 @@ void RequestCallbackImpl::processRpc(
            messageId,
            fromWorkerId,
            weak = std::weak_ptr<FutureMessage>(wrappedRpcResponseFuture),
-           threadLocalState = ThreadLocalState(),
            ctxId = autogradContext->contextId()]() {
             // As this callback can be invoked by a different thread, we have to
             // make sure that the thread_local states in the previous thread is
@@ -486,7 +485,6 @@ void RequestCallbackImpl::processRpc(
             // thread_local states there.
             // TODO: Land on a general solution for RPC ThreadLocalState. See
             // https://github.com/pytorch/pytorch/issues/38510
-            ThreadLocalStateGuard stateGuard(threadLocalState);
             DistAutogradContextGuard ctxGuard(ctxId);
 
             auto wrappedRpcResponseFuture = weak.lock();

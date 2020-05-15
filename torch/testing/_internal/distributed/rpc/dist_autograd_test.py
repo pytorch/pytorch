@@ -2122,7 +2122,7 @@ class DistAutogradTest(RpcAgentTestFixture):
 
         with dist_autograd.context() as context_id:
             loss = rref.to_here().sum()
-            # due to slow add, the continuatoin of this backward pass will be
+            # due to slow add, the continuation of this backward pass will be
             # invoked by the previous rpc.remote thread which does not has a
             # valid context_id. So, this can test whether we propagate
             # thread_local states properly when jumping across threads on the
