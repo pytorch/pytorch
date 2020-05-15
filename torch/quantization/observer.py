@@ -495,6 +495,7 @@ class _MinMaxTensorListObserver(MinMaxObserver):
         self.max_val = max_val
         return tensor_list
 
+    @torch.jit.export
     def calculate_qparams(self):
         scales = []
         zero_points = []
@@ -995,6 +996,7 @@ class NoopObserver(ObserverBase):
     def forward(self, x):
         return x
 
+    @torch.jit.export
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
 
