@@ -2128,7 +2128,6 @@ class DistAutogradTest(RpcAgentTestFixture):
             # thread_local states properly when jumping across threads on the
             # server side.
             dist_autograd.backward(context_id, [loss])
-            grads = dist_autograd.get_gradients(context_id)
             self.assertTrue(
                 rpc.rpc_sync(
                     dst,
