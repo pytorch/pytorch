@@ -23,11 +23,15 @@
 namespace at { namespace native {
 
 #ifdef __HIP_PLATFORM_HCC__
-template <typename T>
-struct ROCm_Bug {
-  char bytes[sizeof(T)];
-  C10_HOST_DEVICE operator T() {
-    return *reinterpret_cast<T*>(this);
+template<typename T>
+struct alignas(T) ROCm_Bug {
+  struct { char bytes[sizeof(T)]; } value;
+  __device__ operator T&() {
+    return *reinterpret_cast<T *>(&value);
+  }
+  __device__ ROCm_Bug &operator=(T x) {
+    value = *reinterpret_cast<decltype(&value)>(&x);
+    return *this;
   }
 };
 #endif
@@ -439,22 +443,22 @@ struct ReduceOp {
     const index_t stride = config.step_input;
 
     // Multiple accumulators to remove dependency between unrolled loops.
-    arg_t value_list[vec_size]
-#ifdef __HIP_PLATFORM_HCC__
-    = {static_cast<arg_t>(ROCm_Bug<arg_t>())}
+#ifndef __HIP_PLATFORM_HCC__
+    arg_t value_list[vec_size];
+#else
+    ROCm_Bug<arg_t> value_list[vec_size];
 #endif
-    ;
     value_list[0] = value;
     #pragma unroll
     for (int i = 1; i < vec_size; i++) {
       value_list[i] = ident;
     }
 
-    scalar_t values[vec_size]
-#ifdef __HIP_PLATFORM_HCC__
-    = {static_cast<scalar_t>(ROCm_Bug<scalar_t>())}
+#ifndef __HIP_PLATFORM_HCC__
+    scalar_t values[vec_size];
+#else
+    ROCm_Bug<scalar_t> values[vec_size];
 #endif
-    ;
     load_t *values_vector = reinterpret_cast<load_t*>(values);
 
     while (idx * vec_size + vec_size - 1 < end) {
@@ -490,22 +494,23 @@ struct ReduceOp {
     const index_t stride = config.step_input;
 
     // Multiple accumulators to remove dependency between unrolled loops.
-    arg_t value_list[vt0]
-#ifdef __HIP_PLATFORM_HCC__
-    = {static_cast<arg_t>(ROCm_Bug<arg_t>())}
+
+#ifndef __HIP_PLATFORM_HCC__
+    arg_t value_list[vt0];
+#else
+    ROCm_Bug<arg_t> value_list[vt0];
 #endif
-    ;
 
     #pragma unroll
     for (int i = 0; i < vt0; i++) {
       value_list[i] = ident;
     }
 
-    scalar_t values[vt0]
-#ifdef __HIP_PLATFORM_HCC__
-    = {static_cast<scalar_t>(ROCm_Bug<scalar_t>())}
+#ifndef __HIP_PLATFORM_HCC__
+    scalar_t values[vt0];
+#else
+    ROCm_Bug<scalar_t> values[vt0];
 #endif
-    ;
 
     while (idx + (vt0 - 1) * stride < end) {
       #pragma unroll
