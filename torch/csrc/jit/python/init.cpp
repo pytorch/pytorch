@@ -43,6 +43,7 @@
 #include <torch/csrc/jit/passes/quantization/finalize.h>
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
+#include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -500,6 +501,9 @@ void initJITBindings(PyObject* module) {
             return debugGetFusedKernelCode(g, inps);
           })
       .def(
+          "_jit_pass_remove_dropout",
+          [](script::Module& module) { return removeDropout(module); })
+      .def(
           "_jit_pass_insert_prepacked_ops",
           [](std::shared_ptr<Graph>& graph) {
             return insertPrePackedOps(graph);
@@ -669,12 +673,8 @@ void initJITBindings(PyObject* module) {
     }
 
     THPObjectPtr getMemview(void* buf, size_t n) const {
-#if PY_MAJOR_VERSION >= 3
       THPObjectPtr memview(PyMemoryView_FromMemory(
           reinterpret_cast<char*>(buf), n, PyBUF_WRITE));
-#else
-      THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, n));
-#endif
       if (!memview) {
         throw python_error();
       }
@@ -828,6 +828,10 @@ void initJITBindings(PyObject* module) {
       .def(
           "wait",
           &PythonFutureWrapper::wait,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_then",
+          &PythonFutureWrapper::then,
           py::call_guard<py::gil_scoped_release>());
 
   m.def("fork", [](py::args args) {
