@@ -771,7 +771,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_test(NegSlice(), x)
 
-    @unittest.skip('https://github.com/pytorch/pytorch/issues/10984')
     def test_slice_neg_large_negone(self):
         class NegSlice(torch.nn.Module):
             def forward(self, x):
@@ -822,7 +821,6 @@ class TestONNXRuntime(unittest.TestCase):
                       'output_1': [0, 1, 2]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @unittest.skip("relies on not constant folding size calls, but other tests rely on constant folding")
     def test_arange_dynamic(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
@@ -1312,7 +1310,6 @@ class TestONNXRuntime(unittest.TestCase):
         self._interpolate_tests(False)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @unittest.skip("Interpolate script NYI")
     def test_interpolate_no_shape(self):
         class MyModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1524,7 +1521,7 @@ class TestONNXRuntime(unittest.TestCase):
         k = torch.tensor(3)
         self.run_test(MyModuleDynamic(), [x, k])
 
-    @skipIfUnsupportedOpsetVersion([7, 12])
+    @skipIfUnsupportedOpsetVersion([7])
     def test_normalize(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -2424,7 +2421,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(MaskedSelectModel(), x)
 
-    @unittest.skip("Enable this once depthToSpace attr 'mode' is supported in ORT")
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pixel_shuffle(self):
         class PixelShuffle(torch.nn.Module):
