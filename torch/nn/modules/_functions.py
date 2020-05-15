@@ -1,6 +1,7 @@
 import torch
-from torch.autograd.function import Function
+import torch.distributed as dist
 
+from torch.autograd.function import Function
 
 class SyncBatchNorm(Function):
 
@@ -15,23 +16,18 @@ class SyncBatchNorm(Function):
         # calculate mean/invstd for input.
         mean, invstd = torch.batch_norm_stats(input, eps)
 
-        count_all = torch.empty(world_size, 1, dtype=count.dtype, device=count.device)
-        mean_all = torch.empty(world_size, mean.size(0), dtype=mean.dtype, device=mean.device)
-        invstd_all = torch.empty(world_size, invstd.size(0), dtype=invstd.dtype, device=invstd.device)
-
-        count_l = list(count_all.unbind(0))
-        mean_l = list(mean_all.unbind(0))
-        invstd_l = list(invstd_all.unbind(0))
-
-        # using all_gather instead of all reduce so we can calculate count/mean/var in one go
-        count_all_reduce = torch.distributed.all_gather(count_l, count, process_group, async_op=True)
-        mean_all_reduce = torch.distributed.all_gather(mean_l, mean, process_group, async_op=True)
-        invstd_all_reduce = torch.distributed.all_gather(invstd_l, invstd, process_group, async_op=True)
-
-        # wait on the async communication to finish
-        count_all_reduce.wait()
-        mean_all_reduce.wait()
-        invstd_all_reduce.wait()
+        num_channels = input.shape[1]
+        # C, C, 1 -> (2C + 1)
+        combined = torch.cat([mean, invstd, count], dim=0)
+        # world_size * (2C + 1)
+        combined_list = [
+            torch.empty_like(combined) for k in range(world_size)
+        ]
+        # Use allgather instead of allreduce since I don't trust in-place operations ..
+        dist.all_gather(combined_list, combined, async_op=False)
+        combined = torch.stack(combined_list, dim=0)
+        # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
+        mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
 
         size = count_all.view(-1).long().sum()
         if size == 1:
@@ -78,14 +74,11 @@ class SyncBatchNorm(Function):
         if self.needs_input_grad[0]:
             # synchronizing stats used to calculate input gradient.
             # TODO: move div_ into batch_norm_backward_elemt kernel
-            sum_dy_all_reduce = torch.distributed.all_reduce(
-                sum_dy, torch.distributed.ReduceOp.SUM, process_group, async_op=True)
-            sum_dy_xmu_all_reduce = torch.distributed.all_reduce(
-                sum_dy_xmu, torch.distributed.ReduceOp.SUM, process_group, async_op=True)
-
-            # wait on the async communication to finish
-            sum_dy_all_reduce.wait()
-            sum_dy_xmu_all_reduce.wait()
+            num_channels = sum_dy.shape[0]
+            combined = torch.cat([sum_dy, sum_dy_xmu], dim=0)
+            torch.distributed.all_reduce(
+                combined, torch.distributed.ReduceOp.SUM, process_group, async_op=False)
+            sum_dy, sum_dy_xmu = torch.split(combined, num_channels)
 
             divisor = count_tensor.sum()
             mean_dy = sum_dy / divisor
