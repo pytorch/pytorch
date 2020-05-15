@@ -211,15 +211,15 @@ if(INTERN_BUILD_ATEN_OPS)
 endif()
 
 function(append_filelist name outputvar)
-  set(_rootdir "${CMAKE_CURRENT_LIST_DIR}/../")
+  set(_rootdir "${${CMAKE_PROJECT_NAME}_SOURCE_DIR}/")
   # configure_file adds its input to the list of CMAKE_RERUN dependencies
   configure_file(
       ${CMAKE_SOURCE_DIR}/tools/build_variables.bzl
       ${CMAKE_BINARY_DIR}/caffe2/build_variables.bzl)
   execute_process(
     COMMAND "${PYTHON_EXECUTABLE}" -c
-            "exec(open('../tools/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
+            "exec(open('tools/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
+    WORKING_DIRECTORY "${_rootdir}"
     RESULT_VARIABLE _retval
     OUTPUT_VARIABLE _tempvar)
   if(NOT _retval EQUAL 0)
