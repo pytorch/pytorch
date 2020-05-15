@@ -124,7 +124,7 @@ Tensor q_maxpool_2d(
   int64_t iW = qx.size(dimw);
   TORCH_CHECK(iC > 0 && iH > 0 && iW > 0, "input dimensions must be non-zero.");
   TORCH_CHECK(
-      qx.numel() > 0 && (ndim == 3 || ndim == 4),
+      (ndim == 3 || ndim == 4),
       "non-empty 3D or 4D input tensor is expected.");
   TORCH_CHECK(
       kH / 2 >= pH && kW / 2 >= pW,
