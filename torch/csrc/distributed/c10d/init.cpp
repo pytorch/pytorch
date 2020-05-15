@@ -127,7 +127,7 @@ PyObject* c10d_init(PyObject* _unused) {
           py::arg("bucket_indices"),
           py::arg("process_group"),
           py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
-          py::arg("bucket_bytes_cap") = ::c10d::DEFAULT_BUCKET_BYTES_CAP)
+          py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap)
       .def(
           "initialize_buckets",
           &::c10d::Reducer::initialize_buckets,
@@ -746,13 +746,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       },
       py::call_guard<py::gil_scoped_release>());
 
-  module.def("_default_first_bucket_bytes", []() {
-    return ::c10d::DEFAULT_FIRST_BUCKET_BYTES;
-  });
-
-  module.def("_default_broadcast_bucket_bytes", []() {
-    return ::c10d::DEFAULT_BROADCAST_BUCKET_BYTES;
-  });
+  module.attr("_DEFAULT_FIRST_BUCKET_BYTES") = ::c10d::kDefaultFirstBucketBytes;
 
   Py_RETURN_TRUE;
 }

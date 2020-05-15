@@ -13,9 +13,8 @@
 
 namespace c10d {
 
-constexpr int DEFAULT_FIRST_BUCKET_BYTES = int(1024 * 1024);
-constexpr int DEFAULT_BUCKET_BYTES_CAP = int(25 * 1024 * 1024);
-constexpr int DEFAULT_BROADCAST_BUCKET_BYTES = int(250 * 1024 * 1024);
+constexpr int kDefaultFirstBucketBytes = int(1024 * 1024);
+constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
 
 class Reducer {
  public:
@@ -213,9 +212,6 @@ class Reducer {
   const int64_t bucket_bytes_cap_;
 };
 
-// tensor_indices stores the parameter tensor indices of "tensors" in
-// orginal model.parameters() list, if it is empty, then the parameter tensor
-// indices of "tensors" are the indices in "tensor" list.
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,

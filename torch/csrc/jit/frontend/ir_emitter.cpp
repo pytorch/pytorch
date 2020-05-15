@@ -413,6 +413,17 @@ struct Environment {
     return getSugaredVar(ident)->asValue(ident.range(), method);
   }
 
+  void throwVarNotFoundError(
+      const std::string& ident,
+      const SourceRange& range) {
+    // check if this value was not emitted in an if statement because of a
+    // type mismatch. if it was, then we print a more informative error msg
+    if (auto msg = findVariableTypeError(ident)) {
+      throw ErrorReport(range) << *msg << "and was used here";
+    }
+    throw ErrorReport(range) << "undefined value " << ident;
+  }
+
   SugaredValuePtr getSugaredVar(
       const std::string& ident,
       const SourceRange& range,
@@ -509,18 +520,27 @@ struct Environment {
     }
 
     if (!retval && required) {
-      // check if this value was not emitted in an if statement because of a
-      // type mismatch. if it was, then we print a more informative error msg
-      if (auto msg = findVariableTypeError(ident)) {
-        throw ErrorReport(range) << *msg << "and was used here";
-      }
-      throw ErrorReport(range) << "undefined value " << ident;
+      throwVarNotFoundError(ident, range);
     }
     return retval;
   }
 
   Value* getVar(const std::string& ident, const SourceRange& range) {
     return getSugaredVar(ident, range)->asValue(range, method);
+  }
+
+  void removeVar(const Ident& ident, bool check_if_removed = false) {
+    bool removed = false;
+
+    for (auto runner = this; runner; runner = runner->next.get()) {
+      auto a = runner->value_table.erase(ident.name());
+      auto b = runner->type_table.erase(ident.name());
+      removed = a || b;
+    }
+
+    if (check_if_removed && !removed) {
+      throwVarNotFoundError(ident.name(), ident.range());
+    }
   }
 
   std::vector<std::string> definedVariables() {
@@ -901,26 +921,30 @@ struct to_ir {
   }
 
   void emitDelete(const Delete& stmt) {
-    if (stmt.expr().kind() != TK_SUBSCRIPT) {
+    if (stmt.expr().kind() == TK_SUBSCRIPT) {
+      Subscript subscript(stmt.expr());
+      const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+      if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
+        throw ErrorReport(stmt.range())
+            << "del statements only support deletion at a single index, "
+               "slicing is not supported"
+               " (see https://github.com/pytorch/pytorch/issues/31430)";
+      }
+      const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+      const SourceRange& val_range = subscript.value().range();
+      Value* idx = emitExpr(subscript_exprs[0]);
+      Value* val = sv->asValue(val_range, method);
+      auto node = graph->create(aten::Delete, {val, idx}, 0)
+                      ->setSourceRange(stmt.range());
+      graph->insertNode(node);
+    } else if (stmt.expr().kind() == TK_VAR) {
+      Var var(stmt.expr());
+      environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
+    } else {
       throw ErrorReport(stmt.range())
-          << "del statements are only supported for list"
-             " and dict item deletion";
+          << "del statements are only supported for deleting"
+             " list and dict items and variables";
     }
-    Subscript subscript(stmt.expr());
-    const List<Expr>& subscript_exprs = subscript.subscript_exprs();
-    if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      throw ErrorReport(stmt.range())
-          << "del statements only support deletion at a single index, "
-             "slicing is not supported"
-             " (see https://github.com/pytorch/pytorch/issues/31430)";
-    }
-    const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
-    const SourceRange& val_range = subscript.value().range();
-    Value* idx = emitExpr(subscript_exprs[0]);
-    Value* val = sv->asValue(val_range, method);
-    auto node = graph->create(aten::Delete, {val, idx}, 0)
-                    ->setSourceRange(stmt.range());
-    graph->insertNode(node);
   }
 
   void emitReturn(const Return& stmt) {
@@ -2782,9 +2806,13 @@ struct to_ir {
     // through RPC in TorchScript,
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
-    if (apply.inputs().size() < 2 || apply.inputs().size() > 4) {
+    auto rpcMinInputs = 2;
+    auto rpcMaxInputs = 5; // NOLINT
+    if (apply.inputs().size() < rpcMinInputs ||
+        apply.inputs().size() > rpcMaxInputs) {
       throw ErrorReport(apply)
           << "Possible forms of call to rpc_async(..) are\n"
+          << "rpc_async(dst_worker_name, user_callable, args, kwargs, timeout)\n"
           << "rpc_async(dst_worker_name, user_callable, args, kwargs)\n"
           << "rpc_async(dst_worker_name, user_callable, args)\n"
           << "rpc_async(dst_worker_name, user_callable)\n"
@@ -2816,7 +2844,9 @@ struct to_ir {
     // If `kwargs` is an empty dict, users are allowed to not pass `kwargs`.
     // If `args` and `kwargs` are an empty tuple and an empty dict,
     // respectively, users are allowed to not pass `args` and `kwargs`.
-    TreeList args_kwargs_trees(input_trees.begin() + 2, input_trees.end());
+
+    TreeList args_kwargs_timeout_trees(
+        input_trees.begin() + 2, input_trees.end());
 
     // Get user callable.
     const auto& callablePtrs = user_callable_function_value->callees();
@@ -2835,9 +2865,9 @@ struct to_ir {
     std::vector<NamedValue> kwargs;
     // Get args and kwargs as `NamedValue`s.
     // Similar to getNamedValues(..) and emitAttributes(..).
-    if (args_kwargs_trees.size() >= 1) {
+    if (args_kwargs_timeout_trees.size() >= 1) {
       // Unroll args from a Var that is known to be a Tuple.
-      auto& args_tree = args_kwargs_trees[0];
+      auto& args_tree = args_kwargs_timeout_trees[0];
       auto entry_sugared_values = emitSugaredExpr(Expr(args_tree), 1)
                                       ->asTuple(args_tree->range(), method);
       args.reserve(entry_sugared_values.size());
@@ -2871,7 +2901,7 @@ struct to_ir {
       rpc_async_node->addInput(dst_worker_name_value);
       rpc_async_node->addInput(userCallableQualNameValue);
 
-      for (const auto& tree : args_kwargs_trees) {
+      for (const auto& tree : args_kwargs_timeout_trees) {
         rpc_async_node->addInput(emitExpr(Expr(tree)));
       }
     }
@@ -3559,7 +3589,7 @@ std::unique_ptr<Function> CompilationUnit::define(
       TORCH_INTERNAL_ASSERT(atoms.size() >= 2);
       call_name = atoms.at(atoms.size() - 2) + "." + atoms.at(atoms.size() - 1);
     }
-    ErrorReport::CallStack call(call_name);
+    ErrorReport::CallStack call(call_name, def.range());
     to_ir(def, _resolver, self, method);
   };
   auto name = prefix ? QualifiedName(*prefix, def.name().name())

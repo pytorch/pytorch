@@ -276,12 +276,13 @@ void Reducer::autograd_hook(VariableIndex index) {
 
   // Rebuild bucket only if 1) it is the first time to rebuild bucket 2)
   // unused_parameters_ is empty, currently it does not support when there are
-  // unused parameters 3) this backward pass needs to run all reduce. Here, we
+  // unused parameters 3) this backward pass needs to run allreduce. Here, we
   // just dump tensors and their parameter indices into rebuilt_params_ and
-  // rebuilt_param_indices_, and then at the end of finalize_backward(), buckets
-  // will be rebuilt based on rebuilt_params_ and rebuilt_param_indices_, and
-  // then will be broadcasted and intialized. Also we only need to dump tensors
-  // and parameter indcies of one replica.
+  // rebuilt_param_indices_ based on gradient arriving order, and then at the
+  // end of finalize_backward(), buckets will be rebuilt based on
+  // rebuilt_params_ and rebuilt_param_indices_, and then will be broadcasted
+  // and intialized. Also we only need to dump tensors and parameter indcies of
+  // one replica.
   if (!has_rebuilt_bucket_ && unused_parameters_.empty() &&
       index.replica_index == 0) {
     rebuilt_params_.push_back(
@@ -391,15 +392,17 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
 
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
-      std::lock_guard<std::mutex> lock(this->mutex_);
+      std::unique_lock<std::mutex> lock(this->mutex_);
       this->finalize_backward();
       // Rebuild bucket if this is the first time to rebuild
       if (!rebuilt_params_.empty()) {
         auto rebuilt_bucket_indices = rebuildBuckets();
         // Unlock before initialize_buckets() as initialize_buckets() requires a
         // lock, it could result in self deadlock without unlocking here.
-        mutex_.unlock();
+        lock.unlock();
         initialize_buckets(std::move(rebuilt_bucket_indices));
+      } else {
+        lock.unlock();
       }
     });
   }
@@ -757,10 +760,9 @@ void Reducer::finalize_backward() {
 
 void Reducer::sync_bucket_indices(
     std::vector<std::vector<size_t>>& bucket_indices) {
-  int64_t broadcast_bucket_size = DEFAULT_BROADCAST_BUCKET_BYTES;
-
   auto num_buckets = bucket_indices.size();
   std::vector<size_t> bucket_sizes;
+  bucket_sizes.reserve(num_buckets);
   int64_t total_size = 0;
   for (size_t i = 0; i < num_buckets; i++) {
     auto bucket_size = bucket_indices.at(i).size();
@@ -789,9 +791,9 @@ void Reducer::sync_bucket_indices(
   // it can only broadcast device tensors.
   auto indices_tensor_device = at::empty({total_size + 1}, options);
   indices_tensor_device.copy_(indices_tensor, true);
-  broadcast_coalesced(
-      process_group_, indices_tensor_device, broadcast_bucket_size);
-  indices_tensor.copy_(indices_tensor_device);
+  std::vector<at::Tensor> indices_tensor_list = {indices_tensor_device};
+  process_group_->broadcast(indices_tensor_list)->wait();
+  indices_tensor.copy_(indices_tensor_list.front());
 
   // Update num_buckets after receiving it from rank 0
   num_buckets = indices_accessor[indices_accessor_Index];
@@ -807,9 +809,10 @@ void Reducer::sync_bucket_indices(
   }
   auto bucket_sizes_tensor_device = at::empty({(int64_t)num_buckets}, options);
   bucket_sizes_tensor_device.copy_(bucket_sizes_tensor, true);
-  broadcast_coalesced(
-      process_group_, bucket_sizes_tensor_device, broadcast_bucket_size);
-  bucket_sizes_tensor.copy_(bucket_sizes_tensor_device);
+  std::vector<at::Tensor> bucket_sizes_tensor_list = {
+      bucket_sizes_tensor_device};
+  process_group_->broadcast(bucket_sizes_tensor_list)->wait();
+  bucket_sizes_tensor.copy_(bucket_sizes_tensor_list.front());
 
   // Clear bucket_indices first, and then update bucket_indices using received
   // num_buckets, bucket_sizes_tensor and indices_tensor from rank 0
@@ -823,17 +826,20 @@ void Reducer::sync_bucket_indices(
     for (size_t j = 0; j < bucket_size; j++) {
       bucket.push_back(indices_accessor[indices_accessor_Index++]);
     }
-    bucket_indices.push_back(bucket);
+    bucket_indices.emplace_back(std::move(bucket));
   }
 }
 
 std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
   TORCH_INTERNAL_ASSERT(
       rebuilt_params_.size() == rebuilt_param_indices_.size(),
-      "rebuild tensor size is not same as rebuild param indices size.");
+      "rebuilt parameter tensors size is not same as rebuilt parameter indices size.");
+  TORCH_INTERNAL_ASSERT(
+      replicas_[0].size() == rebuilt_param_indices_.size(),
+      "rebuilt parameter indices size is not same as original model parameters size.");
   std::vector<std::vector<size_t>> rebuilt_bucket_indices;
   std::vector<size_t> bucket_size_limits;
-  bucket_size_limits.push_back(DEFAULT_FIRST_BUCKET_BYTES);
+  bucket_size_limits.push_back(kDefaultFirstBucketBytes);
   bucket_size_limits.push_back(bucket_bytes_cap_);
   rebuilt_bucket_indices = compute_bucket_assignment_by_size(
       rebuilt_params_,
@@ -880,6 +886,9 @@ inline bool operator==(const BucketKey& lhs, const BucketKey& rhs) {
 // This is equivalent to take_tensors but returns indices into the
 // tensor list argument for bucket assignment. Also, it is aware
 // of device placement and will not allow buckets to span devices.
+// The index of tensors[i] assigned to bucket is tensor_indices[i],
+// when tensor_indices is empty, the index of tensors[i] assigned to
+// bucket is i.
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size_limits,
@@ -917,21 +926,23 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const auto& tensor = tensors[i];
     TORCH_CHECK(!tensor.is_sparse(), "No support for sparse tensors.");
 
-    auto param_index = i;
+    // when tensor_indices is empty, the index of tensors[i] assigned to
+    // bucket is i, otherwise the tensor index is tensor_indices[i].
+    auto tensor_index = i;
     if (!tensor_indices.empty()) {
-      param_index = tensor_indices[i];
+      tensor_index = tensor_indices[i];
     }
     // If we expect a sparse gradient to be produced for this tensor, it cannot
     // be grouped together with other gradients and gets its own bucket.
     if (!expect_sparse_gradient.empty() &&
-        expect_sparse_gradient[param_index]) {
-      result.push_back({param_index});
+        expect_sparse_gradient[tensor_index]) {
+      result.push_back({tensor_index});
       continue;
     }
 
     auto key = BucketKey(tensor.scalar_type(), tensor.device());
     auto& bucket = buckets[key];
-    bucket.indices.push_back(param_index);
+    bucket.indices.push_back(tensor_index);
     bucket.size += tensor.numel() * tensor.element_size();
 
     // Initialize bucket size limit iterator if necessary.
@@ -961,10 +972,13 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     }
   }
 
-  // Sort resulting buckets by the minimum tensor index they include.
-  // We assume that the order of the tensors is the order in which they are
-  // used (or the reverse order in which their gradients are produced).
-  // This sorting step ensures that the buckets are ready in consecutive order.
+  // If tensor_indices is not empty, the order of the tensors is in the gradient
+  // ready order, so no need to sort.
+  // If tensor_indices is empty, sort resulting buckets by the minimum tensor
+  // index they include. We assume that the order of the tensors is the order in
+  // which they are used (or the reverse order in which their gradients are
+  // produced). This sorting step ensures that the buckets are ready in
+  // consecutive order.
   if (tensor_indices.empty()) {
     std::sort(
         result.begin(),
