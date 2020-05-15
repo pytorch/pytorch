@@ -311,7 +311,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK_WITH(error_t, cond, ...)  \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(error_t,                  \
+    C10_THROW_ERROR(Error,                  \
         #cond " CHECK FAILED at "             \
         C10_STRINGIZE(__FILE__)               \
     );                                        \
