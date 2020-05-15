@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/dispatch/OperatorEntry.h>
+#include <ATen/core/dispatch/CppSignature.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <c10/util/Exception.h>
 #include <c10/util/LeftRight.h>
@@ -148,7 +149,7 @@ public:
    */
   // NB: steals the inferred function schema, as we may need to hold on to
   // it for a bit until the real schema turns up
-  RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
+  RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, c10::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
 
   /**
    * Register a fallback kernel for a backend.
@@ -221,6 +222,8 @@ private:
   std::mutex mutex_;
 };
 
+template<class FuncType> class TypedOperatorHandle;
+
 /**
  * This is a handle to an operator schema registered with the dispatcher.
  * This handle can be used to register kernels with the dispatcher or
@@ -257,14 +260,10 @@ public:
     return operatorIterator_->op.checkInvariants();
   }
 
-  template<class Return, class... Args>
-  Return call(Args... args) const {
-    return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
-  }
-
-  template<class Return, class... Args>
-  Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
-    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
+  template<class FuncType>
+  TypedOperatorHandle<FuncType> typed() const {
+    operatorIterator_->op.assertSignatureIsCorrect<FuncType>();
+    return TypedOperatorHandle<FuncType>(*this);
   }
 
   void callBoxed(Stack* stack) const {
@@ -277,6 +276,66 @@ private:
   friend class Dispatcher;
 
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
+};
+
+/**
+ * This is a handle to an operator schema registered with the dispatcher.
+ * It holds the same information as an OperatorHandle, but it is templated
+ * on the operator arguments and allows calling the operator in an
+ * unboxed way.
+ */
+template<class FuncType>
+class CAFFE2_API TypedOperatorHandle final {
+  static_assert(guts::false_t<FuncType>(), "FuncType in OperatorHandle::typed<FuncType> was not a valid function type");
+};
+template<class Return, class... Args>
+class CAFFE2_API TypedOperatorHandle<Return (Args...)> final {
+public:
+  TypedOperatorHandle(TypedOperatorHandle&&) noexcept = default;
+  TypedOperatorHandle& operator=(TypedOperatorHandle&&) noexcept = default;
+  TypedOperatorHandle(const TypedOperatorHandle&) = default;
+  TypedOperatorHandle& operator=(const TypedOperatorHandle&) = default;
+
+  const OperatorName& operator_name() const {
+    return handle_.operator_name();
+  }
+
+  bool hasSchema() const {
+    return handle_.hasSchema();
+  }
+
+  const FunctionSchema& schema() const {
+    return handle_.schema();
+  }
+
+  const std::string& debug() const {
+    return handle_.debug();
+  }
+
+  std::string dumpState() const {
+    return handle_.dumpState();
+  }
+
+  void checkInvariants() const {
+    return handle_.checkInvariants();
+  }
+
+  Return call(Args... args) const {
+    return c10::Dispatcher::singleton().call<Return, Args...>(handle_, std::forward<Args>(args)...);
+  }
+
+  Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
+    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(handle_, dispatchKey, std::forward<Args>(args)...);
+  }
+
+  void callBoxed(Stack* stack) const {
+    handle_.callBoxed(stack);
+  }
+private:
+  friend class OperatorHandle;
+  explicit TypedOperatorHandle(OperatorHandle handle): handle_(std::move(handle)) {}
+
+  OperatorHandle handle_;
 };
 
 namespace detail {

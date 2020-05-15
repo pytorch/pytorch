@@ -5,28 +5,16 @@
 
 namespace c10 {
 
-namespace detail {
-template<class FuncType>
-std::type_index hashFunctionSignature() {
-  // Decay functors, lambdas, function pointers, etc. into the plain function type
-  using decayed_function_type = typename guts::infer_function_traits_t<FuncType>::func_type;
-
-  return std::type_index(typeid(decayed_function_type));
-}
-}
-
 inline KernelFunction::KernelFunction()
 : functor_(nullptr)
 , boxed_kernel_func_(nullptr)
 , unboxed_kernel_func_(nullptr)
-, signature_hash_(c10::nullopt)
 {}
 
-inline KernelFunction::KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, c10::optional<std::type_index> signature_hash)
+inline KernelFunction::KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func)
 : functor_(std::move(functor))
 , boxed_kernel_func_(boxed_kernel_func)
 , unboxed_kernel_func_(unboxed_kernel_func)
-, signature_hash_(std::move(signature_hash))
 {}
 
 template<KernelFunction::BoxedKernelFunction* func>
@@ -62,13 +50,6 @@ inline Return KernelFunction::call(const OperatorHandle& opHandle, Args... args)
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
 
-    TORCH_INTERNAL_ASSERT(!signature_hash_.has_value() || (detail::hashFunctionSignature<Return (Args...)>() == *signature_hash_),
-        "Called KernelFunction::call with wrong argument types. Called with ",
-        detail::hashFunctionSignature<Return (Args...)>().name(),
-        " but kernel expects ",
-        signature_hash_->name()
-    );
-
     if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
         using ActualSignature = Return (OperatorKernel*, Args...);
         ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func_);
@@ -84,8 +65,7 @@ inline KernelFunction KernelFunction::makeFromBoxedFunction() {
     return KernelFunction(
         nullptr,  // no functor_ object
         &make_boxed_function<func>,
-        nullptr,  // no unboxed function pointer
-        c10::nullopt  // signature is not known, we can't error check unboxed calls.
+        nullptr  // no unboxed function pointer
     );
 }
 
@@ -93,8 +73,7 @@ inline KernelFunction KernelFunction::makeFallthrough() {
     return KernelFunction(
         nullptr,  // no functor_ object
         &fallthrough_kernel,
-        nullptr,  // no unboxed function pointer
-        c10::nullopt  // signature is not known, we can't error check unboxed calls.
+        nullptr  // no unboxed function pointer
     );
 }
 
@@ -106,8 +85,7 @@ inline KernelFunction KernelFunction::makeFromUnboxedFunctor(std::unique_ptr<Ope
     return KernelFunction(
         std::move(kernelFunctor),
         &impl::make_boxed_from_unboxed_functor<KernelFunctor, AllowLegacyTypes>::call,
-        reinterpret_cast<void*>(&impl::wrap_kernel_functor_unboxed<KernelFunctor>::call),
-        detail::hashFunctionSignature<KernelFunctor>()
+        reinterpret_cast<void*>(&impl::wrap_kernel_functor_unboxed<KernelFunctor>::call)
     );
 }
 
@@ -122,8 +100,7 @@ inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunctor(std::unique_ptr
     return KernelFunction(
         std::move(kernelFunctor),
         nullptr, // Don't create a boxed kernel for this
-        reinterpret_cast<void*>(&impl::wrap_kernel_functor_unboxed<KernelFunctor>::call),
-        detail::hashFunctionSignature<KernelFunctor>()
+        reinterpret_cast<void*>(&impl::wrap_kernel_functor_unboxed<KernelFunctor>::call)
     );
 }
 
