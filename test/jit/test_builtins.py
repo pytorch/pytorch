@@ -199,7 +199,7 @@ class TestTensorBuiltins(JitTestCase):
             self.checkScript(fn, (torch.zeros(2, dtype=torch.uint8),))
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    def test_tensor_subscript_assign_cuda(self):
+    def test_tensor_subscript_assign_device(self):
         def fn6(x):
             a = torch.zeros_like(x, dtype=torch.float32, device="cuda")
             a[torch.tensor(0)] = 2
