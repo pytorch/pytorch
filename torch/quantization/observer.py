@@ -116,9 +116,26 @@ class _ObserverBase(ObserverBase):
             torch.quint8,
         ), "Default Observer only works for qint8 and quint8 data type"
 
+    @torch.jit._overload
+    def _calculate_qparams(self, min_val: torch.Tensor, max_val: torch.Tensor) -> torch.Tensor: ...
+
+    @torch.jit._overload
+    def _calculate_qparams(self, min_val: List[torch.Tensor], max_val: List[torch.Tensor]) -> List[torch.Tensor]: ...
+
     @torch.jit.export
     def _calculate_qparams(self, min_val, max_val):
-        # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor]
+        if isinstance(min_val, torch.Tensor):
+            return self._calculate_qparams_impl(min_val, max_val)
+        else:
+            num_tensors = len(min_val)
+            assert len(max_val) == num_tensors
+            qparams = []
+            for i in range(num_tensors):
+                qparams.append(self._calculate_qparams_impl(min_val[i], max_val[i]))
+            return qparams
+
+    @torch.jit.export
+    def _calculate_qparams_impl(self, min_val, max_val):
         r"""Calculates the quantization parameters, given min and max
         value tensors. Works for both per tensor and per channel cases
 
@@ -885,41 +902,34 @@ class HistogramObserver(_ObserverBase):
     def forward(self, x_orig: torch.Tensor) -> torch.Tensor: ...
 
     def forward(self, x_orig):  # noqa: F811
+        min_val, max_val, histogram = self.min_val, self.max_val, self.histogram
+        initialized = min_val.numel() != 0 and max_val.numel() != 0
         if isinstance(x_orig, torch.Tensor):
-            min_val, max_val, histogram = self._forward(x_orig, self.min_val, self.max_val, self.histogram)
-            self.update_stats(min_val, max_val, histogram)
-            return x_orig
+            min_val, max_val, histogram = self._forward(x_orig, min_val, max_val, histogram, initialized)
         else:
-            min_vals = self.min_val
-            max_vals = self.max_val
-            histograms = self.histogram
             num_tensors = len(x_orig)
-            initialized = True
-            if min_vals.numel() != num_tensors or max_vals.numel() != num_tensors or \
-               histograms.numel() != num_tensors * self.bins:
-                min_vals = torch.empty(num_tensors, dtype=torch.float32)
-                max_vals = torch.empty(num_tensors, dtype=torch.float32)
-                histograms = torch.empty(num_tensors * self.bins, dtype=torch.float32)
+            if min_val.numel() != num_tensors or max_val.numel() != num_tensors or \
+               histogram.numel() != num_tensors * self.bins:
+                min_val = torch.empty(num_tensors, dtype=torch.float32)
+                max_val = torch.empty(num_tensors, dtype=torch.float32)
+                histogram = torch.empty(num_tensors * self.bins, dtype=torch.float32)
                 initialized = False
             for i in range(num_tensors):
-                if initialized:
-                    min_val, max_val, histogram = min_vals[i], max_vals[i], \
-                        histograms[self.bins * i : self.bins * (i + 1)]
-                else:
-                    min_val, max_val, histogram = torch.tensor([]), torch.tensor([]), \
-                        torch.zeros(self.bins)
-                min_val, max_val, histogram = \
-                    self._forward(x_orig[i], min_val, max_val, histogram)
-                min_vals[i] = min_val
-                max_vals[i] = max_val
-                histograms[self.bins * i : self.bins * (i + 1)] = histogram
-                self.update_stats(min_vals, max_vals, histograms)
-            return x_orig
+                min_val_i, max_val_i, histogram_i = min_val[i], max_val[i], \
+                    histogram[self.bins * i : self.bins * (i + 1)]
+                min_val_i, max_val_i, histogram_i = \
+                    self._forward(x_orig[i], min_val_i, max_val_i, histogram_i, initialized)
+                min_val[i] = min_val_i
+                max_val[i] = max_val_i
+                histogram[self.bins * i : self.bins * (i + 1)] = histogram_i
 
-    def _forward(self, x_orig, min_val, max_val, histogram):
+        self.update_stats(min_val, max_val, histogram)
+        return x_orig
+
+    def _forward(self, x_orig, min_val, max_val, histogram, initialized):
         # type: (Tensor, Tensor, Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
         x = x_orig.detach()
-        if min_val.numel() == 0 or max_val.numel() == 0:
+        if not initialized:
             min_val = torch.min(x)
             max_val = torch.max(x)
             histogram = torch.histc(x, self.bins, min=min_val, max=max_val)
@@ -960,19 +970,19 @@ class HistogramObserver(_ObserverBase):
             "supplied while making this observer"
         )
         num_tensors = self.histogram.numel() // self.bins
-        qparams = []
         if num_tensors > 1:
+            min_val, max_val = [], []
             for i in range(num_tensors):
-                new_min, new_max = \
+                new_min_i, new_max_i = \
                     self._non_linear_param_search(
                         self.min_val[i], self.max_val[i],
                         self.histogram[self.bins * i : self.bins * (i + 1)])
-                qparams.append(self._calculate_qparams(new_min, new_max))
-            return qparams
+                min_val.append(new_min_i)
+                max_val.append(new_max_i)
         else:
-            new_min, new_max = \
+            min_val, max_val = \
                 self._non_linear_param_search(self.min_val, self.max_val, self.histogram)
-            return self._calculate_qparams(new_min, new_max)
+        return self._calculate_qparams(min_val, max_val)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(HistogramObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
