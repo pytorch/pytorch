@@ -222,7 +222,7 @@ private:
   std::mutex mutex_;
 };
 
-template<class FuncType> class TypedOperatorHandle;
+template<class FuncType> class CAFFE2_API TypedOperatorHandle;
 
 /**
  * This is a handle to an operator schema registered with the dispatcher.
