@@ -441,6 +441,7 @@ import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
 import torch.backends.quantized
+import torch.experimental
 import torch.quantization
 import torch.utils.data
 import torch.__config__

@@ -59,6 +59,14 @@ void Context::setDeterministicCuDNN(bool b) {
   deterministic_cudnn = b;
 }
 
+bool Context::deterministic() const {
+  return _deterministic;
+}
+
+void Context::setDeterministic(bool b) {
+  _deterministic = b;
+}
+
 bool Context::benchmarkCuDNN() const {
   return benchmark_cudnn;
 }
