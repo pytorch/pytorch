@@ -81,15 +81,13 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     LDR r5, [sp, 112]
     ADD r7, r9, 4
     # Load pointer to per channel zero points array
-    LDR r4, [r9]
+    LDR r4, [r9], 8
     # Load pointer to per channel requant scale
-    # Register offset, load r9+8
-    LDR r11, [r9, 8]
+    # add 8 bytes to get to vfmax
+    LDR r11, [r9], 8
     # Load a_zero_point:
     # - d14 = a_zero_point
     VLD1.8 {d14[]}, [r7]
-    # add 8 bytes to get to vfmax
-    ADD r9, r9, 16
     # Byte offset of output channel index for requant scale.
     LSL r6, r5, 2
     # Add offset to the base pointer

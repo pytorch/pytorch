@@ -53,7 +53,8 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     STP d15, d14, [sp, -16]
 
     # Load pointer to per channel zero points array
-    LDR x17, [x8]
+    # And go to the a_zero_point with post-index
+    LDR x17, [x8], 8
 
     STP d13, d12, [sp, -32]
     STP d11, d10, [sp, -48]
@@ -67,8 +68,6 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
 
     # Load b_zero_point
     LD1 {v25.8b}, [x17]
-    # Go to the a_zero_point
-    ADD x8, x8, 8
     # Load a_zero_point
     LD1R {v24.8b}, [x8]
     # Load pointer to per channel requant scale
