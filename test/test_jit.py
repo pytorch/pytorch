@@ -352,7 +352,7 @@ class TestJit(JitTestCase):
         self.checkTrace(f, (x, y))
 
     def test_inferred_as_tensor(self):
-        with self.assertRaisesRegex(RuntimeError, "Inferred 'dim' to be of type 'Tensor' "
+        with self.assertRaisesRegex(RuntimeError, "Inferred the value for argument 'dim' to be of type 'Tensor' "
                                                   "because it was not annotated with an explicit type"):
             @torch.jit.script
             def dot(points, query, dim):
