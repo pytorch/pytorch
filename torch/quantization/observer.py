@@ -1079,6 +1079,7 @@ class NoopObserver(ObserverBase):
     def forward(self, x):
         return x
 
+    @torch.jit.export
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
 
