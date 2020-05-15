@@ -1493,16 +1493,12 @@ at::Tensor interpolate(
 
     if (warn_recompute_scale_factor) {
       TORCH_WARN(
-          "The default behavior for interpolate/upsample with float scale_factor changed "
-          "in 1.5.0 to align with other frameworks/libraries, and uses scale_factor directly, "
+          "The default behavior for interpolate/upsample with float scale_factor will change "
+          "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
           "instead of relying on the computed output size. "
           "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
           "See the documentation of nn.Upsample for details.");
     }
-  }
-
-  if (recompute_scale_factor == c10::nullopt) {
-    recompute_scale_factor = false;
   }
 
   if (recompute_scale_factor == false) {
