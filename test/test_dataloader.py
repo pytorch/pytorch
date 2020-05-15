@@ -1635,8 +1635,8 @@ except RuntimeError as e:
 
     def test_default_collate_bad_sequence_type(self):
         batch = [['X'], ['X', 'X']]
-        self.assertRaises(AssertionError, lambda: _utils.collate.default_collate(batch))
-        self.assertRaises(AssertionError, lambda: _utils.collate.default_collate(batch[::-1]))
+        self.assertRaises(RuntimeError, lambda: _utils.collate.default_collate(batch))
+        self.assertRaises(RuntimeError, lambda: _utils.collate.default_collate(batch[::-1]))
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_shared_tensor(self):
