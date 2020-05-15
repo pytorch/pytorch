@@ -31,7 +31,9 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec256/vec256.h>
+
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
@@ -185,6 +187,7 @@ static inline void unroll_contiguous_scalar_checks(
 
 template <typename func_t>
 void cpu_kernel(TensorIterator& iter, func_t&& op) {
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
   using traits = function_traits<func_t>;
   TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
 
@@ -203,6 +206,7 @@ void cpu_kernel(TensorIterator& iter, func_t&& op) {
 
 template <typename func_t, typename vec_func_t>
 void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
   using traits = function_traits<func_t>;
   TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
 
@@ -225,6 +229,7 @@ void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
 
 template <typename func_t>
 void cpu_serial_kernel(TensorIterator& iter, func_t&& op, const Range& range) {
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
   using traits = function_traits<func_t>;
   TORCH_INTERNAL_ASSERT((std::is_void<typename traits::result_type>::value &&
     iter.noutputs() == 0 && iter.ntensors() == traits::arity) || (iter.ntensors() >= traits::arity + 1));
@@ -249,6 +254,7 @@ void cpu_serial_kernel(TensorIterator& iter, func_t&& op) {
 
 template <typename func_t, typename vec_func_t>
 void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop, const Range& range) {
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
   using traits = function_traits<func_t>;
   TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
 
