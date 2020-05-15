@@ -266,7 +266,7 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
         bottom_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
 
-    MIOPEN_ENFROCE(miopenSet4dTensorDescriptor(
+    MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
         top_desc_, miopenTypeWrapper<T>::type, N_out, C_out, H_out, W_out));
 #endif
     // Carry out the pooling computation.
