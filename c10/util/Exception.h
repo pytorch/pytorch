@@ -308,25 +308,28 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // simply raises an exception, it does NOT unceremoniously quit the process
 // (unlike CHECK() from glog.)
 //
+#define TORCH_CHECK_WITH(error_t, cond, ...) \
+  TORCH_CHECK_WITH_MSG(error_t, cond, "", __VA_ARGS__)
+
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_CHECK_WITH(error_t, cond, ...)  \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(Error,                  \
-        #cond " CHECK FAILED at "             \
-        C10_STRINGIZE(__FILE__)               \
-    );                                        \
+#define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)  \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                 \
+    C10_THROW_ERROR(Error,                              \
+        #cond #type " CHECK FAILED at "                 \
+        C10_STRINGIZE(__FILE__)                         \
+    );                                                  \
   }
 #else
-#define TORCH_CHECK_WITH(error_t, cond, ...)                \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {                     \
-    C10_THROW_ERROR(error_t,                                \
-      ::c10::detail::if_empty_then(                         \
-        ::c10::str(__VA_ARGS__),                            \
-        "Expected " #cond " to be true, but got false.  "   \
-        "(Could this error message be improved?  If so, "   \
-        "please report an enhancement request to PyTorch.)" \
-      )                                                     \
-    );                                                      \
+#define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)                \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                               \
+    C10_THROW_ERROR(error_t,                                          \
+      ::c10::detail::if_empty_then(                                   \
+        ::c10::str(__VA_ARGS__),                                      \
+        "Expected " #cond " to be true, but got false.  "             \
+        "(Could this error message be improved?  If so, "             \
+        "please report an enhancement request to PyTorch.)"           \
+      )                                                               \
+    );                                                                \
   }
 #endif
 #define TORCH_CHECK(cond, ...) TORCH_CHECK_WITH(Error, cond, __VA_ARGS__)
@@ -358,50 +361,12 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // this way; check if this actually affects binary size.
 
 // Like TORCH_CHECK, but raises IndexErrors instead of Errors.
-#ifdef STRIP_ERROR_MESSAGES
-#define TORCH_CHECK_INDEX(cond, ...)          \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(Error,                    \
-        #cond " INDEX CHECK FAILED at "       \
-        C10_STRINGIZE(__FILE__)               \
-    );                                        \
-  }
-#else
-#define TORCH_CHECK_INDEX(cond, ...)                        \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {                     \
-    C10_THROW_ERROR(IndexError,                             \
-      ::c10::detail::if_empty_then(                         \
-        ::c10::str(__VA_ARGS__),                            \
-        "Expected " #cond " to be true, but got false.  "   \
-        "(Could this error message be improved?  If so, "   \
-        "please report an enhancement request to PyTorch.)" \
-      )                                                     \
-    );                                                      \
-  }
-#endif
+#define TORCH_CHECK_INDEX(cond, ...) \
+  TORCH_CHECK_WITH_MSG(IndexError, cond, "INDEX", __VA_ARGS__)
 
 // Like TORCH_CHECK, but raises ValueErrors instead of Errors.
-#ifdef STRIP_ERROR_MESSAGES
-#define TORCH_CHECK_VALUE(cond, ...)          \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(Error,                    \
-        #cond " VALUE CHECK FAILED at "       \
-        C10_STRINGIZE(__FILE__)               \
-    );                                        \
-  }
-#else
-#define TORCH_CHECK_VALUE(cond, ...)                        \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {                     \
-    C10_THROW_ERROR(ValueError,                             \
-      ::c10::detail::if_empty_then(                         \
-        ::c10::str(__VA_ARGS__),                            \
-        "Expected " #cond " to be true, but got false.  "   \
-        "(Could this error message be improved?  If so, "   \
-        "please report an enhancement request to PyTorch.)" \
-      )                                                     \
-    );                                                      \
-  }
-#endif
+#define TORCH_CHECK_VALUE(cond, ...) \
+  TORCH_CHECK_WITH_MSG(ValueError, cond, "VALUE", __VA_ARGS__)
 
 // Report a warning to the user.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
