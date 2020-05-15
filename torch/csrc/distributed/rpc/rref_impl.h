@@ -212,7 +212,7 @@ class TORCH_API RRef : public RRefInterface {
     return rrefId_;
   }
 
-  inline bool isPyObj() {
+  inline bool isPyObj() const {
     return type_ == PyObjectType::get();
   }
   inline const TypePtr type() const override {
@@ -287,7 +287,7 @@ class TORCH_API UserRRef final : public RRef {
 
   // Get of copy of the value from the ``OwnerRRef``. If the value is not ready
   // yet, this call will block.
-  IValue toHere();
+  IValue toHere() const;
 
   void tryDel() override;
 
@@ -338,8 +338,11 @@ class TORCH_API OwnerRRef final : public RRef {
       const RRefId& rrefId,
       TypePtr type,
       c10::optional<IValue> value)
-      : RRef(ownerId, rrefId, std::move(type)) {
-    value_ = std::move(value);
+      : RRef(ownerId, rrefId, type) {
+    future_ = std::make_shared<JitFuture>(type);
+    if (value.has_value()) {
+      future_->markCompleted(value.value());
+    }
   }
 
   inline bool isOwner() const override {
@@ -366,17 +369,12 @@ class TORCH_API OwnerRRef final : public RRef {
   // Has a value or error been set?
   bool hasValue() const;
   // Gets a future that is satisfied when the value or error is set.
-  std::shared_ptr<FutureIValue> getFuture();
+  std::shared_ptr<JitFuture> getFuture();
 
  private:
   friend class RRefContext;
 
-  // See #32608 for dicussion on whether value_ should be merged into future_
-  c10::optional<IValue> value_;
-  c10::optional<std::string> error_;
-  mutable std::mutex mutex_;
-  mutable std::condition_variable valueCV_;
-  std::shared_ptr<FutureIValue> future_;
+  std::shared_ptr<JitFuture> future_;
 };
 
 } // namespace rpc

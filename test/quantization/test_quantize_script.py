@@ -11,15 +11,11 @@ from torch.quantization import QConfig
 from torch.quantization import default_dynamic_qconfig
 from torch.quantization import QConfigDynamic
 from torch.quantization import default_observer
-from torch.quantization import default_weight_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
 from torch.quantization import get_default_qconfig
-from torch.quantization import quantize
 
 # torch.quantization._quantize_script
-from torch.nn.quantized.modules.linear import LinearPackedParams
-from torch.quantization._quantize_script import ConvPackedParams
 from torch.quantization._quantize_script import script_qconfig
 from torch.quantization._quantize_script import prepare_script
 from torch.quantization._quantize_script import convert_script
@@ -28,9 +24,8 @@ from torch.quantization._quantize_script import prepare_dynamic_script
 from torch.quantization._quantize_script import quantize_dynamic_script
 
 # Testing utils
-from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
-from torch.testing._internal.common_quantization import ConvModel, AnnotatedConvModel
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
+from torch.testing._internal.common_quantized import override_qengines
 
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
@@ -793,105 +788,6 @@ graph(%input, %weight):
                            .check("return") \
                            .run(conv._get_method('_conv_forward').graph)
 
-    def test_fold_quantize(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.weight = torch.nn.Parameter(torch.tensor([2], dtype=torch.float))
-
-            def forward(self, x):
-                return torch.quantize_per_tensor(self.weight, 2.0, 0, torch.quint8)
-
-        m = torch.jit.script(M())
-        torch._C._jit_pass_fold_quantize(m._c, 'forward')
-        self.assertTrue(m._c.hasattr('_quantized_weight'))
-        FileCheck().check_not('GetAttr[name="weight"]') \
-                   .check('GetAttr[name="_quantized_weight"]') \
-                   .run(m._c._get_method('forward').graph)
-
-    @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
-    @unittest.skip("Skip for now since we changed scale/zero_point to attributes."
-                   "We'll enable this in a separate PR")
-    def test_fold_prepack(self):
-        def copy_weights(name, m, ref_m):
-            if name == 'linear':
-                m.fc1.weight = torch.nn.Parameter(ref_m.fc1.module.weight.detach())
-                m.fc1.bias = torch.nn.Parameter(ref_m.fc1.module.bias.detach())
-            else:
-                m.conv.weight = torch.nn.Parameter(ref_m.conv.weight.detach())
-
-        for is_per_channel in [True, False]:
-            for name, M, ref_M, data in [
-                    ('linear',
-                     SingleLayerLinearModel,
-                     AnnotatedSingleLayerLinearModel,
-                     torch.randn((5, 5), dtype=torch.float)),
-                    ('conv',
-                     ConvModel,
-                     AnnotatedConvModel,
-                     torch.randn((1, 3, 7, 7), dtype=torch.float))]:
-                qconfig = QConfig(
-                    activation=default_observer,
-                    weight=default_per_channel_weight_observer if is_per_channel else default_weight_observer)
-                # eager mode
-                ref_m = ref_M()
-                m = M()
-                copy_weights(name, m, ref_m)
-                ref_m.qconfig = qconfig
-                ref_m = quantize(ref_m, _test_only_eval_fn, [(data, torch.randint(0, 1, (5,), dtype=torch.long))])
-                ref_res = ref_m(data)
-                # script mode
-                m = torch.jit.script(m)
-                qconfig_dict = {
-                    '': script_qconfig(qconfig)
-                }
-                m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, 'forward', qconfig_dict, False))
-                get_forward(m._c)(data)
-                m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, 'forward', False))
-                torch._C._jit_pass_insert_prepack_unpack(m._c)
-                linear_packed_params = torch.jit.script(LinearPackedParams())._c
-                conv_packed_params = torch.jit.script(ConvPackedParams())._c
-                torch._C._jit_pass_fold_prepack(m._c,
-                                                linear_packed_params,
-                                                conv_packed_params)
-                res = get_forward(m._c)(data)
-                # check result
-                self.assertEqual(res, ref_res)
-
-                # check attributes
-                # construct a RecursiveScriptModule
-                m = wrap_cpp_module(m._c)
-                mod_to_inspect = m.fc1 if name == 'linear' else m.conv
-                packed_module_list = [x for x, _ in mod_to_inspect._modules._c.items()
-                                      if x.startswith('_' + name + '_packed_params_module')]
-                assert len(packed_module_list) == 1, \
-                    'Expected to have one packed_params_module'
-                packed_module_name = packed_module_list[0]
-                # check values
-                w, _ = mod_to_inspect._c.getattr(packed_module_name)._get_method('_weight_bias')()
-                original_w = mod_to_inspect.weight
-                if is_per_channel:
-                    ref_w = torch.quantize_per_channel(original_w,
-                                                       w.q_per_channel_scales(),
-                                                       w.q_per_channel_zero_points(),
-                                                       w.q_per_channel_axis(),
-                                                       w.dtype).dequantize()
-                else:
-                    ref_w = torch.quantize_per_tensor(original_w, w.q_scale(), w.q_zero_point(), w.dtype).dequantize()
-                self.assertEqual(ref_w, w.dequantize())
-
-                # test serialization
-                buffer = io.BytesIO()
-                torch.jit.save(m, buffer)
-                buffer.seek(0)
-                loaded_mod = torch.jit.load(buffer)
-                loaded_res = loaded_mod(data)
-                self.assertEqual(ref_res, loaded_res)
-
     def test_dedup_module_uses(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1205,7 +1101,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
     for individual ops end to end.
     """
     def _test_op_impl(self, module, data, quantized_op):
-        qconfig_dict = {'': get_default_qconfig('fbgemm')}
+        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         model = torch.jit.script(module).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
         FileCheck().check(quantized_op) \
@@ -1217,9 +1113,28 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
 
         return model
 
+    @override_qengines
+    def test_quantized_conv1d(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv1d(3, 3, 3).float()
+
+            def forward(self, x):
+                return self.conv(x)
+
+        data = [(torch.rand((1, 3, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        model = self._test_op_impl(M(), data, "quantized::conv1d")
+        # make sure there is only one quantize_per_tensor for input
+        # and conv2d_prepack is folded
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .run(model.graph)
+
+        FileCheck().check_not("quantized::conv1d_prepack") \
+                   .run(model.graph)
+
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
     def test_quantized_conv2d(self):
@@ -1261,6 +1176,26 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # make sure there is only one quantize_per_tensor for input
         # and conv3d_prepack is folded
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .run(model.graph)
+
+    @override_qengines
+    def test_quantized_conv1d_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv1d(1, 4, 2, 3).float()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.conv(x))
+
+        data = [(torch.randn(1, 1, 10, dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        model = self._test_op_impl(M(), data, "quantized::conv1d_relu")
+        FileCheck().check_not("aten::conv1d") \
+                   .check_not("aten::relu") \
+                   .check_not("quantized::conv1d(") \
+                   .check_not("quantized::relu(") \
                    .run(model.graph)
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
@@ -1639,48 +1574,20 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.maxpool1d = torch.nn.MaxPool1d(kernel_size=3)
                 self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3)
                 self.maxpool3d = torch.nn.MaxPool3d(kernel_size=3)
-                self.adaptive_avgpool1d = torch.nn.AdaptiveAvgPool1d((1))
-                self.adaptive_avgpool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
-                self.adaptive_avgpool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.dropout = torch.nn.Dropout()
-                self.avgpool1d = torch.nn.AvgPool1d(3)
-                self.avgpool2d = torch.nn.AvgPool2d(3)
-                self.avgpool3d = torch.nn.AvgPool3d(3)
                 self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.sigmoid = torch.nn.Sigmoid()
-                self.tanh = torch.nn.Tanh()
-                self.hardtanh = torch.nn.Hardtanh()
-                self.elu = torch.nn.ELU()
-                self.hardsigmoid = torch.nn.Hardsigmoid()
                 self.relu = torch.nn.ReLU()
-                self.relu6 = torch.nn.ReLU6()
-                self.leaky_relu = torch.nn.LeakyReLU()
 
             def forward(self, x):
                 x = self.conv(x)
                 x = self.maxpool1d(x)
                 x = self.maxpool2d(x)
                 x = self.maxpool3d(x)
-                x = self.adaptive_avgpool1d(x)
-                x = self.adaptive_avgpool2d(x)
-                x = self.adaptive_avgpool3d(x)
-                x = self.avgpool1d(x)
-                x = self.avgpool2d(x)
-                x = self.avgpool3d(x)
                 x = torch.flatten(x)
-                x = F.adaptive_avg_pool1d(x, (1))
-                x = F.adaptive_avg_pool2d(x, (1, 1))
-                x = F.adaptive_avg_pool3d(x, (1, 1, 1))
-                x = F.avg_pool1d(x, 3)
-                x = F.avg_pool2d(x, 3)
-                x = F.avg_pool3d(x, 3)
                 x = torch.max(x)
                 x = torch.min(x)
-                x = torch.mean(x)
-                x = torch.sigmoid(x)
                 x = x.reshape([-1])
                 x = x.resize_(1, 1, x.numel())
-                x = self.sigmoid(x)
                 x = x.view(-1)
                 x = x.transpose(1, 2)
                 x = x.contiguous()
@@ -1688,36 +1595,11 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = F.dropout(x)
                 x = self.dropout(x)
                 x, _ = torch.sort(x)
-                x = F.interpolate(x, 4, mode='nearest')
-                x = F.upsample(x, (32, 32))
-                x = F.upsample_bilinear(x, (32, 32))
-                x = F.upsample_nearest(x, (32, 32))
-                x = torch.clamp(x, -3, 3)
-                x = x.clamp(-2.5, 2.5)
-                # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
-                x = F.sigmoid(x)
                 x = x.permute(0, 2, 3, 1)
                 x = torch.repeat_interleave(x, 3, 1)
-                x = self.tanh(x)
-                x = F.tanh(x)
-                x = torch.tanh(x)
-                x = self.hardtanh(x)
-                x = F.hardtanh(x)
-                x.hardtanh_()
-                x = self.elu(x)
-                x = F.elu(x)
-                x.elu_()
-                x = self.hardsigmoid(x)
-                x = F.hardsigmoid(x)
-                x.hardsigmoid_()
                 x = self.relu(x)
                 x = F.relu(x)
                 x.relu_()
-                x = self.relu6(x)
-                x = F.relu6(x)
-                x = self.leaky_relu(x)
-                x = F.leaky_relu(x)
-                x.leaky_relu_()
                 x = self.conv(x)
                 return x
 
@@ -1742,20 +1624,77 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .run(m.graph)
 
     def test_quantize_general_value_ops(self):
-        """ A test that checks dequantize will be swapped for \
+        """ A test that checks correct patterns are produced for
         all supported general value ops like aten::avg_pool2d \
         without actually checking for execution of these ops
         """
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.avgpool2d = torch.nn.AvgPool2d(3)
                 self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.avg_pool1d = torch.nn.AvgPool1d(3)
+                self.avg_pool2d = torch.nn.AvgPool2d(3)
+                self.avg_pool3d = torch.nn.AvgPool3d(3)
+                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
+                self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
+                self.hardtanh = torch.nn.Hardtanh()
+                self.relu6 = torch.nn.ReLU6()
+                self.elu = torch.nn.ELU()
+                self.leaky_relu = torch.nn.LeakyReLU()
+                self.hardsigmoid = torch.nn.Hardsigmoid()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.tanh = torch.nn.Tanh()
 
             def forward(self, x):
                 x = self.conv(x)
-                x = self.avgpool2d(x)
+                x = self.avg_pool1d(x)
+                x = self.avg_pool2d(x)
+                x = self.avg_pool3d(x)
+                x = self.adaptive_avg_pool1d(x)
+                x = self.adaptive_avg_pool2d(x)
+                x = self.adaptive_avg_pool3d(x)
+                x = F.avg_pool1d(x, 3)
                 x = F.avg_pool2d(x, 3)
+                x = F.avg_pool3d(x, 3)
+                x = F.adaptive_avg_pool1d(x, (1))
+                x = F.adaptive_avg_pool2d(x, (1, 1))
+                x = F.adaptive_avg_pool3d(x, (1, 1, 1))
+                x = torch.mean(x)
+                x = x.mean()
+                # interpolate node will introduce 3 quantize_per_tensor ops
+                x = F.interpolate(x, 4, mode='nearest')  # interpolate node
+                x = F.upsample(x, (32, 32))  # interpolate node
+                x = F.upsample_nearest(x, (32, 32))  # interpolate node
+                x = F.interpolate(x, 4, mode='linear')  # common node
+                x = F.upsample_bilinear(x, (32, 32))  # common node
+                x = torch.clamp(x, -3, 3)
+                x = x.clamp(-2.5, 2.5)
+                # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
+                x = self.hardtanh(x)
+                x = F.hardtanh(x)
+                x.hardtanh_()
+                x = self.relu6(x)
+                x = F.relu6(x)
+                x = self.elu(x)
+                x = F.elu(x)
+                x.elu_()
+                x = self.leaky_relu(x)
+                x = F.leaky_relu(x)
+                x.leaky_relu_()
+                x = self.hardsigmoid(x)
+                x = F.hardsigmoid(x)
+                x.hardsigmoid_()
+                x = self.sigmoid(x)
+                x = torch.sigmoid(x)
+                # F.sigmoid is deprecated
+                x = x.sigmoid()
+                x.sigmoid_()
+                x = self.tanh(x)
+                # F.tanh is deprecated
+                x = torch.tanh(x)
+                x = x.tanh()
+                x.tanh_()
                 x = self.conv(x)
                 return x
 
@@ -1775,10 +1714,15 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # and for N general value op between conv we should have
         # N + 1 quantize_per_tensor between these ops
         m1 = convert_script(m, debug=True)
-        conv_op_quant = 4
         # NB: This Needs to be updated when we add more ops to test
-        general_value_op_quant = 2
-        FileCheck().check_count("aten::quantize_per_tensor", conv_op_quant + general_value_op_quant + 1, exactly=True) \
+        # mapping from number of quant for the op to the number of these ops
+        # for example, for `3` in the key means for this type of op
+        # we'll have 3 quantize_per_tensor
+        num_op_by_num_quant = {1: 40, 2: 2, 3: 3}
+        num_quantize_per_tensor = 1  # for output
+        for num_quant, num_op in num_op_by_num_quant.items():
+            num_quantize_per_tensor += num_op * num_quant
+        FileCheck().check_count("aten::quantize_per_tensor(", num_quantize_per_tensor, exactly=True) \
                    .run(m1.graph)
 
         # This checks that the dequantize from the output of first conv
@@ -1786,11 +1730,10 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
-            torch.jit.script(M())._c, 'forward', {'': qconfig}, inplace=False))
         m2 = convert_script(m, debug=False)
         FileCheck().check_count("aten::quantize_per_tensor(", 1, exactly=True) \
-                   .check_count("quantized::conv2d(", 2, exactly=True) \
+                   .run(m2.graph)
+        FileCheck().check_count("quantized::conv2d(", 2, exactly=True) \
                    .check("aten::dequantize(") \
                    .run(m2.graph)
 
