@@ -306,7 +306,6 @@ void IRPrinter::visit(const RoundOff* v) {
 void IRPrinter::visit(const ReduceOp* v) {
   os() << "ReduceOp(";
   os() << *v->accumulator() << ", ";
-  os() << *v->initializer() << ", ";
   os() << v->complete() << ", ";
 
   bool first = true;
@@ -330,10 +329,6 @@ void IRPrinter::visit(const ReduceOp* v) {
     first = false;
   }
   os() << "})";
-}
-
-void IRPrinter::visit(const NoOp* v) {
-  os() << "NoOp";
 }
 
 // === Stmt visitors below ===
