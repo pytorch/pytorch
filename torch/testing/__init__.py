@@ -156,6 +156,13 @@ def _compare_scalars_internal(a, b, *, rtol, atol, equal_nan):
         if a == b or (equal_nan and a != a and b != b):
             return (True, None)
 
+        # Special-case for NaN comparisions when equal_nan=False
+        if not equal_nan and (a != a or b != b):
+            msg = ("Found {0} and {1} while comparing" + s + "and either one "
+                   "is nan and the other isn't, or both are nan and "
+                   "equal_nan is False").format(a, b)
+            return (False, msg)
+
         diff = abs(a - b)
         allowed_diff = atol + rtol * abs(b)
         result = diff <= allowed_diff
@@ -167,7 +174,7 @@ def _compare_scalars_internal(a, b, *, rtol, atol, equal_nan):
 
         msg = None
         if not result:
-            msg = ("Comparing " + s + "{0} and {1} gives a "
+            msg = ("Comparing" + s + "{0} and {1} gives a "
                    "difference of {2}, but the allowed difference "
                    "with rtol={3} and atol={4} is "
                    "only {5}!").format(a, b, diff,
@@ -179,14 +186,14 @@ def _compare_scalars_internal(a, b, *, rtol, atol, equal_nan):
         a = complex(a)
         b = complex(b)
 
-        result, msg = _helper(a.real, b.real, "the real part ")
+        result, msg = _helper(a.real, b.real, " the real part ")
 
         if not result:
             return (False, msg)
 
-        return _helper(a.imag, b.imag, "the imaginary part ")
+        return _helper(a.imag, b.imag, " the imaginary part ")
 
-    return _helper(a, b, "")
+    return _helper(a, b, " ")
 
 def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg=''):
     if not isinstance(actual, torch.Tensor):
