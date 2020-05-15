@@ -22,7 +22,7 @@ bool THPException_init(PyObject *module)
 namespace torch {
 
 static bool compute_cpp_stack_traces_enabled() {
-  auto envar = std::getenv("TORCH_CPP_STACKTRACES");
+  auto envar = std::getenv("TORCH_SHOW_CPP_STACKTRACES");
   if (envar) {
     if (strcmp(envar, "0") == 0) {
       return false;
@@ -30,7 +30,7 @@ static bool compute_cpp_stack_traces_enabled() {
     if (strcmp(envar, "1") == 0) {
       return true;
     }
-    TORCH_WARN("ignoring invalid value for TORCH_CPP_STACKTRACES: ", envar,
+    TORCH_WARN("ignoring invalid value for TORCH_SHOW_CPP_STACKTRACES: ", envar,
                " valid values are 0 or 1.");
   }
   return false;
