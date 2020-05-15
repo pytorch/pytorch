@@ -484,7 +484,7 @@ void RequestCallbackImpl::processRpc(
             // thread_local states there.
             // TODO: Land on a general solution for RPC ThreadLocalState. See
             // https://github.com/pytorch/pytorch/issues/38510
-            DistAutogradContextGuard ctxGuard(ctxId);
+            DistAutogradContextGuard cbCtxGuard(ctxId);
 
             auto wrappedRpcResponseFuture = weak.lock();
             TORCH_INTERNAL_ASSERT(wrappedRpcResponseFuture);
