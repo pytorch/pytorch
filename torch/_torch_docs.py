@@ -3007,7 +3007,7 @@ Example::
 
 add_docstr(torch.logaddexp,
            r"""
-logaddexp(input, other) -> Tensor
+logaddexp(input, other, out=None) -> Tensor
 
 Logarithm of the sum of exponentiations of the inputs.
 
@@ -3037,7 +3037,7 @@ Example::
 
 add_docstr(torch.logaddexp2,
            r"""
-logaddexp2(input, other) -> Tensor
+logaddexp2(input, other, out=None) -> Tensor
 
 Logarithm of the sum of exponentiations of the inputs in base-2.
 
