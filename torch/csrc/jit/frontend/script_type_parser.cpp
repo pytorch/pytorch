@@ -271,10 +271,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
     if (!decl_arg.type().present()) {
       // If this param doesn't have a type, default to "tensor"
       is_inferred_type = true;
-      type = TensorType::get();
-      if (auto pt = type->cast<TensorType>()) {
-        pt->setToInferredType();
-      }
+      type = TensorType::getInferred();
     } else {
       // BroadcastList list can only appear at the argument level
       Expr type_expr = decl_arg.type().get();
