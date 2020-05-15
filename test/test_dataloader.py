@@ -1737,7 +1737,6 @@ class TestDictDataLoader(TestCase):
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
 
 
-
 class NamedTupleDataset(Dataset):
     from collections import namedtuple
     Batch = namedtuple('Batch', ['data', 'label', 'random_tensor'])
