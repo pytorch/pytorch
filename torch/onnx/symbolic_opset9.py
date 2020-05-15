@@ -322,8 +322,7 @@ def cumsum(g, input, dim, dtype):
             return _unimplemented(name, "dtype")
         return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
     else:
-        raise RuntimeError('Unsupported: ONNX export of cumsum in '
-                           'opset 9. Please try opset version 11.')
+        sym_help._onnx_opset_unsupported('cumsum', 9, 11)
 
 
 def _sample_dirichlet(g, self, generator):
@@ -333,8 +332,7 @@ def _sample_dirichlet(g, self, generator):
                                   'We are not able to export generator')
         return g.op("ATen", self, operator_s="_sample_dirichlet")
     else:
-        raise RuntimeError('Unsupported: ONNX export of _sample_dirichlet operator. '
-                           'Please open a bug to request ONNX export support for the missing operator.')
+        return sym_help._onnx_unsupported('_sample_dirichlet')
 
 
 def _standard_gamma(g, self, generator):
@@ -344,8 +342,7 @@ def _standard_gamma(g, self, generator):
                                   'We are not able to export generator')
         return g.op("ATen", self, operator_s="_standard_gamma")
     else:
-        raise RuntimeError('Unsupported: ONNX export of _standard_gamma operator. '
-                           'Please open a bug to request ONNX export support for the missing operator.')
+        return sym_help._onnx_unsupported('_standard_gamma')
 
 
 def t(g, self):
@@ -388,9 +385,7 @@ def embedding_bag(g,
                   per_sample_weights,
                   include_last_offset):
     if not sym_help._is_none(per_sample_weights):
-        raise RuntimeError('Unsupported: ONNX export of embedding_bag '
-                           'with per_sample_weights. '
-                           'Please open a bug to request ONNX export support for the missing operator.')
+        return sym_help._onnx_unsupported('embedding_bag  with per_sample_weights')
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen",
                     embedding_matrix,
@@ -403,8 +398,7 @@ def embedding_bag(g,
                     sparse_i=sparse,
                     include_last_offset_i=include_last_offset)
     else:
-        raise RuntimeError('Unsupported: ONNX export of embedding_bag operator. '
-                           'Please open a bug to request ONNX export support for the missing operator.')
+        return sym_help._onnx_unsupported('embedding_bag')
 
 
 def size(g, self, dim=None):
@@ -1219,8 +1213,7 @@ def index_put(g, self, indices_list_value, values, accumulate):
         args = [self] + indices_list + [values, accumulate]
         return g.op("ATen", *args, operator_s='index_put')
     else:
-        raise RuntimeError('Unsupported: ONNX export of index_put '
-                           'in opset 9. Please try opset version 11.')
+        sym_help._onnx_opset_unsupported('index_put', 9, 11)
 
 
 def index_fill(g, self, dim, index, value):
@@ -1263,8 +1256,7 @@ def cosine_similarity(g, x1, x2, dim, eps):
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", x1, x2, dim_i=dim, eps_f=eps, operator_s="cosine_similarity")
     else:
-        raise RuntimeError('Unsupported: ONNX export of cosine_similarity operator. '
-                           'Please open a bug to request ONNX export support for the missing operator.')
+        return sym_help._onnx_unsupported('cosine_similarity')
 
 
 # ignore clone operators that are inserted by PyTorch autograd
@@ -1402,8 +1394,7 @@ def conv_tbc(g, input, weight, bias, pad):
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
     else:
-        raise RuntimeError('Unsupported: ONNX export of conv_tbc operator. '
-                           'Please open a bug to request ONNX export support for the missing operator.')
+        return sym_help._onnx_unsupported('conv_tbc')
 
 
 @parse_args('v', 'i', 'i')
@@ -1412,8 +1403,7 @@ def _unique(g, input, sorted, return_inverse):
         return g.op("ATen", input, operator_s="_unique", sorted_i=sorted,
                     return_inverse_i=return_inverse, outputs=2)
     else:
-        raise RuntimeError('Unsupported: ONNX export of _unique operator. '
-                           'Please open a bug to request ONNX export support for the missing operator.')
+        return sym_help._onnx_unsupported('_unique')
 
 
 @parse_args('v', 'i', 'i', 'i')
@@ -1423,8 +1413,7 @@ def _unique2(g, input, sorted, return_inverse, return_counts):
                     return_inverse_i=return_inverse, return_counts_i=return_counts,
                     outputs=3)
     else:
-        raise RuntimeError('Unsupported: ONNX export of _unique2 '
-                           'in opset 9. Please try opset version 11.')
+        sym_help._onnx_opset_unsupported('_unique2', 9, 11)
 
 
 for k, v in sym_help.cast_pytorch_to_onnx.items():
