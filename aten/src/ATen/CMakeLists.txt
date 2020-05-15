@@ -94,24 +94,8 @@ file(GLOB native_quantized_hip_cpp "native/quantized/hip/*.cpp")
 file(GLOB native_xnnpack "native/xnnpack/*.cpp")
 
 # Add files needed from jit folders
-list(APPEND ATen_CORE_HEADERS
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/source_range.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/function_schema_parser.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/lexer.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/strtod.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/parse_string_literal.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/schema_type_parser.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/error_report.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/tree.h
-)
-list(APPEND ATen_CORE_SRCS
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/error_report.cpp
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/function_schema_parser.cpp
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/lexer.cpp
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/strtod.cpp
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/schema_type_parser.cpp
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/source_range.cpp
-)
+append_filelist("jit_core_headers" ATen_CORE_HEADERS)
+append_filelist("jit_core_sources" ATen_CORE_SRCS)
 
 add_subdirectory(quantized)
 set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})
@@ -380,7 +364,7 @@ endif()
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
 foreach(HEADER  ${INSTALL_HEADERS})
   string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "ATen/" HEADER_SUB ${HEADER})
-  string(REPLACE "${Caffe2_SOURCE_DIR}/" "" HEADER_SUB ${HEADER_SUB})
+  string(REPLACE "${${CMAKE_PROJECT_NAME}_SOURCE_DIR}/" "" HEADER_SUB ${HEADER_SUB})
   get_filename_component(DIR ${HEADER_SUB} DIRECTORY)
   install(FILES ${HEADER} DESTINATION "${AT_INSTALL_INCLUDE_DIR}/${DIR}")
 endforeach()
