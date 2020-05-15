@@ -227,6 +227,11 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
     TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
     TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
     bucket_view.copy_(grad.view({-1}), /* non_blocking */ true);
+    // if (grad.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+    //   bucket_view.copy_(grad.permute({0, 2, 3, 1}).view({-1}), /* non_blocking */ true);
+    // } else {
+    //   bucket_view.copy_(grad.view({-1}), /* non_blocking */ true);
+    // }
   } else {
     bucket_view.zero_();
   }
@@ -664,13 +669,21 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 
       auto bucket_view =
           replica.contents.narrow(0, offset, length).view(variable.sizes());
+      // auto bucket_slice =
+      //     replica.contents.narrow(0, offset, length);
       auto& grad = variable.grad();
 
       // If a parameter is globally unused, we keep its grad untouched.
       if (!global_unused) {
         if (!grad.defined()) {
           grad = at::empty(bucket_view.sizes(), bucket_view.options());
+          // grad = at::empty(variable.sizes(), bucket_slice.options());
         }
+        // if (grad.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+        //   grad.permute({0, 2, 3, 1}).view(-1).copy_(bucket_slice);
+        // } else {
+        //   grad.copy_(bucket_slice.view(grad.sizes()));
+        // }
         grad.copy_(bucket_view);
       }
     }

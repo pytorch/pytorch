@@ -564,8 +564,11 @@ void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
     if (t.sizes() != first.sizes()) {
       throw std::runtime_error("Tensors must have identical size");
     }
-    if (!t.is_contiguous()) {
-      throw std::runtime_error("Tensors must be contiguous");
+    if (t.strides() != first.strides()) {
+      throw std::runtime_error("Tensors must have identical strides");
+    }
+    if (!t.is_non_overlapping_and_dense()) {
+      throw std::runtime_error("Tensors must be non-overlapping and dense");
     }
     const auto inserted = usedDevices.insert(t.get_device()).second;
     if (!inserted) {
