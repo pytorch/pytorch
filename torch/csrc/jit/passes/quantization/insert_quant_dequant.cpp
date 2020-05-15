@@ -18,10 +18,6 @@ using graph_rewrite_helper::getFuncName;
 using graph_rewrite_helper::getValue;
 using graph_rewrite_helper::PatternInfo;
 
-// Map of quantization parameter name and value
-// for example _scale, _zero_point,
-// _scalar_type and _axis(for per channel quantization)
-using QParamVector = std::vector<std::pair<std::string, IValue>>;
 // dynamic quantization ops for activation: choose_qparams, quant, dequant
 using DynamicQuantOps = std::tuple<Node*, Node*, Node*>;
 
@@ -612,9 +608,11 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
   return invoked_methods;
 }
 
-void propagateQuantizationParamsFromInput(
+void propagateQParams(
     Value* original_output,
-    const std::vector<Value*>& inputs) {
+    const std::vector<Value*>& inputs,
+    const c10::optional<std::tuple<c10::QScheme, QParamVector>>& qparams_opt =
+        c10::nullopt) {
   Node* n = original_output->node();
   Graph* graph = n->owningGraph();
   // for ops like average pool, we'll insert quant dequant after the op
@@ -626,24 +624,42 @@ void propagateQuantizationParamsFromInput(
   Value* quantized_input = inputs[0]->node()->input(0);
   // insert ops after the general op
   WithInsertPoint ins(n->next());
-  // get quantization parameters from previous quantized op
-  Node* scale = insertQParam(
-      graph,
-      quantized_input,
-      at::Symbol::aten("q_scale"),
-      FloatType::get(),
-      "q_scale");
-  Node* zero_point = insertQParam(
-      graph,
-      quantized_input,
-      at::Symbol::aten("q_zero_point"),
-      IntType::get(),
-      "q_zero_point");
-  Node* dtype = insertQParam(
-      graph, quantized_input, prim::dtype, IntType::get(), "dtype");
-  std::vector<Value*> quant_inputs = {
-      original_output, scale->output(), zero_point->output(), dtype->output()};
-  auto quant_kind = at::Symbol::aten("quantize_per_tensor");
+  std::vector<Value*> quant_inputs;
+  auto quant_kind = Symbol::aten("quantize_per_tensor");
+  if (qparams_opt.has_value()) {
+    quant_inputs = {original_output};
+    auto qscheme = std::get<0>(*qparams_opt);
+    auto qparams = std::get<1>(*qparams_opt);
+    if (isPerChannel(qscheme)) {
+      quant_kind = Symbol::aten("quantize_per_channel");
+    }
+    for (const auto& qparam : qparams) {
+      Value* qparam_val = graph->insertConstant(qparam.second);
+      qparam_val->setDebugName(quantized_input->debugName() + qparam.first);
+      quant_inputs.push_back(qparam_val);
+    }
+  } else {
+    // Only per tensor affine quantized tensor is supported in this case
+    // get quantization parameters from previous quantized op
+    Node* scale = insertQParam(
+        graph,
+        quantized_input,
+        at::Symbol::aten("q_scale"),
+        FloatType::get(),
+        "q_scale");
+    Node* zero_point = insertQParam(
+        graph,
+        quantized_input,
+        at::Symbol::aten("q_zero_point"),
+        IntType::get(),
+        "q_zero_point");
+    Node* dtype = insertQParam(
+        graph, quantized_input, prim::dtype, IntType::get(), "dtype");
+    quant_inputs = {original_output,
+                    scale->output(),
+                    zero_point->output(),
+                    dtype->output()};
+  }
   Node* quant = insertQuant(
       graph, quant_inputs, quant_kind, original_output->debugName() + ".quant");
   Value* quantized_output = quant->output();
@@ -702,7 +718,9 @@ void propagateQuantizationOps(Block* block) {
           continue;
         }
         if (isSingleInputGeneralValueAtenFunction(n)) {
-          propagateQuantizationParamsFromInput(output, inputs);
+          propagateQParams(output, inputs);
+        } else if (auto qparams_opt = getFixedQParams(n)) {
+          propagateQParams(output, inputs, qparams_opt);
         } else {
           propagateDequantize(output, inputs);
         }
