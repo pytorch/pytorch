@@ -9,7 +9,7 @@
 #include <qnnpack/assembly.h>
 #include <requantization/runtime-assembly.h>
 
-#  Args passed via 4 registers (16 bytes)
+#  Args passed via 8 registers (64 bytes)
 #  x0: mr
 #  x1: nr
 #  x2: k
@@ -44,13 +44,11 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     # Callee need to save 8-15 vector registers and only the lower 64 bits of each.
 
     # Load params
-    LDR x8, [sp, 8]
+    LDP x16, x8, [sp]
 
     # a1
     CMP x0, 2
     ADD x9, x3, x4
-    # Load output channel index
-    LDR x16, [sp]
 
     STP d15, d14, [sp, -16]
 
