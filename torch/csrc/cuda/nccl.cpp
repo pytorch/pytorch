@@ -90,8 +90,10 @@ ncclDataType_t get_data_type(const Tensor& t) {
       return ncclChar;
     case at::kByte:
       return ncclChar;
+#if defined(__HIP_PLATFORM_HCC__)
     case at::kBFloat16:
       return ncclBfloat16;
+#endif
     default:
       throw std::runtime_error("Unconvertible NCCL type");
   }
