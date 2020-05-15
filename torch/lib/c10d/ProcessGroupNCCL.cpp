@@ -52,6 +52,7 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kInt, ncclInt32},
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
+    {at::kBFloat16, ncclBfloat16},
 };
 
 // Helper function that gets the data type and issues error if not supported
