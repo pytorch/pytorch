@@ -819,7 +819,7 @@ void initJITBindings(PyObject* module) {
     });
   });
   m.def("_jit_get_custom_class_schemas", []() {
-    auto &methods = customClassMethods();
+    auto& methods = customClassMethods();
     return fmap(methods, [](const std::unique_ptr<jit::Function>& fn) {
       return fn->getSchema();
     });
