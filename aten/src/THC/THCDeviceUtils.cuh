@@ -107,7 +107,7 @@ __device__ __forceinline__ T WARP_SHFL_DOWN(T value, unsigned int delta, int wid
 
 #ifdef __HIP_PLATFORM_HCC__
 template<>
-__device__ __forceinline__ int64_t WARP_SHFL_DOWN<int64_t>(int64_t value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
+__device__ __forceinline__ int64_t WARP_SHFL_DOWN<int64_t>(int64_t value, unsigned int delta, int width , unsigned int mask)
 {
   //(HIP doesn't support int64_t). Trick from https://devblogs.nvidia.com/faster-parallel-reductions-kepler/
   int2 a = *reinterpret_cast<int2*>(&value);
@@ -116,7 +116,7 @@ __device__ __forceinline__ int64_t WARP_SHFL_DOWN<int64_t>(int64_t value, unsign
   return *reinterpret_cast<int64_t*>(&a);
 }
 template<>
-__device__ __forceinline__ c10::Half WARP_SHFL_DOWN<c10::Half>(c10::Half value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
+__device__ __forceinline__ c10::Half WARP_SHFL_DOWN<c10::Half>(c10::Half value, unsigned int delta, int width, unsigned int mask)
 {
   //(HIP doesn't support c10::Half). Trick from https://devblogs.nvidia.com/faster-parallel-reductions-kepler/
   short a = *reinterpret_cast<short*>(&value);
@@ -124,7 +124,7 @@ __device__ __forceinline__ c10::Half WARP_SHFL_DOWN<c10::Half>(c10::Half value, 
   return *reinterpret_cast<c10::Half*>(&a);
 }
 template<>
-__device__ __forceinline__ __half WARP_SHFL_DOWN<__half>(__half value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
+__device__ __forceinline__ __half WARP_SHFL_DOWN<__half>(__half value, unsigned int delta, int width, unsigned int mask)
 {
   //(HIP doesn't support c10::Half). Trick from https://devblogs.nvidia.com/faster-parallel-reductions-kepler/
   short a = *reinterpret_cast<short*>(&value);
