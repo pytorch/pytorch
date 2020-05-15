@@ -108,7 +108,7 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     # Load a_zero_point:
     # - d14 = a_zero_point
     VLD1.8 {d14[]}, [r9]
-    # add 8 bytes to get to vfmax
+    # add 12 bytes to get to vfmax
     ADD r9, r9, 12
     # q15 := vacc3x4567
     VMOV.I32 q15, q9
