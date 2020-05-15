@@ -90,7 +90,7 @@ ncclDataType_t get_data_type(const Tensor& t) {
       return ncclChar;
     case at::kByte:
       return ncclChar;
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 301
     case at::kBFloat16:
       return ncclBfloat16;
 #endif

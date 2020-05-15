@@ -52,7 +52,7 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kInt, ncclInt32},
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 301
     {at::kBFloat16, ncclBfloat16},
 #endif
 };
