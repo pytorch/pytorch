@@ -1193,8 +1193,8 @@ class TestGraphModePostTrainingStatic(QuantizationTestCase):
         r"""Compare the result of dynamic quantization of single linear layer in
         eager mode and graph mode.
         """
-        for qengine in supported_qengines:
-            with override_quantized_engine(qengine):
+        if 'qnnpack' in supported_qengines:
+            with override_quantized_engine('qnnpack'):
                 # eager mode
                 annotated_linear_model = AnnotatedSingleLayerLinearModel('qnnpack').eval()
                 linear_model = SingleLayerLinearModel().eval()
@@ -1291,7 +1291,7 @@ class TestFusion(QuantizationTestCase):
             self.assertEqual(type(model.sub2.relu), nn.ReLU)
 
         checkQAT(model)
-        test_only_train_fn(model, self.img_data)
+        test_only_train_fn(model, self.img_data_1d)
         model = convert(model)
 
         def checkQuantized(model):
@@ -1302,23 +1302,25 @@ class TestFusion(QuantizationTestCase):
             self.assertEqual(type(model.sub1.bn), nn.Identity)
             self.assertEqual(type(model.sub2.conv), nn.Conv2d)
             self.assertEqual(type(model.sub2.relu), nn.ReLU)
-            test_only_eval_fn(model, self.img_data)
+            test_only_eval_fn(model, self.img_data_1d)
         checkQuantized(model)
 
         model = ModelForFusion(default_qat_qconfig).train()
         model = fuse_modules(model, [['conv1', 'bn1', 'relu1'],
                              ['sub1.conv', 'sub1.bn']])
-        model = quantize_qat(model, test_only_train_fn, self.img_data)
+        model = quantize_qat(model, test_only_train_fn, self.img_data_1d)
         checkQuantized(model)
 
 
     def test_fuse_module_eval(self):
         model = ModelForFusion(default_qconfig)
         model.eval()
-        model = fuse_modules(model, [['conv1', 'bn1', 'relu1'] ,
+        model = fuse_modules(model, [['conv3', 'relu4'],
+                             ['conv1', 'bn1', 'relu1'],
                              ['conv2', 'relu2'],
                              ['bn2', 'relu3'],
                              ['sub1.conv', 'sub1.bn']])
+
         self.assertEqual(type(model.conv1), nni.ConvReLU2d,
                          "Fused Conv + BN + Relu first layer (BN is folded)")
         self.assertEqual(type(model.conv1[0]), nn.Conv2d,
@@ -1342,6 +1344,13 @@ class TestFusion(QuantizationTestCase):
         self.assertEqual(type(model.relu2), nn.Identity,
                          "Fused Conv + BN + Relu second layer (Skipped Relu)")
 
+        self.assertEqual(type(model.conv3), nni.ConvReLU1d,
+                         "Fused Conv + Relu for conv1d")
+        self.assertEqual(type(model.conv3[0]), nn.Conv1d,
+                         "Fused Conv + Relu for conv1d ")
+        self.assertEqual(type(model.conv3[1]), nn.ReLU,
+                         "Fused Conv + Relu for conv1d")
+
         self.assertEqual(type(model.sub1.conv), nn.Conv2d,
                          "Fused submodule Conv + folded BN")
         self.assertEqual(type(model.sub1.bn), nn.Identity,
@@ -1353,10 +1362,11 @@ class TestFusion(QuantizationTestCase):
 
         model = prepare(model)
         self.checkObservers(model)
-        test_only_eval_fn(model, self.img_data)
+        test_only_eval_fn(model, self.img_data_1d)
         model = convert(model)
 
         def checkQuantized(model):
+            self.assertEqual(type(model.conv3), nniq.ConvReLU1d)
             self.assertEqual(type(model.conv1), nniq.ConvReLU2d)
             self.assertEqual(type(model.bn1), nn.Identity)
             self.assertEqual(type(model.relu1), nn.Identity)
@@ -1365,15 +1375,16 @@ class TestFusion(QuantizationTestCase):
             self.assertEqual(type(model.sub2.conv), nn.Conv2d)
             self.assertEqual(type(model.sub2.relu), nn.ReLU)
             self.assertEqual(type(model.bn2), nniq.BNReLU3d)
-            test_only_eval_fn(model, self.img_data)
+            test_only_eval_fn(model, self.img_data_1d)
         checkQuantized(model)
 
         model = ModelForFusion(default_qconfig).eval()
         model = fuse_modules(model, [['conv1', 'bn1', 'relu1'],
                              ['conv2', 'relu2'],
                              ['bn2', 'relu3'],
-                             ['sub1.conv', 'sub1.bn']])
-        model = quantize(model, test_only_eval_fn, self.img_data)
+                             ['sub1.conv', 'sub1.bn'],
+                             ['conv3', 'relu4']])
+        model = quantize(model, test_only_eval_fn, self.img_data_1d)
         checkQuantized(model)
 
     def test_fusion_sequential_model_train(self):
