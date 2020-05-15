@@ -1104,6 +1104,7 @@ class RpcTest(RpcAgentTestFixture):
             j += 1
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_py_tensors_in_container(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1286,6 +1287,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_py_rpc_rref_args(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1303,6 +1305,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(c, torch.ones(n, n) + 4)
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_nested_remote(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -1316,6 +1319,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_nested_rref(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -1359,6 +1363,7 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_multi_layer_nested_async_rpc(self):
         # This test will exit right away, but there will be a chain of async
         # RPCs. The termination algorithm should detect those messages properly.
@@ -1384,6 +1389,7 @@ class RpcTest(RpcAgentTestFixture):
             rref.to_here()
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_rpc_return_rref(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -1420,6 +1426,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(local_rref.local_value(), 35)
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_local_value_not_on_owner(self):
         # ensure that an error message is thrown if a user tries to call
         # local_value() on a non-owning node.
@@ -1433,6 +1440,7 @@ class RpcTest(RpcAgentTestFixture):
             rref.local_value()
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_return_local_rrefs(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1507,6 +1515,7 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_remote_same_worker(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1714,14 +1723,17 @@ class RpcTest(RpcAgentTestFixture):
                 rpc.shutdown(graceful=True)
 
     @dist_init(setup_rpc=False)
+    @_skip_if_tensorpipe_agent
     def test_rref_leak(self):
         self._test_rref_leak(ignore_leak=False)
 
     @dist_init(setup_rpc=False)
+    @_skip_if_tensorpipe_agent
     def test_ignore_rref_leak(self):
         self._test_rref_leak(ignore_leak=True)
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_rref_str(self):
         rref1 = RRef(self.rank)
         id_class = "GloballyUniqueId"
@@ -2261,6 +2273,7 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init(setup_rpc=False)
+    @_skip_if_tensorpipe_agent
     def test_use_rref_after_shutdown(self):
         rpc.init_rpc(
             name="worker%d" % self.rank,
@@ -2343,6 +2356,7 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_user_rrefs_confirmed(self):
         dst_rank = (self.rank + 1) % self.world_size
         rref = self._create_rref()
@@ -2354,6 +2368,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(ret, True)
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_user_rrefs_confirmed_remote(self):
         dst_rank = (self.rank + 1) % self.world_size
         rref = self._create_rref()
