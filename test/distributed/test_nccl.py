@@ -35,7 +35,7 @@ class TestNCCL(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
     def test_broadcast(self, device, dtype):
-        expected = torch.zeros(128, dtype=dtype).uniform_()
+        expected = torch.zeros(128).uniform_().to(dtype=dtype)
         tensors = [expected.cuda()]
         for device in range(1, torch.cuda.device_count()):
             with torch.cuda.device(device):
@@ -50,7 +50,7 @@ class TestNCCL(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
     def test_reduce(self, device, dtype):
-        tensors = [torch.zeros(128, dtype=dtype).uniform_() for i in range(nGPUs)]
+        tensors = [torch.zeros(128).uniform_().to(dtype=dtype) for i in range(nGPUs)]
         expected = torch.zeros(128, dtype=dtype)
         for t in tensors:
             expected.add_(t)
@@ -64,7 +64,7 @@ class TestNCCL(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
     def test_all_reduce(self, device, dtype):
-        tensors = [torch.zeros(128, dtype=dtype).uniform_() for i in range(nGPUs)]
+        tensors = [torch.zeros(128).uniform_().to(dtype=dtype) for i in range(nGPUs)]
         expected = torch.zeros(128, dtype=dtype)
         for t in tensors:
             expected.add_(t)
@@ -80,7 +80,7 @@ class TestNCCL(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
     def test_all_gather(self, device, dtype):
-        inputs = [torch.zeros(128, dtype=dtype).uniform_() for i in range(nGPUs)]
+        inputs = [torch.zeros(128).uniform_().to(dtype=dtype) for i in range(nGPUs)]
         expected = torch.cat(inputs, 0)
 
         inputs = [inputs[i].cuda(i) for i in range(nGPUs)]
@@ -99,7 +99,7 @@ class TestNCCL(TestCase):
         in_size = 32 * nGPUs
         out_size = 32
 
-        inputs = [torch.zeros(in_size, dtype=dtype).uniform_() for i in range(nGPUs)]
+        inputs = [torch.zeros(in_size).uniform_().to(dtype=dtype) for i in range(nGPUs)]
         expected = torch.zeros(in_size, dtype=dtype)
         for t in inputs:
             expected.add_(t)
