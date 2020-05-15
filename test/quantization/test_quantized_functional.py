@@ -64,7 +64,53 @@ class TestQuantizedFunctional(QuantizationTestCase):
         np.testing.assert_array_almost_equal(
             Y_exp.int_repr().numpy(), Y_act.int_repr().numpy(), decimal=0)
 
+    @given(batch_size=st.integers(1, 3),
+           in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           L=st.integers(4, 16),
+           out_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           groups=st.integers(1, 4),
+           kernel=st.integers(1, 7),
+           stride=st.integers(1, 2),
+           pad=st.integers(0, 2),
+           dilation=st.integers(1, 2),
+           X_scale=st.floats(1.2, 1.6),
+           X_zero_point=st.integers(0, 4),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           Y_zero_point=st.integers(0, 4),
+           use_bias=st.booleans(),
+           use_channelwise=st.booleans(),
+           qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_conv1d_api(
+        self, batch_size, in_channels_per_group, L, out_channels_per_group,
+        groups, kernel, stride, pad, dilation,
+        X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
+        use_bias, use_channelwise, qengine,
+    ):
+        # Tests the correctness of the conv1d function.
+        if qengine not in torch.backends.quantized.supported_engines:
+            return
+        if qengine == 'qnnpack':
+            if IS_PPC or TEST_WITH_UBSAN:
+                return
+            use_channelwise = False
 
+        input_feature_map_size = (L, )
+        kernel_size = (kernel, )
+        stride = (stride, )
+        padding = (pad, )
+        dilation = (dilation, )
+
+        with override_quantized_engine(qengine):
+            qconv_fn = qF.conv1d
+            conv_fn = F.conv1d
+            self._test_conv_api_impl(
+                qconv_fn, conv_fn, batch_size, in_channels_per_group,
+                input_feature_map_size, out_channels_per_group, groups,
+                kernel_size, stride, padding, dilation, X_scale, X_zero_point,
+                W_scale, W_zero_point, Y_scale, Y_zero_point, use_bias,
+                use_channelwise)
 
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
