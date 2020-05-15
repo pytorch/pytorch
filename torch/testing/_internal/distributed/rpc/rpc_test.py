@@ -2415,6 +2415,7 @@ class RpcTest(RpcAgentTestFixture):
             self.assertFalse(t_ret.is_contiguous())
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_callback_simple(self):
         set_by_cb = concurrent.futures.Future()
         n = self.rank + 1
