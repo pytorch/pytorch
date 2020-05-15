@@ -64,8 +64,6 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
 
     # Add offset to the base pointer
     ADD x17, x17, x16
-    # Mul by 4 to get byte offset for requant scale.
-    LSL x16, x16, 2
 
     # Load b_zero_point
     LD1 {v25.8b}, [x17]
@@ -112,8 +110,9 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     # v23 := vacc7x4567
     MOV v23.16b, v9.16b
 
+    # Fold mul by 4 to get byte offset for requant scale.
     # Add offset to the base pointer
-    ADD x17, x17, x16
+    ADD x17, x17, x16, lsl#2
     // Load requantization_scale
     // - v26 = requantization_scale channels 0-3
     // - v27 = requantization_scale channels 4-7

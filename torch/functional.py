@@ -504,7 +504,8 @@ def istft(input, n_fft, hop_length=None, win_length=None, window=None,
 del torch.unique_dim
 
 
-def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
+def _unique_impl(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
+    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor, Tensor]
     r"""Returns the unique elements of the input tensor.
 
     .. note:: This function is different from :func:`torch.unique_consecutive` in the sense that
@@ -568,6 +569,7 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
             return handle_torch_function(
                 unique, (input,), input, sorted=sorted, return_inverse=return_inverse,
                 return_counts=return_counts, dim=dim)
+
     if dim is not None:
         output, inverse_indices, counts = _VF.unique_dim(
             input,
@@ -583,14 +585,69 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
             return_inverse=return_inverse,
             return_counts=return_counts,
         )
-    if return_inverse and return_counts:
-        return output, inverse_indices, counts
-    elif return_inverse:
-        return output, inverse_indices
-    elif return_counts:
-        return output, counts
-    else:
-        return output
+    return output, inverse_indices, counts
+
+
+def _return_counts(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
+    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return _unique_impl(input, sorted, return_inverse, return_counts, dim)
+
+    output, _, counts = _unique_impl(input, sorted, return_inverse, return_counts, dim)
+    return output, counts
+
+def _return_output(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
+    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tensor
+
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return _unique_impl(input, sorted, return_inverse, return_counts, dim)
+
+    output, _, _ = _unique_impl(input, sorted, return_inverse, return_counts, dim)
+    return output
+
+def _return_inverse(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
+    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return _unique_impl(input, sorted, return_inverse, return_counts, dim)
+
+    output, inverse_indices, _ = _unique_impl(input, sorted, return_inverse, return_counts, dim)
+    return output, inverse_indices
+
+_return_inverse_false = boolean_dispatch(
+    arg_name='return_counts',
+    arg_index=3,
+    default=False,
+    if_true=_return_counts,
+    if_false=_return_output,
+    module_name=__name__,
+    func_name='unique')
+
+_return_inverse_true = boolean_dispatch(
+    arg_name='return_counts',
+    arg_index=3,
+    default=False,
+    if_true=_unique_impl,
+    if_false=_return_inverse,
+    module_name=__name__,
+    func_name='unique')
+
+# The return type of unique depends on `return_inverse`, and `return_counts` so in order to
+# resolve the output type in TorchScript we need to statically know the value of both parameters
+
+unique = boolean_dispatch(
+    arg_name='return_inverse',
+    arg_index=2,
+    default=False,
+    if_true=_return_inverse_true,
+    if_false=_return_inverse_false,
+    module_name=__name__,
+    func_name='unique')
+unique.__doc__ = _unique_impl.__doc__
 
 
 def unique_consecutive(input, return_inverse=False, return_counts=False, dim=None):

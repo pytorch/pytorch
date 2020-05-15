@@ -701,9 +701,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return SpecialFormValue::create(prim::annotate);
 #ifdef USE_DISTRIBUTED
   } else if (
-      // RPC module is only avaialble for Python3
-      // when build flag "USE_DISTRIBUTED" is on.
-      !py::module::import("torch._six").attr("PY2").cast<bool>() &&
+      // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
       obj.ptr() ==
           py::module::import("torch.distributed.rpc").attr("rpc_async").ptr()) {
     return SpecialFormValue::create(prim::rpc_async);
@@ -763,16 +761,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         // Register class
         auto rcb = py::module::import("torch._jit_internal")
                        .attr("createResolutionCallbackForClassMethods")(obj);
-
-        {
-          // We're starting a new compilation, so update the error call stack in
-          // case it fails
-          ErrorReport::CallStack stack(qualname.name());
-          ErrorReport::CallStack::update_pending_range(loc);
-
-          py::module::import("torch.jit")
-              .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
-        }
+        py::module::import("torch.jit")
+            .attr("_recursive_compile_class")(obj, loc);
 
         // Return class
         auto newClassType = pyCu->get_class(qualname);
