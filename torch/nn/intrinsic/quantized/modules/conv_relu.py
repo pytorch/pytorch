@@ -43,8 +43,8 @@ class ConvReLU2d(nnq.Conv2d):
     def from_float(cls, mod):
         if type(mod) == torch.nn.intrinsic.qat.ConvBnReLU2d:
             mod.weight, mod.bias = fuse_conv_bn_weights(
-                mod.weight, mod.bias, mod.running_mean, mod.running_var,
-                mod.eps, mod.gamma, mod.beta)
+                mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
+                mod.bn.eps, mod.bn.weight, mod.bn.bias)
         return super(ConvReLU2d, cls).from_float(mod)
 
 

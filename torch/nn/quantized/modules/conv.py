@@ -361,8 +361,8 @@ class Conv2d(_ConvNd):
             # '.from_float only works for ' + cls.__QAT_MODULE.__name__
             if type(mod) == nniqat.ConvBn2d:
                 mod.weight, mod.bias = fuse_conv_bn_weights(
-                    mod.weight, mod.bias, mod.running_mean, mod.running_var,
-                    mod.eps, mod.gamma, mod.beta)
+                    mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
+                    mod.bn.eps, mod.bn.weight, mod.bn.bias)
             assert hasattr(mod, 'activation_post_process'), \
                 'Input QAT module must have observer attached'
             weight_post_process = mod.weight_fake_quant

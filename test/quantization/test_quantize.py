@@ -1256,7 +1256,8 @@ class TestFunctionalModule(QuantizationTestCase):
         checkQuantized(model)
         self.checkScriptable(model, [(xq, xq)], check_save_load=True)
 
-@skipIfNoFBGEMM
+# TODO: figure out why this is not running on devgpu?
+#@skipIfNoFBGEMM
 class TestFusion(QuantizationTestCase):
     def test_fuse_module_train(self):
         model = ModelForFusion(default_qat_qconfig).train()
@@ -1487,6 +1488,7 @@ class TestFusion(QuantizationTestCase):
                 prep_model = prepare_qat(model, inplace=False)
                 # output with fusion but no observers.
                 out_fused = prep_model(self.img_data[0][0])
+                # TODO: fix this failure
                 self.assertEqual(out_ref, out_fused)
 
                 model.qconfig = torch.quantization.get_default_qconfig(qengine)
