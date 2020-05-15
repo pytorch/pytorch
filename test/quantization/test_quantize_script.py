@@ -1385,9 +1385,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                          " with instruction set support avx2 or newer.")
     def test_quantized_cat(self):
-        """ Note that we to support the case that torch.cat is quantized
-        indepdently, we need to have an observer that works
-        for list of Tensors.
+        """ quantization of the output of cat will be depend on the
+        input of cat. we only quantize the output of cat when its inputs are quantized.
         """
         class QuantizedCat(torch.nn.Module):
             def __init__(self):
