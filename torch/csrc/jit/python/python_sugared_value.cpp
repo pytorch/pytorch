@@ -224,7 +224,7 @@ SugaredValuePtr ModuleValue::getitem(
     Function& m,
     Value* idx) {
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
-    return getSugaredModuleDict(loc, m)->getModules()->getitem(loc, m, idx);
+    return getSugaredDict(loc, m)->getModules()->getitem(loc, m, idx);
   }
   throw ErrorReport(loc)
       << "Only ModuleList, Sequential, and ModuleDict modules are subscriptable";
@@ -257,7 +257,7 @@ void recurseThroughNestedModules(
   values.push_back(self);
 
   checkInterface(loc, m, self, field);
-  auto module_dict = self->getSugaredModuleDict(loc, m);
+  auto module_dict = self->getSugaredDict(loc, m);
   auto keys_iter = module_dict->keys_;
   auto module_values_iter = module_dict->modules_;
   for (size_t i = 0; i < keys_iter->tup_.size(); ++i) {
@@ -278,7 +278,7 @@ void recurseThroughNestedModules(
   };
 }
 
-std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredNamedBufferDict(
+std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedBufferDict(
     const SourceRange& loc,
     Function& m) {
   std::vector<std::string> paramNames;
@@ -300,13 +300,13 @@ std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredNamedBufferDict(
     keys.push_back(name_v);
   }
 
-  return std::make_shared<SugaredModuleDict>(
+  return std::make_shared<SugaredDict>(
       std::make_shared<ModuleValue>(self_, concreteType_),
       std::make_shared<SugaredTupleValue>(keys),
       std::make_shared<SugaredTupleValue>(values));
 }
 
-std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredModuleDict(
+std::shared_ptr<SugaredDict> ModuleValue::getSugaredDict(
     const SourceRange& loc,
     Function& m) {
   std::vector<std::string> submoduleNames;
@@ -331,13 +331,13 @@ std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredModuleDict(
     values.push_back(mod_v);
   }
 
-  return std::make_shared<SugaredModuleDict>(
+  return std::make_shared<SugaredDict>(
       std::make_shared<ModuleValue>(self_, concreteType_),
       std::make_shared<SugaredTupleValue>(keys),
       std::make_shared<SugaredTupleValue>(values));
 }
 
-std::shared_ptr<SugaredValue> SugaredModuleDict::attr(
+std::shared_ptr<SugaredValue> SugaredDict::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
@@ -425,13 +425,13 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
   // values() calls into the appropriate method.
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
     if (field == "items" || field == "keys" || field == "values") {
-      return getSugaredModuleDict(loc, m)->attr(loc, m, field);
+      return getSugaredDict(loc, m)->attr(loc, m, field);
     }
   }
 
   if (field == "named_modules" || field == "modules" || field == "children" ||
       field == "named_children") {
-    return getSugaredModuleDict(loc, m)->attr(loc, m, field);
+    return getSugaredDict(loc, m)->attr(loc, m, field);
   }
 
   if (field == "named_buffers") {
@@ -527,7 +527,7 @@ SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
         << "Only constant Sequential, ModueList, or ModuleDict can be used as an iterable";
   }
 
-  auto module_dict = getSugaredModuleDict(loc, m);
+  auto module_dict = getSugaredDict(loc, m);
   if (iterableModuleKind == IterableModuleKind::DICT) {
     return module_dict->keys_;
   } else if (iterableModuleKind == IterableModuleKind::LIST) {

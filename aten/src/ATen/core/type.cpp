@@ -964,7 +964,7 @@ void ClassType::unsafeRemoveMethod(const std::string& name) {
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
-  auto ptr = ClassType::create(name(), compilation_unit_);
+  auto ptr = ClassType::create(name(), compilation_unit_, is_module());
   AT_ASSERT(numAttributes() == refined_slots.size());
   for (size_t i = 0; i < attributes_.size(); ++i) {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(attributes_[i].getType()));
@@ -1099,7 +1099,7 @@ ClassTypePtr ClassType::create(
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module)
+    bool is_module = false)
     : NamedType(TypeKind::ClassType, std::move(name)),
       compilation_unit_(std::move(cu)),
       isModule_(is_module) {

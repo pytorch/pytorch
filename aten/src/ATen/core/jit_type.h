@@ -1859,7 +1859,7 @@ struct CAFFE2_API ClassType : public NamedType {
   void unsafeRemoveConstant(const std::string& name);
 
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
-    auto ptr = ClassType::create(name(), compilation_unit_);
+    auto ptr = ClassType::create(name(), compilation_unit_, is_module());
     AT_ASSERT(numAttributes() == contained_types.size());
     for(size_t i = 0; i < attributes_.size(); ++i) {
       AT_ASSERT(attributes_[i].getType()->isSubtypeOf(contained_types[i]));
