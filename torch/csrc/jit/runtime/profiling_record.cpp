@@ -158,6 +158,7 @@ bool isProfilable(Node* n) {
     case prim::Return:
     case prim::Param:
     case prim::GetAttr:
+    case aten::t:
       return true;
     default:
     return false;
