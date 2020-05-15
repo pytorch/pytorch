@@ -11,14 +11,17 @@ from torch.nn.parameter import Parameter
 
 class _ConvBnNd(nn.modules.conv._ConvNd):
     def __init__(self,
-                 # BN args
-                 bn,
                  # ConvNd args
                  in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
                  groups,
                  bias,
                  padding_mode,
+                 # BatchNormNd args
+                 # num_features: out_channels
+                 eps=1e-05, momentum=0.1,
+                 # affine: True
+                 # track_running_stats: True
                  # Args for this module
                  freeze_bn=False,
                  qconfig=None):
@@ -27,8 +30,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                                          output_padding, groups, False, padding_mode)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
-        self.bn = bn
-        self.num_features = out_channels
+        self.bn = nn.BatchNorm2d(out_channels, eps, momentum, True, True)
         self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
         if bias:
@@ -104,14 +106,20 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
             assert mod.qconfig, 'Input float module must have a valid qconfig'
             qconfig = mod.qconfig
         conv, bn = mod[0], mod[1]
-        qat_convbn = cls(bn, conv.in_channels, conv.out_channels, conv.kernel_size,
+        qat_convbn = cls(conv.in_channels, conv.out_channels, conv.kernel_size,
                          conv.stride, conv.padding, conv.dilation,
                          conv.groups, conv.bias is not None,
                          conv.padding_mode,
+                         bn.eps, bn.momentum,
                          False,
                          qconfig)
         qat_convbn.weight = conv.weight
         qat_convbn.bias = conv.bias
+        qat_convbn.bn.weight = bn.weight
+        qat_convbn.bn.bias = bn.bias
+        qat_convbn.bn.running_mean = bn.running_mean
+        qat_convbn.bn.running_var = bn.running_var
+        qat_convbn.bn.num_batches_tracked = bn.num_batches_tracked
         return qat_convbn
 
 class ConvBn2d(_ConvBnNd, nn.Conv2d):
@@ -137,13 +145,16 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
     _FLOAT_MODULE = torch.nn.intrinsic.ConvBn2d
 
     def __init__(self,
-                 # BN args
-                 bn,
                  # ConvNd args
                  in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
                  bias=None,
                  padding_mode='zeros',
+                 # BatchNorm2d args
+                 # num_features: out_channels
+                 eps=1e-05, momentum=0.1,
+                 # affine: True
+                 # track_running_stats: True
                  # Args for this module
                  freeze_bn=False,
                  qconfig=None):
@@ -151,9 +162,9 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
         stride = _pair(stride)
         padding = _pair(padding)
         dilation = _pair(dilation)
-        _ConvBnNd.__init__(self, bn, in_channels, out_channels, kernel_size, stride,
+        _ConvBnNd.__init__(self, in_channels, out_channels, kernel_size, stride,
                            padding, dilation, False, _pair(0), groups, bias, padding_mode,
-                           freeze_bn, qconfig)
+                           eps, momentum, freeze_bn, qconfig)
 
 class ConvBnReLU2d(ConvBn2d):
     r"""
@@ -178,19 +189,22 @@ class ConvBnReLU2d(ConvBn2d):
     _FLOAT_MODULE = torch.nn.intrinsic.ConvBnReLU2d
 
     def __init__(self,
-                 # BN args
-                 bn,
                  # Conv2d args
                  in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
                  bias=None,
                  padding_mode='zeros',
+                 # BatchNorm2d args
+                 # num_features: out_channels
+                 eps=1e-05, momentum=0.1,
+                 # affine: True
+                 # track_running_stats: True
                  # Args for this module
                  freeze_bn=False,
                  qconfig=None):
-        super(ConvBnReLU2d, self).__init__(bn, in_channels, out_channels, kernel_size, stride,
+        super(ConvBnReLU2d, self).__init__(in_channels, out_channels, kernel_size, stride,
                                            padding, dilation, groups, bias,
-                                           padding_mode,
+                                           padding_mode, eps, momentum,
                                            freeze_bn,
                                            qconfig)
 

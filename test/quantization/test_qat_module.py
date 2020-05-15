@@ -271,7 +271,6 @@ class TestQATModule(TestCase):
 
             cls = ConvBnReLU2d if use_relu else ConvBn2d
             qat_op = cls(
-                copy.deepcopy(bn_op),
                 input_channels,
                 output_channels,
                 (kernel_h, kernel_w),
@@ -281,6 +280,8 @@ class TestQATModule(TestCase):
                 groups,
                 None,  # bias
                 padding_mode,
+                eps,
+                momentum,
                 freeze_bn=True,
                 qconfig=default_qat_qconfig
             ).to(dtype=torch.double)
@@ -421,10 +422,7 @@ class TestQATModule(TestCase):
             output_channels = output_channels_per_group * groups
             dilation_h = dilation_w = dilation
 
-            bn_op = BatchNorm2d(output_channels, eps, momentum).to(dtype=torch.double)
-
             qat_op = ConvBn2d(
-                copy.deepcopy(bn_op),
                 input_channels,
                 output_channels,
                 (kernel_h, kernel_w),
@@ -434,6 +432,8 @@ class TestQATModule(TestCase):
                 groups,
                 bias,  # bias
                 padding_mode,
+                eps,
+                momentum,
                 freeze_bn=freeze_bn,
                 qconfig=default_qat_qconfig
             ).to(dtype=torch.double)

@@ -23,11 +23,8 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "layer_norm",
 };
 
-std::vector<std::string> _dynamic_quantizable_call_funcs = {
-    "linear",
-};
-
 std::vector<std::string> _static_quantizable_aten_funcs = {
+    "conv1d",
     "conv2d",
     "conv3d",
     "linear",
@@ -41,6 +38,10 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "mul_",
     "hardswish",
     "layer_norm",
+};
+
+std::vector<std::string> _dynamic_quantizable_call_funcs = {
+    "linear",
 };
 
 std::vector<std::string> _dynamic_quantizable_aten_funcs = {
@@ -59,22 +60,8 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "_max_pool2d",
     "_max_pool3d",
     "dropout",
-    "interpolate",
-    "upsample",
-    "upsample_bilinear",
-    "upsample_nearest",
     "relu",
-    "relu_",
-    "sigmoid",
-    "tanh",
-    "hardtanh",
-    "hardtanh_",
-    "elu",
-    "elu_",
     "hardsigmoid",
-    "hardsigmoid_",
-    "leaky_relu",
-    "leaky_relu_",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
@@ -89,42 +76,25 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "flatten",
     "max",
     "min",
-    "mean",
-    "upsample_nearest1d",
-    "upsample_nearest2d",
-    "upsample_nearest3d",
-    "upsample_linear1d",
-    "upsample_bilinear2d",
-    "upsample_trilinear3d",
-    "upsample_bicubic2d",
     "dropout",
     "reshape",
-    "resize_", // Non-inplace resize is deprecated
+    // Non-inplace resize is deprecated
+    "resize_",
     "chunk",
     "view",
     "transpose",
     "contiguous",
     "permute",
     "repeat_interleave",
-    "clamp",
-    // "clamp_",  // Enable when quantized `clamp_` is ready
     "relu",
     "relu_",
-    "sigmoid",
-    "tanh",
-    "hardtanh",
-    "hardtanh_",
-    "elu",
-    "elu_",
-    "hardsigmoid",
-    "hardsigmoid_",
-    "leaky_relu",
-    "leaky_relu_",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
 // have a single input Tensor
 // Also these ops do computation on the value of Tensor
+// TODO: [Need verify] looks like we can quantize simple functionals that just
+// call into aten functions
 std::vector<std::string> _single_input_general_value_call_funcs = {
     "avg_pool1d",
     "avg_pool2d",
@@ -132,6 +102,13 @@ std::vector<std::string> _single_input_general_value_call_funcs = {
     "adaptive_avg_pool1d",
     "adaptive_avg_pool2d",
     "adaptive_avg_pool3d",
+    "interpolate",
+    "upsample",
+    "upsample_bilinear",
+    "upsample_nearest",
+    "hardtanh",
+    "elu",
+    "leaky_relu",
 };
 
 // Theses are aten functions for ops that doesn't require observation and
@@ -145,6 +122,55 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     "adaptive_avg_pool1d",
     "adaptive_avg_pool2d",
     "adaptive_avg_pool3d",
+    "mean",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "upsample_linear1d",
+    "upsample_bilinear2d",
+    "upsample_trilinear3d",
+    "upsample_bicubic2d",
+    "clamp",
+    // "clamp_",  // Enable when quantized `clamp_` is ready
+    "hardtanh",
+    "hardtanh_",
+    "elu",
+    "elu_",
+    "leaky_relu",
+    "leaky_relu_",
+};
+
+const float _asym_scale = 1.0f / 256.0f;
+const int _asym_zero_point = 0;
+const float _sym_scale = 2.0f / 256.0f;
+const int _sym_zero_point = 128;
+// quantization parameters for ops with range 0 to 1
+// for example: aten/src/ATen/native/quantized/cpu/qsigmoid.cpp
+std::tuple<c10::QScheme, QParamVector> _per_tensor_asym_qparam =
+    std::make_tuple(
+        c10::kPerTensorAffine,
+        QParamVector({std::make_pair(".scale", IValue(_asym_scale)),
+                      std::make_pair(".zero_point", IValue(_asym_zero_point)),
+                      std::make_pair(".scalar_type", IValue(c10::kQUInt8))}));
+
+// quantization parrameters for ops with range -1 to 1
+// for example: aten/src/ATen/native/quantized/cpu/qtanh.cpp
+std::tuple<c10::QScheme, QParamVector> _per_tensor_sym_qparam = std::make_tuple(
+    c10::kPerTensorAffine,
+    QParamVector({std::make_pair(".scale", IValue(_sym_scale)),
+                  std::make_pair(".zero_point", IValue(_sym_zero_point)),
+                  std::make_pair(".scalar_type", IValue(c10::kQUInt8))}));
+
+// Map from aten op symbol to the quantization parameters
+// for the ops with fixed quantization parameters
+std::unordered_map<NodeKind, std::tuple<c10::QScheme, QParamVector>>
+    _fixed_qparams_map = {
+        {Symbol::aten("hardsigmoid"), _per_tensor_asym_qparam},
+        {Symbol::aten("hardsigmoid_"), _per_tensor_asym_qparam},
+        {Symbol::aten("sigmoid"), _per_tensor_asym_qparam},
+        {Symbol::aten("sigmoid_"), _per_tensor_asym_qparam},
+        {Symbol::aten("tanh"), _per_tensor_sym_qparam},
+        {Symbol::aten("tanh_"), _per_tensor_sym_qparam},
 };
 
 // Special checks for ops that do not require observers for all input tensors.
@@ -201,7 +227,11 @@ bool matchArgPattern(
 bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv2d", 1}, {"conv3d", 1}, {"linear", 1}, {"lstm", 2}}),
+      AtenFuncArgs({{"conv1d", 1},
+                    {"conv2d", 1},
+                    {"conv3d", 1},
+                    {"linear", 1},
+                    {"lstm", 2}}),
       CallFuncArgs({{"linear", 2}}));
   return result;
 }
@@ -209,7 +239,8 @@ bool isWeight(Value* v) {
 bool isBiasOfConvOrLinear(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv2d", 2}, {"conv3d", 2}, {"linear", 2}}),
+      AtenFuncArgs(
+          {{"conv1d", 2}, {"conv2d", 2}, {"conv3d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
   return result;
 }
@@ -248,17 +279,24 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
   return {};
 }
 
-bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
-  std::vector<Symbol> aten_func_symbols;
+std::vector<NodeKind> toAtenSymbol(const std::vector<std::string>& func_names) {
+  std::vector<NodeKind> symbols;
   std::transform(
-      aten_funcs.begin(),
-      aten_funcs.end(),
-      std::back_inserter(aten_func_symbols),
-      [](const std::string& s) { return Symbol::aten(s); });
+      func_names.begin(),
+      func_names.end(),
+      std::back_inserter(symbols),
+      Symbol::aten);
+  return symbols;
+}
 
-  return std::find(
-             aten_func_symbols.begin(), aten_func_symbols.end(), n->kind()) !=
-      aten_func_symbols.end();
+bool isAtenFunc(Node* n, const std::vector<NodeKind>& aten_funcs) {
+  return std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
+      aten_funcs.end();
+}
+
+bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
+  const auto& symbols = toAtenSymbol(aten_funcs);
+  return isAtenFunc(n, symbols);
 }
 
 // TODO: factor out isCallFunc
@@ -277,42 +315,49 @@ bool isFunctionNode(
 }
 
 bool isSingleInputGeneralValueAtenFunction(Node* n) {
-  return isFunctionNode(
-      n,
-      /* call_funcs = */ {},
-      /* aten_funcs = */ _single_input_general_value_aten_funcs);
+  return isAtenFunc(n, _single_input_general_value_aten_funcs);
 }
 
 bool isSingleInputGeneralCallFunction(Node* n) {
-  static std::vector<std::string> _single_input_general_call_funcs;
+  static std::vector<std::string> single_input_general_call_funcs;
   std::copy(
       _single_input_general_shape_call_funcs.begin(),
       _single_input_general_shape_call_funcs.end(),
-      std::back_inserter(_single_input_general_call_funcs));
+      std::back_inserter(single_input_general_call_funcs));
   std::copy(
       _single_input_general_value_call_funcs.begin(),
       _single_input_general_value_call_funcs.end(),
-      std::back_inserter(_single_input_general_call_funcs));
+      std::back_inserter(single_input_general_call_funcs));
   return isFunctionNode(
       n,
-      /* call_funcs = */ _single_input_general_shape_call_funcs,
+      /* call_funcs = */ single_input_general_call_funcs,
       /* aten_funcs = */ {});
 }
 
 bool isSingleInputGeneralAtenFunction(Node* n) {
-  static std::vector<std::string> _single_input_general_aten_funcs;
-  std::copy(
-      _single_input_general_shape_aten_funcs.begin(),
-      _single_input_general_shape_aten_funcs.end(),
-      std::back_inserter(_single_input_general_aten_funcs));
-  std::copy(
-      _single_input_general_value_aten_funcs.begin(),
-      _single_input_general_value_aten_funcs.end(),
-      std::back_inserter(_single_input_general_aten_funcs));
-  return isFunctionNode(
-      n,
-      /* call_funcs = */ {},
-      /* aten_funcs = */ _single_input_general_aten_funcs);
+  static std::vector<NodeKind> fixed_qparams_aten_funcs;
+  std::transform(
+      _fixed_qparams_map.begin(),
+      _fixed_qparams_map.end(),
+      std::back_inserter(fixed_qparams_aten_funcs),
+      [](auto pair) { return pair.first; });
+
+  return isAtenFunc(n, _single_input_general_shape_aten_funcs) ||
+      isAtenFunc(n, _single_input_general_value_aten_funcs) ||
+      isAtenFunc(n, fixed_qparams_aten_funcs);
+}
+
+c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
+  static std::vector<NodeKind> fixed_qparam_funcs;
+  std::transform(
+      _fixed_qparams_map.begin(),
+      _fixed_qparams_map.end(),
+      std::back_inserter(fixed_qparam_funcs),
+      [](const auto& pair) { return pair.first; });
+  if (isAtenFunc(n, fixed_qparam_funcs)) {
+    return _fixed_qparams_map.at(n->kind());
+  }
+  return c10::nullopt;
 }
 
 bool userDefinedCallFunction(Node* n) {

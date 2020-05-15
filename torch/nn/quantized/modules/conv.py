@@ -179,35 +179,20 @@ class Conv1d(_ConvNd):
         >>> input = torch.randn(20, 16, 100)
         >>> # quantize input to quint8
         >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0,
-                                                dtype=torch.quint32)
+                                                dtype=torch.quint8)
         >>> output = m(q_input)
 
     """
 
     _FLOAT_MODULE = nn.Conv1d
 
-    # We are using Conv2d to run the Conv1d. For that we need to know which
-    # dimension is squeezed/unsqueezed.
-    _SQUEEZE_DIM = -2  # -2 is faster than -1.
-
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros'):
-        kernel_size = list(_pair_from_first(kernel_size))
-        kernel_size[self._SQUEEZE_DIM] = 1
-        kernel_size = tuple(kernel_size)
-
-        stride = list(_pair_from_first(stride))
-        stride[self._SQUEEZE_DIM] = 1
-        stride = tuple(stride)
-
-        padding = list(_pair_from_first(padding))
-        padding[self._SQUEEZE_DIM] = 0
-        padding = tuple(padding)
-
-        dilation = list(_pair_from_first(dilation))
-        dilation[self._SQUEEZE_DIM] = 1
-        dilation = tuple(dilation)
+        kernel_size = _pair_from_first(kernel_size)
+        stride = _pair_from_first(stride)
+        padding = _pair_from_first(padding)
+        dilation = _pair_from_first(dilation)
 
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -218,15 +203,11 @@ class Conv1d(_ConvNd):
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        # Check if need to unsqueeze
-        if len(w.shape) == 3:
-            w = w.unsqueeze(dim=self._SQUEEZE_DIM)
-        self._packed_params = torch.ops.quantized.conv2d_prepack(
+        self._packed_params = torch.ops.quantized.conv1d_prepack(
             w, b, self.stride, self.padding, self.dilation, self.groups)
 
     def _weight_bias(self):
-        w, b = self._packed_params.unpack()
-        w = w.squeeze(dim=self._SQUEEZE_DIM)
+        w, b = torch.ops.quantized.conv1d_unpack(self._packed_params)
         return w, b
 
     def weight(self):
@@ -240,10 +221,7 @@ class Conv1d(_ConvNd):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 3:
             raise ValueError("Input shape must be `(N, C, L)`!")
-        input = input.unsqueeze(dim=self._SQUEEZE_DIM)
-        output = ops.quantized.conv2d(
-            input, self._packed_params, self.scale, self.zero_point)
-        return output.squeeze(dim=self._SQUEEZE_DIM)
+        return ops.quantized.conv1d(input, self._packed_params, self.scale, self.zero_point)
 
     @classmethod
     def from_float(cls, mod):
@@ -258,6 +236,11 @@ class Conv1d(_ConvNd):
             cls._FLOAT_MODULE.__name__
         assert hasattr(mod, 'qconfig'), \
             'Input float module must have qconfig defined.'
+        if type(mod) == nni.ConvReLU1d:
+            activation_post_process = mod[1].activation_post_process
+            mod = mod[0]
+        else:
+            activation_post_process = mod.activation_post_process
         weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
         act_scale, act_zp = mod.activation_post_process.calculate_qparams()
