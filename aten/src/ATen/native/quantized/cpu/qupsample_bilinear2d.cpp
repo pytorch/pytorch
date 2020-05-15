@@ -102,7 +102,7 @@ Tensor quantized_upsample_bilinear2d_cpu(
       output_size.size());
 
   TORCH_CHECK(
-      input.numel() != 0 && input.dim() == 4,
+      input.dim() == 4,
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 

@@ -86,6 +86,11 @@ class TensorPipeAgent : public RpcAgent {
   std::string createUniqueShmAddr();
 #endif
 
+  // Retrieve IP address for a given network device for corss-hosts
+  // to set up tensorpipe connection. For now we default the device
+  // name eth0.
+  static std::string getDefaultIPAddress();
+
   // TensorPipe read function that could be used to read response messages
   // by client, and read request messages by server.
   void pipeRead(

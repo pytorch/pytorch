@@ -216,6 +216,10 @@ const Expr* IRMutator::mutate(const FunctionCall* v) {
   return this->mutate(base);
 }
 
+const Expr* IRMutator::mutate(const NoOp* v) {
+  return v;
+}
+
 const Expr* IRMutator::mutate(const Term* v) {
   const Expr* newScalar = v->scalar()->accept_mutator(this);
 
