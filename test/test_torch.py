@@ -17316,6 +17316,9 @@ _float_types_no_half = [torch.float, torch.double]
 # with _float_types when bfloat16 bringup is complete on all platforms
 _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
 
+# TODO: this will be replaced by _float_types2 + _complex_types when #38400 is merged
+_complex_and_float_types2 = _float_types2 + [torch.cfloat, torch.cdouble]
+
 _signed_types = [
     torch.half, torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long
@@ -17765,9 +17768,9 @@ tensor_op_tests = [
     ('acos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('asin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('atan', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('acosh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
-    ('asinh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
-    ('atanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
+    ('acosh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _complex_and_float_types2),
+    ('asinh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _complex_and_float_types2),
+    ('atanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _complex_and_float_types2),
     ('cos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('cosh', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, 1e-5, _float_types),
     ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
