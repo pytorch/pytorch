@@ -306,7 +306,7 @@ void RemoveRedundantDequantize(std::shared_ptr<Graph>& graph) {
         dequant_out->uses().size() == 1,
         "Expect dequant output to have single use");
     Node* user = dequant_out->uses()[0].user;
-    return !nodeQuantizable(user, /* is_dynamic */ false);
+    return isTensorInfoNode(user);
   };
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(dequantize, dequantize_replacement);
