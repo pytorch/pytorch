@@ -1158,7 +1158,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   return stmt;
 }
 
-std::string TensorExprKernel::getCodegenName(BackendType backendType) {
+std::string TensorExprKernel::getCodeGenName(BackendType backendType) {
   switch (backendType) {
     case kCudaCodeGen:
       return "cuda_codegen";
@@ -1272,10 +1272,11 @@ static void checkInputs(
 }
 
 at::Device TensorExprKernel::pickDeviceType(
-    const at::ArrayRef<IValue>& inputs) {
+    const at::ArrayRef<torch::jit::Value*>& inputs) {
   for (auto const& input : inputs) {
-    if (input.isTensor()) {
-      return input.toTensor().device();
+    auto tt = input->type()->cast<TensorType>();
+    if (tt && tt->device()) {
+      return *tt->device();
     }
   }
   throw std::runtime_error("No tensor inputs");
@@ -1390,6 +1391,16 @@ void TensorExprKernel::compile() {
     tensorOutputs_.emplace_back(tensors_.at(output->unique()));
     tensors_.erase(output->unique());
   }
+
+  device_ = pickDeviceType(graph_->inputs());
+  BackendType backendType = inferBackendTypeFromDevice(device_);
+  Stmt* stmt = generateStmt(backendType);
+
+  // Set up formal params (inputs, then outputs) for kernel.
+  std::vector<CodeGen::BufferArg> params = prepareBufferArgs();
+
+  // Generate code.
+  codegen_ = CreateCodeGen(getCodeGenName(backendType), stmt, params, device_);
 }
 
 TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
@@ -1426,8 +1437,7 @@ void TensorExprKernel::run(Stack& stack) {
 
 std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     const at::ArrayRef<IValue>& inputs,
-    std::vector<at::Tensor>& outputs,
-    at::Device device) {
+    std::vector<at::Tensor>& outputs) {
   std::map<const Expr*, int32_t> varToSize;
 
   std::vector<CodeGen::CallArg> runArgs;
@@ -1468,57 +1478,27 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     }
 
     outputs.push_back(at::empty(
-        tensorSize, c10::TensorOptions(tensorType(o)).device(device)));
+        tensorSize, c10::TensorOptions(tensorType(o)).device(device_)));
     runArgs.emplace_back(outputs.back().data_ptr());
   }
   return runArgs;
 }
 
-void TensorExprKernel::lowerToBackend(const at::ArrayRef<IValue>& inputs) {
-  checkInputs(inputs, inputTypes_);
-
-  at::Device device = pickDeviceType(inputs);
-  if (!codegenCache_.count(torch::get_hash(device))) {
-    BackendType backendType = inferBackendTypeFromDevice(device);
-    Stmt* stmt = generateStmt(backendType);
-
-    // Set up formal params (inputs, then outputs) for kernel.
-    std::vector<CodeGen::BufferArg> params = prepareBufferArgs();
-
-    // Generate code.
-    codegenCache_.emplace(
-        torch::get_hash(device),
-        CreateCodeGen(getCodegenName(backendType), stmt, params, device));
-  }
-}
-
-void TensorExprKernel::codegenRun(
-    at::Device device,
-    const std::vector<CodeGen::CallArg>& runArgs) {
-  codegenCache_.at(torch::get_hash(device))->call(runArgs);
-}
-
-Stmt* TensorExprKernel::getStmtForInputs(const at::ArrayRef<IValue>& inputs) {
-  lowerToBackend(inputs);
-  at::Device device = pickDeviceType(inputs);
-  return codegenCache_.at(torch::get_hash(device))->stmt();
+Stmt* TensorExprKernel::getCodeGenStmt() {
+  return codegen_->stmt();
 }
 
 void TensorExprKernel::runKernel(Stack& stack) {
   KernelScope kernelScope(&kernelArena_);
+
   // Set up arguments (inputs, then outputs) for kernel call.
   auto inputs = last(stack, nInputs_);
-
-  lowerToBackend(inputs);
-
-  at::Device device = pickDeviceType(inputs);
-
   std::vector<at::Tensor> outputs;
-  std::vector<CodeGen::CallArg> runArgs =
-      prepareRunArgs(inputs, outputs, device);
+
+  std::vector<CodeGen::CallArg> runArgs = prepareRunArgs(inputs, outputs);
 
   // Call the kernel.
-  codegenRun(device, runArgs);
+  codegen_->call(runArgs);
 
   // Update the stack.
   drop(stack, nInputs_);
