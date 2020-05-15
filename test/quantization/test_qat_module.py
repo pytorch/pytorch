@@ -13,7 +13,7 @@ from torch.nn.modules.utils import _pair
 from torch.quantization.qconfig import default_qat_qconfig
 import torch.backends.mkldnn
 from torch.testing._internal.common_utils import TestCase
-from hypothesis import given, seed
+from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
