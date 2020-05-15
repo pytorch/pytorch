@@ -780,7 +780,7 @@ class TestCase(expecttest.TestCase):
     # in https://github.com/pytorch/pytorch/pull/32538.
     # dtype name : (rtol, atol)
     dtype_precisions = {
-        'float16': (0.001, 1e-5),
+        'float16': (0.005, 1e-4),
         'bfloat16': (0.016, 1e-5),
         'float32': (1.3e-6, 1e-5),
         'float64': (1e-7, 1e-7),
