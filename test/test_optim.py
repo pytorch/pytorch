@@ -1450,7 +1450,7 @@ class TestLRScheduler(TestCase):
         scheduler_copy.load_state_dict(scheduler.state_dict())
         for key in scheduler.__dict__.keys():
             if key not in {'optimizer', 'is_better'}:
-                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
     def test_lambda_lr_state_dict_fn(self):
         scheduler = LambdaLR(self.opt, lr_lambda=lambda x: x)
@@ -1461,7 +1461,7 @@ class TestLRScheduler(TestCase):
         scheduler_copy.load_state_dict(state)
         for key in scheduler.__dict__.keys():
             if key not in {'optimizer', 'lr_lambdas'}:
-                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
     def test_lambda_lr_state_dict_obj(self):
         scheduler = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(10))
@@ -1472,7 +1472,7 @@ class TestLRScheduler(TestCase):
         scheduler_copy.load_state_dict(state)
         for key in scheduler.__dict__.keys():
             if key not in {'optimizer'}:
-                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
     def test_CosineAnnealingWarmRestarts_lr_state_dict(self):
         self._check_scheduler_state_dict(
