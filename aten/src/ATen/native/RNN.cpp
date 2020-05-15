@@ -62,7 +62,8 @@ using CellParamsSerializationType = std::tuple<
     std::vector<at::Tensor>,
     std::vector<double>,
     std::vector<int64_t>,
-    std::vector<c10::intrusive_ptr<LinearPackedParamsBase>>>;
+    std::vector<c10::intrusive_ptr<LinearPackedParamsBase>>,
+    int64_t>;
 
 // Base class so we can polymorphically handle these
 struct CellParamsBase : torch::CustomClassHolder {
@@ -198,14 +199,15 @@ struct QuantizedCellParams : public CellParamsBase {
         std::move(tensors_to_serialize),
         std::move(doubles_to_serialize),
         std::move(longs_to_serialize),
-        {});
+        {},
+        0);
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
     std::vector<at::Tensor> tensors;
     std::vector<double> doubles;
     std::vector<int64_t> longs;
-    std::tie(std::ignore, tensors, doubles, longs, std::ignore) =
+    std::tie(std::ignore, tensors, doubles, longs, std::ignore, std::ignore) =
         std::move(state);
     TORCH_INTERNAL_ASSERT(tensors.size() == 6);
     TORCH_INTERNAL_ASSERT(doubles.size() == 2);
@@ -346,13 +348,14 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
         std::move(tensors_to_serialize),
         {},
         {},
-        std::move(packed_params_to_serialize));
+        std::move(packed_params_to_serialize),
+        0);
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
     std::vector<at::Tensor> tensors;
     std::vector<c10::intrusive_ptr<LinearPackedParamsBase>> packed_params;
-    std::tie(std::ignore, tensors, std::ignore, std::ignore, packed_params) =
+    std::tie(std::ignore, tensors, std::ignore, std::ignore, packed_params, std::ignore) =
         std::move(state);
     TORCH_INTERNAL_ASSERT(tensors.size() == 2);
     TORCH_INTERNAL_ASSERT(packed_params.size() == 2);
@@ -416,13 +419,13 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
         packed_params_to_serialize{packed_ih, packed_hh};
 
     return CellParamsSerializationType(
-        "quantized_fp16", {}, {}, {}, std::move(packed_params_to_serialize));
+        "quantized_fp16", {}, {}, {}, std::move(packed_params_to_serialize), 0);
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
     std::vector<c10::intrusive_ptr<LinearPackedParamsBase>> packed_params;
     std::tie(
-        std::ignore, std::ignore, std::ignore, std::ignore, packed_params) =
+        std::ignore, std::ignore, std::ignore, std::ignore, packed_params, std::ignore) =
         std::move(state);
     TORCH_INTERNAL_ASSERT(packed_params.size() == 2);
     return make_quantized_cell_params_fp16(
