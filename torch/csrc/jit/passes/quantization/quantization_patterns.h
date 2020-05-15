@@ -69,6 +69,42 @@ QuantFusionInfo getInputTensorQParamOpFusionInfo(
   return {op_name, op_pattern, aten_op_pattern};
 }
 
+// Patterns for the ops that has fixed quantization parameters
+QuantFusionInfo getFixedQParamOpFusionInfo(
+    const std::string& op_name,
+    const std::vector<std::string>& extra_args,
+    bool is_symmetric) {
+  const auto& extra_arg_list = getExtraArgList(extra_args);
+  std::string graph_header = "graph(%a_quant" + extra_arg_list + "):";
+  std::string op_pattern = graph_header;
+  op_pattern += R"(
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = )";
+  op_pattern += op_name + "(" + "%a_dequant" + extra_arg_list + ")";
+  // IR pattern common to all ops with fixed quantization parameters for
+  // asymetric quantization
+  std::string asym_fixed_qparam_op_suffix = R"(
+          %r_scale : float = prim::Constant[value=0.00390625]()
+          %r_zero_point : int = prim::Constant[value=0]()
+          %r_dtype : int = prim::Constant[value=13]()
+          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+          return (%r_quant) )";
+
+  std::string sym_fixed_qparam_op_suffix = R"(
+          %r_scale : float = prim::Constant[value=0.0078125]()
+          %r_zero_point : int = prim::Constant[value=128]()
+          %r_dtype : int = prim::Constant[value=13]()
+          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+          return (%r_quant) )";
+  op_pattern +=
+      is_symmetric ? sym_fixed_qparam_op_suffix : asym_fixed_qparam_op_suffix;
+
+  std::string aten_op_pattern =
+      getAtenOpPattern(graph_header, op_name, extra_arg_list);
+
+  return {op_name, op_pattern, aten_op_pattern};
+}
+
 } // namespace
 
 std::vector<QuantFusionInfo> quant_fusion_pattern_and_replacements() {
@@ -624,93 +660,19 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
   auto leaky_relu_ = getInputTensorQParamOpFusionInfo(
       "aten::leaky_relu_", {"%negative_slope"});
 
-  // IR pattern common to all ops with fixed quantization parameters for
-  // asymetric quantization
-  std::string asym_fixed_qparam_op_suffix = R"(
-          %r_scale : float = prim::Constant[value=0.00390625]()
-          %r_zero_point : int = prim::Constant[value=0]()
-          %r_dtype : int = prim::Constant[value=13]()
-          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-          return (%r_quant) )";
+  // Ops with fixed quantization parameters
+  auto hardsigmoid = getFixedQParamOpFusionInfo("aten::hardsigmoid", {}, false);
 
-  std::string sym_fixed_qparam_op_suffix = R"(
-          %r_scale : float = prim::Constant[value=0.0078125]()
-          %r_zero_point : int = prim::Constant[value=128]()
-          %r_dtype : int = prim::Constant[value=13]()
-          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-          return (%r_quant) )";
+  auto hardsigmoid_ =
+      getFixedQParamOpFusionInfo("aten::hardsigmoid_", {}, false);
 
-  // aten::hardsigmoid
-  std::string hardsigmoid = R"(
-graph(%a_quant):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::hardsigmoid(%a_dequant)
-)" + asym_fixed_qparam_op_suffix;
+  auto sigmoid = getFixedQParamOpFusionInfo("aten::sigmoid", {}, false);
 
-  std::string aten_hardsigmoid = R"(
-graph(%a_quant):
-          %r = aten::hardsigmoid(%a_quant)
-          return (%r) )";
+  auto sigmoid_ = getFixedQParamOpFusionInfo("aten::sigmoid_", {}, false);
 
-  // aten::hardsigmoid_
-  std::string hardsigmoid_ = R"(
-graph(%a_quant):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::hardsigmoid_(%a_dequant)
-)" + asym_fixed_qparam_op_suffix;
+  auto tanh = getFixedQParamOpFusionInfo("aten::tanh", {}, true);
 
-  std::string aten_hardsigmoid_ = R"(
-graph(%a_quant):
-          %r = aten::hardsigmoid_(%a_quant)
-          return (%r) )";
-
-  // aten::sigmoid
-  std::string sigmoid = R"(
-graph(%a_quant):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::sigmoid(%a_dequant)
-)" + asym_fixed_qparam_op_suffix;
-
-  std::string aten_sigmoid = R"(
-graph(%a_quant):
-          %r = aten::sigmoid(%a_quant)
-          return (%r) )";
-
-  // aten::sigmoid_
-  std::string sigmoid_ = R"(
-graph(%a_quant):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::sigmoid_(%a_dequant)
-)" + asym_fixed_qparam_op_suffix;
-
-  std::string aten_sigmoid_ = R"(
-graph(%a_quant):
-          %r = aten::sigmoid_(%a_quant)
-          return (%r) )";
-
-  // aten::tanh
-  std::string tanh = R"(
-graph(%a_quant):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::tanh(%a_dequant)
-)" + sym_fixed_qparam_op_suffix;
-
-  std::string aten_tanh = R"(
-graph(%a_quant):
-          %r = aten::tanh(%a_quant)
-          return (%r) )";
-
-  // aten::tanh_
-  std::string tanh_ = R"(
-graph(%a_quant):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::tanh_(%a_dequant)
-)" + sym_fixed_qparam_op_suffix;
-
-  std::string aten_tanh_ = R"(
-graph(%a_quant):
-          %r = aten::tanh_(%a_quant)
-          return (%r) )";
+  auto tanh_ = getFixedQParamOpFusionInfo("aten::tanh_", {}, true);
 
   return {
       {"quantized::conv1d", conv1d, quantized_conv1d},
@@ -798,12 +760,12 @@ graph(%a_quant):
       leaky_relu,
       leaky_relu_,
       // fixed qparam ops
-      {"aten::hardsigmoid", hardsigmoid, aten_hardsigmoid},
-      {"aten::hardsigmoid_", hardsigmoid_, aten_hardsigmoid_},
-      {"aten::sigmoid", sigmoid, aten_sigmoid},
-      {"aten::sigmoid_", sigmoid_, aten_sigmoid_},
-      {"aten::tanh", tanh, aten_tanh},
-      {"aten::tanh_", tanh_, aten_tanh_},
+      hardsigmoid,
+      hardsigmoid_,
+      sigmoid,
+      sigmoid_,
+      tanh,
+      tanh_,
   };
 }
 
