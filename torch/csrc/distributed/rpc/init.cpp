@@ -337,6 +337,29 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   on the remote node. This is for internal use cases such as profiling
                   only.
               )")
+          .def(
+              "_get_profiling_future",
+              [](const PyRRef& self) {
+                return std::make_shared<jit::PythonFutureWrapper>(
+                    self.getProfilingFuture());
+              },
+              py::call_guard<py::gil_scoped_acquire>(),
+              R"(
+                  Returns future that completes when the profiling event corresponding
+                  to the creation of this RRef on the remote node has been recorded.
+              )")
+          .def(
+              "_set_profiling_future",
+              [](PyRRef& self,
+                 const std::shared_ptr<jit::PythonFutureWrapper>&
+                     wrappedFuture) {
+                self.setProfilingFuture(wrappedFuture->fut);
+              },
+              py::call_guard<py::gil_scoped_acquire>(),
+              R"(
+                  Set future that is completed when the profiling event corresponding
+                  to the creation of this RRef on the remote node has been recorded.
+              )")
           // not releasing GIL to avoid context switch
           .def("__str__", &PyRRef::str);
 

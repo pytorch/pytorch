@@ -7,6 +7,40 @@ import torch.nn.quantized as nnq
 
 from torch.nn.utils import fuse_conv_bn_weights
 
+class ConvReLU1d(nnq.Conv1d):
+    r"""
+    A ConvReLU1d module is a fused module of Conv1d and ReLU
+
+    We adopt the same interface as :class:`torch.nn.quantized.Conv1d`.
+
+    Attributes:
+        Same as torch.nn.quantized.Conv1d
+
+    """
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU1d
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1, bias=True,
+                 padding_mode='zeros'):
+        super(ConvReLU1d, self).__init__(
+            in_channels, out_channels, kernel_size, stride=stride,
+            padding=padding, dilation=dilation, groups=groups, bias=bias,
+            padding_mode=padding_mode)
+
+    def forward(self, input):
+        # Temporarily using len(shape) instead of ndim due to JIT issue
+        # https://github.com/pytorch/pytorch/issues/23890
+        if len(input.shape) != 3:
+            raise ValueError("Input shape must be `(N, C, L)`!")
+        return torch.ops.quantized.conv1d_relu(
+            input, self._packed_params, self.scale, self.zero_point)
+
+    def _get_name(self):
+        return 'QuantizedConvReLU1d'
+
+    @classmethod
+    def from_float(cls, mod):
+        return super(ConvReLU1d, cls).from_float(mod)
 
 class ConvReLU2d(nnq.Conv2d):
     r"""
