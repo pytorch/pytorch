@@ -661,6 +661,14 @@ struct CAFFE2_API TensorType : public Type {
     return scalar_type_ && device_ && sizes_.isComplete() && strides_.isComplete();
   }
 
+  bool isInferredType() const {
+    return is_inferred_type_;
+  }
+
+  void setToInferredType(){
+    is_inferred_type_ = true;
+  }
+
   // this property is used by GuardElimination
   // please see `checkInputs` for more details
   bool isSummarized() const {
@@ -732,6 +740,8 @@ struct CAFFE2_API TensorType : public Type {
   // defined and undefined. However, no tensor type starts out with
   // `undefined_` set to `c10::nullopt`
   c10::optional<bool> undefined_;
+  // If a param doesn't have a type, default to "tensor"
+  bool is_inferred_type_= false;
 };
 
 struct ListType;

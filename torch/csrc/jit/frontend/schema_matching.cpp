@@ -173,6 +173,16 @@ static Value* tryMatchArgument(
     if (failure_messages) {
       auto& ostream = err()
           << arg.formatTypeMismatchMsg(value->type()->python_str());
+      auto pt = value->type()->cast<TensorType>();
+      if (pt->kind() == TypeKind::TensorType && pt->isInferredType()) {
+        std::string inferred_type_hint;
+        inferred_type_hint = c10::str(
+            "Inferred the value for argument '",
+            arg.name(),
+            "' to be of type 'Tensor' ",
+            "because it was not annotated with an explicit type.\n");
+        ostream << inferred_type_hint;
+      }
 
       if (auto v = value->type()->cast<ListType>()) {
         if (v->getElementType()->isSubtypeOf(TensorType::get())) {
