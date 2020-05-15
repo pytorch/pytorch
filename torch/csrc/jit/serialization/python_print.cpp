@@ -1246,15 +1246,15 @@ struct PythonPrintImpl {
           body_ << "\"" << param << "\", ";
         }
         body_ << "]\n";
-        #ifndef FBCODE_CAFFE2
-        // Note: Forward compat gated. TODO: @voznesenskym to remove when ready.  
+#ifndef FBCODE_CAFFE2
+        // Note: Forward compat gated. TODO: @voznesenskym to remove when ready.
         indent();
         body_ << "__buffers__ = [";
         for (const auto& buffer : buffers) {
           body_ << "\"" << buffer << "\", ";
         }
         body_ << "]\n";
-        #endif
+#endif
       }
 
       for (size_t i = 0; i < numAttrs; i++) {
