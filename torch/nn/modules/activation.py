@@ -1049,6 +1049,9 @@ class Softmax(Module):
     .. math::
         \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
 
+    When the input Tensor is a sparse tensor then the unspecifed
+    values are treated as ``-inf``.
+
     Shape:
         - Input: :math:`(*)` where `*` means, any number of additional
           dimensions
@@ -1072,6 +1075,7 @@ class Softmax(Module):
         >>> m = nn.Softmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
+
     """
     __constants__ = ['dim']
 
