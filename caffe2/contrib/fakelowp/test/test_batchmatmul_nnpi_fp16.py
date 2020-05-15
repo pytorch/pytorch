@@ -18,8 +18,6 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 
 core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
 
-GLOW_MATMUL_RTOL = 1e-3
-
 
 class TestBatchMatMul(serial.SerializedTestCase):
     @given(
@@ -27,12 +25,14 @@ class TestBatchMatMul(serial.SerializedTestCase):
         M=st.integers(min_value=1, max_value=10),
         K=st.integers(min_value=1, max_value=10),
         N=st.integers(min_value=1, max_value=10),
+        rand_seed=st.integers(0, 65534),
         trans_a=st.booleans(),
         trans_b=st.booleans(),
         run_ints=st.booleans(),
         **hu.gcs
     )
-    def test_batch_matmul(self, M, K, N, trans_a, trans_b, run_ints, gc, dc):
+    def test_batch_matmul(self, M, K, N, rand_seed, trans_a, trans_b, run_ints, gc, dc):
+        np.random.seed(rand_seed)
         workspace.ResetWorkspace()
         C = 0  # TODO
         batch_dims = np.random.randint(
@@ -95,23 +95,15 @@ class TestBatchMatMul(serial.SerializedTestCase):
         diff = np.abs((out_c2_fakefp16 - out_glow) / (out_c2_fakefp16 + 1e-8))
         rowdiff = np.max(diff, axis=1)
 
-        success = True
-        if run_ints:
-            if not np.allclose(out_glow, out_c2_fakefp16):
-                success = False
-        else:
-            n_offenders = np.count_nonzero(rowdiff[rowdiff > GLOW_MATMUL_RTOL])
-            # Find the max difference per row, if more than 10% of the rows
-            # are bigger, consider it a failure.
-            if n_offenders * 10 > rowdiff.shape[0]:
-                success = False
-
-        if not success:
-            print_test_debug_info("bmm",
-                {"m": M, "k": K, "n": N, "X": X, "Y": Y,
-                 "out_glow": out_glow,
-                 "out_c2_fakefp16": out_c2_fakefp16,
-                 "diff": diff})
+        if not np.allclose(out_glow, out_c2_fakefp16):
+            print_test_debug_info("bmm", {
+                "seed": rand_seed,
+                "m": M, "k": K,
+                "n": N, "X": X, "Y": Y,
+                "out_glow": out_glow,
+                "out_c2_fakefp16": out_c2_fakefp16,
+                "diff": diff
+            })
             assert(0)
 
 
