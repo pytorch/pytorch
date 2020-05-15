@@ -6139,6 +6139,21 @@ class TestAutogradDeviceType(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1], [1, 1]])
 
+    def test_logcumsumexp_large_value(self, device):
+        a = torch.rand(4, 4, 4, dtype=torch.double, requires_grad=True)
+        with torch.no_grad():
+            # Large Number
+            a[0] = 10000
+
+        gradcheck(lambda x: x.logcumsumexp(0), a)
+        gradgradcheck(lambda x: x.logcumsumexp(0), a)
+
+        gradcheck(lambda x: x.logcumsumexp(1), a)
+        gradgradcheck(lambda x: x.logcumsumexp(1), a)
+
+        gradcheck(lambda x: x.logcumsumexp(2), a)
+        gradgradcheck(lambda x: x.logcumsumexp(2), a)
+
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
         threads = []
