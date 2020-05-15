@@ -75,11 +75,6 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
 
 #if HIP_VERSION >= 303
     CAFFE_ENFORCE(kernel_.size() == 2 || kernel_.size() == 3, "MIOpen supports only 2D and 3D pooling");
-#else
-    CAFFE_ENFORCE(kernel_.size() == 2, "MIOpen supports only 2D pooling.");
-#endif
-
-#if HIP_VERSION >= 303
     MIOPEN_ENFORCE(miopenSetNdPoolingDescriptor(
         pooling_desc_,
         mode_,
@@ -102,6 +97,7 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
     MIOPEN_ENFORCE(miopenSetTensorDescriptor(
         top_desc_, miopenTypeWrapper<T>::type, output_dims.size(), output_dims.data(), nullptr));
 #else
+    CAFFE_ENFORCE(kernel_.size() == 2, "MIOpen supports only 2D pooling.");
     MIOPEN_ENFORCE(miopenSet2dPoolingDescriptor(
                     pooling_desc_,
                     mode_,
