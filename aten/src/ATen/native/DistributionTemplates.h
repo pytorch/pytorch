@@ -337,6 +337,22 @@ Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Ge
   return self;
 }
 
+// ==================================================== Bernoulli =====================================================
+
+template<template<typename> class bernoulli_tensor_kernel, typename RNG>
+Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+  NoNamesGuard guard;
+  bernoulli_tensor_kernel<RNG>()(self, p_, gen);
+  return self;
+}
+
+template<template<typename> class bernoulli_scalar_kernel, typename RNG>
+Tensor& bernoulli_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
+  TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
+  bernoulli_scalar_kernel<RNG>()(self, p, gen);
+  return self;
+}
+
 #undef CHECK_OUT_OF_BOUNDS
 #undef WARN_OUT_OF_BOUNDS
 

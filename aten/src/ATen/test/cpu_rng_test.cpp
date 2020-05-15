@@ -111,6 +111,16 @@ Tensor& exponential_(Tensor& self, double lambda, c10::optional<Generator> gen) 
   return at::native::templates::exponential_impl_<native::templates::cpu::ExponentialKernel, TestCPUGenerator>(self, lambda, gen);
 }
 
+// ================================================== Bernoulli =======================================================
+
+Tensor& bernoulli_tensor(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+  return at::native::templates::bernoulli_impl_<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(self, p_, gen);
+}
+
+Tensor& bernoulli_scalar(Tensor& self, double p, c10::optional<Generator> gen) {
+  return at::native::templates::bernoulli_impl_<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(self, p, gen);
+}
+
 TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   // Random
   m.impl_UNBOXED("random_.from",             random_from_to);
@@ -133,6 +143,9 @@ TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   m.impl_UNBOXED("geometric_",               geometric_);
   // Exponential
   m.impl_UNBOXED("exponential_",             exponential_);
+  // Bernoulli
+  m.impl_UNBOXED("bernoulli_.Tensor",        bernoulli_tensor);
+  m.impl_UNBOXED("bernoulli_.float",         bernoulli_scalar);
 }
 
 class RNGTest : public ::testing::Test {
@@ -351,6 +364,34 @@ TEST_F(RNGTest, Exponential) {
   auto expected = torch::empty_like(actual);
   auto iter = TensorIterator::nullary_op(expected);
   native::templates::cpu::exponential_kernel(iter, lambda, check_generator<TestCPUGenerator>(gen));
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
+
+// ==================================================== Bernoulli =====================================================
+
+TEST_F(RNGTest, BernoulliTensor) {
+  const auto p = 0.42;
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
+
+  auto actual = torch::empty({3, 3});
+  actual.bernoulli_(torch::full({3,3}, p), gen);
+
+  auto expected = torch::empty_like(actual);
+  native::templates::cpu::bernoulli_kernel(expected, torch::full({3,3}, p), check_generator<TestCPUGenerator>(gen));
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
+
+TEST_F(RNGTest, BernoulliScalar) {
+  const auto p = 0.42;
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
+
+  auto actual = torch::empty({3, 3});
+  actual.bernoulli_(p, gen);
+
+  auto expected = torch::empty_like(actual);
+  native::templates::cpu::bernoulli_kernel(expected, p, check_generator<TestCPUGenerator>(gen));
 
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
