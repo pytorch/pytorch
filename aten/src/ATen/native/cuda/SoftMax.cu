@@ -447,6 +447,7 @@ WriteFpropResultsVectorized(
   if (shift > 0) {
     input -= shift;
     output -= shift;
+    size += shift;
 
     if (threadIdx.x >= shift) {
       output[offset] = epilogue(input[offset]);
@@ -501,6 +502,7 @@ WriteBpropResultsVectorized(
     gradInput -= shift;
     output -= shift;
     gradOutput -= shift;
+    size += shift;
 
     if (threadIdx.x >= shift) {
       gradInput[offset] = epilogue(gradOutput[offset], output[offset]);
