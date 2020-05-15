@@ -23,15 +23,11 @@
 namespace at { namespace native {
 
 #ifdef __HIP_PLATFORM_HCC__
-template<typename T>
-struct alignas(T) ROCm_Bug {
-  struct { char bytes[sizeof(T)]; } value;
-  __device__ operator T&() {
-    return *reinterpret_cast<T *>(&value);
-  }
-  __device__ ROCm_Bug &operator=(T x) {
-    value = *reinterpret_cast<decltype(&value)>(&x);
-    return *this;
+template<typename T, int size>
+struct ROCm_Bug {
+  struct { char bytes[sizeof(T) * size]; } value;
+  __device__ T operator[](int i) {
+    return *reinterpret_cast<T *>(&value[i * sizeof(T)]);
   }
 };
 #endif
@@ -446,7 +442,7 @@ struct ReduceOp {
 #ifndef __HIP_PLATFORM_HCC__
     arg_t value_list[vec_size];
 #else
-    ROCm_Bug<arg_t> value_list[vec_size];
+    ROCm_Bug<arg_t, vec_size> value_list;
 #endif
     value_list[0] = value;
     #pragma unroll
@@ -457,7 +453,7 @@ struct ReduceOp {
 #ifndef __HIP_PLATFORM_HCC__
     scalar_t values[vec_size];
 #else
-    ROCm_Bug<scalar_t> values[vec_size];
+    ROCm_Bug<scalar_t, vec_size> values;
 #endif
     load_t *values_vector = reinterpret_cast<load_t*>(values);
 
@@ -498,7 +494,7 @@ struct ReduceOp {
 #ifndef __HIP_PLATFORM_HCC__
     arg_t value_list[vt0];
 #else
-    ROCm_Bug<arg_t> value_list[vt0];
+    ROCm_Bug<arg_t, vt0> value_list;
 #endif
 
     #pragma unroll
@@ -509,7 +505,7 @@ struct ReduceOp {
 #ifndef __HIP_PLATFORM_HCC__
     scalar_t values[vt0];
 #else
-    ROCm_Bug<scalar_t> values[vt0];
+    ROCm_Bug<scalar_t, vt0> values;
 #endif
 
     while (idx + (vt0 - 1) * stride < end) {
