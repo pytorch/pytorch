@@ -99,8 +99,9 @@ class DBFileReader(Reader):
         if field_names:
             return from_column_list(field_names)
 
-        assert os.path.exists(self.db_path), \
-            'db_path [{db_path}] does not exist'.format(db_path=self.db_path)
+        if self.db_type == "log_file_db":
+            assert os.path.exists(self.db_path), \
+                'db_path [{db_path}] does not exist'.format(db_path=self.db_path)
         with core.NameScope(self.name):
             # blob_prefix is for avoiding name conflict in workspace
             blob_prefix = scope.CurrentNameScope()
@@ -156,8 +157,9 @@ class DBFileReader(Reader):
 
     def _feed_field_blobs_from_db_file(self, net):
         """Load from the DB file at db_path and feed dataset field blobs"""
-        assert os.path.exists(self.db_path), \
-            'db_path [{db_path}] does not exist'.format(db_path=self.db_path)
+        if self.db_type == "log_file_db":
+            assert os.path.exists(self.db_path), \
+                'db_path [{db_path}] does not exist'.format(db_path=self.db_path)
         net.Load(
             [],
             self.ds.get_blobs(),
@@ -170,7 +172,8 @@ class DBFileReader(Reader):
     def _extract_db_name_from_db_path(self):
         """Extract DB name from DB path
 
-            E.g. given self.db_path=`/tmp/sample.db`,
+            E.g. given self.db_path=`/tmp/sample.db`, or
+            self.db_path = `dper_test_data/cached_reader/sample.db`
             it returns `sample`.
 
             Returns:
