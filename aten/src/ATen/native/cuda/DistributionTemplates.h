@@ -550,7 +550,11 @@ void exponential_kernel(TensorIterator& iter, double lambda_, RNG gen) {
       // Hence, squash the 1 to just below 1.
       // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/16706
       if(rand == static_cast<accscalar_t>(1.0)) {
-        rand = std::nextafter(static_cast<accscalar_t>(1.0), static_cast<accscalar_t>(0.0));
+#if defined(__HIPCC__)
+  rand = ::nextafter(static_cast<accscalar_t>(1.0), static_cast<accscalar_t>(0.0));
+#else
+  rand = std::nextafter(static_cast<accscalar_t>(1.0), static_cast<accscalar_t>(0.0));
+#endif 
       }
       return static_cast<scalar_t>(transformation::exponential<accscalar_t>(rand, lambda));
     };

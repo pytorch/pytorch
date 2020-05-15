@@ -91,6 +91,7 @@ C10_HOST_DEVICE inline T normal(T val, T mean, T std) {
  */
 template <typename T>
 C10_HOST_DEVICE inline T cauchy(T val, T median, T sigma) {
+  // https://en.wikipedia.org/wiki/Cauchy_distribution#Cumulative_distribution_function
   return median + sigma * at::tan(static_cast<T>(M_PI) * (val - static_cast<T>(0.5)));
 }
 
@@ -101,7 +102,7 @@ C10_HOST_DEVICE inline T cauchy(T val, T median, T sigma) {
 template <typename T>
 C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val, T lambda) {
   // https://en.wikipedia.org/wiki/Exponential_distribution#Generating_exponential_variates
-  return -at::log(val) / lambda;
+  return static_cast<T>(-1.0) / lambda * at::log(static_cast<T>(1.0) - val);
 }
 
 /**
@@ -110,6 +111,7 @@ C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val
  */
 template <typename T>
 C10_HOST_DEVICE inline T geometric(T val, T p) {
+  // https://en.wikipedia.org/wiki/Geometric_distribution#Related_distributions
   return static_cast<T>(::ceil(at::log(val) / at::log(static_cast<T>(1.0) - p)));
 }
 
@@ -119,6 +121,7 @@ C10_HOST_DEVICE inline T geometric(T val, T p) {
  */
 template <typename T>
 C10_HOST_DEVICE inline T log_normal(T val, T mean, T std) {
+  // https://en.wikipedia.org/wiki/Log-normal_distribution#Mode,_median,_quantiles
   return at::exp(val * std + mean);
 }
 
