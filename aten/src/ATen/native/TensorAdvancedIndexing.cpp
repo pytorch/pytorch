@@ -517,17 +517,17 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
 }
 
-Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+Tensor & gather_out_cpu_cuda(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "gather_out(): Expected dtype int64 for index");
   result.resize_(index.sizes());
   gather_stub(result.device().type(), result, self, dim, index);
   return result;
 }
 
-Tensor gather_cpu(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "gather(): Expected dtype int64 for index");
   Tensor result = at::empty({0}, self.options());
-  return gather_out_cpu(result, self, dim, index, sparse_grad);
+  return gather_out_cpu_cuda(result, self, dim, index, sparse_grad);
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
