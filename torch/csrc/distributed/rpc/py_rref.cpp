@@ -153,7 +153,7 @@ std::string PyRRef::ownerName() const {
   return rref_->ownerName();
 }
 
-py::object PyRRef::toHere() {
+py::object PyRRef::toHere() const {
   if (rref_->isOwner()) {
     return localValue();
   } else {
@@ -178,7 +178,7 @@ py::object PyRRef::toHere() {
   }
 }
 
-py::object PyRRef::localValue() {
+py::object PyRRef::localValue() const {
   TORCH_CHECK(
       rref_->isOwner(),
       "Cannot call localValue() on a non-local reference. Call it on ",
@@ -248,7 +248,7 @@ PyRRef PyRRef::unpickle(const py::tuple& pyTuple) {
   return PyRRef(std::move(rref));
 }
 
-c10::IValue PyRRef::toIValue() {
+c10::IValue PyRRef::toIValue() const {
   // cast to RRefInterface to hold it into IValue
   auto rrefPtr = c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref_);
   return IValue(rrefPtr);
