@@ -47,6 +47,7 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(const Polynomial* v) override;
   void visit(const RoundOff* v) override;
   void visit(const ReduceOp* v) override;
+  void visit(const NoOp* v) override;
 
   void visit(const AtomicAdd* v) override;
   void visit(const Store* v) override;
