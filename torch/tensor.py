@@ -309,11 +309,11 @@ class Tensor(torch._C._TensorBase):
     """)
 
     def retain_grad(self):
+        r"""Enables .grad attribute for non-leaf Tensors."""
         relevant_args = (self,)
         from torch._overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.retain_grad, relevant_args, self)
-        r"""Enables .grad attribute for non-leaf Tensors."""
         if not self.requires_grad:
             raise RuntimeError("can't retain_grad on Tensor that has requires_grad=False")
         if self.is_leaf:  # no-op for leaves
@@ -338,14 +338,14 @@ class Tensor(torch._C._TensorBase):
         self.retains_grad = True
 
     def is_shared(self):
-        relevant_args = (self,)
-        from torch._overrides import has_torch_function, handle_torch_function
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.is_shared, relevant_args, self)
         r"""Checks if tensor is in shared memory.
 
         This is always ``True`` for CUDA tensors.
         """
+        relevant_args = (self,)
+        from torch._overrides import has_torch_function, handle_torch_function
+        if type(self) is not Tensor and has_torch_function(relevant_args):
+            return handle_torch_function(Tensor.is_shared, relevant_args, self)
         return self.storage().is_shared()
 
     def share_memory_(self):
