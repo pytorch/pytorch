@@ -106,7 +106,7 @@ const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
-IValue UserRRef::toHere() {
+IValue UserRRef::toHere() const {
   // see Note [Best-Effort Check on Deleted UserRRefs]
   TORCH_CHECK(
       !deletedOnOwner_,
@@ -202,61 +202,27 @@ RRefForkData UserRRef::fork() const {
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
 const IValue& OwnerRRef::getValue() const {
-  std::unique_lock<std::mutex> lock(mutex_);
-  valueCV_.wait(
-      lock, [this] { return value_.has_value() || error_.has_value(); });
-  if (error_) {
-    std::runtime_error err(*error_);
-    throw err;
+  future_->wait();
+  if (future_->hasError()) {
+    (void)future_->value(); // Throws the error.
   }
-  return value_.value();
+  return future_->constValue();
 }
 
 bool OwnerRRef::hasValue() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return value_.has_value() || error_.has_value();
+  return future_->completed();
 }
 
-std::shared_ptr<FutureIValue> OwnerRRef::getFuture() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  if (future_.get()) {
-    return future_;
-  }
-  future_ = std::make_shared<FutureIValue>();
-  std::shared_ptr<FutureIValue> ret = future_;
-  if (value_.has_value()) {
-    lock.unlock();
-    ret->markCompleted(IValue());
-  } else if (error_.has_value()) {
-    auto err = *error_;
-    lock.unlock();
-    ret->setError(std::move(err));
-  }
-  return ret;
+std::shared_ptr<JitFuture> OwnerRRef::getFuture() {
+  return future_;
 }
 
 void OwnerRRef::setValue(IValue&& value) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  value_ = std::move(value);
-  std::shared_ptr<FutureIValue> future;
-  future.swap(future_);
-  lock.unlock();
-  valueCV_.notify_all();
-  if (future.get() && !future->completed()) {
-    future->markCompleted(IValue());
-  }
+  future_->markCompleted(value);
 }
 
 void OwnerRRef::setError(const std::string& error) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  error_ = error;
-  std::shared_ptr<FutureIValue> future;
-  future.swap(future_);
-  lock.unlock();
-  valueCV_.notify_all();
-  if (future.get()) {
-    future->setErrorIfNeeded(error);
-  }
+  future_->setErrorIfNeeded(error);
 }
 
 } // namespace rpc

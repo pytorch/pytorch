@@ -487,15 +487,9 @@
 - func: atan_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _atan__cpu
-    CUDA: _atan__cuda
 
 - func: atan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _atan_out_cpu
-    CUDA: _atan_out_cuda
 
 - func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
@@ -1252,15 +1246,9 @@
 - func: erfc_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _erfc__cpu
-    CUDA: _erfc__cuda
 
 - func: erfc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _erfc_out_cpu
-    CUDA: _erfc_out_cuda
 
 - func: exp(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -1270,15 +1258,9 @@
 - func: exp_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _exp__cpu
-    CUDA: _exp__cuda
 
 - func: exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _exp_out_cpu
-    CUDA: _exp_out_cuda
 
 - func: expm1(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -1586,7 +1568,7 @@
 
 - func: isnan(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
   device_guard: False
   supports_named_tensor: True
   dispatch:
@@ -3268,6 +3250,40 @@
       SparseCPU: _sparse_sum_backward_cpu
       SparseCUDA: _sparse_sum_backward_cuda
 
+- func: _sparse_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+  variants: function
+  supports_named_tensor: True
+
+- func: _sparse_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function
+  supports_named_tensor: True
+
+- func: _sparse_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    SparseCPU: softmax_sparse_cpu
+
+- func: _sparse_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
+  dispatch:
+    SparseCPU: softmax_backward_sparse_cpu
+
+- func: _sparse_log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+  variants: function
+  supports_named_tensor: True
+
+- func: _sparse_log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function
+  supports_named_tensor: True
+
+- func: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    SparseCPU: log_softmax_sparse_cpu
+
+- func: _sparse_log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
+  dispatch:
+    SparseCPU: log_softmax_backward_sparse_cpu
+
 - func: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   variants: function, method
 
@@ -3418,7 +3434,6 @@
 # that doesn't propagate gradients to non-present entries on sparse.
 - func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
-  named_guard: False
 
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -4913,15 +4928,15 @@
 
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: gather_out_cpu
-    CUDA: gather_out_cuda
+    CPU: gather_out_cpu_cuda
+    CUDA: gather_out_cpu_cuda
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: gather_cpu
-    CUDA: gather_cuda
+    CPU: gather
+    CUDA: gather
 
 - func: gather.dimname_out(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
 
@@ -6979,13 +6994,13 @@
 
 - func: isfinite(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
   device_guard: False
   supports_named_tensor: True
 
 - func: isinf(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
   device_guard: False
   supports_named_tensor: True
 

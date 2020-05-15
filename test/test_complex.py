@@ -30,8 +30,10 @@ class TestComplexTensor(TestCase):
         real = torch.randn(4)
         imag = torch.randn(4)
         complex_tensor = real + 1j * imag
-        self.assertEqual(complex_tensor.copy_real(), real)
-        self.assertEqual(complex_tensor.copy_imag(), imag)
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(complex_tensor.copy_real(), real)
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(complex_tensor.copy_imag(), imag)
 
     def test_dtype_inference(self):
         # issue: https://github.com/pytorch/pytorch/issues/36834
