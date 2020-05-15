@@ -14,6 +14,8 @@ enum RRefProxyType { RPC_SYNC, RPC_ASYNC, REMOTE };
 // pickle and unpickle.
 class PyRRef {
  public:
+  // The first ctor can only be called while holding GIL. See its implementation
+  // for more explanations.
   explicit PyRRef(const py::object& value, const py::object& type_hint);
   explicit PyRRef(c10::intrusive_ptr<RRef> rref);
 
