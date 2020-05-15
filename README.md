@@ -335,6 +335,7 @@ Three pointers to get you started:
 * [Deep Neural Networks with PyTorch from Coursera](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
 * [PyTorch Twitter](https://twitter.com/PyTorch)
 * [PyTorch Blog](https://pytorch.org/blog/)
+* [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
 
 ## Communication
 * forums: discuss implementations, research, etc. https://discuss.pytorch.org
