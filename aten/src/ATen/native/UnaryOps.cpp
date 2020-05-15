@@ -110,6 +110,10 @@ Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
+Tensor& atan_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atan_stub); }
+Tensor atan(const Tensor& self) { return unary_op_impl(self, at::atan_out); }
+Tensor& atan_(Tensor& self) { return unary_op_impl_(self, at::atan_out); }
+
 // Note [Complex abs and angle]
 // Complex inputs to abs and angle return float results by default.
 // abs and angle, in both NumPy and C++, returns a float result when given a
@@ -167,6 +171,10 @@ Tensor& ceil_out(Tensor& result, const Tensor& self) {
 Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
 Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
+Tensor& exp_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, exp_stub); }
+Tensor exp(const Tensor& self) { return unary_op_impl(self, at::exp_out); }
+Tensor& exp_(Tensor& self) { return unary_op_impl_(self, at::exp_out); }
+
 Tensor& expm1_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, expm1_stub); }
 Tensor expm1(const Tensor& self) { return unary_op_impl(self, at::expm1_out); }
 Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
@@ -174,6 +182,10 @@ Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
 Tensor& erf_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erf_stub); }
 Tensor erf(const Tensor& self) { return unary_op_impl(self, at::erf_out); }
 Tensor& erf_(Tensor& self) { return unary_op_impl_(self, at::erf_out); }
+
+Tensor& erfc_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erfc_stub); }
+Tensor erfc(const Tensor& self) { return unary_op_impl(self, at::erfc_out); }
+Tensor& erfc_(Tensor& self) { return unary_op_impl_(self, at::erfc_out); }
 
 Tensor& frac_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, frac_stub); }
 Tensor frac(const Tensor& self) { return unary_op_impl(self, at::frac_out); }
@@ -434,10 +446,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
-IMPLEMENT_UNARY_OP_VEC(atan)
-IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
-IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)
 
 DEFINE_DISPATCH(abs_stub);
