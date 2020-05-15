@@ -68,6 +68,7 @@ else:
 if has_hip_support:
     GpuDeviceType = caffe2_pb2.HIP
     NumGpuDevices = C.num_hip_devices
+    GetHIPVersion = C.get_hip_version
 
     def GetGpuPeerAccessPattern():
         return np.asarray(C.get_hip_peer_access_pattern())
