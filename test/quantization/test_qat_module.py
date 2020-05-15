@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import copy
+import math
 import torch
 import torch.nn as nn
 from torch.nn import Conv2d, BatchNorm2d, ReLU, init
@@ -57,11 +58,11 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
         self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
-        self.reset_bn_parameters()
         if bias:
-            self.bias = Parameter(torch.Tensor(out_channels))
+            self.bias = nn.Parameter(torch.Tensor(out_channels))
         else:
             self.register_parameter('bias', None)
+        self.reset_bn_parameters()
 
     def reset_running_stats(self):
         self.running_mean.zero_()
@@ -450,42 +451,43 @@ class TestQATModule(TestCase):
                 qconfig=default_qat_qconfig
             ).to(dtype=torch.double)
 
-            qat_op.train()
-            qat_ref_op.train()
-
             qat_op.apply(torch.quantization.disable_fake_quant)
             qat_ref_op.apply(torch.quantization.disable_fake_quant)
 
-            if freeze_bn:
-                qat_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
-                qat_ref_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
-            else:
-                qat_op.apply(torch.nn.intrinsic.qat.update_bn_stats)
-                qat_ref_op.apply(torch.nn.intrinsic.qat.update_bn_stats)
-
             # align inputs and internal parameters
-            input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)
-            input_clone = input.clone().detach().requires_grad_()
-
-            # TODO: test bias
-            qat_ref_op.weight = torch.nn.Parameter(qat_op.weight.detach())
+            qat_ref_op.weight = torch.nn.Parameter(qat_op.weight.detach().clone())
             qat_ref_op.running_mean = qat_op.bn.running_mean.clone()
             qat_ref_op.running_var = qat_op.bn.running_var.clone()
-            qat_ref_op.gamma = torch.nn.Parameter(qat_op.bn.weight.detach())
-            qat_ref_op.beta = torch.nn.Parameter(qat_op.bn.bias.detach())
+            qat_ref_op.gamma = torch.nn.Parameter(qat_op.bn.weight.detach().clone())
+            qat_ref_op.beta = torch.nn.Parameter(qat_op.bn.bias.detach().clone())
+            # if qat_op.bias != None:
+                # qat_ref_op.bias = torch.nn.Parameter(qat_op.bias.detach().clone())
 
-            def compose(functions):
-                # functions are reversed for natural reading order
-                return reduce(lambda f, g: lambda x: f(g(x)), functions[::-1], lambda x: x)
+            lr = 0.01
+            qat_op_optim = torch.optim.SGD(qat_op.parameters(), lr=lr)
+            qat_ref_op_optim = torch.optim.SGD(qat_ref_op.parameters(), lr=lr)
 
-            for i in range(10):
+            for i in range(5):
+                qat_op_optim.zero_grad()
+                qat_ref_op_optim.zero_grad()
+
+                input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)
+                input_clone = input.clone().detach().requires_grad_()
+
+                if i > 2:
+                    qat_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                    qat_ref_op.freeze_bn_stats()
+
+                if i > 3:
+                    qat_op.apply(torch.quantization.disable_observer)
+                    qat_ref_op.apply(torch.quantization.disable_observer)
+
                 result_ref = qat_ref_op(input)
                 result_actual = qat_op(input_clone)
-                # print('ref', result_ref, 'act', result_actual)
                 self.assertEqual(result_ref, result_actual)
 
                 # backward
-                dout = torch.randn(result_ref.size(), dtype=torch.double)
+                dout = torch.randn(result_ref.size(), dtype=torch.double) + 10.0
 
                 loss = (result_ref - dout).sum()
                 loss.backward()
@@ -507,7 +509,7 @@ class TestQATModule(TestCase):
                 running_var_actual = qat_op.bn.running_var
                 num_batches_tracked_actual = qat_op.bn.num_batches_tracked
 
-                precision = 1e-10
+                precision = 1e-5
                 self.assertEqual(input_grad_ref, input_grad_actual, atol=precision)
                 self.assertEqual(weight_grad_ref, weight_grad_actual, atol=precision)
                 self.assertEqual(gamma_grad_ref, gamma_grad_actual, atol=precision)
@@ -515,3 +517,6 @@ class TestQATModule(TestCase):
                 self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual, atol=precision)
                 self.assertEqual(running_mean_ref, running_mean_actual, atol=precision)
                 self.assertEqual(running_var_ref, running_var_actual, atol=precision)
+
+                qat_op_optim.step()
+                qat_ref_op_optim.step()

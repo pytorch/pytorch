@@ -1,4 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+import math
 import torch
 import torch.nn as nn
 import torch.nn.intrinsic
@@ -27,6 +28,17 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.bn = bn
+        self.num_features = out_channels
+        self.activation_post_process = self.qconfig.activation()
+        self.weight_fake_quant = self.qconfig.weight()
+        if bias:
+            self.bias = Parameter(torch.Tensor(out_channels))
+        else:
+            self.register_parameter('bias', None)
+        self.reset_bn_parameters()
+
+        # this needs to be called after reset_bn_parameters,
+        # as they modify the same state
         if self.training:
             if freeze_bn:
                 self.freeze_bn_stats()
@@ -34,28 +46,15 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                 self.update_bn_stats()
         else:
             self.freeze_bn_stats()
-        self.num_features = out_channels
-        self.activation_post_process = self.qconfig.activation()
-        self.weight_fake_quant = self.qconfig.weight()
-        self.reset_bn_parameters()
-        if bias:
-            self.bias = Parameter(torch.Tensor(out_channels))
-        else:
-            self.register_parameter('bias', None)
 
     def reset_running_stats(self):
-        # TODO: handle this
-        # self.running_mean.zero_()
-        # self.running_var.fill_(1)
-        # self.num_batches_tracked.zero_()
-        pass
+        self.bn.reset_running_stats()
 
     def reset_bn_parameters(self):
-        # TODO: handle this
-        # self.reset_running_stats()
-        # init.uniform_(self.gamma)
-        # init.zeros_(self.beta)
-        # TODO: below is actully for conv, not BN
+        self.bn.reset_running_stats()
+        init.uniform_(self.bn.weight)
+        init.zeros_(self.bn.bias)
+        # note: below is actully for conv, not BN
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_in)
@@ -63,22 +62,21 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
 
     def reset_parameters(self):
         super(_ConvBnNd, self).reset_parameters()
-        # TODO: verify nothing else is needed
 
     def update_bn_stats(self):
-        self.bn.train()
+        self.bn.training = True
         return self
 
     def freeze_bn_stats(self):
-        self.bn.eval()
+        self.bn.training = False
         return self
 
     def _forward(self, input):
         running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
         scale_factor = self.bn.weight / running_std
-        scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
+        scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape([-1, 1, 1, 1]))
         # this does not include the conv bias
-        conv = self._conv_forward(input, self.weight_fake_quant(scaled_weight))
+        conv = self._conv_forward(input, scaled_weight)
         conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
         if self.bias is not None:
             conv_orig = conv_orig + self.bias.reshape([1, -1, 1, 1])
@@ -117,7 +115,6 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         return qat_convbn
 
 class ConvBn2d(_ConvBnNd, nn.Conv2d):
-    # TODO before land: update docs everywhere with new params and updated approach
     r"""
     A ConvBn2d module is a module fused from Conv2d and BatchNorm2d,
     attached with FakeQuantize modules for both output activation and weight,
