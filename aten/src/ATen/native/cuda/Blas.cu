@@ -6,8 +6,11 @@ namespace at { namespace native {
 
 Tensor &addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta_, Scalar alpha_) {
   auto r_stride = result.stride(0);
-  const auto vec_contiguous = vec.contiguous();
-  auto vec_stride = vec_contiguous.stride(0);
+  auto vec_stride = vec.stride(0);
+
+  // Check for contiguity of `vec` and update `vec_stride` accordingly
+  const auto vec_contiguous = vec_stride == 0 ? vec.contiguous() : vec;
+  vec_stride = vec_contiguous.stride(0);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, mat.scalar_type(), "addmv_impl_cuda", [&] {
     auto beta = beta_.to<scalar_t>();
@@ -26,7 +29,7 @@ Tensor &addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, c
       Tensor cmat = mat.contiguous();
       at::cuda::blas::gemv<scalar_t>('t',
           mat.size(1), mat.size(0), alpha, cmat.data_ptr<scalar_t>(), cmat.stride(0),
-          vec_contiguous.data_ptr<scalar_t>(), vec.stride(0), beta, result.data_ptr<scalar_t>(), r_stride);
+          vec_contiguous.data_ptr<scalar_t>(), vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
     }
 
     // In cublasSgemv, cublasDgemv (x,0).mv(0) does not
