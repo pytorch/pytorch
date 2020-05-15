@@ -11,6 +11,11 @@ from typing import List, Optional
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 
+# ARE YOU EDITING THIS NUMBER?  MAKE SURE YOU READ THE GUIDANCE AT THE
+# TOP OF .circleci/config.yml
+DOCKER_IMAGE_VERSION = "9a3986fa-7ce7-4a36-a001-3c9bef9892e2"
+
+
 @dataclass
 class Conf:
     distro: str
@@ -55,14 +60,11 @@ class Conf:
         return result
 
     def gen_docker_image_path(self):
-        return miniutils.quote(
-            DOCKER_IMAGE_PATH_BASE + self.gen_docker_image_name()
-        )
 
-    def gen_docker_image_name(self):
         parms_source = self.parent_build or self
         base_build_env_name = "-".join(parms_source.get_parms(True))
-        return base_build_env_name
+
+        return miniutils.quote(DOCKER_IMAGE_PATH_BASE + base_build_env_name + ":" + str(DOCKER_IMAGE_VERSION))
 
     def get_build_job_name_pieces(self, build_or_test):
         return self.get_parms(False) + [build_or_test]
@@ -94,9 +96,6 @@ class Conf:
         job_def = OrderedDict()
         job_def["name"] = self.gen_build_name(phase)
         job_def["requires"] = ["setup"]
-
-        if phase == "build":
-            job_def["requires"].append(miniutils.quote("docker-" + self.gen_docker_image_name()))
 
         if phase == "test":
 
