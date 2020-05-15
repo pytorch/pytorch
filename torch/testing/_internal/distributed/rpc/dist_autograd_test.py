@@ -2104,16 +2104,16 @@ class DistAutogradTest(RpcAgentTestFixture):
     @staticmethod
     def _slow_add(t1, t2):
         time.sleep(1)
-        t3 = (t1 + t2).detach()
+        t3 = t1 + t2
         t3.requires_grad = True
         return t3
 
     @dist_init
     def test_thread_local_context_id(self):
-        t1 = torch.rand((3, 3), requires_grad=True)
-        t2 = torch.rand((3, 3), requires_grad=True)
+        t1 = torch.rand((3, 3))
+        t2 = torch.rand((3, 3))
 
-        t3 = (t1 + t2).detach()
+        t3 = t1 + t2
         t3.requires_grad = True
         t3.sum().backward()
 
