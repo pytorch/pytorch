@@ -1178,6 +1178,26 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
                    .run(model.graph)
 
+    @override_qengines
+    def test_quantized_conv1d_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv1d(1, 4, 2, 3).float()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.conv(x))
+
+        data = [(torch.randn(1, 1, 10, dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        model = self._test_op_impl(M(), data, "quantized::conv1d_relu")
+        FileCheck().check_not("aten::conv1d") \
+                   .check_not("aten::relu") \
+                   .check_not("quantized::conv1d(") \
+                   .check_not("quantized::relu(") \
+                   .run(model.graph)
+
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                          " with instruction set support avx2 or newer.")
