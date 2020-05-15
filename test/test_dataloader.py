@@ -1633,6 +1633,11 @@ except RuntimeError as e:
         arr = np.array([[[object(), object(), object()]]])
         self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
 
+    def test_default_collate_bad_sequence_type(self):
+        batch = [['X'], ['X', 'X']]
+        self.assertRaises(AssertionError, lambda: _utils.collate.default_collate(batch))
+        self.assertRaises(AssertionError, lambda: _utils.collate.default_collate(batch[::-1]))
+
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_shared_tensor(self):
         import numpy as np
@@ -1730,6 +1735,7 @@ class TestDictDataLoader(TestCase):
         for sample in loader:
             self.assertTrue(sample['a_tensor'].is_pinned())
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
+
 
 
 class NamedTupleDataset(Dataset):
