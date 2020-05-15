@@ -20,7 +20,7 @@ if(NOT CMAKE_VERSION VERSION_LESS 3.10)
 endif()
 
 # ---[ Project and semantic versioning.
-project(Caffe2 CXX C)
+project(Torch CXX C)
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
