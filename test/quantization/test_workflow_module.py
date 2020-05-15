@@ -103,13 +103,14 @@ class TestObserver(QuantizationTestCase):
         # reduce_range cannot be true for symmetric quantization with uint8
         if qdtype == torch.quint8 and qscheme == torch.per_tensor_symmetric:
             reduce_range = False
-        ObserverList = [MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range),
-                        MovingAverageMinMaxObserver(averaging_constant=0.5,
+        ObserverList = [MinMaxObserver.with_args(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range),
+                        MovingAverageMinMaxObserver.with_args(averaging_constant=0.5,
                                                     dtype=qdtype,
                                                     qscheme=qscheme,
                                                     reduce_range=reduce_range)]
-        for myobs in ObserverList:
+        for obs in ObserverList:
             # Calculate Qparams should return with a warning for observers with no data
+            myobs = obs()
             qparams = myobs.calculate_qparams()
             if type(myobs) == MinMaxObserver:
                 x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
@@ -149,12 +150,25 @@ class TestObserver(QuantizationTestCase):
             loaded_dict = torch.load(b)
             for key in state_dict:
                 self.assertEqual(state_dict[key], loaded_dict[key])
-            loaded_obs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+            loaded_obs = obs()
             loaded_obs.load_state_dict(loaded_dict)
             loaded_qparams = loaded_obs.calculate_qparams()
             self.assertEqual(myobs.min_val, loaded_obs.min_val)
             self.assertEqual(myobs.max_val, loaded_obs.max_val)
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
+
+            # test list inputs
+            x = [x, x]
+            y = [y, y]
+            myobs = obs()
+            myobs(x)
+            myobs(y)
+            self.assertEqual(myobs.min_val, [1.0, 1.0])
+            self.assertEqual(myobs.max_val, [8.0, 8.0])
+            qparams = myobs.calculate_qparams()
+            for i in range(2):
+                self.assertEqual(qparams[i][1].item(), ref_zero_point)
+                self.assertAlmostEqual(qparams[i][0].item(), ref_scale, delta=1e-5)
 
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=4,

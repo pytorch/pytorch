@@ -117,10 +117,10 @@ class _ObserverBase(ObserverBase):
         ), "Default Observer only works for qint8 and quint8 data type"
 
     @torch.jit._overload
-    def _calculate_qparams(self, min_val: torch.Tensor, max_val: torch.Tensor) -> torch.Tensor: ...
+    def _calculate_qparams(self, min_val: torch.Tensor, max_val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]: ...
 
     @torch.jit._overload
-    def _calculate_qparams(self, min_val: List[torch.Tensor], max_val: List[torch.Tensor]) -> List[torch.Tensor]: ...
+    def _calculate_qparams(self, min_val: List[torch.Tensor], max_val: List[torch.Tensor]) -> List[Tuple[torch.Tensor, torch.Tensor]]: ...
 
     @torch.jit.export
     def _calculate_qparams(self, min_val, max_val):
@@ -153,7 +153,6 @@ class _ObserverBase(ObserverBase):
                                     Returning default scale and zero point "
             )
             return torch.tensor([1.0]), torch.tensor([0])
-
         if min_val.dim() == 0 or max_val.dim() == 0:
             assert min_val <= max_val, "min {} should be less than max {}".format(
                 min_val, max_val
@@ -286,28 +285,62 @@ class MinMaxObserver(_ObserverBase):
             raise NotImplementedError("Cannot reduce range for symmetric \
                                        quantization for quint8")
 
+    def update_stats(self, min_val, max_val):
+        self.min_val.resize_(min_val.shape)
+        self.max_val.resize_(max_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
+
+    @torch.jit._overload
+    def forward(self, x_orig: List[torch.Tensor]) -> List[torch.Tensor]: ...
+    @torch.jit._overload
+    def forward(self, x_orig: torch.Tensor) -> torch.Tensor: ...
+
     def forward(self, x_orig):
+        min_val, max_val = self.min_val, self.max_val
+        initialized = min_val.numel() != 0 and max_val.numel() != 0
+        if isinstance(x_orig, torch.Tensor):
+            min_val, max_val = self._forward(x_orig, min_val, max_val, initialized)
+        else:
+            num_tensors = len(x_orig)
+            if min_val.numel() != num_tensors or max_val.numel() != num_tensors:
+                min_val = torch.empty(num_tensors, dtype=torch.float32)
+                max_val = torch.empty(num_tensors, dtype=torch.float32)
+                initialized = False
+            for i in range(num_tensors):
+                min_val_i, max_val_i = min_val[i], max_val[i]
+                min_val_i, max_val_i = self._forward(x_orig[i], min_val_i, max_val_i, initialized)
+                min_val[i] = min_val_i
+                max_val[i] = max_val_i
+
+        self.update_stats(min_val, max_val)
+        return x_orig
+
+    def _forward(self, x_orig, min_val, max_val, initialized):
+        # type: (Tensor, Tensor, Tensor, bool) -> Tuple[Tensor, Tensor]
         r"""Records the running minimum and maximum of ``x``."""
         x = x_orig.detach()  # avoid keeping autograd tape
-        x = x.to(self.min_val.dtype)
-        min_val = self.min_val
-        max_val = self.max_val
-        if min_val.numel() == 0 or max_val.numel() == 0:
+        x = x.to(min_val.dtype)
+        if not initialized:
             min_val = torch.min(x)
             max_val = torch.max(x)
         else:
             min_val = torch.min(torch.min(x), min_val)
             max_val = torch.max(torch.max(x), max_val)
-        self.min_val.resize_(min_val.shape)
-        self.max_val.resize_(max_val.shape)
-        self.min_val.copy_(min_val)
-        self.max_val.copy_(max_val)
-        return x_orig
+        return min_val, max_val
 
     @torch.jit.export
     def calculate_qparams(self):
         r"""Calculates the quantization parameters."""
-        return self._calculate_qparams(self.min_val, self.max_val)
+        if self.min_val.numel() > 1:
+            min_val, max_val = [], []
+            for i in range(len(self.min_val)):
+                min_val.append(torch.tensor([self.min_val[i]]))
+                max_val.append(torch.tensor([self.max_val[i]]))
+            return self._calculate_qparams(min_val, max_val)
+        else:
+            min_val, max_val = self.min_val, self.max_val
+            return self._calculate_qparams(min_val, max_val)
 
     @torch.jit.export
     def extra_repr(self):
@@ -381,22 +414,17 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
                                                           qscheme=qscheme,
                                                           reduce_range=reduce_range)
 
-    def forward(self, x_orig):
+    def _forward(self, x_orig, min_val, max_val, initialized):
+        # type: (Tensor, Tensor, Tensor, bool) -> Tuple[Tensor, Tensor]
         x = x_orig.detach()  # avoid keeping autograd tape
-        x = x.to(self.min_val.dtype)
-        min_val = self.min_val
-        max_val = self.max_val
-        if min_val.numel() == 0 or max_val.numel() == 0:
+        x = x.to(min_val.dtype)
+        if not initialized:
             min_val = torch.min(x)
             max_val = torch.max(x)
         else:
             min_val = min_val + self.averaging_constant * (torch.min(x) - min_val)
             max_val = max_val + self.averaging_constant * (torch.max(x) - max_val)
-        self.min_val.resize_(min_val.shape)
-        self.max_val.resize_(max_val.shape)
-        self.min_val.copy_(min_val)
-        self.max_val.copy_(max_val)
-        return x_orig
+        return min_val, max_val
 
 
 class MinMaxDynamicQuantObserver(MinMaxObserver):
