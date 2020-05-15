@@ -332,6 +332,10 @@ void IRPrinter::visit(const ReduceOp* v) {
   os() << "})";
 }
 
+void IRPrinter::visit(const NoOp* v) {
+  os() << "NoOp";
+}
+
 // === Stmt visitors below ===
 // Some invariants to keep in mind when changing printer visitors for statement:
 //  1) every statement first outputs the indendation with emitIndent
