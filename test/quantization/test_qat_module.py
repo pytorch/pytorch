@@ -391,27 +391,6 @@ class TestQATModule(TestCase):
             freeze_bn,
             bias,
     ):
-        # TODO: remove before land
-        if False:
-            batch_size = 2
-            input_channels_per_group = 2
-            height = 5
-            width = 5
-            output_channels_per_group = 2
-            groups = 1
-            kernel_h = 1
-            kernel_w = 1
-            stride_h = 1
-            stride_w = 1
-            pad_h = 0
-            pad_w = 0
-            dilation = 1
-            padding_mode = 'zeros'
-            eps = 1e-5
-            momentum = 0.1
-            freeze_bn = False
-            freeze_bn = True
-            bias = True
         # **** WARNING: This is used to temporarily disable MKL-DNN convolution due
         # to a bug: https://github.com/pytorch/pytorch/issues/23825
         # Once this bug is fixed, this context manager as well as its callsites
