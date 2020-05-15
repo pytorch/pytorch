@@ -48,14 +48,13 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
 #endif
 
-  c10::IValue result;
-  {
-    at::RecordFunctionGuard g;
-    auto m = find_method(method_name);
-    stack.insert(stack.begin(), object_);
-    m->run(stack);
-    result = stack.front();
+  auto m = find_method(method_name);
+  if (m == nullptr) {
+    AT_ERROR("Method '", method_name, "' is not defined.");
   }
+  stack.insert(stack.begin(), object_);
+  m->run(stack);
+  c10::IValue result = stack.front();
 
 #if defined(PYTORCH_MOBILE_OBSERVER)
   if (observer) {
@@ -71,7 +70,7 @@ Function* Module::find_method(const std::string& basename) const {
       return fn.get();
     }
   }
-  AT_ERROR("Method '", basename, "' is not defined.");
+  return nullptr;
 }
 
 namespace {
