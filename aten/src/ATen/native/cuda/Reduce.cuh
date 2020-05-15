@@ -455,7 +455,7 @@ struct ReduceOp {
 #else
     ROCm_Bug<scalar_t, vec_size> values;
 #endif
-    load_t *values_vector = reinterpret_cast<load_t*>(values);
+    load_t *values_vector = reinterpret_cast<load_t*>(&values[0]);
 
     while (idx * vec_size + vec_size - 1 < end) {
       *values_vector = reinterpret_cast<const load_t*>(data)[idx];
