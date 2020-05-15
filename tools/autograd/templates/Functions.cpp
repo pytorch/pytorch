@@ -489,7 +489,8 @@ Tensor logcumsumexp_backward(Tensor grad, const Tensor & self, Tensor result, in
       at::typeMetaToScalarType(grad.dtype()),
       "logcumsumexp_backward",
       [grad, self, result, dim]() {
-        auto grad_min = at::tensor(std::numeric_limits<scalar_t>::lowest());
+        auto grad_min = at::empty_like(grad);
+        grad_min.fill_(std::numeric_limits<scalar_t>::lowest());
         auto log_grad_positive = at::where(grad > 0, grad.log(), grad_min);
         auto log_grad_negative = at::where(grad < 0, (-grad).log(), grad_min);
 
