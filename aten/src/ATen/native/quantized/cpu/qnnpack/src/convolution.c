@@ -242,7 +242,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
               cr,
 #if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
               input_zero_point,
-              kernel_zero_points.data(),
+              kernel_zero_points[0],
 #endif
               kernel,
               bias,
