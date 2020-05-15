@@ -9,7 +9,7 @@
 #include <qnnpack/assembly.h>
 #include <requantization/runtime-assembly.h>
 
-#  Args passed via 4 registers (16 bytes)
+#  Args passed via 8 registers (64 bytes)
 #  x0: mr
 #  x1: nr
 #  x2: k
@@ -49,10 +49,8 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     LD1 {v8.4s, v9.4s}, [x5], 32
 
     # Load params
-    LDR x8, [sp, 8]
+    LDP x16, x8, [sp]
 
-    # Load output channel index
-    LDR x16, [sp]
     # Load pointer to per channel zero points array
     LDR x17, [x8]
     # Add offset to the base pointer

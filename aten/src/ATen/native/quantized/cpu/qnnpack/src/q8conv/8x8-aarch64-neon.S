@@ -10,7 +10,7 @@
 #include <requantization/runtime-assembly.h>
 
 
-#  Args passed via 4 registers (16 bytes)
+#  Args passed via 8 registers (64 bytes)
 #  x0: mr
 #  x1: nr
 #  x2: kc
@@ -40,8 +40,12 @@
 #    size_t output_channel_index,
 #    const union pytorch_qnnp_q31_requantization_params quantization_params[restrict static 1])
 BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
-    # Load params
-    LDR x8, [sp, 8]
+    # Load params: x8
+    # Load output channel index: x9
+    # Note since this is an offset into a byte pointer
+    # We do not need to multiply with size of pointer type
+    # Load pointer to per channel zero points array
+    LDP x9, x8, [sp]
 
     STP d15, d14, [sp, -16]
     STP d13, d12, [sp, -32]
@@ -51,11 +55,6 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
     # Load bias0123, bias4567
     LD1 {v8.4s, v9.4s}, [x5], 32
 
-    # Load output channel index
-    # Note since this is an offset into a byte pointer
-    # We do not need to multiply with size of pointer type
-    LDR x9, [sp]
-    # Load pointer to per channel zero points array
     LDR x10, [x8]
     # Add offset to the base pointer
     ADD x10, x10, x9
