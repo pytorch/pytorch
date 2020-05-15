@@ -501,7 +501,6 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
 
   double act_input_scale = act_nhwc.q_scale();
 
-
   // Re-quantizing the bias based on input scale and weight scale.
   if (!input_scale.has_value() || input_scale.value() != act_input_scale) {
     // Get the original weight and adjust it to uint8 from int8
