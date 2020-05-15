@@ -129,11 +129,12 @@ static void frac_kernel(TensorIterator& iter) {
 }
 
 static void logical_not_kernel(TensorIterator& iter) {
+  // error check -- this is just ensuring we don't dispatch on types that aren't in ALL_TYPES_AND2(...)
+  // so we don't have to maintain a separate list or to do double dispatch.
+  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_not_cpu", [&]() {});
+
   AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_not_cpu", [&]() {
-    using self_t = scalar_t;
-    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_not_cpu", [&]() {
-      cpu_kernel(iter, [](self_t a) -> scalar_t { return static_cast<scalar_t>(!a); });
-    });
+    cpu_kernel(iter, [](scalar_t a) -> bool { return !a; });
   });
 }
 
