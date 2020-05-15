@@ -561,7 +561,12 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
          // a shared_ptr here.
          rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
          messageType = request.type(),
-         id = request.id()]() {
+         id = request.id(),
+         threadLocalState = ThreadLocalState()]() {
+          // The following execution possibly on another thread includes
+          // tensor functions, so profiler state should be transferred.
+          ThreadLocalStateGuard stateGuard(threadLocalState);
+
           try {
             // For a recv thread, current context id should be invalid outside
             // processMessage().
