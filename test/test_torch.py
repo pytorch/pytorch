@@ -6145,7 +6145,7 @@ class TestTorchDeviceType(TestCase):
                 # scalar ** tensor to enforce correct handling of dtypes for __rpow__().
                 res1 = num ** m1[4]
                 res2 = res1.clone().zero_()
-                for i in range(res2.size(0))
+                for i in range(res2.size(0)):
                     res2[i] = pow_fn(num, m1[i, 4])
                 self.assertEqual(res1, res2)
                 self.assertEqual(res1.dtype, expected_dtype)
