@@ -26,10 +26,6 @@ class TestSparseLpNorm(hu.HypothesisTestCase):
             return param_out
         raise ValueError
 
-    # @staticmethod
-    # def ref_lpnorm_gradient(param_in, norm):
-    #     return norm * (param_in ** (norm - 1))
-
     # Suppress filter_too_much health check.
     # Likely caused by `assume` call falling through too often.
     @settings(suppress_health_check=[HealthCheck.filter_too_much])
@@ -40,7 +36,6 @@ class TestSparseLpNorm(hu.HypothesisTestCase):
            **hu.gcs_cpu_only)
     def test_sparse_lpnorm(self, inputs, p, reg_lambda, data_strategy, gc, dc):
 
-        # param, grad = inputs
         param, = inputs
         param += 0.02 * np.sign(param)
         param[param == 0.0] += 0.02
