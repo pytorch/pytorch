@@ -25,9 +25,9 @@ namespace at { namespace native {
 #ifdef __HIP_PLATFORM_HCC__
 template<typename T, int size>
 struct ROCm_Bug {
-  struct { char bytes[sizeof(T) * size]; } value;
+  char bytes[sizeof(T) * size];
   __device__ T operator[](int i) {
-    return *reinterpret_cast<T *>(&value[i * sizeof(T)]);
+    return *reinterpret_cast<T *>(&bytes[i * sizeof(T)]);
   }
 };
 #endif
