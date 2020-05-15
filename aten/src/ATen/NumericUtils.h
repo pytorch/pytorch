@@ -99,14 +99,5 @@ C10_HOST_DEVICE inline double tan<double>(double x) {
   return ::tan(x);
 }
 
-template <typename T>
-C10_HOST_DEVICE inline T nextafter(T from, T to) {
-#if defined(__HIPCC__)
-  return ::nextafter(from, to);
-#else
-  return std::nextafter(from, to);
-#endif
-}
-
 } // namespace at
 
