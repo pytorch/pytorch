@@ -114,9 +114,10 @@ static inline void pytorch_pack_q8gemm_wrq(
         }
       }
       if (kzp != 0) {
-        // This part fills the packed wights with zero points for output channels
+        // This part fills the packed weights with zero points for output channels
         // when they are not divisble by nr blocking parameter.
-        // In that case
+        // This is needed because in some kernels, sse2 ones, it relies on this
+        // to produce zero as a result of subtracting zero point from weight value.
         size_t remaining_nr_blocks = ((nr - nr_block_size) & (np - 1));
         for (size_t nr_block_offset = 0; nr_block_offset < remaining_nr_blocks;
              nr_block_offset++) {
