@@ -26,7 +26,7 @@ namespace at { namespace native {
 template<typename T, int size>
 struct ROCm_Bug {
   char bytes[sizeof(T) * size];
-  __device__ T operator[](int i) {
+  __device__ T& operator[](int i) {
     return *reinterpret_cast<T *>(&bytes[i * sizeof(T)]);
   }
 };
