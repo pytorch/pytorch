@@ -150,7 +150,7 @@ TORCH_API bool isCustomClass(const c10::IValue& v);
 
 // This API is for testing purposes ONLY. It should not be used in
 // any load-bearing code.
-TORCH_API std::vector<std::unique_ptr<jit::Function>>& customClassMethods();
+TORCH_API std::vector<c10::FunctionSchema> customClassSchemasForBCCheck();
 
 namespace jit {
 using ::torch::registerCustomClass;
