@@ -97,6 +97,7 @@ def fuse_known_modules(mod_list):
         (torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU): fuse_conv_bn_relu,
         (torch.nn.Conv3d, torch.nn.BatchNorm3d): fuse_conv_bn,
         (torch.nn.Conv3d, torch.nn.BatchNorm3d, torch.nn.ReLU): fuse_conv_bn_relu,
+        (torch.nn.Conv1d, torch.nn.ReLU): torch.nn.intrinsic.ConvReLU1d,
         (torch.nn.Conv2d, torch.nn.ReLU): torch.nn.intrinsic.ConvReLU2d,
         (torch.nn.Conv3d, torch.nn.ReLU): torch.nn.intrinsic.ConvReLU3d,
         (torch.nn.Linear, torch.nn.ReLU): torch.nn.intrinsic.LinearReLU,

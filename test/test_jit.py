@@ -3518,6 +3518,30 @@ class TestScript(JitTestCase):
             .check("aten::mul") \
             .run(m.inlined_graph)
 
+    def test_static_method_on_module(self):
+        """
+        Check that the `@staticmethod` annotation on a function on a module works.
+        """
+        class MyCell(torch.nn.Module):
+            def __init__(self):
+                super(MyCell, self).__init__()
+
+            @staticmethod
+            def do_it(x, h):
+                new_h = torch.tanh(x + h)
+                return new_h, new_h
+
+            def forward(self, x, h):
+                return self.do_it(x, h)
+
+        my_cell = torch.jit.script(MyCell())
+        x = torch.rand(3, 4)
+        h = torch.rand(3, 4)
+        jitted_cell = my_cell(x, h)
+        non_jitted_cell = MyCell().do_it(x, h)
+
+        self.assertEqual(jitted_cell, non_jitted_cell)
+
     def test_code_with_constants(self):
         """
         Check that the `code_with_constants` property correctly returns graph CONSTANTS in the
@@ -10781,6 +10805,39 @@ a")
         m = torch.jit.script(M())
         # test copy
         m_c = m.copy()
+
+    def test_script_forward_method_replacement(self):
+        # We want to support the use case of having a different `forward` method
+        # when we are not in scripting mode.
+        class LowLevelModule(torch.nn.Module):
+            def __init__(self):
+                super(LowLevelModule, self).__init__()
+
+            def forward(self, *args, **kwargs):
+                # Generic forward dispatch, when we are not in scripting mode
+                assert not torch.jit.is_scripting()
+                return self.forward_pytorch(*args, **kwargs) * 2
+
+        class TestModule(LowLevelModule):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                # Replace the forward method if we know we are not in scripting mode
+                if not torch.jit.is_scripting():
+                    self.forward = types.MethodType(LowLevelModule.forward, self)
+
+            def forward_pytorch(self, input: torch.Tensor):
+                return torch.tensor(123)
+
+            def forward(self, input: torch.Tensor):
+                # Scripting should only use this forward method
+                assert torch.jit.is_scripting()
+                return self.forward_pytorch(input)
+
+        m = TestModule()
+        self.assertEqual(m(torch.tensor(1)), torch.tensor(246))
+
+        m_scripted = torch.jit.script(m)
+        self.assertEqual(m_scripted(torch.tensor(1)), torch.tensor(123))
 
     # Suppression: ONNX warns when exporting RNNs because of potential batch size mismatch.
     @suppress_warnings
