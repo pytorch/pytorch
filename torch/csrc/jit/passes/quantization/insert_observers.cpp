@@ -335,6 +335,12 @@ class InsertObserversHelper {
       Value* output,
       std::unordered_set<Value*>& block_observed_values);
 
+  bool shouldPropagateQuant(
+      Node* n, const std::unordered_set<Value*>& block_observed_values) {
+    return isObserved(n->input(0), block_observed_values);
+  }
+
+
   void delayObservingValuesInPattern(Graph& graph, const PatternInfo& pattern);
 
   void addValuesToDelayObservation(
@@ -731,7 +737,8 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   // of the quantizable function.
   if (!is_dynamic_) {
     // Check whether producer is quantizable
-    if (mayRequireObservation(v) && nodeQuantizable(v->node())) {
+    if ((mayRequireObservation(v) && nodeQuantizable(v->node())) ||
+        isPropagateQuantNode(v->node())) {
       return true;
     }
   }
@@ -1025,7 +1032,13 @@ InsertObserversHelper::insertObserversFor(
           propagateObservedProperty(v, block_observed_values);
           if (!inputs_outputs.count(v) &&
               !isObserved(v, block_observed_values)) {
-            if (auto observer_opt = getObserverFor(v)) {
+            auto observer_opt = getObserverFor(v);
+            // If the node is one of the propagate quant node, e.g.
+            // aten::cat, we should observe its output only
+            // if the input of the node is observed
+            if (observer_opt &&
+                (!isPropagateQuantNode(n) ||
+                 shouldPropagateQuant(n, block_observed_values))) {
               recordObserved(
                   v, *observer_opt, values_to_observe, block_observed_values);
             }
