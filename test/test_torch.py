@@ -6432,26 +6432,51 @@ class TestTorchDeviceType(TestCase):
                          torch.bitwise_xor(torch.tensor([True, True, False], device=device),
                                            torch.tensor([False, True, False], device=device)))
 
-    def test_logical_not(self, device):
-        for dtype in torch.testing.get_all_dtypes():
-            a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
-            if dtype == torch.bfloat16 or dtype.is_complex:
-                self.assertRaises(RuntimeError, lambda: a.logical_not())
-                continue
-            expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
-            # new tensor
-            self.assertEqual(expected_res.bool(), a.logical_not())
-            # out
-            for out_dtype in torch.testing.get_all_dtypes():
-                b = torch.empty(0, dtype=out_dtype, device=device)
-                if out_dtype == torch.bfloat16 or out_dtype.is_complex:
-                    self.assertRaises(RuntimeError, lambda: torch.logical_not(a, out=b))
-                    continue
-                torch.logical_not(a, out=b)
-                self.assertEqual(expected_res.bool(), b.bool())
-            # in-place
-            a.logical_not_()
-            self.assertEqual(expected_res, a)
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_logical_not(self, device, dtype):
+        data = [10, 1, 0.3, 0, -0.3, -1, -10]
+        a = torch.tensor(data, dtype=dtype, device=device)
+
+        # do this before constructing the numpy array because np can't construct
+        # bfloat16 tensors.  Can we define our own dtype in NumPy so testing would be easier?
+        if dtype == torch.bfloat16 or dtype.is_complex:
+            self.assertRaises(RuntimeError, lambda: a.logical_not())
+            self.assertRaises(RuntimeError, lambda: a.logical_not_())
+            raise unittest.SkipTest('logical_not not supported on {}'.format(dtype))
+
+        a_np = np.array(data, dtype=torch_to_numpy_dtype_dict[dtype])
+
+        if dtype == torch.bool:
+            # this is set to trip when https://github.com/pytorch/pytorch/issues/37398 is fixed
+            # so that we combine with the above test.
+            self.assertNotEqual(a_np, a)
+            a_np = a.cpu().numpy()  # ensure they are the same because of above issue
+
+        self.assertEqual(np.logical_not(a_np), torch.logical_not(a).to('cpu'))
+        self.assertEqual(np.logical_not(a_np, out=a_np), a.logical_not_().to('cpu'))
+
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    @dtypes(*list(product(torch.testing.get_all_dtypes(),
+                          torch.testing.get_all_dtypes())))
+    def test_logical_not_out(self, device, dtypes):
+        dtype = dtypes[0]
+        out_dtype = dtypes[1]
+        data = [10, 1, 0.3, 0, -0.3, -1, -10]
+        a = torch.tensor(data, dtype=dtype, device=device)
+        out = torch.empty(a.shape, dtype=out_dtype, device=device)
+
+        if (dtype == torch.bfloat16 or dtype.is_complex or
+                out_dtype == torch.bfloat16 or out_dtype.is_complex):
+            self.assertRaises(RuntimeError, lambda: torch.logical_not(a, out=out))
+            raise unittest.SkipTest('logical_not not supported on {}'.format(out_dtype))
+
+        out_np = np.empty(a.shape, dtype=torch_to_numpy_dtype_dict[out_dtype])
+
+        self.assertEqual(a, a.cpu().numpy())
+        torch.logical_not(a, out=out)
+        np.logical_not(a.cpu().numpy(), out=out_np)
+        self.assertEqual(out_np, out.to('cpu'))
 
     def _test_logical(self, device, op, a_, b_, expected_res_):
         for dtype in torch.testing.get_all_dtypes():

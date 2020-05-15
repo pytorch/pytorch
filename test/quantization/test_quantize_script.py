@@ -1389,9 +1389,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         indepdently, we need to have an observer that works
         for list of Tensors.
         """
-        class M(torch.nn.Module):
+        class QuantizedCat(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super(QuantizedCat, self).__init__()
                 self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
                 self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
 
@@ -1400,7 +1400,15 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 y = self.conv2(y)
                 return torch.cat([x, y], 1)
 
-        m = torch.jit.script(M().eval())
+        class NonQuantizedCat(torch.nn.Module):
+            def __init__(self):
+                super(NonQuantizedCat, self).__init__()
+
+            def forward(self, x, y):
+                return torch.cat([x, y], 1)
+
+        # quantized cat
+        m = torch.jit.script(QuantizedCat()).eval()
         m = prepare_script(m, {'': default_qconfig}, True)
         # four for input and output of conv and one for output of cat
         # this also tests the ListConstruct can preserve the observed property so that
@@ -1412,7 +1420,20 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         FileCheck().check_not("aten::cat") \
                    .check("quantized::cat") \
-                   .run(m.graph_for(data, data))
+                   .run(m.graph)
+
+        # non quantized cat
+        m = torch.jit.script(NonQuantizedCat()).eval()
+        m = prepare_script(m, {'': default_qconfig}, True)
+        assert len(attrs_with_prefix(m, '_observer_')) == 0
+        data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+        m(data, data)
+        m = convert_script(m, True)
+
+        FileCheck().check_not("quantized::cat") \
+                   .check("aten::cat") \
+                   .run(m.graph)
+
 
     def test_qbatch_norm(self):
         class M(torch.nn.Module):
