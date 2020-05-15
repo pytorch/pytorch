@@ -318,6 +318,38 @@ class _TestTorchMixin(object):
         with self.assertRaisesRegex(RuntimeError, "PyTorch doesn't support reduction operations for dim>=64"):
             torch.sum(x, -1)
 
+    def _test_logaddexp(self, base2=False):
+        import numpy as np
+
+        if base2:
+            gt_func = np.logaddexp2
+            our_func = torch.logaddexp2
+        else:
+            gt_func = np.logaddexp
+            our_func = torch.logaddexp
+
+        a = torch.randn(51, 2)
+        b = torch.randn(51, 2)
+        gt = gt_func(a.numpy(), b.numpy())
+        ours = our_func(a, b)
+        self.assertEqual(ours.shape, gt.shape)
+        self.assertTrue(np.allclose(ours.numpy(), gt))
+
+        # numerical stability
+        a *= 10000
+        b *= 10000
+        gt = gt_func(a.numpy(), b.numpy())
+        ours = our_func(a, b)
+        self.assertTrue(np.allclose(ours.numpy(), gt))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_logaddexp(self):
+        self._test_logaddexp()
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_logaddexp2(self):
+        self._test_logaddexp(base2=True)
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
         from scipy.special import logsumexp
