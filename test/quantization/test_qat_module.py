@@ -368,7 +368,8 @@ class TestQATModule(TestCase):
            padding_mode=st.sampled_from(['zeros', 'circular']),
            eps=st.sampled_from([1e-5, 1e-4, 1e-3]),
            momentum=st.sampled_from([0.1, 0.2, 0.3]),
-           freeze_bn=st.booleans())
+           freeze_bn=st.booleans(),
+           bias=st.booleans())
     def test_conv_bn_folded_vs_unfolded(
             self,
             batch_size,
@@ -387,7 +388,8 @@ class TestQATModule(TestCase):
             padding_mode,
             eps,
             momentum,
-            freeze_bn
+            freeze_bn,
+            bias,
     ):
         # TODO: remove before land
         if False:
@@ -409,6 +411,7 @@ class TestQATModule(TestCase):
             momentum = 0.1
             freeze_bn = False
             freeze_bn = True
+            bias = True
         # **** WARNING: This is used to temporarily disable MKL-DNN convolution due
         # to a bug: https://github.com/pytorch/pytorch/issues/23825
         # Once this bug is fixed, this context manager as well as its callsites
@@ -429,7 +432,7 @@ class TestQATModule(TestCase):
                 (pad_h, pad_w),
                 (dilation_h, dilation_w),
                 groups,
-                None,  # bias
+                bias,  # bias
                 padding_mode,
                 freeze_bn=freeze_bn,
                 qconfig=default_qat_qconfig
@@ -443,7 +446,7 @@ class TestQATModule(TestCase):
                 (pad_h, pad_w),
                 (dilation_h, dilation_w),
                 groups,
-                None,  # bias
+                bias,  # bias
                 padding_mode,
                 eps,
                 momentum,
@@ -460,8 +463,8 @@ class TestQATModule(TestCase):
             qat_ref_op.running_var = qat_op.bn.running_var.clone()
             qat_ref_op.gamma = torch.nn.Parameter(qat_op.bn.weight.detach().clone())
             qat_ref_op.beta = torch.nn.Parameter(qat_op.bn.bias.detach().clone())
-            # if qat_op.bias != None:
-                # qat_ref_op.bias = torch.nn.Parameter(qat_op.bias.detach().clone())
+            if qat_op.bias is not None:
+                qat_ref_op.bias = torch.nn.Parameter(qat_op.bias.detach().clone())
 
             lr = 0.01
             qat_op_optim = torch.optim.SGD(qat_op.parameters(), lr=lr)
