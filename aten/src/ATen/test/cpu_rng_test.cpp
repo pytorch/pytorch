@@ -89,10 +89,8 @@ Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> 
 
 // ==================================================== Cauchy ========================================================
 
-Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> generator) {
-  auto iter = TensorIterator::nullary_op(self);
-  native::templates::cpu::cauchy_kernel(iter, median, sigma, check_generator<TestCPUGenerator>(generator));
-  return self;
+Tensor& cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> generator) {
+  return at::native::templates::cauchy_impl_<native::templates::cpu::CauchyKernel, TestCPUGenerator>(self, median, sigma, generator);
 }
 
 // ================================================== LogNormal =======================================================
@@ -128,7 +126,7 @@ TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   m.impl_UNBOXED("normal.Tensor_Tensor",     normal_Tensor_Tensor);
   m.impl_UNBOXED("uniform_",                 uniform_);
   // Cauchy
-  m.impl_UNBOXED("cauchy_",                  custom_rng_cauchy_);
+  m.impl_UNBOXED("cauchy_",                  cauchy_);
   // LogNormal
   m.impl_UNBOXED("log_normal_",              log_normal_);
   // Geometric
@@ -139,6 +137,8 @@ TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
 
 class RNGTest : public ::testing::Test {
 };
+
+static constexpr auto MAGIC_NUMBER = 424242424242424242ULL;
 
 // ==================================================== Random ========================================================
 
@@ -180,9 +180,9 @@ TEST_F(RNGTest, Random64bits) {
 TEST_F(RNGTest, Normal) {
   const auto mean = 123.45;
   const auto std = 67.89;
-  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  auto actual = torch::empty({3, 3});
+  auto actual = torch::empty({10});
   actual.normal_(mean, std, gen);
 
   auto expected = torch::empty_like(actual);
@@ -194,10 +194,10 @@ TEST_F(RNGTest, Normal) {
 TEST_F(RNGTest, Normal_float_Tensor_out) {
   const auto mean = 123.45;
   const auto std = 67.89;
-  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  auto actual = torch::empty({3, 3});
-  at::normal_out(actual, mean, torch::full({3, 3}, std), gen);
+  auto actual = torch::empty({10});
+  at::normal_out(actual, mean, torch::full({10}, std), gen);
 
   auto expected = torch::empty_like(actual);
   native::templates::cpu::normal_kernel(expected, mean, std, check_generator<TestCPUGenerator>(gen));
@@ -208,10 +208,10 @@ TEST_F(RNGTest, Normal_float_Tensor_out) {
 TEST_F(RNGTest, Normal_Tensor_float_out) {
   const auto mean = 123.45;
   const auto std = 67.89;
-  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  auto actual = torch::empty({3, 3});
-  at::normal_out(actual, torch::full({3, 3}, mean), std, gen);
+  auto actual = torch::empty({10});
+  at::normal_out(actual, torch::full({10}, mean), std, gen);
 
   auto expected = torch::empty_like(actual);
   native::templates::cpu::normal_kernel(expected, mean, std, check_generator<TestCPUGenerator>(gen));
@@ -222,10 +222,10 @@ TEST_F(RNGTest, Normal_Tensor_float_out) {
 TEST_F(RNGTest, Normal_Tensor_Tensor_out) {
   const auto mean = 123.45;
   const auto std = 67.89;
-  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  auto actual = torch::empty({3, 3});
-  at::normal_out(actual, torch::full({3, 3}, mean), torch::full({3, 3}, std), gen);
+  auto actual = torch::empty({10});
+  at::normal_out(actual, torch::full({10}, mean), torch::full({10}, std), gen);
 
   auto expected = torch::empty_like(actual);
   native::templates::cpu::normal_kernel(expected, mean, std, check_generator<TestCPUGenerator>(gen));
@@ -236,9 +236,9 @@ TEST_F(RNGTest, Normal_Tensor_Tensor_out) {
 TEST_F(RNGTest, Normal_float_Tensor) {
   const auto mean = 123.45;
   const auto std = 67.89;
-  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  auto actual = at::normal(mean, torch::full({3, 3}, std), gen);
+  auto actual = at::normal(mean, torch::full({10}, std), gen);
 
   auto expected = torch::empty_like(actual);
   native::templates::cpu::normal_kernel(expected, mean, std, check_generator<TestCPUGenerator>(gen));
@@ -249,9 +249,9 @@ TEST_F(RNGTest, Normal_float_Tensor) {
 TEST_F(RNGTest, Normal_Tensor_float) {
   const auto mean = 123.45;
   const auto std = 67.89;
-  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  auto actual = at::normal(torch::full({3, 3}, mean), std, gen);
+  auto actual = at::normal(torch::full({10}, mean), std, gen);
 
   auto expected = torch::empty_like(actual);
   native::templates::cpu::normal_kernel(expected, mean, std, check_generator<TestCPUGenerator>(gen));
@@ -262,9 +262,9 @@ TEST_F(RNGTest, Normal_Tensor_float) {
 TEST_F(RNGTest, Normal_Tensor_Tensor) {
   const auto mean = 123.45;
   const auto std = 67.89;
-  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  auto actual = at::normal(torch::full({3, 3}, mean), torch::full({3, 3}, std), gen);
+  auto actual = at::normal(torch::full({10}, mean), torch::full({10}, std), gen);
 
   auto expected = torch::empty_like(actual);
   native::templates::cpu::normal_kernel(expected, mean, std, check_generator<TestCPUGenerator>(gen));
@@ -277,7 +277,7 @@ TEST_F(RNGTest, Normal_Tensor_Tensor) {
 TEST_F(RNGTest, Uniform) {
   const auto from = -24.24;
   const auto to = 42.42;
-  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
   auto actual = torch::empty({3, 3});
   actual.uniform_(from, to, gen);
@@ -294,7 +294,7 @@ TEST_F(RNGTest, Uniform) {
 TEST_F(RNGTest, Cauchy) {
   const auto median = 123.45;
   const auto sigma = 67.89;
-  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
   auto actual = torch::empty({3, 3});
   actual.cauchy_(median, sigma, gen);
@@ -311,9 +311,9 @@ TEST_F(RNGTest, Cauchy) {
 TEST_F(RNGTest, LogNormal) {
   const auto mean = 12.345;
   const auto std = 6.789;
-  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  auto actual = torch::empty({3, 3});
+  auto actual = torch::empty({10});
   actual.log_normal_(mean, std, gen);
 
   auto expected = torch::empty_like(actual);
@@ -327,7 +327,7 @@ TEST_F(RNGTest, LogNormal) {
 
 TEST_F(RNGTest, Geometric) {
   const auto p = 0.42;
-  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
   auto actual = torch::empty({3, 3});
   actual.geometric_(p, gen);
@@ -343,7 +343,7 @@ TEST_F(RNGTest, Geometric) {
 
 TEST_F(RNGTest, Exponential) {
   const auto lambda = 42;
-  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
   auto actual = torch::empty({3, 3});
   actual.exponential_(lambda, gen);

@@ -9,8 +9,10 @@ from quantization.test_quantized_tensor import TestQuantizedTensor  # noqa: F401
 from quantization.test_quantized_op import TestQuantizedOps  # noqa: F401
 from quantization.test_quantized_op import TestQNNPackOps  # noqa: F401
 from quantization.test_quantized_op import TestQuantizedLinear  # noqa: F401
+from quantization.test_quantized_op import TestQuantizedConv  # noqa: F401
 from quantization.test_quantized_op import TestDynamicQuantizedLinear  # noqa: F401
 from quantization.test_quantized_op import TestComparatorOps  # noqa: F401
+from quantization.test_quantized_op import TestPadding  # noqa: F401
 
 # Quantized Functional
 from quantization.test_quantized_functional import TestQuantizedFunctional  # noqa: F401
@@ -32,6 +34,7 @@ from quantization.test_workflow_module import TestObserver  # noqa: F401
 # TODO: merge with TestObserver
 # TODO: some tests belong to test_quantize.py, e.g. test_record_observer
 from quantization.test_workflow_module import TestRecordHistogramObserver  # noqa: F401
+from quantization.test_workflow_module import TestDistributed  # noqa: F401
 
 # Workflow
 # 1. Eager mode quantization

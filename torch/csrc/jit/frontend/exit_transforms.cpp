@@ -505,6 +505,101 @@ struct ExitTransformer {
   std::shared_ptr<Graph> graph_;
 };
 
+bool inlineConsecutiveIfs(Node* node) {
+  if (node->kind() != prim::If || node->next()->kind() != prim::If) {
+    return false;
+  }
+
+  IfView first_if(node);
+  IfView second_if(node->next());
+
+  // the second if must depend on a value outputted in the first if for us to
+  // inline the second if
+  if (second_if.cond()->node() != node) {
+    return false;
+  }
+
+  // both blocks must output a constant value for us to inline, and those values
+  // must be different. if the values are the same, then the subsequent if node
+  // will get constant prop'd away, and inlining it into the first node would
+  // double code size
+
+  auto input_offset = second_if.cond()->offset();
+  auto maybe_then_value = toIValue(first_if.thenOutputs().at(input_offset));
+  auto maybe_else_value = toIValue(first_if.elseOutputs().at(input_offset));
+  if (!maybe_then_value || !maybe_else_value ||
+      maybe_then_value->toBool() == maybe_else_value->toBool()) {
+    return false;
+  }
+
+  bool then_value = maybe_then_value->toBool();
+  bool else_value = maybe_else_value->toBool();
+
+  for (auto i = 0; i < 2; ++i) {
+    Block* first_if_block;
+    Block* second_if_block;
+
+    if (i == 0) {
+      first_if_block = first_if.thenBlock();
+      second_if_block =
+          then_value ? second_if.thenBlock() : second_if.elseBlock();
+    } else {
+      first_if_block = first_if.elseBlock();
+      second_if_block =
+          else_value ? second_if.thenBlock() : second_if.elseBlock();
+      ;
+    }
+
+    // we need to replace values that were used in the second if that were
+    // outputs of the first if with the equivalent value in the scope of the
+    // block we're copying into
+    auto value_map = [&](Value* v) {
+      if (v->node() != first_if.node()) {
+        return v;
+      }
+      auto offset = v->offset();
+      return first_if_block->outputs().at(offset);
+    };
+
+    // clone from also copies block outputs from second_if_block onto
+    // first_if_block
+    first_if_block->cloneFrom(second_if_block, value_map);
+  }
+
+  for (Value* output : second_if.outputs()) {
+    auto new_out = first_if.node()->addOutput()->copyMetadata(output);
+    output->replaceAllUsesWith(new_out);
+  }
+  second_if.node()->destroy();
+  return true;
+}
+
+// After an early return, we conditionalize all further execution
+// This means code like the following:
+// if x:
+//     return 1
+// return 2
+// Gets generated as one if statement checking `if x`, and then a second if
+// statement that conditionalizes execution. We can rewrite cases like these
+// into one if statement, so that the above examples gets rewritten to look
+// like: if x:
+//   return 1
+// else:
+//   return 2
+void inlineConsecutiveIfs(Block* block) {
+  for (auto it = block->nodes().begin(), end = block->nodes().end();
+       it != end;) {
+    for (Block* b : it->blocks()) {
+      inlineConsecutiveIfs(b);
+    }
+
+    // if we fused two ifs, we need to check current node and new next node
+    if (!inlineConsecutiveIfs(*it)) {
+      it++;
+    }
+  }
+}
+
 // This pass takes in a graph where LoopContinuation & ReturnStmts exist in the
 // graph and erases them in the graph, correctly setting block outputs.
 // prim::LoopContinuation(*vals) means that the values are targeting the most
@@ -586,6 +681,7 @@ void TransformExits(std::shared_ptr<Graph>& graph) {
   e_loop.transformLoopContinuations();
   ExitTransformer e_ret(graph);
   e_ret.transformReturnStmts();
+  inlineConsecutiveIfs(graph->block());
 }
 } // namespace jit
 } // namespace torch

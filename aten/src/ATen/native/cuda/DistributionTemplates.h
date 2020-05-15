@@ -287,7 +287,7 @@ void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, R
     {
       // define lambda to mod with range and add base
       auto random_func = [range, base] __device__ (uint64_t rand) {
-        return uniform_int_from_to_transformation<scalar_t>(rand, range, base);
+        return transformation::uniform_int_from_to<scalar_t>(rand, range, base);
       };
       distribution_nullary_kernel<scalar_t, uint64_t, curand4_engine_calls/2>(iter,
         gen,
@@ -301,7 +301,7 @@ void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, R
         random_func);
     } else {
       auto random_func = [range, base] __device__ (uint32_t rand) {
-        return uniform_int_from_to_transformation<scalar_t>(rand, range, base);
+        return transformation::uniform_int_from_to<scalar_t>(rand, range, base);
       };
       distribution_nullary_kernel<scalar_t, uint32_t, curand4_engine_calls>(iter,
         gen,
@@ -330,7 +330,7 @@ void random_full_64_bits_range_kernel(TensorIterator& iter, RNG gen) {
         std::is_same<scalar_t, float>::value ||
         std::is_same<scalar_t, at::BFloat16>::value) {
       auto random_func = [] __device__ (uint64_t rand) {
-        return uniform_int_full_range_transformation<scalar_t>(rand);
+        return transformation::uniform_int_full_range<scalar_t>(rand);
       };
       distribution_nullary_kernel<scalar_t, uint64_t, curand4_engine_calls/2>(iter,
         gen,
@@ -369,7 +369,7 @@ void random_kernel(TensorIterator& iter, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, iter.dtype(), "random_kernel_cuda", [&] {
     if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
       auto random_func = [] __device__ (uint64_t rand) {
-        return uniform_int_transformation<scalar_t>(rand);
+        return transformation::uniform_int<scalar_t>(rand);
       };
       distribution_nullary_kernel<scalar_t, uint64_t, curand4_engine_calls/2>(iter, gen,
         [] __device__ (curandStatePhilox4_32_10_t* state) -> ulonglong2 {
@@ -382,7 +382,7 @@ void random_kernel(TensorIterator& iter, RNG gen) {
         random_func);
     } else {
       auto random_func = [] __device__ (uint32_t rand) {
-        return uniform_int_transformation<scalar_t>(rand);
+        return transformation::uniform_int<scalar_t>(rand);
       };
       distribution_nullary_kernel<scalar_t, uint32_t, curand4_engine_calls>(iter,
         gen,
@@ -603,6 +603,45 @@ template<typename RNG>
 struct ExponentialKernel {
   void operator()(TensorIterator& iter, double lambda, c10::optional<Generator> gen) {
     exponential_kernel(iter, lambda, check_generator<RNG>(gen));
+  }
+};
+
+// ==================================================== Cauchy ========================================================
+
+template<typename RNG>
+void cauchy_kernel(TensorIterator& iter, double median_, double sigma_, RNG gen) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "cauchy_cuda", [&] {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto median = static_cast<accscalar_t>(median_);
+    auto sigma = static_cast<accscalar_t>(sigma_);
+    if (std::is_same<scalar_t, double>::value) {
+      // define lambda for cauchy transformation
+      auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
+        return static_cast<scalar_t>(median + sigma *
+                ::tan(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
+      };
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
+        cauchy_func);
+    } else {
+      // use __tanf fast approximation for peak bandwidth
+      auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
+        return static_cast<scalar_t>(median + sigma *
+                __tanf(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
+      };
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
+        cauchy_func);
+    }
+   });
+}
+
+template<typename RNG>
+struct CauchyKernel {
+  void operator()(TensorIterator& iter, double median, double sigma, c10::optional<Generator> gen) {
+    cauchy_kernel(iter, median, sigma, check_generator<RNG>(gen));
   }
 };
 

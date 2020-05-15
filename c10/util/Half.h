@@ -11,6 +11,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
+#include <c10/util/complex_type.h>
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
@@ -359,45 +360,23 @@ struct alignas(2) Half {
 
 // This is just a placeholder for whatever complex representation we
 // end up deciding to use for half-precision complex numbers.
-struct alignas(4) ComplexHalf {
+template<>
+struct alignas(4) complex<Half> {
+  using value_type = Half;
   Half real_;
   Half imag_;
-  ComplexHalf() = default;
+  complex() = default;
   Half real() const {
     return real_;
   }
   Half imag() const {
     return imag_;
   }
-  inline ComplexHalf(std::complex<float> value)
+  inline complex(std::complex<float> value)
       : real_(value.real()), imag_(value.imag()) {}
   inline operator std::complex<float>() const {
     return {real_, imag_};
   }
-};
-
-template <typename T>
-struct is_complex_t : public std::false_type {};
-
-template <typename T>
-struct is_complex_t<std::complex<T>> : public std::true_type {};
-
-template <>
-struct is_complex_t<ComplexHalf> : public std::true_type {};
-
-// Extract double from std::complex<double>; is identity otherwise
-// TODO: Write in more idiomatic C++17
-template <typename T>
-struct scalar_value_type {
-  using type = T;
-};
-template <typename T>
-struct scalar_value_type<std::complex<T>> {
-  using type = T;
-};
-template <>
-struct scalar_value_type<ComplexHalf> {
-  using type = Half;
 };
 
 // In some versions of MSVC, there will be a compiler error when building.
@@ -408,6 +387,7 @@ struct scalar_value_type<ComplexHalf> {
 #pragma warning( push )
 #pragma warning( disable : 4146 )
 #pragma warning( disable : 4804 )
+#pragma warning( disable : 4018 )
 #endif
 
 // The overflow checks may involve float to int conversion which may

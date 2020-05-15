@@ -15,6 +15,9 @@ namespace native {
 #define HOST_DEVICE
 #endif
 
+// integral power in pytorch allows for negative exponents, giving truncated integral results.
+// e.g. since 2**-1==0.5, the truncated integral result is zero. 1**negative_exponent is the 
+// only non-zero result.
 template <class T,
   typename std::enable_if<std::is_integral<T>::value, T>::type* = nullptr>
 static inline HOST_DEVICE __ubsan_ignore_signed_int_overflow__ T powi_impl(T a, T b) {

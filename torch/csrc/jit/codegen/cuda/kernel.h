@@ -50,6 +50,7 @@ class CudaKernel {
   CUmodule module_;
   CUfunction function_;
   int max_blocks_;
+  int unroll_factor_ = 1;
 
   // WARNING:
   // Block and Grid dimension setting is here for testing purposes only
@@ -64,6 +65,7 @@ class CudaKernel {
 
   dim3 block_;
   dim3 grid_;
+  bool has_random_;
 };
 
 // compile Fusion to CUDA functions:
@@ -81,8 +83,8 @@ TORCH_CUDA_API void runKernel(
 
 // Facility API to run kernel in tests.
 TORCH_CUDA_API void runTestKernel(
-    CudaKernel& entry,
-    const std::vector<at::Tensor>& inputs,
+    CudaKernel* entry,
+    const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs);
 
 } // namespace cuda

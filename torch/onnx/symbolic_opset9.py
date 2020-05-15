@@ -584,19 +584,35 @@ def softmax(g, input, dim, dtype=None):
     #           [0.167, 0.167, 0.167]]
     # So only when dim and axis both equal to ndim - 1 (the last dimension),
     # their semantics are equivalent.
-    # So use softmax when dim and axis both equal to ndim - 1
-    # otherwise compute softmax using a subgraph with other operators
+    # So use softmax when dim and axis both equal to ndim - 1,
+    # otherwise transpose the input to put the vectors to be normalized to the last dimension.
+    # When input rank is not known at export time we compute softmax using a subgraph
+    # with other operators
     input_dim = input.type().dim()
-    if input_dim:
+    if input_dim is not None:
         # TODO: remove this as onnx opset 11 spec allows negative axes
         if dim < 0:
             dim = input_dim + dim
-        if input_dim == dim + 1:
-            softmax = g.op('Softmax', input, axis_i=dim)
-            if dtype and dtype.node().kind() != 'prim::Constant':
-                parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
-                softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
-            return softmax
+
+        is_transpose_required = (input_dim != dim + 1)
+
+        if is_transpose_required:
+            axes = list(range(input_dim))
+            axes[dim], axes[-1] = axes[-1], axes[dim]
+            input = g.op("Transpose", input, perm_i=axes)
+            dim = input_dim - 1
+
+        softmax = g.op('Softmax', input, axis_i=dim)
+        if dtype and dtype.node().kind() != 'prim::Constant':
+            parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
+            softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+
+        if is_transpose_required:
+            softmax = g.op("Transpose", softmax, perm_i=axes)
+        return softmax
+
+    # Apply max normalization.
+    input = g.op('Sub', input, g.op('ReduceMax', input, axes_i=[dim], keepdims_i=1))
 
     exp = g.op('Exp', input)
     sum = g.op('ReduceSum', exp, axes_i=[dim])
@@ -1237,7 +1253,16 @@ def log1p(g, self):
 
 
 def pow(g, self, exponent):
-    return g.op("Pow", self, exponent)
+    f_dtype = self_dtype = self.type().scalarType()
+    if not sym_help._is_fp(self):
+        f_dtype = 'Float'
+        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[f_dtype])
+    if not sym_help._is_fp(exponent):
+        exponent = g.op("Cast", exponent, to_i=sym_help.cast_pytorch_to_onnx[f_dtype])
+    pow = g.op("Pow", self, exponent)
+    if self_dtype and self_dtype != f_dtype:
+        pow = g.op("Cast", pow, to_i=sym_help.cast_pytorch_to_onnx[self_dtype])
+    return pow
 
 
 def clamp(g, self, min, max):

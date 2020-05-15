@@ -22,9 +22,10 @@ Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
   TORCH_CHECK(!(isIntegralType(base.scalar_type(), true) &&
               exp.isIntegral(true) && exp.toLong() < 0),
               "Integers to negative integer powers are not allowed.");
-  if (exp.toDouble() == 0.0) {
+  // Avoid runtime error when typecasting
+  if (!exp.isComplex() && (exp.toDouble() == 0.0)) {
     result.resize_as_(base).fill_(1);
-  } else if (exp.toDouble() == 1.0) {
+  } else if (!exp.isComplex() && (exp.toDouble() == 1.0)) {
     result.resize_as_(base).copy_(base);
   } else {
     auto common_dtype = at::result_type(base, exp);
