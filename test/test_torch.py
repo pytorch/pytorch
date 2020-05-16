@@ -12309,6 +12309,20 @@ class TestTorchDeviceType(TestCase):
                     non_zero_rand((2, 2), dtype=dtype, device=device),
                     non_zero_rand((2, 2), dtype=dtype, device=device))
 
+    # This function tests that a nan value is returned for input values not in domain
+    def test_acosh_domain(self, device):
+        # Domain of acosh is [1, inf)
+        sample = torch.tensor([-1.23, -0.06, 0.98], device=device)
+        self.assertEqual(torch.isnan(torch.acosh(sample)),  torch.BoolTensor([1, 1, 1]))
+        self.assertEqual(torch.isnan(sample.acosh()), torch.BoolTensor([1, 1, 1]))
+
+    # This function tests that a nan value is returned for input values not in domain
+    def test_atanh_domain(self, device):
+        # Domain of atanh is (-1, 1)
+        sample = torch.tensor([-1.00, 1.00, -1.23, 1.06], device=device)
+        self.assertEqual(torch.isnan(torch.atanh(sample)),  torch.BoolTensor([1, 1, 1, 1]))
+        self.assertEqual(torch.isnan(sample.atanh()), torch.BoolTensor([1, 1, 1, 1]))
+
     # TODO: run on non-native device types
     @dtypes(torch.double)
     def test_unary_out_op_mem_overlap(self, device, dtype):
