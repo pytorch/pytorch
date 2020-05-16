@@ -6309,6 +6309,10 @@ class TestTorchDeviceType(TestCase):
         torch_fn, np_fn = fns
 
         a = np.array(vals, dtype=torch_to_numpy_dtype_dict[dtype])
+
+        # `numpy` may return an array with `negative` strides
+        # which is currently not supported. `.copy()` assures
+        # that we get an array with `postive` strides only.
         np_result = torch.from_numpy(np_fn(a).copy())
 
         t = torch.tensor(vals, device=device, dtype=dtype)
@@ -11893,7 +11897,7 @@ class TestTorchDeviceType(TestCase):
 
             # Currently `CUDA` backend is not supported as
             # at::legacy::cumprod does not support complex dtypes.
-            if 'cuda' in device:
+            if self.device_type == 'cuda':
                 with self.assertRaises(RuntimeError):
                     pt_res = torch.vander(pt_x, increasing=inc) if n is None \
                         else torch.vander(pt_x, n, inc)
