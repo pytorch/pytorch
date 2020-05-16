@@ -12312,7 +12312,7 @@ class TestTorchDeviceType(TestCase):
     # This function tests that a nan value is returned for input values not in domain
     def test_acosh_domain(self, device):
         # Domain of acosh is [1, inf)
-        sample = torch.tensor([-1.23, -0.06, 0.98], device=device, dtype=dtype)
+        sample = torch.tensor([-1.23, -0.06, 0.98], device=device)
         self.assertEqual(torch.isnan(torch.acosh(sample)), torch.BoolTensor([1, 1, 1]))
         self.assertEqual(torch.isnan(sample.acosh()), torch.BoolTensor([1, 1, 1]))
 
