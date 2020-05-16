@@ -512,6 +512,13 @@ SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor&
     Tensor r_values = at::cat({t_values, s_values}, 0).to(r.scalar_type());
     alias_into_sparse(r, r_indices, r_values);
 
+    // Prevent unbounded growth of nnz
+    // TODO: Improved heuristic on when to coalesce or remove need to coalesce
+    if (r._nnz() > r.numel()) {
+      auto c = r.coalesce();
+      alias_into_sparse(r, c._indices(), c._values());
+    }
+
     return r;
 }
 

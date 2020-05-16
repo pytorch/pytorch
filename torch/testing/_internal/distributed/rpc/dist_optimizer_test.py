@@ -1,7 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import threading
-import unittest
 
 import torch
 import torch.distributed.autograd as dist_autograd
@@ -35,7 +34,7 @@ class MyModule:
 
 class FailingOptimizer(optim.Optimizer):
     def __init__(self, params):
-        super(FailingOptimizer, self).__init__(params, {})
+        super().__init__(params, {})
 
     def step(self, closure=None):
         raise ValueError("Error running optimizer.")
@@ -43,7 +42,7 @@ class FailingOptimizer(optim.Optimizer):
 
 class OptimizerFailingOnConstructor(optim.Optimizer):
     def __init__(self, params):
-        super(OptimizerFailingOnConstructor, self).__init__(params, {})
+        super().__init__(params, {})
         raise ValueError("Error creating optimizer.")
 
     def step(self, closure=None):
@@ -94,9 +93,6 @@ def rpc_async_method(method, obj_rref, *args, **kwargs):
     )
 
 
-@unittest.skipIf(
-    not torch._six.PY3, "Pytorch distributed optim does not support python2"
-)
 class DistOptimizerTest(RpcAgentTestFixture):
     @dist_init()
     def test_dist_optim_exception(self):

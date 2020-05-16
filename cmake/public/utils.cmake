@@ -128,7 +128,7 @@ function(caffe2_binary_target target_name_or_src)
     prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${target_name_or_src}")
   endif()
   add_executable(${__target} ${__srcs})
-  target_link_libraries(${__target} ${Caffe2_MAIN_LIBS})
+  target_link_libraries(${__target} torch_library)
   # If we have Caffe2_MODULES defined, we will also link with the modules.
   if(DEFINED Caffe2_MODULES)
     target_link_libraries(${__target} ${Caffe2_MODULES})
@@ -233,7 +233,7 @@ function(torch_compile_options libname)
       target_compile_options(${libname} PUBLIC
         ${MSVC_RUNTIME_LIBRARY_OPTION}
         ${MSVC_DEBINFO_OPTION}
-        /EHa
+        /EHsc
         /DNOMINMAX
         /wd4267
         /wd4251

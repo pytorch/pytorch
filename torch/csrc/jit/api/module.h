@@ -131,8 +131,9 @@ struct TORCH_API Module : public Object {
       const std::string& name,
       const TypePtr t,
       IValue v,
-      bool is_param = false) {
-    type()->addOrCheckAttribute(name, t, is_param);
+      bool is_param = false,
+      bool allow_any = false) {
+    type()->addOrCheckAttribute(name, t, is_param, allow_any);
     _ivalue()->setAttr(name, std::move(v));
   }
   void register_module(const std::string& name, const Module& module) {
@@ -220,6 +221,10 @@ struct TORCH_API Module : public Object {
   void _save_for_mobile(
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+
+  Module copy() const;
+
+  Module deepcopy() const;
 
   // Clones both the underlying `ClassType` and the module instance(data), this
   // function creates a new `ClassType` and returns a new instance that has the

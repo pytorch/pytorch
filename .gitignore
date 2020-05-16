@@ -30,6 +30,7 @@ dist/
 docs/src/**/*
 docs/cpp/build
 docs/cpp/source/api
+docs/source/generated/
 log
 test/.coverage
 test/.hypothesis/
@@ -47,6 +48,9 @@ third_party/build/
 tools/shared/_utils_internal.py
 torch.egg-info/
 torch/__init__.pyi
+torch/_C/__init__.pyi
+torch/_C/_nn.pyi
+torch/_C/_VariableFunctions.pyi
 torch/nn/functional.pyi
 torch/nn/modules/*.pyi
 torch/csrc/autograd/generated/*

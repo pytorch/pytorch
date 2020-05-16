@@ -43,12 +43,13 @@ def reference_spatialbn_test16(X, scale, bias, mean, var, epsilon, order):
 # Test the lowered BN op
 class BatchnormTest(unittest.TestCase):
     # TODO: using hypothesis seed, sweep dimensions
-    @given(seed=st.integers(0, 65535))
-    def test_bn(self, seed):
+    @given(seed=st.integers(0, 65535),
+           size=st.integers(2, 30),
+           input_channels=st.integers(2, 40),
+           batch_size=st.integers(2, 20))
+    @settings(max_examples=100)
+    def test_bn(self, seed, size, input_channels, batch_size):
         workspace.ResetWorkspace()
-        size = 30
-        input_channels = 20
-        batch_size = 40
         np.random.seed(seed)
 
         order = "NCHW"
@@ -134,13 +135,14 @@ class BatchnormTest(unittest.TestCase):
             diff = np.abs(Y_glow - Y_c2).astype(np.float16)
             print_test_debug_info(
                 "bn",
-                {"seed": seed,
-                "scale": scale,
-                "bias": bias,
-                "mean": mean,
-                "var": var,
-                "Y_np": Y_c2.shape,
-                "Y_glow": Y_glow.shape,
-                "diff": diff,
-                "rowwise_diff": np.max(np.abs(diff), -1)})
+                {
+                    "seed": seed,
+                    "scale": scale,
+                    "bias": bias,
+                    "mean": mean,
+                    "var": var,
+                    "Y_np": Y_c2,
+                    "Y_glow": Y_glow,
+                    "diff": diff,
+                    "rowwise_diff": np.max(np.abs(diff), -1)})
             assert(0)

@@ -41,15 +41,15 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indice,
     indice.set_(indices_view);
   }
 
-  Tensor self_restrided = restride_dim(self, dim, self_sizes);
   auto self_dim_stride = ensure_nonempty_stride(self, dim);
 
   auto iter = TensorIterator();
   iter.dont_compute_common_dtype();
   iter.dont_resize_outputs();
+  iter.declare_static_shape(self.sizes(), /*squash_dim=*/dim);
   iter.add_output(result);
   iter.add_output(indice);
-  iter.add_input(self_restrided);
+  iter.add_input(self);
   iter.build();
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
@@ -143,7 +143,7 @@ static void max_kernel_impl(
 }
 
 static void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "where_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX(iter.dtype(), "where_cpu", [&] {
     if (condition_type == at::ScalarType::Byte) {
       cpu_kernel(
         iter,
