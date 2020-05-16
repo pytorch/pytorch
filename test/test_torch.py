@@ -12310,9 +12310,11 @@ class TestTorchDeviceType(TestCase):
                     non_zero_rand((2, 2), dtype=dtype, device=device))
 
     # This function tests that a nan value is returned for input values not in domain
-    def test_acosh_domain(self, device):
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_acosh_domain(self, device, dtype):
         # Domain of acosh is [1, inf)
-        sample = torch.tensor([-1.23, -0.06, 0.98], device=device)
+        sample = torch.tensor([-1.23, -0.06, 0.98], device=device, dtype=dtype)
         self.assertEqual(torch.isnan(torch.acosh(sample)), torch.BoolTensor([1, 1, 1]))
         self.assertEqual(torch.isnan(sample.acosh()), torch.BoolTensor([1, 1, 1]))
 
