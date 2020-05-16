@@ -1600,12 +1600,16 @@ CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
 CAFFE2_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type);
 
+// This enumerator represents the 'kind' of an attribute - a buffer, a paramter, or neither.
+// This state is mutually exclusive. Buffers and Parameters can only appear on modules.
 enum class AttributeKind {
   BUFFER,
   PARAMETER,
   REGULAR_ATTRIBUTE
 };
 
+// This structure represents all notional booking entities in a class attribute: name, kind (see: AttributeKind), and type (see: TypePtr).
+// Note: This structure does not represent the value of the attribute.
 struct CAFFE2_API ClassAttribute {
   public:
   ClassAttribute(AttributeKind kind,
@@ -1623,7 +1627,7 @@ struct CAFFE2_API ClassAttribute {
     return attributeType_;
   }
 
-  const std::string getName() const {
+  const std::string& getName() const {
     return attributeName_;
   }
 
