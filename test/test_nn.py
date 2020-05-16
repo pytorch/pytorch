@@ -9727,19 +9727,14 @@ class TestNNDeviceType(NNTestCase):
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypes(torch.float)
     def test_softmax_backward(self, device, dtype):
-        # Non-even sizes and non-zero shifts test fallback paths in vectorized kernel
-        # Note: dim1 > 1024 is needed to exercise the vectorized (non-persistent) path, (16, 30576) is BERT-esque
-        sizes = [(0, 10), (32, 20), (10, 0), (31, 20), (32, 21), (31, 23), (32, 1536), (31, 2048), (16, 30576)]
-        shifts = [(0, 0), (1, 0), (0, 1), (1, 1)]
+        sizes = [(0, 10), (32, 20), (10, 0)]
         for fn in [F.softmax, F.log_softmax]:
             for size in sizes:
-                for shift in shifts:
-                    input = torch.rand(size, device=device, dtype=dtype, requires_grad=True)
-                    input = input[shift[0]:, shift[1]:]
-                    for dim in [0, 1]:
-                        output = fn(input, dtype=torch.float, dim=dim).sum()
-                        grad_input, = torch.autograd.grad(output, input, create_graph=True)
-                        grad_input.sum().backward()
+                input = torch.rand(size, device=device, dtype=dtype, requires_grad=True)
+                for dim in [0, 1]:
+                    output = fn(input, dtype=torch.float, dim=dim).sum()
+                    grad_input, = torch.autograd.grad(output, input, create_graph=True)
+                    grad_input.sum().backward()
 
     @largeCUDATensorTest('12GB')
     def test_conv_large_nosplit(self, device):
@@ -10816,19 +10811,19 @@ class TestNNDeviceType(NNTestCase):
         t = torch.tensor([[[float("-inf")]]])
         m = nn.MaxPool1d(kernel_size=1, return_indices=True)
         output, indices = m(t)
-        self.assertEqual(output[0, 0, 0], float("-inf"), allow_inf=True)
+        self.assertEqual(output[0, 0, 0], float("-inf"))
         self.assertEqual(indices[0, 0, 0], 0)
 
         t = torch.tensor([[[float("-inf")]]])
         m = nn.MaxPool2d(kernel_size=1, return_indices=True)
         output, indices = m(t)
-        self.assertEqual(output[0, 0, 0], float("-inf"), allow_inf=True)
+        self.assertEqual(output[0, 0, 0], float("-inf"))
         self.assertEqual(indices[0, 0, 0], 0)
 
         t = torch.tensor([[[[float("-inf")]]]])
         m = nn.MaxPool3d(kernel_size=1, return_indices=True)
         output, indices = m(t)
-        self.assertEqual(output[0, 0, 0, 0], float("-inf"), allow_inf=True)
+        self.assertEqual(output[0, 0, 0, 0], float("-inf"))
         self.assertEqual(indices[0, 0, 0, 0], 0)
 
     @dtypesIfCUDA(*ALL_TENSORTYPES2)

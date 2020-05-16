@@ -46,6 +46,7 @@ class Polynomial;
 class RoundOff;
 class ReduceOp;
 class AtomicAdd;
+class NoOp;
 
 class TORCH_API IRVisitor {
  public:
@@ -97,6 +98,7 @@ class TORCH_API IRVisitor {
   virtual void visit(const RoundOff* v);
   virtual void visit(const ReduceOp* v);
   virtual void visit(const AtomicAdd* v);
+  virtual void visit(const NoOp* v);
 };
 
 } // namespace tensorexpr
