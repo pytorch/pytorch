@@ -156,7 +156,8 @@ add_docstr(torch.acosh,
            r"""
 acosh(input, out=None) -> Tensor
 
-Returns a new tensor with the inverse hyperbolic cosine of the elements of :attr:`input`. All values in the input tensor must be greater than or equal to one.
+Returns a new tensor with the inverse hyperbolic cosine of the elements of :attr:`input`,
+All values in the input tensor must be greater than or equal to one.
 
 .. math::
     \text{out}_{i} = \cosh^{-1}(\text{input}_{i})
@@ -710,7 +711,8 @@ add_docstr(torch.atanh,
            r"""
 atanh(input, out=None) -> Tensor
 
-Returns a new tensor with the inverse hyperbolic tangent of the elements of :attr:`input`. All values in the input tensor must be in the open interval `(-1, 1)`.
+Returns a new tensor with the inverse hyperbolic tangent of the elements of :attr:`input`.
+All values in the input tensor must be in the open interval `(-1, 1)`.
 
 .. math::
     \text{out}_{i} = \tanh^{-1}(\text{input}_{i})
