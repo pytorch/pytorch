@@ -433,9 +433,6 @@ void TensorPipeAgent::pollTimeoutRpcs() {
   while (rpcAgentRunning_.load()) {
     std::unique_lock<std::mutex> lock(timeoutMapMutex_);
 
-    steady_clock_time_point earliestTimeout =
-        std::chrono::steady_clock::now() + kLargeTimeDuration;
-
     // We sleep until the earliest expiring RPC in the timeoutMap_. We must
     // also ensure that we sleep while the map is empty, and we exit sleeping
     // if the RPC Agent has been shutdown.
@@ -443,6 +440,10 @@ void TensorPipeAgent::pollTimeoutRpcs() {
       if (!rpcAgentRunning_.load()) {
         return;
       }
+
+      steady_clock_time_point earliestTimeout =
+          std::chrono::steady_clock::now() + kLargeTimeDuration;
+
       if (std::chrono::steady_clock::now() >= earliestTimeout) {
         break;
       }
@@ -470,14 +471,7 @@ void TensorPipeAgent::pollTimeoutRpcs() {
           "RPC ran for more than set timeout and will now be marked with an error");
       // Using setErrorIfNeeded so completed futures are ignored.
       future->setErrorIfNeeded(errorMsg);
-      if (future->hasError()) {
-        // We only want to decrease the active call count if the future has an
-        // error. If it was successful, the counter was already updated in the
-        // send() function above.
-        --clientActiveCalls_;
-      }
     }
-    timedOutFutures.clear();
   }
 }
 
