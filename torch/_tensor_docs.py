@@ -203,7 +203,7 @@ In-place version of :meth:`~Tensor.acos`
 """)
 
 add_docstr_all('acosh',
-              r"""
+               r"""
 acosh() -> Tensor
 
 See :func:`torch.acosh`
