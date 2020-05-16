@@ -7,7 +7,7 @@ Scalar Scalar::operator-() const {
   if (isFloatingPoint()) {
     return Scalar(-v.d);
   } else if (isComplex()) {
-    return Scalar(c10::complex<double>(-v.z[0], -v.z[1]));
+    return Scalar(-v.z);
   } else {
     return Scalar(-v.i);
   }
