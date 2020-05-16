@@ -33,11 +33,8 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2):
         total_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(), norm_type).to(device) for p in parameters]), norm_type)
     clip_coef = max_norm / (total_norm + 1e-6)
     if clip_coef < 1:
-        # clip_coef is a scalar on device0
-        # since tensors on multiple devices will need to interact with it, make it python scalar
-        clip_coef = clip_coef.item()
         for p in parameters:
-            p.grad.detach().mul_(clip_coef)
+            p.grad.detach().mul_(clip_coef.to(p.grad.device))
     return total_norm
 
 
