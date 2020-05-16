@@ -119,110 +119,120 @@ namespace c10 {
 //  - thrust::complex only support float and double
 
 template<typename T>
-struct complex;
-
-template<typename T>
-struct alignas(sizeof(T) * 2) complex_common {
+struct alignas(sizeof(T) * 2) complex {
   using value_type = T;
 
-  T storage[2] = {T(), T()};
+  T real_ = T(0);
+  T imag_ = T(0);
 
-  constexpr complex_common() = default;
-  constexpr complex_common(const T& re, const T& im = T()): storage{re, im} {}
+  constexpr complex() = default;
+  constexpr complex(const T& re, const T& im = T()): real_(re), imag_(im) {}
   template<typename U>
-  explicit constexpr complex_common(const std::complex<U> &other): complex_common(other.real(), other.imag()) {}
+  explicit constexpr complex(const std::complex<U> &other): complex(other.real(), other.imag()) {}
 #if defined(__CUDACC__) || defined(__HIPCC__)
   template<typename U>
-  explicit C10_HOST_DEVICE complex_common(const thrust::complex<U> &other): complex_common(other.real(), other.imag()) {}
+  explicit C10_HOST_DEVICE complex(const thrust::complex<U> &other): complex(other.real(), other.imag()) {}
 #endif
 
+  // Use SFINAE to specialize casting constructor for c10::complex<float> and c10::complex<double>
+  template<typename U = T>
+  explicit constexpr complex(const std::enable_if_t<std::is_same<U, float>::value, complex<double>> &other) {
+    real_ = other.real_;
+    imag_ = other.imag_;
+  }
+  template<typename U = T>
+  constexpr complex(const std::enable_if_t<std::is_same<U, double>::value, complex<float>> &other) {
+    real_ = other.real_;
+    imag_ = other.imag_;
+  };
+
   constexpr complex<T> &operator =(T re) {
-    storage[0] = re;
-    storage[1] = 0;
-    return static_cast<complex<T> &>(*this);
+    real_ = re;
+    imag_ = 0;
+    return *this;
   }
 
   constexpr complex<T> &operator +=(T re) {
-    storage[0] += re;
-    return static_cast<complex<T> &>(*this);
+    real_ += re;
+    return *this;
   }
 
   constexpr complex<T> &operator -=(T re) {
-    storage[0] -= re;
-    return static_cast<complex<T> &>(*this);
+    real_ -= re;
+    return *this;
   }
 
   constexpr complex<T> &operator *=(T re) {
-    storage[0] *= re;
-    storage[1] *= re;
-    return static_cast<complex<T> &>(*this);
+    real_ *= re;
+    imag_ *= re;
+    return *this;
   }
 
   constexpr complex<T> &operator /=(T re) {
-    storage[0] /= re;
-    storage[1] /= re;
-    return static_cast<complex<T> &>(*this);
+    real_ /= re;
+    imag_ /= re;
+    return *this;
   }
 
   template<typename U>
   constexpr complex<T> &operator =(const complex<U> &rhs) {
-    storage[0] = rhs.real();
-    storage[1] = rhs.imag();
-    return static_cast<complex<T> &>(*this);
+    real_ = rhs.real();
+    imag_ = rhs.imag();
+    return *this;
   }
 
   template<typename U>
   constexpr complex<T> &operator +=(const complex<U> &rhs) {
-    storage[0] += rhs.real();
-    storage[1] += rhs.imag();
-    return static_cast<complex<T> &>(*this);
+    real_ += rhs.real();
+    imag_ += rhs.imag();
+    return *this;
   }
 
   template<typename U>
   constexpr complex<T> &operator -=(const complex<U> &rhs) {
-    storage[0] -= rhs.real();
-    storage[1] -= rhs.imag();
-    return static_cast<complex<T> &>(*this);
+    real_ -= rhs.real();
+    imag_ -= rhs.imag();
+    return *this;
   }
 
   template<typename U>
   constexpr complex<T> &operator *=(const complex<U> &rhs) {
     // (a + bi) * (c + di) = (a*c - b*d) + (a * d + b * c) i
-    T a = storage[0];
-    T b = storage[1];
+    T a = real_;
+    T b = imag_;
     U c = rhs.real();
     U d = rhs.imag();
-    storage[0] = a * c - b * d;
-    storage[1] = a * d + b * c;
-    return static_cast<complex<T> &>(*this);
+    real_ = a * c - b * d;
+    imag_ = a * d + b * c;
+    return *this;
   }
 
   template<typename U>
   constexpr complex<T> &operator /=(const complex<U> &rhs) {
     // (a + bi) / (c + di) = (ac + bd)/(c^2 + d^2) + (bc - ad)/(c^2 + d^2) i
-    T a = storage[0];
-    T b = storage[1];
+    T a = real_;
+    T b = imag_;
     U c = rhs.real();
     U d = rhs.imag();
     auto denominator = c * c + d * d;
-    storage[0] = (a * c + b * d) / denominator;
-    storage[1] = (b * c - a * d) / denominator;
-    return static_cast<complex<T> &>(*this);
+    real_ = (a * c + b * d) / denominator;
+    imag_ = (b * c - a * d) / denominator;
+    return *this;
   }
 
   template<typename U>
   constexpr complex<T> &operator =(const std::complex<U> &rhs) {
-    storage[0] = rhs.real();
-    storage[1] = rhs.imag();
-    return static_cast<complex<T> &>(*this);
+    real_ = rhs.real();
+    imag_ = rhs.imag();
+    return *this;
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
   template<typename U>
   C10_HOST_DEVICE complex<T> &operator =(const thrust::complex<U> &rhs) {
-    storage[0] = rhs.real();
-    storage[1] = rhs.imag();
-    return static_cast<complex<T> &>(*this);
+    real_ = rhs.real();
+    imag_ = rhs.imag();
+    return *this;
   }
 #endif
 
@@ -239,44 +249,18 @@ struct alignas(sizeof(T) * 2) complex_common {
 #endif
 
   constexpr T real() const {
-    return storage[0];
+    return real_;
   }
   constexpr void real(T value) {
-    storage[0] = value;
+    real_ = value;
   }
   constexpr T imag() const {
-    return storage[1];
+    return imag_;
   }
   constexpr void imag(T value) {
-    storage[1] = value;
+    imag_ = value;
   }
 };
-
-// In principle, `using complex_common<??>::complex_common;` should be enough
-// to for default constructor, but multiple compilers are having multiple bugs on
-// this at different contexts
-#define COMPILER_BUGS constexpr complex() = default;
-
-template<>
-struct alignas(2*sizeof(float)) complex<float>: public complex_common<float> {
-  using complex_common<float>::complex_common;
-  COMPILER_BUGS
-  explicit constexpr complex(const complex<double> &other);
-  using complex_common<float>::operator=;
-};
-
-template<>
-struct alignas(2*sizeof(double)) complex<double>: public complex_common<double> {
-  using complex_common<double>::complex_common;
-  COMPILER_BUGS
-  constexpr complex(const complex<float> &other);
-  using complex_common<double>::operator=;
-};
-
-#undef COMPILER_BUGS
-
-constexpr complex<float>::complex(const complex<double> &other): complex_common(other.real(), other.imag()) {}
-constexpr complex<double>::complex(const complex<float> &other): complex_common(other.real(), other.imag()) {}
 
 namespace complex_literals {
 
