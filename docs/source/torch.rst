@@ -20,6 +20,7 @@ Tensors
     is_storage
     is_complex
     is_floating_point
+    is_nonzero
     set_default_dtype
     get_default_dtype
     set_default_tensor_type

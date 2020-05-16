@@ -1221,6 +1221,14 @@ class TestNN(NNTestCase):
         module_dict.update(next_modules)
         check()
 
+        next_modules = nn.ModuleDict([
+            ('fc5', nn.Linear(5, 5)),
+            ('act4', nn.Sigmoid()),
+        ])
+        modules.update(next_modules)
+        module_dict.update(next_modules)
+        check()
+
         del module_dict['fc']
         del modules['fc']
         check()
@@ -1371,6 +1379,14 @@ class TestNN(NNTestCase):
             'p7': Parameter(torch.randn(10, 10))
         }
         parameters.update(sorted(next_parameters.items()))
+        parameter_dict.update(next_parameters)
+        check()
+
+        next_parameters = nn.ParameterDict([
+            ('p10', Parameter(torch.randn(10, 10))),
+            ('p9', Parameter(torch.randn(10, 10))),
+        ])
+        parameters.update(next_parameters)
         parameter_dict.update(next_parameters)
         check()
 
@@ -11054,8 +11070,8 @@ class TestNNDeviceType(NNTestCase):
         out2 = op_bfp16(input2)
         out2.backward(grad_input2)
 
-        self.assertEqual(out1, out2, atol=prec)
-        self.assertEqual(input1.grad.data, input2.grad.data, atol=prec)
+        self.assertEqual(out1, out2, atol=prec, exact_dtype=False)
+        self.assertEqual(input1.grad.data, input2.grad.data, atol=prec, exact_dtype=False)
 
     @onlyCUDA
     @skipCUDAIfNotRocm
