@@ -1,3 +1,5 @@
+#include <limits>
+
 namespace c10 {
 
 template <typename T>
@@ -24,5 +26,12 @@ template <typename T>
 struct scalar_value_type<c10::complex<T>> {
   using type = T;
 };
+
+}
+
+namespace std {
+
+template <typename T>
+class numeric_limits<c10::complex<T>> : public numeric_limits<T>  {};
 
 }

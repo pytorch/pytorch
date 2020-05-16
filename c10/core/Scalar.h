@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <type_traits>
 
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
@@ -30,6 +31,9 @@ class C10_API Scalar {
 
   AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, DEFINE_IMPLICIT_CTOR)
   AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
+  // TODO: remove the std::complex below
+  DEFINE_IMPLICIT_CTOR(std::complex<float>, x)
+  DEFINE_IMPLICIT_CTOR(std::complex<double>, x)
 
 #undef DEFINE_IMPLICIT_CTOR
 
@@ -103,14 +107,14 @@ class C10_API Scalar {
 
  private:
     template<typename T,
-             typename std::enable_if<std::numeric_limits<T>::is_integer && ! std::is_same<T, bool>::value, bool>::type* =
+             typename std::enable_if<std::is_integral<T>::value && ! std::is_same<T, bool>::value, bool>::type* =
                  nullptr>
     Scalar(T vv, bool) : tag(Tag::HAS_i) {
       v.i = convert<decltype(v.i), T>(vv);
     }
 
     template<typename T,
-             typename std::enable_if<!std::numeric_limits<T>::is_integer && !c10::is_complex_t<T>::value, bool>::type* =
+             typename std::enable_if<!std::is_integral<T>::value && !c10::is_complex_t<T>::value, bool>::type* =
                  nullptr>
     Scalar(T vv, bool) : tag(Tag::HAS_d) {
       v.d = convert<decltype(v.d), T>(vv);
@@ -120,7 +124,7 @@ class C10_API Scalar {
              typename std::enable_if<c10::is_complex_t<T>::value, bool>::type* =
                  nullptr>
     Scalar(T vv, bool) : tag(Tag::HAS_z) {
-      v.d = convert<decltype(v.d), T>(vv);
+      v.z = convert<decltype(v.z), T>(vv);
     }
 
   // We can't set v in the initializer list using the
