@@ -203,7 +203,6 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_random(self):
-        import torch_test_cpp_extension.csprng as csprng_extension
         for gen in self.createGenerators():
             for dtype in [torch.bool, torch.uint8, torch.int8, torch.int16, 
                         torch.int32, torch.int64, torch.float, torch.double]:
@@ -213,7 +212,6 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_random2(self):
-        import torch_test_cpp_extension.csprng as csprng_extension
         for gen in self.createGenerators():
             s = torch.zeros(20, 20, dtype=torch.uint8, device='cuda')
             t = s[:, 7]
@@ -227,7 +225,6 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_bool(self):
-        import torch_test_cpp_extension.csprng as csprng_extension
         size = 10000
         for gen in self.createGenerators():
             for i in range(100):
@@ -238,7 +235,6 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_ints(self):
-        import torch_test_cpp_extension.csprng as csprng_extension
         for gen in self.createGenerators():
             for (dtype, size, prec) in [(torch.uint8, 10000, 2), (torch.int8, 10000, 2), (torch.int16, 1000000, 100)]:
                 t = torch.empty(size, dtype=dtype, device='cuda').random_(generator=gen)
@@ -256,7 +252,6 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_uniform1(self):
-        import torch_test_cpp_extension.csprng as csprng_extension
         size = 1000
         alpha = 0.1
         for gen in self.createGenerators():
@@ -272,7 +267,6 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_normal1(self):
-        import torch_test_cpp_extension.csprng as csprng_extension
         size = 1000
         for gen in self.createGenerators():
             for dtype in [torch.float, torch.double]:
@@ -285,7 +279,6 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_normal2(self):
-        import torch_test_cpp_extension.csprng as csprng_extension
 
         def helper(self, device, dtype, gen, ptype, t_transform, std_transform):
             q = torch.empty(100, 100, dtype=dtype, device=device)
@@ -405,7 +398,6 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_uniform(self):
-        import torch_test_cpp_extension.csprng as csprng_extension
         size = 1000
         for gen in self.createGenerators():
             for dtype in [torch.float, torch.double]:
@@ -417,7 +409,6 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_normal(self):
-        import torch_test_cpp_extension.csprng as csprng_extension
         size = 1000
         mean = 0.0
         std = 1.0
@@ -431,7 +422,6 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cauchy(self):
-        import torch_test_cpp_extension.csprng as csprng_extension
         size = 1000
         median = 0.0
         sigma = 1.0
@@ -445,7 +435,6 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_log_normal(self):
-        import torch_test_cpp_extension.csprng as csprng_extension
         size = 1000
         mean = 0.0
         std = 0.25
@@ -459,7 +448,6 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_geometric(self):
-        import torch_test_cpp_extension.csprng as csprng_extension
         size = 1000
         p = 0.5
         for gen in self.createGenerators():
@@ -473,7 +461,6 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_exponential(self):
-        import torch_test_cpp_extension.csprng as csprng_extension
         size = 1000
         lambd = 1.0
         for gen in self.createGenerators():
