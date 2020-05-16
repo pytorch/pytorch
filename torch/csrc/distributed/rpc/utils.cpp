@@ -25,12 +25,17 @@ RPCErrorType getRPCErrorType(const FutureMessage& fm) {
   TORCH_INTERNAL_ASSERT(
       fm.hasError(),
       "FutureMessage passed to getRPCErrorType does not have an error.");
-  auto timeoutErrorStr =
+  auto timeoutErrors =
       RpcAgent::getCurrentRpcAgent()->getTimeoutErrorDescription();
+  timeoutErrors.push_back("failed intentionally");
+
   auto err = std::string(fm.error()->what());
-  if (err.find(timeoutErrorStr) != std::string::npos) {
-    return RPCErrorType::TIMEOUT;
-  } else if (err.find("failed intentionally") != std::string::npos) {
+  if (std::any_of(
+          timeoutErrors.begin(),
+          timeoutErrors.end(),
+          [&err](const std::string& timeoutErrorStr) {
+            return err.find(timeoutErrorStr) != std::string::npos;
+          })) {
     return RPCErrorType::TIMEOUT;
   }
   LOG(INFO) << "Unknown error: " << err;

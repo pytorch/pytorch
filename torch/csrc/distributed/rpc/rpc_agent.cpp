@@ -276,8 +276,8 @@ bool RpcAgent::isGILProfilingEnabled() {
   return profilingEnabled_.load();
 }
 
-std::string RpcAgent::getTimeoutErrorDescription() {
-  return "";
+std::vector<std::string> RpcAgent::getTimeoutErrorDescription() {
+  return std::vector<std::string>{};
 }
 
 std::unordered_map<std::string, std::string> RpcAgent::getDebugInfo() {

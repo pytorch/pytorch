@@ -214,7 +214,7 @@ def wait_until_n_owners_and_forks_on_rank(n, rank, timeout=20):
     start = time.time()
     while True:
         num_owners_on_rank, num_forks_on_rank = rpc.rpc_sync(
-            worker_name(rank), get_num_owners_and_forks, args=(), timeout=2
+            worker_name(rank), get_num_owners_and_forks, args=(), timeout=5
         )
         num_owners_on_rank = int(num_owners_on_rank)
         num_forks_on_rank = int(num_forks_on_rank)

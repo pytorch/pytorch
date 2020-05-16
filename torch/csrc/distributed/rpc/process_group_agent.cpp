@@ -242,8 +242,9 @@ void ProcessGroupAgent::sync() {
   } while (hasPendingMessage());
 }
 
-std::string ProcessGroupAgent::getTimeoutErrorDescription() {
-  return kRPCTimeoutErrorStr.substr(0, kRPCTimeoutErrorStr.find("{}") - 1);
+std::vector<std::string> ProcessGroupAgent::getTimeoutErrorDescription() {
+  return std::vector<std::string>{
+      kRPCTimeoutErrorStr.substr(0, kRPCTimeoutErrorStr.find("{}") - 1)};
 }
 
 void ProcessGroupAgent::startImpl() {

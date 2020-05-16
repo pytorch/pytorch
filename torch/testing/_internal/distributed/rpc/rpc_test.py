@@ -2533,6 +2533,28 @@ class RpcTest(RpcAgentTestFixture):
         ):
             rpc.rpc_async(dst, raise_func)._then(None)
 
+    @dist_init
+    def test_rref_timeout(self):
+        # This test is similar to ones in FaultyProcessGroupTest, but is meant to be
+        # run with other backends besides ProcessGroup.
+        if self.rank != 0:
+            return
+
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker = "worker{}".format(dst_rank)
+        # 10 ms timeout
+        rref = rpc.remote(dst_worker, my_sleep_func, args=(2, ), timeout=0.01)
+        # Future corresponding to the remote creation should time out.
+        expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            rref._get_future().wait()
+        # Call to ensure pending callbacks are run.
+        wait_until_pending_users_flushed()
+        with self.assertRaisesRegex(RuntimeError, "RRef creation"):
+            rref.to_here()
+
+        wait_until_n_owners_and_forks_on_rank(n=1, rank=1)
+
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
 

@@ -75,7 +75,7 @@ class ProcessGroupAgent : public RpcAgent {
 
   void sync() override;
 
-  std::string getTimeoutErrorDescription() override;
+  std::vector<std::string> getTimeoutErrorDescription() override;
 
   void startImpl() override;
 
