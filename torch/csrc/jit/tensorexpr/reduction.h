@@ -237,6 +237,109 @@ class Minimum : public Reducer {
         }) {}
 };
 
+class ReductionInitCleaner : public IRMutator {
+ public:
+  Stmt* clean(Stmt* s) {
+    return s->accept_mutator(this);
+  }
+
+  const Expr* mutate(const ReduceOp* v) override {
+    if (v->initializer()->dtype() == kVoid) {
+      return v;
+    }
+
+    return new ReduceOp(
+        v->accumulator(),
+        new NoOp(),
+        v->body(),
+        v->interaction(),
+        v->output_args(),
+        v->reduce_args());
+    return v->complete().node();
+  }
+};
+
+class ReductionExpander : public IRMutator {
+ public:
+  Stmt* expand(Stmt* s) {
+    Stmt* s_new = s->accept_mutator(this);
+    if (!initializers_.empty()) {
+      throw std::runtime_error("failed to initialize all reductions");
+    }
+
+    return s_new;
+  }
+
+  Stmt* mutate(const For* v) override {
+    Stmt* body_new = v->body()->accept_mutator(this);
+    if (body_new == v->body()) {
+      body_new = Stmt::clone(v->body());
+    }
+
+    Stmt* ret = v->cloneWithNewBody(body_new);
+
+    for (size_t i = 0; i < initializers_.size();) {
+      InitializerInfo& info = initializers_[i];
+
+      auto end = std::remove(info.vars.begin(), info.vars.end(), v->var());
+      if (end == info.vars.end()) {
+        info.skipped_loops.push_back(v);
+        i++;
+        continue;
+      }
+
+      info.vars.erase(end);
+      if (info.vars.empty()) {
+        const ReduceOp* op = info.op;
+        std::vector<const Expr*> indices(
+            op->output_args().begin(), op->output_args().end());
+
+        Stmt* init = new Store(
+            op->accumulator(), indices, op->initializer(), new IntImm(1));
+
+        for (auto it = info.skipped_loops.rbegin();
+             it != info.skipped_loops.rend();
+             it++) {
+          const For* old_for = *it;
+          init = old_for->cloneWithNewBody(init);
+        }
+        info.skipped_loops.clear();
+
+        if (Block* b = dynamic_cast<Block*>(ret)) {
+          b->prepend_stmt(init);
+        } else {
+          ret = new Block({init, ret});
+        }
+        initializers_.erase(initializers_.begin() + i);
+        continue;
+      }
+
+      i++;
+    }
+    return ret;
+  }
+
+  const Expr* mutate(const ReduceOp* v) override {
+    if (v->initializer()->dtype() != kVoid) {
+      const std::vector<const Var*>& reduce_vars(v->reduce_args());
+      initializers_.emplace_back(InitializerInfo(v, reduce_vars));
+    }
+
+    return v->complete().node();
+  }
+
+ private:
+  struct InitializerInfo {
+    InitializerInfo(const ReduceOp* o, std::vector<const Var*> v)
+        : op(o), vars(std::move(v)) {}
+    const ReduceOp* op;
+    std::vector<const Var*> vars;
+    std::vector<const For*> skipped_loops;
+  };
+
+  std::vector<InitializerInfo> initializers_;
+};
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
