@@ -322,7 +322,7 @@ load_tests = load_tests
 
 
 class RpcTest(RpcAgentTestFixture):
-    def _skip_if_tensorpipe_agent(old_func):  # noqa
+    def _skip_if_tensorpipe_agent(old_func):  # noqa: B902
         def decorator(self):
             return unittest.skipIf(
                 self.rpc_backend == rpc.backend_registry.BackendType.TENSORPIPE,
@@ -1753,6 +1753,7 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_rref_get_future(self):
         # Tests that we can obtain the future corresponding to the creation of
         # the RRef on remote end
