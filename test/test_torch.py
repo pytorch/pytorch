@@ -12320,8 +12320,12 @@ class TestTorchDeviceType(TestCase):
     def test_atanh_domain(self, device):
         # Domain of atanh is (-1, 1)
         sample = torch.tensor([-1.00, 1.00, -1.23, 1.06], device=device)
-        self.assertEqual(torch.isnan(torch.atanh(sample)),  torch.BoolTensor([1, 1, 1, 1]))
-        self.assertEqual(torch.isnan(sample.atanh()), torch.BoolTensor([1, 1, 1, 1]))
+        # For values not in domain (except -1.0 and 1.0), atanh should return nan
+        self.assertEqual(torch.isnan(torch.atanh(sample)),  torch.BoolTensor([0, 0, 1, 1]))
+        self.assertEqual(torch.isnan(sample.atanh()), torch.BoolTensor([0, 0, 1, 1]))
+        # For values -1.0 and 1.0, atanh should return -inf and inf respectively
+        self.assertEqual(torch.isinf(torch.atanh(sample)), torch.BoolTensor([1, 1, 0, 0]))
+        self.assertEqual(torch.isinf(sample.atanh()), torch.BoolTensor([1, 1, 0, 0]))
 
     # TODO: run on non-native device types
     @dtypes(torch.double)
