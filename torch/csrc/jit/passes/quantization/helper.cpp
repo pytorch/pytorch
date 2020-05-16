@@ -179,6 +179,9 @@ std::unordered_map<NodeKind, std::tuple<c10::QScheme, QParamVector>>
 AtenFuncArgs _observe_inputs_aten_func = {};
 CallFuncArgs _observe_inputs_call_func = {{"batch_norm", 1}};
 
+// Aten functions for getting tensor information
+std::vector<std::string> _tensor_info_funcs = {"size"};
+
 // Check if `use` is an aten function of name `func_name` and if value
 // `v` is the nth argument (if provided) of the function.
 bool matchAtenFuncToUse(
@@ -345,6 +348,10 @@ bool isSingleInputGeneralAtenFunction(Node* n) {
   return isAtenFunc(n, _single_input_general_shape_aten_funcs) ||
       isAtenFunc(n, _single_input_general_value_aten_funcs) ||
       isAtenFunc(n, fixed_qparams_aten_funcs);
+}
+
+bool isTensorInfoNode(Node* n) {
+  return isAtenFunc(n, _tensor_info_funcs);
 }
 
 c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
