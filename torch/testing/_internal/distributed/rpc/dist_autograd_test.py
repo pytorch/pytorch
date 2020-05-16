@@ -193,7 +193,7 @@ class ExecMode(Enum):
 
 
 class DistAutogradTest(RpcAgentTestFixture):
-    def _skip_if_tensorpipe_agent(old_func):  # noqa
+    def _skip_if_tensorpipe_agent(old_func):  # noqa: B902
         def decorator(self):
             return unittest.skipIf(
                 self.rpc_backend == rpc.backend_registry.BackendType.TENSORPIPE,

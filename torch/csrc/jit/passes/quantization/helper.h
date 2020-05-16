@@ -39,6 +39,10 @@ TORCH_API bool isSingleInputGeneralCallFunction(Node* n);
 
 TORCH_API bool isSingleInputGeneralAtenFunction(Node* n);
 
+// Check if the node will produce the same result regardless of whether
+// the input tensor is quantized or not, example: aten::size
+TORCH_API bool isTensorInfoNode(Node* n);
+
 TORCH_API c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(
     Node* n);
 

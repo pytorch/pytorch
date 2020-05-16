@@ -2,7 +2,7 @@ import torch.distributed.rpc as rpc
 import torch.testing._internal.dist_utils as dist_utils
 
 # In order to run the existing test RPC and Distributed Autograd test suites
-# with Tensorpipe, we make introduce a new class in both rpc_test.py and
+# with Tensorpipe, we introduce a new class in both rpc_test.py and
 # dist_autograd_test.py that inherits from the base test classes and this
 # fixture. In order for this mulitple inheritance to work, this class cannot
 # inherit from RpcAgentTestFixture, since this and the base test classes would
