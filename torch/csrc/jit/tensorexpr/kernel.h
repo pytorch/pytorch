@@ -52,7 +52,7 @@ class TORCH_API TensorExprKernel {
     InterpreterState(code_).run(stack);
   }
 
-  Stmt* getStmtForInputs(const at::ArrayRef<IValue>& inputs);
+  Stmt* getCodeGenStmt();
 
  private:
   enum BackendType {
@@ -63,7 +63,6 @@ class TORCH_API TensorExprKernel {
   };
 
   void compile();
-  void lowerToBackend(const at::ArrayRef<IValue>& inputs);
 
   void runKernel(Stack& stack);
 
@@ -160,17 +159,13 @@ class TORCH_API TensorExprKernel {
   Stmt* generateStmt(BackendType backendType);
   std::vector<CodeGen::BufferArg> prepareBufferArgs();
 
-  std::string getCodegenName(BackendType backendType);
-  void codegenRun(
-      at::Device device,
-      const std::vector<CodeGen::CallArg>& runArgs);
+  std::string getCodeGenName(BackendType backendType);
 
   std::vector<CodeGen::CallArg> prepareRunArgs(
       const at::ArrayRef<IValue>& inputs,
-      std::vector<at::Tensor>& outputs,
-      at::Device device);
+      std::vector<at::Tensor>& outputs);
   BackendType inferBackendTypeFromDevice(at::Device device);
-  at::Device pickDeviceType(const at::ArrayRef<IValue>& inputs);
+  at::Device pickDeviceType(const at::ArrayRef<torch::jit::Value*>& inputs);
 
   void bindInput(const torch::jit::Value* input);
 
@@ -215,7 +210,8 @@ class TORCH_API TensorExprKernel {
   std::vector<Tensor*> flatTensorOutputs_;
   std::unordered_map<int64_t, Tensor*> tensors_;
   std::unordered_map<int64_t, VarHandle> scalars_;
-  std::unordered_map<size_t, std::unique_ptr<CodeGen>> codegenCache_;
+  std::unique_ptr<CodeGen> codegen_;
+  at::Device device_ = at::kCPU;
   KernelArena kernelArena_;
   std::vector<TypePtr> inputTypes_;
   std::shared_ptr<Graph> graph_;
@@ -228,6 +224,8 @@ class TORCH_API TensorExprKernel {
 TORCH_API int& getTECudaPointwiseLoopLevels();
 TORCH_API int& getTECudaPointwiseBlockCount();
 TORCH_API int& getTECudaPointwiseBlockSize();
+TORCH_API bool fallbackAllowed();
+TORCH_API bool setFallbackAllowed(bool value);
 
 } // namespace tensorexpr
 } // namespace jit

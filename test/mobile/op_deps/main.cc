@@ -13,7 +13,7 @@ int main() {
   at::call_DD_op(input);
   at::call_EE_op(input);
   at::call_FF_op(input);
-  callOp("quantized::t_add", "", input, input, 1.0, 0);
-  callOp("quantized::t_add_relu", "", input, input, 1.0, 0);
+  call_unboxed_super_slow_temp_shim("quantized::t_add", "", input, input, 1.0, 0);
+  call_unboxed_super_slow_temp_shim("quantized::t_add_relu", "", input, input, 1.0, 0);
   return 0;
 }

@@ -4,19 +4,8 @@ import inspect
 import os
 
 import torch
+from torch.distributed.nn.jit.code_template import CodeTemplate
 from torch.distributed.nn.jit.templates import dir_path as TEMPLATE_DIR_PATH
-
-
-try:
-    # For fb.
-    from src.ATen.code_template import CodeTemplate
-except ImportError:
-    # For open-source.
-    from tools.shared.module_loader import import_module
-
-    CodeTemplate = import_module(
-        "code_template", "aten/src/ATen/code_template.py"
-    ).CodeTemplate
 
 
 def infer_module_interface_cls(module_creator, module_interface_cls):
@@ -89,9 +78,7 @@ def write(out_path, text):
         print("Skipped writing {}".format(out_path))
 
 
-def instantiate_remote_module_template(
-    module_interface_cls, is_scriptable
-):
+def instantiate_remote_module_template(module_interface_cls, is_scriptable):
     # Generate the template instance name.
     module_interface_cls_name = torch.jit._qualified_name(module_interface_cls).replace(
         ".", "_"

@@ -382,7 +382,7 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
         concreteType_->findSubmoduleConcreteType(field);
     return std::make_shared<ModuleValue>(
         m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
-  } else if (selfType->hasAttribute(field) || selfType->getMethod(field)) {
+  } else if (selfType->hasAttribute(field) || selfType->findMethod(field)) {
     // ...otherwise, methods, parameters, attributes, and buffers are all
     // first class so they get returned as SimpleValues
     return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
@@ -426,7 +426,17 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
       concreteType_->getPyClass(),
       field.c_str(),
       pybind11::cast<pybind11::none>(Py_None));
+
   if (py::isinstance<py::function>(unboundMethod)) {
+    bool isStaticFn =
+        py::cast<bool>(py::module::import("torch._jit_internal")
+                           .attr("is_static_fn")(concreteType_->getPyClass(), field.c_str()));
+    if (isStaticFn) {
+      // Functions within the module annotated with @staticmethod do not need binding.
+      py::object staticFn = py::module::import("torch._jit_internal")
+                           .attr("get_static_fn")(concreteType_->getPyClass(), field.c_str());
+      return toSugaredValue(staticFn, m, loc);
+    }
     // For Python methods that we're trying to call directly, we need to bind
     // the method to a self. (see the documentation for lazy_bind in Python for
     // more info).
@@ -701,9 +711,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return SpecialFormValue::create(prim::annotate);
 #ifdef USE_DISTRIBUTED
   } else if (
-      // RPC module is only avaialble for Python3
-      // when build flag "USE_DISTRIBUTED" is on.
-      !py::module::import("torch._six").attr("PY2").cast<bool>() &&
+      // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
       obj.ptr() ==
           py::module::import("torch.distributed.rpc").attr("rpc_async").ptr()) {
     return SpecialFormValue::create(prim::rpc_async);
@@ -763,16 +771,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         // Register class
         auto rcb = py::module::import("torch._jit_internal")
                        .attr("createResolutionCallbackForClassMethods")(obj);
-
-        {
-          // We're starting a new compilation, so update the error call stack in
-          // case it fails
-          ErrorReport::CallStack stack(qualname.name());
-          ErrorReport::CallStack::update_pending_range(loc);
-
-          py::module::import("torch.jit")
-              .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
-        }
+        py::module::import("torch.jit")
+            .attr("_recursive_compile_class")(obj, loc);
 
         // Return class
         auto newClassType = pyCu->get_class(qualname);

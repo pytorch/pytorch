@@ -61,79 +61,6 @@ class IndexFlattener : public IRMutator {
   }
 };
 
-class ReductionExpander : public IRMutator {
- public:
-  Stmt* expand(Stmt* s) {
-    return s->accept_mutator(this);
-  }
-
-  Stmt* mutate(const For* v) override {
-    Stmt* body_new = v->body()->accept_mutator(this);
-    if (body_new == v->body()) {
-      body_new = Stmt::clone(v->body());
-    }
-
-    Stmt* ret = v->cloneWithNewBody(body_new);
-
-    for (size_t i = 0; i < initializers_.size();) {
-      InitializerInfo& info = initializers_[i];
-
-      auto end = std::remove(info.vars.begin(), info.vars.end(), v->var());
-      if (end == info.vars.end()) {
-        info.skipped_loops.push_back(v);
-        i++;
-        continue;
-      }
-
-      info.vars.erase(end);
-      if (info.vars.empty()) {
-        const ReduceOp* op = info.op;
-        std::vector<const Expr*> indices(
-            op->output_args().begin(), op->output_args().end());
-
-        Stmt* init = new Store(
-            op->accumulator(), indices, op->initializer(), new IntImm(1));
-
-        for (auto it = info.skipped_loops.rbegin();
-             it != info.skipped_loops.rend();
-             it++) {
-          const For* old_for = *it;
-          init = old_for->cloneWithNewBody(init);
-        }
-        info.skipped_loops.clear();
-
-        if (Block* b = dynamic_cast<Block*>(ret)) {
-          b->prepend_stmt(init);
-        } else {
-          ret = new Block({init, ret});
-        }
-        initializers_.erase(initializers_.begin() + i);
-        continue;
-      }
-
-      i++;
-    }
-    return ret;
-  }
-
-  const Expr* mutate(const ReduceOp* v) override {
-    const std::vector<const Var*>& reduce_vars(v->reduce_args());
-    initializers_.emplace_back(InitializerInfo(v, reduce_vars));
-    return v->complete().node();
-  }
-
- private:
-  struct InitializerInfo {
-    InitializerInfo(const ReduceOp* o, std::vector<const Var*> v)
-        : op(o), vars(std::move(v)) {}
-    const ReduceOp* op;
-    std::vector<const Var*> vars;
-    std::vector<const For*> skipped_loops;
-  };
-
-  std::vector<InitializerInfo> initializers_;
-};
-
 class Vectorizer : public IRMutator {
  public:
   Stmt* vectorize(const For* v) {
@@ -237,18 +164,6 @@ class Vectorizer : public IRMutator {
     }
 
     return v;
-  }
-
-  const Expr* mutate(const Let* v) override {
-    const Expr* var = v->var();
-    const Expr* value = v->value();
-    const Expr* body = v->body();
-
-    std::vector<const Expr*> inputs = {body};
-    return try_vectorize(v, inputs, [&]() {
-      return Let::make(
-          ExprHandle(var), ExprHandle(value), ExprHandle(inputs[0]));
-    });
   }
 
   const Expr* mutate(const Ramp* v) override {
@@ -647,12 +562,21 @@ class RandomInliner : public FunctionInliner {
  private:
   // Emit let statements for all encountered random vars, thenclear them.
   Stmt* bind_random_vars(Stmt* s) {
+    if (random_vars_.empty()) {
+      return s;
+    }
+
+    Block* b = dynamic_cast<Block*>(s);
+    if (!b) {
+      b = new Block({s});
+    }
+
     for (auto const& p : random_vars_) {
       Var* v = p.second;
-      s = new LetStmt(v, new Intrinsics(kRand, v->dtype()), s);
+      b->add_var_binding(v, new Intrinsics(kRand, v->dtype()));
     }
     random_vars_.clear();
-    return s;
+    return b;
   }
 
   // Track the function currently being inlined.
@@ -841,7 +765,7 @@ std::unordered_map<const Buf*, std::vector<BufUse>> findUses(Stmt* s) {
 
 class ContainedStmtsFinder : public IRVisitor {
  public:
-  // Simply list all Stores and LetStmts that are children of the given stmt
+  // Simply list all Stores and Block that are children of the given stmt
   const std::unordered_set<Stmt*>& findContainedStmts(Stmt* s) {
     contained_.clear();
     s->accept(this);
@@ -853,7 +777,7 @@ class ContainedStmtsFinder : public IRVisitor {
     contained_.insert((Stmt*)v);
     IRVisitor::visit(v);
   }
-  void visit(const LetStmt* v) override {
+  void visit(const Block* v) override {
     contained_.insert((Stmt*)v);
     IRVisitor::visit(v);
   }
@@ -1018,9 +942,11 @@ void LoopNest::splitWithTail(
 
     Stmt* body_tail =
         Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
+    ReductionInitCleaner cleaner;
+    body_tail = cleaner.clean(body_tail);
     *tail = new For(i_tail, new IntImm(0), tail_size, body_tail);
 
-    p->append_stmt(*tail);
+    p->insert_stmt_after(*tail, *outer);
   } else {
     *tail = nullptr;
   }
@@ -1141,7 +1067,7 @@ void LoopNest::reorderAxis(For* a, For* b) {
   CHECK(root);
 
   // Do a shallow copy of the inner blocks.
-  Block* body = new Block({});
+  Block* body = new Block(inner->body()->varBindings(), {});
   body->splice(body->end(), inner->body());
 
   For* before{outer};
