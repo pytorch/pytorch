@@ -9729,7 +9729,7 @@ class TestNNDeviceType(NNTestCase):
     def test_softmax_results(self, device, dtype):
         # Non-even sizes and non-zero shifts test fallback paths in vectorized kernel
         # Note: dim1 > 1024 is needed to exercise the vectorized (non-persistent) path, (16, 30576) is BERT-esque
-        sizes = [(0, 10), (32, 20), (10, 0), (31, 20), (32, 21), (31, 23), (32, 1536), (31, 2048), (33, 2049),(16, 30576)]
+        sizes = [(0, 10), (32, 20), (10, 0), (31, 20), (32, 21), (31, 23), (32, 1536), (31, 2048), (33, 2049), (16, 30576)]
         shifts = [(0, 0), (1, 0), (0, 1), (1, 1)]
         for fn in [F.softmax, F.log_softmax]:
             for size in sizes:
@@ -9749,7 +9749,8 @@ class TestNNDeviceType(NNTestCase):
                         grad_output = torch.rand_like(output)
                         ref_grad_output = grad_output.clone().cpu().detach()
                         grad_input, = torch.autograd.grad(output, input, grad_outputs=(grad_output), create_graph=True)
-                        ref_grad_input, = torch.autograd.grad(ref_output, ref_input, grad_outputs=(ref_grad_output), create_graph=True)
+                        ref_grad_input, = torch.autograd.grad(ref_output, ref_input,
+                                                              grad_outputs=(ref_grad_output), create_graph=True)
                         grad_input.sum().backward()
                         ref_grad_input.sum().backward()
 
