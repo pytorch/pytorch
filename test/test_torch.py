@@ -55,12 +55,15 @@ SIZE = 100
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
 class _TestTorchMixin(object):
-    def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True):
+    def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True, use_complex=False):
         float_types = [torch.double,
                        torch.float]
         int_types = [torch.int64,
                      torch.int32,
                      torch.int16]
+
+        complex_types = [torch.complex64,
+                         torch.complex128]
 
         def make_contiguous(shape, dtype):
             if dtype in float_types:
@@ -92,6 +95,8 @@ class _TestTorchMixin(object):
             types += float_types
         if use_integral:
             types += int_types
+        if use_complex:
+            types += complex_types
         tensors = {"cont": [], "noncont": [], "slice": []}
         for dtype in types:
             tensors["cont"].append(make_contiguous(shape, dtype))
@@ -514,7 +519,7 @@ class _TestTorchMixin(object):
             self.assertTrue(np.allclose(n, t.numpy(), equal_nan=True))
 
     def _test_dim_ops(self, pytorch_op, numpy_op,
-                      use_floating=True, use_integral=True):
+                      use_floating=True, use_integral=True, use_complex=False):
         def do_one(tensors_dict, dim):
             for category, tensors in tensors_dict.items():
                 if category == "slice":
@@ -531,36 +536,37 @@ class _TestTorchMixin(object):
                                                               dim).cpu(),
                                                    expected)
         do_one(self._make_tensors((5, 400000), use_floating=use_floating,
-                                  use_integral=use_integral), 1)
+                                  use_integral=use_integral, use_complex=use_complex), 1)
         do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
-                                  use_integral=use_integral), 0)
+                                  use_integral=use_integral, use_complex=use_complex), 0)
         do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
-                                  use_integral=use_integral), 1)
+                                  use_integral=use_integral, use_complex=use_complex), 1)
         do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
-                                  use_integral=use_integral), 2)
+                                  use_integral=use_integral, use_complex=use_complex), 2)
         do_one(self._make_tensors((100000, ), use_floating=use_floating,
-                                  use_integral=use_integral), -1)
+                                  use_integral=use_integral, use_complex=use_complex), -1)
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
-                                  use_integral=use_integral), 0)
+                                  use_integral=use_integral, use_complex=use_complex), 0)
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
-                                  use_integral=use_integral), 1)
+                                  use_integral=use_integral, use_complex=use_complex), 1)
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
-                                  use_integral=use_integral), 2)
+                                  use_integral=use_integral, use_complex=use_complex), 2)
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
-                                  use_integral=use_integral), (1, 2))
+                                  use_integral=use_integral, use_complex=use_complex), (1, 2))
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
-                                  use_integral=use_integral), (1, -1))
+                                  use_integral=use_integral, use_complex=use_complex), (1, -1))
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
-                                  use_integral=use_integral), (0, 2))
+                                  use_integral=use_integral, use_complex=use_complex), (0, 2))
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
-                                  use_integral=use_integral), (0, 2, 1))
+                                  use_integral=use_integral, use_complex=use_complex), (0, 2, 1))
 
     @slowTest
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_sum_dim(self):
         self._test_dim_ops(
             lambda t, d: t.sum(d),
-            lambda n, d: n.sum(d))
+            lambda n, d: n.sum(d),
+            use_floating=True, use_integral=True, use_complex=True)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_mean_dim(self):
@@ -17597,6 +17603,8 @@ _complex_types = [torch.cfloat, torch.cdouble]
 
 _float_types_no_half = [torch.float, torch.double]
 
+_complex_types = [torch.cfloat, torch.cdouble]
+
 # _float_types2 adds bfloat16 type to _float_types only on ROCm. Should eventually be unified
 # with _float_types when bfloat16 bringup is complete on all platforms
 _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
@@ -17957,6 +17965,9 @@ tensor_op_tests = [
     ('sum', '', _small_2d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _types2, _cpu_types, False),
     ('sum', 'dim', _small_3d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _types2, _cpu_types, False),
     ('sum', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('sum', 'complex', _small_2d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _complex_types, _cpu_types, False),
+    ('sum', 'complex_dim', _small_3d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _complex_types, _cpu_types, False),
+    ('sum', 'complex_neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _complex_types, _cpu_types, False),
     ('renorm', '2_norm', _small_3d, lambda t, d: [2, 1, 1], 1e-3, 1e-5, 1e-5, _float_types),
     ('renorm', '2_norm_neg_dim', _small_3d, lambda t, d: [2, -1, 1], 1e-3, 1e-5, 1e-5, _float_types),
     ('renorm', '1_5_norm', _small_3d, lambda t, d: [1.5, 1, 1], 1e-3, 1e-5, 1e-5, _float_types),
