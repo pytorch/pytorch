@@ -1,6 +1,7 @@
 #include <caffe2/core/operator.h>
 #include <caffe2/core/tensor_int8.h>
 #include "caffe2/quantization/server/fbgemm_pack_blob.h"
+#include "caffe2/quantization/server/fbgemm_pack_op.h"
 #include "fake_nnpi_ops_utils.h"
 
 #include <cmath>
@@ -17,14 +18,14 @@ class Int8FCFakeAcc32NNPIOp final : public Operator<CPUContext> {
         o_scale_(this->template GetSingleArgument<float>("Y_scale", 0)),
         o_zero_point_(
             this->template GetSingleArgument<int32_t>("Y_zero_point", 0)) {}
+
   ~Int8FCFakeAcc32NNPIOp() override {}
+
   bool RunOnDevice() override {
     // Qint8 input
     const auto& X = this->Input<int8::Int8TensorCPU>(0);
     // Qint8 weight
     const auto& W = this->Input<Int8FCDNNLowPPackedWeightBlob>(1);
-    // Qint32 bias
-    const auto& B = this->Input<int8::Int8TensorCPU>(2);
     const auto& X_tensor = X.t;
     const auto& W_tensor = W.original_tensor;
     const float x_scale = X.scale;
@@ -38,7 +39,27 @@ class Int8FCFakeAcc32NNPIOp final : public Operator<CPUContext> {
     const int N = W_tensor.size_to_dim(canonical_axis_w);
     const uint8_t* X_data = X_tensor.template data<uint8_t>();
     const int8_t* W_data = W_tensor.template data<int8_t>();
-    const int32_t* B_data = B.t.template data<int32_t>();
+    const int32_t* B_data = nullptr;
+    if (InputBlob(2).IsType<int8::Int8TensorCPU>()) {
+      // Qint32 bias
+      const auto& B = this->Input<int8::Int8TensorCPU>(2);
+      B_data = B.t.template data<int32_t>();
+    } else if (InputBlob(2).IsType<Tensor>()) {
+      // FP32 bias
+      if (bias_cached_) {
+        B_data = B_.data();
+      } else {
+        dnnlowp::TensorQuantizationParams in_qparams;
+        in_qparams.scale = x_scale;
+        std::vector<dnnlowp::TensorQuantizationParams> w_qparams(1);
+        w_qparams[0].scale = w_scale;
+        QuantizeConvBias(InputBlob(2), N, in_qparams, w_qparams, B_);
+        B_data = B_.data();
+        bias_cached_ = true;
+      }
+    } else {
+      CAFFE_THROW("Only support int8tensor or tensor for bias");
+    }
 
     auto* Y = this->Output<int8::Int8TensorCPU>(0);
     Y->scale = o_scale_;
@@ -70,6 +91,8 @@ class Int8FCFakeAcc32NNPIOp final : public Operator<CPUContext> {
   const int32_t axis_w_;
   const float o_scale_;
   const int32_t o_zero_point_;
+  bool bias_cached_{false};
+  std::vector<int32_t> B_;
 };
 
 REGISTER_CPU_OPERATOR(Int8FCFakeAcc32NNPI, Int8FCFakeAcc32NNPIOp);
