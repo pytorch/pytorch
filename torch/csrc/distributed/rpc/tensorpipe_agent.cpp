@@ -358,6 +358,12 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   // Don't need to hold lock while calling tensorpipe API.
   lock.unlock();
 
+  futureResponseMessage->addCallback([this]() {
+    // Decrease the callcount through a callback so it is only decremented once
+    // per future.
+    --clientActiveCalls_;
+  });
+
   pipeWrite(
       clientPipe.pipe_,
       std::move(requestMessage),
@@ -365,7 +371,6 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
           const tensorpipe::Error& error) {
         if (error) {
           LOG(WARNING) << "client write error: " << error.what();
-          --clientActiveCalls_;
           futureResponseMessage->setError(error.what());
           return;
         }
@@ -381,7 +386,6 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                 // Flushing all future messages belonging to this pipe due to
                 // error state.
                 for (auto& p : clientPipe.pendingResponseMessage_) {
-                  --clientActiveCalls_;
                   std::shared_ptr<FutureMessage>& futureMessage = p.second;
                   futureMessage->setError(error.what());
                 }
@@ -413,7 +417,6 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                   [this,
                    futureResponseMessage,
                    responseMessage{std::move(responseMessage)}]() mutable {
-                    --clientActiveCalls_;
                     if (responseMessage.type() == MessageType::EXCEPTION) {
                       futureResponseMessage->setError(std::string(
                           responseMessage.payload().begin(),
