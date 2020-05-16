@@ -284,83 +284,83 @@ constexpr complex<double> operator"" _id(unsigned long long imag) {
 
 
 template<typename T>
-constexpr c10::complex<T> operator+(const c10::complex<T>& val) {
+constexpr complex<T> operator+(const complex<T>& val) {
   return val;
 }
 
 template<typename T>
-constexpr c10::complex<T> operator-(const c10::complex<T>& val) {
-  return c10::complex<T>(-val.real(), -val.imag());
+constexpr complex<T> operator-(const complex<T>& val) {
+  return complex<T>(-val.real(), -val.imag());
 }
 
 template<typename T>
-constexpr c10::complex<T> operator+(const c10::complex<T>& lhs, const c10::complex<T>& rhs) {
-  c10::complex<T> result = lhs;
+constexpr complex<T> operator+(const complex<T>& lhs, const complex<T>& rhs) {
+  complex<T> result = lhs;
   return result += rhs;
 }
 
 template<typename T>
-constexpr c10::complex<T> operator+(const c10::complex<T>& lhs, const T& rhs) {
-  c10::complex<T> result = lhs;
+constexpr complex<T> operator+(const complex<T>& lhs, const T& rhs) {
+  complex<T> result = lhs;
   return result += rhs;
 }
 
 template<typename T>
-constexpr c10::complex<T> operator+(const T& lhs, const c10::complex<T>& rhs) {
-  return c10::complex<T>(lhs + rhs.real(), rhs.imag());
+constexpr complex<T> operator+(const T& lhs, const complex<T>& rhs) {
+  return complex<T>(lhs + rhs.real(), rhs.imag());
 }
 
 template<typename T>
-constexpr c10::complex<T> operator-(const c10::complex<T>& lhs, const c10::complex<T>& rhs) {
-  c10::complex<T> result = lhs;
+constexpr complex<T> operator-(const complex<T>& lhs, const complex<T>& rhs) {
+  complex<T> result = lhs;
   return result -= rhs;
 }
 
 template<typename T>
-constexpr c10::complex<T> operator-(const c10::complex<T>& lhs, const T& rhs) {
-  c10::complex<T> result = lhs;
+constexpr complex<T> operator-(const complex<T>& lhs, const T& rhs) {
+  complex<T> result = lhs;
   return result -= rhs;
 }
 
 template<typename T>
-constexpr c10::complex<T> operator-(const T& lhs, const c10::complex<T>& rhs) {
-  c10::complex<T> result = -rhs;
+constexpr complex<T> operator-(const T& lhs, const complex<T>& rhs) {
+  complex<T> result = -rhs;
   return result += lhs;
 }
 
 template<typename T>
-constexpr c10::complex<T> operator*(const c10::complex<T>& lhs, const c10::complex<T>& rhs) {
-  c10::complex<T> result = lhs;
+constexpr complex<T> operator*(const complex<T>& lhs, const complex<T>& rhs) {
+  complex<T> result = lhs;
   return result *= rhs;
 }
 
 template<typename T>
-constexpr c10::complex<T> operator*(const c10::complex<T>& lhs, const T& rhs) {
-  c10::complex<T> result = lhs;
+constexpr complex<T> operator*(const complex<T>& lhs, const T& rhs) {
+  complex<T> result = lhs;
   return result *= rhs;
 }
 
 template<typename T>
-constexpr c10::complex<T> operator*(const T& lhs, const c10::complex<T>& rhs) {
-  c10::complex<T> result = rhs;
+constexpr complex<T> operator*(const T& lhs, const complex<T>& rhs) {
+  complex<T> result = rhs;
   return result *= lhs;
 }
 
 template<typename T>
-constexpr c10::complex<T> operator/(const c10::complex<T>& lhs, const c10::complex<T>& rhs) {
-  c10::complex<T> result = lhs;
+constexpr complex<T> operator/(const complex<T>& lhs, const complex<T>& rhs) {
+  complex<T> result = lhs;
   return result /= rhs;
 }
 
 template<typename T>
-constexpr c10::complex<T> operator/(const c10::complex<T>& lhs, const T& rhs) {
-  c10::complex<T> result = lhs;
+constexpr complex<T> operator/(const complex<T>& lhs, const T& rhs) {
+  complex<T> result = lhs;
   return result /= rhs;
 }
 
 template<typename T>
-constexpr c10::complex<T> operator/(const T& lhs, const c10::complex<T>& rhs) {
-  c10::complex<T> result(lhs, T());
+constexpr complex<T> operator/(const T& lhs, const complex<T>& rhs) {
+  complex<T> result(lhs, T());
   return result /= rhs;
 }
 
@@ -415,42 +415,42 @@ constexpr c10::complex<fT> operator/(const iT& a, const c10::complex<fT>& b) {
 
 
 template<typename T>
-constexpr bool operator==(const c10::complex<T>& lhs, const c10::complex<T>& rhs) {
+constexpr bool operator==(const complex<T>& lhs, const complex<T>& rhs) {
   return (lhs.real() == rhs.real()) && (lhs.imag() == rhs.imag());
 }
 
 template<typename T>
-constexpr bool operator==(const c10::complex<T>& lhs, const T& rhs) {
+constexpr bool operator==(const complex<T>& lhs, const T& rhs) {
   return (lhs.real() == rhs) && (lhs.imag() == T());
 }
 
 template<typename T>
-constexpr bool operator==(const T& lhs, const c10::complex<T>& rhs) {
+constexpr bool operator==(const T& lhs, const complex<T>& rhs) {
   return (lhs == rhs.real()) && (T() == rhs.imag());
 }
 
 template<typename T>
-constexpr bool operator!=(const c10::complex<T>& lhs, const c10::complex<T>& rhs) {
+constexpr bool operator!=(const complex<T>& lhs, const complex<T>& rhs) {
   return !(lhs == rhs);
 }
 
 template<typename T>
-constexpr bool operator!=(const c10::complex<T>& lhs, const T& rhs) {
+constexpr bool operator!=(const complex<T>& lhs, const T& rhs) {
   return !(lhs == rhs);
 }
 
 template<typename T>
-constexpr bool operator!=(const T& lhs, const c10::complex<T>& rhs) {
+constexpr bool operator!=(const T& lhs, const complex<T>& rhs) {
   return !(lhs == rhs);
 }
 
 template <typename T, typename CharT, typename Traits>
-std::basic_ostream<CharT, Traits>& operator<<(std::basic_ostream<CharT, Traits>& os, const c10::complex<T>& x) {
+std::basic_ostream<CharT, Traits>& operator<<(std::basic_ostream<CharT, Traits>& os, const complex<T>& x) {
   return (os << static_cast<std::complex<T>>(x));
 }
 
 template <typename T, typename CharT, typename Traits>
-std::basic_istream<CharT, Traits>& operator>>(std::basic_istream<CharT, Traits>& is, c10::complex<T>& x) {
+std::basic_istream<CharT, Traits>& operator>>(std::basic_istream<CharT, Traits>& is, complex<T>& x) {
   std::complex<T> tmp;
   is >> tmp;
   x = tmp;
@@ -534,11 +534,11 @@ constexpr c10::complex<T> conj(const c10::complex<T>& z) {
 namespace c10 {
 
 template<typename T>
-C10_HOST_DEVICE c10::complex<T> polar(const T& r, const T& theta = T()) {
+C10_HOST_DEVICE complex<T> polar(const T& r, const T& theta = T()) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<c10::complex<T>>(thrust::polar(r, theta));
+  return static_cast<complex<T>>(thrust::polar(r, theta));
 #else
-  return static_cast<c10::complex<T>>(std::polar(r, theta));
+  return static_cast<complex<T>>(std::polar(r, theta));
 #endif
 }
 
