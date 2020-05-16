@@ -73,6 +73,11 @@ class TORCH_API DistAutogradContainer {
   // Retrieves the worker ID for this node
   rpc::worker_id_t getWorkerId() const;
 
+  // Forcibly sets the thread local current context id. Should only be used in
+  // cases where you know what you're doing and need to override the thread
+  // local. Otherwise, use setCurrentContextId instead.
+  static void forceCurrentContextId(int64_t contextId);
+
   // Can set current context id if there is no valid context yet
   void setCurrentContextId(int64_t contextId);
 
@@ -81,6 +86,9 @@ class TORCH_API DistAutogradContainer {
 
   // Returns the number of autograd contexts in the container.
   size_t numAutogradContexts() const;
+
+  // Returns the current thread local context id for this thread.
+  static int64_t currentContextId();
 
  private:
   DistAutogradContainer();

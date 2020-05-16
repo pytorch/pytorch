@@ -866,7 +866,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             self.assertIsNone(t1.grad)
             self.assertIsNone(t2.grad)
 
-            # Now populate .grad with local autograd engine and 
+            # Now populate .grad with local autograd engine and
             # verify dist autograd doesn't mess with it.
             loss_local = torch.add(t1, t2).sum()
             loss_local.backward()
@@ -1943,3 +1943,38 @@ class DistAutogradTest(RpcAgentTestFixture):
             # both should be copied.
             self.assertFalse(grads[a].data_ptr() == MyFunc.static_grad_ptr)
             self.assertFalse(grads[b].data_ptr() == MyFunc.static_grad_ptr)
+
+    @staticmethod
+    def _slow_add(t1, t2):
+        time.sleep(1)
+        t3 = t1 + t2
+        t3.requires_grad = True
+        return t3
+
+    @dist_init
+    def test_thread_local_context_id(self):
+        t1 = torch.rand((3, 3))
+        t2 = torch.rand((3, 3))
+
+        t3 = t1 + t2
+        t3.requires_grad = True
+        t3.sum().backward()
+
+        dst = worker_name((self.rank + 1) % self.world_size)
+        rref = rpc.remote(dst, DistAutogradTest._slow_add, args=(t1, t2))
+
+        with dist_autograd.context() as context_id:
+            loss = rref.to_here().sum()
+            # due to slow add, the continuation of this backward pass will be
+            # invoked by the previous rpc.remote thread which does not have a
+            # valid context_id. So, this can test whether we propagate
+            # thread_local states properly when jumping across threads on the
+            # server side.
+            dist_autograd.backward(context_id, [loss])
+            self.assertTrue(
+                rpc.rpc_sync(
+                    dst,
+                    _compare_owner_value,
+                    args=(context_id, rref, t3.grad)
+                )
+            )
