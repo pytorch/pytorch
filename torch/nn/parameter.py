@@ -20,11 +20,11 @@ class Parameter(torch.Tensor):
             :ref:`excluding-subgraphs` for more details. Default: `True`
     """
 
-    def __new__(cls, data=None, requires_grad=True, tags={}):
+    def __new__(cls, data=None, requires_grad=True, tags=None):
         if data is None:
             data = torch.Tensor()
         instance = torch.Tensor._make_subclass(cls, data, requires_grad)
-        instance.tags = tags
+        instance.tags = {} if tags is None else tags
         return instance
 
     def __deepcopy__(self, memo):
