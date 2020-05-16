@@ -1402,6 +1402,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1)
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_rref_forward_chain(self):
         ttl = 8
         n = self.rank + 1
@@ -2318,6 +2319,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(2)
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_cuda(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         t1 = torch.rand(3, 3).cuda(0)
