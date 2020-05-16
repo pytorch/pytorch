@@ -10,16 +10,18 @@ namespace nn {
 namespace modules {
 namespace utils {
 
-// Repeat each element of `t` for `n` times.
+// Reverse the order of `t` and repeat each element for `n` times.
 // This can be used to translate padding arg used by Conv and Pooling modules
 // to the ones used by `F::pad`.
 //
-// This mirrors `_repeat_tuple` in `torch/nn/modules/utils.py`.
-inline std::vector<int64_t> _repeat_vector(at::ArrayRef<int64_t> t, int64_t n) {
+// This mirrors `_reverse_repeat_tuple` in `torch/nn/modules/utils.py`.
+inline std::vector<int64_t> _reverse_repeat_vector(at::ArrayRef<int64_t> t, int64_t n) {
+  TORCH_INTERNAL_ASSERT(n >= 0);
   std::vector<int64_t> ret;
-  for (int64_t elem : t) {
+  ret.reserve(t.size() * n);
+  for (auto rit = t.rbegin(); rit != t.rend(); ++rit) {
     for (int64_t i = 0; i < n; i++) {
-      ret.emplace_back(elem);
+      ret.emplace_back(*rit);
     }
   }
   return ret;

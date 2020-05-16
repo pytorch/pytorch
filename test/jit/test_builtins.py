@@ -1,6 +1,7 @@
 import os
 import sys
 import inspect
+import unittest
 from typing import List
 
 import torch
@@ -8,17 +9,19 @@ import torch
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+
 class TestBuiltins(JitTestCase):
     """
     Tests for TorchScript support of Python builtin functions.
     """
+
     def test_has_attr(self):
         class HasA(torch.nn.Module):
             def __init__(self):
@@ -165,3 +168,41 @@ class TestTensorBuiltins(JitTestCase):
             if p in EQUALITY_MISMATCH:
                 continue
             self.assertEqual(getattr(tensor, p), cu.fn(tensor))
+
+    def test_tensor_subscript_assign(self):
+        def fn1(x):
+            a = torch.zeros_like(x, dtype=torch.uint8)
+            a[torch.tensor(0)] = torch.tensor(2, dtype=torch.uint8)
+            return a
+
+        def fn2(x):
+            a = torch.zeros_like(x, dtype=torch.uint8)
+            a[0] = 2
+            return a
+
+        def fn3(x):
+            a = torch.zeros_like(x, dtype=torch.uint8)
+            a[torch.tensor(0)] = 2
+            return a
+
+        def fn4(x):
+            a = torch.zeros_like(x, dtype=torch.uint8)
+            a[0] = torch.tensor(2, dtype=torch.uint8)
+            return a
+
+        def fn5(x):
+            a = torch.zeros_like(x, dtype=torch.float32)
+            a[torch.tensor(0)] = 2
+            return a
+
+        for fn in (fn1, fn2, fn3, fn4, fn5):
+            self.checkScript(fn, (torch.zeros(2, dtype=torch.uint8),))
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_tensor_subscript_assign_device(self):
+        def fn6(x):
+            a = torch.zeros_like(x, dtype=torch.float32, device="cuda")
+            a[torch.tensor(0)] = 2
+            return a
+
+        self.checkScript(fn6, (torch.zeros(2, dtype=torch.float32, device="cuda"),))
