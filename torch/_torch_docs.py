@@ -163,7 +163,7 @@ All values in the input tensor must be greater than or equal to one.
     \text{out}_{i} = \cosh^{-1}(\text{input}_{i})
 """ + r"""
 Args:
-    {input}: The domain is the closed interval `[1, +inf)`.
+    input (Tensor): the input tensor where :math:`input` is in the closed interval `[1, +inf)`.
     {out}
 
 Example::
@@ -172,7 +172,7 @@ Example::
     >>> a
     tensor([ 1.3192, 1.9915, 1.9674, 1.7151 ])
     >>> torch.acosh(a)
-    tensor([ 0.7791, 1.3120, 1.2980, 1.1342 ])
+    tensor([ 0.7791, 1.3120, 1.2979, 1.1341 ])
 """.format(**common_args))
 
 add_docstr(torch.add,
@@ -652,9 +652,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([ 0.00417, 0.05982, 0.8063, 0.1257 ])
+    tensor([ 0.1606, -1.4267, -1.0899, -1.0250 ])
     >>> torch.asinh(a)
-    tensor([ 0.0041, 0.3119, 0.5746, 0.2337 ])
+    tensor([ 0.1599, -1.1534, -0.9435, -0.8990 ])
 """.format(**common_args))
 
 add_docstr(torch.atan,
@@ -718,7 +718,7 @@ All values in the input tensor must be in the open interval `(-1, 1)`.
     \text{out}_{i} = \tanh^{-1}(\text{input}_{i})
 """ + r"""
 Args:
-    {input}: The domain is the open interval `(-1, 1)`.
+    input (Tensor): the input tensor where math:`input` is in the open interval `(-1, 1)`.
     {out}
 
 Example::
@@ -727,7 +727,7 @@ Example::
     >>> a
     tensor([ -0.9385, 0.2968, -0.8591, -0.1871 ])
     >>> torch.atanh(a)
-    tensor([ -1.7251, 0.3060, -1.2898, -0.1897 ])
+    tensor([ -1.7253, 0.3060, -1.2899, -0.1893 ])
 """.format(**common_args))
 
 add_docstr(torch.baddbmm,
