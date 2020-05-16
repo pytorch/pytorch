@@ -20,16 +20,18 @@ class Parameter(torch.Tensor):
             :ref:`excluding-subgraphs` for more details. Default: `True`
     """
 
-    def __new__(cls, data=None, requires_grad=True):
+    def __new__(cls, data=None, requires_grad=True, tags={}):
         if data is None:
             data = torch.Tensor()
-        return torch.Tensor._make_subclass(cls, data, requires_grad)
+        instance = torch.Tensor._make_subclass(cls, data, requires_grad)
+        instance.tags = tags
+        return instance
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
             return memo[id(self)]
         else:
-            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.requires_grad)
+            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.requires_grad, self.tags)
             memo[id(self)] = result
             return result
 
@@ -40,5 +42,5 @@ class Parameter(torch.Tensor):
         # See Note [Don't serialize hooks]
         return (
             torch._utils._rebuild_parameter,
-            (self.data, self.requires_grad, OrderedDict())
+            (self.data, self.requires_grad, OrderedDict(), self.tags)
         )

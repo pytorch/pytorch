@@ -176,8 +176,8 @@ def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, re
     tensor._backward_hooks = backward_hooks
     return tensor
 
-def _rebuild_parameter(data, requires_grad, backward_hooks):
-    param = torch.nn.Parameter(data, requires_grad)
+def _rebuild_parameter(data, requires_grad, backward_hooks, tags):
+    param = torch.nn.Parameter(data, requires_grad, tags)
     # NB: This line exists only for backwards compatibility; the
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
