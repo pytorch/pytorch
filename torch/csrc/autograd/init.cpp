@@ -52,10 +52,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_profiler_enabled", profilerEnabled);
-  m.def("_run_before_callbacks", _runBeforeCallbacks);
-
-  py::class_<RecordFunction, std::shared_ptr<RecordFunction>>(m, "_RecordFunction")
-    .def(py::init<>());
 
   Py_RETURN_TRUE;
 }
@@ -142,7 +138,7 @@ static PyObject * is_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
 }
 
 // autograd methods on torch._C
-static PyMethodDef methods[] = {
+static PyMethodDef methods[] = { // NOLINT
   {"set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
   {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, nullptr},
   {"set_autocast_enabled", (PyCFunction)set_autocast_enabled, METH_O, nullptr},

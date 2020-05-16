@@ -2,14 +2,15 @@
 
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ThreadLocalDebugInfo.h>
 
-#include <ATen/ThreadLocalDebugInfo.h>
+#include <ATen/record_function.h>
 
 namespace at {
 
 // Thread local state contains values that are preserved across
 // thread boundaries (e.g. at::launch/JIT fork, autograd, at::parallel_for)
-class ThreadLocalState {
+class TORCH_API ThreadLocalState {
  public:
   // Saves the thread local variables' values and
   // returns them as a ThreadLocalState
@@ -27,7 +28,10 @@ class ThreadLocalState {
 
   // ThreadLocalDebugInfo does not change after being created
   // with DebugInfoGuard
-  std::shared_ptr<at::ThreadLocalDebugInfo> debug_info_;
+  std::shared_ptr<c10::ThreadLocalDebugInfo> debug_info_;
+
+  // RecordFunction TLS callbacks
+  RecordFunctionCallbacks callbacks_;
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   bool keep_grad_mode_ = true;
@@ -38,7 +42,7 @@ class ThreadLocalState {
 };
 
 // Guard to set and reset the thread local state
-class ThreadLocalStateGuard {
+class TORCH_API ThreadLocalStateGuard {
  public:
   explicit ThreadLocalStateGuard(const ThreadLocalState& state)
       : prev_state_(ThreadLocalState()) {
@@ -55,4 +59,4 @@ class ThreadLocalStateGuard {
   const ThreadLocalState prev_state_;
 };
 
-} // namespace torch
+} // namespace at

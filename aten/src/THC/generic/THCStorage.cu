@@ -7,13 +7,15 @@ void THCStorage_(fill)(THCState *state, THCStorage *self, scalar_t value)
   THCThrustAllocator thrustAlloc(state);
   thrust::device_ptr<scalar_t> self_data(THCStorage_(data)(state, self));
   thrust::fill(
-    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
-    self_data, self_data+self->numel(), value);
+      thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
+      self_data,
+      self_data + (self->nbytes() / sizeof(scalar_t)),
+      value);
 }
 
-void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
-{
-  THCStorage_resize(state, self, size);
+void THCStorage_(
+    resizeBytes)(THCState* state, THCStorage* self, ptrdiff_t size_bytes) {
+  THCStorage_resizeBytes(state, self, size_bytes);
 }
 
 int THCStorage_(getDevice)(THCState* state, const THCStorage* storage) {
