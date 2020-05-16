@@ -28,6 +28,7 @@ from torch.testing._internal.dist_utils import (
     initialize_pg,
     wait_until_node_failure,
     wait_until_pending_users_flushed,
+    wait_until_n_owners_and_forks_on_rank,
     worker_name,
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
@@ -2575,6 +2576,108 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
     @dist_init(messages_to_delay={"SCRIPT_CALL": 1.5})
     def test_custom_messages_to_delay(self):
         self.assertEqual(self.rpc_backend_options.messages_to_delay, {"SCRIPT_CALL": 1.5})
+
+    @dist_init(faulty_messages=["PYTHON_REMOTE_CALL"])
+    def test_remote_message_dropped_pickle(self):
+        if self.rank != 0:
+            return
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker = "worker{}".format(dst_rank)
+        # Since we fail python_remote_call messages synchronously, the future
+        # corresponding to this remote call will be marked with an error when
+        # this function returns.
+        rref = rpc.remote(dst_worker, my_sleep_func, args=(1, ))
+        # Call to ensure pending callbacks are run.
+        wait_until_pending_users_flushed()
+        # Attempt to fork the RRef should raise an error indicating the rpc.remote timeout.
+        with self.assertRaisesRegex(RuntimeError, "RRef creation"):
+            rref._serialize()
+        # Test that using RRef as arg over RPC (which forks) results in the same
+        # error
+        with self.assertRaisesRegex(RuntimeError, "RRef creation"):
+            rpc.rpc_async(dst_worker, add_rref_to_value, args=(rref, 1))
+
+    def _test_remote_message_dropped_timeout(self, func, args):
+        if self.rank != 0:
+            return
+        # test the case where rpc.remote() message creation is completely dropped.
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker = "worker{}".format(dst_rank)
+        # Since we fail python_remote_call messages synchronously, the future
+        # corresponding to this remote call will be marked with an error when
+        # this function returns.
+        rref = rpc.remote(dst_worker, func, args=args)
+        # Call to ensure pending callbacks are run.
+        wait_until_pending_users_flushed()
+        with self.assertRaisesRegex(RuntimeError, "RRef creation"):
+            rref.to_here()
+        # Note: during shutdown, logs will indicate "Could not find OwnerRRef..."
+        # on the owning nodes, this is expected because the OwnerRRef was never
+        # successfully created. Therefore, delAllUsers will work as expected.
+
+    @dist_init(faulty_messages=["SCRIPT_REMOTE_CALL"])
+    def test_script_remote_message_dropped_timeout(self):
+        func = torch.add
+        args = (torch.tensor(1), torch.tensor(1))
+        self._test_remote_message_dropped_timeout(func, args)
+
+    @dist_init(faulty_messages=["PYTHON_REMOTE_CALL"])
+    def test_remote_message_dropped_timeout(self):
+        func = my_sleep_func
+        args = (2, )
+        self._test_remote_message_dropped_timeout(func, args)
+
+    def _test_remote_message_delay_timeout(self, func, args):
+        if self.rank != 0:
+            return
+        # Test the case where remote message is eventually processed on the owner,
+        # but the future on the creator times out before the response comes back.
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker = "worker{}".format(dst_rank)
+        # 10 ms timeout
+        rref = rpc.remote(dst_worker, func, args=args, timeout=0.01)
+        # Future corresponding to the remote creation should time out.
+        expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            rref._get_future().wait()
+
+        # Call to ensure pending callbacks are run.
+        wait_until_pending_users_flushed()
+        # to_here() should now pick up that rpc.remote() creation has failed.
+        with self.assertRaisesRegex(RuntimeError, "RRef creation"):
+            rref.to_here()
+
+        # Test the case where rpc.remote() times out, but to_here() has already
+        # started blocking before.
+        slow_rref = rpc.remote(dst_worker, func, args=args, timeout=2)
+        # to_here() should raise timeout error, since it does not know about the
+        # status of rpc.remote().
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            slow_rref.to_here(0.001)
+        # Note: UserRRef will try to send out a RRefUserDelete, but will not find it on the owner.
+        # later, the owner will process the RRef creation, and time out
+        # waiting for the delete messages.
+        # Therefore, we wait until we get notification that pending owners have been confirmed
+        # before sending out RRefUserDeletes.
+        wait_until_n_owners_and_forks_on_rank(n=2, rank=1)
+
+    @dist_init(faulty_messages=[])
+    def test_remote_message_delay_timeout(self):
+        func = my_sleep_func
+        args = (2, )
+        self._test_remote_message_delay_timeout(func, args)
+
+    @dist_init(faulty_messages=[], messages_to_delay={"SCRIPT_REMOTE_CALL": 2, "SCRIPT_RREF_FETCH_CALL": 1})
+    def test_remote_message_builtin_delay_timeout(self):
+        func = torch.add
+        args = (torch.tensor(1), torch.tensor(1))
+        self._test_remote_message_delay_timeout(func, args)
+
+    @dist_init(faulty_messages=[], messages_to_delay={"SCRIPT_REMOTE_CALL": 2, "SCRIPT_RREF_FETCH_CALL": 1})
+    def test_remote_message_script_delay_timeout(self):
+        func = my_script_func
+        args = (torch.tensor(1), )
+        self._test_remote_message_delay_timeout(func, args)
 
     @dist_init(faulty_messages=[])
     def test_rpc_builtin_timeout(self):

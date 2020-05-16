@@ -7,12 +7,13 @@
 #include <atomic>
 #include <thread>
 
+#include <fmt/format.h>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
 
 constexpr auto kDefaultNumSendRecvThreads = 4;
-
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
   ProcessGroupRpcBackendOptions(
       int num_send_recv_threads,
@@ -73,6 +74,8 @@ class ProcessGroupAgent : public RpcAgent {
   void join() override;
 
   void sync() override;
+
+  std::string getTimeoutErrorDescription() override;
 
   void startImpl() override;
 

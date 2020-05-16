@@ -63,6 +63,23 @@ RRefForkData RRef::fork() const {
       getTypeStr(type_));
 }
 
+void RRef::handleError(
+    RPCErrorType errorType,
+    const FutureMessage& futMessage) {
+  static std::
+      unordered_map<RPCErrorType, std::function<void(const FutureMessage& fm)>>
+          errorHandlers = {
+              {RPCErrorType::TIMEOUT,
+               [this](const FutureMessage& /* unused */) { setTimedOut(); }},
+              {RPCErrorType::UNKNOWN_ERROR, [](const FutureMessage& fm) {
+                 // Default error handler, equivalent to
+                 // RRefContext::handleException().
+                 VLOG(1) << "Got exception: " << fm.error()->what();
+                 throw std::runtime_error(fm.error()->what());
+               }}};
+  errorHandlers.find(errorType)->second(futMessage);
+}
+
 //////////////////////////  UserRRef  /////////////////////////////////////
 
 UserRRef::UserRRef(
@@ -106,7 +123,12 @@ const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
-IValue UserRRef::toHere() const {
+IValue UserRRef::toHere(const float timeoutSeconds) const {
+  if (this->getTimedOut()) {
+    throw std::runtime_error(
+        "RRef creation via rpc.remote() timed out, and it "
+        "is possible that the RRef on the owner node does not exist.");
+  }
   // see Note [Best-Effort Check on Deleted UserRRefs]
   TORCH_CHECK(
       !deletedOnOwner_,
@@ -146,8 +168,11 @@ IValue UserRRef::toHere() const {
       *agent,
       agent->getWorkerInfo(ownerId_),
       std::move(msgToSend),
-      true /* forceGradRecording */);
+      true /* forceGradRecording */,
+      timeoutSeconds);
 
+  // TODO: we should ideally be able to interrupt this blocking wait if we check
+  // isTimedOut() and it is true.
   const Message& message = futureResponse->wait();
   MessageType msgType = message.type();
   auto response = deserializeResponse(message, msgType);

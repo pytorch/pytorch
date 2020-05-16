@@ -8,6 +8,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+enum RPCErrorType { TIMEOUT = 0, UNKNOWN_ERROR = 10 };
+
 enum MessageType {
   // messages for dist.rpc on builtin operators
   SCRIPT_CALL = 0,

@@ -10,6 +10,8 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
+const std::string kRPCTimeoutErrorStr =
+    "RPC ran for more than {} milliseconds and timed out.";
 
 namespace {
 constexpr auto kSecToMsConversion = 1000;
@@ -238,6 +240,10 @@ void ProcessGroupAgent::sync() {
     // trigger more messages to be sent, we need to wait for the thread pool
     // again.
   } while (hasPendingMessage());
+}
+
+std::string ProcessGroupAgent::getTimeoutErrorDescription() {
+  return kRPCTimeoutErrorStr.substr(0, kRPCTimeoutErrorStr.find("{}") - 1);
 }
 
 void ProcessGroupAgent::startImpl() {
@@ -795,10 +801,8 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     futureCV_.notify_all();
 
     for (const auto& timedOutFuture : timedOutFutures) {
-      auto err = c10::str(
-          "RPC ran for more than ",
-          timedOutFuture.timeout_.count(),
-          " milliseconds and timed out.");
+      auto err =
+          fmt::format(kRPCTimeoutErrorStr, timedOutFuture.timeout_.count());
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
         timedOutFuture.future_->setError(err);

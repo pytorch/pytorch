@@ -18,10 +18,14 @@ void confirmPendingUser(
   if (!futureMessage.hasError()) {
     auto rr = RemoteRet::fromMessage(futureMessage.constValue());
     TORCH_INTERNAL_ASSERT(rr->forkId() == expectedForkId);
+  } else {
+    // Handle errors, such as timeouts, by invoking the error handler on the
+    // rref.
+    auto rref_ptr = RRefContext::getInstance().getPendingUser(expectedForkId);
+    auto errorType = getRPCErrorType(futureMessage);
+    rref_ptr->handleError(errorType, futureMessage);
   }
   RRefContext::getInstance().delPendingUser(expectedForkId);
-  // Potentially propagate to the userRRef?
-  RRefContext::handleException(futureMessage);
 }
 
 c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
@@ -71,7 +75,6 @@ std::vector<c10::intrusive_ptr<RRef>> RRefContext::destroyInstance(
 
 void RRefContext::handleException(const FutureMessage& fm) {
   if (fm.hasError()) {
-    // TODO: allow users to register an error handler and call it here.
     VLOG(1) << "Got exception: " << fm.error()->what();
     throw std::runtime_error(fm.error()->what());
   }
@@ -334,6 +337,13 @@ std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>> RRefContext::
 
 RRefForkData RRefContext::prepareChildFork(
     const c10::intrusive_ptr<RRef>& rref) {
+  // If we know that rref creation on the owner has timed out, raise it to the
+  // user here, otherwise continue with pickling.
+  if (rref->getTimedOut()) {
+    throw std::runtime_error(
+        "RRef creation via rpc.remote() timed out, and it "
+        "is possible that the RRef on the owner node does not exist.");
+  }
   auto rrefForkData = rref->fork();
   if (rref->isOwner()) {
     // Note [Early Fork Registration]
@@ -545,6 +555,15 @@ void RRefContext::addConfirmedUser(
       std::piecewise_construct,
       std::forward_as_tuple(forkId),
       std::forward_as_tuple(rref));
+}
+
+c10::intrusive_ptr<RRef>& RRefContext::getPendingUser(const ForkId& forkId) {
+  auto it = pendingUsers_.find(forkId);
+  if (it == pendingUsers_.end()) {
+    TORCH_INTERNAL_ASSERT(
+        false, "Pending user with forkId ", forkId, " not found");
+  }
+  return it->second->rref_;
 }
 
 void RRefContext::recordThreadLocalPendingRRefs() {

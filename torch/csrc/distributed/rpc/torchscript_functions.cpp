@@ -55,7 +55,8 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
-    std::vector<c10::IValue>& stack) {
+    std::vector<c10::IValue>& stack,
+    const float rpcTimeoutSeconds) {
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
   auto dstWorkerInfo = rpcAgentPtr->getWorkerInfo(dstWorkerName);
   auto& ctx = RRefContext::getInstance();
@@ -83,7 +84,8 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
-        true /*forceGradRecording*/);
+        true /*forceGradRecording*/,
+        rpcTimeoutSeconds /* timeout */);
 
     userRRefPtr->registerOwnerCreationFuture(fm);
 
@@ -108,7 +110,8 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
-        true /*forceGradRecording*/);
+        true /*forceGradRecording*/,
+        rpcTimeoutSeconds /* timeout */);
 
     ownerRRefPtr->registerOwnerCreationFuture(fm);
 

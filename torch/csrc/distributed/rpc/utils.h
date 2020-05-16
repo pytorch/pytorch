@@ -7,6 +7,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+TORCH_API RPCErrorType getRPCErrorType(const FutureMessage& fm);
+
 // Given an RPC message received as a request over the wire, deserialize it into
 // the appropriate 'RpcCommandBase' type.
 TORCH_API std::unique_ptr<RpcCommandBase> deserializeRequest(

@@ -344,7 +344,7 @@ def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_optio
 
 
 @_require_initialized
-def remote(to, func, args=None, kwargs=None):
+def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
     Make a remote call to run ``func`` on worker ``to`` and return an
     :class:`~torch.distributed.rpc.RRef` to the result value immediately.
@@ -363,6 +363,19 @@ def remote(to, func, args=None, kwargs=None):
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
+
+        timeout (float, optional): timeout in seconds for this remote call. If the
+                                   creation of this
+                                   :class:`~torch.distributed.rpc.RRef` on worker
+                                   ``to`` is not successfully processed on this
+                                   worker within this timeout, then the next time
+                                   there is an attempt to use the RRef (such as
+                                   to_here()), a timeout will be raised indicating
+                                   this failure. A value of 0 indicates an
+                                   infinite timeout, i.e. a timeout error will
+                                   never be raised. If not provided, the default
+                                   value set during initialization or with
+                                   `_set_rpc_timeout` is used.
 
     Returns:
         A user :class:`~torch.distributed.rpc.RRef` instance to the result
@@ -455,19 +468,20 @@ def remote(to, func, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
         if qualified_name is not None:
-            rref = _invoke_remote_builtin(dst_worker_info, qualified_name, *args, **kwargs)
+            rref = _invoke_remote_builtin(dst_worker_info, qualified_name, timeout, *args, **kwargs)
         elif isinstance(func, torch.jit.ScriptFunction):
             rref = _invoke_remote_torchscript(
                 dst_worker_info.name,
                 torch._jit_internal._qualified_name(func),
+                timeout,
                 *args,
-                **kwargs
+                **kwargs,
             )
         else:
             (pickled_python_udf, tensors) = _default_pickler.serialize(
                 PythonUDF(func, args, kwargs)
             )
-            rref = _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors)
+            rref = _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors, timeout)
         # attach profiling information
         if should_profile:
             assert torch.autograd._profiler_enabled()

@@ -95,7 +95,8 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
     const WorkerInfo& dst,
     SerializedPyObj serializedPyObj,
     const IValue& rrefId,
-    const IValue& forkId) {
+    const IValue& forkId,
+    const float rpcTimeoutSeconds) {
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
       std::move(serializedPyObj), rrefId, forkId);
 
@@ -106,7 +107,8 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
       *agent,
       dst,
       std::move(*pythonRemoteCall).toMessage(),
-      true /*forceGradRecording*/);
+      true /*forceGradRecording*/,
+      rpcTimeoutSeconds);
 }
 
 } // namespace
@@ -223,6 +225,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
+    const float rpcTimeoutSeconds,
     const py::args& args,
     const py::kwargs& kwargs) {
   DCHECK(PyGILState_Check());
@@ -242,7 +245,11 @@ PyRRef pyRemoteBuiltin(
         op, std::move(stack), userRRef->rrefId(), userRRef->forkId());
 
     auto fm = sendMessageWithAutograd(
-        *agent, dst, std::move(*scriptRemoteCall).toMessage(), false);
+        *agent,
+        dst,
+        std::move(*scriptRemoteCall).toMessage(),
+        /*forceGradRecord */ false,
+        /* timeout */ rpcTimeoutSeconds);
 
     userRRef->registerOwnerCreationFuture(fm);
     ctx.addPendingUser(userRRef->forkId(), userRRef);
@@ -258,7 +265,11 @@ PyRRef pyRemoteBuiltin(
     auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
         op, std::move(stack), ownerRRef->rrefId(), ownerRRef->rrefId());
     auto fm = sendMessageWithAutograd(
-        *agent, dst, std::move(*scriptRemoteCall).toMessage(), false);
+        *agent,
+        dst,
+        std::move(*scriptRemoteCall).toMessage(),
+        /* forceGradRecord */ false,
+        /* timeout */ rpcTimeoutSeconds);
 
     ownerRRef->registerOwnerCreationFuture(fm);
 
@@ -273,7 +284,8 @@ PyRRef pyRemoteBuiltin(
 PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
-    std::vector<torch::Tensor>& tensors) {
+    std::vector<torch::Tensor>& tensors,
+    const float rpcTimeoutSeconds) {
   DCHECK(!PyGILState_Check());
   auto& ctx = RRefContext::getInstance();
   auto serializedPyObj =
@@ -284,7 +296,8 @@ PyRRef pyRemotePythonUdf(
         dst,
         std::move(serializedPyObj),
         userRRef->rrefId().toIValue(),
-        userRRef->forkId().toIValue());
+        userRRef->forkId().toIValue(),
+        rpcTimeoutSeconds);
 
     userRRef->registerOwnerCreationFuture(fm);
 
@@ -301,7 +314,8 @@ PyRRef pyRemotePythonUdf(
         dst,
         std::move(serializedPyObj),
         ownerRRef->rrefId().toIValue(),
-        ownerRRef->rrefId().toIValue());
+        ownerRRef->rrefId().toIValue(),
+        rpcTimeoutSeconds);
 
     ownerRRef->registerOwnerCreationFuture(fm);
 
@@ -319,6 +333,7 @@ PyRRef pyRemotePythonUdf(
 PyRRef pyRemoteTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
+    const float rpcTimeoutSeconds,
     const py::args& args,
     const py::kwargs& kwargs) {
   DCHECK(!PyGILState_Check());
@@ -335,8 +350,8 @@ PyRRef pyRemoteTorchscript(
         functionSchema, args, kwargs, c10::nullopt);
   }
   DCHECK(!PyGILState_Check());
-  auto rrefPtr =
-      remoteTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
+  auto rrefPtr = remoteTorchscript(
+      dstWorkerName, qualifiedName, functionSchema, stack, rpcTimeoutSeconds);
   return PyRRef(rrefPtr);
 }
 

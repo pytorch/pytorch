@@ -5,6 +5,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/types.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/utils/future.h>
 
 #include <atomic>
@@ -170,6 +171,10 @@ class TORCH_API RRefContext {
   void addConfirmedUser(
       const ForkId& forkId,
       const c10::intrusive_ptr<RRef>& rref);
+
+  // Retrieve a pending user given the fork ID. Throws if the user has already
+  // been confirmed (i.e. is no longer in the pendingUser_ map).
+  c10::intrusive_ptr<RRef>& getPendingUser(const ForkId& forkId);
 
   // Start recroding new pending UserRRefs. All pending UserRRefs introduced
   // after this point will be put into the thread_local userTable_, which will

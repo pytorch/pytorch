@@ -31,7 +31,8 @@ c10::intrusive_ptr<RRef> TORCH_API remoteTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
-    std::vector<c10::IValue>& stack);
+    std::vector<c10::IValue>& stack,
+    const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout);
 
 } // namespace rpc
 } // namespace distributed

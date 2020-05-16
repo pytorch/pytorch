@@ -203,6 +203,32 @@ def wait_until_pending_users_flushed():
         num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
     return
 
+def get_num_owners_and_forks():
+    rref_dbg_info = _rref_context_get_debug_info()
+    num_owners = rref_dbg_info["num_owner_rrefs"]
+    num_forks = rref_dbg_info["num_forks"]
+    return num_owners, num_forks
+
+
+def wait_until_n_owners_and_forks_on_rank(n, rank, timeout=20):
+    start = time.time()
+    while True:
+        num_owners_on_rank, num_forks_on_rank = rpc.rpc_sync(
+            worker_name(rank), get_num_owners_and_forks, args=(), timeout=2
+        )
+        num_owners_on_rank = int(num_owners_on_rank)
+        num_forks_on_rank = int(num_forks_on_rank)
+        if num_owners_on_rank == n and num_forks_on_rank == n:
+            return
+        time.sleep(1)
+        if time.time() - start > timeout:
+            raise ValueError(
+                "Timed out waiting for {} owners on rank {} (had {})".format(
+                    n, rank, num_owners_on_rank
+                )
+            )
+
+
 def initialize_pg(init_method, rank, world_size):
     # This is for tests using `dist.barrier`.
     # For `RpcAgent` other than `ProcessGroupAgent`,

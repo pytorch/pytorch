@@ -245,6 +245,8 @@ class TORCH_API RpcAgent {
   // Retrieve wheher we should profile GIL wait times or not.
   bool isGILProfilingEnabled();
 
+  virtual std::string getTimeoutErrorDescription();
+
   // Set type resolver that will be passed to JIT pickler to resolver type Ptr
   // based on type str.
   void setTypeResolver(std::shared_ptr<TypeResolver> typeResolver);
