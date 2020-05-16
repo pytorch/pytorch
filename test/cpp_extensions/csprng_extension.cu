@@ -7,6 +7,7 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/core/DistributionsHelper.h>
 #include <memory>
+#include <random>
 #include "block_cipher.cuh"
 #include "aes.cuh"
 
@@ -14,11 +15,29 @@ using namespace at;
 using namespace at::native::templates;
 using namespace torch::custom_prng;
 
+inline uint64_t make64BitsFrom32Bits(uint32_t hi, uint32_t lo) {
+  return (static_cast<uint64_t>(hi) << 32) | lo;
+}
+
 // CUDA CSPRNG is actually CPU generator which is used only to generate a random key on CPU for AES running in a block mode on CUDA 
-struct CUDA_CSPRNG_GeneratorImpl : public CPUGeneratorImpl {
-  CUDA_CSPRNG_GeneratorImpl(uint64_t seed_in = default_rng_seed_val) : CPUGeneratorImpl(seed_in) {
-    this->key_set_ = DispatchKeySet(DispatchKey::CustomRNGKeyId);
-  }
+struct CustomGeneratorImpl : public c10::GeneratorImpl {
+  CustomGeneratorImpl(bool use_rd)              : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(DispatchKey::CustomRNGKeyId)}, use_rd_{use_rd} {}
+  CustomGeneratorImpl(const std::string& token) : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(DispatchKey::CustomRNGKeyId)}, use_rd_{true}, rd_{token} {}
+  CustomGeneratorImpl(uint64_t seed)            : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(DispatchKey::CustomRNGKeyId)}, use_rd_{false}, mt_{seed} { }
+  ~CustomGeneratorImpl() = default;
+  uint32_t random() { return use_rd_ ? rd_() : mt_(); }
+  uint64_t random64() { return use_rd_ ? make64BitsFrom32Bits(rd_(), rd_()) : make64BitsFrom32Bits(mt_(), mt_()); }
+
+  void set_current_seed(uint64_t seed) override { throw std::runtime_error("not implemented"); }
+  uint64_t current_seed() const override { throw std::runtime_error("not implemented"); }
+  uint64_t seed() override { throw std::runtime_error("not implemented"); }
+  CustomGeneratorImpl* clone_impl() const override { throw std::runtime_error("not implemented"); }
+
+  static DeviceType device_type() { return DeviceType::CPU; }
+
+  bool use_rd_;
+  std::random_device rd_;
+  std::mt19937 mt_;
 };
 
 // ====================================================================================================================
@@ -136,11 +155,11 @@ struct RandomFromToKernel {
 };
 
 Tensor& random_(Tensor& self, c10::optional<Generator> generator) {
-  return random_impl<RandomKernel, CUDA_CSPRNG_GeneratorImpl>(self, generator);
+  return random_impl<RandomKernel, CustomGeneratorImpl>(self, generator);
 }
 
 Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> generator) {
-  return random_from_to_impl<RandomFromToKernel, CUDA_CSPRNG_GeneratorImpl>(self, from, to, generator);
+  return random_from_to_impl<RandomFromToKernel, CustomGeneratorImpl>(self, from, to, generator);
 }
 
 Tensor& random_to(Tensor& self, int64_t to, c10::optional<Generator> generator) {
@@ -166,7 +185,7 @@ struct UniformKernel {
 };
 
 Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> generator) {
-  return uniform_impl_<UniformKernel, CUDA_CSPRNG_GeneratorImpl>(self, from, to, generator);
+  return uniform_impl_<UniformKernel, CustomGeneratorImpl>(self, from, to, generator);
 }
 
 // ==================================================== Normal ========================================================
@@ -189,31 +208,31 @@ struct NormalKernel {
 };
 
 Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> generator) {
-  return normal_impl_<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(self, mean, std, generator);
+  return normal_impl_<NormalKernel, CustomGeneratorImpl>(self, mean, std, generator);
 }
 
 Tensor& normal_Tensor_float_out(Tensor& output, const Tensor& mean, double std, c10::optional<Generator> gen) {
-  return normal_out_impl<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(output, mean, std, gen);
+  return normal_out_impl<NormalKernel, CustomGeneratorImpl>(output, mean, std, gen);
 }
 
 Tensor& normal_float_Tensor_out(Tensor& output, double mean, const Tensor& std, c10::optional<Generator> gen) {
-  return normal_out_impl<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(output, mean, std, gen);
+  return normal_out_impl<NormalKernel, CustomGeneratorImpl>(output, mean, std, gen);
 }
 
 Tensor& normal_Tensor_Tensor_out(Tensor& output, const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
-  return normal_out_impl<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(output, mean, std, gen);
+  return normal_out_impl<NormalKernel, CustomGeneratorImpl>(output, mean, std, gen);
 }
 
 Tensor normal_Tensor_float(const Tensor& mean, double std, c10::optional<Generator> gen) {
-  return normal_impl<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(mean, std, gen);
+  return normal_impl<NormalKernel, CustomGeneratorImpl>(mean, std, gen);
 }
 
 Tensor normal_float_Tensor(double mean, const Tensor& std, c10::optional<Generator> gen) {
-  return normal_impl<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(mean, std, gen);
+  return normal_impl<NormalKernel, CustomGeneratorImpl>(mean, std, gen);
 }
 
 Tensor normal_Tensor_Tensor(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
-  return normal_impl<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(mean, std, gen);
+  return normal_impl<NormalKernel, CustomGeneratorImpl>(mean, std, gen);
 }
 
 // ==================================================== Cauchy ========================================================
@@ -235,7 +254,7 @@ struct CauchyKernel {
 };
 
 Tensor& cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> generator) {
-  return cauchy_impl_<CauchyKernel, CUDA_CSPRNG_GeneratorImpl>(self, median, sigma, generator);
+  return cauchy_impl_<CauchyKernel, CustomGeneratorImpl>(self, median, sigma, generator);
 }
 
 // ================================================== LogNormal =======================================================
@@ -257,7 +276,7 @@ struct LogNormalKernel {
 };
 
 Tensor& log_normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
-  return log_normal_impl_<LogNormalKernel, CUDA_CSPRNG_GeneratorImpl>(self, mean, std, gen);
+  return log_normal_impl_<LogNormalKernel, CustomGeneratorImpl>(self, mean, std, gen);
 }
 
 // ================================================== Geometric =======================================================
@@ -279,7 +298,7 @@ struct GeometricKernel {
 };
 
 Tensor& geometric_(Tensor& self, double p, c10::optional<Generator> gen) {
-  return geometric_impl_<GeometricKernel, CUDA_CSPRNG_GeneratorImpl>(self, p, gen);
+  return geometric_impl_<GeometricKernel, CustomGeneratorImpl>(self, p, gen);
 }
 
 // ================================================== Exponential =====================================================
@@ -301,13 +320,25 @@ struct ExponentialKernel {
 };
 
 Tensor& exponential_(Tensor& self, double lambda, c10::optional<Generator> gen) {
-  return exponential_impl_<ExponentialKernel, CUDA_CSPRNG_GeneratorImpl>(self, lambda, gen);
+  return exponential_impl_<ExponentialKernel, CustomGeneratorImpl>(self, lambda, gen);
 }
 
 // ====================================================================================================================
 
-Generator create_CUDA_CSPRNG_Generator() {
-  return make_generator<CUDA_CSPRNG_GeneratorImpl>();
+Generator create_random_device_generator() {
+  return make_generator<CustomGeneratorImpl>(true);
+}
+
+Generator create_random_device_generator_with_token(const std::string& token) {
+  return make_generator<CustomGeneratorImpl>(token);
+}
+
+Generator create_mt19937_generator() {
+  return make_generator<CustomGeneratorImpl>(false);
+}
+
+Generator create_mt19937_generator_with_seed(uint64_t seed) {
+  return make_generator<CustomGeneratorImpl>(seed);
 }
   
 void registerOps() {
@@ -370,5 +401,8 @@ void registerOps() {
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("registerOps", &registerOps);
-  m.def("create_CUDA_CSPRNG_Generator", &create_CUDA_CSPRNG_Generator);
+  m.def("create_random_device_generator", &create_random_device_generator);
+  m.def("create_random_device_generator_with_token", &create_random_device_generator_with_token);
+  m.def("create_mt19937_generator", &create_mt19937_generator);
+  m.def("create_mt19937_generator_with_seed", &create_mt19937_generator_with_seed);
 }

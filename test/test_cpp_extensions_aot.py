@@ -191,95 +191,103 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
         }
         return min(results.items(), key=lambda res: res[1].statistic)
 
+    def createGenerators(self):
+        import torch_test_cpp_extension.csprng as csprng_extension
+        return [
+            csprng_extension.create_random_device_generator(),
+            csprng_extension.create_random_device_generator_with_token('/dev/urandom'),
+            csprng_extension.create_mt19937_generator(),
+            csprng_extension.create_mt19937_generator_with_seed(42)
+        ]
+
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_random(self):
         import torch_test_cpp_extension.csprng as csprng_extension
-        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
-        for dtype in [torch.bool, torch.uint8, torch.int8, torch.int16, 
-                      torch.int32, torch.int64, torch.float, torch.double]:
-            t = torch.empty(100, dtype=dtype, device='cuda').random_(generator=gen)
-            # print(t)
+        for gen in self.createGenerators():
+            for dtype in [torch.bool, torch.uint8, torch.int8, torch.int16, 
+                        torch.int32, torch.int64, torch.float, torch.double]:
+                t = torch.empty(100, dtype=dtype, device='cuda').random_(generator=gen)
+                # print(t)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_random2(self):
         import torch_test_cpp_extension.csprng as csprng_extension
-        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
-        s = torch.zeros(20, 20, dtype=torch.uint8, device='cuda')
-        t = s[:, 7]
-        self.assertFalse(t.is_contiguous())
-        t.random_(generator=gen)
-        t = s[7, :]
-        self.assertTrue(t.is_contiguous())
-        t.random_(generator=gen)
-        # print(s)
+        for gen in self.createGenerators():
+            s = torch.zeros(20, 20, dtype=torch.uint8, device='cuda')
+            t = s[:, 7]
+            self.assertFalse(t.is_contiguous())
+            t.random_(generator=gen)
+            t = s[7, :]
+            self.assertTrue(t.is_contiguous())
+            t.random_(generator=gen)
+            # print(s)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_bool(self):
         import torch_test_cpp_extension.csprng as csprng_extension
-        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 10000
-        for i in range(100):
-            t = torch.empty(size, dtype=torch.bool, device='cuda').random_(generator=gen)
-            percentage = (t.eq(True)).to(torch.int).sum().item() / size
-            self.assertTrue(0.48 < percentage < 0.52)
+        for gen in self.createGenerators():
+            for i in range(100):
+                t = torch.empty(size, dtype=torch.bool, device='cuda').random_(generator=gen)
+                percentage = (t.eq(True)).to(torch.int).sum().item() / size
+                self.assertTrue(0.48 < percentage < 0.52)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_ints(self):
         import torch_test_cpp_extension.csprng as csprng_extension
-        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
-        for (dtype, size, prec) in [(torch.uint8, 10000, 1), (torch.int8, 10000, 1), (torch.int16, 1000000, 100)]:
-            t = torch.empty(size, dtype=dtype, device='cuda').random_(generator=gen)
-            avg = t.sum().item() / size
-            # print(avg)
-            # print(torch.iinfo(dtype).max / 2)
-            self.assertEqual(avg, torch.iinfo(dtype).max / 2, prec)
-        for (dtype, size, prec) in [(torch.int32, 1000000, 1e7), (torch.int64, 1000000, 1e16)]:
-            t = torch.empty(size, dtype=dtype, device='cuda').random_(generator=gen)
-            avg = (t / size).sum().item()
-            # print(avg)
-            # print(torch.iinfo(dtype).max / 2)
-            self.assertEqual(avg, torch.iinfo(dtype).max / 2, prec)
+        for gen in self.createGenerators():
+            for (dtype, size, prec) in [(torch.uint8, 10000, 2), (torch.int8, 10000, 2), (torch.int16, 1000000, 100)]:
+                t = torch.empty(size, dtype=dtype, device='cuda').random_(generator=gen)
+                avg = t.sum().item() / size
+                # print(avg)
+                # print(torch.iinfo(dtype).max / 2)
+                self.assertEqual(avg, torch.iinfo(dtype).max / 2, prec)
+            for (dtype, size, prec) in [(torch.int32, 1000000, 1e7), (torch.int64, 1000000, 1e16)]:
+                t = torch.empty(size, dtype=dtype, device='cuda').random_(generator=gen)
+                avg = (t / size).sum().item()
+                # print(avg)
+                # print(torch.iinfo(dtype).max / 2)
+                self.assertEqual(avg, torch.iinfo(dtype).max / 2, prec)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_uniform1(self):
         import torch_test_cpp_extension.csprng as csprng_extension
-        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 1000
         alpha = 0.1
-        for dtype in [torch.float, torch.double]:
-            for from_ in [-100, 0, 1000]:
-                for to_ in [-42, 0, 4242]:
-                    if to_ > from_:
-                        range_ = to_ - from_
-                        t = torch.empty(size, dtype=dtype, device='cuda').uniform_(from_, to_, generator=gen)
-                        self.assertTrue(from_  <= t.min() < from_ + alpha * range_)
-                        self.assertTrue(to_ - alpha * range_  <= t.max() < to_)
+        for gen in self.createGenerators():
+            for dtype in [torch.float, torch.double]:
+                for from_ in [-100, 0, 1000]:
+                    for to_ in [-42, 0, 4242]:
+                        if to_ > from_:
+                            range_ = to_ - from_
+                            t = torch.empty(size, dtype=dtype, device='cuda').uniform_(from_, to_, generator=gen)
+                            self.assertTrue(from_  <= t.min() < from_ + alpha * range_)
+                            self.assertTrue(to_ - alpha * range_  <= t.max() < to_)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_normal1(self):
         import torch_test_cpp_extension.csprng as csprng_extension
-        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 1000
-        for dtype in [torch.float, torch.double]:
-            for mean in [-42.42, 0.0, 4242]:
-                for std in [1.0, 2.0, 3.0]:
-                    t = torch.empty(size, dtype=dtype, device='cuda').normal_(mean, std, generator=gen)
-                    self.assertEqual(t.mean().item(), mean, 1)
-                    self.assertEqual(t.std().item(), std, 1)
+        for gen in self.createGenerators():
+            for dtype in [torch.float, torch.double]:
+                for mean in [-42.42, 0.0, 4242]:
+                    for std in [1.0, 2.0, 3.0]:
+                        t = torch.empty(size, dtype=dtype, device='cuda').normal_(mean, std, generator=gen)
+                        self.assertEqual(t.mean().item(), mean, 1)
+                        self.assertEqual(t.std().item(), std, 1)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_normal2(self):
         import torch_test_cpp_extension.csprng as csprng_extension
-        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
 
-        def helper(self, device, dtype, ptype, t_transform, std_transform):
+        def helper(self, device, dtype, gen, ptype, t_transform, std_transform):
             q = torch.empty(100, 100, dtype=dtype, device=device)
 
             q.normal_(generator=gen)
@@ -293,7 +301,7 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
             q = torch.empty(100, 100, dtype=dtype, device=device)
             q_row1 = q[0:1].clone()
             q[99:100].normal_(generator=gen)
-            self.assertEqual(t_transform(q[99:100]).mean(), 0, 0.2)
+            self.assertEqual(t_transform(q[99:100]).mean(), 0, 0.3)
             self.assertEqual(t_transform(q[99:100]).std(), std_transform(1), 0.2)
             self.assertEqual(t_transform(q[0:1]).clone(), t_transform(q_row1))
 
@@ -377,101 +385,103 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
             self.assertEqual(t_transform(r).std(), std_transform(3), 0.3)
 
         device = 'cuda:0'
-        for dtype in [torch.float, torch.double] :
-            if dtype.is_complex:
-                helper(self, device, dtype, lambda x: complex(x, x),
-                    lambda t: torch.real(t).to(torch.float), lambda mean: mean / math.sqrt(2))
-                helper(self, device, dtype, lambda x: complex(x, x),
-                    lambda t: torch.imag(t).to(torch.float), lambda mean: mean / math.sqrt(2))
-                self.assertRaisesRegex(
-                    RuntimeError, "normal expects standard deviation to be non-complex",
-                    lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device), generator=gen))
-                out = torch.empty(100, 100, dtype=dtype, device=device)
-                self.assertRaisesRegex(
-                    RuntimeError, "normal expects standard deviation to be non-complex",
-                    lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device), generator=gen, out=out))
-            else:
-                helper(self, device, dtype, lambda x: x, lambda t: t, lambda mean: mean)
+        for gen in self.createGenerators():
+            for dtype in [torch.float, torch.double] :
+                if dtype.is_complex:
+                    helper(self, device, dtype, gen, lambda x: complex(x, x),
+                        lambda t: torch.real(t).to(torch.float), lambda mean: mean / math.sqrt(2))
+                    helper(self, device, dtype, gen, lambda x: complex(x, x),
+                        lambda t: torch.imag(t).to(torch.float), lambda mean: mean / math.sqrt(2))
+                    self.assertRaisesRegex(
+                        RuntimeError, "normal expects standard deviation to be non-complex",
+                        lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device), generator=gen))
+                    out = torch.empty(100, 100, dtype=dtype, device=device)
+                    self.assertRaisesRegex(
+                        RuntimeError, "normal expects standard deviation to be non-complex",
+                        lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device), generator=gen, out=out))
+                else:
+                    helper(self, device, dtype, gen, lambda x: x, lambda t: t, lambda mean: mean)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_uniform(self):
         import torch_test_cpp_extension.csprng as csprng_extension
-        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 1000
-        for dtype in [torch.float, torch.double]:
-            t = torch.empty(size, dtype=dtype, device='cuda').uniform_(generator=gen)
-            actual_distribution = self.distribution(t)
-            self.assertEqual(actual_distribution[0], "uniform")
-            self.assertTrue(actual_distribution[1].statistic < 0.1)
+        for gen in self.createGenerators():
+            for dtype in [torch.float, torch.double]:
+                t = torch.empty(size, dtype=dtype, device='cuda').uniform_(generator=gen)
+                actual_distribution = self.distribution(t)
+                self.assertEqual(actual_distribution[0], "uniform")
+                self.assertTrue(actual_distribution[1].statistic < 0.1)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_normal(self):
         import torch_test_cpp_extension.csprng as csprng_extension
-        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 1000
         mean = 0.0
         std = 1.0
-        for dtype in [torch.float, torch.double]:
-            t = torch.empty(size, dtype=dtype, device='cuda').normal_(generator=gen)
-            actual_distribution = self.distribution(t)
-            self.assertEqual(actual_distribution[0], "normal(" + str(mean) + ", " + str(std) + ")")
-            self.assertTrue(actual_distribution[1].statistic < 0.1)
+        for gen in self.createGenerators():
+            for dtype in [torch.float, torch.double]:
+                t = torch.empty(size, dtype=dtype, device='cuda').normal_(generator=gen)
+                actual_distribution = self.distribution(t)
+                self.assertEqual(actual_distribution[0], "normal(" + str(mean) + ", " + str(std) + ")")
+                self.assertTrue(actual_distribution[1].statistic < 0.1)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cauchy(self):
         import torch_test_cpp_extension.csprng as csprng_extension
-        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 1000
         median = 0.0
         sigma = 1.0
-        for dtype in [torch.float, torch.double]:
-            t = torch.empty(size, dtype=dtype, device='cuda').cauchy_(median=median, sigma=sigma, generator=gen)
-            actual_distribution = self.distribution(t)
-            self.assertEqual(actual_distribution[0], "cauchy(" + str(median) + ", " + str(sigma) + ")")
-            self.assertTrue(actual_distribution[1].statistic < 0.1)
+        for gen in self.createGenerators():
+            for dtype in [torch.float, torch.double]:
+                t = torch.empty(size, dtype=dtype, device='cuda').cauchy_(median=median, sigma=sigma, generator=gen)
+                actual_distribution = self.distribution(t)
+                self.assertEqual(actual_distribution[0], "cauchy(" + str(median) + ", " + str(sigma) + ")")
+                self.assertTrue(actual_distribution[1].statistic < 0.1)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_log_normal(self):
         import torch_test_cpp_extension.csprng as csprng_extension
-        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 1000
         mean = 0.0
         std = 0.25
-        for dtype in [torch.float, torch.double]:
-            t = torch.empty(size, dtype=dtype, device='cuda').log_normal_(mean=mean, std=std, generator=gen)
-            actual_distribution = self.distribution(t)
-            self.assertEqual(actual_distribution[0], "lognormal(" + str(mean) + ", " + str(std) + ")")
-            self.assertTrue(actual_distribution[1].statistic < 0.1)
+        for gen in self.createGenerators():
+            for dtype in [torch.float, torch.double]:
+                t = torch.empty(size, dtype=dtype, device='cuda').log_normal_(mean=mean, std=std, generator=gen)
+                actual_distribution = self.distribution(t)
+                self.assertEqual(actual_distribution[0], "lognormal(" + str(mean) + ", " + str(std) + ")")
+                self.assertTrue(actual_distribution[1].statistic < 0.1)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_geometric(self):
         import torch_test_cpp_extension.csprng as csprng_extension
-        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 1000
         p = 0.5
-        for dtype in [torch.float, torch.double]:
-            t = torch.empty(size, dtype=dtype, device='cuda').geometric_(p=p, generator=gen)
-            actual_distribution = self.distribution(t)
-            self.assertEqual(actual_distribution[0], "geometric(" + str(p) + ")")
-            self.assertTrue(actual_distribution[1].statistic < 0.6)
+        for gen in self.createGenerators():
+            
+            for dtype in [torch.float, torch.double]:
+                t = torch.empty(size, dtype=dtype, device='cuda').geometric_(p=p, generator=gen)
+                actual_distribution = self.distribution(t)
+                self.assertEqual(actual_distribution[0], "geometric(" + str(p) + ")")
+                self.assertTrue(actual_distribution[1].statistic < 0.6)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_exponential(self):
         import torch_test_cpp_extension.csprng as csprng_extension
-        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 1000
         lambd = 1.0
-        for dtype in [torch.float, torch.double]:
-            t = torch.empty(size, dtype=dtype, device='cuda').exponential_(lambd=lambd, generator=gen)
-            actual_distribution = self.distribution(t)
-            self.assertEqual(actual_distribution[0], "exponential(" + str(lambd) + ")")
-            self.assertTrue(actual_distribution[1].statistic < 0.1)
+        for gen in self.createGenerators():
+            for dtype in [torch.float, torch.double]:
+                t = torch.empty(size, dtype=dtype, device='cuda').exponential_(lambd=lambd, generator=gen)
+                actual_distribution = self.distribution(t)
+                self.assertEqual(actual_distribution[0], "exponential(" + str(lambd) + ")")
+                self.assertTrue(actual_distribution[1].statistic < 0.1)
 
 if __name__ == "__main__":
     common.run_tests()
