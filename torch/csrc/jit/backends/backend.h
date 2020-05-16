@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
-#include <torch/csrc/jit/python/pybind.h>
-#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/custom_class.h>
 
 namespace torch {
