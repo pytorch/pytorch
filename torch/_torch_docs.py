@@ -156,13 +156,13 @@ add_docstr(torch.acosh,
            r"""
 acosh(input, out=None) -> Tensor
 
-Returns a new tensor with arccosh (inverse hyperbolic cosine) of the elements of :attr:`input`.
+Returns a new tensor with the inverse hyperbolic cosine of the elements of :attr:`input`. All values in the input tensor must be greater than or equal to one.
 
 .. math::
     \text{out}_{i} = \cosh^{-1}(\text{input}_{i})
 """ + r"""
 Args:
-    {input}
+    {input}: The domain is the closed interval `[1, +inf)`.
     {out}
 
 Example::
@@ -638,7 +638,7 @@ add_docstr(torch.asinh,
            r"""
 asinh(input, out=None) -> Tensor
 
-Returns a new tensor with arcsinh (inverse hyperbolic sine) of the elements of :attr:`input`.
+Returns a new tensor with the inverse hyperbolic sine of the elements of :attr:`input`.
 
 .. math::
     \text{out}_{i} = \sinh^{-1}(\text{input}_{i})
@@ -649,11 +649,11 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4).uniform_(1, 2)
+    >>> a = torch.randn(4)
     >>> a
-    tensor([ 1.1678, 1.4004, 1.6039, 1.8095 ])
+    tensor([ 0.00417, 0.05982, 0.8063, 0.1257 ])
     >>> torch.asinh(a)
-    tensor([ 1.2885, 1.1382, 1.2510, 1.3551 ])
+    tensor([ 0.0041, 0.3119, 0.5746, 0.2337 ])
 """.format(**common_args))
 
 add_docstr(torch.atan,
@@ -710,13 +710,13 @@ add_docstr(torch.atanh,
            r"""
 atanh(input, out=None) -> Tensor
 
-Returns a new tensor with arctanh (inverse hyperbolic tangent) of the elements of :attr:`input`.
+Returns a new tensor with the inverse hyperbolic tangent of the elements of :attr:`input`. All values in the input tensor must be in the open interval `(-1, 1)`.
 
 .. math::
     \text{out}_{i} = \tanh^{-1}(\text{input}_{i})
 """ + r"""
 Args:
-    {input}
+    {input}: The domain is the open interval `(-1, 1)`.
     {out}
 
 Example::
@@ -7825,15 +7825,15 @@ add_docstr(torch.searchsorted,
            r"""
 searchsorted(sorted_sequence, values, out_int32=False, right=False, out=None) -> Tensor
 
-Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the 
-corresponding values in :attr:`values` were inserted before the indices, the order of the 
-corresponding *innermost* dimension within :attr:`sorted_sequence` would be preserved. 
-Return a new tensor with the same size as :attr:`values`. If :attr:`right` is False (default), 
-then the left boundary of :attr:`sorted_sequence` is closed. More formally, the returned index 
-satisfies the following rules: 
+Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the
+corresponding values in :attr:`values` were inserted before the indices, the order of the
+corresponding *innermost* dimension within :attr:`sorted_sequence` would be preserved.
+Return a new tensor with the same size as :attr:`values`. If :attr:`right` is False (default),
+then the left boundary of :attr:`sorted_sequence` is closed. More formally, the returned index
+satisfies the following rules:
 
-.. list-table:: 
-   :widths: 12 10 78 
+.. list-table::
+   :widths: 12 10 78
    :header-rows: 1
 
    * - :attr:`sorted_sequence`
@@ -7853,27 +7853,27 @@ satisfies the following rules:
      - ``sorted_sequence[m][n]...[l][i-1] < values[m][n]...[l][x] <= sorted_sequence[m][n]...[l][i]``
 
 Args:
-    sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost* 
+    sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost*
                               dimension.
     values (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
-    out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise. 
+    out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise.
                                 Default value is False, i.e. default output data type is torch.int64.
-    right (bool, optional): if False, return the first suitable location that is found. If True, return the 
-                            last such index. If no suitable index found, return 0 for non-numerical value 
-                            (eg. nan, inf) or the size of *innermost* dimension within :attr:`sorted_sequence` 
-                            (one pass the last index of the *innermost* dimension). In other words, if False, 
-                            gets the lower bound index for each value in :attr:`values` on the corresponding 
-                            *innermost* dimension of the :attr:`sorted_sequence`. If True, gets the upper 
+    right (bool, optional): if False, return the first suitable location that is found. If True, return the
+                            last such index. If no suitable index found, return 0 for non-numerical value
+                            (eg. nan, inf) or the size of *innermost* dimension within :attr:`sorted_sequence`
+                            (one pass the last index of the *innermost* dimension). In other words, if False,
+                            gets the lower bound index for each value in :attr:`values` on the corresponding
+                            *innermost* dimension of the :attr:`sorted_sequence`. If True, gets the upper
                             bound index instead. Default value is False.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`values` if provided.
 
-.. note:: If your use case is always 1-D sorted sequence, :func:`torch.bucketize` is preferred, 
+.. note:: If your use case is always 1-D sorted sequence, :func:`torch.bucketize` is preferred,
           because it has fewer dimension checks resulting in slightly better performance.
 
 
 Example::
 
-    >>> sorted_sequence = torch.tensor([[1, 3, 5, 7, 9], [2, 4, 6, 8, 10]]) 
+    >>> sorted_sequence = torch.tensor([[1, 3, 5, 7, 9], [2, 4, 6, 8, 10]])
     >>> sorted_sequence
     tensor([[ 1,  3,  5,  7,  9],
             [ 2,  4,  6,  8, 10]])
@@ -7901,12 +7901,12 @@ add_docstr(torch.bucketize,
 bucketize(input, boundaries, out_int32=False, right=False, out=None) -> Tensor
 
 Returns the indices of the buckets to which each value in the :attr:`input` belongs, where the
-boundaries of the buckets are set by :attr:`boundaries`. Return a new tensor with the same size 
-as :attr:`input`. If :attr:`right` is False (default), then the left boundary is closed. More 
+boundaries of the buckets are set by :attr:`boundaries`. Return a new tensor with the same size
+as :attr:`input`. If :attr:`right` is False (default), then the left boundary is closed. More
 formally, the returned index satisfies the following rules:
 
-.. list-table:: 
-   :widths: 15 85 
+.. list-table::
+   :widths: 15 85
    :header-rows: 1
 
    * - :attr:`right`
@@ -7919,14 +7919,14 @@ formally, the returned index satisfies the following rules:
 Args:
     input (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
     boundaries (Tensor): 1-D tensor, must contain a monotonically increasing sequence.
-    out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise. 
+    out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise.
                                 Default value is False, i.e. default output data type is torch.int64.
-    right (bool, optional): if False, return the first suitable location that is found. If True, return the 
-                            last such index. If no suitable index found, return 0 for non-numerical value 
-                            (eg. nan, inf) or the size of :attr:`boundaries` (one pass the last index). 
-                            In other words, if False, gets the lower bound index for each value in :attr:`input` 
-                            from :attr:`boundaries`. If True, gets the upper bound index instead. 
-                            Default value is False. 
+    right (bool, optional): if False, return the first suitable location that is found. If True, return the
+                            last such index. If no suitable index found, return 0 for non-numerical value
+                            (eg. nan, inf) or the size of :attr:`boundaries` (one pass the last index).
+                            In other words, if False, gets the lower bound index for each value in :attr:`input`
+                            from :attr:`boundaries`. If True, gets the upper bound index instead.
+                            Default value is False.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`input` if provided.
 
 
