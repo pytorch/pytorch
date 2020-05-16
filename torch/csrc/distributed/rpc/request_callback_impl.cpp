@@ -73,16 +73,18 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
 // When request message has autograd info, processMessage() will set up valid
 // current context id properly. This struct is used to clean up current context
 // id after processMessage() is done.
-struct ClearAutogradContextGuard {
-  ClearAutogradContextGuard() = default;
-  ~ClearAutogradContextGuard() {
-    clear();
+struct DistAutogradContextGuard {
+  explicit DistAutogradContextGuard(int64_t ctxId) {
+    auto& container = DistAutogradContainer::getInstance();
+    prevCtxId_ = container.currentContextId();
+    container.forceCurrentContextId(ctxId);
+  }
+  ~DistAutogradContextGuard() {
+    auto& container = DistAutogradContainer::getInstance();
+    container.forceCurrentContextId(prevCtxId_);
   }
 
-  void clear() {
-    auto& autogradContainer = DistAutogradContainer::getInstance();
-    autogradContainer.clearCurrentContext();
-  }
+  int64_t prevCtxId_;
 };
 
 } // anonymous namespace
@@ -447,7 +449,8 @@ void RequestCallbackImpl::processRpc(
           autogradContext != nullptr,
           "autogradContext is nullptr, FORWARD_AUTOGRAD_REQ should always get "
           "or create valid autogradContext in addRecvRpcBackward.");
-      autogradContainer.setCurrentContextId(autogradContext->contextId());
+
+      DistAutogradContextGuard ctxGuard(autogradContext->contextId());
 
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
@@ -469,7 +472,20 @@ void RequestCallbackImpl::processRpc(
           [responseFuture,
            messageId,
            fromWorkerId,
-           weak = std::weak_ptr<FutureMessage>(wrappedRpcResponseFuture)]() {
+           weak = std::weak_ptr<FutureMessage>(wrappedRpcResponseFuture),
+           ctxId = autogradContext->contextId()]() {
+            // As this callback can be invoked by a different thread, we have to
+            // make sure that the thread_local states in the previous thread is
+            // correctly propagated.
+            // NB: The execution of TorchScript functions can also run on a
+            // different thread, which is addressed by
+            // https://github.com/pytorch/pytorch/pull/36395
+            // NB: when adding async UDF support, we should also propagate
+            // thread_local states there.
+            // TODO: Land on a general solution for RPC ThreadLocalState. See
+            // https://github.com/pytorch/pytorch/issues/38510
+            DistAutogradContextGuard cbCtxGuard(ctxId);
+
             auto wrappedRpcResponseFuture = weak.lock();
             TORCH_INTERNAL_ASSERT(wrappedRpcResponseFuture);
             if (wrappedRpcResponseFuture->hasError()) {
@@ -563,9 +579,6 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
          messageType = request.type(),
          id = request.id()]() {
           try {
-            // For a recv thread, current context id should be invalid outside
-            // processMessage().
-            ClearAutogradContextGuard guard;
             processRpc(*rpc, messageType, id, retFuture);
           } catch (py::error_already_set& e) {
             retFuture->markCompleted(handleError(e, messageType, id));
