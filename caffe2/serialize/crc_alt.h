@@ -111,7 +111,7 @@ uint32_t crc32_16bytes_prefetch(const void* data, size_t length, uint32_t previo
 #elif defined(__APPLE__)
   #include <TargetConditionals.h>
     #if TARGET_IPHONE_SIMULATOR
-      #error "iOS sim not supported"
+      #define __BYTE_ORDER __LITTLE_ENDIAN
     #elif TARGET_OS_IPHONE
       #define __BYTE_ORDER __LITTLE_ENDIAN
     #elif TARGET_OS_MAC
