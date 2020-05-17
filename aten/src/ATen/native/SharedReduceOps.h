@@ -313,11 +313,11 @@ struct NormTwoOps {
 template <typename acc_t>
 struct NanSumOps {
   inline C10_DEVICE acc_t reduce(acc_t a, acc_t b, int64_t /*idx*/) const {
-    return (std::isnan(a) ? acc_t{0} : a) + (std::isnan(b) ? acc_t{0} : b);
+    return (at::_isnan(a) ? acc_t{0} : a) + (at::_isnan(b) ? acc_t{0} : b);
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
-    return  (std::isnan(a) ? acc_t{0} : a) + (std::isnan(b) ? acc_t{0} : b);
+    return  (at::_isnan(a) ? acc_t{0} : a) + (at::_isnan(b) ? acc_t{0} : b);
   }
 
   inline C10_DEVICE acc_t project(acc_t a) const {
