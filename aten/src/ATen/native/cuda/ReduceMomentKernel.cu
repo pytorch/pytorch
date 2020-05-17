@@ -62,6 +62,12 @@ static void mean_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
+void nanmean_kernel_impl(TensorIterator& iter) {
+  float factor = float(iter.num_output_elements()) / iter.numel();
+  // TODO: gpu_reduce_kernel implement
+}
+
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_cuda);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_cuda);
 

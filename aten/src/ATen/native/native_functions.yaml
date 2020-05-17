@@ -1881,6 +1881,36 @@
   use_c10_dispatcher: full
   supports_named_tensor: True
 
+# TODO: Currently I'm following how mean is implemented
+# We don't need to name CPU and GPU dispatch variants weirdly here if there are no
+# namespacing issues in C++
+- func: nanmean(Tensor self, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  supports_named_tensor: True
+  dispatch:
+    CPU: nanmean_cpu_gpu
+    CUDA: nanmean_cpu_gpu
+
+- func: nanmean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  supports_named_tensor: True
+  dispatch:
+    CPU: nanmean_cpu_gpu
+    CUDA: nanmean_cpu_gpu
+ 
+- func: nanmean.out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+  dispatch:
+    CPU: nanmean_out_cpu_gpu
+    CUDA: nanmean_out_cpu_gpu
+
+- func: nanmean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  supports_named_tensor: True
+
+- func: nanmean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
 # The CPU and GPU dispatch variants are named weirdly here because otherwise there
 # are namespacing issues in C++
 - func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
