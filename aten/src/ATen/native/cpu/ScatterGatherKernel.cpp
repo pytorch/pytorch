@@ -3,7 +3,8 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/Parallel.h>
-#include <map>
+#include <unordered_map>
+
 
 namespace at { namespace native {
 
@@ -190,6 +191,17 @@ auto scalar_reduce_divide = [](auto * self_data, Scalar src_data) {
                        *self_data /= src_data.to<scalar_t>();
                      };
 
+  class Awesome {
+  public:
+    Awesome(int op) {
+      
+    }
+
+    void operator()(auto * self_data, auto * src_data) {
+      
+    }
+  };
+
 template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
   void operator()(Tensor& self, int64_t dim,
@@ -249,7 +261,7 @@ struct cpu_scatter_gather_base_kernel {
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
 
         using binary_func_t = std::function<void(scalar_t*, Scalar)>;
-        std::map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
+        std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
         binary_funcs[SCATTER_GATHER_OP::SCALAR_ASSIGN] =  scalar_assign;
         binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_ADD] = scalar_reduce_add;
         binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_SUBTRACT] = scalar_reduce_subtract;
@@ -380,7 +392,7 @@ struct cpu_scatter_gather_base_kernel {
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
 
         using binary_func_t = std::function<void(scalar_t*, scalar_t*)>;
-        std::map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
+        std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
         binary_funcs[SCATTER_GATHER_OP::REDUCE_ADD] = reduce_add;
         binary_funcs[SCATTER_GATHER_OP::REDUCE_SUBTRACT] = reduce_subtract;
         binary_funcs[SCATTER_GATHER_OP::REDUCE_MULTIPLY] = reduce_multiply;

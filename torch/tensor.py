@@ -616,6 +616,7 @@ class Tensor(torch._C._TensorBase):
         names = resolve_ellipsis(names, self.names, 'refine_names')
         return super(Tensor, self).refine_names(names)
 
+
     def align_to(self, *names):
         r"""Permutes the dimensions of the :attr:`self` tensor to match the order
         specified in :attr:`names`, adding size-one dims for any new names.

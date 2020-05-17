@@ -4085,7 +4085,7 @@
   supports_named_tensor: True
 
 - func: scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
-  variants: method
+  variants: function,method
   dispatch:
     CPU: scatter_cpu_
     CUDA: legacy::cuda::_th_scatter_
