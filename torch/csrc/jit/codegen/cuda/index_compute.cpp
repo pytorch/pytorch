@@ -50,8 +50,8 @@ TensorDomain* IndexCompute::replayBackward(Reorder* reorder, TensorDomain*) {
         " at least one move position is not within bounds.");
     old2new[old_pos] = new_pos;
   }
-  for (decltype(old2new.size()) i = 0; i < old2new.size(); i++) {
-    int new_pos = old2new[i];
+  for (auto new_pos : old2new) {
+    // int new_pos = old2new[i];
     // int old_pos = i;
     // reordered_indices[old_pos] = indices[new_pos];
     reordered_indices.push_back(indices[new_pos]);
@@ -69,9 +69,8 @@ TensorDomain* IndexCompute::runBackward(std::vector<Expr*> history) {
   return running_td;
 }
 
-IndexCompute::IndexCompute(TensorDomain* td, std::vector<Val*> _indices) {
-  indices = std::move(_indices);
-
+IndexCompute::IndexCompute(TensorDomain* td, std::vector<Val*> _indices)
+    : indices(_indices) {
   bool exclude_reduction = td->nDims() > indices.size();
 
   TORCH_INTERNAL_ASSERT(

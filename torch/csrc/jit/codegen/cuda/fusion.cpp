@@ -321,11 +321,25 @@ StmtNameType Fusion::getExprName() {
   return expr_name_counter_++;
 }
 
-void Fusion::setRandom(bool r) {
-  this->random_ = r;
+// Indicate to kernel to set itself up to generate random numbers
+bool Fusion::hasRNG() {
+  for (auto expr : exprs(true))
+    if (expr->getExprType() == ExprType::UnaryOp)
+      if (static_cast<UnaryOp*>(expr)->getUnaryOpType() ==
+          UnaryOpType::RandLike)
+        return true;
+  return false;
 }
-bool Fusion::random() const noexcept {
-  return random_;
+
+// Indicate to kernel to set itself up to generate random numbers
+bool Fusion::hasReduction() {
+  for (auto expr : exprs(true))
+    for (auto out : expr->outputs())
+      if (out->getValType() == ValType::TensorView)
+        if (static_cast<TensorView*>(out)->hasReduction())
+          return true;
+
+  return false;
 }
 
 } // namespace fuser

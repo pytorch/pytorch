@@ -36,7 +36,7 @@ TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2);
 // reduces across axes, and reduction operation defined by BinaryOp.
 TORCH_CUDA_API Val* reductionOp(
     BinaryOpType reduction_op_type,
-    std::vector<int> axes,
+    const std::vector<int>& axes,
     Val* init,
     Val* v1);
 

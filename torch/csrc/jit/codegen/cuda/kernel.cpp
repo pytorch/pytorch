@@ -189,13 +189,6 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
     entry->outputs.push_back(out);
 
   static int32_t compiled_kernel_id = 0;
-  const char* debug_env = getenv("PYTORCH_CUDA_FUSER_DEBUG");
-  int debug_fusion = debug_env ? atoi(debug_env) : 0;
-
-  if (debug_fusion) {
-    std::cout << "==== kernel id: " << compiled_kernel_id++ << " ====\n"
-              << code << std::endl;
-  }
 
   // vvv NVRTC COMPILATION vvv
 
@@ -210,7 +203,7 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
 
   // set device for the operation;
   at::cuda::set_device(entry->device_);
-  entry->has_random_ = fusion.random();
+  entry->has_random_ = fusion.hasRNG();
 
   const auto prop = at::cuda::getCurrentDeviceProperties();
   int nvrtc_major, nvrtc_minor;
@@ -232,7 +225,7 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
 
   const std::string compute = "--gpu-architecture=compute_" +
       std::to_string(major) + std::to_string(minor);
-  std::cout << "compute flag: " << compute << std::endl;
+
   const std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
 

@@ -907,13 +907,13 @@ void testGPU_FusionAdvancedComputeAt() {
     tv0->computeAt(tv3, 1);
 
     // // Check propagation of this computeAt.
-    TORCH_INTERNAL_ASSERT(tv0->getComputeAtView() == tv3);
-    TORCH_INTERNAL_ASSERT(tv1->getComputeAtView() == tv4);
-    TORCH_INTERNAL_ASSERT(tv2->getComputeAtView() == tv4);
-    TORCH_INTERNAL_ASSERT(tv3->getComputeAtView() == tv6);
-    TORCH_INTERNAL_ASSERT(tv4->getComputeAtView() == tv5);
-    TORCH_INTERNAL_ASSERT(tv5->getComputeAtView() == tv6);
-    TORCH_INTERNAL_ASSERT(!tv6->hasComputeAt());
+    TORCH_CHECK(tv0->getComputeAtView() == tv3);
+    TORCH_CHECK(tv1->getComputeAtView() == tv4);
+    TORCH_CHECK(tv2->getComputeAtView() == tv4);
+    TORCH_CHECK(tv3->getComputeAtView() == tv6);
+    TORCH_CHECK(tv4->getComputeAtView() == tv5);
+    TORCH_CHECK(tv5->getComputeAtView() == tv6);
+    TORCH_CHECK(!tv6->hasComputeAt());
 
     // Lets setup to actually run
     tv6->merge(0);
@@ -924,13 +924,13 @@ void testGPU_FusionAdvancedComputeAt() {
 
     tv0->computeAt(tv6, 1);
 
-    TORCH_INTERNAL_ASSERT(tv0->getComputeAtView() == tv3 && tv0->nDims() == 3);
-    TORCH_INTERNAL_ASSERT(tv1->getComputeAtView() == tv4 && tv1->nDims() == 3);
-    TORCH_INTERNAL_ASSERT(tv2->getComputeAtView() == tv4 && tv2->nDims() == 3);
-    TORCH_INTERNAL_ASSERT(tv3->getComputeAtView() == tv6 && tv3->nDims() == 3);
-    TORCH_INTERNAL_ASSERT(tv4->getComputeAtView() == tv5 && tv4->nDims() == 3);
-    TORCH_INTERNAL_ASSERT(tv5->getComputeAtView() == tv6 && tv5->nDims() == 3);
-    TORCH_INTERNAL_ASSERT(!tv6->hasComputeAt());
+    TORCH_CHECK(tv0->getComputeAtView() == tv3 && tv0->nDims() == 3);
+    TORCH_CHECK(tv1->getComputeAtView() == tv4 && tv1->nDims() == 3);
+    TORCH_CHECK(tv2->getComputeAtView() == tv4 && tv2->nDims() == 3);
+    TORCH_CHECK(tv3->getComputeAtView() == tv6 && tv3->nDims() == 3);
+    TORCH_CHECK(tv4->getComputeAtView() == tv5 && tv4->nDims() == 3);
+    TORCH_CHECK(tv5->getComputeAtView() == tv6 && tv5->nDims() == 3);
+    TORCH_CHECK(!tv6->hasComputeAt());
 
     for (Val* val : fusion.vals()) {
       if (!fusion.hasInput(val) &&
@@ -966,8 +966,8 @@ void testGPU_FusionAdvancedComputeAt() {
     torch::jit::fuser::cuda::runTestKernel(
         &prog, {t0}, {kernel_tv5, kernel_tv6});
 
-    TORCH_INTERNAL_ASSERT(at::allclose(kernel_tv5, t5));
-    TORCH_INTERNAL_ASSERT(at::allclose(kernel_tv6, t6));
+    TORCH_CHECK(at::allclose(kernel_tv5, t5));
+    TORCH_CHECK(at::allclose(kernel_tv6, t6));
   }
 
   // Case 2
@@ -998,13 +998,13 @@ void testGPU_FusionAdvancedComputeAt() {
     fusion.addOutput(tv6);
 
     tv2->computeAt(tv4, 1);
-    TORCH_INTERNAL_ASSERT(!tv0->hasComputeAt());
-    TORCH_INTERNAL_ASSERT(!tv1->hasComputeAt());
-    TORCH_INTERNAL_ASSERT(tv2->getComputeAtView() == tv4);
-    TORCH_INTERNAL_ASSERT(!tv3->hasComputeAt());
-    TORCH_INTERNAL_ASSERT(!tv4->hasComputeAt());
-    TORCH_INTERNAL_ASSERT(!tv5->hasComputeAt());
-    TORCH_INTERNAL_ASSERT(!tv6->hasComputeAt());
+    TORCH_CHECK(!tv0->hasComputeAt());
+    TORCH_CHECK(!tv1->hasComputeAt());
+    TORCH_CHECK(tv2->getComputeAtView() == tv4);
+    TORCH_CHECK(!tv3->hasComputeAt());
+    TORCH_CHECK(!tv4->hasComputeAt());
+    TORCH_CHECK(!tv5->hasComputeAt());
+    TORCH_CHECK(!tv6->hasComputeAt());
 
     // Lets setup to actually run
     tv6->merge(0);
@@ -1053,8 +1053,8 @@ void testGPU_FusionAdvancedComputeAt() {
     std::stringstream cdg;
     gpulw.printKernel(cdg);
 
-    TORCH_INTERNAL_ASSERT(at::allclose(kernel_tv5, t5), cdg.str());
-    TORCH_INTERNAL_ASSERT(at::allclose(kernel_tv6, t6));
+    TORCH_CHECK(at::allclose(kernel_tv5, t5), cdg.str());
+    TORCH_CHECK(at::allclose(kernel_tv6, t6));
   }
 
   // Case 3
@@ -1120,7 +1120,7 @@ void testGPU_FusionAdvancedComputeAt() {
     std::stringstream cdg;
     gpulw.printKernel(cdg);
 
-    TORCH_INTERNAL_ASSERT(at::allclose(kernel_tv3, t3), cdg.str());
+    TORCH_CHECK(at::allclose(kernel_tv3, t3), cdg.str());
   }
 
   // Case 4
@@ -1200,7 +1200,7 @@ void testGPU_FusionAdvancedComputeAt() {
     std::stringstream cdg;
     gpulw.printKernel(cdg);
 
-    TORCH_INTERNAL_ASSERT(at::allclose(kernel_tv6, t6), cdg.str());
+    TORCH_CHECK(at::allclose(kernel_tv6, t6), cdg.str());
   }
 }
 
@@ -1300,7 +1300,7 @@ void testGPU_FusionScalarInputs() {
   std::stringstream cdg;
   gpulw.printKernel(cdg);
 
-  TORCH_INTERNAL_ASSERT(at::allclose(kernel_tv4, t4), cdg.str());
+  TORCH_CHECK(at::allclose(kernel_tv4, t4), cdg.str());
 }
 
 void testGPU_FusionLoopUnroll() {
@@ -1520,13 +1520,13 @@ void test_op(
       gen_aten_operand(op, blocks, threads, /*rand*/ false).toTensor();
   std::vector<at::Tensor> output_vect = {output};
   cudaDeviceSynchronize();
-  if (fusion.random())
+  if (fusion.hasRNG())
     at::manual_seed(0);
   torch::jit::fuser::cuda::runTestKernel(
       &prog, aten_inputs_ivalues, output_vect);
   cudaDeviceSynchronize();
 
-  if (fusion.random())
+  if (fusion.hasRNG())
     at::manual_seed(0);
   at::Tensor ref_output = af(aten_inputs);
   cudaDeviceSynchronize(); // This sync shouldn't be necessary;
@@ -1954,13 +1954,13 @@ void testGPU_FusionRFactorReplay() {
   // pasc      [I0oi{16}, (I0oo*I0i{32})o, I(Ioo*I0i)i{2}, ir1oi{4}rf,
   // R(R1oo*R1i{8})rf]
 
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       new_domain->nDims() - 1 == new_domain2->nDims(),
       casp->nDims() == new_domain2->nDims() + 1,
       pasc->nDims() == new_domain->nDims() + 1,
       "Error in rfactor, number of dimensions is not correct.");
 
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       !casp->sameAs(new_domain2) && !pasc->sameAs(new_domain) &&
           !new_domain->sameAs(new_domain2) &&
           !tv1->domain()->sameAs(new_domain) &&
@@ -1968,7 +1968,7 @@ void testGPU_FusionRFactorReplay() {
       "Error in rfactor, number of dimensions is not correct.");
 
   auto dom = new_domain->rootDomain()->domain();
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       !new_domain->rootDomain()->axis(0)->isReduction() &&
           std::any_of(
               dom.begin(),
@@ -1981,7 +1981,7 @@ void testGPU_FusionRFactorReplay() {
       "Error in rFactor, there seems to be something wrong in root domain.");
 
   auto dom2 = new_domain2->rootDomain()->domain();
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       !new_domain2->rootDomain()->axis(0)->isReduction() &&
           std::any_of(
               dom2.begin(),
@@ -2004,6 +2004,8 @@ void testGPU_FusionReduction() {
   TensorView* tv1 = static_cast<TensorView*>(
       reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0));
   fusion.addOutput(tv1);
+
+  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
 
   tv1->split(1, 128);
   // tv1[I0, R1o, R1i{128}] = tv0[I0, I1]

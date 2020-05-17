@@ -56,11 +56,11 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
       os << ", ";
   }
 
-  if (fusion->random())
+  if (fusion->hasRNG())
     os << ", unsigned long long seed, unsigned long long offset";
   os << "){\n";
   indent_size++;
-  if (fusion->random()) {
+  if (fusion->hasRNG()) {
     indent();
     os << "int idx = blockIdx.x*blockDim.x + threadIdx.x;\n";
     indent();

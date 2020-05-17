@@ -65,7 +65,7 @@ TORCH_CUDA_API Val* promoteNew(Val* v1, Val* v2) {
 Val* newConstScalar(DataType dtype, long int val) {
   switch (dtype) {
     case (DataType::Int):
-      return new Int((int)val);
+      return new Int(val);
     default:
       break;
   }
@@ -178,7 +178,7 @@ TORCH_CUDA_API Val* andOp(Val* v1, Val* v2) {
 
 Val* reductionOp(
     BinaryOpType reduction_op_type,
-    std::vector<int> axes,
+    const std::vector<int>& axes,
     Val* init,
     Val* v1) {
   TORCH_CHECK(
