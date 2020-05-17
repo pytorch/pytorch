@@ -1,8 +1,8 @@
 PyTorch Governance
-==========================
+------------------
 
 Governance Philosophy and Guiding Tenets
------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 PyTorch adopts a governance structure with a small set of maintainers
 driving the overall project direction with a strong bias towards
@@ -27,10 +27,10 @@ derived:
    forum answers, code reviews or otherwise)
 
 Key people and their functions
-------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Project Maintainers
-~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^
 
 Project maintainers provide leadership and direction for the PyTorch
 project. Specifics include:
@@ -50,7 +50,7 @@ PyTorch Maintainers:
 -  (sunsetting) Sam Gross (`colesbury <https://github.com/colesbury>`__)
 
 Core Developers
-~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^
 
 The PyTorch project is developed by a team of core developers. You can
 find the list of core developers at :doc:`PyTorch Governance \| Persons of
@@ -67,7 +67,7 @@ GitHub, contribution takes many forms:
 -  discussing topics on official PyTorch communication channels.
 
 Moderators
-~~~~~~~~~~
+^^^^^^^^^^
 
 There is a group of people, some of which are not core developers,
 responsible for ensuring that discussions on official communication
@@ -76,10 +76,10 @@ violations and help to support a healthy community. You can find the
 list of moderators `here <https://discuss.pytorch.org/about>`__.
 
 Decision Making
----------------
+~~~~~~~~~~~~~~~
 
 Uncontroversial Changes
-~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^
 
 Primary work happens through bug tracker issues and pull requests on
 GitHub. Core developers should avoid pushing their changes directly to
@@ -94,7 +94,7 @@ strongly preferred, especially on pull request approvals. Failure to do
 so might end up with the change being reverted by the relevant expert.
 
 Controversial decision process
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Substantial changes in a given interest area require a GitHub issue to
 be opened for discussion. This includes:
@@ -108,7 +108,7 @@ be opened for discussion. This includes:
 Project Maintainers ultimately approve these changes.
 
 FAQ
----
+~~~
 
 **Q: What if I would like to own (or partly own) a part of the project
 such as a domain api (i.e. Torch Vision)?** This is absolutely possible.
