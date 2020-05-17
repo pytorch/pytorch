@@ -219,7 +219,7 @@ Val* reductionOp(
   return out;
 }
 
-TORCH_CUDA_API Val* sum(Val* v1, std::vector<int> axes) {
+TORCH_CUDA_API Val* sum(Val* v1, const std::vector<int>& axes) {
   Val* init;
   switch (v1->getDataType().value()) {
     case (DataType::Float):

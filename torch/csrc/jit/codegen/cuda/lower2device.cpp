@@ -382,7 +382,7 @@ void GPULower::fixComputeAt(Fusion* fusion) {
     TensorView* ctv = tv->getComputeAtView();
 
     if (ctv != nullptr && visited.find(ctv) == visited.end()) {
-      ctv->setComputeAt(tv, tv->getComputeAtAxis());
+      ctv->setComputeAt(tv, (int)tv->getComputeAtAxis());
       tv->clearComputeAt();
     }
     visited.emplace(tv);

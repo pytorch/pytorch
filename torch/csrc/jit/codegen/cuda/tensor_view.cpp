@@ -261,7 +261,7 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
 
   // Convert dep chains to tensor view chains
   std::deque<std::deque<TensorView*>> all_consumer_chains;
-  for (auto val_dep_chain : val_all_consumer_chains)
+  for (const auto& val_dep_chain : val_all_consumer_chains)
     all_consumer_chains.push_back(
         tv_iterable<std::deque<TensorView*>>(val_dep_chain));
 
@@ -274,7 +274,7 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
         std::set<TensorView*>(dep_chain.begin(), dep_chain.end()));
 
   // Remove all TVs between producer and consumer
-  for (auto dep_chain : dep_chains) {
+  for (const auto& dep_chain : dep_chains) {
     auto tv_chain = tv_iterable<std::deque<TensorView*>>(dep_chain);
     for (auto tv : tv_chain) {
       if (tv != consumer)

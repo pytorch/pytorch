@@ -53,17 +53,17 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
 
   // This handle functions is called on every Statement* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Statement* s) {
+  virtual void handle(Statement* s) override {
     OptOutDispatch::handle(s);
   }
   // This handle functions is called on every Expr* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Expr* e) {
+  virtual void handle(Expr* e) override {
     OptOutDispatch::handle(e);
   }
   // This handle functions is called on every Val* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Val* v) {
+  virtual void handle(Val* v) override {
     OptOutDispatch::handle(v);
   }
 

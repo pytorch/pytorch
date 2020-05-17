@@ -42,7 +42,7 @@ struct TORCH_CUDA_API TransformIter : public IterVisitor {
 
   // Runs through operations in history and applies them to TD, runs exprs from
   // begining to end
-  virtual TensorDomain* runReplay(TensorDomain*, std::vector<Expr*>);
+  virtual TensorDomain* runReplay(TensorDomain*, const std::vector<Expr*>&);
 
  public:
   // Returns transformation exprs in forward order
@@ -58,36 +58,36 @@ struct TORCH_CUDA_API TransformIter : public IterVisitor {
   // axes that were modified into td axes matching marked influence vector
   static std::vector<bool> getRootInfluence(
       TensorDomain* td,
-      std::vector<bool> influence);
+      const std::vector<bool>& influence);
 
   static std::vector<bool> replayBackwardInfluence(
-      std::vector<Expr*> history,
-      std::vector<bool> td_influence);
+      const std::vector<Expr*>& history,
+      const std::vector<bool>& td_influence);
 
   // Runs through history, applying only on influence to track how modifications
   // would influence the original axes.
   static std::vector<bool> replayInfluence(
-      std::vector<Expr*> history,
-      std::vector<bool> td_influence);
+      const std::vector<Expr*>& history,
+      const std::vector<bool>& td_influence);
 
   // Goes through history and applies it to td, with the axis_map provided.
   // Axis_map entries of -1 mean those axes won't be modified
   static TensorDomain* replay(
       TensorDomain* td,
-      std::vector<Expr*> history,
-      std::vector<int> axis_map);
+      const std::vector<Expr*>& history,
+      const std::vector<int>& axis_map);
 
   // Takes td, and replays history backwards on it to create a new root tensor
   // domain using axis_map. Entries in axis_map == -1 will not be modified
   static TensorDomain* replayBackward(
       TensorDomain* td,
-      std::vector<Expr*> history,
-      std::vector<int> axis_map);
+      const std::vector<Expr*>& history,
+      const std::vector<int>& axis_map);
 
   static TensorDomain* replaySelf(
       TensorDomain* td,
-      std::vector<Expr*> history,
-      std::vector<int> axis_map);
+      const std::vector<Expr*>& history,
+      const std::vector<int>& axis_map);
 
   // Replays backwards all non-rfactor axes
   static TensorDomain* getRFactorRoot(TensorDomain* td);

@@ -66,11 +66,13 @@ struct IndexCompute : public TransformIter {
   // Otherwise warning on runBackward as it hides an overloaded virtual function
   using TransformIter::runBackward;
 
-  IndexCompute(TensorDomain* td, std::vector<Val*> _indices);
+  IndexCompute(TensorDomain* td, const std::vector<Val*>& _indices);
   std::vector<Val*> indices;
 
  public:
-  static std::vector<Val*> get(TensorDomain* td, std::vector<Val*> _indices);
+  static std::vector<Val*> get(
+      TensorDomain* td,
+      const std::vector<Val*>& _indices);
 };
 
 // Simple interface for IndexCompute
@@ -80,24 +82,24 @@ struct Index : public TransformIter {
   static TensorIndex* getProducerIndex_impl(
       TensorView* producer,
       TensorView* consumer,
-      std::vector<ForLoop*> loops);
+      const std::vector<ForLoop*>& loops);
 
   // Consumer indexing if it's in shared or local memory
   static TensorIndex* getConsumerIndex_impl(
       TensorView* consumer,
-      std::vector<ForLoop*> loops);
+      const std::vector<ForLoop*>& loops);
 
  public:
   // Producer if it's in global memory
   static TensorIndex* getGlobalProducerIndex(
       TensorView* producer,
       TensorView* consumer,
-      std::vector<ForLoop*> loops);
+      const std::vector<ForLoop*>& loops);
 
   // Consumer indexing if it's in global memory
   static TensorIndex* getGlobalConsumerIndex(
       TensorView* consumer,
-      std::vector<ForLoop*> loops);
+      const std::vector<ForLoop*>& loops);
 
   // Indexing functions
   // Consumer = Producer
@@ -106,12 +108,12 @@ struct Index : public TransformIter {
   static TensorIndex* getProducerIndex(
       TensorView* producer,
       TensorView* consumer,
-      std::vector<ForLoop*> loops);
+      const std::vector<ForLoop*>& loops);
 
   // Consumer index dispatch
   static TensorIndex* getConsumerIndex(
       TensorView* consumer,
-      std::vector<ForLoop*> loops);
+      const std::vector<ForLoop*>& loops);
 
   // Will run inds through back prop index computation for tv
   static TensorIndex* manualBackprop(TensorView tv, std::vector<Val*> inds);

@@ -265,7 +265,8 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
     }
 
     CUlinkState linkState;
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuLinkCreate(0, 0, 0, &linkState));
+
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuLinkCreate(0, nullptr, nullptr, &linkState));
     AT_CUDA_DRIVER_CHECK(nvrtc().cuLinkAddData(
         linkState,
         CU_JIT_INPUT_PTX,
@@ -273,8 +274,8 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
         ptx_size,
         "compiling PTX",
         0,
-        0,
-        0));
+        nullptr,
+        nullptr));
     size_t cubinSize;
     void* cubin;
     AT_CUDA_DRIVER_CHECK(nvrtc().cuLinkComplete(linkState, &cubin, &cubinSize));

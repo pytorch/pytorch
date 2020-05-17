@@ -51,7 +51,7 @@ TORCH_CUDA_API Val* ceilDiv(Val* v1, Val* v2);
 TORCH_CUDA_API Val* andOp(Val* v1, Val* v2);
 
 // REDUCTION OPERATIONS
-TORCH_CUDA_API Val* sum(Val* v1, std::vector<int> reduction_axes);
+TORCH_CUDA_API Val* sum(Val* v1, const std::vector<int>& reduction_axes);
 
 // COMPOUND OPERATIONS
 TORCH_CUDA_API Val* add_alpha(Val* v1, Val* v2, Val* s);

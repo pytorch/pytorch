@@ -69,7 +69,7 @@ TensorDomain* IndexCompute::runBackward(std::vector<Expr*> history) {
   return running_td;
 }
 
-IndexCompute::IndexCompute(TensorDomain* td, std::vector<Val*> _indices)
+IndexCompute::IndexCompute(TensorDomain* td, const std::vector<Val*>& _indices)
     : indices(_indices) {
   bool exclude_reduction = td->nDims() > indices.size();
 
@@ -113,15 +113,15 @@ IndexCompute::IndexCompute(TensorDomain* td, std::vector<Val*> _indices)
 
 std::vector<Val*> IndexCompute::get(
     TensorDomain* td,
-    std::vector<Val*> _indices) {
-  IndexCompute ic(td, std::move(_indices));
+    const std::vector<Val*>& _indices) {
+  IndexCompute ic(td, _indices);
   return ic.indices;
 }
 
 TensorIndex* Index::getGlobalProducerIndex(
     TensorView* producer,
     TensorView* consumer,
-    std::vector<ForLoop*> loops) {
+    const std::vector<ForLoop*>& loops) {
   // This replay will ignore reduction dimensions on the producer
   auto pind =
       TransformReplay::replayPasC(producer->domain(), consumer->domain(), -1);
@@ -166,7 +166,7 @@ TensorIndex* Index::getGlobalProducerIndex(
 TensorIndex* Index::getProducerIndex_impl(
     TensorView* producer,
     TensorView* consumer,
-    std::vector<ForLoop*> loops) {
+    const std::vector<ForLoop*>& loops) {
   TORCH_INTERNAL_ASSERT(
       loops.size() == producer->domain()->noReductions()->nDims(),
       "Expected a tensor with ",
@@ -216,7 +216,7 @@ TensorIndex* Index::getProducerIndex_impl(
 
 TensorIndex* Index::getGlobalConsumerIndex(
     TensorView* consumer,
-    std::vector<ForLoop*> loops) {
+    const std::vector<ForLoop*>& loops) {
   // If we're initializing a reduction buffer, we won't have the reduction
   // loops. If we're actually performing the reduction, we will.
 
@@ -257,7 +257,7 @@ TensorIndex* Index::getGlobalConsumerIndex(
 
 TensorIndex* Index::getConsumerIndex_impl(
     TensorView* consumer,
-    std::vector<ForLoop*> loops) {
+    const std::vector<ForLoop*>& loops) {
   // If we're initializing a reduction buffer, we won't have the reduction
   // loops. If we're actually performing the reduction, we will.
 
@@ -329,7 +329,7 @@ TensorIndex* Index::getConsumerIndex_impl(
 TensorIndex* Index::getProducerIndex(
     TensorView* producer,
     TensorView* consumer,
-    std::vector<ForLoop*> loops) {
+    const std::vector<ForLoop*>& loops) {
   if (producer->getMemoryType() == MemoryType::Global)
     return getGlobalProducerIndex(producer, consumer, loops);
   return getProducerIndex_impl(producer, consumer, loops);
@@ -338,7 +338,7 @@ TensorIndex* Index::getProducerIndex(
 // Consumer is the output of an expression
 TensorIndex* Index::getConsumerIndex(
     TensorView* consumer,
-    std::vector<ForLoop*> loops) {
+    const std::vector<ForLoop*>& loops) {
   if (consumer->getMemoryType() == MemoryType::Global)
     return getGlobalConsumerIndex(consumer, loops);
   return getConsumerIndex_impl(consumer, loops);

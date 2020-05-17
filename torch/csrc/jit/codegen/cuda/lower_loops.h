@@ -69,7 +69,7 @@ struct TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   void handle(Expr*) final;
 
   // Generate the loop nest structure and place it in lowered_exprs
-  void generate(std::vector<Expr*> exprs);
+  void generate(const std::vector<Expr*>& exprs);
 
   LoopNestGenerator(Fusion* _fusion) : fusion_(_fusion) {}
 

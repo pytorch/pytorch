@@ -49,7 +49,7 @@ TensorDomain* TransformReplay::replayPasC(
     TensorDomain* consumer,
     int compute_at_axis) {
   if (compute_at_axis < 0)
-    compute_at_axis += consumer->nDims() + 1;
+    compute_at_axis += (int)consumer->nDims() + 1;
   TORCH_INTERNAL_ASSERT(
       compute_at_axis >= 0 &&
           (unsigned int)compute_at_axis <= consumer->nDims(),
@@ -182,7 +182,7 @@ TensorDomain* TransformReplay::replayCasP(
     TensorDomain* producer,
     int compute_at_axis) {
   if (compute_at_axis < 0)
-    compute_at_axis += producer->nDims() + 1;
+    compute_at_axis += (int)producer->nDims() + 1;
   TORCH_INTERNAL_ASSERT(
       compute_at_axis >= 0 &&
           (unsigned int)compute_at_axis <= producer->nDims(),

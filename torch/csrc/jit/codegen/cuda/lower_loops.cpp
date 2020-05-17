@@ -358,13 +358,13 @@ void LoopNestGenerator::handle(Expr* expr) {
   while (compute_at_scope.size() > out->getComputeAtAxis() &&
          compute_at_scope.back().second != out &&
          compute_at_scope.back() !=
-             out->getComputeAtAxis(compute_at_scope.size() - 1)) {
+             out->getComputeAtAxis((int)compute_at_scope.size() - 1)) {
     popFor();
   }
 
   // 2) Open back up to computeAt
   while (compute_at_scope.size() < out->getComputeAtAxis()) {
-    openFor(out->getComputeAtAxis(compute_at_scope.size()));
+    openFor(out->getComputeAtAxis((int)compute_at_scope.size()));
   }
 
   //  3) Allocate the output.
@@ -390,7 +390,7 @@ void LoopNestGenerator::handle(Expr* expr) {
 }
 
 // Generate the loop nest structure and place it in lowered_exprs
-void LoopNestGenerator::generate(std::vector<Expr*> exprs) {
+void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
   FusionGuard fg(fusion_);
 
   // Initialize members of the class

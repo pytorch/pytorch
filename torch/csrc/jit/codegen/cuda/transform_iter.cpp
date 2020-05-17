@@ -118,7 +118,7 @@ TensorDomain* TransformIter::replay(Expr* expr, TensorDomain* td) {
 
 TensorDomain* TransformIter::runReplay(
     TensorDomain* td,
-    std::vector<Expr*> history) {
+    const std::vector<Expr*>& history) {
   for (Expr* op : history)
     td = TransformIter::replay(op, td);
   return td;
@@ -126,7 +126,7 @@ TensorDomain* TransformIter::runReplay(
 
 namespace {
 
-void validate_axis_map(int nDims, std::vector<int> axis_map) {
+void validate_axis_map(int nDims, const std::vector<int>& axis_map) {
   TORCH_INTERNAL_ASSERT(
       axis_map.size() == (unsigned int)nDims,
       "Invalid axis map in replay transform. NDims doesn't match.");
@@ -194,7 +194,7 @@ struct Influence : public TransformIter {
 
   // FORWARD INFLUENCE
 
-  TensorDomain* replay(Split* split, TensorDomain* td) {
+  TensorDomain* replay(Split* split, TensorDomain* td) override {
     int axis = split->axis();
     TORCH_INTERNAL_ASSERT(
         (unsigned int)axis < influence.size(),
@@ -203,7 +203,7 @@ struct Influence : public TransformIter {
     return nullptr;
   }
 
-  TensorDomain* replay(Merge* merge, TensorDomain* td) {
+  TensorDomain* replay(Merge* merge, TensorDomain* td) override {
     int axis = merge->axis();
     TORCH_INTERNAL_ASSERT(
         axis >= 0 && (unsigned int)(axis + 1) < influence.size(),
@@ -213,7 +213,7 @@ struct Influence : public TransformIter {
     return nullptr;
   }
 
-  TensorDomain* replay(Reorder* reorder, TensorDomain* td) {
+  TensorDomain* replay(Reorder* reorder, TensorDomain* td) override {
     // new2old[new_pos] = old_pos Generate new old2new map
     const std::vector<int>& new2old = reorder->new2old();
 
@@ -236,16 +236,15 @@ struct Influence : public TransformIter {
 
   std::vector<bool> influence;
 
-  Influence(std::vector<Expr*> history, std::vector<bool> td_influence)
-      : influence(td_influence) {}
+  Influence(const std::vector<bool>& td_influence) : influence(td_influence) {}
 
   using TransformIter::replayBackward;
   using TransformIter::runReplay;
 
  public:
   static std::vector<bool> computeBackward(
-      std::vector<Expr*> history,
-      std::vector<bool> td_influence) {
+      const std::vector<Expr*>& history,
+      const std::vector<bool>& td_influence) {
     if (history.empty())
       return td_influence;
 
@@ -256,7 +255,7 @@ struct Influence : public TransformIter {
                 td_influence.size(),
         "Tried to compute influence, but recieved an influence vector that does not match the expected size.");
 
-    Influence inf(history, td_influence);
+    Influence inf(td_influence);
     std::vector<Expr*> ops(history.rbegin(), history.rend());
     for (Expr* op : ops)
       inf.replayBackward(op, nullptr);
@@ -264,8 +263,8 @@ struct Influence : public TransformIter {
   }
 
   static std::vector<bool> computeForward(
-      std::vector<Expr*> history,
-      std::vector<bool> td_influence) {
+      const std::vector<Expr*>& history,
+      const std::vector<bool>& td_influence) {
     if (history.empty())
       return td_influence;
 
@@ -274,7 +273,7 @@ struct Influence : public TransformIter {
             static_cast<TensorDomain*>(history[0]->input(0))->nDims() ==
                 td_influence.size(),
         "Tried to compute influence, but recieved an influence vector that does not match the expected size.");
-    Influence inf(history, td_influence);
+    Influence inf(td_influence);
     inf.runReplay(nullptr, history);
     return inf.influence;
   }
@@ -287,7 +286,7 @@ struct Replay : public TransformIter {
    * "record" based on influence axes. Will also update influence and propagate
    * it forward.
    */
-  TensorDomain* replay(Split* split, TensorDomain* td) {
+  TensorDomain* replay(Split* split, TensorDomain* td) override {
     int saxis = split->axis();
 
     TORCH_INTERNAL_ASSERT(
@@ -324,7 +323,7 @@ struct Replay : public TransformIter {
     return td;
   }
 
-  TensorDomain* replay(Merge* merge, TensorDomain* td) {
+  TensorDomain* replay(Merge* merge, TensorDomain* td) override {
     int maxis = merge->axis();
 
     TORCH_INTERNAL_ASSERT(
@@ -368,7 +367,7 @@ struct Replay : public TransformIter {
   // Axes not marked with -1 should be placed in the outer most dimensions in
   // the relative order specified by reorder. Remaining axes should be placed in
   // the inner most dimensions maintaining their original relative positioning.
-  TensorDomain* replay(Reorder* reorder, TensorDomain* td) {
+  TensorDomain* replay(Reorder* reorder, TensorDomain* td) override {
     // convert to old2new as it makes this easier to do, and we need that map
     // anyways in the end to replay reorder
     const std::vector<int>& new2old_orig = reorder->new2old();
@@ -515,7 +514,7 @@ struct Replay : public TransformIter {
   }
 
   std::vector<int> axis_map;
-  Replay(std::vector<int> _axis_map) : axis_map(_axis_map) {}
+  Replay(const std::vector<int>& _axis_map) : axis_map(_axis_map) {}
 
  public:
   // Replays history provided on td, axis_map is the mapping from td axes to
@@ -523,8 +522,8 @@ struct Replay : public TransformIter {
   // be marked as -1 in the axis_map
   static TensorDomain* replay(
       TensorDomain* td,
-      std::vector<Expr*> history,
-      std::vector<int> axis_map) {
+      const std::vector<Expr*>& history,
+      const std::vector<int>& axis_map) {
     if (history.empty())
       return td;
 
@@ -540,7 +539,7 @@ struct ReplaySelf : public TransformIter {
    * and reapplies it based on influence axes. Will replay rfactor axes
    * correctly as well.
    */
-  TensorDomain* replay(Split* split, TensorDomain* td) {
+  TensorDomain* replay(Split* split, TensorDomain* td) override {
     int saxis = split->axis();
 
     TORCH_INTERNAL_ASSERT(
@@ -615,7 +614,7 @@ struct ReplaySelf : public TransformIter {
     return replayed;
   }
 
-  TensorDomain* replay(Merge* merge, TensorDomain* td) {
+  TensorDomain* replay(Merge* merge, TensorDomain* td) override {
     int maxis = merge->axis();
 
     TORCH_INTERNAL_ASSERT(
@@ -678,7 +677,7 @@ struct ReplaySelf : public TransformIter {
   }
 
   // TODO: This is the same as Replay::replay, should work towards code reuse.
-  TensorDomain* replay(Reorder* reorder, TensorDomain* td) {
+  TensorDomain* replay(Reorder* reorder, TensorDomain* td) override {
     // convert to old2new as it makes this easier to do, and we need that map
     // anyways in the end to replay reorder
     const std::vector<int>& new2old_orig = reorder->new2old();
@@ -827,7 +826,7 @@ struct ReplaySelf : public TransformIter {
   }
 
   std::vector<int> axis_map;
-  ReplaySelf(std::vector<int> _axis_map) : axis_map(_axis_map) {}
+  ReplaySelf(const std::vector<int>& _axis_map) : axis_map(_axis_map) {}
 
  public:
   // Replays history provided on td, axis_map is the mapping from td axes to
@@ -835,8 +834,8 @@ struct ReplaySelf : public TransformIter {
   // be marked as -1 in the axis_map
   static TensorDomain* replay(
       TensorDomain* td,
-      std::vector<Expr*> history,
-      std::vector<int> axis_map) {
+      const std::vector<Expr*>& history,
+      const std::vector<int>& axis_map) {
     ReplaySelf r(axis_map);
     return r.runReplay(TransformIter::getRoot(td), history);
   }
@@ -847,7 +846,7 @@ struct TORCH_CUDA_API TransformBackward : public TransformIter {
  private:
   // axis_map goes from the transform position to the position in our modified
   // td.
-  TensorDomain* replayBackward(Split* split, TensorDomain* td) {
+  TensorDomain* replayBackward(Split* split, TensorDomain* td) override {
     int saxis = split->axis();
 
     TORCH_INTERNAL_ASSERT(
@@ -899,7 +898,7 @@ struct TORCH_CUDA_API TransformBackward : public TransformIter {
     return replayed_inp;
   }
 
-  TensorDomain* replayBackward(Merge* merge, TensorDomain* td) {
+  TensorDomain* replayBackward(Merge* merge, TensorDomain* td) override {
     /*
      * Remember axis_map goes from merge information -> how it's stored in td
      * When we're done we want axis_map to match the returned td before or not
@@ -963,7 +962,7 @@ struct TORCH_CUDA_API TransformBackward : public TransformIter {
     return replayed_inp;
   }
 
-  TensorDomain* replayBackward(Reorder* reorder, TensorDomain* td) {
+  TensorDomain* replayBackward(Reorder* reorder, TensorDomain* td) override {
     const std::vector<int>& new2old_orig = reorder->new2old();
 
     // We want to convert new2old to something with td->nDims which it isn't
@@ -1002,7 +1001,7 @@ struct TORCH_CUDA_API TransformBackward : public TransformIter {
 
     int max_elem = *std::max_element(new2old.begin(), new2old.end());
     // Now lets push all elements to the right
-    int right_offset = td->nDims() - max_elem - 1;
+    int right_offset = ((int)td->nDims()) - max_elem - 1;
     TORCH_INTERNAL_ASSERT(
         right_offset >= 0,
         "Error during backward replay, couldn't move modified axes to the right in reorder.");
@@ -1055,24 +1054,26 @@ struct TORCH_CUDA_API TransformBackward : public TransformIter {
 
   // Entry for backward influence propagation on td following record, history
   // should be present -> past as you go through the vector
-  TensorDomain* replayBackward(TensorDomain* td, std::vector<Expr*> history) {
+  TensorDomain* replayBackward(
+      TensorDomain* td,
+      const std::vector<Expr*>& history) {
     TensorDomain* running_td = td;
 
-    history = std::vector<Expr*>(history.rbegin(), history.rend());
-    for (Expr* op : history)
+    std::vector<Expr*> rev_history(history.rbegin(), history.rend());
+    for (Expr* op : rev_history)
       running_td = TransformIter::replayBackward(op, running_td);
     return running_td;
   }
 
   std::vector<int> axis_map;
 
-  TransformBackward(std::vector<int> _axis_map) : axis_map(_axis_map){};
+  TransformBackward(const std::vector<int>& _axis_map) : axis_map(_axis_map){};
 
  public:
   static TensorDomain* replay(
       TensorDomain* td,
-      std::vector<Expr*> history,
-      std::vector<int> axis_map) {
+      const std::vector<Expr*>& history,
+      const std::vector<int>& axis_map) {
     TransformBackward tb(axis_map);
     return tb.replayBackward(td, history);
   }
@@ -1099,7 +1100,8 @@ struct RFactorRoot : public TransformIter {
 
   // Replay forward until we hit an operation that doesn't involve an rfactor
   // axis
-  TensorDomain* runReplay(TensorDomain*, std::vector<Expr*> history) final {
+  TensorDomain* runReplay(TensorDomain*, const std::vector<Expr*>& history)
+      final {
     TORCH_INTERNAL_ASSERT(
         !history.empty(), "No history provided to find rfactor root domain.");
 
@@ -1163,20 +1165,20 @@ struct RFactorRoot : public TransformIter {
 
 std::vector<bool> TransformIter::getRootInfluence(
     TensorDomain* td,
-    std::vector<bool> td_influence) {
+    const std::vector<bool>& td_influence) {
   return Influence::computeBackward(
       TransformIter::getHistory(td), td_influence);
 }
 
 std::vector<bool> TransformIter::replayBackwardInfluence(
-    std::vector<Expr*> history,
-    std::vector<bool> td_influence) {
+    const std::vector<Expr*>& history,
+    const std::vector<bool>& td_influence) {
   return Influence::computeBackward(history, td_influence);
 }
 
 std::vector<bool> TransformIter::replayInfluence(
-    std::vector<Expr*> history,
-    std::vector<bool> td_influence) {
+    const std::vector<Expr*>& history,
+    const std::vector<bool>& td_influence) {
   if (history.empty())
     return td_influence;
 
@@ -1185,8 +1187,8 @@ std::vector<bool> TransformIter::replayInfluence(
 
 TensorDomain* TransformIter::replay(
     TensorDomain* td,
-    std::vector<Expr*> history,
-    std::vector<int> axis_map) {
+    const std::vector<Expr*>& history,
+    const std::vector<int>& axis_map) {
   if (history.empty())
     return td;
   if (std::none_of(
@@ -1199,8 +1201,8 @@ TensorDomain* TransformIter::replay(
 
 TensorDomain* TransformIter::replaySelf(
     TensorDomain* td,
-    std::vector<Expr*> history,
-    std::vector<int> axis_map) {
+    const std::vector<Expr*>& history,
+    const std::vector<int>& axis_map) {
   if (std::none_of(
           axis_map.begin(), axis_map.end(), [](int i) { return i > -1; }))
     return TransformIter::getRoot(td);
@@ -1211,8 +1213,8 @@ TensorDomain* TransformIter::replaySelf(
 
 TensorDomain* TransformIter::replayBackward(
     TensorDomain* td,
-    std::vector<Expr*> history,
-    std::vector<int> axis_map) {
+    const std::vector<Expr*>& history,
+    const std::vector<int>& axis_map) {
   if (history.empty())
     return td;
   if (std::none_of(

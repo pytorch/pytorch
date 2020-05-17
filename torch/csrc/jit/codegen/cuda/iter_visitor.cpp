@@ -144,7 +144,7 @@ struct DependencyChains : public IterVisitor {
   bool is_dependency = false;
   std::set<Val*> dependencies_;
 
-  void handle(Val* val) {
+  void handle(Val* val) override {
     if (dependencies_.find(val) != dependencies_.end()) {
       is_dependency = true;
       std::deque<Val*> deps;
@@ -170,7 +170,9 @@ struct DependencyChains : public IterVisitor {
       traverse(_dependency->fusion(), false);
   }
 
-  DependencyChains(std::set<Val*> _dependencies, bool all_chains_ = false)
+  DependencyChains(
+      const std::set<Val*>& _dependencies,
+      bool all_chains_ = false)
       : dependencies_(_dependencies) {
     if (dependencies_.empty())
       return;
@@ -205,7 +207,7 @@ struct DependencyChains : public IterVisitor {
   }
 
   static std::deque<std::deque<Val*>> getDependencyChainsTo(
-      std::set<Val*> dependencies) {
+      const std::set<Val*>& dependencies) {
     DependencyChains dp(dependencies, true);
     if (dp.dep_chains.empty())
       return std::deque<std::deque<Val*>>();
@@ -224,7 +226,9 @@ struct Exprs : public IterVisitor {
   }
 
  public:
-  static std::vector<Expr*> getExprs(Fusion* fusion, std::vector<Val*> from) {
+  static std::vector<Expr*> getExprs(
+      Fusion* fusion,
+      const std::vector<Val*>& from) {
     Exprs ex;
     ex.traverseFrom(fusion, from, false);
     return ex.exprs;
