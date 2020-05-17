@@ -108,12 +108,17 @@ uint32_t crc32_16bytes_prefetch(const void* data, size_t length, uint32_t previo
   #else
     #define PREFETCH(location) _mm_prefetch(location, _MM_HINT_T0)
   #endif
-#elseif defined(__BYTE_ORDER__)
-  #if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#elseif defined(__APPLE__)
+  #if defined(__BIG_ENDIAN__)
     #define __BYTE_ORDER _BIG_ENDIAN
-  #elseif (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+  #if defined(__LITTLE_ENDIAN__)
     #define __BYTE_ORDER __LITTLE_ENDIAN
   #endif
+#elseif defined(__ARMEB__)
+#define __BYTE_ORDER _BIG_ENDIAN
+#else
+#define __BYTE_ORDER _LITTLE_ENDIAN
+#endif
 #else
   // defines __BYTE_ORDER as __LITTLE_ENDIAN or __BIG_ENDIAN
   #include <sys/param.h>
