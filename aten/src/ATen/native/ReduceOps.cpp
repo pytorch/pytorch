@@ -499,32 +499,29 @@ Tensor& mean_out(Tensor& result, const Tensor& self, DimnameList dim,
 }
 
 Tensor& nanmean_out_cpu_gpu(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> opt_dtype) {
-  ScalarType scalarType = opt_dtype.has_value() > opt_dtype.value() : self.scalar_type();
+  ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
       at::isFloatingType(scalarType) || at::isComplexType(scalarType),
       "Can only calculate the mean of floating types. Got ",
       toString(scalarType),
       " instead.");
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
-  Tensor without_nans = torch.where(torch.isnan(self), torch.zeros_like(self), self);
+  Tensor without_nans = at::where(at::isnan(self), at::zeros_like(self), self);
   if (self.device().is_cpu()) {
-    int64_t dim_prod = at::sum(~self.isnan(), axis=dim, keepdims=keepdim, dtype=dtype);
+    at::Tensor dim_prod = at::sum(self.isnan().logical_not(), dim, keepdim, dtype);
     // TODO: Check if .div_() works or we should use true_divide here
     // Python script gives warning to use true_divide or float_divide
     at::sum_out(result, without_nans, dim, keepdim, dtype).div_(dim_prod);
     return result;
   } else {
-    return self;
+    auto iter = make_reduction("nanmean", result, self, dim, keepdim, dtype);
+    if (iter.numel() == 0) {
+      result.fill_(std::numeric_limits<double>::quiet_NaN());
+    } else {
+      nanmean_stub(iter.device_type(), iter);
+    }
+    return result;
   }
-  /*
-  auto iter = make_reduction("nanmean", result, self, dim, keepdim, dtype);
-  if (iter.numel() == 0) {
-    result.fill_(std::numeric_limits<double>::quiet_NaN());
-  } else {
-    nanmean_stub(iter.device_type(), iter);
-  }
-  return result;;
-  */
 }
 
 Tensor nanmean_cpu_gpu(const Tensor& self, optional<ScalarType> dtype) {

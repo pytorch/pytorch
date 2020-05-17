@@ -64,11 +64,33 @@ static void mean_kernel_cuda(TensorIterator& iter) {
 
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
 void nanmean_kernel_impl(TensorIterator& iter) {
-  float factor = float(iter.num_output_elements()) / iter.numel();
-  // TODO: gpu_reduce_kernel implement
+  at::Tensor src = iter.tensor(1);
+  at::Tensor dim_prod = at::sum(src.isnan().logical_not());
+  float factor = float(iter.num_output_elements()) / dim_prod.item<float>();
+  gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps<acc_t, float> {factor});
+}
+
+static void nanmean_kernel_cuda(TensorIterator& iter) {
+  if (iter.dtype() == kHalf) {
+    return nanmean_kernel_impl<at::Half, float>(iter);
+  } else if (iter.dtype(1) == kHalf && iter.dtype() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return nanmean_kernel_impl<at::Half, float, float>(iter);
+  }
+  #ifdef __HIP_PLATFORM_HCC__
+  else if (iter.dtype() == kBFloat16) {
+    return nanmean_kernel_impl<at::BFloat16, float>(iter);
+  } else if (iter.dtype(1) == kBFloat16 && iter.dtype() == kFloat) {
+    // type promotion that does and reduction in a single kernel
+    return nanmean_kernel_impl<at::BFloat16, float, float>(iter);
+  }
+  #endif
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "nanmean_cuda", [&]() {
+    nanmean_kernel_impl<scalar_t>(iter);
+  });
 }
 
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_cuda);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_cuda);
-
+REGISTER_DISPATCH(nanmean_stub, &nanmean_kernel_cuda);
 }} // namespace at::native
