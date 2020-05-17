@@ -36,6 +36,13 @@ struct Argument {
         kwarg_only_(kwarg_only),
         alias_info_(std::move(alias_info)),
         is_inferred_type_(is_inferred_type) {
+          if (type){
+            if (auto pt = type->cast<TensorType>()) {
+              if (pt->isInferredType()) {
+                is_inferred_type_=true;
+                }
+            }
+          }
   }
   const std::string& name() const {
     return name_;

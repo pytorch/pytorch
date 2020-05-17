@@ -542,6 +542,8 @@ struct CAFFE2_API TensorType : public Type {
       at::Device device,
       at::IntArrayRef sizes);
 
+  static TensorTypePtr createInferred();
+
   static TypePtr fromNumberType(TypePtr typ);
   static TypePtr fromBoolType();
 
@@ -666,9 +668,8 @@ struct CAFFE2_API TensorType : public Type {
   }
 
   static TensorTypePtr getInferred() {
-    auto pt = get();
-    pt->is_inferred_type_ = true;
-    return pt;
+    static auto valueInferred = createInferred();
+    return valueInferred;
   }
 
   // this property is used by GuardElimination

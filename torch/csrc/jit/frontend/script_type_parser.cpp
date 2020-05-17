@@ -267,10 +267,8 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
 
     TypePtr type;
     c10::optional<int32_t> N = c10::nullopt;
-    bool is_inferred_type = false;
     if (!decl_arg.type().present()) {
       // If this param doesn't have a type, default to "tensor"
-      is_inferred_type = true;
       type = TensorType::getInferred();
     } else {
       // BroadcastList list can only appear at the argument level
@@ -292,8 +290,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
         N,
         default_value,
         decl_arg.kwarg_only(),
-        /*alias_info=*/c10::nullopt,
-        is_inferred_type);
+        /*alias_info=*/c10::nullopt);
     retval.push_back(arg);
   }
   return retval;

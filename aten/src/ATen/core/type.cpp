@@ -879,6 +879,13 @@ TensorTypePtr TensorType::create(
       requires_grad);
 }
 
+TensorTypePtr TensorType::createInferred(){
+  auto pt = TensorType::create(
+      {}, {}, VaryingShape<ShapeSymbol>{}, VaryingShape<Stride>{}, {});
+  pt->is_inferred_type_ = true;
+  return pt;
+}
+
 TensorTypePtr TensorType::createContiguous(
     at::ScalarType scalar_type,
     at::Device device,
