@@ -596,7 +596,7 @@ at::Tensor convolution(
   auto& ctx = at::globalContext();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
-                          ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
+                          ctx.benchmarkCuDNN(), ctx.deterministicCuDNN() || ctx.deterministic(), ctx.userEnabledCuDNN());
 }
 
 at::Tensor convolution_overrideable(
