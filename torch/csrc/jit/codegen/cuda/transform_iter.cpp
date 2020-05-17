@@ -327,7 +327,7 @@ struct Replay : public TransformIter {
     int maxis = merge->axis();
 
     TORCH_INTERNAL_ASSERT(
-        maxis >= 0 && (unsigned int)maxis < axis_map.size(),
+        maxis >= 0 && (unsigned int)(maxis + 1) < axis_map.size(),
         "TransformReplay tried to modify an axis out of range, recieved ",
         maxis,
         " but this value should be >= 0 and < axis_map.size()");
@@ -618,7 +618,7 @@ struct ReplaySelf : public TransformIter {
     int maxis = merge->axis();
 
     TORCH_INTERNAL_ASSERT(
-        maxis >= 0 && (unsigned int)maxis < axis_map.size(),
+        maxis >= 0 && (unsigned int)(maxis + 1) < axis_map.size(),
         "TransformReplay tried to modify an axis out of range, recieved ",
         maxis,
         " but this value should be >= 0 and < axis_map.size()");
