@@ -509,6 +509,8 @@ Tensor& nanmean_out_cpu_gpu(Tensor& result, const Tensor& self, IntArrayRef dim,
   Tensor without_nans = torch.where(torch.isnan(self), torch.zeros_like(self), self);
   if (self.device().is_cpu()) {
     int64_t dim_prod = at::sum(~self.isnan(), axis=dim, keepdims=keepdim, dtype=dtype);
+    // TODO: Check if .div_() works or we should use true_divide here
+    // Python script gives warning to use true_divide or float_divide
     at::sum_out(result, without_nans, dim, keepdim, dtype).div_(dim_prod);
     return result;
   } else {
