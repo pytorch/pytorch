@@ -724,12 +724,12 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
 
 Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
   Tensor result = at::empty({self.size(0), mat2.size(2), self.size(1)}, mat2.options(), at::MemoryFormat::Contiguous);
-  return _bmm_out_sparse_cuda(result, self, mat2, false);
+  return _bmm_out_sparse_cuda(result, self, mat2, c10::nullopt);
 }
 
-Tensor _bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool deterministic) {
+Tensor _bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, c10::optional<bool> deterministic_opt) {
   Tensor result = at::empty({self.size(0), mat2.size(2), self.size(1)}, mat2.options(), at::MemoryFormat::Contiguous);
-  return _bmm_out_sparse_cuda(result, self, mat2, deterministic);
+  return _bmm_out_sparse_cuda(result, self, mat2, deterministic_opt);
 }
 
 #if !(defined(__HIP_PLATFORM_HCC__) || defined(_WIN32) || defined(_WIN64))
@@ -811,10 +811,10 @@ cudaDataType getTensorCudaDataType(Tensor self) {
 #endif
 
 Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
-  return _bmm_out_sparse_cuda(result, self, mat2, false);
+  return _bmm_out_sparse_cuda(result, self, mat2, c10::nullopt);
 }
 
-Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2, bool deterministic) {
+Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2, c10::optional<bool> deterministic_opt) {
 #if defined __HIP_PLATFORM_HCC__
   TORCH_CHECK(false, "bmm sparse-dense is not supported on HIP");
 #elif defined(_WIN32) || defined(_WIN64)
@@ -895,6 +895,7 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
   size_t workspace_buffer_size = 0;
   void* workspace_buffer = nullptr;
 
+  bool deterministic = deterministic_opt.has_value() ? deterministic_opt.value() : at::globalContext().deterministic();
   cusparseSpMMAlg_t mm_alg = deterministic ? CUSPARSE_COOMM_ALG2 : CUSPARSE_COOMM_ALG1;
 
   // Iterate through each set of 2D matrices within the 3D
