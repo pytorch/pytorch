@@ -15,6 +15,13 @@ void sum_kernel_impl(TensorIterator& iter) {
 }
 
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
+void nansum_kernel_impl(TensorIterator& iter) {
+  gpu_reduce_kernel<scalar_t, out_t>(iter, func_wrapper<out_t> ([]GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
+    return (::isnan(a) ? acc_t{0} : a) + (::isnan(b) ? acc_t{0} : b);
+  }));
+}
+
+template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
 void prod_kernel_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, out_t>(iter, func_wrapper<out_t> ([]GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
     return a * b;
@@ -41,6 +48,26 @@ static void sum_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+static void nansum_kernel_cuda(TensorIterator& iter) {
+  if (iter.dtype() == kHalf) {
+    return nansum_kernel_impl<at::Half, float>(iter);
+  } else if (iter.dtype(1) == kHalf && iter.dtype() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return nansum_kernel_impl<at::Half, float, float>(iter);
+  }
+  #ifdef __HIP_PLATFORM_HCC__
+  else if (iter.dtype() == kBFloat16) {
+    return nansum_kernel_impl<at::BFloat16, float>(iter);
+  } else if (iter.dtype(1) == kBFloat16 && iter.dtype() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return nansum_kernel_impl<at::BFloat16, float, float>(iter);
+  }
+  #endif
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, iter.dtype(), "nansum_cuda", [&]() {
+    nansum_kernel_impl<scalar_t>(iter);
+  });
+}
+
 static void prod_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == kHalf) {
     return prod_kernel_impl<at::Half, float>(iter);
@@ -62,6 +89,7 @@ static void prod_kernel_cuda(TensorIterator& iter) {
 }
 
 REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
+REGISTER_DISPATCH(nansum_stub, &nansum_kernel_cuda);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
 
 }} // namespace at::native

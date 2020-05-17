@@ -5609,6 +5609,51 @@ Example::
     tensor([  435.,  1335.,  2235.,  3135.])
 """.format(**multi_dim_common))
 
+add_docstr(torch.nansum,
+           r"""
+nansum(input, dtype=None) -> Tensor
+
+Return the sum of array elements over a given axis treating Not a Numbers (NaNs) as zero.
+
+Args:
+    {input}
+    {dtype}
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    tensor([[ 0.1133, -0.9567,  0.2958]])
+    >>> torch.sum(a)
+    tensor(-0.5475)
+
+.. function:: sum(input, dim, keepdim=False, dtype=None) -> Tensor
+
+Returns the sum of each row of the :attr:`input` tensor in the given
+dimension :attr:`dim` treating Not a Numbers (NaNs) as zero. 
+If :attr:`dim` is a list of dimensions, reduce over all of them.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+    {dtype}
+
+Example::
+
+    >>> torch.nansum(torch.tensor([1., float("nan")]))
+    1.0
+    >>> a = torch.tensor([[1, 1], [1., float("nan")]])
+    >>> torch.nansum(a)
+    tensor(3.)
+    >>> torch.nansum(a, axis=0)
+    tensor([2., 1.])
+    >>> torch.nansum(a, axis=1)
+    tensor([2., 1.])
+""".format(**multi_dim_common))
+
 add_docstr(torch.svd,
            r"""
 svd(input, some=True, compute_uv=True, out=None) -> (Tensor, Tensor, Tensor)
