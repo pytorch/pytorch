@@ -108,32 +108,46 @@ uint32_t crc32_16bytes_prefetch(const void* data, size_t length, uint32_t previo
   #else
     #define PREFETCH(location) _mm_prefetch(location, _MM_HINT_T0)
   #endif
-#elseif defined(__APPLE__)
-  #if defined(__BIG_ENDIAN__)
-    #define __BYTE_ORDER _BIG_ENDIAN
-  #if defined(__LITTLE_ENDIAN__)
-    #define __BYTE_ORDER __LITTLE_ENDIAN
+#elif defined(__APPLE__)
+  #include <TargetConditionals.h>
+    #if TARGET_IPHONE_SIMULATOR
+      #error "iOS sim not supported"
+    #elif TARGET_OS_IPHONE
+      #define __BYTE_ORDER __LITTLE_ENDIAN
+    #elif TARGET_OS_MAC
+      #include <machine/endian.h>
+      #if defined(__BIG_ENDIAN__)
+          #define __BYTE_ORDER __BIG_ENDIAN
+      #endif
+      #if defined(__LITTLE_ENDIAN__)
+        #define __BYTE_ORDER __LITTLE_ENDIAN
+      #endif
+    #else
+      # error "Unknown Apple platform"
+    #endif
+#elif defined(__ARMEB__)
+  #define __BYTE_ORDER __BIG_ENDIAN
+#elif defined(__BYTE_ORDER__)
+  #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+      #define __BYTE_ORDER __BIG_ENDIAN
+  #else
+      #define __BYTE_ORDER __LITTLE_ENDIAN
   #endif
-#elseif defined(__ARMEB__)
-#define __BYTE_ORDER _BIG_ENDIAN
-#else
-#define __BYTE_ORDER _LITTLE_ENDIAN
-#endif
 #else
   // defines __BYTE_ORDER as __LITTLE_ENDIAN or __BIG_ENDIAN
   #include <sys/param.h>
+#endif
 
-  // intrinsics / prefetching
-  #ifdef __GNUC__
-    #define PREFETCH(location) __builtin_prefetch(location)
-  #else
-    // no prefetching
-    #define PREFETCH(location) ;
-  #endif
+// intrinsics / prefetching
+#ifdef __GNUC__
+  #define PREFETCH(location) __builtin_prefetch(location)
+#else
+  // no prefetching
+  #define PREFETCH(location) ;
 #endif
 
 // abort if byte order is undefined
-#if !defined(__BYTE_ORDER)
+#ifndef __BYTE_ORDER
 #error undefined byte order, compile with -D__BYTE_ORDER=1234 (if little endian) or -D__BYTE_ORDER=4321 (big endian)
 #endif
 
