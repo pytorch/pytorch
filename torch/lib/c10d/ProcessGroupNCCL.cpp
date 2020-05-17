@@ -612,6 +612,10 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
         throw std::runtime_error(
             "All tensor operands to scatter/gather must have the same size");
       }
+      if (t.strides() != other[i].strides()) {
+        throw std::runtime_error(
+            "All tensor operands to scatter/gather must have the same layout (strides)");
+      }
     }
     // Flatten the tensors (from all ranks) into a single big tensor.
     flattened[i] = newLikeFlat(tensor_lists, i);
