@@ -49,6 +49,9 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
 #endif
 
   auto m = find_method(method_name);
+  if (m == nullptr) {
+    AT_ERROR("Method '", method_name, "' is not defined.");
+  }
   stack.insert(stack.begin(), object_);
   m->run(stack);
   c10::IValue result = stack.front();
@@ -67,7 +70,7 @@ Function* Module::find_method(const std::string& basename) const {
       return fn.get();
     }
   }
-  AT_ERROR("Method '", basename, "' is not defined.");
+  return nullptr;
 }
 
 namespace {

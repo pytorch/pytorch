@@ -26,7 +26,10 @@ Tensor qnnpack_clamp(Tensor input, Scalar min, Scalar max) {
   initQNNPACK();
 
   Tensor input_contig = input.contiguous(input.suggest_memory_format());
-  size_t num_elems = input_contig.numel() / input_contig.size(0);
+  size_t num_elems = 1;
+  for (int i = 1; i < input_contig.ndimension(); ++i) {
+    num_elems *= input_contig.size(i);
+  }
 
   auto min_f = min.to<float>();
   auto max_f = max.to<float>();

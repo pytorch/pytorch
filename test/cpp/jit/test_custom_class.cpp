@@ -32,6 +32,10 @@ struct Foo : torch::CustomClassHolder {
   }
 };
 
+struct NoInit : torch::CustomClassHolder {
+  int64_t x;
+};
+
 template <class T>
 struct MyStackClass : torch::CustomClassHolder {
   std::vector<T> stack_;
@@ -78,6 +82,9 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("increment", &Foo::increment)
       .def("add", &Foo::add)
       .def("combine", &Foo::combine);
+
+  m.class_<NoInit>("_NoInit").def(
+      "get_x", [](const c10::intrusive_ptr<NoInit>& self) { return self->x; });
 
   m.class_<MyStackClass<std::string>>("_StackString")
       .def(torch::init<std::vector<std::string>>())
