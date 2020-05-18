@@ -2767,6 +2767,22 @@ class TestAutograd(TestCase):
 
         assert([get_children_ids(event) for event in events] == res)
 
+    def test_profiler_aggregation_table(self):
+        """
+        Test if the profiling result is aggregated for `str(prof)`
+
+        See: https://github.com/pytorch/pytorch/issues/37500
+        """
+
+        x = torch.randn(1024)
+        with torch.autograd.profiler.profile() as prof:
+            torch.einsum("i->", x)
+
+        prof_str = str(prof)
+        prof_table = prof.table()
+
+        self.assertEqual(prof_table, prof_str)
+
     def test_profiler_function_event_avg(self):
         avg = FunctionEventAvg()
         avg.add(FunctionEvent(id=0, name="foo", thread=0, cpu_start=10, cpu_end=15))
