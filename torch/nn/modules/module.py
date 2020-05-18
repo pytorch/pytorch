@@ -712,7 +712,7 @@ class Module(object):
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         r"""Returns a dictionary containing a whole state of the module.
 
-        Both parameters and persistent buffers (e.g. running averages) are
+        Both parameters (without tags) and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
 
         Returns:

@@ -49,7 +49,7 @@ class Parameter(torch.Tensor):
                 (self.data, self.requires_grad, OrderedDict(), self.tags)
             )
         else:
-            # This ensures parameter without tags can be deserialized
+            # This ensures that parameter without tags can be deserialized
             # by older version of PyTorch (i.e. forward compatibility)
             return (
                 torch._utils._rebuild_parameter,

@@ -3788,7 +3788,7 @@ class TestNN(NNTestCase):
 
             with TemporaryFileName() as fname:
                 m_state_dict = m.state_dict()
-                # Parameter tags should not be exported in `Module.state_dict()`
+                # Parameter tags should not be included in `Module.state_dict()`
                 self.assertFalse(hasattr(m_state_dict["param"], "tags"))
 
                 # Loading a state dict does not affect a module's parameter tags
