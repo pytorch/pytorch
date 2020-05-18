@@ -120,7 +120,7 @@ static void bitwise_not_kernel(TensorIterator& iter) {
 }
 
 static void exp2_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "exp2_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "exp2_cpu", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::exp2(a); });
