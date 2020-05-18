@@ -365,6 +365,9 @@ class TestNN(NNTestCase):
             m = torch.load(path)
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
+        # Legacy module should have their parameters' tags populated with empty dict
+        for p in m.parameters():
+            self.assertEqual(p.tags, {})
 
     def test_conv_backcompat(self):
         from torch.serialization import SourceChangeWarning
@@ -382,6 +385,9 @@ class TestNN(NNTestCase):
             m = torch.load(path, encoding='utf-8')
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
+        # Legacy module should have their parameters' tags populated with empty dict
+        for p in m.parameters():
+            self.assertEqual(p.tags, {})
 
     def test_share_memory(self):
         class Net(nn.Module):
