@@ -16,8 +16,6 @@ using at::Tensor;
 namespace dist_autograd = torch::distributed::autograd;
 namespace dist_rpc = torch::distributed::rpc;
 
-using torch::distributed::autograd::kDistAutogradBackwardProfilingKey;
-
 namespace torch {
 namespace jit {
 
@@ -120,22 +118,12 @@ RegisterOperators reg_rpc_ops(
      Operator(
          "aten::dist_backward(int context_id, Tensor[] roots, bool retain_graph=False) -> ()",
          [](Stack& stack) {
-           RECORD_FUNCTION(
-               kDistAutogradBackwardProfilingKey, std::vector<c10::IValue>());
            bool retain_graph = pop(stack).toBool();
-           auto roots = pop(stack).toTensorList();
+           auto roots_list = pop(stack).toTensorList();
            int64_t context_id = pop(stack).toInt();
-           torch::autograd::variable_list variables;
-           for (const auto& root : roots) {
-             variables.emplace_back(root);
-           }
-           try {
-             dist_autograd::DistEngine::getInstance().execute(
-                 context_id, variables, retain_graph);
-           } catch (python_error& e) {
-             // FIXME: crashes if exception type is not RuntimeError
-             throw std::runtime_error(e.what());
-           }
+           torch::autograd::variable_list roots(
+               roots_list.begin(), roots_list.end());
+           dist_autograd::backward(context_id, roots, retain_graph);
            return 0;
          },
          aliasAnalysisConservative()),

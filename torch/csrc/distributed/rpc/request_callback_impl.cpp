@@ -33,11 +33,6 @@ using namespace torch::distributed::autograd;
 
 namespace {
 
-py::object toPyObj(IValue value) {
-  pybind11::gil_scoped_acquire ag;
-  return torch::jit::toPyObject(std::move(value));
-}
-
 std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
     RpcCommandBase& rpc,
     const MessageType& messageType) {
@@ -173,7 +168,7 @@ void RequestCallbackImpl::processRpc(
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       std::shared_ptr<SerializedPyObj> serializedPyObj = nullptr;
       {
-        pybind11::gil_scoped_acquire ag;
+        py::gil_scoped_acquire acquire;
         serializedPyObj =
             std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
                 pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf())));
@@ -284,7 +279,7 @@ void RequestCallbackImpl::processRpc(
       IValue py_ivalue;
       try {
         {
-          pybind11::gil_scoped_acquire ag;
+          py::gil_scoped_acquire acquire;
           py_ivalue = jit::toIValue(
               pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
               PyObjectType::get());
@@ -354,6 +349,14 @@ void RequestCallbackImpl::processRpc(
       return;
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
+      // Making this lambda mutable to allow move-capture it in callbacks
+      auto serialize = [](IValue value) mutable -> SerializedPyObj {
+        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+        // Need this GIL to guard jit::toPyObj and destruct its returned
+        // py::object
+        py::gil_scoped_acquire acquire;
+        return pythonRpcHandler.serialize(jit::toPyObject(std::move(value)));
+      };
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
 
@@ -363,15 +366,17 @@ void RequestCallbackImpl::processRpc(
         // the OwnerRRef has been created
         const auto& rref = futureOwner->constValue();
         if (rref->hasValue()) {
-          SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
-              toPyObj(rref->getValue()));
+          SerializedPyObj result = serialize(rref->getValue());
           markComplete(
               PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
           return;
         }
       }
 
-      futureOwner->addCallback([responseFuture, messageId, futureOwner]() {
+      futureOwner->addCallback([responseFuture,
+                                messageId,
+                                futureOwner,
+                                serialize{std::move(serialize)}]() mutable {
         const auto& rref = futureOwner->constValue();
         auto whenValueSet = rref->getFuture();
 
@@ -380,14 +385,14 @@ void RequestCallbackImpl::processRpc(
         whenValueSet->addCallback([responseFuture,
                                    messageId,
                                    rref,
-                                   whenValueSet] {
+                                   whenValueSet,
+                                   serialize{std::move(serialize)}]() mutable {
           if (whenValueSet->hasError()) {
             responseFuture->setError(whenValueSet->error()->what());
             return;
           }
           try {
-            SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
-                toPyObj(rref->getValue()));
+            SerializedPyObj result = serialize(rref->getValue());
             Message m =
                 PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
             m.setId(messageId);
@@ -405,7 +410,7 @@ void RequestCallbackImpl::processRpc(
       auto& ctx = RRefContext::getInstance();
       auto deletedRRef = ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
       if (deletedRRef && deletedRRef->isPyObj()) {
-        pybind11::gil_scoped_acquire ag;
+        py::gil_scoped_acquire acquire;
         deletedRRef.reset();
       }
       markComplete(std::move(RRefAck()).toMessage());

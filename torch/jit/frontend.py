@@ -1,11 +1,9 @@
-import __future__
 import torch
 import sys
 import ast
 import inspect
 import string
 from textwrap import dedent
-from torch._six import PY2
 from torch._C._jit_tree_views import (
     ClassDef, Ident, Stmt, Decl, Def, Var,
     EmptyTypeAnnotation, Param, ExprStmt, Assign,
@@ -124,18 +122,6 @@ def build_stmts(ctx, stmts):
     return list(filter(None, stmts))
 
 
-def _uses_true_division(fn):
-    if not PY2:
-        return True
-    if inspect.ismethod(fn):
-        return _uses_true_division(fn.__func__)
-    elif inspect.isfunction(fn):
-        return fn.__globals__.get('division') is __future__.division
-    else:
-        raise RuntimeError(
-            '_uses_true_division: expected function or method, got {}'.format(type(fn)))
-
-
 def get_jit_class_def(cls, self_name):
     # Get defs for each method within the current class independently
     # TODO: proper overriding analysis when implementing class inheritance
@@ -179,7 +165,7 @@ def get_jit_def(fn, def_name, self_name=None):
         raise RuntimeError("Expected a single top-level function")
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
+    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, True)
     return build_def(ctx, py_ast.body[0], type_line, def_name, self_name=self_name)
 
 

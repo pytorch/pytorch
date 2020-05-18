@@ -254,6 +254,7 @@ class RNNBase(torch.nn.Module):
                         packed_ih, packed_hh)
 
                 _all_weight_values.append(PackedParameter(cell_params))
+        qRNNBase._all_weight_values = torch.nn.ModuleList(_all_weight_values)
         qRNNBase._all_params = ([m.param for m in _all_weight_values])
 
         return qRNNBase
