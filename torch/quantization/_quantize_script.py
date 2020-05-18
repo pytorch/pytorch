@@ -23,7 +23,7 @@ def script_qconfig_dict(qconfig_dict):
 def _prepare_script(model, qconfig_dict, is_dynamic):
     _check_is_script_module(model)
     _check_forward_method(model)
-    if all(isinstance(x, str) for x in qconfig_dict.keys()):
+    if not all(isinstance(x, str) for x in qconfig_dict.keys()):
         raise ValueError('qconfig_dict should only contain names(str) as keys.')
     scripted_qconfig_dict = script_qconfig_dict(qconfig_dict)
     torch._C._jit_pass_dedup_module_uses(model._c)
