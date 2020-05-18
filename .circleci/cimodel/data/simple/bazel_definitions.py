@@ -1,4 +1,4 @@
-from cimodel.data.simple.util.docker_constants import DOCKER_IMAGE_BAZEL
+from cimodel.data.simple.util.docker_constants import DOCKER_IMAGE_GCC7
 
 
 def gen_job_name(phase):
@@ -42,7 +42,7 @@ class BazelJob:
 
         props_dict = {
             "build_environment": build_env_name,
-            "docker_image": DOCKER_IMAGE_BAZEL,
+            "docker_image": DOCKER_IMAGE_GCC7,
             "name": full_job_name,
             "requires": ["setup"] + extra_requires,
         }
