@@ -166,7 +166,7 @@ Note:
     \text{out}_{i} = \cosh^{-1}(\text{input}_{i})
 """ + r"""
 Args:
-    {iput}
+    {input}
 
 Keyword arguments:
     {out}
