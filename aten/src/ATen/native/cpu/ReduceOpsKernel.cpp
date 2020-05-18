@@ -1,8 +1,6 @@
 #include <numeric>
 #include <iterator>
 #include <algorithm>
-// TODO: Remove this
-#include <iostream>
 
 #include <ATen/Dispatch.h>
 #include <ATen/cpu/vec256/vec256.h>
@@ -124,10 +122,9 @@ static void mean_kernel_impl(TensorIterator& iter) {
 
 static void nanmean_kernel_impl(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX(iter.dtype(), "nanmean_cpu", [&] {
-    scalar_t factor = scalar_t(iter.num_output_elements()) / scalar_t(iter.numel());
-    std::cout << "Factor: " << factor << std::endl;
-    std::cout << "Num output elements: " << iter.num_output_elements() << std::endl;
-    std::cout << "Numel: " << iter.numel() << std::endl;
+    at::Tensor src = iter.tensor(1);
+    at::Tensor dim_prod = at::sum(src.isnan().logical_not());
+    scalar_t factor = scalar_t(iter.num_output_elements()) / dim_prod.item<scalar_t>();
     binary_kernel_reduce(
       iter,
       MeanOps<scalar_t, scalar_t> {factor},
