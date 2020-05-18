@@ -158,14 +158,15 @@ acosh(input, out=None) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic cosine of the elements of :attr:`input`.
 The domain of the inverse hyperbolic cosine is `[1, inf)` and values outside this range
-will be mapped to ``NaN``.
+will be mapped to ``NaN``, except for `+ INF` for which the output is mapped to `+ INF`.
 
 .. math::
     \text{out}_{i} = \cosh^{-1}(\text{input}_{i})
 """ + r"""
 Args:
     input (Tensor): the input tensor where :math:`input` is in the interval `[1, inf)`
-    and the values outside this range are mapped to ``NaN``.
+    and the value `+ INF` is mapped to `+ INF` while the other values outside this range
+    are mapped to ``NaN``.
 
 Keyword arguments:
     {out}
@@ -728,7 +729,7 @@ mapped to `+/-INF` respectively.
 Args:
     input (Tensor): the input tensor where math:`input` is in the open interval `(-1, 1)`
     and the edge values `-1` and `1` are mapped to `-/+ INF` respectively while the other
-    `values outside this range are mapped to ``NaN``.
+    values outside this range are mapped to ``NaN``.
 
 Keyword arguments:
     {out}
