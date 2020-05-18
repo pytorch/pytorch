@@ -307,10 +307,8 @@ if(MSVC)
     # starts up and display of informational messages during compiling.
     string(APPEND ${flag_var} " /nologo")
 
-    # The /permissive- compiler option is used to specify standards-conforming
-    # compiler behavior. This option disables permissive behaviors, and sets
-    # the /Zc compiler options for strict conformance.
-    string(APPEND ${flag_var} " /permissive-")
+    # Report vectorized and non-vectorized functions
+    string(APPEND ${flag_var} " /Qvec-report:2")
 
     if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       if(${flag_var} MATCHES "/MD")
