@@ -365,7 +365,7 @@ class TestNN(NNTestCase):
             m = torch.load(path)
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
-        # Legacy module should have their parameters' tags populated with empty dict
+        # Legacy module should have its parameters' tags populated with empty dict
         for p in m.parameters():
             self.assertEqual(p.tags, {})
 
@@ -385,7 +385,7 @@ class TestNN(NNTestCase):
             m = torch.load(path, encoding='utf-8')
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
-        # Legacy module should have their parameters' tags populated with empty dict
+        # Legacy module should have its parameters' tags populated with empty dict
         for p in m.parameters():
             self.assertEqual(p.tags, {})
 
@@ -3764,6 +3764,37 @@ class TestNN(NNTestCase):
 
             param_copy = deepcopy(param)
             self.assertEqual(param_copy.tags, expected_tags)
+
+        do_test(True, {"optimizer": "sparse"}, {"optimizer": "sparse"})
+        do_test(True, None, {})
+        do_test(False, None, {})
+
+    def test_module_with_parameter_tags(self):
+        def do_test(has_tags_arg, tags, expected_tags):
+            class TestModule(nn.Module):
+                def __init__(self):
+                    super(TestModule, self).__init__()
+                    if has_tags_arg:
+                        self.param = nn.Parameter(torch.randn(5, 5), tags=tags)
+                    else:
+                        self.param = nn.Parameter(torch.randn(5, 5))
+
+                def forward(self, x):
+                    return x
+
+            m = TestModule()
+            self.assertEqual(m.param.tags, expected_tags)
+
+            m_unpickle = pickle.loads(pickle.dumps(m))
+            self.assertEqual(m_unpickle.param.tags, expected_tags)
+
+            with TemporaryFileName() as fname:
+                torch.save(m, fname)
+                m_torch_load = torch.load(fname)
+                self.assertEqual(m_torch_load.param.tags, expected_tags)
+
+            m_copy = deepcopy(m)
+            self.assertEqual(m_copy.param.tags, expected_tags)
 
         do_test(True, {"optimizer": "sparse"}, {"optimizer": "sparse"})
         do_test(True, None, {})
