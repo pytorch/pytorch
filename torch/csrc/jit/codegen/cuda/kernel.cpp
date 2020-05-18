@@ -163,39 +163,39 @@ std::pair<std::string, std::string> codeGeneration(Fusion* fusion) {
 
 bool validateKernelArgTensor(
     const at::Tensor& arg,
-    const Val* const param,
+    const Val& param,
     int device_index,
     std::stringstream& msg) {
   // Arg is a tensor. Param must be a tensor too.
-  if (*param->getValType() != ValType::TensorView) {
+  if (*param.getValType() != ValType::TensorView) {
     msg << "Argument is a tensor, but the parameter is not.";
     return false;
   }
-
   // Check the rank of the tensors.
   size_t arg_dim = arg.dim();
-  // Note: This requires current Fusion to be active.
-  size_t param_dim = TensorDomain::noReductions(
-                         static_cast<const TensorView*>(param)->getRootDomain())
-                         .size();
-  // see [Note - broadcast support in integration]
-  // Because of broadcasting support handled in integration, we relax the rank
-  // check as necessary.
-  if (arg_dim > param_dim) {
+  const auto& root_dom = *static_cast<const TensorView&>(param).getRootDomain();
+  size_t param_dim = 0;
+  for (size_t i = 0; i < root_dom.nDims(); ++i) {
+    if (!root_dom.axis(i)->isReduction())
+      ++param_dim;
+  }
+  if (arg_dim != param_dim) {
     msg << "Argument tensor's rank is " << arg_dim << ", but the parameter is "
         << param_dim;
     return false;
   }
-
   if (arg.device().index() != device_index) {
     msg << "Argument is on device that is not compiled for";
     return false;
   }
   // Check element type
   at::ScalarType arg_data_type = arg.scalar_type();
-  DataType param_data_type = *param->getDataType();
+  DataType param_data_type = *param.getDataType();
   bool match = false;
   switch (arg_data_type) {
+    case at::ScalarType::Int:
+      match = param_data_type == DataType::Int;
+      break;
     case at::ScalarType::Half:
       match = param_data_type == DataType::Half;
       break;
@@ -206,9 +206,7 @@ bool validateKernelArgTensor(
       match = param_data_type == DataType::Bool;
       break;
     default:
-      msg << "Argument element type, " << arg_data_type
-          << ", is not supported.";
-      return false;
+      match = false;
   }
   if (!match)
     msg << "Argument element type is " << arg_data_type
@@ -217,16 +215,16 @@ bool validateKernelArgTensor(
 }
 
 bool validateKernelArgScalar(
-    const c10::TypePtr& arg_type,
-    const Val* const param,
+    const c10::Type& arg_type,
+    const Val& param,
     std::stringstream& msg) {
-  if (!param->isScalar()) {
+  if (!param.isScalar()) {
     msg << "Argument is a scalar, but the parameter is not.";
     return false;
   }
-  DataType param_type = *param->getDataType();
+  DataType param_type = *param.getDataType();
   bool match = false;
-  switch (arg_type->kind()) {
+  switch (arg_type.kind()) {
     case c10::TypeKind::IntType:
       match = param_type == DataType::Int;
       break;
@@ -240,7 +238,7 @@ bool validateKernelArgScalar(
       match = false;
   }
   if (!match) {
-    msg << "Argument type is " << *arg_type << ", but the parameter is "
+    msg << "Argument type is " << arg_type << ", but the parameter is "
         << param_type;
   }
   return match;
@@ -248,11 +246,11 @@ bool validateKernelArgScalar(
 
 bool validateKernelArg(
     const c10::IValue& arg,
-    const Val* const param,
+    const Val& param,
     int device_index,
     std::stringstream& msg) {
   if (arg.type()->kind() != c10::TypeKind::TensorType) {
-    return validateKernelArgScalar(arg.type(), param, msg);
+    return validateKernelArgScalar(*arg.type(), param, msg);
   } else {
     return validateKernelArgTensor(arg.toTensor(), param, device_index, msg);
   }
@@ -262,15 +260,12 @@ void validateKernelArgs(
     const CudaKernel& entry,
     const at::ArrayRef<IValue>& inputs,
     const std::vector<at::Tensor>& outputs) {
-  // This is necessary as we were traversing the fusion graph later in the check
-  FusionGuard fg(&entry);
   // Check inputs
   TORCH_INTERNAL_ASSERT(
-      inputs.size() == entry.fusion_->inputs().size(),
-      "Wrong number of kernel inputs.");
+      inputs.size() == entry.inputs.size(), "Wrong number of kernel inputs.");
   for (size_t i = 0; i < inputs.size(); ++i) {
     const IValue& arg = inputs[i];
-    const Val* const param = entry.fusion_->inputs()[i];
+    const Val& param = *entry.inputs[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
         validateKernelArg(arg, param, entry.device_, msg),
@@ -281,18 +276,18 @@ void validateKernelArgs(
   }
 
   TORCH_INTERNAL_ASSERT(
-      entry.fusion_->outputs().size() != 0,
+      entry.outputs.size() != 0,
       "Kernel should have at least one output tensor.");
 
   TORCH_INTERNAL_ASSERT(
-      outputs.size() == entry.fusion_->outputs().size(),
+      outputs.size() == entry.outputs.size(),
       "Wrong number of kernel outputs.");
   for (size_t i = 0; i < outputs.size(); ++i) {
     const at::Tensor& arg = outputs[i];
-    const Val* const param = entry.fusion_->outputs()[i];
+    const Val& param = *entry.outputs[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
-        validateKernelArgTensor(arg, param, entry.device_, msg),
+        validateKernelArg(arg, param, entry.device_, msg),
         "Output argument at position ",
         i,
         " is invalid; ",
@@ -549,16 +544,8 @@ void runTestKernel(
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different
   // from I/O expected by the generated CUDA kernel.
-  TORCH_INTERNAL_ASSERT(inputs.size() == entry->inputs.size(),
-                        "Wrong number of kernel inputs.");
   for (auto& input : inputs) {
     if (input.isTensor()) {
-      TORCH_INTERNAL_ASSERT(
-          input.toTensor().device().index() == entry->device_,
-          "input to kernel on device that is not compiled for");
-      TORCH_INTERNAL_ASSERT(
-          !entry->fusion_->outputs().empty(),
-          "No output found for this kernel, aborting.");
       if (has_reduction) {
         kernel_args.push(input.toTensor());
       } else {
