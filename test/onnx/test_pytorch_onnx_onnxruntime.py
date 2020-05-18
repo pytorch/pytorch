@@ -12,7 +12,6 @@ import io
 import itertools
 import copy
 
-from torch import select
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence

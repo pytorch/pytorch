@@ -565,7 +565,6 @@ def squeeze(g, self, dim=None):
                 dims.append(i)
     else:
         dims = [sym_help._get_const(dim, 'i', 'dim')]
-        input_dims = self.type().sizes()
         # Handle negative dims
         for i, dim in enumerate(dims):
             if dim < 0:
@@ -580,9 +579,9 @@ def squeeze(g, self, dim=None):
                     dims[i] += rank
                 else:
                     return _unimplemented('squeeze', 'negative axis with unknown input rank')
-            # Handle input dimensions > 1, which are disallowed in the ONNX spec.
-            if input_dims[dim] > 1:
-                return _unimplemented('squeeze', 'cannot apply squeeze operator on shape entries not equal to 1')
+            # # Handle input dimensions > 1, which are disallowed in the ONNX spec.
+            # if input_dims[dim] > 1:
+            #     return _unimplemented('squeeze', 'cannot apply squeeze operator on shape entries not equal to 1')
 
     return g.op("Squeeze", self, axes_i=dims)
 

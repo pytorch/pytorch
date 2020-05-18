@@ -497,14 +497,30 @@ def size(g, self, dim=None):
 
 def squeeze(g, self, dim=None):
     if dim is None:
-        dims = []
-        for i, size in enumerate(self.type().sizes()):
-            if size == 1:
-                dims.append(i)
-    else:
-        dims = [sym_help._get_const(dim, 'i', 'dim')]
-    return g.op("Squeeze", self, axes_i=dims)
+        return g.op("Squeeze", self)
+        # dims = []
+        # for i, size in enumerate(self.type().sizes()):
+        #     if size == 1:
+        #         dims.append(i)
+        # return g.op("Squeeze", self, axes_i=dims)
 
+    dim = sym_help._get_const(dim, 'i', 'dim')
+    # create 'cond' node (condition is shape[i]==1)
+    shape_op = g.op("Shape", self)
+    slice_op = sym_help._slice_helper(g, shape_op, axes = [0], starts = [dim], ends = [dim])
+    const_one = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
+    cond = g.op("Equal", slice_op, const_one)
+    # create a subgraph containing "Squeeze" called branch1
+    class Identity(torch.jit.Module):
+        def forward(self, input):
+            return input
+    from torch.onnx.utils import _trace_and_get_graph_from_model
+    branch1_graph, torch_out = _trace_and_get_graph_from_model(Identity(), torch.tensor(self.type().sizes()))
+    branch1_graph.op("Squeeze", *(branch1_graph.nodes()), axes_i=[dim])
+    # and a subgraph containing no-op called branch2
+    branch2_graph, torch_out = _trace_and_get_graph_from_model(Identity(), torch.tensor(self.type().sizes()))
+    g = g.op("If", cond, then_branch_g=branch1_graph, else_branch_g=branch2_graph)
+    return g
 
 @parse_args('v', 'i')
 def unsqueeze(g, self, dim):
