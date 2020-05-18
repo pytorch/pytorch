@@ -12,16 +12,12 @@
 #include <ATen/cuda/NumericLimits.cuh>
 #include <type_traits>
 
-#include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/PersistentSoftmax.cuh>
 
 namespace at {
 namespace native {
 
 namespace {
-
-constexpr int ALIGN_BYTES = 16;
 
 template<typename T, typename AccumT, typename OutT>
 struct LogSoftMaxForwardEpilogue {
@@ -143,17 +139,7 @@ void SpatialSoftMax_getLaunchSizes(
 inline dim3 SoftMax_getBlockSize(int ILP, uint64_t dim_size) {
   uint64_t block_size = 1;
   uint64_t max_block_size = std::min(dim_size / ILP, static_cast<uint64_t>(max_threads));
-
-  // In the vectorized case we want to trade off allowing more of the buffers to be accessed
-  // in a vectorized way against wanting a larger block size to get better utilisation.
-  // In general with ILP you can have (ILP-1)/ILP of the buffer accessed vectorised, at the risk
-  // of having a very small block size. We choose to keep >= 1/2 of the buffer vectorised while
-  // allowing a larger block size.
-  if (ILP > 1) {
-    max_block_size /= 2;
-  }
-
-  while (block_size < (max_block_size)) block_size *= 2;
+  while (block_size < max_block_size) block_size *= 2;
   // Launch at least a single warp - the kernel assumes that.
   block_size = std::max(block_size, static_cast<uint64_t>(C10_WARP_SIZE));
   return dim3(block_size);
@@ -385,228 +371,34 @@ blockReduce(AccumT* smem, AccumT val,
 
 template <template<typename, typename> class Reduction, int ILP, typename T, typename AccumT>
 __device__ __forceinline__ AccumT
-ilpReduce(int shift,
-          T* data,
+ilpReduce(T* data,
           int size,
           const Reduction<T, AccumT>& r,
           AccumT defaultVal)
 {
-  using LoadT = at::native::memory::aligned_vector<T, ILP>;
   AccumT threadVal = defaultVal;
   int offset = threadIdx.x;
 
-  // shift and do 1
-  if(shift > 0){
-    data -= shift;
-    size += shift;
-    if(threadIdx.x >= shift){
-      threadVal = r(threadVal, data[offset]);
-    }
-    size -= blockDim.x;
-    data += blockDim.x;
-  }
   int last = size % (ILP * blockDim.x);
 
-  T v[ILP];
-  LoadT* value = reinterpret_cast<LoadT*>(&v);
+  // Body (unroll by ILP times)
+  for (; offset < size - last; offset += blockDim.x * ILP) {
+    T tmp[ILP];
 
-  for (; offset * ILP < (size - last); offset += blockDim.x) {
-    *value = reinterpret_cast<LoadT*>(data)[offset];
+#pragma unroll
+    for (int j = 0; j < ILP; ++j)
+      tmp[j] = data[offset + j * blockDim.x];
 
-    #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
-      threadVal = r(threadVal, v[j]);
-    }
+#pragma unroll
+    for (int j = 0; j < ILP; ++j)
+      threadVal = r(threadVal, tmp[j]);
   }
 
-  offset = size - last + threadIdx.x;
   // Epilogue
   for (; offset < size; offset += blockDim.x)
     threadVal = r(threadVal, data[offset]);
 
   return threadVal;
-}
-
-/**
- * This will apply the Epilogue with vectorized reads & writes when input & output have the same shift
- */
-template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
-__device__ __forceinline__ void
-WriteFpropResultsVectorized(
-             int size,
-             const int shift,
-             scalar_t *input,
-             outscalar_t *output,
-             Epilogue<scalar_t, accum_t, outscalar_t> epilogue) {
-  using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;
-  using StoreT = at::native::memory::aligned_vector<outscalar_t, ILP>;
-
-  int offset = threadIdx.x;
-
-  // if unaligned, do one value / thread and move on, guaranteeing aligned reads/writes later
-  if (shift > 0) {
-    input -= shift;
-    output -= shift;
-
-    if (threadIdx.x >= shift) {
-      output[offset] = epilogue(input[offset]);
-    }
-    size -= blockDim.x;
-    input += blockDim.x;
-    output += blockDim.x;
-  }
-
-  const int last = size % (ILP * blockDim.x);
-
-  scalar_t in_v[ILP];
-  LoadT* in_value = reinterpret_cast<LoadT*>(&in_v);
-
-  outscalar_t out_v[ILP];
-  StoreT* out_value = reinterpret_cast<StoreT*>(&out_v);
-
-  for (; offset * ILP < (size - last); offset += blockDim.x) {
-    *in_value = reinterpret_cast<LoadT*>(input)[offset];
-
-    #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
-      out_v[j] = epilogue(in_v[j]);
-    }
-
-    reinterpret_cast<StoreT*>(output)[offset] = *out_value;
-  }
-
-  offset = size - last + threadIdx.x;
-  // handle the tail
-  for (; offset < size; offset += blockDim.x) {
-    output[offset] = epilogue(input[offset]);
-  }
-}
-
-template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
-__device__ __forceinline__ void
-WriteBpropResultsVectorized(
-             int size,
-             const int shift,
-             scalar_t *gradInput,
-             outscalar_t *output,
-             outscalar_t *gradOutput,
-             Epilogue<scalar_t, accum_t, outscalar_t> epilogue) {
-  using gradInputT = at::native::memory::aligned_vector<scalar_t, ILP>;
-  using outputT = at::native::memory::aligned_vector<outscalar_t, ILP>;
-
-  int offset = threadIdx.x;
-
-  // if unaligned, do one value / thread and move on, guaranteeing aligned reads/writes later
-  if (shift > 0) {
-    gradInput -= shift;
-    output -= shift;
-    gradOutput -= shift;
-
-    if (threadIdx.x >= shift) {
-      gradInput[offset] = epilogue(gradOutput[offset], output[offset]);
-    }
-    size -= blockDim.x;
-    gradInput += blockDim.x;
-    output += blockDim.x;
-    gradOutput += blockDim.x;
-  }
-
-  const int last = size % (ILP * blockDim.x);
-
-  scalar_t dX[ILP];
-  gradInputT *dX_v = reinterpret_cast<gradInputT*>(&dX);
-
-  outscalar_t Y[ILP];
-  outputT *Y_v = reinterpret_cast<outputT*>(&Y);
-
-  outscalar_t dY[ILP];
-  outputT *dY_v = reinterpret_cast<outputT*>(&dY);
-
-  for (; offset * ILP < (size - last); offset += blockDim.x) {
-    *Y_v = reinterpret_cast<outputT*>(output)[offset];
-    *dY_v = reinterpret_cast<outputT*>(gradOutput)[offset];
-
-    #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
-      dX[j] = epilogue(dY[j], Y[j]);
-    }
-
-    reinterpret_cast<gradInputT*>(gradInput)[offset] = *dX_v;
-  }
-
-  offset = size - last + threadIdx.x;
-  for (; offset < size; offset += blockDim.x) {
-    gradInput[offset] = epilogue(gradOutput[offset], output[offset]);
-  }
-}
-
-/**
- * This will apply the Epilogue with non-vectrorized reads & writes for the general case
- */
-template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
-__device__ __forceinline__ void
-WriteFpropResults(
-             int classes,
-             scalar_t *input,
-             outscalar_t *output,
-             Epilogue<scalar_t, accum_t, outscalar_t> epilogue) {
-  int offset = threadIdx.x;
-
-  int last = classes % (ILP * blockDim.x);
-
-  // Main bulk of loop with ILP
-  for (; offset < classes - last; offset += blockDim.x * ILP) {
-    scalar_t tmp[ILP];
-
-    #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
-      tmp[j] = input[offset + j * blockDim.x];
-    }
-    #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
-      output[offset + j * blockDim.x] = epilogue(tmp[j]);
-    }
-  }
-
-  // Remainder - no ILP
-  for (; offset < classes; offset += blockDim.x) {
-    output[offset] = epilogue(input[offset]);
-  }
-}
-
-template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
-__device__ __forceinline__ void
-WriteBpropResults(
-             int classes,
-             scalar_t *gradInput,
-             outscalar_t *output,
-             outscalar_t *gradOutput,
-             Epilogue<scalar_t, accum_t, outscalar_t> epilogue) {
-
-  int offset = threadIdx.x;
-
-  int last = classes % (ILP * blockDim.x);
-
-  for (; offset < classes - last; offset += blockDim.x * ILP) {
-    outscalar_t tmpOutput[ILP];
-    outscalar_t tmpGradOutput[ILP];
-
-    #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
-      tmpOutput[j] = output[offset + j * blockDim.x];
-      tmpGradOutput[j] = gradOutput[offset + j * blockDim.x];
-    }
-
-    #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
-      gradInput[offset + j * blockDim.x] = epilogue(tmpGradOutput[j], tmpOutput[j]);
-    }
-  }
-
-  // Remainder - no ILP
-  for (; offset < classes; offset += blockDim.x) {
-    gradInput[offset] = epilogue(gradOutput[offset], output[offset]);
-  }
 }
 
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue>
@@ -615,69 +407,83 @@ cunn_SoftMaxForward(outscalar_t *output, scalar_t *input, int classes)
 {
   extern __shared__ unsigned char smem[];
   auto sdata = reinterpret_cast<accscalar_t*>(smem);
-
-  using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;
-  using StoreT = at::native::memory::aligned_vector<outscalar_t, ILP>;
-
   // forward pointers to batch[blockIdx.x]
   // each block handles a sample in the mini-batch
   input += blockIdx.x * classes;
   output += blockIdx.x * classes;
 
-  const int shift = ((uint64_t)input) % ALIGN_BYTES / sizeof(scalar_t);
-  const int output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
-
   // find the max
   accscalar_t threadMax = ilpReduce<MaxFloat, ILP, scalar_t, accscalar_t>(
-      shift, input, classes, MaxFloat<scalar_t, accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
+      input, classes, MaxFloat<scalar_t, accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
   accscalar_t max_k = blockReduce<Max, accscalar_t>(
       sdata, threadMax, Max<accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
 
   // reduce all values
   accscalar_t threadExp = ilpReduce<SumExpFloat, ILP, scalar_t, accscalar_t>(
-      shift, input, classes, SumExpFloat<scalar_t, accscalar_t>(max_k), static_cast<accscalar_t>(0));
+      input, classes, SumExpFloat<scalar_t, accscalar_t>(max_k), static_cast<accscalar_t>(0));
   accscalar_t sumAll = blockReduce<Add, accscalar_t>(
       sdata, threadExp, Add<accscalar_t>(), static_cast<accscalar_t>(0));
 
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
+  int offset = threadIdx.x;
+  int last = classes % (ILP * blockDim.x);
+  for (; offset < classes - last; offset += blockDim.x * ILP) {
+    scalar_t tmp[ILP];
 
-  if (shift == output_shift) {
-    WriteFpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, shift, input, output, epilogue);
-  } else {
-    WriteFpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, input, output, epilogue);
+#pragma unroll
+    for (int j = 0; j < ILP; ++j)
+      tmp[j] = input[offset + j * blockDim.x];
+
+#pragma unroll
+    for (int j = 0; j < ILP; ++j)
+      output[offset + j * blockDim.x] = epilogue(tmp[j]);
   }
+
+  for (; offset < classes; offset += blockDim.x)
+    output[offset] = epilogue(input[offset]);
 }
 
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
 __global__ void
 cunn_SoftMaxBackward(scalar_t *gradInput, outscalar_t *output, outscalar_t *gradOutput, int classes)
 {
-  using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;
-  using StoreT = at::native::memory::aligned_vector<outscalar_t, ILP>;
-
   extern __shared__ unsigned char smem[];
   auto sdata = reinterpret_cast<accscalar_t*>(smem);
   gradInput += blockIdx.x * classes;
   output += blockIdx.x * classes;
   gradOutput += blockIdx.x * classes;
 
-  const int shift = ((uint64_t)gradInput) % ALIGN_BYTES / sizeof(scalar_t);
-  const int output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
-  const int grad_output_shift = ((uint64_t)gradOutput) % ALIGN_BYTES / sizeof(outscalar_t);
-
-  accscalar_t threadSum = ilpReduce<AddFloat, ILP, outscalar_t, accscalar_t>(
-      shift, gradOutput, classes, AddFloat<outscalar_t, accscalar_t>(), accscalar_t(0));
+  accscalar_t threadSum = ilpReduce<AddFloat, 4, outscalar_t, accscalar_t>(
+      gradOutput, classes, AddFloat<outscalar_t, accscalar_t>(), accscalar_t(0));
   accscalar_t sum_k = blockReduce<Add, accscalar_t>(
         sdata, threadSum, Add<accscalar_t>(), accscalar_t(0));
 
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(sum_k);
+  int offset = threadIdx.x;
+  int last = classes % (ILP * blockDim.x);
+  for (; offset < classes - last; offset += blockDim.x * ILP) {
+    outscalar_t tmpGradOutput[ILP];
+    outscalar_t tmpOutput[ILP];
 
-  if (shift == output_shift && shift == grad_output_shift) {
-    WriteBpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, shift, gradInput, output, gradOutput, epilogue);
-  } else {
-    WriteBpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, gradInput, output, gradOutput, epilogue);
+#pragma unroll
+    for (int j = 0; j < ILP; ++j) {
+      tmpGradOutput[j] = gradOutput[offset + j * blockDim.x];
+      tmpOutput[j] = output[offset + j * blockDim.x];
+    }
+
+#pragma unroll
+    for (int j = 0; j < ILP; ++j)
+      gradInput[offset + j * blockDim.x] = epilogue(tmpGradOutput[j], tmpOutput[j]);
   }
+
+  for (; offset < classes; offset += blockDim.x)
+    gradInput[offset] = epilogue(gradOutput[offset], output[offset]);
 }
+
+
+
+
+
 
 template<template<typename, typename, typename> class Epilogue, bool is_log_softmax>
 Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_to_float){
@@ -700,9 +506,10 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
       inner_size *= input.size(i);
     // This kernel spawns a block per each element in the batch.
     // XXX: it assumes that inner_size == 1
-
     if (inner_size == 1) {
+      const int ILP = 2;
       dim3 grid(outer_size);
+      dim3 block = SoftMax_getBlockSize(ILP, dim_size);
       AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "host_softmax", [&] {
       AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "host_softmax", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
@@ -711,8 +518,6 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
           dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
               output.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), dim_size, dim_size, outer_size);
         } else {
-          constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
-          dim3 block = SoftMax_getBlockSize(ILP, dim_size);
           cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
             <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
               output.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), dim_size
@@ -723,8 +528,6 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
           dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax>(
               output.data_ptr<accscalar_t>(), input.data_ptr<scalar_t>(), dim_size, dim_size, outer_size);
         } else {
-          constexpr int ILP = sizeof(float4) / sizeof(accscalar_t);
-          dim3 block = SoftMax_getBlockSize(ILP, dim_size);
           cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
             <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
               output.data_ptr<accscalar_t>(), input.data_ptr<scalar_t>(), dim_size
@@ -792,7 +595,9 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
 // See descriptions of kernels above.
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   if (inner_size == 1) {
+    const int ILP = 2;
     dim3 grid(outer_size);
+    dim3 block = SoftMax_getBlockSize(ILP, dim_size);
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, gI.scalar_type(), "host_softmax_backward", [&] {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "host_softmax_backward", [&] {
     using accscalar_t = acc_type<scalar_t, true>;
@@ -801,8 +606,6 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
         dispatch_softmax_backward<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
             gI.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(), dim_size, dim_size, outer_size);
       } else {
-        constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
-        dim3 block = SoftMax_getBlockSize(ILP, dim_size);
         cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
             gI.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), dim_size
@@ -813,8 +616,6 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
         dispatch_softmax_backward<accscalar_t, scalar_t, accscalar_t, is_log_softmax>(
             gI.data_ptr<scalar_t>(), grad.data_ptr<accscalar_t>(), output.data_ptr<accscalar_t>(), dim_size, dim_size, outer_size);
       } else {
-        constexpr int ILP = sizeof(float4) / sizeof(accscalar_t);
-        dim3 block = SoftMax_getBlockSize(ILP, dim_size);
         cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
             gI.data_ptr<scalar_t>(), output.data_ptr<accscalar_t>(), grad.data_ptr<accscalar_t>(), dim_size

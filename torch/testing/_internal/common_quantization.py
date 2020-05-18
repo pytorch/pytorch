@@ -116,9 +116,10 @@ def _make_conv_test_input(
 
 def skipIfNoFBGEMM(fn):
     reason = 'Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs with instruction set support AVX2 or newer.'
-    if isinstance(fn, type) and 'fbgemm' not in torch.backends.quantized.supported_engines:
-        fn.__unittest_skip__ = True
-        fn.__unittest_skip_why__ = reason
+    if isinstance(fn, type):
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
         return fn
 
     @functools.wraps(fn)
@@ -136,7 +137,7 @@ class QuantizationTestCase(TestCase):
         super().setUp()
         self.calib_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
         self.train_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
-        self.img_data = [(torch.rand(2, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
+        self.img_data = [(torch.rand(1, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
                          for _ in range(2)]
         self.img_data_1d = [(torch.rand(2, 3, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
                             for _ in range(2)]
