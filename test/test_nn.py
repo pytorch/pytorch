@@ -3770,19 +3770,12 @@ class TestNN(NNTestCase):
         do_test(False, None, {})
 
     def test_module_with_parameter_tags(self):
-        class TestModule(nn.Module):
-            def __init__(self, has_tags_arg, tags):
-                super(TestModule, self).__init__()
-                if has_tags_arg:
-                    self.param = nn.Parameter(torch.randn(5, 5), tags=tags)
-                else:
-                    self.param = nn.Parameter(torch.randn(5, 5))
-
-            def forward(self, x):
-                return x
-
         def do_test(has_tags_arg, tags, expected_tags):
-            m = TestModule(has_tags_arg, tags)
+            m = torch.nn.Linear(4, 5)
+            if has_tags_arg:
+                m.param = Parameter(torch.randn(5, 5), tags=tags)
+            else:
+                m.param = Parameter(torch.randn(5, 5))
             self.assertEqual(m.param.tags, expected_tags)
 
             m_unpickle = pickle.loads(pickle.dumps(m))
