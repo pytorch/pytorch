@@ -8,6 +8,7 @@ from torch.testing._internal.dist_utils import (
     dist_init,
     get_timeout_error_regex,
     worker_name,
+    wait_until_pending_users_flushed
 )
 from torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture import (
     FaultyRpcAgentTestFixture,
@@ -22,7 +23,6 @@ def two_args_two_kwargs(
     second_kwarg=torch.tensor([4, 4]),
 ):
     return first_arg + second_arg + first_kwarg + second_kwarg
-
 
 @torch.jit.script
 def rpc_async_call_remote_torchscript_in_torchscript(
@@ -62,6 +62,18 @@ def rpc_async_call_future_ret(
 ):
     fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
     return fut
+
+@torch.jit.script
+def rref_to_here(rref_var):
+    # type: (RRef[Tensor]) -> Tensor
+    return rref_var.to_here()
+
+@torch.jit.script
+def rpc_async_with_rref_arg(dst_worker_name, args):
+    # type: (str, Tuple[RRef[Tensor]]) -> Tensor
+    fut = rpc.rpc_async(dst_worker_name, rref_to_here, args)
+    ret = fut.wait()
+    return ret
 
 
 class JitFaultyAgentRpcTest(FaultyRpcAgentTestFixture):
@@ -140,3 +152,35 @@ class JitFaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         self.assertEqual(result, torch.tensor([8, 8]))
         # reset for clean shutdown
         rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
+
+    @dist_init(faulty_messages=["SCRIPT_REMOTE_CALL"])
+    def test_rref_timeout_to_here_in_jit(self):
+        # Test that calling to_here() in JIT will raise timeout error if
+        # rpc.remote failed.
+        if self.rank != 0:
+            return
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker = "worker{}".format(dst_rank)
+        rref = rpc.remote(
+            dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
+        )
+        wait_until_pending_users_flushed()
+        # Call to_here() within a ScriptFunction and ensure it raises
+        with self.assertRaisesRegex(RuntimeError, "RRef creation"):
+            rref_to_here(rref)
+
+    @dist_init(faulty_messages=["SCRIPT_REMOTE_CALL"])
+    def test_rref_timeout_pickle_in_jit(self):
+        if self.rank != 0:
+            return
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker = "worker{}".format(dst_rank)
+        rref = rpc.remote(
+            dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
+        )
+        wait_until_pending_users_flushed()
+        # Call RPC with RRef arg in JIT, which will go through JIT pickling and
+        # ensure error is raised.
+        with self.assertRaisesRegex(RuntimeError, "RRef creation"):
+            rpc_async_with_rref_arg(dst_worker, (rref, ))
+        # test with regular rpc_sync but scriptFunction, see script_check_rref_confirmed

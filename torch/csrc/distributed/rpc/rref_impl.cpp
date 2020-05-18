@@ -66,17 +66,19 @@ RRefForkData RRef::fork() const {
 void RRef::handleError(
     RPCErrorType errorType,
     const FutureMessage& futMessage) {
-  static std::
-      unordered_map<RPCErrorType, std::function<void(const FutureMessage& fm)>>
-          errorHandlers = {
-              {RPCErrorType::TIMEOUT,
-               [this](const FutureMessage& /* unused */) { setTimedOut(); }},
-              {RPCErrorType::UNKNOWN_ERROR, [](const FutureMessage& fm) {
-                 // Default error handler, equivalent to
-                 // RRefContext::handleException().
-                 VLOG(1) << "Got exception: " << fm.error()->what();
-                 throw std::runtime_error(fm.error()->what());
-               }}};
+  static std::unordered_map<
+      RPCErrorType,
+      std::function<void(const FutureMessage& fm)>,
+      std::hash<int>>
+      errorHandlers = {
+          {RPCErrorType::TIMEOUT,
+           [this](const FutureMessage& /* unused */) { setTimedOut(); }},
+          {RPCErrorType::UNKNOWN_ERROR, [](const FutureMessage& fm) {
+             // Default error handler, equivalent to
+             // RRefContext::handleException().
+             VLOG(1) << "Got exception: " << fm.error()->what();
+             throw std::runtime_error(fm.error()->what());
+           }}};
   errorHandlers.find(errorType)->second(futMessage);
 }
 

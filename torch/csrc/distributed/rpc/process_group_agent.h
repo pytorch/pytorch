@@ -75,6 +75,8 @@ class ProcessGroupAgent : public RpcAgent {
 
   void sync() override;
 
+  // Return a set of possible errors when an RPC times out. Used for error
+  // handling of RPC timeouts.
   std::vector<std::string> getTimeoutErrorDescription() override;
 
   void startImpl() override;

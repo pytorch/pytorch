@@ -27,7 +27,7 @@ RPCErrorType getRPCErrorType(const FutureMessage& fm) {
       "FutureMessage passed to getRPCErrorType does not have an error.");
   auto timeoutErrors =
       RpcAgent::getCurrentRpcAgent()->getTimeoutErrorDescription();
-  timeoutErrors.push_back("failed intentionally");
+  timeoutErrors.emplace_back("failed intentionally");
 
   auto err = std::string(fm.error()->what());
   if (std::any_of(

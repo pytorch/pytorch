@@ -7,6 +7,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+// Parse error message and return RPCErrorType based on the message.
 TORCH_API RPCErrorType getRPCErrorType(const FutureMessage& fm);
 
 // Given an RPC message received as a request over the wire, deserialize it into
