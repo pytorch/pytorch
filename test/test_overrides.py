@@ -470,6 +470,8 @@ def generate_tensor_like_override_tests(cls):
         func_args = [TensorLike() for _ in range(nargs)]
         if args.varargs is not None:
             func_args += [TensorLike(), TensorLike()]
+        if func.__name__ in {'gru', 'lstm', 'rnn_tanh', 'rnn_relu'}:
+            func_args += args.defaults
 
         def test(self):
             self.assertEqual(func(*func_args), -1)
