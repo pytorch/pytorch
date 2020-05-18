@@ -318,44 +318,6 @@ class _TestTorchMixin(object):
         with self.assertRaisesRegex(RuntimeError, "PyTorch doesn't support reduction operations for dim>=64"):
             torch.sum(x, -1)
 
-    def _test_logaddexp(self, base2=False):
-        assert TEST_NUMPY
-
-        if base2:
-            gt_func = np.logaddexp2
-            our_func = torch.logaddexp2
-        else:
-            gt_func = np.logaddexp
-            our_func = torch.logaddexp
-
-        a = torch.randn(51, 2)
-        b = torch.randn(51, 2)
-        gt = gt_func(a.numpy(), b.numpy())
-        ours = our_func(a, b)
-        self.assertEqual(ours.shape, gt.shape)
-        self.assertTrue(np.allclose(ours.numpy(), gt))
-
-        # numerical stability
-        a *= 10000
-        b *= 10000
-        a[0] = inf
-        b[0] = inf
-        a[1] = -inf
-        b[1] = -inf
-        a[2] = inf
-        b[2] = -inf
-        gt = gt_func(a.numpy(), b.numpy())
-        ours = our_func(a, b)
-        self.assertTrue(np.allclose(ours.numpy(), gt))
-
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_logaddexp(self):
-        self._test_logaddexp()
-
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_logaddexp2(self):
-        self._test_logaddexp(base2=True)
-
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
         from scipy.special import logsumexp
@@ -9641,6 +9603,44 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(actual, actual_out)
                 expected = start + weight * (end - start)
                 self.assertEqual(expected, actual)
+
+    def _test_logaddexp(self, device, dtype, base2=False):
+        if base2:
+            gt_func = np.logaddexp2
+            our_func = torch.logaddexp2
+        else:
+            gt_func = np.logaddexp
+            our_func = torch.logaddexp
+
+        a = torch.randn(51, 2, dtype=dtype, device=device)
+        b = torch.randn(51, 2, dtype=dtype, device=device)
+        gt = torch.tensor(gt_func(a.cpu().numpy(), b.cpu().numpy()), device=device)
+        ours = our_func(a, b)
+        self.assertEqual(ours.shape, gt.shape)
+        self.assertTrue(torch.allclose(ours, gt))
+
+        # numerical stability
+        a *= 10000
+        b *= 10000
+        a[0] = inf
+        b[0] = inf
+        a[1] = -inf
+        b[1] = -inf
+        a[2] = inf
+        b[2] = -inf
+        gt = torch.tensor(gt_func(a.cpu().numpy(), b.cpu().numpy()), device=device)
+        ours = our_func(a, b)
+        self.assertTrue(torch.allclose(ours, gt))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(torch.float32, torch.float64)
+    def test_logaddexp(self, device, dtype):
+        self._test_logaddexp(device, dtype)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(torch.float32, torch.float64)
+    def test_logaddexp2(self, device, dtype):
+        self._test_logaddexp(device, dtype, base2=True)
 
     def test_diagflat(self, device):
         dtype = torch.float32
