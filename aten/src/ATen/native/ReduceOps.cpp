@@ -463,12 +463,17 @@ Tensor nanprod(const Tensor& self, int64_t dim, bool keepdim, c10::optional<Scal
   return result;
 }
 
-Tensor& nanprod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) {
-  return at::native::prod_out_impl(result, self, dim, keepdim, dtype);
+Tensor nanprod(const Tensor& self, c10::optional<ScalarType> dtype) {
+  Tensor result;
+  return at::native::nanprod_out_impl(result, self, {}, false, dtype);
 }
 
-Tensor prod(const Tensor& self, Dimname dim, bool keepdim, c10::optional<ScalarType> dtype) {
-  return at::prod(self, dimname_to_position(self, dim), keepdim, dtype);
+Tensor& nanprod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  return at::native::nanprod_out_impl(result, self, dim, keepdim, dtype);
+}
+
+Tensor nanprod(const Tensor& self, Dimname dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  return at::nanprod(self, dimname_to_position(self, dim), keepdim, dtype);
 }
 
 Tensor& nanprod_out(Tensor& result, const Tensor& self, Dimname dim,
