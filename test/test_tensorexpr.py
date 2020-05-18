@@ -1,4 +1,3 @@
-import contextlib
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -1142,7 +1141,7 @@ class TestTensorExprFuser(BaseTestClass):
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skip("dynamic shapes are not quite there yet")
     def test_dynamic_shape(self):
-        with set_num_profiled_runs(2):
+        with num_profiled_runs(2):
             @torch.jit.script
             def test(x, y, z):
                 return x * y * z

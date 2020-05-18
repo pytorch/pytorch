@@ -3737,7 +3737,7 @@ class TestScript(JitTestCase):
                 return 2
 
         with enable_profiling_mode_for_profiling_tests():
-            with set_num_profiled_runs(2):
+            with num_profiled_runs(2):
                 test_not_const(torch.rand([1, 2]))
                 test_not_const(torch.rand([2, 2]))
                 test_not_const(torch.rand([3, 2]))

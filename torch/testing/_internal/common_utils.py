@@ -93,7 +93,7 @@ def enable_profiling_mode():
         torch._C._jit_set_profiling_mode(old_prof_mode_state)
 
 @contextmanager
-def set_num_profiled_runs(num_runs):
+def num_profiled_runs(num_runs):
     old_num_runs = torch._C._jit_set_num_profiled_runs(num_runs)
     try:
         yield
