@@ -3741,20 +3741,27 @@ class TestNN(NNTestCase):
         self.assertEqual(mm[0].sub.weight[0, 0].item(), 555)
 
     def test_parameter_tags(self):
-        tags = {"optimizer": "sparse"}
-        new_param = Parameter(torch.randn(5, 5), tags=tags)
-        self.assertEqual(new_param.tags, tags)
+        def do_test(has_tags_arg, tags):
+            if has_tags_arg:
+                param = Parameter(torch.randn(5, 5), tags=tags)
+            else:
+                param = Parameter(torch.randn(5, 5))
+            self.assertEqual(param.tags, tags)
 
-        new_param_unpickle = pickle.loads(pickle.dumps(new_param))
-        self.assertEqual(new_param_unpickle.tags, tags)
+            param_unpickle = pickle.loads(pickle.dumps(param))
+            self.assertEqual(param_unpickle.tags, tags)
 
-        with TemporaryFileName() as fname:
-            torch.save(new_param, fname)
-            new_param_torch_load = torch.load(fname)
-            self.assertEqual(new_param_torch_load.tags, tags)
+            with TemporaryFileName() as fname:
+                torch.save(param, fname)
+                param_torch_load = torch.load(fname)
+                self.assertEqual(param_torch_load.tags, tags)
 
-        new_param_copy = deepcopy(new_param)
-        self.assertEqual(new_param_copy.tags, tags)
+            param_copy = deepcopy(param)
+            self.assertEqual(param_copy.tags, tags)
+
+        do_test(True, {"optimizer": "sparse"})
+        do_test(True, None)
+        do_test(False, None)
 
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
