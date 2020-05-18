@@ -423,6 +423,8 @@ class BuildExtension(build_ext, object):
                                              include_dirs, sources,
                                              depends, extra_postargs)
             common_cflags = self.compiler._get_cc_args(pp_opts, debug, extra_preargs)
+            from shlex import quote
+            common_cflags = [quote(f) for f in common_cflags]
             extra_cc_cflags = self.compiler.compiler_so[1:]
             with_cuda = any(map(_is_cuda_file, sources))
 
@@ -1628,8 +1630,7 @@ def _write_ninja_file(path,
         if flags is None:
             return []
         else:
-            # quote each flag, in case there are spaces in path names
-            return ['"' + flag.strip() + '"' for flag in flags]
+            return [flag.strip() for flag in flags]
 
     cflags = sanitize_flags(cflags)
     post_cflags = sanitize_flags(post_cflags)
