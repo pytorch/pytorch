@@ -3791,13 +3791,11 @@ class TestNN(NNTestCase):
                 # Parameter tags should not be exported in `Module.state_dict()`
                 self.assertFalse(hasattr(m_state_dict["param"], "tags"))
 
+                # Loading a state dict does not affect a module's parameter tags
                 torch.save(m_state_dict, fname)
                 m2 = torch.nn.Linear(4, 5)
                 m2_tags = {"optimizer": "dense"}
-                if has_tags_arg:
-                    m2.param = Parameter(torch.randn(5, 5), tags=m2_tags)
-                else:
-                    m2.param = Parameter(torch.randn(5, 5))
+                m2.param = Parameter(torch.randn(5, 5), tags=m2_tags)
                 m2.load_state_dict(torch.load(fname))
                 self.assertEqual(m2.param.tags, m2_tags)
 
