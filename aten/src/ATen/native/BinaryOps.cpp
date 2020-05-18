@@ -745,7 +745,7 @@ Tensor& fmod_(Tensor& self, Scalar other) {
 }
 
 Tensor& logaddexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/true);
   logaddexp_stub(iter.device_type(), iter);
   return result;
 }
@@ -756,7 +756,7 @@ Tensor logaddexp(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& logaddexp2_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/true);
   logaddexp2_stub(iter.device_type(), iter);
   return result;
 }
