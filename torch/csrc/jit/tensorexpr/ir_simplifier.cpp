@@ -254,10 +254,10 @@ const Expr* PolynomialTransformer::mutate(const Add* v) {
   const Expr* scalar = nullptr;
   const Expr* variable = nullptr;
   if (lhs_new->isConstant()) {
-    scalar = evaluateOp(lhs_new);
+    scalar = lhs_new;
     variable = rhs_new;
   } else if (rhs_new->isConstant()) {
-    scalar = evaluateOp(rhs_new);
+    scalar = rhs_new;
     variable = lhs_new;
   }
 
@@ -1047,6 +1047,15 @@ Stmt* PolynomialTransformer::mutate(const Cond* v) {
   if (true_new && false_new &&
       hasher_.hash(true_new) == hasher_.hash(false_new)) {
     return Stmt::clone(true_new);
+  }
+
+  Block* true_block = dynamic_cast<Block*>(true_new);
+  Block* false_block = dynamic_cast<Block*>(false_new);
+  bool true_empty = !true_new || (true_block && true_block->nstmts() == 0);
+  bool false_empty = !false_new || (false_block && false_block->nstmts() == 0);
+
+  if (true_empty && false_empty) {
+    return new Block({});
   }
 
   if (cond_old == cond_new && true_old == true_new && false_old == false_new) {

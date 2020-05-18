@@ -42,7 +42,21 @@ namespace jit {
   _(ExprSplitWithMask01)                    \
   _(ScheduleBroadcastAddBuffer)             \
   _(ScheduleFunctionCall01)                 \
+  _(ScheduleInlineSimple)                   \
   _(ScheduleInlineFunc01)                   \
+  _(ScheduleInlineRandom)                   \
+  _(ScheduleInlineIntrinsics)               \
+  _(ScheduleInlineRandWithIntrinsics)       \
+  _(ScheduleSplitAThenInline)               \
+  _(ScheduleSplitBThenInline)               \
+  _(ScheduleSplitTwiceThenInline)           \
+  _(ScheduleInlineThenSplit)                \
+  _(ScheduleSplitInlineThenSplit)           \
+  _(ScheduleSplitInlineSimplify)            \
+  _(ScheduleInlineThreeMixedOnce)           \
+  _(ScheduleInlineThreeMixedTwice)          \
+  _(ScheduleInlineThreeMixedInner)          \
+  _(ScheduleInlineThreeMixedSplit)          \
   _(ScheduleFuserStyle)                     \
   _(ScheduleFuserThreeArg)                  \
   _(ScheduleDynamicShape2D)                 \
@@ -56,6 +70,11 @@ namespace jit {
   _(ReduceAnyAll)                           \
   _(ReduceMatmul2D)                         \
   _(ReduceRfactorLike)                      \
+  _(ReduceAsProducer)                       \
+  _(ReduceAsConsumer)                       \
+  _(SplitReduceAxis)                        \
+  _(SplitNonReduceAxis)                     \
+  _(ReorderedReductionInitializer)          \
   _(ReduceRfactor)                          \
   _(Reduce3DRfactor)                        \
   _(Reduce3DRfactor2)                       \
@@ -72,8 +91,9 @@ namespace jit {
   _(ReduceOverSplitMask)                    \
   _(ReduceSplitRfactor)                     \
   _(ReduceOverSplitRfactor)                 \
-  _(SplitReduceAxis)                        \
-  _(SplitNonReduceAxis)                     \
+  _(ReduceInlineReduction)                  \
+  _(ReduceInlineConsumer)                   \
+  _(ReduceInlineReducerInternal)            \
   _(TypeTest01)                             \
   _(TypePropagation)                        \
   _(Cond01)                                 \

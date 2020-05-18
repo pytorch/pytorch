@@ -54,8 +54,15 @@ class StmtNode : public Stmt {
 
 template <class Op>
 Stmt* StmtNode<Op>::accept_mutator(IRMutator* mutator) {
-  StmtNode* this_mutable = const_cast<StmtNode*>(this);
-  return mutator->mutate(static_cast<Op*>(this_mutable));
+  StmtNode* this_pre = static_cast<StmtNode*>(mutator->pre_mutate(this));
+  if (!this_pre) {
+    return nullptr;
+  }
+  if (dynamic_cast<Op*>(this_pre) == nullptr) {
+    return this_pre->accept_mutator(mutator);
+  }
+
+  return mutator->mutate(static_cast<Op*>(this_pre));
 }
 
 // Concrete Stmt classes

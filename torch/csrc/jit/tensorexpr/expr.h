@@ -263,8 +263,15 @@ class VarHandle : public ExprHandle {
 
 template <class Op, class Base>
 const Expr* ExprNode<Op, Base>::accept_mutator(IRMutator* mutator) const {
-  ExprNode* this_mutable = const_cast<ExprNode*>(this);
-  return mutator->mutate(static_cast<Op*>(this_mutable));
+  const Expr* this_pre = mutator->pre_mutate(this);
+  if (!this_pre) {
+    return nullptr;
+  }
+  const Op* this_op = dynamic_cast<const Op*>(this_pre);
+  if (this_op == nullptr) {
+    return this_pre->accept_mutator(mutator);
+  }
+  return mutator->mutate(const_cast<Op*>(this_op));
 }
 
 inline bool same_node(const ExprHandle& expr1, const ExprHandle& expr2) {

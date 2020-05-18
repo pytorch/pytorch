@@ -53,6 +53,14 @@ class AtomicAdd;
 class TORCH_API IRMutator {
  public:
   virtual ~IRMutator() {}
+
+  virtual Stmt* pre_mutate(Stmt* s) {
+    return s;
+  }
+  virtual const Expr* pre_mutate(const Expr* e) {
+    return e;
+  }
+
   virtual const Expr* mutate(const Add* v);
   virtual const Expr* mutate(const Sub* v);
   virtual const Expr* mutate(const Mul* v);
