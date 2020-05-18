@@ -471,52 +471,6 @@ class MinMaxDynamicQuantObserver(MinMaxObserver):
 
         return scale.to(dtype=torch.float), torch.tensor([nudged_zero_point])
 
-# This observer is a temporary solution for quantizing modules with tensor lists as inputs.
-# If we decide to support more observers with TensorList this should be refactored
-# to work with multiple observer types.
-class _MinMaxTensorListObserver(MinMaxObserver):
-    r"""Observer module that works on lists of tensors.
-    It uses MinMaxObserver for computing the quantization parameters based on the
-    tensor min and max values.
-    This observer is used currently for dynamic quantization of LSTM modules that
-    require list of tensors for weight inputs.
-    """
-    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False):
-        super(_MinMaxTensorListObserver, self).__init__(dtype=dtype,
-                                                        qscheme=qscheme,
-                                                        reduce_range=reduce_range)
-
-    def forward(self, tensor_list):
-        # type: (List[Tensor]) -> (List[Tensor])
-        r"""Records the running minimum and maximum of ``tensor_list``."""
-        min_val = self.min_val
-        max_val = self.max_val
-        if min_val.numel() == 0 or max_val.numel() == 0:
-            min_val = torch.empty(len(tensor_list), dtype=torch.float32)
-            max_val = torch.empty(len(tensor_list), dtype=torch.float32)
-            for i in range(len(tensor_list)):
-                x = tensor_list[i].detach()
-                min_val[i] = torch.min(x)
-                max_val[i] = torch.max(x)
-        else:
-            for i in range(len(tensor_list)):
-                x = tensor_list[i].detach()
-                min_val[i] = torch.min(torch.min(x), min_val[i])
-                max_val[i] = torch.max(torch.max(x), max_val[i])
-        self.min_val = min_val
-        self.max_val = max_val
-        return tensor_list
-
-    def calculate_qparams(self):
-        scales = []
-        zero_points = []
-        for i in range(self.min_val.numel()):
-            x, y = self._calculate_qparams(self.min_val[i], self.max_val[i])
-            scales.append(x)
-            zero_points.append(y)
-        return scales, zero_points
-
-
 class PerChannelMinMaxObserver(_ObserverBase):
     r"""Observer module for computing the quantization parameters based on the
     running per channel min and max values.
