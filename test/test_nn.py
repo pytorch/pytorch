@@ -3771,7 +3771,7 @@ class TestNN(NNTestCase):
 
     def test_module_with_parameter_tags(self):
         class TestModule(nn.Module):
-            def __init__(self, has_tags_arg):
+            def __init__(self, has_tags_arg, tags):
                 super(TestModule, self).__init__()
                 if has_tags_arg:
                     self.param = nn.Parameter(torch.randn(5, 5), tags=tags)
@@ -3782,7 +3782,7 @@ class TestNN(NNTestCase):
                 return x
 
         def do_test(has_tags_arg, tags, expected_tags):
-            m = TestModule(has_tags_arg)
+            m = TestModule(has_tags_arg, tags)
             self.assertEqual(m.param.tags, expected_tags)
 
             m_unpickle = pickle.loads(pickle.dumps(m))
