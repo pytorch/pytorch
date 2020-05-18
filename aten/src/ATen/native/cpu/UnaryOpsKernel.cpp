@@ -119,6 +119,14 @@ static void bitwise_not_kernel(TensorIterator& iter) {
   }
 }
 
+static void exp2_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "exp2_cpu", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::exp2(a); });
+  });
+}
+
 static void frac_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "frac_cpu", [&]() {
     cpu_kernel_vec(
@@ -441,6 +449,7 @@ REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
+REGISTER_DISPATCH(exp2, &exp2_kernel);
 REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
 REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
@@ -481,7 +490,7 @@ IMPLEMENT_FLOAT_KERNEL(FLOATING, erf)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erfc)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erfinv)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, exp)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, exp2)
+// IMPLEMENT_COMPLEX_KERNEL(FLOATING, exp2)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, expm1)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, floor)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, log)
