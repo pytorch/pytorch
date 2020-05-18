@@ -1266,7 +1266,7 @@ class CTCLoss(_Loss):
         - Output: scalar. If :attr:`reduction` is ``'none'``, then
           :math:`(N)`, where :math:`N = \text{batch size}`.
 
-    Example1::
+    Examples::
 
         >>> # Target are to be padded
         >>> T = 50      # Input sequence length
@@ -1286,9 +1286,8 @@ class CTCLoss(_Loss):
         >>> ctc_loss = nn.CTCLoss()
         >>> loss = ctc_loss(input, target, input_lengths, target_lengths)
         >>> loss.backward()
-
-    Example2::
-
+        >>>
+        >>>
         >>> # Target are to be un-padded
         >>> T = 50      # Input sequence length
         >>> C = 20      # Number of classes (including blank)
