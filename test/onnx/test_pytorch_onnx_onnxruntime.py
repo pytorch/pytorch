@@ -1953,42 +1953,71 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.ones(5, 6)
         self.run_test(DimArange(), x)
 
+    def _test_compare_ops(self, model, num_inputs):
+        x_float = torch.randn(1, 2, 3, 4, requires_grad=True)
+        x_int = torch.randint(10, (3, 4), dtype=torch.int32)
+        if num_inputs > 1:
+            y_float = torch.randn(1, 2, 3, 4, requires_grad=True)
+            y_int = torch.randint(10, (3, 4), dtype=torch.int32)
+            self.run_test(model, (x_float, y_float))
+            self.run_test(model, (x_float, y_int))
+            self.run_test(model, (x_int, y_float))
+            self.run_test(model, (x_int, y_int))
+        else:
+            self.run_test(model, x_float)
+            self.run_test(model, x_int)
+
     def test_gt(self):
         class GreaterModel(torch.nn.Module):
             def forward(self, input, other):
                 return input > other
+        self._test_compare_ops(GreaterModel(), 2)
 
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        y = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.run_test(GreaterModel(), (x, y))
-
-        x = torch.randint(10, (3, 4), dtype=torch.int32)
-        y = torch.randint(10, (3, 4), dtype=torch.int32)
-        self.run_test(GreaterModel(), (x, y))
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_ge(self):
+        class GreaterOrEqualModel(torch.nn.Module):
+            def forward(self, input, other):
+                return input >= other
+        self._test_compare_ops(GreaterOrEqualModel(), 2)
 
     def test_gt_scalar(self):
         class GreaterModel(torch.nn.Module):
             def forward(self, input):
                 return input > 1
+        self._test_compare_ops(GreaterModel(), 1)
 
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.run_test(GreaterModel(), x)
-
-        x = torch.randint(10, (3, 4), dtype=torch.int32)
-        self.run_test(GreaterModel(), x)
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_ge_scalar(self):
+        class GreaterOrEqualModel(torch.nn.Module):
+            def forward(self, input):
+                return input >= 1
+        self._test_compare_ops(GreaterOrEqualModel(), 1)
 
     def test_lt(self):
         class LessModel(torch.nn.Module):
             def forward(self, input, other):
                 return input > other
+        self._test_compare_ops(LessModel(), 2)
 
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        y = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.run_test(LessModel(), (x, y))
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_le(self):
+        class LessOrEqualModel(torch.nn.Module):
+            def forward(self, input, other):
+                return input <= other
+        self._test_compare_ops(LessOrEqualModel(), 2)
 
-        x = torch.randint(10, (3, 4), dtype=torch.int32)
-        y = torch.randint(10, (3, 4), dtype=torch.int32)
-        self.run_test(LessModel(), (x, y))
+    def test_lt_scalar(self):
+        class LessModel(torch.nn.Module):
+            def forward(self, input):
+                return input < 1
+        self._test_compare_ops(LessModel(), 1)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_le_scalar(self):
+        class LessOrEqualModel(torch.nn.Module):
+            def forward(self, input):
+                return input <= 1
+        self._test_compare_ops(LessOrEqualModel(), 1)
 
     def test_matmul(self):
         class MatmulModel(torch.nn.Module):
