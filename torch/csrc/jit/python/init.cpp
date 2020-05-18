@@ -834,7 +834,7 @@ void initJITBindings(PyObject* module) {
           &PythonFutureWrapper::then,
           py::call_guard<py::gil_scoped_release>());
 
-  m.def("fork", [](py::args args, py::kwargs kwargs) {
+  m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);
 
     py::function f = py::cast<py::function>(args[0]);
