@@ -1147,6 +1147,7 @@ class RpcTest(RpcAgentTestFixture):
             fut.wait()
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_nested_rpc(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1255,6 +1256,7 @@ class RpcTest(RpcAgentTestFixture):
         self._test_multi_remote_call(my_function, kwargs_fn=kwargs_fn)
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_py_rref_args(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -2571,6 +2573,7 @@ class RpcTest(RpcAgentTestFixture):
             fut1.wait()
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_callback_none(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         with self.assertRaisesRegex(

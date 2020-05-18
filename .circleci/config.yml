@@ -372,9 +372,13 @@ binary_windows_params: &binary_windows_params
     build_environment:
       type: string
       default: ""
+    executor:
+      type: string
+      default: "windows-cpu-with-nvidia-cuda"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     BUILD_FOR_SYSTEM: windows
+    JOB_EXECUTOR: <<parameters.executor>>
 
 
 promote_common: &promote_common
@@ -1205,8 +1209,14 @@ jobs:
 
   binary_windows_build:
     <<: *binary_windows_params
-    executor:
-      name: windows-cpu-with-nvidia-cuda
+    parameters:
+      build_environment:
+        type: string
+        default: ""
+      executor:
+        type: string
+        default: "windows-cpu-with-nvidia-cuda"
+    executor: <<parameters.executor>>
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - attach_scripts
@@ -1225,6 +1235,33 @@ jobs:
     - persist_to_workspace:
         root: "C:/w"
         paths: final_pkgs
+
+  binary_windows_test:
+    <<: *binary_windows_params
+    parameters:
+      build_environment:
+        type: string
+        default: ""
+      executor:
+        type: string
+        default: "windows-cpu-with-nvidia-cuda"
+    executor: <<parameters.executor>>
+    steps:
+    - attach_scripts
+    - attach_workspace:
+        at: c:/users/circleci/project
+    - run:
+        <<: *binary_checkout
+    - run:
+        <<: *binary_populate_env
+    - run:
+        name: Test
+        no_output_timeout: "1h"
+        command: |
+          set -eux -o pipefail
+          script="/c/w/p/.circleci/scripts/binary_windows_test.sh"
+          cat "$script"
+          source "$script"
 
   binary_windows_upload:
     <<: *binary_windows_params
@@ -3031,6 +3068,31 @@ workflows:
           name: binary_windows_wheel_3_7_cu102_build
           requires:
             - setup
+      - binary_windows_test:
+          build_environment: "libtorch 3.7 cpu debug"
+          name: binary_windows_libtorch_3_7_cpu_debug_test
+          requires:
+            - setup
+            - binary_windows_libtorch_3_7_cpu_debug_build
+      - binary_windows_test:
+          build_environment: "libtorch 3.7 cpu release"
+          name: binary_windows_libtorch_3_7_cpu_release_test
+          requires:
+            - setup
+            - binary_windows_libtorch_3_7_cpu_release_build
+      - binary_windows_test:
+          build_environment: "wheel 3.7 cu102"
+          executor: windows-with-nvidia-gpu
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          name: binary_windows_wheel_3_7_cu102_test
+          requires:
+            - setup
+            - binary_windows_wheel_3_7_cu102_build
       - binary_linux_test:
           build_environment: manywheel 3.7m cu102 devtoolset7
           docker_image: pytorch/manylinux-cuda102
@@ -5779,6 +5841,382 @@ workflows:
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
+      - binary_windows_test:
+          name: binary_windows_wheel_3_6_cpu_nightly_test
+          build_environment: "wheel 3.6 cpu"
+          requires:
+            - setup
+            - binary_windows_wheel_3_6_cpu_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_test:
+          name: binary_windows_wheel_3_7_cpu_nightly_test
+          build_environment: "wheel 3.7 cpu"
+          requires:
+            - setup
+            - binary_windows_wheel_3_7_cpu_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_test:
+          name: binary_windows_wheel_3_8_cpu_nightly_test
+          build_environment: "wheel 3.8 cpu"
+          requires:
+            - setup
+            - binary_windows_wheel_3_8_cpu_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_test:
+          name: binary_windows_wheel_3_6_cu92_nightly_test
+          build_environment: "wheel 3.6 cu92"
+          requires:
+            - setup
+            - binary_windows_wheel_3_6_cu92_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_wheel_3_7_cu92_nightly_test
+          build_environment: "wheel 3.7 cu92"
+          requires:
+            - setup
+            - binary_windows_wheel_3_7_cu92_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_wheel_3_8_cu92_nightly_test
+          build_environment: "wheel 3.8 cu92"
+          requires:
+            - setup
+            - binary_windows_wheel_3_8_cu92_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_wheel_3_6_cu101_nightly_test
+          build_environment: "wheel 3.6 cu101"
+          requires:
+            - setup
+            - binary_windows_wheel_3_6_cu101_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_wheel_3_7_cu101_nightly_test
+          build_environment: "wheel 3.7 cu101"
+          requires:
+            - setup
+            - binary_windows_wheel_3_7_cu101_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_wheel_3_8_cu101_nightly_test
+          build_environment: "wheel 3.8 cu101"
+          requires:
+            - setup
+            - binary_windows_wheel_3_8_cu101_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_wheel_3_6_cu102_nightly_test
+          build_environment: "wheel 3.6 cu102"
+          requires:
+            - setup
+            - binary_windows_wheel_3_6_cu102_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_wheel_3_7_cu102_nightly_test
+          build_environment: "wheel 3.7 cu102"
+          requires:
+            - setup
+            - binary_windows_wheel_3_7_cu102_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_wheel_3_8_cu102_nightly_test
+          build_environment: "wheel 3.8 cu102"
+          requires:
+            - setup
+            - binary_windows_wheel_3_8_cu102_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_conda_3_6_cpu_nightly_test
+          build_environment: "conda 3.6 cpu"
+          requires:
+            - setup
+            - binary_windows_conda_3_6_cpu_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_test:
+          name: binary_windows_conda_3_7_cpu_nightly_test
+          build_environment: "conda 3.7 cpu"
+          requires:
+            - setup
+            - binary_windows_conda_3_7_cpu_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_test:
+          name: binary_windows_conda_3_8_cpu_nightly_test
+          build_environment: "conda 3.8 cpu"
+          requires:
+            - setup
+            - binary_windows_conda_3_8_cpu_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_test:
+          name: binary_windows_conda_3_6_cu92_nightly_test
+          build_environment: "conda 3.6 cu92"
+          requires:
+            - setup
+            - binary_windows_conda_3_6_cu92_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_conda_3_7_cu92_nightly_test
+          build_environment: "conda 3.7 cu92"
+          requires:
+            - setup
+            - binary_windows_conda_3_7_cu92_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_conda_3_8_cu92_nightly_test
+          build_environment: "conda 3.8 cu92"
+          requires:
+            - setup
+            - binary_windows_conda_3_8_cu92_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_conda_3_6_cu101_nightly_test
+          build_environment: "conda 3.6 cu101"
+          requires:
+            - setup
+            - binary_windows_conda_3_6_cu101_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_conda_3_7_cu101_nightly_test
+          build_environment: "conda 3.7 cu101"
+          requires:
+            - setup
+            - binary_windows_conda_3_7_cu101_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_conda_3_8_cu101_nightly_test
+          build_environment: "conda 3.8 cu101"
+          requires:
+            - setup
+            - binary_windows_conda_3_8_cu101_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_conda_3_6_cu102_nightly_test
+          build_environment: "conda 3.6 cu102"
+          requires:
+            - setup
+            - binary_windows_conda_3_6_cu102_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_conda_3_7_cu102_nightly_test
+          build_environment: "conda 3.7 cu102"
+          requires:
+            - setup
+            - binary_windows_conda_3_7_cu102_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_conda_3_8_cu102_nightly_test
+          build_environment: "conda 3.8 cu102"
+          requires:
+            - setup
+            - binary_windows_conda_3_8_cu102_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_libtorch_3_7_cpu_debug_nightly_test
+          build_environment: "libtorch 3.7 cpu debug"
+          requires:
+            - setup
+            - binary_windows_libtorch_3_7_cpu_debug_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_test:
+          name: binary_windows_libtorch_3_7_cu92_debug_nightly_test
+          build_environment: "libtorch 3.7 cu92 debug"
+          requires:
+            - setup
+            - binary_windows_libtorch_3_7_cu92_debug_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_libtorch_3_7_cu101_debug_nightly_test
+          build_environment: "libtorch 3.7 cu101 debug"
+          requires:
+            - setup
+            - binary_windows_libtorch_3_7_cu101_debug_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_libtorch_3_7_cu102_debug_nightly_test
+          build_environment: "libtorch 3.7 cu102 debug"
+          requires:
+            - setup
+            - binary_windows_libtorch_3_7_cu102_debug_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_libtorch_3_7_cpu_release_nightly_test
+          build_environment: "libtorch 3.7 cpu release"
+          requires:
+            - setup
+            - binary_windows_libtorch_3_7_cpu_release_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_test:
+          name: binary_windows_libtorch_3_7_cu92_release_nightly_test
+          build_environment: "libtorch 3.7 cu92 release"
+          requires:
+            - setup
+            - binary_windows_libtorch_3_7_cu92_release_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_libtorch_3_7_cu101_release_nightly_test
+          build_environment: "libtorch 3.7 cu101 release"
+          requires:
+            - setup
+            - binary_windows_libtorch_3_7_cu101_release_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
+      - binary_windows_test:
+          name: binary_windows_libtorch_3_7_cu102_release_nightly_test
+          build_environment: "libtorch 3.7 cu102 release"
+          requires:
+            - setup
+            - binary_windows_libtorch_3_7_cu102_release_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          executor: windows-with-nvidia-gpu
       #- binary_linux_libtorch_3.6m_cpu_test:
       #    requires:
       #      - binary_linux_libtorch_3.6m_cpu_build
@@ -6580,7 +7018,7 @@ workflows:
           build_environment: "wheel 3.6 cpu"
           requires:
             - setup
-            - binary_windows_wheel_3_6_cpu_nightly_build
+            - binary_windows_wheel_3_6_cpu_nightly_test
           filters:
             branches:
               only: nightly
@@ -6592,7 +7030,7 @@ workflows:
           build_environment: "wheel 3.7 cpu"
           requires:
             - setup
-            - binary_windows_wheel_3_7_cpu_nightly_build
+            - binary_windows_wheel_3_7_cpu_nightly_test
           filters:
             branches:
               only: nightly
@@ -6604,7 +7042,7 @@ workflows:
           build_environment: "wheel 3.8 cpu"
           requires:
             - setup
-            - binary_windows_wheel_3_8_cpu_nightly_build
+            - binary_windows_wheel_3_8_cpu_nightly_test
           filters:
             branches:
               only: nightly
@@ -6616,7 +7054,7 @@ workflows:
           build_environment: "wheel 3.6 cu92"
           requires:
             - setup
-            - binary_windows_wheel_3_6_cu92_nightly_build
+            - binary_windows_wheel_3_6_cu92_nightly_test
           filters:
             branches:
               only: nightly
@@ -6628,7 +7066,7 @@ workflows:
           build_environment: "wheel 3.7 cu92"
           requires:
             - setup
-            - binary_windows_wheel_3_7_cu92_nightly_build
+            - binary_windows_wheel_3_7_cu92_nightly_test
           filters:
             branches:
               only: nightly
@@ -6640,7 +7078,7 @@ workflows:
           build_environment: "wheel 3.8 cu92"
           requires:
             - setup
-            - binary_windows_wheel_3_8_cu92_nightly_build
+            - binary_windows_wheel_3_8_cu92_nightly_test
           filters:
             branches:
               only: nightly
@@ -6652,7 +7090,7 @@ workflows:
           build_environment: "wheel 3.6 cu101"
           requires:
             - setup
-            - binary_windows_wheel_3_6_cu101_nightly_build
+            - binary_windows_wheel_3_6_cu101_nightly_test
           filters:
             branches:
               only: nightly
@@ -6664,7 +7102,7 @@ workflows:
           build_environment: "wheel 3.7 cu101"
           requires:
             - setup
-            - binary_windows_wheel_3_7_cu101_nightly_build
+            - binary_windows_wheel_3_7_cu101_nightly_test
           filters:
             branches:
               only: nightly
@@ -6676,7 +7114,7 @@ workflows:
           build_environment: "wheel 3.8 cu101"
           requires:
             - setup
-            - binary_windows_wheel_3_8_cu101_nightly_build
+            - binary_windows_wheel_3_8_cu101_nightly_test
           filters:
             branches:
               only: nightly
@@ -6688,7 +7126,7 @@ workflows:
           build_environment: "wheel 3.6 cu102"
           requires:
             - setup
-            - binary_windows_wheel_3_6_cu102_nightly_build
+            - binary_windows_wheel_3_6_cu102_nightly_test
           filters:
             branches:
               only: nightly
@@ -6700,7 +7138,7 @@ workflows:
           build_environment: "wheel 3.7 cu102"
           requires:
             - setup
-            - binary_windows_wheel_3_7_cu102_nightly_build
+            - binary_windows_wheel_3_7_cu102_nightly_test
           filters:
             branches:
               only: nightly
@@ -6712,7 +7150,7 @@ workflows:
           build_environment: "wheel 3.8 cu102"
           requires:
             - setup
-            - binary_windows_wheel_3_8_cu102_nightly_build
+            - binary_windows_wheel_3_8_cu102_nightly_test
           filters:
             branches:
               only: nightly
@@ -6724,7 +7162,7 @@ workflows:
           build_environment: "conda 3.6 cpu"
           requires:
             - setup
-            - binary_windows_conda_3_6_cpu_nightly_build
+            - binary_windows_conda_3_6_cpu_nightly_test
           filters:
             branches:
               only: nightly
@@ -6736,7 +7174,7 @@ workflows:
           build_environment: "conda 3.7 cpu"
           requires:
             - setup
-            - binary_windows_conda_3_7_cpu_nightly_build
+            - binary_windows_conda_3_7_cpu_nightly_test
           filters:
             branches:
               only: nightly
@@ -6748,7 +7186,7 @@ workflows:
           build_environment: "conda 3.8 cpu"
           requires:
             - setup
-            - binary_windows_conda_3_8_cpu_nightly_build
+            - binary_windows_conda_3_8_cpu_nightly_test
           filters:
             branches:
               only: nightly
@@ -6760,7 +7198,7 @@ workflows:
           build_environment: "conda 3.6 cu92"
           requires:
             - setup
-            - binary_windows_conda_3_6_cu92_nightly_build
+            - binary_windows_conda_3_6_cu92_nightly_test
           filters:
             branches:
               only: nightly
@@ -6772,7 +7210,7 @@ workflows:
           build_environment: "conda 3.7 cu92"
           requires:
             - setup
-            - binary_windows_conda_3_7_cu92_nightly_build
+            - binary_windows_conda_3_7_cu92_nightly_test
           filters:
             branches:
               only: nightly
@@ -6784,7 +7222,7 @@ workflows:
           build_environment: "conda 3.8 cu92"
           requires:
             - setup
-            - binary_windows_conda_3_8_cu92_nightly_build
+            - binary_windows_conda_3_8_cu92_nightly_test
           filters:
             branches:
               only: nightly
@@ -6796,7 +7234,7 @@ workflows:
           build_environment: "conda 3.6 cu101"
           requires:
             - setup
-            - binary_windows_conda_3_6_cu101_nightly_build
+            - binary_windows_conda_3_6_cu101_nightly_test
           filters:
             branches:
               only: nightly
@@ -6808,7 +7246,7 @@ workflows:
           build_environment: "conda 3.7 cu101"
           requires:
             - setup
-            - binary_windows_conda_3_7_cu101_nightly_build
+            - binary_windows_conda_3_7_cu101_nightly_test
           filters:
             branches:
               only: nightly
@@ -6820,7 +7258,7 @@ workflows:
           build_environment: "conda 3.8 cu101"
           requires:
             - setup
-            - binary_windows_conda_3_8_cu101_nightly_build
+            - binary_windows_conda_3_8_cu101_nightly_test
           filters:
             branches:
               only: nightly
@@ -6832,7 +7270,7 @@ workflows:
           build_environment: "conda 3.6 cu102"
           requires:
             - setup
-            - binary_windows_conda_3_6_cu102_nightly_build
+            - binary_windows_conda_3_6_cu102_nightly_test
           filters:
             branches:
               only: nightly
@@ -6844,7 +7282,7 @@ workflows:
           build_environment: "conda 3.7 cu102"
           requires:
             - setup
-            - binary_windows_conda_3_7_cu102_nightly_build
+            - binary_windows_conda_3_7_cu102_nightly_test
           filters:
             branches:
               only: nightly
@@ -6856,7 +7294,7 @@ workflows:
           build_environment: "conda 3.8 cu102"
           requires:
             - setup
-            - binary_windows_conda_3_8_cu102_nightly_build
+            - binary_windows_conda_3_8_cu102_nightly_test
           filters:
             branches:
               only: nightly
@@ -6868,7 +7306,7 @@ workflows:
           build_environment: "libtorch 3.7 cpu debug"
           requires:
             - setup
-            - binary_windows_libtorch_3_7_cpu_debug_nightly_build
+            - binary_windows_libtorch_3_7_cpu_debug_nightly_test
           filters:
             branches:
               only: nightly
@@ -6880,7 +7318,7 @@ workflows:
           build_environment: "libtorch 3.7 cu92 debug"
           requires:
             - setup
-            - binary_windows_libtorch_3_7_cu92_debug_nightly_build
+            - binary_windows_libtorch_3_7_cu92_debug_nightly_test
           filters:
             branches:
               only: nightly
@@ -6892,7 +7330,7 @@ workflows:
           build_environment: "libtorch 3.7 cu101 debug"
           requires:
             - setup
-            - binary_windows_libtorch_3_7_cu101_debug_nightly_build
+            - binary_windows_libtorch_3_7_cu101_debug_nightly_test
           filters:
             branches:
               only: nightly
@@ -6904,7 +7342,7 @@ workflows:
           build_environment: "libtorch 3.7 cu102 debug"
           requires:
             - setup
-            - binary_windows_libtorch_3_7_cu102_debug_nightly_build
+            - binary_windows_libtorch_3_7_cu102_debug_nightly_test
           filters:
             branches:
               only: nightly
@@ -6916,7 +7354,7 @@ workflows:
           build_environment: "libtorch 3.7 cpu release"
           requires:
             - setup
-            - binary_windows_libtorch_3_7_cpu_release_nightly_build
+            - binary_windows_libtorch_3_7_cpu_release_nightly_test
           filters:
             branches:
               only: nightly
@@ -6928,7 +7366,7 @@ workflows:
           build_environment: "libtorch 3.7 cu92 release"
           requires:
             - setup
-            - binary_windows_libtorch_3_7_cu92_release_nightly_build
+            - binary_windows_libtorch_3_7_cu92_release_nightly_test
           filters:
             branches:
               only: nightly
@@ -6940,7 +7378,7 @@ workflows:
           build_environment: "libtorch 3.7 cu101 release"
           requires:
             - setup
-            - binary_windows_libtorch_3_7_cu101_release_nightly_build
+            - binary_windows_libtorch_3_7_cu101_release_nightly_test
           filters:
             branches:
               only: nightly
@@ -6952,7 +7390,7 @@ workflows:
           build_environment: "libtorch 3.7 cu102 release"
           requires:
             - setup
-            - binary_windows_libtorch_3_7_cu102_release_nightly_build
+            - binary_windows_libtorch_3_7_cu102_release_nightly_test
           filters:
             branches:
               only: nightly
