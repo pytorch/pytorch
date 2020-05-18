@@ -257,6 +257,9 @@ public:
                                    sin_cos.x, 0xAA);                  //cos(b)           sin(b)
     return _mm256_mul_ps(exp, cos_sin);
   }
+  Vec256<std::complex<float>> exp2() const {
+    return map(std::exp2);
+  }
   Vec256<std::complex<float>> expm1() const {
     AT_ERROR("not supported for complex numbers");
   }

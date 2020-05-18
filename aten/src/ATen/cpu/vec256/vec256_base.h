@@ -324,6 +324,9 @@ public:
   Vec256<T> exp() const {
     return map(std::exp);
   }
+  Vec256<T> exp2() const {
+    return map(std::exp2);
+  }
   Vec256<T> expm1() const {
     return map(std::expm1);
   }
