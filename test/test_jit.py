@@ -15437,26 +15437,14 @@ a")
             m_traced = torch.jit.trace(m, torch.tensor(1.))
             m_scripted = torch.jit.script(m)
 
-            def test_serialization_or_copy(module, support_deepcopy_and_torch_save):
-                module_unpickle = pickle.loads(pickle.dumps(module))
-                self.assertEqual(module_unpickle.param.tags, expected_tags)
-
+            def test_serialization(module):
                 with TemporaryFileName() as fname:
                     module.save(fname)
                     module_torch_jit_load = torch.jit.load(fname)
                     self.assertEqual(module_torch_jit_load.param.tags, expected_tags)
 
-                if support_deepcopy_and_torch_save:
-                    with TemporaryFileName() as fname:
-                        torch.save(module, fname)
-                        module_torch_load = torch.load(fname)
-                        self.assertEqual(module_torch_load.param.tags, expected_tags)
-
-                    module_copy = deepcopy(module)
-                    self.assertEqual(module_copy.param.tags, expected_tags)
-
-            test_serialization_or_copy(m_traced, support_deepcopy_and_torch_save=True)
-            test_serialization_or_copy(m_scripted, support_deepcopy_and_torch_save=False)
+            test_serialization(m_traced)
+            test_serialization(m_scripted)
 
         do_test(True, {"optimizer": "sparse"}, {"optimizer": "sparse"})
         do_test(True, None, {})
