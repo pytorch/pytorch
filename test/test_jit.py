@@ -15419,7 +15419,47 @@ a")
             self.assertEqual(loaded.buffer1, torch.ones(2, 2) + 5)
             self.assertEqual(loaded.buffer2, torch.ones(2, 2) + 10)
 
+    def test_parameter_tags(self):
+        def do_test(has_tags_arg, tags, expected_tags):
+            class TestModule(nn.Module):
+                def __init__(self):
+                    super(Param, self).__init__()
+                    if has_tags_arg:
+                        self.param = nn.Parameter(torch.randn(5, 5), tags=tags)
+                    else:
+                        self.param = nn.Parameter(torch.randn(5, 5))
 
+                def forward(self, x):
+                    return x
+
+            m = TestModule()
+            self.assertEqual(m.tags, expected_tags)
+            m_traced = torch.jit.trace(m, torch.tensor(1.))
+            m_scripted = torch.jit.script(m)
+
+            def test_serialization_or_copy(module):
+                module_unpickle = pickle.loads(pickle.dumps(module))
+                self.assertEqual(module_unpickle.param.tags, expected_tags)
+
+                with TemporaryFileName() as fname:
+                    torch.save(module, fname)
+                    module_torch_load = torch.load(fname)
+                    self.assertEqual(module_torch_load.param.tags, expected_tags)
+
+                with TemporaryFileName() as fname:
+                    module.save(fname)
+                    module_torch_jit_load = torch.jit.load(fname)
+                    self.assertEqual(module_torch_jit_load.param.tags, expected_tags)
+
+                module_copy = deepcopy(module)
+                self.assertEqual(module_copy.param.tags, expected_tags)
+
+            test_serialization_or_copy(m_traced)
+            test_serialization_or_copy(m_scripted)
+
+        do_test(True, {"optimizer": "sparse"}, {"optimizer": "sparse"})
+        do_test(True, None, {})
+        do_test(False, None, {})
 
     def test_string_slicing(self):
         def fn1(x):
