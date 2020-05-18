@@ -200,7 +200,7 @@ class TestAsync(JitTestCase):
     def test_async_kwargs(self):
         @torch.jit.script
         def foo(x1, x2):
-            return 2*x1 + x2;
+            return 2 * x1 + x2
 
         x1 = torch.rand(3, 4)
         x2 = torch.rand(3, 4)
