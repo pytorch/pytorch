@@ -18,7 +18,7 @@ static void linspace_kernel(TensorIterator& iter, Scalar scalar_start, Scalar sc
     using step_t = std::conditional_t<std::is_integral<scalar_t>::value, double, scalar_t>;
     const scalar_t start = scalar_start.to<scalar_t>();
     const scalar_t end = scalar_end.to<scalar_t>();
-    const step_t step = static_cast<step_t>(end - start) / static_cast<step_t>(steps - 1);
+    const step_t step = static_cast<step_t>(end - start) / (steps - 1);
     int64_t halfway = steps / 2;
     at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       int64_t idx(p_begin);
@@ -27,18 +27,18 @@ static void linspace_kernel(TensorIterator& iter, Scalar scalar_start, Scalar sc
           it,
           [start, end, step, halfway, steps, &idx]() -> scalar_t {
             if (idx < halfway) {
-              return start + step * static_cast<step_t>(idx++);
+              return start + step * (idx++);
             } else {
-              return end - step * static_cast<step_t>(steps - (idx++) - 1);
+              return end - step * (steps - (idx++) - 1);
             }
           },
           [start, end, step, halfway, steps, &idx]() -> Vec256<scalar_t> {
             Vec256<scalar_t> res;
             if (idx < halfway) {
-              res = Vec256<scalar_t>::arange(start + step * static_cast<step_t>(idx), step);
+              res = Vec256<scalar_t>::arange(start + step * idx, step);
             } else {
               res = Vec256<scalar_t>::arange(
-                  end - step * static_cast<step_t>(steps - idx - 1), step);
+                  end - step * (steps - idx - 1), step);
             }
             idx += Vec256<scalar_t>::size();
             return res;
