@@ -6,8 +6,6 @@
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/library.h>
 
@@ -24,29 +22,6 @@ namespace {
 static auto workerInfo =
     torch::class_<dist_rpc::WorkerInfo>("dist_rpc", "WorkerInfo")
         .def(torch::init<std::string, int64_t>());
-
-at::Tensor toOptionalTensor(const c10::IValue& v) {
-  if (v.isNone()) {
-    return at::Tensor();
-  }
-  return v.toTensor();
-}
-
-at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
-  return v.has_value() ? *v : at::Tensor();
-}
-
-c10::AliasAnalysisKind aliasAnalysisFromSchema() {
-  return c10::AliasAnalysisKind::FROM_SCHEMA;
-}
-
-c10::AliasAnalysisKind aliasAnalysisConservative() {
-  return c10::AliasAnalysisKind::CONSERVATIVE;
-}
-
-c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
-  return c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
-}
 
 RegisterOperators reg_rpc_ops(
     {Operator(

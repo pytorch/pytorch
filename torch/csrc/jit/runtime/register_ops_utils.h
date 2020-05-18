@@ -34,11 +34,17 @@
 
 namespace torch {
 namespace jit {
-c10::AliasAnalysisKind aliasAnalysisFromSchema();
+inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
+}
 
-c10::AliasAnalysisKind aliasAnalysisConservative();
+inline c10::AliasAnalysisKind aliasAnalysisConservative() {
+  return c10::AliasAnalysisKind::CONSERVATIVE;
+}
 
-c10::AliasAnalysisKind aliasAnalysisSpecialCase();
+inline c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
+  return c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
+}
 
 template <class T>
 c10::List<T> make_result_list(const TypePtr& elemType) {
