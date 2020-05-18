@@ -102,7 +102,14 @@ C10_HOST_DEVICE inline T cauchy(T val, T median, T sigma) {
 template <typename T>
 C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val, T lambda) {
   // https://en.wikipedia.org/wiki/Exponential_distribution#Generating_exponential_variates
+  // Different implementations for CUDA and CPU to preserve original logic
+  // TODO: must be investigated and unified!!!
+  // https://github.com/pytorch/pytorch/issues/38662
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  return static_cast<T>(-1.0) / lambda * at::log(val);
+#else
   return static_cast<T>(-1.0) / lambda * at::log(static_cast<T>(1.0) - val);
+#endif
 }
 
 /**
