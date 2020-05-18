@@ -217,7 +217,7 @@ class RNNBase(torch.nn.Module):
 
         num_directions = 2 if mod.bidirectional else 1
 
-        hidden_switch = bidirectional and qRNNBase.concat
+        hidden_switch = qRNNBase.bidirectional and qRNNBase.concat
         bidirectional_size = qRNNBase.hidden_size * num_directions
         actual_size = bidirectional_size if hidden_switch else qRNNBase.hidden_size
 
