@@ -17345,11 +17345,17 @@ _types2 = _types + [torch.bfloat16] if TEST_WITH_ROCM else _types
 
 _float_types = [torch.half, torch.float, torch.double]
 
+_complex_types = [torch.cfloat, torch.cdouble]
+
+_complex_and_float_types = _float_types + _complex_types
+
 _float_types_no_half = [torch.float, torch.double]
 
 # _float_types2 adds bfloat16 type to _float_types only on ROCm. Should eventually be unified
 # with _float_types when bfloat16 bringup is complete on all platforms
 _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
+
+_complex_and_float_types2 = _float_types2 + _complex_types
 
 _signed_types = [
     torch.half, torch.float, torch.double,
@@ -17789,19 +17795,19 @@ tensor_op_tests = [
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
     ('abs', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types2, [torch.bfloat16]),
     ('sign', '', _small_3d, lambda t, d: []),
-    ('log', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
-    ('log10', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
+    ('log', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _complex_and_float_types2, [torch.bfloat16]),
+    ('log10', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _complex_and_float_types2, [torch.bfloat16]),
     ('log1p', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types_no_half, [torch.bfloat16]),
     ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
     ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
-    ('sin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
+    ('sin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _complex_and_float_types, [torch.bfloat16]),
     ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
-    ('acos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('asin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('atan', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('cos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('cosh', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, 1e-5, _float_types),
+    ('acos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _complex_and_float_types, [torch.bfloat16]),
+    ('asin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _complex_and_float_types, [torch.bfloat16]),
+    ('atan', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _complex_and_float_types, [torch.bfloat16]),
+    ('cos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _complex_and_float_types, [torch.bfloat16]),
+    ('cosh', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, 1e-5, _complex_and_float_types),
     ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('erfc', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('exp', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types),
@@ -17813,7 +17819,7 @@ tensor_op_tests = [
     ('reciprocal', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
     ('floor', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('neg', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
+    ('neg', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _complex_and_float_types2, [torch.bfloat16]),
     ('round', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('trunc', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('ceil', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
