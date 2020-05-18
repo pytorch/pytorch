@@ -197,8 +197,7 @@ void RpcAgent::rpcRetryCallback(
   if (futureMessage->hasError()) {
     // Adding one since we want to include the original send as well and not
     // just the retry count.
-    LOG(INFO) << "Send try " << std::to_string(earliestRpc->retryCount_ + 1)
-              << " failed";
+    LOG(INFO) << "Send try " << (earliestRpc->retryCount_ + 1) << " failed";
     if (!rpcAgentRunning_.load()) {
       // If the RPC Agent has shutdown, we cannot retry messages. Thus we mark
       // the future with an error since the RPC was never completed

@@ -938,19 +938,18 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingCatchAllWithMismat
 }
 
 TEST(OperatorRegistrationTest, givenTorchLibrary_whenRegisteringWithMismatchingCppSignatures_thenFails) {
-  auto m = MAKE_TORCH_LIBRARY(test);
-  m.def("_test::dummy(int a) -> ()");
-  m.impl("_test::dummy", DispatchKey::CPU, [] (int64_t) {});
-  expectThrows<c10::Error>([] {
-    auto m = MAKE_TORCH_LIBRARY(test);
-    m.impl("_test::dummy", DispatchKey::CUDA, [] (const int64_t&) {});
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("dummy(int a) -> ()");
+  m.impl("dummy", DispatchKey::CPU, [] (int64_t) {});
+  expectThrows<c10::Error>([&] {
+    m.impl("dummy", DispatchKey::CUDA, [] (const int64_t&) {});
   }, "mismatched with a previous kernel that had the signature");
 }
 
 TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingWithMismatchingCppSignatures_thenFails) {
-  auto m = MAKE_TORCH_LIBRARY(test);
-  m.def("_test::dummy(int a) -> ()");
-  m.impl("_test::dummy", DispatchKey::CPU, [] (int64_t) {});
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("dummy(int a) -> ()");
+  m.impl("dummy", DispatchKey::CPU, [] (int64_t) {});
   expectThrows<c10::Error>([] {
     c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
       .typed<void(const int64_t&)>();
@@ -958,8 +957,8 @@ TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingWithMismatchingCpp
 }
 
 TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingCatchAllWithMismatchingCppSignatures_thenFails) {
-  auto m = MAKE_TORCH_LIBRARY(test);
-  m.def("_test::dummy(int a) -> ()", [] (int64_t) {});
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("dummy(int a) -> ()", [] (int64_t) {});
   expectThrows<c10::Error>([] {
     c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
       .typed<void(const int64_t&)>();

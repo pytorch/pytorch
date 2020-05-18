@@ -11,6 +11,7 @@
 namespace c10 {
 
 class CAFFE2_API OperatorHandle;
+template<class FuncType> class TypedOperatorHandle;
 
 /**
  * Implement this interface and register your instance with the dispatcher
@@ -60,6 +61,7 @@ private:
     size_t def_and_impl_count = 0;
   };
   friend class OperatorHandle;
+  template<class> friend class TypedOperatorHandle;
 
 public:
   ~Dispatcher();
@@ -222,14 +224,12 @@ private:
   std::mutex mutex_;
 };
 
-template<class FuncType> class CAFFE2_API TypedOperatorHandle;
-
 /**
  * This is a handle to an operator schema registered with the dispatcher.
  * This handle can be used to register kernels with the dispatcher or
  * to lookup a kernel for a certain set of arguments.
  */
-class CAFFE2_API OperatorHandle final {
+class CAFFE2_API OperatorHandle {
 public:
   OperatorHandle(OperatorHandle&&) noexcept = default;
   OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
@@ -263,7 +263,7 @@ public:
   template<class FuncType>
   TypedOperatorHandle<FuncType> typed() const {
     operatorIterator_->op.assertSignatureIsCorrect<FuncType>();
-    return TypedOperatorHandle<FuncType>(*this);
+    return TypedOperatorHandle<FuncType>(operatorIterator_);
   }
 
   void callBoxed(Stack* stack) const {
@@ -274,6 +274,7 @@ private:
   explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
   : operatorIterator_(std::move(operatorIterator)) {}
   friend class Dispatcher;
+  template<class> friend class TypedOperatorHandle;
 
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
 };
@@ -285,57 +286,29 @@ private:
  * unboxed way.
  */
 template<class FuncType>
-class CAFFE2_API TypedOperatorHandle final {
+class TypedOperatorHandle final {
   static_assert(guts::false_t<FuncType>(), "FuncType in OperatorHandle::typed<FuncType> was not a valid function type");
 };
 template<class Return, class... Args>
-class CAFFE2_API TypedOperatorHandle<Return (Args...)> final {
+class TypedOperatorHandle<Return (Args...)> final : public OperatorHandle {
 public:
   TypedOperatorHandle(TypedOperatorHandle&&) noexcept = default;
   TypedOperatorHandle& operator=(TypedOperatorHandle&&) noexcept = default;
   TypedOperatorHandle(const TypedOperatorHandle&) = default;
   TypedOperatorHandle& operator=(const TypedOperatorHandle&) = default;
 
-  const OperatorName& operator_name() const {
-    return handle_.operator_name();
-  }
-
-  bool hasSchema() const {
-    return handle_.hasSchema();
-  }
-
-  const FunctionSchema& schema() const {
-    return handle_.schema();
-  }
-
-  const std::string& debug() const {
-    return handle_.debug();
-  }
-
-  std::string dumpState() const {
-    return handle_.dumpState();
-  }
-
-  void checkInvariants() const {
-    return handle_.checkInvariants();
-  }
-
   Return call(Args... args) const {
-    return c10::Dispatcher::singleton().call<Return, Args...>(handle_, std::forward<Args>(args)...);
+    return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
   Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
-    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(handle_, dispatchKey, std::forward<Args>(args)...);
+    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
   }
 
-  void callBoxed(Stack* stack) const {
-    handle_.callBoxed(stack);
-  }
 private:
+  explicit TypedOperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
+  : OperatorHandle(std::move(operatorIterator)) {}
   friend class OperatorHandle;
-  explicit TypedOperatorHandle(OperatorHandle handle): handle_(std::move(handle)) {}
-
-  OperatorHandle handle_;
 };
 
 namespace detail {

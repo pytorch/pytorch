@@ -38,7 +38,7 @@ Tensor ${function_name}(${method_formals}) {
     .findSchemaOrThrow("aten::${name}", "${overload_name}")
     .typed<${cpp_signature}>();
   ${dispatch_key_init}
-  return op.callWithDispatchKey(_dk, ${type_method_actuals});
+  return op.callWithDispatchKey(_dk, ${actuals});
 }
 """)
 
@@ -77,7 +77,7 @@ def register_backend_select_methods(declarations, template_path, file_manager):
                                                             overload_name=option['overload_name'],
                                                             dispatch_key_init=dispatch_key_init,
                                                             cpp_signature=option['cpp_signature'],
-                                                            type_method_actuals=option['type_method_actuals'])
+                                                            actuals=option['actuals'])
 
                 backend_select_function_registrations.append(func_reg)
                 backend_select_method_definitions.append(method_def)
