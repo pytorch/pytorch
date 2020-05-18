@@ -49,7 +49,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // No batch dims
     Tensor tensor = makeBatched(ones({2, 3, 5, 7}), {});
-    auto* batched = unsafeGetBatched(tensor);
+    auto* batched = maybeGetBatched(tensor);
     ASSERT_EQ(batched->actualDim(0), 0);
     ASSERT_EQ(batched->actualDim(1), 1);
     ASSERT_EQ(batched->actualDim(3), 3);
@@ -67,7 +67,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // Single batch dim at front
     Tensor tensor = makeBatched(ones({2, 3, 5, 7}), {{/*lvl*/1, /*dim*/0}});
-    auto* batched = unsafeGetBatched(tensor);
+    auto* batched = maybeGetBatched(tensor);
     ASSERT_EQ(batched->actualDim(0), 1);
     ASSERT_EQ(batched->actualDim(2), 3);
     ASSERT_EQ(batched->actualDim(-1), 3);
@@ -76,7 +76,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // Single batch dim in middle
     Tensor tensor = makeBatched(ones({2, 3, 5, 7}), {{/*lvl*/1, /*dim*/1}});
-    auto* batched = unsafeGetBatched(tensor);
+    auto* batched = maybeGetBatched(tensor);
     ASSERT_EQ(batched->actualDim(0), 0);
     ASSERT_EQ(batched->actualDim(1), 2);
     ASSERT_EQ(batched->actualDim(2), 3);
@@ -84,7 +84,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // Single batch dim at end
     Tensor tensor = makeBatched(ones({2, 3, 5, 7}), {{/*lvl*/1, /*dim*/1}});
-    auto* batched = unsafeGetBatched(tensor);
+    auto* batched = maybeGetBatched(tensor);
     ASSERT_EQ(batched->actualDim(0), 0);
     ASSERT_EQ(batched->actualDim(2), 3);
     ASSERT_EQ(batched->actualDim(-1), 3);
@@ -94,7 +94,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
     Tensor tensor = makeBatched(
         ones({2, 3, 5, 7}),
         {{/*lvl*/1, /*dim*/0}, {/*lvl*/2, /*dim*/1}});
-    auto* batched = unsafeGetBatched(tensor);
+    auto* batched = maybeGetBatched(tensor);
     ASSERT_EQ(batched->actualDim(0), 2);
     ASSERT_EQ(batched->actualDim(1), 3);
   }
@@ -103,7 +103,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
     Tensor tensor = makeBatched(
         ones({2, 3, 5, 7}),
         {{/*lvl*/1, /*dim*/1}, {/*lvl*/2, /*dim*/3}});
-    auto* batched = unsafeGetBatched(tensor);
+    auto* batched = maybeGetBatched(tensor);
     ASSERT_EQ(batched->actualDim(0), 0);
     ASSERT_EQ(batched->actualDim(1), 2);
     ASSERT_EQ(batched->actualDim(-1), 2);
@@ -118,7 +118,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
     ASSERT_EQ(tensor.dim(), kVmapMaxTensorDims);
 
     auto batched = addBatchDim(tensor, /*lvl*/1, /*dim*/0);
-    auto* batched_impl = unsafeGetBatched(batched);
+    auto* batched_impl = maybeGetBatched(batched);
     ASSERT_EQ(
         batched_impl->actualDim(kVmapMaxTensorDims - 2),
         kVmapMaxTensorDims - 1);
