@@ -75,7 +75,7 @@ void Context::setDeterministicErrorLevel(Context::ErrorLevel e) {
   deterministic_error_level = e;
 }
 
-Context::ErrorLevel Context::longToDeterministicErrorLevel(long e) {
+Context::ErrorLevel Context::longToErrorLevel(long e) {
   switch (e) {
     case static_cast<int>(Context::ErrorLevel::None):
     case static_cast<int>(Context::ErrorLevel::Warn):

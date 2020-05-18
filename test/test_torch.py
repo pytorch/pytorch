@@ -115,6 +115,19 @@ class AbstractTestCases:
         def test_dir(self):
             dir(torch)
 
+        def test_deterministic_flag(self):
+            with torch.experimental.flags(deterministic=True):
+                self.assertTrue(torch.experimental.deterministic)
+
+            with torch.experimental.flags(deterministic=False):
+                self.assertFalse(torch.experimental.deterministic)
+
+            for invalid_error_level in [-1, 3, 4]:
+                with self.assertRaisesRegex(RuntimeError,
+                                            "error level %d" % invalid_error_level):
+                    with torch.experimental.flags(deterministic_error_level=invalid_error_level):
+                        pass
+
         def test_type_conversion_via_dtype_name(self):
             x = torch.tensor([1])
             self.assertEqual(x.byte().dtype, torch.uint8)

@@ -442,12 +442,13 @@ PyObject *THPModule_deterministic(PyObject *_unused, PyObject *noargs)
 
 PyObject *THPModule_setDeterministicErrorLevel(PyObject *_unused, PyObject *arg)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assert(PyInt_Check(arg), "set_deterministic_error_level expects an integer, "
           "but got %s", THPUtils_typename(arg));
   at::Context& ctx = at::globalContext();
-  ctx.setDeterministicErrorLevel(ctx.longToDeterministicErrorLevel(PyInt_AsLong(arg)));
+  ctx.setDeterministicErrorLevel(ctx.longToErrorLevel(PyInt_AsLong(arg)));
   Py_RETURN_NONE;
-
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_deterministicErrorLevel(PyObject *_unused, PyObject *noargs)
