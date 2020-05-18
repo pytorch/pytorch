@@ -2,7 +2,7 @@ from torch.distributions import constraints
 from torch.distributions.exponential import Exponential
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import broadcast_all, as_float
 
 
 class Pareto(TransformedDistribution):
@@ -22,7 +22,7 @@ class Pareto(TransformedDistribution):
     arg_constraints = {'alpha': constraints.positive, 'scale': constraints.positive}
 
     def __init__(self, scale, alpha, validate_args=None):
-        self.scale, self.alpha = broadcast_all(scale, alpha)
+        self.scale, self.alpha = broadcast_all(as_float(scale), as_float(alpha))
         base_dist = Exponential(self.alpha)
         transforms = [ExpTransform(), AffineTransform(loc=0, scale=self.scale)]
         super(Pareto, self).__init__(base_dist, transforms, validate_args=validate_args)

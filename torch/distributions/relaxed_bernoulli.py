@@ -4,7 +4,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import SigmoidTransform
-from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs
+from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs, as_float
 
 
 class LogitRelaxedBernoulli(Distribution):
@@ -31,15 +31,15 @@ class LogitRelaxedBernoulli(Distribution):
     support = constraints.real
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
-        self.temperature = temperature
+        self.temperature = as_float(temperature)
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             is_scalar = isinstance(probs, Number)
-            self.probs, = broadcast_all(probs)
+            self.probs, = broadcast_all(as_float(probs))
         else:
             is_scalar = isinstance(logits, Number)
-            self.logits, = broadcast_all(logits)
+            self.logits, = broadcast_all(as_float(logits))
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
             batch_shape = torch.Size()

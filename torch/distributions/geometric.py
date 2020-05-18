@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
+from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, as_float
 from torch.nn.functional import binary_cross_entropy_with_logits
 
 
@@ -34,11 +34,11 @@ class Geometric(Distribution):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
-            self.probs, = broadcast_all(probs)
+            self.probs, = broadcast_all(as_float(probs))
             if not self.probs.gt(0).all():
                 raise ValueError('All elements of probs must be greater than 0')
         else:
-            self.logits, = broadcast_all(logits)
+            self.logits, = broadcast_all(as_float(logits))
         probs_or_logits = probs if probs is not None else logits
         if isinstance(probs_or_logits, Number):
             batch_shape = torch.Size()

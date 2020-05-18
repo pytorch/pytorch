@@ -3,7 +3,7 @@ from torch.distributions import constraints
 from torch.distributions.exponential import Exponential
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, PowerTransform
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import broadcast_all, as_float
 from torch.distributions.gumbel import euler_constant
 
 
@@ -25,7 +25,7 @@ class Weibull(TransformedDistribution):
     support = constraints.positive
 
     def __init__(self, scale, concentration, validate_args=None):
-        self.scale, self.concentration = broadcast_all(scale, concentration)
+        self.scale, self.concentration = broadcast_all(as_float(scale), as_float(concentration))
         self.concentration_reciprocal = self.concentration.reciprocal()
         base_dist = Exponential(torch.ones_like(self.scale))
         transforms = [PowerTransform(exponent=self.concentration_reciprocal),

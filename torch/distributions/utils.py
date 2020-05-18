@@ -84,6 +84,13 @@ def probs_to_logits(probs, is_binary=False):
         return torch.log(ps_clamped) - torch.log1p(-ps_clamped)
     return torch.log(ps_clamped)
 
+def as_float(x):
+    if isinstance(x, torch.Tensor):
+        if not x.is_floating_point():
+            x = x.to(dtype=torch.get_default_dtype())
+    elif isinstance(x, int):
+        x = float(x)
+    return x
 
 class lazy_property(object):
     r"""

@@ -1,7 +1,7 @@
 import torch
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
-from torch.distributions.utils import clamp_probs, broadcast_all
+from torch.distributions.utils import clamp_probs, broadcast_all, as_float
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
@@ -36,7 +36,7 @@ class ExpRelaxedCategorical(Distribution):
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
         self._categorical = Categorical(probs, logits)
-        self.temperature = temperature
+        self.temperature = as_float(temperature)
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
         super(ExpRelaxedCategorical, self).__init__(batch_shape, event_shape, validate_args=validate_args)

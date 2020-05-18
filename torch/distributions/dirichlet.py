@@ -3,6 +3,7 @@ from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
+from torch.distributions.utils import as_float
 
 
 # This helper is exposed for testing.
@@ -47,7 +48,7 @@ class Dirichlet(ExponentialFamily):
     def __init__(self, concentration, validate_args=None):
         if concentration.dim() < 1:
             raise ValueError("`concentration` parameter must be at least one-dimensional.")
-        self.concentration = concentration
+        self.concentration = as_float(concentration)
         batch_shape, event_shape = concentration.shape[:-1], concentration.shape[-1:]
         super(Dirichlet, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 

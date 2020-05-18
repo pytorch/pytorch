@@ -2,7 +2,7 @@ import torch
 from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import probs_to_logits, logits_to_probs, lazy_property
+from torch.distributions.utils import probs_to_logits, logits_to_probs, as_float, lazy_property
 
 
 class Categorical(Distribution):
@@ -47,10 +47,12 @@ class Categorical(Distribution):
         if probs is not None:
             if probs.dim() < 1:
                 raise ValueError("`probs` parameter must be at least one-dimensional.")
+            probs = as_float(probs)
             self.probs = probs / probs.sum(-1, keepdim=True)
         else:
             if logits.dim() < 1:
                 raise ValueError("`logits` parameter must be at least one-dimensional.")
+            logits = as_float(logits)
             self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]

@@ -919,6 +919,10 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(torch.tensor([0.0])).entropy(), torch.tensor([0.0]))
         self.assertEqual(Bernoulli(s).entropy(), torch.tensor(0.6108), atol=1e-4)
 
+        # test integer type coersion
+        self.assertEqual(Bernoulli(torch.tensor(1), validate_args=True).sample().size(), ())
+        self.assertEqual(Bernoulli(logits=torch.tensor(-5), validate_args=True).sample().size(), ())
+
     def test_bernoulli_enumerate_support(self):
         examples = [
             ({"probs": [0.1]}, [[0], [1]]),
@@ -950,6 +954,9 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(Geometric, (p,))
         self.assertRaises(ValueError, lambda: Geometric(0))
         self.assertRaises(NotImplementedError, Geometric(r).rsample)
+        # test integer type coersion
+        self.assertEqual(Geometric(probs=torch.tensor(1), validate_args=True).sample().size(), ())
+        self.assertEqual(Geometric(logits=torch.tensor(-20), validate_args=True).sample().size(), ())
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_geometric_log_prob_and_entropy(self):
@@ -982,6 +989,10 @@ class TestDistributions(TestCase):
             self._gradcheck_log_prob(lambda p: Binomial(total_count, None, p.log()), [p])
         self.assertRaises(NotImplementedError, Binomial(10, p).rsample)
         self.assertRaises(NotImplementedError, Binomial(10, p).entropy)
+        # test integer type coersion
+        self.assertEqual(Binomial(10, probs=torch.tensor(1), validate_args=True).sample().size(), ())
+        self.assertEqual(Binomial(torch.tensor(10), probs=torch.tensor(1), validate_args=True).sample().size(), ())
+        self.assertEqual(Binomial(torch.tensor(10), logits=torch.tensor(0), validate_args=True).sample().size(), ())
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_sample(self):
@@ -1069,6 +1080,10 @@ class TestDistributions(TestCase):
             self._gradcheck_log_prob(lambda p: NegativeBinomial(total_count, None, p.log()), [p])
         self.assertRaises(NotImplementedError, NegativeBinomial(10, p).rsample)
         self.assertRaises(NotImplementedError, NegativeBinomial(10, p).entropy)
+        # test integer type coersion
+        self.assertEqual(NegativeBinomial(10., torch.tensor(0), validate_args=True).sample().size(), ())
+        self.assertEqual(NegativeBinomial(torch.tensor(10), torch.tensor(0), validate_args=True).sample().size(), ())
+        self.assertEqual(NegativeBinomial(torch.tensor(10), logits=torch.tensor(0), validate_args=True).sample().size(), ())
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_negative_binomial_log_prob(self):
@@ -1102,6 +1117,10 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, p), [p])
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
         self.assertRaises(NotImplementedError, Multinomial(10, p).rsample)
+        # test integer type coersion
+        total_count = 10
+        p = torch.tensor([-1, 0, 1])
+        self.assertEqual(Multinomial(total_count, logits=p, validate_args=True).sample().size(), (3,))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_multinomial_1d_log_prob(self):
@@ -1150,6 +1169,9 @@ class TestDistributions(TestCase):
         self.assertEqual(Categorical(p).sample((1,)).size(), (1,))
         self._gradcheck_log_prob(Categorical, (p,))
         self.assertRaises(NotImplementedError, Categorical(p).rsample)
+        # test integer type coersion
+        p = torch.tensor([1, 0, -1])
+        self.assertEqual(Categorical(logits=p, validate_args=True).sample().size(), ())
 
     def test_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
@@ -1196,6 +1218,9 @@ class TestDistributions(TestCase):
         self.assertEqual(OneHotCategorical(p).sample((1,)).size(), (1, 3))
         self._gradcheck_log_prob(OneHotCategorical, (p,))
         self.assertRaises(NotImplementedError, OneHotCategorical(p).rsample)
+        # test integer type coersion
+        p = torch.tensor([-1, 0, 1])
+        self.assertEqual(OneHotCategorical(logits=p, validate_args=True).sample().size(), (3,))
 
     def test_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
@@ -1226,6 +1251,8 @@ class TestDistributions(TestCase):
         self.assertEqual(Poisson(rate_1d).sample().size(), (1,))
         self.assertEqual(Poisson(rate_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Poisson(2.0).sample((2,)).size(), (2,))
+        # test integer type coersion
+        self.assertEqual(Poisson(torch.tensor(1), validate_args=True).sample().size(), ())
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_log_prob(self):
@@ -1274,6 +1301,8 @@ class TestDistributions(TestCase):
         self.assertEqual(RelaxedBernoulli(temp, s).sample().size(), ())
         self._gradcheck_log_prob(RelaxedBernoulli, (temp, p))
         self._gradcheck_log_prob(RelaxedBernoulli, (temp, r))
+        # test integer type coersion
+        self.assertEqual(RelaxedBernoulli(torch.tensor(7), logits=torch.tensor(-2), validate_args=True).sample(()).size(), ())
 
         # test that rsample doesn't fail
         s = RelaxedBernoulli(temp, p).rsample()
@@ -1310,6 +1339,10 @@ class TestDistributions(TestCase):
         self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample((2, 2)).size(), (2, 2, 3))
         self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample((1,)).size(), (1, 3))
         self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp, p))
+        # test integer type coersion
+        l = torch.tensor([-2, 2, 1])
+        temp = torch.tensor(7)
+        self.assertEqual(RelaxedOneHotCategorical(logits=l, temperature=temp, validate_args=True).sample().size(), (3,))
 
     def test_relaxed_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
@@ -1370,6 +1403,12 @@ class TestDistributions(TestCase):
         self.assertEqual(Uniform(low_1d, high_1d).sample().size(), (1,))
         self.assertEqual(Uniform(low_1d, high_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Uniform(0.0, 1.0).sample((1,)).size(), (1,))
+        # test integer type coersion
+        u = Uniform(torch.tensor(1), 2.5, validate_args=True)
+        self.assertEqual(u.low, 1.0)
+        self.assertEqual(u.high, 2.5)
+        self.assertEqual(u.sample().size(), ())
+        self.assertEqual(Uniform(torch.tensor(0), torch.tensor(1), validate_args=True).sample().size(), ())
 
         # Check log_prob computation when value outside range
         uniform = Uniform(low_1d, high_1d)
@@ -1405,6 +1444,11 @@ class TestDistributions(TestCase):
                                             scipy.stats.vonmises(loc=loc, kappa=concentration),
                                             "VonMises(loc={}, concentration={})".format(loc, concentration),
                                             num_samples=int(1e5), circular=True)
+        # test integer type coersion
+        vm = VonMises(torch.tensor(0), 0.5, validate_args=True)
+        self.assertEqual(vm.loc, 0.0)
+        self.assertEqual(vm.concentration, 0.5)
+        self.assertEqual(vm.sample().size(), ())
 
     def test_vonmises_logprob(self):
         concentrations = [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]
@@ -1426,6 +1470,12 @@ class TestDistributions(TestCase):
         self.assertEqual(Cauchy(loc_1d, scale_1d).sample().size(), (1,))
         self.assertEqual(Cauchy(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Cauchy(0.0, 1.0).sample((1,)).size(), (1,))
+        # test integer type coersion
+        c = Cauchy(torch.tensor(0), 0.5, validate_args=True)
+        self.assertEqual(c.loc, 0.0)
+        self.assertEqual(c.scale, 0.5)
+        self.assertEqual(c.sample().size(), ())
+        self.assertEqual(Cauchy(torch.tensor(0), torch.tensor(1), validate_args=True).sample().size(), ())
 
         set_rng_seed(1)
         self._gradcheck_log_prob(Cauchy, (loc, scale))
@@ -1452,6 +1502,8 @@ class TestDistributions(TestCase):
         self.assertEqual(HalfCauchy(scale_1d).sample().size(), (1,))
         self.assertEqual(HalfCauchy(scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(HalfCauchy(1.0).sample((1,)).size(), (1,))
+        # test integer type coersion
+        self.assertEqual(HalfCauchy(torch.tensor(1), validate_args=True).sample().size(), ())
 
         set_rng_seed(1)
         self._gradcheck_log_prob(HalfCauchy, (scale,))
@@ -1475,6 +1527,8 @@ class TestDistributions(TestCase):
         self.assertEqual(HalfNormal(std_1d).sample().size(), (1,))
         self.assertEqual(HalfNormal(.6).sample((1,)).size(), (1,))
         self.assertEqual(HalfNormal(50.0).sample((1,)).size(), (1,))
+        # test integer type coersion
+        self.assertEqual(HalfNormal(torch.tensor(1), validate_args=True).sample().size(), ())
 
         # sample check for extreme value of std
         set_rng_seed(1)
@@ -1522,6 +1576,11 @@ class TestDistributions(TestCase):
         self.assertEqual(LogNormal(mean_1d, std_1d).sample().size(), (1,))
         self.assertEqual(LogNormal(0.2, .6).sample((1,)).size(), (1,))
         self.assertEqual(LogNormal(-0.7, 50.0).sample((1,)).size(), (1,))
+        # test integer type coercion
+        ln = LogNormal(torch.tensor(0), 0.5, validate_args=True)
+        self.assertEqual(ln.loc, 0)
+        self.assertEqual(ln.scale, 0.5)
+        self.assertEqual(ln.sample().size(), ())
 
         # sample check for extreme value of mean, std
         set_rng_seed(1)
@@ -1572,6 +1631,8 @@ class TestDistributions(TestCase):
         self.assertEqual(LogisticNormal(mean_1d, std_1d).sample().size(), (2,))
         self.assertEqual(LogisticNormal(0.2, .6).sample((1,)).size(), (2,))
         self.assertEqual(LogisticNormal(-0.7, 50.0).sample((1,)).size(), (2,))
+        # test integer type coersion
+        self.assertEqual(LogisticNormal(torch.tensor(0), torch.tensor(1), validate_args=True).sample((1,)).size(), (2,))
 
         # sample check for extreme value of mean, std
         set_rng_seed(1)
@@ -1724,6 +1785,12 @@ class TestDistributions(TestCase):
         self.assertEqual(Normal(loc_1d, scale_1d).sample().size(), (1,))
         self.assertEqual(Normal(0.2, .6).sample((1,)).size(), (1,))
         self.assertEqual(Normal(-0.7, 50.0).sample((1,)).size(), (1,))
+        # test integer type coersion
+        n = Normal(torch.tensor(0), 0.5, validate_args=True)
+        self.assertEqual(n.loc, 0.0)
+        self.assertEqual(n.scale, 0.5)
+        self.assertEqual(n.sample().size(), ())
+        self.assertEqual(Normal(torch.tensor(0), torch.tensor(1), validate_args=True).sample().size(), ())
 
         # sample check for extreme value of mean, std
         set_rng_seed(1)
@@ -1801,6 +1868,10 @@ class TestDistributions(TestCase):
                          .sample((2, 7)).size(), (2, 7, 6, 5, 3))
         self.assertEqual(LowRankMultivariateNormal(mean_multi_batch, cov_factor_batched, cov_diag_batched)
                          .sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        # test integer type coersion
+        self.assertEqual(LowRankMultivariateNormal(torch.tensor([0, 0]), 
+                                                   torch.tensor([[1], [0]]),
+                                                   torch.tensor([1, 1]), validate_args=True).sample().size(), (2,))
 
         # check gradients
         self._gradcheck_log_prob(LowRankMultivariateNormal,
@@ -2031,6 +2102,9 @@ class TestDistributions(TestCase):
         self.assertEqual(Exponential(rate_1d).sample().size(), (1,))
         self.assertEqual(Exponential(0.2).sample((1,)).size(), (1,))
         self.assertEqual(Exponential(50.0).sample((1,)).size(), (1,))
+        # test integer type coersion
+        rate_1d = torch.tensor([1])
+        self.assertEqual(Exponential(rate_1d, validate_args=True).sample().size(), (1,))
 
         self._gradcheck_log_prob(Exponential, (rate,))
         state = torch.get_rng_state()
@@ -2070,6 +2144,12 @@ class TestDistributions(TestCase):
         self.assertEqual(Laplace(loc_1d, scale_1d).sample().size(), (1,))
         self.assertEqual(Laplace(0.2, .6).sample((1,)).size(), (1,))
         self.assertEqual(Laplace(-0.7, 50.0).sample((1,)).size(), (1,))
+        # test integer type coersion
+        l = Laplace(torch.tensor(1), 0.5, validate_args=True)
+        self.assertEqual(l.loc, 1.0)
+        self.assertEqual(l.scale, 0.5)
+        self.assertEqual(l.sample(()).size(), ())
+        self.assertEqual(Laplace(torch.tensor(1), torch.tensor(1), validate_args=True).sample(()).size(), ())
 
         # sample check for extreme value of mean, std
         set_rng_seed(0)
@@ -2120,6 +2200,12 @@ class TestDistributions(TestCase):
         self.assertEqual(Gamma(alpha_1d, beta_1d).sample().size(), (1,))
         self.assertEqual(Gamma(0.5, 0.5).sample().size(), ())
         self.assertEqual(Gamma(0.5, 0.5).sample((1,)).size(), (1,))
+        # test integer type coersion
+        g = Gamma(torch.tensor(1), 0.5, validate_args=True)
+        self.assertEqual(g.concentration, 1.0)
+        self.assertEqual(g.rate, 0.5)
+        self.assertEqual(g.sample().size(), ())
+        self.assertEqual(Gamma(torch.tensor(1), torch.tensor(1), validate_args=True).sample().size(), ())
 
         def ref_log_prob(idx, x, log_prob):
             a = alpha.view(-1)[idx].detach()
@@ -2184,6 +2270,12 @@ class TestDistributions(TestCase):
         self.assertEqual(Pareto(scale_1d, alpha_1d).sample().size(), (1,))
         self.assertEqual(Pareto(1.0, 1.0).sample().size(), ())
         self.assertEqual(Pareto(1.0, 1.0).sample((1,)).size(), (1,))
+        # test integer type coersion
+        p = Pareto(torch.tensor(1), 0.5, validate_args=True)
+        self.assertEqual(p.scale, 1.0)
+        self.assertEqual(p.alpha, 0.5)
+        self.assertEqual(p.sample().size(), ())
+        self.assertEqual(Pareto(torch.tensor(1), torch.tensor(1), validate_args=True).sample().size(), ())
 
         def ref_log_prob(idx, x, log_prob):
             s = scale.view(-1)[idx].detach()
@@ -2213,6 +2305,12 @@ class TestDistributions(TestCase):
         self.assertEqual(Gumbel(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Gumbel(1.0, 1.0).sample().size(), ())
         self.assertEqual(Gumbel(1.0, 1.0).sample((1,)).size(), (1,))
+        # test integer type coersion
+        g = Gumbel(torch.tensor(1), 0.5, validate_args=True)
+        self.assertEqual(g.loc, 1.0)
+        self.assertEqual(g.scale, 0.5)
+        self.assertEqual(g.sample().size(), ())
+        self.assertEqual(Gumbel(torch.tensor(1), torch.tensor(1), validate_args=True).sample().size(), ())
 
         def ref_log_prob(idx, x, log_prob):
             l = loc.view(-1)[idx].detach()
@@ -2244,6 +2342,12 @@ class TestDistributions(TestCase):
         self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(FisherSnedecor(1.0, 1.0).sample().size(), ())
         self.assertEqual(FisherSnedecor(1.0, 1.0).sample((1,)).size(), (1,))
+        # test integer type coersion
+        fs = FisherSnedecor(torch.tensor(1), 0.5, validate_args=True)
+        self.assertEqual(fs.df1, 1.0)
+        self.assertEqual(fs.df2, 0.5)
+        self.assertEqual(fs.sample().size(), ())
+        self.assertEqual(FisherSnedecor(torch.tensor(1), torch.tensor(1), validate_args=True).sample().size(), ())
 
         def ref_log_prob(idx, x, log_prob):
             f1 = df1.view(-1)[idx].detach()
@@ -2272,6 +2376,8 @@ class TestDistributions(TestCase):
         self.assertEqual(Chi2(torch.tensor(0.5, requires_grad=True)).sample().size(), ())
         self.assertEqual(Chi2(0.5).sample().size(), ())
         self.assertEqual(Chi2(0.5).sample((1,)).size(), (1,))
+        # test integer type coersion
+        self.assertEqual(Chi2(torch.tensor(1), validate_args=True).sample().size(), ())
 
         def ref_log_prob(idx, x, log_prob):
             d = df.view(-1)[idx].detach()
@@ -2302,6 +2408,8 @@ class TestDistributions(TestCase):
         self.assertEqual(StudentT(torch.tensor(0.5, requires_grad=True)).sample().size(), ())
         self.assertEqual(StudentT(0.5).sample().size(), ())
         self.assertEqual(StudentT(0.5).sample((1,)).size(), (1,))
+        # test integer type coersion
+        self.assertEqual(StudentT(torch.tensor(1), validate_args=True).sample().size(), ())
 
         def ref_log_prob(idx, x, log_prob):
             d = df.view(-1)[idx].detach()
@@ -2337,6 +2445,8 @@ class TestDistributions(TestCase):
         self.assertEqual(Dirichlet(alpha).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(Dirichlet(alpha_1d).sample().size(), (4,))
         self.assertEqual(Dirichlet(alpha_1d).sample((1,)).size(), (1, 4))
+        # test integer type coercion
+        self.assertEqual(Dirichlet(torch.tensor([1]), validate_args=True).sample().size(), (1,))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_dirichlet_log_prob(self):
@@ -2369,6 +2479,12 @@ class TestDistributions(TestCase):
         self.assertEqual(Beta(con1_1d, con0_1d).sample((1,)).size(), (1, 4))
         self.assertEqual(Beta(0.1, 0.3).sample().size(), ())
         self.assertEqual(Beta(0.1, 0.3).sample((5,)).size(), (5,))
+
+        # test integer type coercion
+        b = Beta(torch.tensor(5), 0.5, validate_args=True)
+        self.assertEqual(b.concentration1, 5.0)
+        self.assertEqual(b.concentration0, 0.5)
+        self.assertEqual(b.sample().size(), ())
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_beta_log_prob(self):
@@ -2437,6 +2553,9 @@ class TestDistributions(TestCase):
         self.assertEqual(ContinuousBernoulli(r).sample((3, 2)).size(), (3, 2,))
         self.assertEqual(ContinuousBernoulli(s).sample().size(), ())
         self._gradcheck_log_prob(ContinuousBernoulli, (p,))
+        # test integer type coersion
+        self.assertEqual(ContinuousBernoulli(torch.tensor(0), validate_args=True).sample().size(), ())
+        self.assertEqual(ContinuousBernoulli(logits=torch.tensor(0), validate_args=True).sample().size(), ())
 
         def ref_log_prob(idx, val, log_prob):
             prob = p[idx]
@@ -3252,6 +3371,9 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(weibull.sample((3, 2)).size(), torch.Size((3, 2)))
         self.assertEqual(weibull.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(weibull.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+        # test integer type coersion
+        weibull = Weibull(torch.tensor(1), torch.tensor(1), validate_args=True)
+        self.assertEqual(weibull.sample().size(), torch.Size())
 
     def test_normal_shape_scalar_params(self):
         normal = Normal(0, 1)
