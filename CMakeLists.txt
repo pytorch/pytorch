@@ -303,6 +303,10 @@ if(MSVC)
     # unclean and the warnings aren't telling us anything useful.)
     string(APPEND ${flag_var} " /w")
 
+    # Suppresses the display of the copyright banner when the compiler
+    # starts up and display of informational messages during compiling.
+    string(APPEND ${flag_var} " /nologo")
+
     if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       if(${flag_var} MATCHES "/MD")
         string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
