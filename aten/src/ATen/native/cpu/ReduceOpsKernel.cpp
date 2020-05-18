@@ -110,14 +110,13 @@ static void sum_kernel_impl(TensorIterator& iter) {
 }
 
 static void nansum_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::BFloat16, ScalarType::Half, iter.dtype(), "nansum_cpu", [&] {
-        binary_kernel_reduce(
-            iter,
-            NanSumOps<scalar_t>{},
-            scalar_t{0}
-        );
-      });
+  if (iter.dtype() == ScalarType::Half) {
+    binary_kernel_reduce(iter, NanSumOps<float>{}, float{0});
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nansum_cpu", [&] {
+      binary_kernel_reduce(iter, NanSumOps<scalar_t>{}, scalar_t{0});
+    });
+  }
 }
 
 static void mean_kernel_impl(TensorIterator& iter) {

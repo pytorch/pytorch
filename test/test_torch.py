@@ -6224,7 +6224,13 @@ class TestTorchDeviceType(TestCase):
         np_fn = getattr(np, fn_name)
 
         a = np.array(vals, dtype=torch_to_numpy_dtype_dict[dtype])
-        np_result = torch.from_numpy(np_fn(a))
+        np_res = np_fn(a)
+        if isinstance(np_res, np.ndarray):
+            np_result = torch.from_numpy(np_res)
+        else:
+            # Convert numpy scalar types to array,
+            # as `from_numpy` expects `ndarray`
+            np_result = torch.from_numpy(np.array(np_res))
 
         t = torch.tensor(vals, device=device, dtype=dtype)
         torch_result = torch_fn(t).cpu()
@@ -16872,6 +16878,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 if lazy_init_scale:
                     self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
 
+    @dtypesIfCUDA(torch.half, torch.float, torch.double,
+                  torch.int8, torch.short, torch.int, torch.long)
+    @dtypes(torch.float, torch.double,
+            torch.int8, torch.short, torch.int, torch.long)
+    def test_nansum(self, device, dtype):
+        x = (torch.randn(3, 3))
+        if dtype in [torch.half, torch.float, torch.double]:
+            x[x < 0.2] = float('nan')
+        # Randomly scale the values
+        x = (x * random.randint(10, 100)).tolist()
+        self._np_compare("nansum", x, device, dtype)
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.

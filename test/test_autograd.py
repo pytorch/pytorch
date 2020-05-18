@@ -4057,6 +4057,31 @@ for shape in [(1,), ()]:
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
 
+    def test_nansum_with_nans(self):
+        a = torch.randn(2, 2, 2, 2)
+        with torch.no_grad():
+            a[a < 0.2] = float('nan')
+        a.requires_grad = True
+
+        # No args
+        gradcheck(lambda x: x.nansum(), a)
+        gradgradcheck(lambda x: x.nansum(), a)
+
+        # Single dim
+        gradcheck(lambda x: x.nansum((0)), a)
+        gradgradcheck(lambda x: x.nansum((0)), a)
+
+        # Multi dim
+        gradcheck(lambda x: x.nansum((0, 2)), a)
+        gradgradcheck(lambda x: x.nansum((0, 2)), a)
+
+        gradcheck(lambda x: x.nansum((0, -1)), a)
+        gradgradcheck(lambda x: x.nansum((0, -1)), a)
+
+        # With keep-dim
+        gradcheck(lambda x: x.nansum((0, -1), True), a)
+        gradgradcheck(lambda x: x.nansum((0, -1), True), a)
+
     def test_custom_function_error(self):
         class BadFw(Function):
             @staticmethod
