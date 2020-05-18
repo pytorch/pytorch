@@ -60,7 +60,10 @@ class backend {
       auto any_dict_ty = DictType::create(StringType::get(), AnyType::get());
 
       // Generate LoweredModule.
-      Module loweredModule("torch.jit." + backend_name + "LoweredModule");
+      Module loweredModule(
+          "torch.jit." + backend_name + "LoweredModule",
+          get_python_cu(),
+          /*should_mangle=*/true);
 
       // Generate attributes.
       // This is the original cloned and preprocessed module.
