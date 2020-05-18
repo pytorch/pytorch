@@ -63,7 +63,7 @@ static void nansum_kernel_cuda(TensorIterator& iter) {
     return nansum_kernel_impl<at::BFloat16, float, float>(iter);
   }
   #endif
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, iter.dtype(), "nansum_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nansum_cuda", [&]() {
     nansum_kernel_impl<scalar_t>(iter);
   });
 }
