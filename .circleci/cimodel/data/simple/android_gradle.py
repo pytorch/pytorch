@@ -1,7 +1,10 @@
 import cimodel.data.simple.util.branch_filters
+from cimodel.data.simple.util import docker_constants
 
 
 class AndroidJob:
+    DOCKER_IMAGE = docker_constants.DOCKER_IMAGE_NDK
+
     def __init__(self, job_name, template_name, dependencies):
         self.job_name = job_name
         self.template_name = template_name
@@ -12,7 +15,7 @@ class AndroidJob:
         props_dict = {
             "filters": cimodel.data.simple.util.branch_filters.gen_branch_filter_dict(),
             "name": self.job_name,
-            "requires": self.dependencies,
+            "requires": self.dependencies + docker_constants.gen_docker_image_dependency(self.DOCKER_IMAGE),
         }
 
         return [{self.template_name: props_dict}]
