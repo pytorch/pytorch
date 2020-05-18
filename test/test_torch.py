@@ -12311,7 +12311,7 @@ class TestTorchDeviceType(TestCase):
 
     # This function tests that a nan value is returned for input values not in domain
     @dtypes(torch.float32, torch.complex64)
-    def test_acosh_domain(self, device):
+    def test_acosh_domain(self, device, dtype):
         # Domain of acosh is [1, inf), for values outside the domain - output is mapped
         # to NaN, except for input value `inf` - output is mapped to `inf`
         sample = torch.tensor([float('-inf'), 1.00, -1.23, -0.06, 0.98, float('inf')],
@@ -12325,7 +12325,7 @@ class TestTorchDeviceType(TestCase):
 
     # This function tests that a nan value is returned for input values not in domain
     @dtypes(torch.float32, torch.complex64)
-    def test_atanh_domain(self, device):
+    def test_atanh_domain(self, device, dtype):
         # Domain of atanh is (-1, 1), for edge values (-1 and 1) - output is mapped
         # to inf and for other values outside this range - output is mapped to NaN
         sample = torch.tensor([float('-inf'), -1.00, 1.00, -1.23, 1.06, float('inf')],
