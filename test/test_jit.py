@@ -15423,7 +15423,7 @@ a")
         def do_test(has_tags_arg, tags, expected_tags):
             class TestModule(nn.Module):
                 def __init__(self):
-                    super(Param, self).__init__()
+                    super(TestModule, self).__init__()
                     if has_tags_arg:
                         self.param = nn.Parameter(torch.randn(5, 5), tags=tags)
                     else:
