@@ -60,7 +60,7 @@ class TestCudaFuser(JitTestCase):
     def test_half(self):
         def t(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor, alpha : float):
             o_16 = torch.add(x, y)
-            o_32_a = torch.add(y, z, alpha = alpha)
+            o_32_a = torch.add(y, z, alpha=alpha)
             o_32_b = torch.add(o_16, z)
             return (o_16, o_32_a, o_32_b)
 
