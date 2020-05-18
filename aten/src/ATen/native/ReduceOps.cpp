@@ -445,6 +445,42 @@ Tensor& prod_out(Tensor& result, const Tensor& self, Dimname dim,
   return at::prod_out(result, self, dimname_to_position(self, dim), keepdim, opt_dtype);
 }
 
+static Tensor& nanprod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim,
+                        bool keepdim, c10::optional<ScalarType> opt_dtype) {
+  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
+  auto iter = make_reduction("nanprod", result, self, dim, keepdim, dtype);
+  if (iter.numel() == 0) {
+    result.fill_(1);
+  } else {
+    nanprod_stub(iter.device_type(), iter);
+  }
+  return result;
+}
+
+Tensor nanprod(const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  Tensor result;
+  native::nanprod_out_impl(result, self, dim, keepdim, dtype);
+  return result;
+}
+
+Tensor nanprod(const Tensor& self, c10::optional<ScalarType> dtype) {
+  Tensor result;
+  return at::native::nanprod_out_impl(result, self, {}, false, dtype);
+}
+
+Tensor& nanprod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  return at::native::nanprod_out_impl(result, self, dim, keepdim, dtype);
+}
+
+Tensor nanprod(const Tensor& self, Dimname dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  return at::nanprod(self, dimname_to_position(self, dim), keepdim, dtype);
+}
+
+Tensor& nanprod_out(Tensor& result, const Tensor& self, Dimname dim,
+                    bool keepdim, optional<ScalarType> opt_dtype) {
+  return at::nanprod_out(result, self, dimname_to_position(self, dim), keepdim, opt_dtype);
+}
+
 Tensor &mean_out_cpu_gpu(Tensor &result, const Tensor &self, IntArrayRef dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();

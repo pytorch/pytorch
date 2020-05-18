@@ -15,6 +15,7 @@ using reduce_fn = void(*)(TensorIterator &);
 DECLARE_DISPATCH(reduce_fn, sum_stub);
 DECLARE_DISPATCH(reduce_fn, prod_stub);
 DECLARE_DISPATCH(reduce_fn, mean_stub);
+DECLARE_DISPATCH(reduce_fn, nanprod_stub);
 DECLARE_DISPATCH(reduce_fn, and_stub);
 DECLARE_DISPATCH(reduce_fn, or_stub);
 DECLARE_DISPATCH(reduce_fn, min_values_stub);

@@ -122,6 +122,33 @@ struct WelfordOps {
   }
 };
 
+template <typename acc_t>
+struct NanProdOps {
+  inline C10_DEVICE acc_t reduce(acc_t a, acc_t b, int64_t /*idx*/) const {
+    return combine(a, b);
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return (at::_isnan(a) ? acc_t{1} : a) * (at::_isnan(b) ? acc_t{1} : b);
+  }
+
+  inline C10_DEVICE acc_t project(acc_t a) const {
+    return a;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
+    return WARP_SHFL_DOWN(data, offset);
+  }
+#endif
+
+  NanProdOps() {}
+};
+
 template <typename acc_t, typename factor_t>
 struct MeanOps {
   factor_t factor;
