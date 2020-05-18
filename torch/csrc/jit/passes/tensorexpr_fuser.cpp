@@ -1,14 +1,16 @@
-#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <ATen/record_function.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -314,7 +316,30 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   return {++(++iter), false};
 }
 
-void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
+void BuildGradientsForTensorExprGroups(Block* block) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+    Node* n = *it;
+    it++;
+    if (n->kind() == getTensorExprSymbol()) {
+      TORCH_INTERNAL_ASSERT(n->hasAttribute(attr::Subgraph));
+      // change the node kind from tensorexpr_Group to DifferentiableGraph
+      auto diff_te =
+          SubgraphUtils::createSingletonSubgraph(n, prim::DifferentiableGraph);
+      // differentiate
+      auto diff_graph = std::move(diff_te->g(attr::Subgraph));
+      Gradient gradient = differentiate(diff_graph);
+      packGradient(gradient, diff_te);
+      // we know this is now fully fusible
+      FuseTensorExprs(diff_te->g(attr::Subgraph), false);
+    } else {
+      for (Block* ib : n->blocks()) {
+        BuildGradientsForTensorExprGroups(ib);
+      }
+    }
+  }
+}
+
+void FuseTensorExprs(std::shared_ptr<Graph>& graph, bool run_build_diff_graph) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Get rid of dead code so that we don't waste effort fusing it.
@@ -360,11 +385,13 @@ void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
       }
     }
   }
-
+  GRAPH_DUMP("After TExprFuser: ", graph);
+  if (run_build_diff_graph) {
+    BuildGradientsForTensorExprGroups(graph->block());
+  }
+  GRAPH_DUMP("BuildGradientsForTensorExprGroups: ", graph);
   EliminateCommonSubexpression(graph);
   EliminateDeadCode(graph);
-
-  GRAPH_DUMP("After TExprFuser: ", graph);
 }
 
 Operation createTensorExprOp(const Node* node) {
