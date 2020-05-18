@@ -12316,7 +12316,7 @@ class TestTorchDeviceType(TestCase):
         # to NaN, except for input value `inf` - output is mapped to `inf`
         sample = torch.tensor([float('-inf'), 1.00, -1.23, -0.06, 0.98, float('inf')],
                               device=device, dtype=dtype)
-        nan_mask = torch.tensor([True, False, True, True, True, True], device=device)
+        nan_mask = torch.tensor([True, False, True, True, True, False], device=device)
         inf_mask = torch.tensor([False, False, False, False, False, True], device=device)
         self.assertEqual(torch.isnan(torch.acosh(sample)), nan_mask)
         self.assertEqual(torch.isnan(sample.acosh()), nan_mask)
