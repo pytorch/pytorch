@@ -728,6 +728,10 @@ class TestDistributed(QuantizationTestCase):
         for _i in range(5):
             inputs = torch.rand((4, 4, 4))
             model(inputs)
+        model.apply(torch.quantization.enable_fake_quant)
+        model.apply(torch.quantization.disable_fake_quant)
+        model.apply(torch.quantization.enable_observer)
+        model.apply(torch.quantization.disable_observer)
         buffer_ids_after = _get_buffer_ids(model)
         self.assertEqual(
             buffer_ids_before,
