@@ -150,7 +150,7 @@ struct ShapeSymbolTable {
     return data_[s];
   }
   void assign(c10::ShapeSymbol s, Dimension v) {
-    TORCH_INTERNAL_ASSERT(!s.static_size());
+    TORCH_INTERNAL_ASSERT(!s.is_static());
     data_[s] = v;
   }
   std::map<c10::ShapeSymbol, Dimension> data_;
