@@ -116,9 +116,10 @@ def _make_conv_test_input(
 
 def skipIfNoFBGEMM(fn):
     reason = 'Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs with instruction set support AVX2 or newer.'
-    if isinstance(fn, type) and 'fbgemm' not in torch.backends.quantized.supported_engines:
-        fn.__unittest_skip__ = True
-        fn.__unittest_skip_why__ = reason
+    if isinstance(fn, type):
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
         return fn
 
     @functools.wraps(fn)
@@ -136,7 +137,7 @@ class QuantizationTestCase(TestCase):
         super().setUp()
         self.calib_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
         self.train_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
-        self.img_data = [(torch.rand(2, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
+        self.img_data = [(torch.rand(1, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
                          for _ in range(2)]
         self.img_data_1d = [(torch.rand(2, 3, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
                             for _ in range(2)]
@@ -615,7 +616,7 @@ class SubModelWithoutFusion(nn.Module):
         return self.relu(self.conv(x))
 
 class ModelForFusion(nn.Module):
-    def __init__(self, qconfig, train=False):
+    def __init__(self, qconfig):
         super().__init__()
         self.conv1 = nn.Conv2d(3, 2, 1, bias=None).to(dtype=torch.float)
         self.bn1 = nn.BatchNorm2d(2).to(dtype=torch.float)
@@ -631,10 +632,7 @@ class ModelForFusion(nn.Module):
         self.bn2 = nn.BatchNorm3d(2).to(dtype=torch.float)
         self.relu3 = nn.ReLU(inplace=True).to(dtype=torch.float)
         self.conv3 = nn.Conv1d(3, 3, 2).to(dtype=torch.float)
-        if train:
-            self.bn3 = nn.Identity()
-        else:
-            self.bn3 = nn.BatchNorm1d(3).to(dtype=torch.float)
+        self.bn3 = nn.BatchNorm1d(3).to(dtype=torch.float)
         self.relu4 = nn.ReLU(inplace=True).to(dtype=torch.float)
         # don't quantize sub2
         self.sub2.qconfig = None

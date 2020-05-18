@@ -1259,7 +1259,7 @@ class TestFunctionalModule(QuantizationTestCase):
 @skipIfNoFBGEMM
 class TestFusion(QuantizationTestCase):
     def test_fuse_module_train(self):
-        model = ModelForFusion(default_qat_qconfig, train=True).train()
+        model = ModelForFusion(default_qat_qconfig).train()
         # Test step by step fusion
         model = fuse_modules(model, ['conv1', 'bn1', 'relu1'])
         model = fuse_modules(model, ['sub1.conv', 'sub1.bn'])
@@ -1303,13 +1303,15 @@ class TestFusion(QuantizationTestCase):
             self.assertEqual(type(model.sub2.conv), nn.Conv2d)
             self.assertEqual(type(model.sub2.relu), nn.ReLU)
             test_only_eval_fn(model, self.img_data_1d)
-        checkQuantized(model)
+        with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm' with arguments from the 'QuantizedCPU'"):
+            checkQuantized(model)
 
-        model = ModelForFusion(default_qat_qconfig, train=True).train()
+        model = ModelForFusion(default_qat_qconfig).train()
         model = fuse_modules(model, [['conv1', 'bn1', 'relu1'],
                              ['sub1.conv', 'sub1.bn']])
         model = quantize_qat(model, test_only_train_fn, self.img_data_1d)
-        checkQuantized(model)
+        with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm' with arguments from the 'QuantizedCPU'"):
+            checkQuantized(model)
 
 
     def test_fuse_module_eval(self):

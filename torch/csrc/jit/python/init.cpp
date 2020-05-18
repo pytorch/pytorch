@@ -673,12 +673,8 @@ void initJITBindings(PyObject* module) {
     }
 
     THPObjectPtr getMemview(void* buf, size_t n) const {
-#if PY_MAJOR_VERSION >= 3
       THPObjectPtr memview(PyMemoryView_FromMemory(
           reinterpret_cast<char*>(buf), n, PyBUF_WRITE));
-#else
-      THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, n));
-#endif
       if (!memview) {
         throw python_error();
       }
@@ -818,6 +814,7 @@ void initJITBindings(PyObject* module) {
       return op->schema();
     });
   });
+  m.def("_jit_get_custom_class_schemas", customClassSchemasForBCCheck);
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
     auto symbol = Symbol::fromQualString(qualified_name);
     auto operations = getAllOperatorsFor(symbol);

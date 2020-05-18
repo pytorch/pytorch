@@ -115,11 +115,15 @@ void remainder_kernel(TensorIterator& iter) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "remainder_cpu", [&]() {
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          return a - b * at::native::floor_impl(a / b);
+          scalar_t mod = std::fmod(a, b);
+          if ((mod != 0) && ((b < 0) != (mod < 0))) mod += b;
+          return mod;
         },
         [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-          Vec256<scalar_t> r = a - b * (a / b).floor();
-          return r;
+          auto mod = a.fmod(b);
+          const auto zero = Vec256<scalar_t>(0);
+          auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
+          return Vec256<scalar_t>::blendv(mod, mod + b, mask);
         });
     });
   }
@@ -557,7 +561,7 @@ void fmod_kernel(TensorIterator& iter) {
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "fmod_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "fmod_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t x, scalar_t d) -> scalar_t {
@@ -579,7 +583,7 @@ void fmod_scalar_kernel(TensorIterator& iter, Scalar divisor) {
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "fmod_scalar_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "fmod_scalar_cpu", [&]() {
       const auto div = divisor.to<scalar_t>();
       const auto div_vec = Vec256<scalar_t>(div);
       cpu_kernel_vec(

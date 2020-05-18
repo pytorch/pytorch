@@ -13,6 +13,7 @@ from torch.nn import Module
 from torch.serialization import validate_cuda_device
 from torch._six import PY37, with_metaclass, string_classes, get_function_from_type
 from torch.utils import set_module
+from torch.autograd.grad_mode import _DecoratorContextManager
 
 import collections
 import contextlib
@@ -1098,13 +1099,21 @@ def _try_get_overloaded_fn(mod, field):
 class ScriptWarning(Warning):
     pass
 
-
 @contextlib.contextmanager
 def _disable_emit_hooks():
     hooks = torch._C._jit_get_emit_hooks()
     torch._C._jit_set_emit_hooks(None, None)
     yield
     torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
+
+
+def _disable_emit_hooks_decorator(_DecoratorContextManager):  # noqa: F811
+    def __enter__(self):
+        self.hooks = torch._C._jit_get_emit_hooks()
+        torch._C._jit_set_emit_hooks(None, None)
+
+    def __exit__(self, *args):
+        torch._C._jit_set_emit_hooks(self.hooks[0], self.hooks[1])
 
 
 # ScriptClasses must be new-style classes because we construct them using their
