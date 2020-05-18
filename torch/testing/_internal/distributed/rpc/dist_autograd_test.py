@@ -424,6 +424,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             ctx = dist_autograd._current_context()
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_graph_for_builtin_call(self):
         self._test_graph(torch.add, ExecMode.RPC_SYNC)
 
@@ -648,6 +649,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         self._test_no_graph_with_tensors_not_require_grad(ExecMode.RPC_SYNC)
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_no_graph_with_tensors_not_require_grad_remote(self):
         self._test_no_graph_with_tensors_not_require_grad(ExecMode.REMOTE)
 
@@ -732,6 +734,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         self._test_rpc_complex_args(ExecMode.RPC_SYNC)
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_remote_complex_args(self):
         self._test_rpc_complex_args(ExecMode.REMOTE)
 
@@ -773,6 +776,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         self.assertTrue(success)
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_context_cleanup_tensor_with_grad(self):
         t1 = torch.ones(3, 3, requires_grad=True)
         t2 = torch.zeros(3, 3, requires_grad=True)
@@ -830,6 +834,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             self.assertEqual(worker_ids, dst_ranks)
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_dist_autograd_profiling(self):
         with dist_autograd.context() as context_id:
             t1 = torch.rand(3, 3, requires_grad=True)
@@ -891,6 +896,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         self.assertEqual(ngrads, len(grads))
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_backward_no_grad_on_tensor(self):
         t1 = torch.rand((3, 3), requires_grad=True)
         t2 = torch.rand((3, 3), requires_grad=True)
@@ -935,6 +941,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 local_grads = ret if ret else local_grads
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_backward_simple(self):
         self._test_backward_simple(self._next_rank())
 
@@ -1501,6 +1508,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         return torch.chain_matmul(t1, t2, t3, t4, res)
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_backwards_nested_python_udf(self):
         # Run equivalent of _nested_python_udf locally.
         t1 = torch.rand((3, 3), requires_grad=True)
@@ -1801,6 +1809,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         dist.barrier()
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_backward_accumulate_grads(self):
         t1 = torch.rand((3, 3), requires_grad=True)
         t2 = torch.rand((3, 3), requires_grad=True)
@@ -2132,6 +2141,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         return t3
 
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_thread_local_context_id(self):
         t1 = torch.rand((3, 3))
         t2 = torch.rand((3, 3))
