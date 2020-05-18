@@ -156,6 +156,139 @@ std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
   return std::make_pair(func_name, str_stream.str());
 };
 
+bool validateKernelArgTensor(
+    const at::Tensor& arg,
+    const Val& param,
+    int device_index,
+    std::stringstream& msg) {
+  // Arg is a tensor. Param must be a tensor too.
+  if (*param.getValType() != ValType::TensorView) {
+    msg << "Argument is a tensor, but the parameter is not.";
+    return false;
+  }
+  // Check the rank of the tensors.
+  size_t arg_dim = arg.dim();
+  const auto& root_dom = *static_cast<const TensorView&>(param).getRootDomain();
+  size_t param_dim = 0;
+  for (size_t i = 0; i < root_dom.nDims(); ++i) {
+    if (!root_dom.axis(i)->isReduction())
+      ++param_dim;
+  }
+  if (arg_dim != param_dim) {
+    msg << "Argument tensor's rank is " << arg_dim << ", but the parameter is "
+        << param_dim;
+    return false;
+  }
+  if (arg.device().index() != device_index) {
+    msg << "Argument is on device that is not compiled for";
+    return false;
+  }
+  // Check element type
+  at::ScalarType arg_data_type = arg.scalar_type();
+  DataType param_data_type = *param.getDataType();
+  bool match = false;
+  switch (arg_data_type) {
+    case at::ScalarType::Int:
+      match = param_data_type == DataType::Int;
+      break;
+    case at::ScalarType::Half:
+      match = param_data_type == DataType::Half;
+      break;
+    case at::ScalarType::Float:
+      match = param_data_type == DataType::Float;
+      break;
+    case at::ScalarType::Bool:
+      match = param_data_type == DataType::Bool;
+      break;
+    default:
+      match = false;
+  }
+  if (!match)
+    msg << "Argument element type is " << arg_data_type
+        << ", but the parameter is " << param_data_type;
+  return match;
+}
+
+bool validateKernelArgScalar(
+    const c10::Type& arg_type,
+    const Val& param,
+    std::stringstream& msg) {
+  if (!param.isScalar()) {
+    msg << "Argument is a scalar, but the parameter is not.";
+    return false;
+  }
+  DataType param_type = *param.getDataType();
+  bool match = false;
+  switch (arg_type.kind()) {
+    case c10::TypeKind::IntType:
+      match = param_type == DataType::Int;
+      break;
+    case c10::TypeKind::FloatType:
+      match = param_type == DataType::Float;
+      break;
+    case c10::TypeKind::BoolType:
+      match = param_type == DataType::Bool;
+      break;
+    default:
+      match = false;
+  }
+  if (!match) {
+    msg << "Argument type is " << arg_type << ", but the parameter is "
+        << param_type;
+  }
+  return match;
+}
+
+bool validateKernelArg(
+    const c10::IValue& arg,
+    const Val& param,
+    int device_index,
+    std::stringstream& msg) {
+  if (arg.type()->kind() != c10::TypeKind::TensorType) {
+    return validateKernelArgScalar(*arg.type(), param, msg);
+  } else {
+    return validateKernelArgTensor(arg.toTensor(), param, device_index, msg);
+  }
+}
+
+void validateKernelArgs(
+    const CudaKernel& entry,
+    const at::ArrayRef<IValue>& inputs,
+    const std::vector<at::Tensor>& outputs) {
+  // Check inputs
+  TORCH_INTERNAL_ASSERT(
+      inputs.size() == entry.inputs.size(), "Wrong number of kernel inputs.");
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    const IValue& arg = inputs[i];
+    const Val& param = *entry.inputs[i];
+    std::stringstream msg;
+    TORCH_INTERNAL_ASSERT(
+        validateKernelArg(arg, param, entry.device_, msg),
+        "Input argument at position ",
+        i,
+        " is invalid; ",
+        msg.str());
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      entry.outputs.size() != 0,
+      "Kernel should have at least one output tensor.");
+
+  TORCH_INTERNAL_ASSERT(
+      outputs.size() == entry.outputs.size(),
+      "Wrong number of kernel outputs.");
+  for (size_t i = 0; i < outputs.size(); ++i) {
+    const at::Tensor& arg = outputs[i];
+    const Val& param = *entry.outputs[i];
+    std::stringstream msg;
+    TORCH_INTERNAL_ASSERT(
+        validateKernelArg(arg, param, entry.device_, msg),
+        "Output argument at position ",
+        i,
+        " is invalid; ",
+        msg.str());
+  }
+}
 } // namespace
 
 bool NaivePWKernelArgsReq::matchKernelSize(const at::ArrayRef<IValue> inputs) {
@@ -309,6 +442,8 @@ void runKernel(
     CudaKernel* entry,
     const at::ArrayRef<IValue> inputs,
     std::vector<at::Tensor> outputs) {
+  validateKernelArgs(*entry, inputs, outputs);
+
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry->device_);
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -327,9 +462,6 @@ void runKernel(
   // from I/O expected by the generated CUDA kernel.
   for (auto& input : inputs) {
     if (input.isTensor()) {
-      TORCH_INTERNAL_ASSERT(
-          input.toTensor().device().index() == entry->device_,
-          "input to kernel on device that is not compiled for");
       kernel_args.push(input.toTensor(), outputs[0].sizes());
     } else {
       kernel_args.push(input);
@@ -380,6 +512,8 @@ void runTestKernel(
     CudaKernel* entry,
     const at::ArrayRef<IValue> inputs,
     std::vector<at::Tensor> outputs) {
+  validateKernelArgs(*entry, inputs, outputs);
+
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry->device_);
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -402,16 +536,8 @@ void runTestKernel(
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different
   // from I/O expected by the generated CUDA kernel.
-  TORCH_INTERNAL_ASSERT(inputs.size() == entry->inputs.size(),
-                        "Wrong number of kernel inputs.");
   for (auto& input : inputs) {
     if (input.isTensor()) {
-      TORCH_INTERNAL_ASSERT(
-          input.toTensor().device().index() == entry->device_,
-          "input to kernel on device that is not compiled for");
-      TORCH_INTERNAL_ASSERT(
-          !entry->outputs.empty(),
-          "No output found for this kernel, aborting.");
       if (has_reduction) {
         kernel_args.push(input.toTensor());
       } else {
@@ -422,9 +548,6 @@ void runTestKernel(
     }
   }
 
-
-  TORCH_INTERNAL_ASSERT(outputs.size() == entry->outputs.size(),
-                        "Wrong number of kernel outputs.");
   for (auto& output : outputs) {
     kernel_args.push(output);
   }
