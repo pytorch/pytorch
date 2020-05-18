@@ -1126,6 +1126,9 @@
 - name: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _log_softmax_backward_data(grad, result, dim, self)
 
+- name: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  self: _sparse_log_softmax_backward_data(grad, result, dim, self)
+
 - name: prelu(Tensor self, Tensor weight) -> Tensor
   self, weight: prelu_backward(grad, self, weight)
 
@@ -1140,6 +1143,9 @@
 
 - name: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _softmax_backward_data(grad, result, dim, self)
+
+- name: _sparse_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  self: _sparse_softmax_backward_data(grad, result, dim, self)
 
 - name: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
   self: softplus_backward(grad, self, beta, threshold, result)
