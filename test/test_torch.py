@@ -127,11 +127,15 @@ class AbstractTestCases:
                 torch.experimental.alert_not_deterministic("caller")
 
             with torch.experimental.flags(deterministic=True, deterministic_error_level=1):
-                self.assertWarnsRegex(UserWarning, "caller is not deterministic",
+                self.assertWarnsRegex(
+                    UserWarning,
+                    "caller is not deterministic",
                     lambda: torch.experimental.alert_not_deterministic("caller"))
 
             with torch.experimental.flags(deterministic=True, deterministic_error_level=2):
-                self.assertRaisesRegex(RuntimeError, "caller is not deterministic",
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "caller is not deterministic",
                     lambda: torch.experimental.alert_not_deterministic("caller"))
 
             with torch.experimental.flags(deterministic=False, deterministic_error_level=2):
@@ -140,10 +144,9 @@ class AbstractTestCases:
 
             # Make sure invalid error levels raise an exception
             for invalid_error_level in [-1, 3, 4]:
-                with self.assertRaisesRegex(RuntimeError,
-                                            "error level %d" % invalid_error_level):
+                with self.assertRaisesRegex(RuntimeError, "error level %d" % invalid_error_level):
                     with torch.experimental.flags(deterministic_error_level=invalid_error_level):
-                    pass
+                        pass
 
         def test_type_conversion_via_dtype_name(self):
             x = torch.tensor([1])
