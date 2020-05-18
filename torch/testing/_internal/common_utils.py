@@ -58,6 +58,20 @@ class ProfilingMode(Enum):
     SIMPLE = 2
     PROFILING = 3
 
+def cppProfilingFlagsToProfilingMode():
+    old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
+    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    torch._C._jit_set_profiling_executor(old_prof_exec_state)
+    torch._C._jit_set_profiling_mode(old_prof_mode_state)
+
+    if old_prof_exec_state:
+        if old_prof_mode_state:
+            return ProfilingMode.PROFILING
+        else:
+            return ProfilingMode.SIMPLE
+    else:
+        return ProfilingMode.LEGACY
+
 @contextmanager
 def enable_profiling_mode_for_profiling_tests():
     if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
@@ -126,14 +140,17 @@ parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
 
-GRAPH_EXECUTOR = ProfilingMode.SIMPLE if IS_SANDCASTLE else ProfilingMode.PROFILING
 args, remaining = parser.parse_known_args()
 if args.ge_config == 'legacy':
     GRAPH_EXECUTOR = ProfilingMode.LEGACY
 elif args.ge_config == 'profiling':
     GRAPH_EXECUTOR = ProfilingMode.PROFILING
-else:
+elif args.ge_config == 'simple':
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
+else:
+    # infer flags based on the default settings
+    GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
+
 
 LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
@@ -429,6 +446,16 @@ def skipIfNotRegistered(op_name, message):
     except ImportError:
         skipper = unittest.skip("Cannot import `caffe2.python.core`")
     return skipper
+
+
+def skipIfNoSciPy(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not TEST_SCIPY:
+            raise unittest.SkipTest("test require SciPy, but SciPy not found")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 
 def slowTest(fn):
@@ -1017,8 +1044,9 @@ class TestCase(expecttest.TestCase):
             prec = 10**(-places)
         self.assertEqual(x, y, msg, atol=prec, allow_inf=allow_inf)
 
-    def assertQuantizedClose(self, qx, qy, tol_off_by_y_scale=1e-2, message=''):
-        # Asserts that qx is exactly matching qy, allowing for tol_off_by_y_scale
+    def assertQuantizedClose(self, qx, qy, tol_off_by_one=1e-2,
+                             tol_off_by_two=1e-6, message=''):
+        # Asserts that qx is close to qy, allowing for tol_off_by_y_scale
         # errors.
 
         self.assertTrue(qx.is_quantized and qy.is_quantized)
@@ -1031,10 +1059,12 @@ class TestCase(expecttest.TestCase):
 
         diff = torch.abs(qx.int_repr() - qy.int_repr())
         off_by_one = torch.sum(diff == 1)
-        off_by_two_plus = torch.sum(diff > 1)
+        off_by_two = torch.sum(diff == 2)
+        off_by_three_plus = torch.sum(diff > 2)
 
-        self.assertTrue(off_by_two_plus == 0)
-        self.assertTrue(float(off_by_one) / diff.numel() < tol_off_by_y_scale, message)
+        self.assertTrue(float(off_by_one) / diff.numel() < tol_off_by_one, message)
+        self.assertTrue(float(off_by_two) / diff.numel() < tol_off_by_two, message)
+        self.assertTrue(off_by_three_plus == 0)
 
     def assertNotEqual(self, x, y, message='', *, atol=None):
         if not isinstance(message, str):
@@ -1102,7 +1132,7 @@ class TestCase(expecttest.TestCase):
         r"""
         Test if :attr:`callable` does not raise a warning.
         """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
+        with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             callable()
             self.assertTrue(len(ws) == 0, msg)
@@ -1114,7 +1144,7 @@ class TestCase(expecttest.TestCase):
         This filters expected warnings from the test log and fails the test if
         any unexpected warnings are caught.
         """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
+        with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             # Ignore expected warnings
             warnings.filterwarnings("ignore", message=regex, category=category)
@@ -1128,46 +1158,6 @@ class TestCase(expecttest.TestCase):
                             w.message, w.category, w.filename, w.lineno, w.line)
                         msg += '\n'
                     self.fail(msg)
-
-    @contextmanager
-    def _reset_warning_registry(self):
-        r"""
-        warnings.catch_warnings() in Python 2 misses already registered
-        warnings. We need to manually clear the existing warning registries to
-        ensure catching warnings in a scope.
-        """
-        # Python 3 has no problem.
-        if sys.version_info >= (3,):
-            yield
-            return
-
-        # Backup and clear all existing warning registries.
-        backup = {}
-        for name, mod in list(sys.modules.items()):
-            try:
-                reg = mod.__warningregistry__
-            except AttributeError:
-                continue
-            else:
-                backup[name] = reg.copy()
-                reg.clear()
-
-        yield
-
-        # Restore backed up warning registries.
-        for name, reg_orig in backup.items():
-            try:
-                mod = sys.modules[name]
-            except KeyError:
-                continue
-
-            try:
-                reg = mod.__warningregistry__
-            except AttributeError:
-                mod.__warningregistry__ = reg_orig
-            else:
-                reg.clear()
-                reg.update(reg_orig)
 
     def assertExpected(self, s, subname=None):
         r"""
