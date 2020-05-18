@@ -7,7 +7,7 @@ namespace at {
 
 BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   : TensorImpl(
-      c10::DispatchKeySet(DispatchKey::Vmap),
+      c10::DispatchKeySet(DispatchKey::BatchedTensorKey),
       value.dtype(),
       value.device()
     )
@@ -39,6 +39,11 @@ int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
   // actualDim gives us the index of `dim` in the `value_` Tensor, which is equivalent
   // to asking "where does the 3rd (0-indexed) zero occur in the bitset?".
   // The answer to that is index 5.
+  //
+  // TODO(rzou): the PDEP instruction does exactly this
+  // (https://stackoverflow.com/questions/7669057/find-nth-set-bit-in-an-int)
+  // but it might require newer (>= ~2015) CPUs. We should clean this up
+  // if/when we have dropped support for older CPUs.
   int64_t non_bdim_count = 0;
   for (int64_t actual_dim = 0; actual_dim < kVmapMaxTensorDims; actual_dim++) {
     if (is_bdim[actual_dim]) {
@@ -89,15 +94,15 @@ bool BatchedTensorImpl::has_storage() const {
 }
 
 Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim) {
-  if (!isBatched(tensor)) {
+  const auto* batched = maybeGetBatched(tensor);
+  if (!batched) {
     BatchDims bdims;
-    bdims.push_back({level, dim});
+    bdims.emplace_back(level, dim);
     return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
   }
-  const auto* batched = getBatched(tensor);
-  BatchDims new_bdims = { batched->bdims().begin(), batched->bdims().end() };
+  BatchDims new_bdims(batched->bdims().begin(), batched->bdims().end());
   auto actual_bdim = batched->actualDim(dim, /*wrap_dim=*/true);
-  new_bdims.push_back({level, actual_bdim});
+  new_bdims.emplace_back(level, actual_bdim);
   return makeBatched(batched->value(), std::move(new_bdims));
 }
 
