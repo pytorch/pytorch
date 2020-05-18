@@ -27,7 +27,7 @@ class Parameter(torch.Tensor):
         if data is None:
             data = torch.Tensor()
         instance = torch.Tensor._make_subclass(cls, data, requires_grad)
-        if tags is None
+        if tags is None:
             instance.tags = {}
         else:
             assert isinstance(tags, dict)
