@@ -156,14 +156,18 @@ add_docstr(torch.acosh,
            r"""
 acosh(input, out=None) -> Tensor
 
-Returns a new tensor with the inverse hyperbolic cosine of the elements of :attr:`input`,
-All values in the input tensor must be greater than or equal to one.
+Returns a new tensor with the inverse hyperbolic cosine of the elements of :attr:`input`.
+The domain of the inverse hyperbolic cosine is `[1, inf)` and values outside this range
+will be mapped to ``NaN``.
 
 .. math::
     \text{out}_{i} = \cosh^{-1}(\text{input}_{i})
 """ + r"""
 Args:
-    input (Tensor): the input tensor where :math:`input` is in the closed interval `[1, +inf)`.
+    input (Tensor): the input tensor where :math:`input` is in the interval `[1, inf)`
+    and the values outside this range are mapped to ``NaN``.
+
+Keyword arguments:
     {out}
 
 Example::
@@ -646,6 +650,8 @@ Returns a new tensor with the inverse hyperbolic sine of the elements of :attr:`
 """ + r"""
 Args:
     {input}
+
+Keyword arguments:
     {out}
 
 Example::
@@ -712,13 +718,19 @@ add_docstr(torch.atanh,
 atanh(input, out=None) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic tangent of the elements of :attr:`input`.
-All values in the input tensor must be in the open interval `(-1, 1)`.
+The domain of the inverse hyperbolic tangent is `(-1, 1)` and values outside this range
+will be mapped to ``NaN``, except for the values `1` and `-1` for which the output is
+mapped to `+/-INF` respectively.
 
 .. math::
     \text{out}_{i} = \tanh^{-1}(\text{input}_{i})
 """ + r"""
 Args:
-    input (Tensor): the input tensor where math:`input` is in the open interval `(-1, 1)`.
+    input (Tensor): the input tensor where math:`input` is in the open interval `(-1, 1)`
+    and the edge values `-1` and `1` are mapped to `-/+ INF` respectively while the other
+    `values outside this range are mapped to ``NaN``.
+
+Keyword arguments:
     {out}
 
 Example::
