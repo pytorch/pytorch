@@ -619,13 +619,21 @@ void logaddexp_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
-          scalar_t m = std::max(a, b);
-          return m + std::log((scalar_t)(1.0) + std::exp(-std::abs(a - b)));
+          if (std::isinf(a) && a == b) {
+            return a;
+          } else {
+            scalar_t m = std::max(a, b);
+            return m + std::log((scalar_t)(1.0) + std::exp(-std::abs(a - b)));
+          }
         },
         [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+          Vec256<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
           Vec256<scalar_t> one(1.0);
           Vec256<scalar_t> m = maximum(a, b);
-          return m + (one + (a - b).abs().neg().exp()).log();
+          return Vec256<scalar_t>::blendv(
+              m + (one + (a - b).abs().neg().exp()).log(),
+              a,
+              (a == b) & (a.abs() == inf));
         });
   });
 }
@@ -635,14 +643,22 @@ void logaddexp2_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
-          scalar_t m = std::max(a, b);
-          return m + std::log2((scalar_t)(1.0) + std::pow((scalar_t)(2), -std::abs(a - b)));
+          if (std::isinf(a) && a == b) {
+            return a;
+          } else {
+            scalar_t m = std::max(a, b);
+            return m + std::log2((scalar_t)(1.0) + std::pow((scalar_t)(2), -std::abs(a - b)));
+          }
         },
         [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+          Vec256<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
           Vec256<scalar_t> one(1.0);
           Vec256<scalar_t> two(2.0);
           Vec256<scalar_t> m = maximum(a, b);
-          return m + (one + two.pow((a - b).abs().neg())).log2();
+          return Vec256<scalar_t>::blendv(
+              m + (one + two.pow((a - b).abs().neg())).log2(),
+              a,
+              (a == b) & (a.abs() == inf));
         });
   });
 }
