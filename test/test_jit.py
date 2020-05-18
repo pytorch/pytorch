@@ -15419,41 +15419,6 @@ a")
             self.assertEqual(loaded.buffer1, torch.ones(2, 2) + 5)
             self.assertEqual(loaded.buffer2, torch.ones(2, 2) + 10)
 
-    def test_parameter_tags(self):
-        def do_test(has_tags_arg, tags, expected_tags):
-            class TestModule(nn.Module):
-                def __init__(self):
-                    super(TestModule, self).__init__()
-                    if has_tags_arg:
-                        self.param = nn.Parameter(torch.randn(5, 5), tags=tags)
-                    else:
-                        self.param = nn.Parameter(torch.randn(5, 5))
-
-                def forward(self, x):
-                    return x
-
-            m = TestModule()
-            self.assertEqual(m.param.tags, expected_tags)
-
-            m_traced = torch.jit.trace(m, torch.tensor(1.))
-            self.assertEqual(m.param.tags, expected_tags)
-
-            m_scripted = torch.jit.script(m)
-            self.assertEqual(m.param.tags, expected_tags)
-
-            def test_serialization(module):
-                with TemporaryFileName() as fname:
-                    module.save(fname)
-                    module_torch_jit_load = torch.jit.load(fname)
-                    self.assertEqual(module_torch_jit_load.param.tags, expected_tags)
-
-            test_serialization(m_traced)
-            test_serialization(m_scripted)
-
-        do_test(True, {"optimizer": "sparse"}, {"optimizer": "sparse"})
-        do_test(True, None, {})
-        do_test(False, None, {})
-
     def test_string_slicing(self):
         def fn1(x):
             # type: (str) -> str
