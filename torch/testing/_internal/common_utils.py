@@ -1061,6 +1061,8 @@ class TestCase(expecttest.TestCase):
         off_by_one = torch.sum(diff == 1)
         off_by_two = torch.sum(diff == 2)
         off_by_three_plus = torch.sum(diff > 2)
+        if off_by_three_plus > 0:
+            print(message)
 
         self.assertTrue(float(off_by_one) / diff.numel() < tol_off_by_one, message)
         self.assertTrue(float(off_by_two) / diff.numel() < tol_off_by_two, message)
