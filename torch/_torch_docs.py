@@ -4039,6 +4039,50 @@ Example::
             [1.0311, 0.3901, 0.5049]])
 """)
 
+add_docstr(torch.nanmean,
+           r"""
+nanmean(input) -> Tensor
+
+Returns the mean value of all elements ignoring NaNs in the :attr:`input` tensor.
+
+Args:
+    {input}
+
+Example::
+
+    >>> a = torch.tensor([[1, float('nan')], [3, 4]])
+    >>> a
+    tensor([[1., nan],
+            [3., 4.]])
+    >>> torch.nanmean(a)
+    tensor(2.6667)
+
+.. function:: mean(input, dim, keepdim=False, out=None) -> Tensor
+
+Returns the mean value of each row of the :attr:`input` tensor in the given
+dimension :attr:`dim` ignoring NaNs. If :attr:`dim` is a list of dimensions,
+reduce over all of them.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([[1, float('nan')], [3, 4]]) 
+    >>> a
+    tensor([[1., nan],
+            [3., 4.]])
+    >>> torch.nanmean(a, axis=0)
+    tensor([2., 4.])
+    >>> torch.nanmean(a, axis=1)
+    tensor([1.0000, 3.5000])
+""".format(**multi_dim_common))
+
 add_docstr(torch.narrow,
            r"""
 narrow(input, dim, start, length) -> Tensor

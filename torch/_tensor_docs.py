@@ -1943,6 +1943,13 @@ mvlgamma_(p) -> Tensor
 In-place version of :meth:`~Tensor.mvlgamma`
 """)
 
+add_docstr_all('nanmean',
+               r"""
+nanmean(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
+
+See :func:`torch.nanmean`
+""")
+
 add_docstr_all('narrow',
                r"""
 narrow(dimension, start, length) -> Tensor
