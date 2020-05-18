@@ -5888,10 +5888,11 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(actual, expected.to(actual))
 
                 if torch.can_cast(torch.result_type(base, exponent), base.dtype):
-                    actual = base.clone()
                     actual2 = actual.pow_(exponent)
                     self.assertEqual(actual, expected)
                     self.assertEqual(actual2, expected)
+                else:
+                    self.assertRaisesRegex(RuntimeError, 'cannot cast', lambda: actual.pow_(exponent))
 
             actual = torch.pow(base, exponent)
             self.assertEqual(actual, expected.to(actual))
