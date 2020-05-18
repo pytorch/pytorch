@@ -3023,6 +3023,8 @@ reduction with a tensor over a specific axis.
 Args:
     {input}
     other (Tensor): the tensor to compute logaddexp with
+
+Keyword arguments:
     {out}
 
 Example::
@@ -3047,6 +3049,8 @@ Calculates pointwise :math:`\log_2\left(2^x + 2^y\right)`. See
 Args:
     {input}
     other (Tensor): the tensor to compute logaddexp2 with
+
+Keyword arguments:
     {out}
 """.format(**common_args))
 
