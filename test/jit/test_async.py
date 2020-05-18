@@ -197,6 +197,23 @@ class TestAsync(JitTestCase):
         self.assertEqual(y2, foo2(x1, x2))
         self.assertEqual(y3, foo3(x1, x2, x3))
 
+    def test_async_kwargs(self):
+        @torch.jit.script
+        def foo(x1, x2):
+            return 2*x1 + x2;
+
+        x1 = torch.rand(3, 4)
+        x2 = torch.rand(3, 4)
+        y_hat = foo(x1, x2)
+        for fut in [
+            torch.jit._fork(foo, x1, x2),
+            torch.jit._fork(foo, x1, x2=x2),
+            torch.jit._fork(foo, x1=x1, x2=x2),
+            torch.jit._fork(foo, x2=x2, x1=x1),
+        ]:
+            y = torch.jit._wait(fut)
+            self.assertEqual(y, y_hat)
+
     @_inline_everything
     def test_async_script_trace(self):
         class Traced(nn.Module):
