@@ -26,7 +26,7 @@ class RNNBase(torch.nn.Module):
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
                  dropout=0., bidirectional=False,
-                 cat_layer_fwd_bwd_states=True, dtype=torch.qint8):
+                 concat=True, dtype=torch.qint8):
         super(RNNBase, self).__init__()
 
         self.mode = mode
@@ -37,11 +37,11 @@ class RNNBase(torch.nn.Module):
         self.batch_first = batch_first
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
-        self.cat_layer_fwd_bwd_states = cat_layer_fwd_bwd_states
+        self.concat = concat
         self.dtype = dtype
         num_directions = 2 if bidirectional else 1
 
-        hidden_switch = bidirectional and cat_layer_fwd_bwd_states
+        hidden_switch = bidirectional and concat
         bidirectional_size = hidden_size * num_directions
         actual_size = bidirectional_size if hidden_switch else hidden_size
 
@@ -211,13 +211,13 @@ class RNNBase(torch.nn.Module):
         if mod.mode == 'LSTM':
             qRNNBase = LSTM(mod.input_size, mod.hidden_size, mod.num_layers,
                             mod.bias, mod.batch_first, mod.dropout, mod.bidirectional,
-                            mod.cat_layer_fwd_bwd_states, dtype)
+                            mod.concat, dtype)
         else:
             raise NotImplementedError('Only LSTM is supported for QuantizedRNN for now')
 
         num_directions = 2 if mod.bidirectional else 1
 
-        hidden_switch = bidirectional and qRNNBase.cat_layer_fwd_bwd_states
+        hidden_switch = bidirectional and qRNNBase.concat
         bidirectional_size = qRNNBase.hidden_size * num_directions
         actual_size = bidirectional_size if hidden_switch else qRNNBase.hidden_size
 
@@ -301,12 +301,12 @@ class LSTM(RNNBase):
         if batch_sizes is None:
             result = torch.quantized_lstm(input, hx, _all_params, self.bias, self.num_layers,
                                           float(self.dropout), self.training, self.bidirectional,
-                                          self.cat_layer_fwd_bwd_states, self.batch_first,
+                                          self.concat, self.batch_first,
                                           dtype=self.dtype, use_dynamic=True)
         else:
             result = torch.quantized_lstm(input, batch_sizes, hx, _all_params, self.bias,
                                           self.num_layers, float(self.dropout), self.training,
-                                          self.bidirectional, self.cat_layer_fwd_bwd_states,
+                                          self.bidirectional, self.concat,
                                           dtype=self.dtype, use_dynamic=True)
         output = result[0]
         hidden = result[1:]

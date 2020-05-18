@@ -43,7 +43,7 @@ struct TORCH_API RNNOptionsBase {
   // and backward states will be processed independently and then concatenated
   // at the final output of the network. If true then both forward and
   // backward states will be concatenated after each layer.
-  TORCH_ARG(bool, cat_layer_fwd_bwd_states) = true;
+  TORCH_ARG(bool, concat) = true;
 };
 
 } // namespace detail
@@ -87,7 +87,7 @@ struct TORCH_API RNNOptions {
   // and backward states will be processed independently and then concatenated
   // at the final output of the network. If true then both forward and
   // backward states will be concatenated after each layer.
-  TORCH_ARG(bool, cat_layer_fwd_bwd_states) = true;
+  TORCH_ARG(bool, concat) = true;
 };
 
 /// Options for the `LSTM` module.
@@ -125,7 +125,7 @@ struct TORCH_API LSTMOptions {
   // and backward states will be processed independently and then concatenated
   // at the final output of the network. If true then both forward and
   // backward states will be concatenated after each layer.
-  TORCH_ARG(bool, cat_layer_fwd_bwd_states) = true;
+  TORCH_ARG(bool, concat) = true;
 };
 
 /// Options for the `GRU` module.
@@ -163,7 +163,7 @@ struct TORCH_API GRUOptions {
   // and backward states will be processed independently and then concatenated
   // at the final output of the network. If true then both forward and
   // backward states will be concatenated after each layer.
-  TORCH_ARG(bool, cat_layer_fwd_bwd_states) = true;
+  TORCH_ARG(bool, concat) = true;
 };
 
 namespace detail {

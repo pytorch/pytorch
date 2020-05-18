@@ -244,7 +244,7 @@ def apply_permutation(tensor, permutation, dim=1):
 class QuantizedRNNBase(torch.jit.ScriptModule):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
                      'batch_first', 'dropout', 'bidirectional',
-                     'cat_layer_fwd_bwd_states', 'dtype']
+                     'concat', 'dtype']
 
     def __init__(self, other, dtype=torch.int8):
         super(QuantizedRNNBase, self).__init__()
@@ -258,11 +258,11 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
             assert not self.batch_first
         self.dropout = other.dropout
         self.bidirectional = other.bidirectional
-        self.cat_layer_fwd_bwd_states = other.cat_layer_fwd_bwd_states
+        self.concat = other.concat
         num_directions = 2 if self.bidirectional else 1
         self.dtype = dtype
 
-        hidden_switch = self.bidirectional and self.cat_layer_fwd_bwd_states
+        hidden_switch = self.bidirectional and self.concat
         bidirectional_size = self.hidden_size * num_directions
         actual_size = bidirectional_size if hidden_switch else self.hidden_size
         assert self.bias
@@ -379,7 +379,7 @@ class QuantizedLSTM(QuantizedRNNBase):
         assert batch_sizes is None
         result = torch.quantized_lstm(input, hx, self.all_weights, self.bias, self.num_layers,
                                       float(self.dropout), self.training, self.bidirectional,
-                                      self.cat_layer_fwd_bwd_states,
+                                      self.concat,
                                       self.batch_first, dtype=self.dtype, use_dynamic=False)
         output = result[0]
         hidden = result[1:]
@@ -456,11 +456,11 @@ class QuantizedGRU(QuantizedRNNBase):
         if batch_sizes is None:
             result = torch.quantized_gru(input, hx, self.all_weights, self.bias, self.num_layers,
                                          float(self.dropout), self.training, self.bidirectional,
-                                         self.cat_layer_fwd_bwd_states, self.batch_first)
+                                         self.concat, self.batch_first)
         else:
             result = torch.quantized_gru(input, batch_sizes, hx, self.all_weights, self.bias, self.num_layers,
                                          float(self.dropout), self.training, self.bidirectional,
-                                         self.cat_layer_fwd_bwd_states)
+                                         self.concat)
 
         output = result[0]
         hidden = result[1]

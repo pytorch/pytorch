@@ -63,7 +63,7 @@ void RNNImplBase<Derived>::reset() {
   // If bidirectional mode and type 2 RNN is enabled, then the input
   // size to any hidden layer should be 2 * hidden_size
   const auto hidden_switch =
-      (options_base.bidirectional() && options_base.cat_layer_fwd_bwd_states());
+      (options_base.bidirectional() && options_base.concat());
   const auto bidirectional_size = options_base.hidden_size() * num_directions;
   const auto actual_hidden_size =
       (hidden_switch ? bidirectional_size : options_base.hidden_size());
@@ -263,7 +263,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
       torch::NoGradGuard no_grad;
       if (torch::_use_cudnn_rnn_flatten_weight()) {
         if (options_base.bidirectional() &&
-            !options_base.cat_layer_fwd_bwd_states()) {
+            !options_base.concat()) {
           std::vector<Tensor> flat_weights_fwd;
           std::vector<Tensor> flat_weights_bwd;
           std::vector<std::string> weights_fwd_names;
@@ -283,7 +283,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
               options_base.num_layers(),
               options_base.batch_first(),
               /*bidirectional=*/false,
-              options_base.cat_layer_fwd_bwd_states());
+              options_base.concat());
           // Flatten Backward direction weights
           torch::_cudnn_rnn_flatten_weight(
               flat_weights_bwd,
@@ -294,7 +294,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
               options_base.num_layers(),
               options_base.batch_first(),
               /*bidirectional=*/false,
-              options_base.cat_layer_fwd_bwd_states());
+              options_base.concat());
           std::tie(flat_weights_, flat_weights_names_) =
               merge_direction_weights(flat_weights_fwd, flat_weights_bwd,
                                       weights_fwd_names, weights_fwd_names);
@@ -308,7 +308,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
               options_base.num_layers(),
               options_base.batch_first(),
               options_base.bidirectional(),
-              options_base.cat_layer_fwd_bwd_states());
+              options_base.concat());
         }
       }
     }
@@ -449,8 +449,8 @@ void RNNImplBase<Derived>::pretty_print(std::ostream& stream) const {
          << ", batch_first=" << options_base.batch_first()
          << ", dropout=" << options_base.dropout()
          << ", bidirectional=" << options_base.bidirectional()
-         << ", cat_layer_fwd_bwd_states="
-         << options_base.cat_layer_fwd_bwd_states() << ")";
+         << ", concat="
+         << options_base.concat() << ")";
 }
 
 template <typename Derived>
@@ -497,7 +497,7 @@ RNNImpl::RNNImpl(const RNNOptions& options_)
               .batch_first(options_.batch_first())
               .dropout(options_.dropout())
               .bidirectional(options_.bidirectional())
-              .cat_layer_fwd_bwd_states(options_.cat_layer_fwd_bwd_states())),
+              .concat(options_.concat())),
       options(options_) {}
 
 std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
@@ -533,7 +533,7 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
           options_base.dropout(),
           this->is_training(),
           options_base.bidirectional(),
-          options_base.cat_layer_fwd_bwd_states(),
+          options_base.concat(),
           options_base.batch_first());
     } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
       result = torch::rnn_relu(
@@ -545,7 +545,7 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
           options_base.dropout(),
           this->is_training(),
           options_base.bidirectional(),
-          options_base.cat_layer_fwd_bwd_states(),
+          options_base.concat(),
           options_base.batch_first());
     } else {
       TORCH_CHECK(
@@ -565,7 +565,7 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
           options_base.dropout(),
           this->is_training(),
           options_base.bidirectional(),
-          options_base.cat_layer_fwd_bwd_states());
+          options_base.concat());
     } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
       result = torch::rnn_relu(
           input,
@@ -577,7 +577,7 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
           options_base.dropout(),
           this->is_training(),
           options_base.bidirectional(),
-          options_base.cat_layer_fwd_bwd_states());
+          options_base.concat());
     } else {
       TORCH_CHECK(
           false,
@@ -638,7 +638,7 @@ LSTMImpl::LSTMImpl(const LSTMOptions& options_)
               .batch_first(options_.batch_first())
               .dropout(options_.dropout())
               .bidirectional(options_.bidirectional())
-              .cat_layer_fwd_bwd_states(options_.cat_layer_fwd_bwd_states())),
+              .concat(options_.concat())),
       options(options_) {}
 
 void LSTMImpl::check_forward_args(
@@ -704,7 +704,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
         options.dropout(),
         this->is_training(),
         options.bidirectional(),
-        options.cat_layer_fwd_bwd_states(),
+        options.concat(),
         options.batch_first());
   } else {
     result = torch::lstm(
@@ -717,7 +717,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
         options.dropout(),
         this->is_training(),
         options.bidirectional(),
-        options.cat_layer_fwd_bwd_states());
+        options.concat());
   }
   auto output = std::get<0>(result);
   auto hidden = std::make_tuple(std::get<1>(result), std::get<2>(result));
@@ -776,7 +776,7 @@ GRUImpl::GRUImpl(const GRUOptions& options_)
               .batch_first(options_.batch_first())
               .dropout(options_.dropout())
               .bidirectional(options_.bidirectional())
-              .cat_layer_fwd_bwd_states(options_.cat_layer_fwd_bwd_states())),
+              .concat(options_.concat())),
       options(options_) {}
 
 std::tuple<Tensor, Tensor> GRUImpl::forward_helper(
@@ -810,7 +810,7 @@ std::tuple<Tensor, Tensor> GRUImpl::forward_helper(
         options.dropout(),
         this->is_training(),
         options.bidirectional(),
-        options.cat_layer_fwd_bwd_states(),
+        options.concat(),
         options.batch_first());
   } else {
     result = torch::gru(
@@ -822,7 +822,7 @@ std::tuple<Tensor, Tensor> GRUImpl::forward_helper(
         options.num_layers(),
         options.dropout(),
         this->is_training(),
-        options.cat_layer_fwd_bwd_states(),
+        options.concat(),
         options.bidirectional());
   }
   auto output = std::get<0>(result);

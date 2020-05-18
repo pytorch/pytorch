@@ -5623,7 +5623,7 @@ class TestNN(NNTestCase):
                              bias=bias,
                              dropout=dropout,
                              bidirectional=bidirectional,
-                             cat_layer_fwd_bwd_states=type_2,
+                             concat=type_2,
                              batch_first=batch_first).to(dtype)
 
                 outputs_cpu = forward_backward(
@@ -5635,7 +5635,7 @@ class TestNN(NNTestCase):
                                  bias=bias,
                                  dropout=dropout,
                                  bidirectional=bidirectional,
-                                 cat_layer_fwd_bwd_states=type_2,
+                                 concat=type_2,
                                  batch_first=batch_first).to(dtype)
 
                 outputs_gpu = forward_backward(
@@ -5793,7 +5793,7 @@ class TestNN(NNTestCase):
                                   bias=bias,
                                   dropout=dropout,
                                   bidirectional=True,
-                                  cat_layer_fwd_bwd_states=False,
+                                  concat=False,
                                   batch_first=batch_first).to(dtype)
                 full_rnn.to(device)
 

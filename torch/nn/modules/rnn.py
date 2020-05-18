@@ -25,12 +25,12 @@ def apply_permutation(tensor, permutation, dim=1):
 class RNNBase(Module):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
                      'batch_first', 'dropout', 'bidirectional',
-                     'cat_layer_fwd_bwd_states']
+                     'concat']
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
                  dropout=0., bidirectional=False,
-                 cat_layer_fwd_bwd_states=True):
+                 concat=True):
         super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
@@ -40,7 +40,7 @@ class RNNBase(Module):
         self.batch_first = batch_first
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
-        self.cat_layer_fwd_bwd_states = cat_layer_fwd_bwd_states
+        self.concat = concat
         num_directions = 2 if bidirectional else 1
 
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
@@ -67,7 +67,7 @@ class RNNBase(Module):
 
         self._flat_weights_names = []
         self._all_weights = []
-        hidden_switch = bidirectional and cat_layer_fwd_bwd_states
+        hidden_switch = bidirectional and concat
         bidirectional_size = hidden_size * num_directions
         actual_size = bidirectional_size if hidden_switch else hidden_size
         for layer in range(num_layers):
@@ -140,7 +140,7 @@ class RNNBase(Module):
         with torch.cuda.device_of(first_fw):
             import torch.backends.cudnn.rnn as rnn
 
-            if not self.cat_layer_fwd_bwd_states and self.bidirectional:
+            if not self.concat and self.bidirectional:
                 # Rearrange weights in order to have them in
                 # (forward_weights, backward_weights) order
                 offset = 4 if self.bias else 2
@@ -174,7 +174,7 @@ class RNNBase(Module):
                                 rnn.get_cudnn_mode(self.mode),
                                 self.hidden_size, self.num_layers,
                                 self.batch_first, False,
-                                bool(self.cat_layer_fwd_bwd_states))
+                                bool(self.concat))
                 self._flat_weights = fwd_weights + bwd_weights
                 self._flat_weights_names = fwd_names + bwd_names
             else:
@@ -188,7 +188,7 @@ class RNNBase(Module):
                             self.input_size, rnn.get_cudnn_mode(self.mode),
                             self.hidden_size, self.num_layers,
                             self.batch_first, bool(self.bidirectional),
-                            bool(self.cat_layer_fwd_bwd_states))
+                            bool(self.concat))
 
     def _apply(self, fn):
         ret = super(RNNBase, self)._apply(fn)
@@ -277,11 +277,11 @@ class RNNBase(Module):
         if batch_sizes is None:
             result = _impl(input, hx, self._flat_weights, self.bias, self.num_layers,
                            self.dropout, self.training, self.bidirectional,
-                           self.cat_layer_fwd_bwd_states, self.batch_first)
+                           self.concat, self.batch_first)
         else:
             result = _impl(input, batch_sizes, hx, self._flat_weights, self.bias,
                            self.num_layers, self.dropout, self.training, self.bidirectional,
-                           self.cat_layer_fwd_bwd_states)
+                           self.concat)
         output = result[0]
         hidden = result[1]
 
@@ -301,8 +301,8 @@ class RNNBase(Module):
             s += ', dropout={dropout}'
         if self.bidirectional is not False:
             s += ', bidirectional={bidirectional}'
-        if not self.cat_layer_fwd_bwd_states:
-            s += ', cat_layer_fwd_bwd_states={cat_layer_fwd_bwd_states}'
+        if not self.concat:
+            s += ', concat={concat}'
         return s.format(**self.__dict__)
 
     def __setstate__(self, d):
@@ -375,7 +375,7 @@ class RNN(RNNBase):
             RNN layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
-        cat_layer_fwd_bwd_states: If ``True``, then the forward and backward
+        concat: If ``True``, then the forward and backward
             hidden states will be concatenated and fed as input to each
             layer, except for the first one. If set to ``False``, each hidden
             state will be processed independently and concatenated just at the
@@ -513,7 +513,7 @@ class LSTM(RNNBase):
             LSTM layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional LSTM. Default: ``False``
-        cat_layer_fwd_bwd_states: If ``True``, then the forward and backward
+        concat: If ``True``, then the forward and backward
             hidden states will be concatenated and fed as input to each
             layer, except for the first one. If set to ``False``, each hidden
             state will be processed independently and concatenated just at the
@@ -636,11 +636,11 @@ class LSTM(RNNBase):
         if batch_sizes is None:
             result = _VF.lstm(input, hx, self._flat_weights, self.bias, self.num_layers,
                               self.dropout, self.training, self.bidirectional,
-                              self.cat_layer_fwd_bwd_states, self.batch_first)
+                              self.concat, self.batch_first)
         else:
             result = _VF.lstm(input, batch_sizes, hx, self._flat_weights, self.bias,
                               self.num_layers, self.dropout, self.training, self.bidirectional,
-                              self.cat_layer_fwd_bwd_states)
+                              self.concat)
         output = result[0]
         hidden = result[1:]
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
@@ -692,7 +692,7 @@ class GRU(RNNBase):
             GRU layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional GRU. Default: ``False``
-        cat_layer_fwd_bwd_states: If ``True``, then the forward and backward
+        concat: If ``True``, then the forward and backward
             hidden states will be concatenated and fed as input to each
             layer, except for the first one. If set to ``False``, each hidden
             state will be processed independently and concatenated just at the
@@ -802,11 +802,11 @@ class GRU(RNNBase):
         if batch_sizes is None:
             result = _VF.gru(input, hx, self._flat_weights, self.bias, self.num_layers,
                              self.dropout, self.training, self.bidirectional,
-                             self.cat_layer_fwd_bwd_states, self.batch_first)
+                             self.concat, self.batch_first)
         else:
             result = _VF.gru(input, batch_sizes, hx, self._flat_weights, self.bias,
                              self.num_layers, self.dropout, self.training, self.bidirectional,
-                             self.cat_layer_fwd_bwd_states)
+                             self.concat)
         output = result[0]
         hidden = result[1]
 
