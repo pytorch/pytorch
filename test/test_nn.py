@@ -3789,7 +3789,10 @@ class TestNN(NNTestCase):
             with TemporaryFileName() as fname:
                 torch.save(m.state_dict(), fname)
                 m2 = torch.nn.Linear(4, 5)
-                m2.param = Parameter(torch.randn(5, 5))
+                if has_tags_arg:
+                    m2.param = Parameter(torch.randn(5, 5), tags=tags)
+                else:
+                    m2.param = Parameter(torch.randn(5, 5))
                 m2.load_state_dict(torch.load(fname))
                 self.assertEqual(m2.param.tags, expected_tags)
 
