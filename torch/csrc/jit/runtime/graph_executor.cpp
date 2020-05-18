@@ -37,6 +37,7 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
@@ -431,8 +432,125 @@ struct DifferentiableGraphOp {
   const size_t num_outputs;
 };
 
+struct DifferentiableTensorExprKernel {
+  DifferentiableTensorExprKernel(Gradient grad)
+      : kernel_(grad.f),
+        grad(std::move(grad)),
+        grad_executor(this->grad.df, "<backward op>"),
+        num_inputs(this->grad.f->inputs().size()),
+        num_outputs(this->grad.f->outputs().size()) {}
+
+  // XXX: keep in mind that stack can be larger than the inputs we need!
+  int operator()(Stack& stack) const {
+    auto grad_fn = std::make_shared<DifferentiableGraphBackward>(
+        grad_executor,
+        grad.df_input_vjps.size(),
+        grad.df_input_captured_inputs.size() +
+            grad.df_input_captured_outputs.size());
+
+    {
+      auto inputs = last(stack, num_inputs);
+      // hook up the outputs of df to the gradient functions of the inputs that
+      // require gradients
+      for (auto idx : grad.df_output_vjps) {
+        grad_fn->addOutputForIValue(inputs[idx]);
+      }
+      captureInputs(*grad_fn, inputs);
+    }
+
+    detachVariables(stack);
+    if (!tensorexpr::fallbackAllowed()) {
+      kernel_.run(stack);
+      return 0;
+    }
+
+    try {
+      kernel_.run(stack);
+    } catch (const std::runtime_error& e) {
+      kernel_.fallback(stack);
+    }
+
+    {
+      auto outputs = last(stack, num_outputs);
+      // hookup the gradients for the output tensors that require gradients
+      // to the inputs to our gradient function df
+      // TODO - XXX - if any output is the same tensor multiple times, views
+      // have to be setup here. We need to refactor autograd until it is safe
+      // for tensors to be constructed without all the viewing infrastructure.
+      // this is currently intentionally not done here so we can get an idea of
+      // our perf before introducing overhead for correctness
+      for (auto idx : grad.df_input_vjps) {
+        grad_fn->addInputIValue(outputs[idx]);
+      }
+      captureOutputs(*grad_fn, outputs);
+      // drop the temporary outputs so that we return the same number of
+      // outputs as if we were not also calculating gradient
+      const size_t num_temporary_outputs = num_outputs - grad.f_real_outputs;
+      stack.erase(stack.end() - num_temporary_outputs, stack.end());
+    }
+    return 0;
+  }
+
+ private:
+  friend GraphExecutor* detail::getGradExecutor(Operation& op);
+
+  at::Tensor detach(at::Tensor t) const {
+    if (!t.defined()) {
+      return t;
+    }
+    return t.detach();
+  }
+
+  void detach(IValue& v) const {
+    if (v.isTensor()) {
+      v = IValue(detach(std::move(v).toTensor()));
+    } else if (v.isTensorList()) {
+      c10::List<at::Tensor> lst = std::move(v).toTensorList();
+      for (size_t i = 0; i < lst.size(); ++i) {
+        lst.set(i, detach(lst.extract(i)));
+      }
+      v = std::move(lst);
+    }
+  }
+
+  void detachVariables(Stack& stack) const {
+    // It would be nice to use an ArrayRef here, but unfortunately those can
+    // only return const references, so we need to do a bunch of indexing
+    // ourselves.
+    const int64_t stack_size = stack.size();
+    const int64_t stack_offset = stack_size - num_inputs;
+    for (int64_t i = stack_offset; i < stack_size; ++i) {
+      detach(stack[i]);
+    }
+  }
+  // Capture (save) inputs that would be required to subsequently run backwards
+  void captureInputs(
+      DifferentiableGraphBackward& grad_fn,
+      at::ArrayRef<IValue> inputs) const {
+    for (size_t offset : grad.df_input_captured_inputs) {
+      grad_fn.capture(inputs[offset], /*is_output*/ false);
+    }
+  }
+  void captureOutputs(
+      DifferentiableGraphBackward& grad_fn,
+      at::ArrayRef<IValue> outputs) const {
+    for (size_t offset : grad.df_input_captured_outputs) {
+      grad_fn.capture(outputs[offset], /*is_output*/ true);
+    }
+  }
+
+  Gradient grad;
+  GraphExecutor grad_executor;
+  mutable torch::jit::tensorexpr::TensorExprKernel kernel_;
+
+  const size_t num_inputs;
+  const size_t num_outputs;
+};
+
 Gradient getGradient(const Node* n) {
-  AT_ASSERT(n->kind() == prim::DifferentiableGraph);
+  AT_ASSERT(
+      n->kind() == prim::DifferentiableGraph ||
+      n->kind() == getTensorExprSymbol());
   Gradient grad;
   grad.f = n->g(attr::Subgraph);
   grad.df = n->g(attr::ReverseSubgraph);
@@ -453,6 +571,15 @@ RegisterOperators reg_graph_executor_ops({Operator(
       return DifferentiableGraphOp(getGradient(n));
     },
     aliasAnalysisInternalSpecialCase())});
+
+RegisterOperators TensorExprOps({
+    torch::jit::Operator(
+        getTensorExprSymbol(),
+        [](const Node* n) -> Operation {
+          return DifferentiableGraphOp(getGradient(n));
+        },
+        AliasAnalysisKind::PURE_FUNCTION),
+});
 
 namespace detail {
 
@@ -710,7 +837,7 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g) {
 }
 
 void packGradient(const Gradient& gradient, Node* dnode) {
-  AT_ASSERT(dnode->kind() == prim::DifferentiableGraph);
+  // AT_ASSERT(dnode->kind() == prim::DifferentiableGraph);
   dnode->g_(attr::Subgraph, gradient.f)
       ->g_(attr::ReverseSubgraph, gradient.df)
       ->i_(attr::f_real_outputs, gradient.f_real_outputs)
@@ -773,10 +900,14 @@ void runNondiffOptimization(
   LowerSimpleTuples(graph);
 
   // Rewrite subgraphs with many MMs into expressions that batch them.
-  BatchMM(graph);
+  if (!getProfilingMode()) {
+    BatchMM(graph);
+  }
 
-  if (tensorExprFuserEnabled()) {
-    FuseTensorExprs(graph);
+  if (getProfilingMode()) {
+    if (tensorExprFuserEnabled()) {
+      FuseTensorExprs(graph);
+    }
   } else {
     FuseGraph(graph, strict_fuser_check);
   }

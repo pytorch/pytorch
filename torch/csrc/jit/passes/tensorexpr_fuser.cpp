@@ -1,11 +1,13 @@
-#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <ATen/record_function.h>
+#include <jit/runtime/graph_executor_impl.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
@@ -18,6 +20,11 @@ void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
 }
 
+TORCH_API const Symbol& getTensorExprSymbol() {
+  static Symbol s = Symbol::fromQualString("tensorexpr::Group");
+  return s;
+}
+
 bool tensorExprFuserEnabled() {
   static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR");
   if (!enable_c_str) {
@@ -27,11 +34,6 @@ bool tensorExprFuserEnabled() {
     return false;
   }
   return true;
-}
-
-const Symbol& getTensorExprSymbol() {
-  static Symbol s = Symbol::fromQualString("tensorexpr::Group");
-  return s;
 }
 
 value_list sortReverseTopological(
@@ -314,6 +316,17 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   return {++(++iter), false};
 }
 
+void BuildGradientsForTensorExprGroups(Block* block) {
+  for (auto n : block->nodes()) {
+    if (n->kind() == getTensorExprSymbol()) {
+      TORCH_INTERNAL_ASSERT(n->hasAttribute(attr::Subgraph));
+      auto diff_graph = std::move(n->g(attr::Subgraph));
+      Gradient gradient = differentiate(diff_graph);
+      packGradient(gradient, n);
+    }
+  }
+}
+
 void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
@@ -363,35 +376,12 @@ void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
 
   EliminateCommonSubexpression(graph);
   EliminateDeadCode(graph);
-
   GRAPH_DUMP("After TExprFuser: ", graph);
+  BuildGradientsForTensorExprGroups(graph->block());
+  GRAPH_DUMP("After BuildGradientsForTensorExprGroups: ", graph);
 }
 
-Operation createTensorExprOp(const Node* node) {
-  auto kernel =
-      std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
-  return [kernel](Stack& stack) {
-    RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
-    if (!tensorexpr::fallbackAllowed()) {
-      kernel->run(stack);
-      return 0;
-    }
 
-    try {
-      kernel->run(stack);
-    } catch (const std::runtime_error& e) {
-      kernel->fallback(stack);
-    }
-    return 0;
-  };
-}
-
-RegisterOperators TensorExprOps({
-    torch::jit::Operator(
-        getTensorExprSymbol(),
-        createTensorExprOp,
-        AliasAnalysisKind::PURE_FUNCTION),
-});
 
 } // namespace jit
 } // namespace torch
