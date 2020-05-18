@@ -13,10 +13,10 @@ DOCKER_IMAGE_CUDA_10_2 = "/".join([
     "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7" + DOCKER_IMAGE_TAG,
 ])
 
-DOCKER_IMAGE_BAZEL = "/".join([
+DOCKER_IMAGE_GCC7 = "/".join([
     AWS_DOCKER_HOST,
     "pytorch",
-    "pytorch-linux-xenial-py3.6-gcc7:f990c76a-a798-42bb-852f-5be5006f8026",
+    "pytorch-linux-xenial-py3.6-gcc7" + DOCKER_IMAGE_TAG,
 ])
 
 
