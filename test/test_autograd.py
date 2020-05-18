@@ -4190,7 +4190,8 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # test for these ops with 'complex' in variant should only run for complex and
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
-separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
+
+separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan', 'tanh']
 
 # white list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
