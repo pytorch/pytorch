@@ -319,7 +319,7 @@ class _TestTorchMixin(object):
             torch.sum(x, -1)
 
     def _test_logaddexp(self, base2=False):
-        import numpy as np
+        assert TEST_NUMPY
 
         if base2:
             gt_func = np.logaddexp2
@@ -338,6 +338,12 @@ class _TestTorchMixin(object):
         # numerical stability
         a *= 10000
         b *= 10000
+        a[0] = inf
+        b[0] = inf
+        a[1] = -inf
+        b[1] = -inf
+        a[2] = inf
+        b[2] = -inf
         gt = gt_func(a.numpy(), b.numpy())
         ours = our_func(a, b)
         self.assertTrue(np.allclose(ours.numpy(), gt))
