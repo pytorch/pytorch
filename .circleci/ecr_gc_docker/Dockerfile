@@ -1,6 +1,6 @@
 FROM ubuntu:16.04
 
-RUN apt-get update && apt-get install -y python-pip && rm -rf /var/lib/apt/lists/* /var/log/dpkg.log
+RUN apt-get update && apt-get install -y git python-pip && rm -rf /var/lib/apt/lists/* /var/log/dpkg.log
 
 ADD requirements.txt /requirements.txt
 
