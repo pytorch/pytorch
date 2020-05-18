@@ -193,22 +193,6 @@
     - THTensor* src
 ]]
 [[
-  name: _th_gather
-  cname: gather
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long dim
-    - THIndexTensor* index
-]]
-[[
   name: _th_equal
   cname: equal
   cpu_bool: True
@@ -333,34 +317,6 @@
     - long dim
     - bool largest
     - bool sorted
-]]
-[[
-  name: _th_exp
-  cname: exp
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_erfc
-  cname: erfc
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
 ]]
 [[
   name: _th_var

@@ -170,9 +170,15 @@ __host__ __device__ static inline scalar_t tan_wrapper(scalar_t v) {
   return ::tan(v);
 }
 
+template<typename T>
+__host__ __device__ static inline thrust::complex<T> tan_wrapper(thrust::complex<T> v) {
+  return thrust::tan(v);
+}
+
 void tan_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "tan_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "tan_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
       return tan_wrapper(a);
     });
   });

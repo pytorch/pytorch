@@ -3,6 +3,7 @@ from .fused import ConvBn2d
 from .fused import ConvBn3d
 from .fused import ConvBnReLU2d
 from .fused import ConvBnReLU3d
+from .fused import ConvReLU1d
 from .fused import ConvReLU2d
 from .fused import ConvReLU3d
 from .fused import LinearReLU
@@ -15,6 +16,7 @@ __all__ = [
     'ConvBn3d',
     'ConvBnReLU2d',
     'ConvBnReLU3d',
+    'ConvReLU1d',
     'ConvReLU2d',
     'ConvReLU3d',
     'LinearReLU',
