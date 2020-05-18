@@ -393,7 +393,8 @@ class TestUtilityFuns(TestCase):
         params = list(params_dict.values())
         self.assertEqual(len(params), 1)
         weight = params[0]
-        self.assertEqual(weight, torch.tensor([2, 3, 4, 5, 6]))
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(weight, torch.tensor([2, 3, 4, 5, 6]))
 
     # TODO : enable when constant folding is enabled for opset 12
     @skipIfUnsupportedOpsetVersion([12])
@@ -419,7 +420,8 @@ class TestUtilityFuns(TestCase):
         params = list(params_dict.values())
         self.assertEqual(len(params), 1)
         weight = params[0]
-        self.assertEqual(weight, torch.tensor([0, -1, -2, -3, -4]))
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(weight, torch.tensor([0, -1, -2, -3, -4]))
 
     # TODO : enable when constant folding is enabled for opset 12
     @skipIfUnsupportedOpsetVersion([12])

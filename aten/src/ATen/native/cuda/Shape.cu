@@ -391,7 +391,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
       all32BitIndexable &&
       allSameType) {
 
-    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
         out.scalar_type(), "cat_cuda", [&]() {
       parallel_cat<scalar_t>(out, inputs, dimension, nDims, memory_format);

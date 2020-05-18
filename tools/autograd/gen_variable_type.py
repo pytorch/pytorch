@@ -180,11 +180,11 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals}) ;
+${return_type} ${type_wrapper_name}(${formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${formals}) {
   ${type_definition_body}
 }
 """)
@@ -219,7 +219,7 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_DEFAULT = CodeTemplate("""\
-TypeDefault::${type_wrapper_name}(${type_method_args})""")
+TypeDefault::${type_wrapper_name}(${args})""")
 
 CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
 at::${api_name}(${unpacked_args})""")
@@ -339,7 +339,7 @@ ${statements}
 
 # Generate a file that lists all functions and their schema string. Used for XLA
 REGISTRATION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
+${return_type} ${api_name}(${formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
 """)
 
 # ProfiledType templates
@@ -347,7 +347,7 @@ PROFILE_DISPATCH_UNBOXED = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"});
 TORCH_INTERNAL_ASSERT(op);
 RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
-return c10::Dispatcher::singleton().callUnboxedRedispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
+return c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
 """)
 
 FACTORY_FUNCTION_NAMES = None

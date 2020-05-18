@@ -14,8 +14,8 @@
 #include <string>
 #include <vector>
 
-#include <ATen/ThreadLocalDebugInfo.h>
 #include <ATen/record_function.h>
+#include <c10/util/ThreadLocalDebugInfo.h>
 
 #include <iostream>
 
@@ -267,7 +267,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
-  const auto& state = at::ThreadLocalDebugInfo::get(at::DebugInfoKind::PROFILER_STATE);
+  const auto& state = c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE);
   return dynamic_cast<ProfilerThreadLocalState*>(state.get());
 }
 
@@ -339,7 +339,7 @@ void enableProfiler(const ProfilerConfig& new_config) {
   TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
 
   auto state = std::make_shared<ProfilerThreadLocalState>(new_config);
-  at::ThreadLocalDebugInfo::_push(at::DebugInfoKind::PROFILER_STATE, state);
+  c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
   pushProfilingCallbacks();
   g_.emplace_back(std::make_shared<at::RecordFunctionGuard>());
@@ -366,7 +366,7 @@ void enableProfiler(const ProfilerConfig& new_config) {
 
 thread_event_lists disableProfiler() {
   // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
-  auto state = at::ThreadLocalDebugInfo::_pop(at::DebugInfoKind::PROFILER_STATE);
+  auto state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
   auto state_ptr = static_cast<ProfilerThreadLocalState*>(state.get());
   TORCH_CHECK(state_ptr && state_ptr->config().state != ProfilerState::Disabled,
       "Can't disable profiler when it's not running");

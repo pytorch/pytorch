@@ -51,6 +51,7 @@ def get_ignored_functions():
         torch.get_default_dtype,
         torch.get_num_interop_threads,
         torch.get_num_threads,
+        torch.init_num_threads,
         torch.import_ir_module,
         torch.import_ir_module_from_buffer,
         torch.is_anomaly_enabled,

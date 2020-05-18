@@ -425,7 +425,6 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
         std::ignore, std::ignore, std::ignore, std::ignore, packed_params) =
         std::move(state);
     TORCH_INTERNAL_ASSERT(packed_params.size() == 2);
-
     return make_quantized_cell_params_fp16(
         /*w_ih_packed=*/std::move(packed_params[0]),
         /*w_hh_packed=*/std::move(packed_params[1]));

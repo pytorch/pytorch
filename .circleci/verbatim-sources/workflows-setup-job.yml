@@ -1,6 +1,11 @@
       - setup:
           # Run this job on everything since it is
           # the dependency for everything.
+          #
+          # Note that these include-everything glob patterns are required; it is not equivalent to
+          # omit the filters entirely because tags are not included by default.
+          # And if you specify tags then you also need to specify branches since
+          # specifying tags disincludes branches by default.
           filters:
             tags:
               only: /.*/

@@ -28,7 +28,6 @@
 
 using at::Backend;
 using at::Device;
-using at::DeviceType;
 using at::IntArrayRef;
 using at::kCPU;
 using at::kCUDA;

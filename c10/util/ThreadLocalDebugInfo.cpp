@@ -1,6 +1,6 @@
-#include <ATen/ThreadLocalDebugInfo.h>
+#include <c10/util/ThreadLocalDebugInfo.h>
 
-namespace at {
+namespace c10 {
 
 namespace {
 thread_local std::shared_ptr<ThreadLocalDebugInfo> debug_info = nullptr;
@@ -81,4 +81,4 @@ DebugInfoGuard::DebugInfoGuard(
   active_ = true;
 }
 
-} // namespace at
+} // namespace c10

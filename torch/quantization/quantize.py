@@ -321,6 +321,7 @@ def convert(module, mapping=None, inplace=False):
                          nni.LinearReLU,
                          nni.BNReLU2d,
                          nni.BNReLU3d,
+                         nni.ConvReLU1d,
                          nni.ConvReLU2d,
                          nni.ConvReLU3d)
 
