@@ -228,7 +228,8 @@ def instantiate_configs():
 
         if cuda_version in ["9.2", "10", "10.1", "10.2"]:
             # TODO The gcc version is orthogonal to CUDA version?
-            parms_list.append("gcc7")
+            cuda_gcc_version = fc.find_prop("cuda_gcc_override") or "gcc7"
+            parms_list.append(cuda_gcc_version)
 
         is_libtorch = fc.find_prop("is_libtorch") or False
         is_important = fc.find_prop("is_important") or False
