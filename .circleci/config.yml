@@ -2079,29 +2079,17 @@ jobs:
               export DOCKER_HUB_PASSWORD=${CIRCLECI_DOCKER_HUB_PASSWORD}
               set -x
               /usr/bin/docker_hub.py
-
-##############################################################################
 ##############################################################################
 # Workflows
 ##############################################################################
-##############################################################################
-
-# PR jobs pr builds
 workflows:
   build:
     jobs:
       - setup:
-          # Run this job on everything since it is
-          # the dependency for everything.
-          #
-          # Note that these include-everything glob patterns are required; it is not equivalent to
-          # omit the filters entirely because tags are not included by default.
-          # And if you specify tags then you also need to specify branches since
-          # specifying tags disincludes branches by default.
           filters:
-            tags:
-              only: /.*/
             branches:
+              only: /.*/
+            tags:
               only: /.*/
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2017-14-11-cuda10-cudnn7-py3
@@ -2895,47 +2883,47 @@ workflows:
           requires:
             - setup
       - pytorch_linux_test:
+          build_environment: pytorch-linux-xenial-py3.6-gcc5.4-ge_config_legacy-test
+          docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:9a3986fa-7ce7-4a36-a001-3c9bef9892e2
           name: pytorch_linux_xenial_py3_6_gcc5_4_ge_config_legacy_test
           requires:
             - setup
             - pytorch_linux_xenial_py3_6_gcc5_4_build
-          build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-ge_config_legacy-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:9a3986fa-7ce7-4a36-a001-3c9bef9892e2"
           resource_class: large
       - pytorch_linux_test:
+          build_environment: pytorch-linux-xenial-py3.6-gcc5.4-ge_config_profiling-test
+          docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:9a3986fa-7ce7-4a36-a001-3c9bef9892e2
           name: pytorch_linux_xenial_py3_6_gcc5_4_ge_config_profiling_test
           requires:
             - setup
             - pytorch_linux_xenial_py3_6_gcc5_4_build
-          build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-ge_config_profiling-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:9a3986fa-7ce7-4a36-a001-3c9bef9892e2"
           resource_class: large
       - pytorch_linux_test:
+          build_environment: pytorch-linux-xenial-py3.6-gcc5.4-ge_config_simple-test
+          docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:9a3986fa-7ce7-4a36-a001-3c9bef9892e2
           name: pytorch_linux_xenial_py3_6_gcc5_4_ge_config_simple_test
           requires:
             - setup
             - pytorch_linux_xenial_py3_6_gcc5_4_build
-          build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-ge_config_simple-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:9a3986fa-7ce7-4a36-a001-3c9bef9892e2"
           resource_class: large
       - pytorch_linux_test:
+          build_environment: pytorch-linux-xenial-cuda10.1-cudnn7-ge_config_legacy-test
+          docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:9a3986fa-7ce7-4a36-a001-3c9bef9892e2
           name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_ge_config_legacy_test
           requires:
             - setup
             - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-ge_config_legacy-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:9a3986fa-7ce7-4a36-a001-3c9bef9892e2"
-          use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
+          use_cuda_docker_runtime: "1"
       - pytorch_linux_test:
+          build_environment: pytorch-linux-xenial-cuda10.1-cudnn7-ge_config_profiling-test
+          docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:9a3986fa-7ce7-4a36-a001-3c9bef9892e2
           name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_ge_config_profiling_test
           requires:
             - setup
             - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
-          build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-ge_config_profiling-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:9a3986fa-7ce7-4a36-a001-3c9bef9892e2"
-          use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
+          use_cuda_docker_runtime: "1"
       - pytorch_linux_bazel_build:
           build_environment: pytorch-linux-xenial-py3.6-gcc7-bazel-build
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7:f990c76a-a798-42bb-852f-5be5006f8026
@@ -2980,23 +2968,6 @@ workflows:
           build_environment: "caffe2-onnx-ort2-py3.6-clang7-ubuntu16.04-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:376"
           resource_class: large
-      # TODO: Refactor circleci/cimodel/data/binary_build_data.py to generate this file
-      #       instead of doing one offs here
-      # Binary builds (subset, to smoke test that they'll work)
-      #
-      # NB: If you modify this file, you need to also modify
-      # the binary_and_smoke_tests_on_pr variable in
-      # pytorch-ci-hud to adjust the list of whitelisted builds
-      # at https://github.com/ezyang/pytorch-ci-hud/blob/master/src/BuildHistoryDisplay.js
-      #
-      # Note:
-      # This binary build is currently broken, see https://github_com/pytorch/pytorch/issues/16710
-      # - binary_linux_conda_3_6_cu90_devtoolset7_build
-      # - binary_linux_conda_3_6_cu90_devtoolset7_test
-      #
-      # TODO
-      # we should test a libtorch cuda build, but they take too long
-      # - binary_linux_libtorch_3_6m_cu90_devtoolset7_static-without-deps_build
       - binary_linux_build:
           build_environment: manywheel 3.7m cu102 devtoolset7
           docker_image: pytorch/manylinux-cuda102
@@ -3035,8 +3006,6 @@ workflows:
           requires:
             - setup
       - binary_mac_build:
-          # This job has an average run time of 3 hours o.O
-          # Now only running this on master to reduce overhead
           build_environment: libtorch 3.7 cpu
           filters:
             branches:
@@ -3069,19 +3038,19 @@ workflows:
           requires:
             - setup
       - binary_windows_test:
-          build_environment: "libtorch 3.7 cpu debug"
+          build_environment: libtorch 3.7 cpu debug
           name: binary_windows_libtorch_3_7_cpu_debug_test
           requires:
             - setup
             - binary_windows_libtorch_3_7_cpu_debug_build
       - binary_windows_test:
-          build_environment: "libtorch 3.7 cpu release"
+          build_environment: libtorch 3.7 cpu release
           name: binary_windows_libtorch_3_7_cpu_release_test
           requires:
             - setup
             - binary_windows_libtorch_3_7_cpu_release_build
       - binary_windows_test:
-          build_environment: "wheel 3.7 cu102"
+          build_environment: wheel 3.7 cu102
           executor: windows-with-nvidia-gpu
           filters:
             branches:
