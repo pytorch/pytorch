@@ -19,7 +19,7 @@ class Parameter(torch.Tensor):
         requires_grad (bool, optional): if the parameter requires gradient. See
             :ref:`excluding-subgraphs` for more details. Default: `True`
         tags (dict, optional): special information about this parameter (e.g.
-            which optimizer to use). Note that `tags` are not exported in
+            which optimizer to use). Note that `tags` are not included in
             the parameter's containing module's `.state_dict()`. Default: `None`
     """
 
