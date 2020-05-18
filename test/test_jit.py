@@ -15434,8 +15434,12 @@ a")
 
             m = TestModule()
             self.assertEqual(m.param.tags, expected_tags)
+
             m_traced = torch.jit.trace(m, torch.tensor(1.))
+            self.assertEqual(m.param.tags, expected_tags)
+
             m_scripted = torch.jit.script(m)
+            self.assertEqual(m.param.tags, expected_tags)
 
             def test_serialization(module):
                 with TemporaryFileName() as fname:
