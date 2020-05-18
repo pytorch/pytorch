@@ -790,9 +790,6 @@ class Module(object):
         local_state = {k: v for k, v in local_name_params if v is not None}
 
         for name, param in local_state.items():
-            if name == "param":
-                print(param.tags)
-
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
