@@ -38,7 +38,7 @@ using BatchDimsRef = ArrayRef<BatchDim>;
 
 // A BatchedTensorImpl holds an underlying Tensor and a list of BatchDim
 //
-// The batch dimensions are treated as being private; operations ignore them.
+// The batch dimensions are treated as being "private"; they are not user-visible.
 // For example, in the following Tensor,
 //    bt = BatchedTensorImpl(ones(2, 3, 5, 7), [(lvl=1, dim=0), (lvl=2, dim=1)])
 // dimensions 0 and 1 are batch dimensions.
@@ -64,8 +64,7 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   // bt.actualDim(2) -> Error
   int64_t actualDim(int64_t dim, bool wrap_dim = true) const;
 
-  // Override a bunch of methods inherited from TensorImpl. All of these overrides
-  // are errors.
+  // Override a bunch of methods inherited from TensorImpl to return error messages.
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const override;
   IntArrayRef strides() const override;
   int64_t stride(int64_t d) const override;
