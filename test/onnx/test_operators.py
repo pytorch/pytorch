@@ -135,7 +135,7 @@ class TestOperators(TestCase):
 
     def test_index_opset11(self):
         x = torch.randn(3, 3, 3, requires_grad=True)
-        self.assertONNX(lambda x: x[[0],:, [1, 0, 0]], x)
+        self.assertONNX(lambda x: x[[0], :, [1, 0, 0]], x)
 
     def test_type_as(self):
         x = torch.tensor([0.0], requires_grad=True)
