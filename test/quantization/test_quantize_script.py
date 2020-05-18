@@ -9,7 +9,6 @@ from torch._C import parse_ir
 # torch.quantization
 from torch.quantization import QConfig
 from torch.quantization import default_dynamic_qconfig
-from torch.quantization import QConfigDynamic
 from torch.quantization import default_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
@@ -33,7 +32,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
 from torch.testing._internal.jit_utils import get_forward
 from torch.testing._internal.jit_utils import get_forward_graph
-from torch.testing._internal.jit_utils import get_module_method
 
 from torch.jit._recursive import wrap_cpp_module
 
