@@ -1628,7 +1628,8 @@ def _write_ninja_file(path,
         if flags is None:
             return []
         else:
-            return [flag.strip() for flag in flags]
+            # quote each flag, in case there are spaces in path names
+            return ['"' + flag.strip() + '"' for flag in flags]
 
     cflags = sanitize_flags(cflags)
     post_cflags = sanitize_flags(post_cflags)
@@ -1692,6 +1693,7 @@ def _write_ninja_file(path,
             source_file = source_file.replace(':', '$:')
             object_file = object_file.replace(':', '$:')
         source_file = source_file.replace(" ", "$ ")
+        object_file = object_file.replace(" ", "$ ")
         build.append('build {}: {} {}'.format(object_file, rule, source_file))
 
     if library_target is not None:
