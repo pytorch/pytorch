@@ -4,19 +4,10 @@ import torch
 import torch.nn.functional as F
 import unittest
 
-from torch.testing._internal.common_utils import suppress_warnings
+from torch.testing._internal.common_utils import suppress_warnings, set_num_profiled_runs
 
 from te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
     LLVMCodeGenExecuted, SimpleIREvalExecuted
-
-@contextlib.contextmanager
-def num_profiled_runs(num_runs):
-    old_num_runs = torch._C._jit_set_num_profiled_runs(num_runs)
-    try:
-        yield
-    finally:
-        torch._C._jit_set_num_profiled_runs(old_num_runs)
-
 
 class BaseTestClass(unittest.TestCase):
     def setUp(self):
@@ -1151,7 +1142,7 @@ class TestTensorExprFuser(BaseTestClass):
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skip("dynamic shapes are not quite there yet")
     def test_dynamic_shape(self):
-        with num_profiled_runs(2):
+        with set_num_profiled_runs(2):
             @torch.jit.script
             def test(x, y, z):
                 return x * y * z
