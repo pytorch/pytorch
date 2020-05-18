@@ -229,10 +229,8 @@ bool matchArgPattern(
 bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv1d", 1},
-                    {"conv2d", 1},
-                    {"conv3d", 1},
-                    {"linear", 1}}),
+      AtenFuncArgs(
+          {{"conv1d", 1}, {"conv2d", 1}, {"conv3d", 1}, {"linear", 1}}),
       CallFuncArgs({{"linear", 2}}));
   return result;
 }
