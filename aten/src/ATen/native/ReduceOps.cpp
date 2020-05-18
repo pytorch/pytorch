@@ -27,6 +27,7 @@ namespace native {
 DEFINE_DISPATCH(sum_stub);
 DEFINE_DISPATCH(std_var_stub);
 DEFINE_DISPATCH(prod_stub);
+DEFINE_DISPATCH(nanprod_stub);
 DEFINE_DISPATCH(norm_stub);
 DEFINE_DISPATCH(mean_stub);
 DEFINE_DISPATCH(and_stub);
