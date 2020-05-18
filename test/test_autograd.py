@@ -4065,13 +4065,13 @@ for shape in [(1,), ()]:
         b = torch.tensor([-1., 0., 1.], requires_grad=True)
         c = torch.sum(a**b)
         c.backward()
-        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
 
         s = 0
         b = torch.tensor([-1., 0., 1.], requires_grad=True)
         c = torch.sum(s**b)
         c.backward()
-        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
 
     def test_custom_function_error(self):
         class BadFw(Function):
@@ -5533,9 +5533,9 @@ class TestAutogradDeviceType(TestCase):
             f[0] = nan
             self.assertTrue(math.isnan(float(f)))
             f[0] = inf
-            self.assertEqual(float(f), inf)
+            self.assertEqual(float(f), inf, allow_inf=True)
             f[0] = -inf
-            self.assertEqual(float(f), -inf)
+            self.assertEqual(float(f), -inf, allow_inf=True)
 
             # integral -> floating point
             # check we can convert something that loses precision
