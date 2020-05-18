@@ -440,6 +440,21 @@ PyObject *THPModule_deterministic(PyObject *_unused, PyObject *noargs)
   else Py_RETURN_FALSE;
 }
 
+PyObject *THPModule_setDeterministicErrorLevel(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyInt_Check(arg), "set_deterministic_error_level expects an integer, "
+          "but got %s", THPUtils_typename(arg));
+  at::Context& ctx = at::globalContext();
+  ctx.setDeterministicErrorLevel(ctx.longToDeterministicErrorLevel(PyInt_AsLong(arg)));
+  Py_RETURN_NONE;
+
+}
+
+PyObject *THPModule_deterministicErrorLevel(PyObject *_unused, PyObject *noargs)
+{
+  return PyInt_FromLong(static_cast<long>(at::globalContext().deterministicErrorLevel()));
+}
+
 PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_benchmark_cudnn expects a bool, "
@@ -551,8 +566,10 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_benchmark", (PyCFunction)THPModule_setBenchmarkCuDNN, METH_O,  nullptr},
   {"_get_cudnn_deterministic", (PyCFunction)THPModule_deterministicCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_deterministic", (PyCFunction)THPModule_setDeterministicCuDNN, METH_O,  nullptr},
-  {"_get_experimental_deterministic", (PyCFunction)THPModule_deterministic, METH_NOARGS,     nullptr},
-  {"_set_experimental_deterministic", (PyCFunction)THPModule_setDeterministic, METH_O,  nullptr},
+  {"_get_deterministic", (PyCFunction)THPModule_deterministic, METH_NOARGS,     nullptr},
+  {"_set_deterministic", (PyCFunction)THPModule_setDeterministic, METH_O,  nullptr},
+  {"_get_deterministic_error_level", (PyCFunction)THPModule_deterministicErrorLevel, METH_NOARGS,     nullptr},
+  {"_set_deterministic_error_level", (PyCFunction)THPModule_setDeterministicErrorLevel, METH_O,  nullptr},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       nullptr},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       nullptr},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     nullptr},

@@ -67,6 +67,25 @@ void Context::setDeterministic(bool b) {
   _deterministic = b;
 }
 
+Context::ErrorLevel Context::deterministicErrorLevel() const {
+  return deterministic_error_level;
+}
+
+void Context::setDeterministicErrorLevel(Context::ErrorLevel e) {
+  deterministic_error_level = e;
+}
+
+Context::ErrorLevel Context::longToDeterministicErrorLevel(long e) {
+  switch (e) {
+    case static_cast<int>(Context::ErrorLevel::None):
+    case static_cast<int>(Context::ErrorLevel::Warn):
+    case static_cast<int>(Context::ErrorLevel::Error):
+      return static_cast<Context::ErrorLevel>(e);
+    default:
+      TORCH_CHECK(false, "error level ", e, " is invalid, must be one of 0: None, 1: Warn, or 2: Error");
+  }
+}
+
 bool Context::benchmarkCuDNN() const {
   return benchmark_cudnn;
 }

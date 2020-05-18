@@ -94,6 +94,8 @@ class CAFFE2_API Context {
 
   bool setFlushDenormal(bool on);
 
+  enum ErrorLevel { None=0, Warn, Error };
+
   // NB: This method is *purely* whether or not a user requested
   // that CuDNN was enabled, it doesn't actually say anything about
   // whether or not CuDNN is actually usable.  Use cudnn_is_acceptable
@@ -108,6 +110,9 @@ class CAFFE2_API Context {
   void setDeterministicCuDNN(bool);
   bool deterministic() const;
   void setDeterministic(bool);
+  ErrorLevel deterministicErrorLevel() const;
+  void setDeterministicErrorLevel(ErrorLevel e);
+  ErrorLevel longToDeterministicErrorLevel(long e);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   const std::vector<at::QEngine>& supportedQEngines() const;
@@ -134,6 +139,7 @@ class CAFFE2_API Context {
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool _deterministic = false;
+  ErrorLevel deterministic_error_level =  ErrorLevel::Error;
   bool benchmark_cudnn = false;
   bool enabled_mkldnn = true;
   #ifdef C10_MOBILE
