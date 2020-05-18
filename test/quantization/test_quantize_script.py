@@ -1906,22 +1906,3 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         FileCheck().check("quantized::linear_dynamic") \
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(model.graph)
-
-    def test_prepare_dynamic_lstm(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
-
-            def forward(self, x):
-                return self.lstm(x)
-        from torch.quantization.observer import default_dynamic_quant_observer, _MinMaxTensorListObserver
-        qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                 weight=_MinMaxTensorListObserver)
-        m = torch.jit.script(M())
-        m = prepare_dynamic_script(m, {'': qconfig})
-        assert len(attrs_with_prefix(m.lstm, '_observer_')) == 1
-        FileCheck().check('_MinMaxTensorListObserver = prim::GetAttr[name="_observer_0') \
-                   .check("aten::lstm") \
-                   .check("return") \
-                   .run(str(get_module_method(m, 'lstm', 'forward__0').graph))
