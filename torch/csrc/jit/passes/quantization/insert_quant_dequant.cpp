@@ -18,10 +18,6 @@ using graph_rewrite_helper::getFuncName;
 using graph_rewrite_helper::getValue;
 using graph_rewrite_helper::PatternInfo;
 
-// Map of quantization parameter name and value
-// for example _scale, _zero_point,
-// _scalar_type and _axis(for per channel quantization)
-using QParamVector = std::vector<std::pair<std::string, IValue>>;
 // dynamic quantization ops for activation: choose_qparams, quant, dequant
 using DynamicQuantOps = std::tuple<Node*, Node*, Node*>;
 
@@ -117,8 +113,10 @@ Node* insertDeQuant(
 void insertDeQuantForAllUse(
     Graph* graph,
     Value* quantized_val,
-    Value* original_val,
-    const std::vector<Use>& uses) {
+    Value* original_val) {
+  // copy uses to vector since value->uses() is a reference
+  // and changing the graph will also change the uses() list
+  const std::vector<Use> uses = original_val->uses();
   for (size_t i = 0; i < uses.size(); ++i) {
     auto* user = uses[i].user;
     // Insert dequantize node right before use node, because
@@ -610,8 +608,87 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
   return invoked_methods;
 }
 
+void propagateQParams(
+    Value* original_output,
+    const std::vector<Value*>& inputs,
+    const c10::optional<std::tuple<c10::QScheme, QParamVector>>& qparams_opt =
+        c10::nullopt) {
+  Node* n = original_output->node();
+  Graph* graph = n->owningGraph();
+  // for ops like average pool, we'll insert quant dequant after the op
+  // We'll assume the tensor is a PerTensorAffine quantized Tensor for
+  // now, and may generalize later if this becomes an issue
+  TORCH_INTERNAL_ASSERT(
+      inputs.size() == 1, "Expecting single input for the aten function");
+  // input of the dequantize node
+  Value* quantized_input = inputs[0]->node()->input(0);
+  // insert ops after the general op
+  WithInsertPoint ins(n->next());
+  std::vector<Value*> quant_inputs;
+  auto quant_kind = Symbol::aten("quantize_per_tensor");
+  if (qparams_opt.has_value()) {
+    quant_inputs = {original_output};
+    auto qscheme = std::get<0>(*qparams_opt);
+    auto qparams = std::get<1>(*qparams_opt);
+    if (isPerChannel(qscheme)) {
+      quant_kind = Symbol::aten("quantize_per_channel");
+    }
+    for (const auto& qparam : qparams) {
+      Value* qparam_val = graph->insertConstant(qparam.second);
+      qparam_val->setDebugName(quantized_input->debugName() + qparam.first);
+      quant_inputs.push_back(qparam_val);
+    }
+  } else {
+    // Only per tensor affine quantized tensor is supported in this case
+    // get quantization parameters from previous quantized op
+    Node* scale = insertQParam(
+        graph,
+        quantized_input,
+        at::Symbol::aten("q_scale"),
+        FloatType::get(),
+        "q_scale");
+    Node* zero_point = insertQParam(
+        graph,
+        quantized_input,
+        at::Symbol::aten("q_zero_point"),
+        IntType::get(),
+        "q_zero_point");
+    Node* dtype = insertQParam(
+        graph, quantized_input, prim::dtype, IntType::get(), "dtype");
+    quant_inputs = {original_output,
+                    scale->output(),
+                    zero_point->output(),
+                    dtype->output()};
+  }
+  Node* quant = insertQuant(
+      graph, quant_inputs, quant_kind, original_output->debugName() + ".quant");
+  Value* quantized_output = quant->output();
+  // replace uses of original output of the general op with quantized
+  // output
+  original_output->replaceAllUsesAfterNodeWith(quant, quantized_output);
+  insertDeQuantForAllUse(graph, quantized_output, quantized_output);
+}
+
+void propagateDequantize(Value* output, const std::vector<Value*> inputs) {
+  Node* n = output->node();
+  Graph* graph = n->owningGraph();
+  // Delete dequantize node, we have one dequantize
+  // for each use of the value
+  for (auto* dequantized_val : inputs) {
+    auto* dequantize_node = dequantized_val->node();
+    TORCH_INTERNAL_ASSERT(
+        dequantized_val->uses().size() == 1,
+        "Expect to have one dequantize node for each use");
+    // Replace useses of dequantized_val with the input of
+    // dequantize node
+    dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
+    dequantize_node->removeAllInputs();
+    dequantize_node->destroy();
+  }
+  insertDeQuantForAllUse(graph, output, output);
+}
+
 void propagateQuantizationOps(Block* block) {
-  auto graph = block->owningGraph();
   for (Node* n : block->nodes()) {
     if (n->kind() == prim::If) {
       for (Block* subblock : n->blocks()) {
@@ -629,79 +706,23 @@ void propagateQuantizationOps(Block* block) {
     for (auto* output : n->outputs()) {
       auto inputs = getPassThroughInputs(output);
       if (inputs.size() > 0) {
+        // note that we don't need to recursively check for prim::If
+        // here because if all inputs of a prim::If is dequantized
+        // the dequantize will be factored out before we get to this
+        // point
         bool is_dequantized = true;
         for (auto* input : inputs) {
-          // note that we don't need to recursively check for prim::If
-          // here because if all inputs of a prim::If is dequantized
-          // the dequantize will be factored out before we get to this
-          // point
           is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
         }
         if (!is_dequantized) {
           continue;
         }
         if (isSingleInputGeneralValueAtenFunction(n)) {
-          // for ops like average pool, we'll insert quant dequant after the op
-          // We'll assume the tensor is a PerTensorAffine quantized Tensor for
-          // now, and may generalize later if this becomes an issue
-          TORCH_INTERNAL_ASSERT(
-              inputs.size() == 1,
-              "Expecting single input for the aten function");
-          // input of the dequantize node
-          Value* quantized_input = inputs[0]->node()->input(0);
-          // insert ops after the general op
-          WithInsertPoint ins(n->next());
-          // get quantization parameters from previous quantized op
-          Node* scale = insertQParam(
-              graph,
-              quantized_input,
-              at::Symbol::aten("q_scale"),
-              FloatType::get(),
-              "q_scale");
-          Node* zero_point = insertQParam(
-              graph,
-              quantized_input,
-              at::Symbol::aten("q_zero_point"),
-              IntType::get(),
-              "q_zero_point");
-          Node* dtype = insertQParam(
-              graph, quantized_input, prim::dtype, IntType::get(), "dtype");
-          Value* original_output = n->output();
-          std::vector<Value*> quant_inputs = {original_output,
-                                              scale->output(),
-                                              zero_point->output(),
-                                              dtype->output()};
-          auto quant_kind = at::Symbol::aten("quantize_per_tensor");
-          Node* quant = insertQuant(
-              graph,
-              quant_inputs,
-              quant_kind,
-              original_output->debugName() + ".quant");
-          Value* quantized_output = quant->output();
-          // replace uses of original output of the general op with quantized
-          // output
-          original_output->replaceAllUsesAfterNodeWith(quant, quantized_output);
-          std::vector<Use> quantized_uses = quantized_output->uses();
-          GRAPH_DEBUG("quantized uses: ", quantized_uses.size());
-          insertDeQuantForAllUse(
-              graph, quantized_output, quantized_output, quantized_uses);
+          propagateQParams(output, inputs);
+        } else if (auto qparams_opt = getFixedQParams(n)) {
+          propagateQParams(output, inputs, qparams_opt);
         } else {
-          // Delete dequantize node, we have one dequantize
-          // for each use of the value
-          for (auto* dequantized_val : inputs) {
-            auto* dequantize_node = dequantized_val->node();
-            TORCH_INTERNAL_ASSERT(
-                dequantized_val->uses().size() == 1,
-                "Expect to have one dequantize node for each use");
-            // Replace useses of dequantized_val with the input of
-            // dequantize node
-            dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
-            dequantize_node->removeAllInputs();
-            dequantize_node->destroy();
-          }
-          std::vector<Use> uses = output->uses();
-          // Insert new dequantize node for each use of the output
-          insertDeQuantForAllUse(graph, output, output, uses);
+          propagateDequantize(output, inputs);
         }
       }
     }
@@ -899,17 +920,15 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
     }
   }
   for (Node* n : dequant_nodes_to_rewrite) {
-    auto* quantized_val = n->inputs()[0];
+    auto* quantized_val = n->input(0);
     auto* dequantized_val = n->output();
-    // copy uses to vector since value->uses() is a reference
-    // and changing the graph will also change the uses() list
-    std::vector<Use> uses = dequantized_val->uses();
-    insertDeQuantForAllUse(graph.get(), quantized_val, dequantized_val, uses);
+    insertDeQuantForAllUse(graph.get(), quantized_val, dequantized_val);
   }
 
   for (Node* n : dequant_nodes_to_rewrite) {
     n->removeAllInputs();
   }
+
   for (Node* n : dequant_nodes_to_rewrite) {
     n->destroy();
   }

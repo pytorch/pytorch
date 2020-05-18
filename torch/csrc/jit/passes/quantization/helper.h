@@ -5,7 +5,12 @@
 namespace torch {
 namespace jit {
 
+// Vector of a module and the name of its method
 using ModuleMethodVector = std::vector<std::pair<Module, std::string>>;
+// Map of quantization parameter name and value
+// for example _scale, _zero_point,
+// _scalar_type and _axis(for per channel quantization)
+using QParamVector = std::vector<std::pair<std::string, IValue>>;
 
 // =========== helper functions for Value =========
 // Check if a value is weight, since we need to use weight observer
@@ -33,6 +38,9 @@ TORCH_API bool isSingleInputGeneralValueAtenFunction(Node* n);
 TORCH_API bool isSingleInputGeneralCallFunction(Node* n);
 
 TORCH_API bool isSingleInputGeneralAtenFunction(Node* n);
+
+TORCH_API c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(
+    Node* n);
 
 // We don't want to analyze the graph for some `builtin` CallFunctions
 // like `linear` because we want to preserve the op boundary

@@ -115,13 +115,9 @@ Tensor isfinite(const Tensor& self) {
 
 bool is_nonzero(const Tensor& self) {
   auto n = self.numel();
-  AT_ASSERT(n >= 0);
-  if (n == 0) {
-    AT_ERROR("bool value of Tensor with no values is ambiguous");
-  }
-  if (n > 1) {
-    AT_ERROR("bool value of Tensor with more than one value is ambiguous");
-  }
+  TORCH_CHECK(n != 0, "Boolean value of Tensor with no values is ambiguous");
+  TORCH_CHECK(n < 2, "Boolean value of Tensor with more than one value is ambiguous");
+
   Scalar localScalar = self.item();
   if (localScalar.isFloatingPoint()) {
     return localScalar.to<double>() != 0;
@@ -132,18 +128,17 @@ bool is_nonzero(const Tensor& self) {
   } else if (localScalar.isBoolean()) {
     return localScalar.to<bool>();
   }
-  AT_ERROR("expected non-Tensor backend scalar");
+  TORCH_INTERNAL_ASSERT(false, "Expected non-Tensor backend scalar");
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(condition.device() == self.device() && self.device() == other.device(),
-              "expected condition, x and y to be on the same device, but condition is on ",
+              "Expected condition, x and y to be on the same device, but condition is on ",
               condition.device(), " and x and y are on ", self.device(), " and ", other.device(),
               " respectively");
-  if (condition.scalar_type() != ScalarType::Byte && condition.scalar_type() != ScalarType::Bool) {
-    AT_ERROR("Expected condition to have ScalarType Byte, but got ScalarType ",
-                  toString(condition.scalar_type()));
-  }
+  TORCH_CHECK(condition.scalar_type() == ScalarType::Byte || condition.scalar_type() == ScalarType::Bool,
+              "Expected condition to have ScalarType Byte, but got ScalarType ",
+              toString(condition.scalar_type()));
   Tensor b_condition, b_self, b_other;
   std::tie(b_condition, b_self, b_other) = expand_outplace(condition, self, other, "where");
   return at::_s_where(b_condition, b_self, b_other);

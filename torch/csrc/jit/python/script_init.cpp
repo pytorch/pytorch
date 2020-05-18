@@ -1271,6 +1271,10 @@ void initJitScriptBindings(PyObject* module) {
             is_module);
       });
 
+  py::class_<torch::jit::ErrorReport::CallStack>(
+      m, "CallStack", py::dynamic_attr())
+      .def(py::init<const std::string&, const SourceRange&>());
+
   m.def("_parse_source_def", [](const std::string& src) {
     Parser p(std::make_shared<Source>(src));
     return Def(p.parseFunction(/*is_method=*/true));

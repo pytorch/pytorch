@@ -18,7 +18,7 @@ class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
     Observer classes have usually reasonable default arguments, but they can be overwritten with `with_args`
     method (that behaves like functools.partial):
 
-      my_qconfig = QConfig(activation=MinMaxObserver.with_args(dtype=torch.qint8), 
+      my_qconfig = QConfig(activation=MinMaxObserver.with_args(dtype=torch.qint8),
       weight=default_observer.with_args(dtype=torch.qint8))
     """
     def __new__(cls, activation, weight):
@@ -83,7 +83,7 @@ def get_default_qconfig(backend='fbgemm'):
         qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                           weight=default_weight_observer)
     else:
-        raise ValueError("Unknown backend, please specify qconfig manually")
+        qconfig = default_qconfig
     return qconfig
 
 def get_default_qat_qconfig(backend='fbgemm'):
@@ -101,6 +101,5 @@ def get_default_qat_qconfig(backend='fbgemm'):
                                                             reduce_range=False),
                           weight=default_weight_fake_quant)
     else:
-        raise ValueError("Unknown backend, please specify qconfig manually")
-
+        qconfig = default_qat_qconfig
     return qconfig

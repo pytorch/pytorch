@@ -141,6 +141,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   DeviceType device_type = iter.device_type(0);
   if (iter.device_type(1) == kCUDA) {
     device_type = kCUDA;
+  } else if (iter.device_type(1) == kHIP) {
+    device_type = kHIP;
   }
 
   // TODO: if we need to, we can also enable this path for quantized tensor
