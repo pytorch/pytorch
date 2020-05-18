@@ -2686,6 +2686,16 @@ class AbstractTestCases:
                     with self.assertRaises(RuntimeError):
                         getattr(base.clone(), method)(dim, idx, src)
 
+                # should throw an error when self.dtype != src.dtype.
+                # we ignore the case when src is Scalar, as it gets
+                # cast via src.to<scalar_t>.
+                if not is_scalar:
+                    with self.assertRaises(RuntimeError):
+                        getattr(base.clone().type(torch.int), method)(dim, idx, src)
+
+                    with self.assertRaises(RuntimeError):
+                        getattr(base.clone(), method)(dim, idx, src.type(torch.int))
+
                 # test for empty index, should be a no-op
                 idx = cast(torch.LongTensor())
                 actual = getattr(base.clone(), method)(dim, idx, src)
