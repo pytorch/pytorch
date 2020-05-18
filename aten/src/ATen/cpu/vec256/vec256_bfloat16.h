@@ -249,9 +249,6 @@ public:
   Vec256<BFloat16> exp() const {
     return map(Sleef_expf8_u10);
   }
-  Vec256<BFloat16> exp2() const {
-    return map(Sleef_exp2f8_u10);
-  }
   Vec256<BFloat16> expm1() const {
     return map(Sleef_expm1f8_u10);
   }

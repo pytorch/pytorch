@@ -150,9 +150,6 @@ public:
   Vec256<float> exp() const {
     return Vec256<float>(Sleef_expf8_u10(values));
   }
-  Vec256<float> exp2() const {
-    return Vec256<float>(Sleef_exp2f8_u10(values));
-  }
   Vec256<float> expm1() const {
     return Vec256<float>(Sleef_expm1f8_u10(values));
   }
