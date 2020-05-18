@@ -410,7 +410,7 @@ class _TestTorchMixin(object):
                 x = torch.rand(16, device=devices[1])
                 y = torch.rand(16, device=devices[2])
                 with self.assertRaisesRegex(RuntimeError,
-                                            "expected condition, x and y to be on the same device"):
+                                            "Expected condition, x and y to be on the same device"):
                     torch.where(condition, x, y)
 
     def test_where_bool_tensor(self):
@@ -790,11 +790,32 @@ class _TestTorchMixin(object):
         self.assertEqual('cuda', cuda1.type)
         self.assertEqual(1, cuda1.index)
 
+        cuda90 = torch.device('cuda', 90)
+        self.assertEqual('cuda:90', str(cuda90))
+        self.assertEqual('cuda', cuda90.type)
+        self.assertEqual(90, cuda90.index)
+
+        cuda23333 = torch.device('cuda', 23333)
+        self.assertEqual('cuda:23333', str(cuda23333))
+        self.assertEqual('cuda', cuda23333.type)
+        self.assertEqual(23333, cuda23333.index)
+
         self.assertRaises(RuntimeError, lambda: torch.device('cpu:-1'))
         self.assertRaises(RuntimeError, lambda: torch.device('cpu:1'))
         self.assertRaises(RuntimeError, lambda: torch.device('cpu', -1))
         self.assertRaises(RuntimeError, lambda: torch.device('cpu', 1))
         self.assertRaises(RuntimeError, lambda: torch.device('cuda:-1'))
+        self.assertRaises(RuntimeError, lambda: torch.device('cuda:2 '))
+        self.assertRaises(RuntimeError, lambda: torch.device('cuda: 2'))
+        self.assertRaises(RuntimeError, lambda: torch.device('cuda:2 2'))
+        self.assertRaises(RuntimeError, lambda: torch.device('cuda:2.'))
+        self.assertRaises(RuntimeError, lambda: torch.device('cuda:2?'))
+        self.assertRaises(RuntimeError, lambda: torch.device('cuda:?2'))
+        self.assertRaises(RuntimeError, lambda: torch.device('cuda:'))
+        self.assertRaises(RuntimeError, lambda: torch.device('cuda:2.232'))
+        self.assertRaises(RuntimeError, lambda: torch.device('cuda:2 cuda:3'))
+        self.assertRaises(RuntimeError, lambda: torch.device('cuda:2+cuda:3'))
+        self.assertRaises(RuntimeError, lambda: torch.device('cuda:2cuda:3'))
         self.assertRaises(RuntimeError, lambda: torch.device('cuda', -1))
         self.assertRaises(RuntimeError, lambda: torch.device(-1))
 
@@ -4721,12 +4742,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertExpectedRaisesInline(
             RuntimeError,
             lambda: torch.tensor([]).is_nonzero(),
-            "bool value of Tensor with no values is ambiguous",
+            "Boolean value of Tensor with no values is ambiguous",
         )
         self.assertExpectedRaisesInline(
             RuntimeError,
             lambda: torch.tensor([0, 0]).is_nonzero(),
-            "bool value of Tensor with more than one value is ambiguous",
+            "Boolean value of Tensor with more than one value is ambiguous",
         )
         self.assertFalse(torch.tensor(0).is_nonzero())
         self.assertTrue(torch.tensor(1).is_nonzero())
@@ -6411,26 +6432,51 @@ class TestTorchDeviceType(TestCase):
                          torch.bitwise_xor(torch.tensor([True, True, False], device=device),
                                            torch.tensor([False, True, False], device=device)))
 
-    def test_logical_not(self, device):
-        for dtype in torch.testing.get_all_dtypes():
-            a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
-            if dtype == torch.bfloat16 or dtype.is_complex:
-                self.assertRaises(RuntimeError, lambda: a.logical_not())
-                continue
-            expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
-            # new tensor
-            self.assertEqual(expected_res.bool(), a.logical_not())
-            # out
-            for out_dtype in torch.testing.get_all_dtypes():
-                b = torch.empty(0, dtype=out_dtype, device=device)
-                if out_dtype == torch.bfloat16 or out_dtype.is_complex:
-                    self.assertRaises(RuntimeError, lambda: torch.logical_not(a, out=b))
-                    continue
-                torch.logical_not(a, out=b)
-                self.assertEqual(expected_res.bool(), b.bool())
-            # in-place
-            a.logical_not_()
-            self.assertEqual(expected_res, a)
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_logical_not(self, device, dtype):
+        data = [10, 1, 0.3, 0, -0.3, -1, -10]
+        a = torch.tensor(data, dtype=dtype, device=device)
+
+        # do this before constructing the numpy array because np can't construct
+        # bfloat16 tensors.  Can we define our own dtype in NumPy so testing would be easier?
+        if dtype == torch.bfloat16 or dtype.is_complex:
+            self.assertRaises(RuntimeError, lambda: a.logical_not())
+            self.assertRaises(RuntimeError, lambda: a.logical_not_())
+            raise unittest.SkipTest('logical_not not supported on {}'.format(dtype))
+
+        a_np = np.array(data, dtype=torch_to_numpy_dtype_dict[dtype])
+
+        if dtype == torch.bool:
+            # this is set to trip when https://github.com/pytorch/pytorch/issues/37398 is fixed
+            # so that we combine with the above test.
+            self.assertNotEqual(a_np, a)
+            a_np = a.cpu().numpy()  # ensure they are the same because of above issue
+
+        self.assertEqual(np.logical_not(a_np), torch.logical_not(a).to('cpu'))
+        self.assertEqual(np.logical_not(a_np, out=a_np), a.logical_not_().to('cpu'))
+
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    @dtypes(*list(product(torch.testing.get_all_dtypes(),
+                          torch.testing.get_all_dtypes())))
+    def test_logical_not_out(self, device, dtypes):
+        dtype = dtypes[0]
+        out_dtype = dtypes[1]
+        data = [10, 1, 0.3, 0, -0.3, -1, -10]
+        a = torch.tensor(data, dtype=dtype, device=device)
+        out = torch.empty(a.shape, dtype=out_dtype, device=device)
+
+        if (dtype == torch.bfloat16 or dtype.is_complex or
+                out_dtype == torch.bfloat16 or out_dtype.is_complex):
+            self.assertRaises(RuntimeError, lambda: torch.logical_not(a, out=out))
+            raise unittest.SkipTest('logical_not not supported on {}'.format(out_dtype))
+
+        out_np = np.empty(a.shape, dtype=torch_to_numpy_dtype_dict[out_dtype])
+
+        self.assertEqual(a, a.cpu().numpy())
+        torch.logical_not(a, out=out)
+        np.logical_not(a.cpu().numpy(), out=out_np)
+        self.assertEqual(out_np, out.to('cpu'))
 
     def _test_logical(self, device, op, a_, b_, expected_res_):
         for dtype in torch.testing.get_all_dtypes():
@@ -8879,6 +8925,17 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(dims, device=device)
             test_multidim(x, singleton_dim)
 
+            # check reducing median with NaNs
+            # If the element in the median is a NaN, there can be issues
+            # when comparining with other nan elements
+            if fn_name == 'median':
+                y = torch.full((1, 3), np.nan, dtype=torch.float64, device=device)
+                y[:, :1] = 1.1
+                values, indices = fn_tuple(y, dim=1)
+                expected_values = torch.tensor([nan], dtype=torch.float64, device=device)
+                self.assertEqual(values, expected_values)
+                self.assertTrue(torch.isnan(y.flatten()[indices[0]]))
+
             # check reducing with output kwargs
             if fn_name in ['median', 'mode', 'max', 'min']:
                 y = torch.randn(5, 3, device=device)
@@ -10182,8 +10239,7 @@ class TestTorchDeviceType(TestCase):
     def test_uniform_from_to(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            # Crashes with CUDA error: unspecified launch failure
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -12321,11 +12377,11 @@ class TestTorchDeviceType(TestCase):
             ("erf", doubles, True, True, 'cpu'),
             ("erf", doubles, True, True, 'cuda'),
             ("erfc", doubles, True, True, 'cpu'),
-            ("erfc", doubles, False, True, 'cuda'),
+            ("erfc", doubles, True, True, 'cuda'),
             ("erfinv", doubles, True, True, 'cpu'),
             ("erfinv", doubles, True, True, 'cuda'),
             ("exp", doubles, True, True, 'cpu'),
-            ("exp", doubles, False, True, 'cuda'),
+            ("exp", doubles, True, True, 'cuda'),
             ("expm1", doubles, True, True, 'cpu'),
             ("expm1", doubles, True, True, 'cuda'),
             ("floor", doubles, True, True, 'cpu'),
@@ -13655,7 +13711,7 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.digamma(),
                 lambda x, y: x.digamma_(),
                 # lambda x, y: x.erf(), # https://github.com/pytorch/pytorch/issues/24558
-                # lambda x, y: x.erfc(), # https://github.com/pytorch/pytorch/issues/24559
+                lambda x, y: x.erfc(),
                 lambda x, y: x.erfinv(),
                 lambda x, y: x.erfinv_(),
                 # lambda x, y: x.exp(), # https://github.com/pytorch/pytorch/issues/24561
@@ -14215,6 +14271,24 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(sample_indices.dim(), 1, "wrong number of dimensions")
             self.assertEqual(prob_dist.dim(), 1, "wrong number of prob_dist dimensions")
             self.assertEqual(sample_indices.size(0), n_sample, "wrong number of samples")
+
+    @slowTest
+    @dtypes(torch.float)
+    def test_multinomial_rng_state_advance(self, device, dtype):
+        corpus_size = 100000
+        freqs = torch.ones(corpus_size, dtype=torch.float, device=device)
+        n_sample = 100
+        samples1 = torch.multinomial(freqs, n_sample, replacement=True)
+        samples2 = torch.multinomial(freqs, n_sample, replacement=True)
+        samples = torch.cat([samples1, samples2])
+        # expect no more than 1 repeating elements generated in 2 attempts
+        # the probability of at least element being repeated is surprisingly large, 18%
+        self.assertLessEqual(2 * n_sample - samples.unique().size(0), 2)
+        samples1 = torch.multinomial(freqs, n_sample, replacement=False)
+        samples2 = torch.multinomial(freqs, n_sample, replacement=False)
+        samples = torch.cat([samples1, samples2])
+        # expect no more than 1 repeating elements generated in 2 attempts
+        self.assertLessEqual(2 * n_sample - samples.unique().size(0), 1)
 
     def test_var_unbiased(self, device):
         tensor = torch.randn(100, device=device)
@@ -15462,8 +15536,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 long_res1 = long_m1.clone()
                 long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
 
-    # remove onlyCUDA after CPU impl of remainder_kernel be fixed
-    @onlyCUDA
     @dtypes(torch.float, torch.double)
     def test_remainder_fmod_large_dividend(self, device, dtype):
         alarge = 1e9
@@ -15905,7 +15977,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_random_full_range(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -15913,14 +15985,22 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         int64_min_val = torch.iinfo(torch.int64).min
         int64_max_val = torch.iinfo(torch.int64).max
 
+        if dtype == torch.double:
+            fp_limit = 2**53
+        elif dtype == torch.float:
+            fp_limit = 2**24
+        elif dtype == torch.half:
+            fp_limit = 2**11
+        elif dtype == torch.bfloat16:
+            fp_limit = 2**8
+        else:
+            fp_limit = 0
+
         t = torch.empty(size, dtype=dtype, device=device)
 
-        if dtype in [torch.float, torch.double, torch.half]:
-            from_ = int(max(torch.finfo(dtype).min, int64_min_val))
-            to_inc_ = int(min(torch.finfo(dtype).max, int64_max_val))
-        elif dtype == torch.bfloat16:
-            from_ = int(max(-3.389531389251535e+38, int64_min_val))
-            to_inc_ = int(min(3.389531389251535e+38, int64_max_val))
+        if dtype in [torch.float, torch.double, torch.half, torch.bfloat16]:
+            from_ = int(max(-fp_limit, int64_min_val))
+            to_inc_ = int(min(fp_limit, int64_max_val))
         else:
             from_ = int(max(torch.iinfo(dtype).min, int64_min_val))
             to_inc_ = int(min(torch.iinfo(dtype).max, int64_max_val))
@@ -15938,7 +16018,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_random_from_to(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -16034,7 +16114,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_random_to(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -16099,7 +16179,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_random_default(self, device, dtype):
         # TODO: https://github.com/pytorch/pytorch/issues/33793
         if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            return
+            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
 
         size = 2000
         alpha = 0.1
@@ -16528,6 +16608,40 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         test_output_dtype(torch.float32, False)
         test_output_dtype(torch.int32, False)
         test_output_dtype(torch.int64, True)
+
+    def test_pickle_gradscaler(self, device):
+        # This test is not in test_cuda.py because it should pass in 3 cases:
+        #  1. cuda is not available.
+        #  2. cuda is available but device is not cuda.
+        #  3. cuda is available and device is cuda.
+        # In case 1, a and b disable themselves on construction and shouldn't try to pickle workhorse attributes.
+        # In case 2, a and b are enabled.  Workhorse attributes participate in pickling, but none are lazy-inited
+        # to cuda Tensors, because I don't want to do cuda things if device is not cuda.
+        # In case 3, a and b are enabled and we may also try lazy-initing _scale to a cuda tensor.
+        device = torch.device(device)
+        try_lazy_inits = (True, False) if device.type == "cuda" else (False,)
+        for lazy_init_scale in try_lazy_inits:
+            a = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
+            self.assertTrue(a.is_enabled() if torch.cuda.is_available() else not a.is_enabled())
+            if lazy_init_scale:
+                # Dummy a.scale() call lazy-inits a._scale Tensor.
+                a.scale(torch.tensor([4.0], dtype=torch.float32, device=device))
+                self.assertTrue(isinstance(a._scale, torch.cuda.FloatTensor))
+            # The following three lines should work whether or not cuda is available.
+            serialized = pickle.dumps(a)
+            b = pickle.loads(serialized)
+            self.assertEqual(b.is_enabled(), a.is_enabled())
+            if a.is_enabled():
+                self.assertEqual(b.get_scale(), 3.)
+                self.assertEqual(b.get_growth_factor(), 4.)
+                self.assertEqual(b.get_backoff_factor(), .5)
+                self.assertEqual(b.get_growth_interval(), 2)
+                self.assertEqual(b._init_growth_tracker, 0)
+                # supplies a dummy key to test the defaultdict's default_factory
+                self.assertEqual(b._per_optimizer_states["fdsa"],
+                                 torch.cuda.amp.grad_scaler._refresh_per_optimizer_state())
+                if lazy_init_scale:
+                    self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
 
 
 # NOTE [Linspace+Logspace precision override]
@@ -17256,6 +17370,8 @@ _types2 = _types + [torch.bfloat16] if TEST_WITH_ROCM else _types
 
 _float_types = [torch.half, torch.float, torch.double]
 
+_complex_types = [torch.cfloat, torch.cdouble]
+
 _float_types_no_half = [torch.float, torch.double]
 
 # _float_types2 adds bfloat16 type to _float_types only on ROCm. Should eventually be unified
@@ -17677,6 +17793,7 @@ tensor_op_tests = [
     ('rsqrt', '', lambda t, d: _small_3d(t, d) + 1, lambda t, d: [], 1e-2, 1e-5, 1e-4, _float_types_no_half),
     ('sinh', '', lambda t, d: _small_3d(t, d).clamp(-1, 1), lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types),
     ('tan', '', lambda t, d: _small_3d(t, d).clamp(-1, 1), lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types),
+    ('tan', 'complex', lambda t, d: _small_3d(t, d), lambda t, d: [], 1e-3, 1e-5, 1e-5, _complex_types),
     ('__lshift__', '',
         lambda t, d: torch.pow(2, torch.arange(1, 5).to(dtype=_convert_t(t, d), device=d)),
         lambda t, d: [2],
