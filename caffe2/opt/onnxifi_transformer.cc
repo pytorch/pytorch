@@ -256,6 +256,7 @@ void mergeFp32InputsAndConvertToFp16(
     ops.emplace_back(op);
   }
   pred_net->clear_op();
+  int current_pos = ops.size();
 
   for (const auto& elem : user_inputs_by_partition) {
     const auto& partition = elem.first;
@@ -275,9 +276,8 @@ void mergeFp32InputsAndConvertToFp16(
       total += user_input_map[u].shape.dims(1);
     }
     shape_info.shape.set_dims(1, total);
-    auto* arg = op1.add_arg();
-    arg->set_name("axis");
-    arg->set_i(1);
+    AddArgument("axis", 1, &op1);
+    AddArgument(kNetPos, current_pos++, &op1);
     pred_net->add_op()->CopyFrom(op1);
 
     // TODO: a possible optimization is to fuse the fp16 conversion into Concat
@@ -285,9 +285,8 @@ void mergeFp32InputsAndConvertToFp16(
     op2.set_type("FloatToHalf");
     op2.add_input(partition + "_fp32_input_concated");
     op2.add_output(partition + "_fp16_input_concated");
-    arg = op2.add_arg();
-    arg->set_name("clip");
-    arg->set_i(1);
+    AddArgument("clip", 1, &op2);
+    AddArgument(kNetPos, current_pos++, &op2);
     shape_hints->emplace(partition + "_fp16_input_concated", shape_info);
     pred_net->add_op()->CopyFrom(op2);
 
@@ -306,17 +305,16 @@ void mergeFp32InputsAndConvertToFp16(
           "",
           {partition + "_" + i + "_split_fp16"},
           {partition + "_" + i + "_split"},
-          {}));
+          {MakeArgument<int>(kNetPos, current_pos++)}));
       converts.back().mutable_device_option()->set_node_name(partition);
 
       auto converted_shape = user_input_map[i];
       converted_shape.shape.set_data_type(TensorProto_DataType_FLOAT);
       shape_hints->emplace(partition + "_" + i + "_split", converted_shape);
     }
-    arg = op3.add_arg();
-    arg->set_name("axis");
-    arg->set_i(1);
-    arg = op3.add_arg();
+    AddArgument("axis", 1, &op3);
+    AddArgument(kNetPos, current_pos++, &op3);
+    auto* arg = op3.add_arg();
     arg->set_name("split");
     for (const auto& u : user_inputs) {
       arg->add_ints(user_input_map[u].shape.dims(1));
