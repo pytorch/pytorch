@@ -4197,7 +4197,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
                 '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add', 'roll',
-                '__radd__', 'repeat', 'expand', 'mul'] + separate_complex_tests
+                '__radd__', 'repeat', 'expand', 'mul', 'unfold', 'addcdiv', 'addcmul'] + separate_complex_tests
 
 def add_test(
         name,

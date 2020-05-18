@@ -17608,9 +17608,11 @@ _float_types = [torch.half, torch.float, torch.double]
 
 _complex_types = [torch.cfloat, torch.cdouble]
 
-_float_types_no_half = [torch.float, torch.double]
+_complex_and_types2 = _complex_types + _types2
 
-_complex_types = [torch.cfloat, torch.cdouble]
+_types_and_complex = _types + _complex_types
+
+_float_types_no_half = [torch.float, torch.double]
 
 # _float_types2 adds bfloat16 type to _float_types only on ROCm. Should eventually be unified
 # with _float_types when bfloat16 bringup is complete on all platforms
@@ -17686,7 +17688,13 @@ def _small_2d(dtype, device, has_zeros=True, fill_ones=False, oneish=False):
     if oneish:
         return t.clamp(min=_number(.99, 1, dtype), max=1.01)
     if not has_zeros:
-        return t.clamp(min=(_number(_div_min, 1, dtype)))
+        if dtype.is_complex:
+            # TODO: update this when torch.clamp is implemented for complex
+            clamped_real = t.copy_real().abs().clamp(min=(_number(_div_min, 1, dtype)))
+            clamped_imag = t.copy_imag().abs().clamp(min=(_number(_div_min, 1, dtype)))
+            return clamped_real + 1j * clamped_imag
+        else:
+            return t.clamp(min=(_number(_div_min, 1, dtype)))
     return t
 
 def _small_3d(dtype, device, has_zeros=True, fill_ones=False, oneish=False):
@@ -17802,17 +17810,17 @@ tensor_op_tests = [
     ('addcdiv', '', _small_2d,
         lambda t, d: [_small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1, 1e-3,
-        _types2, _cpu_types, True,
+        _complex_and_types2, _cpu_types, True,
         [_wrap_maybe_warns("Integer division .+")]),
     ('addcdiv', 'scalar', _small_2d,
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
-        _types, _cpu_types, True,
+        _types_and_complex, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addcdiv_? is deprecated|Integer division .+")]),
-    ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 1e-1, 1e-3, _types2),
+    ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 1e-1, 1e-3, _complex_and_types2),
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
-        1e-1, 1e-5, _types2, _cpu_types, True,
+        1e-1, 1e-5, _complex_and_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addcmul_? is deprecated")]),
     ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types2),
