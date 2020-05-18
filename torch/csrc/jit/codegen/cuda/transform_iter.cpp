@@ -842,7 +842,7 @@ struct ReplaySelf : public TransformIter {
 
 }; // struct ReplaySelf
 
-struct TORCH_CUDA_API TransformBackward : public TransformIter {
+struct TransformBackward : public TransformIter {
  private:
   // axis_map goes from the transform position to the position in our modified
   // td.
