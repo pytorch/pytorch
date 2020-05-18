@@ -140,6 +140,16 @@ static void prod_kernel_impl(TensorIterator& iter) {
   });
 }
 
+static void nanprod_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX(iter.dtype(), "nanprod_cpu", [&] {
+      binary_kernel_reduce_vec(
+        iter,
+        NanProdOps<scalar_t>{},
+        scalar_t{1}
+      );
+  });
+}
+
 static void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
     Scalar p) {
@@ -283,6 +293,7 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
+REGISTER_DISPATCH(nanprod_stub, &nanprod_kernel_impl);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
 REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
 REGISTER_DISPATCH(and_stub, &and_kernel_impl);
