@@ -15419,6 +15419,8 @@ a")
             self.assertEqual(loaded.buffer1, torch.ones(2, 2) + 5)
             self.assertEqual(loaded.buffer2, torch.ones(2, 2) + 10)
 
+
+
     def test_string_slicing(self):
         def fn1(x):
             # type: (str) -> str
