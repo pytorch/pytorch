@@ -183,7 +183,7 @@ std::vector<std::string> _tensor_info_funcs = {"size"};
 
 // Aten functions whose output will be quantized or not quantized depending
 // on input tensor
-std::vector<std::string> _propagate_quant_funcs = {"cat"};
+std::vector<std::string> _propagate_quant_ops = {"cat"};
 
 // Check if `use` is an aten function of name `func_name` and if value
 // `v` is the nth argument (if provided) of the function.
@@ -358,7 +358,7 @@ bool isTensorInfoNode(Node* n) {
 }
 
 bool isPropagateQuantNode(Node* n) {
-  return isAtenFunc(n, _propagate_quant_funcs);
+  return isAtenFunc(n, _propagate_quant_ops);
 }
 
 c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
