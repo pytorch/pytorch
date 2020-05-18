@@ -325,8 +325,9 @@ void mergeFp32InputsAndConvertToFp16(
     }
 
     for (auto& op : ops) {
-      if (!op.device_option().node_name().empty() &&
-          op.device_option().node_name() == partition) {
+      if ((!op.device_option().node_name().empty() &&
+           op.device_option().node_name() == partition) ||
+          (op.device_option().node_name().empty() && partition == "default")) {
         for (auto& i : *op.mutable_input()) {
           if (user_input_set.count(i)) {
             i = partition + "_" + i + "_split";
