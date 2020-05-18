@@ -12310,22 +12310,34 @@ class TestTorchDeviceType(TestCase):
                     non_zero_rand((2, 2), dtype=dtype, device=device))
 
     # This function tests that a nan value is returned for input values not in domain
+    @dtypes(torch.float32, torch.complex64)
     def test_acosh_domain(self, device):
-        # Domain of acosh is [1, inf)
-        sample = torch.tensor([-1.23, -0.06, 0.98], device=device)
-        self.assertEqual(torch.isnan(torch.acosh(sample)), torch.BoolTensor([1, 1, 1]))
-        self.assertEqual(torch.isnan(sample.acosh()), torch.BoolTensor([1, 1, 1]))
+        # Domain of acosh is [1, inf), for values outside the domain - output is mapped
+        # to NaN, except for input value `inf` - output is mapped to `inf`
+        sample = torch.tensor([float('-inf'), 1.00, -1.23, -0.06, 0.98, float('inf')],
+                              device=device, dtype=dtype)
+        nan_mask = torch.tensor([True, False, True, True, True, True])
+        inf_mask = torch.tensor([False, False, False, False, False, True])
+        self.assertEqual(torch.isnan(torch.acosh(sample)), nan_mask)
+        self.assertEqual(torch.isnan(sample.acosh()), nan_mask)
+        self.assertEqual(torch.isinf(torch.acosh(sample)), inf_mask)
+        self.assertEqual(torch.isinf(sample.acosh()), inf_mask)
 
     # This function tests that a nan value is returned for input values not in domain
+    @dtypes(torch.float32, torch.complex64)
     def test_atanh_domain(self, device):
-        # Domain of atanh is (-1, 1)
-        sample = torch.tensor([-1.00, 1.00, -1.23, 1.06], device=device)
+        # Domain of atanh is (-1, 1), for edge values (-1 and 1) - output is mapped
+        # to inf and for other values outside this range - output is mapped to NaN
+        sample = torch.tensor([float('-inf'), -1.00, 1.00, -1.23, 1.06, float('inf')],
+                              device=device, dtype=dtype)
+        nan_mask = torch.tensor([True, False, False, True, True, True])
+        inf_mask = torch.tensor([False, True, True, False, False, False])
         # For values not in domain (except -1.0 and 1.0), atanh should return nan
-        self.assertEqual(torch.isnan(torch.atanh(sample)), torch.BoolTensor([0, 0, 1, 1]))
-        self.assertEqual(torch.isnan(sample.atanh()), torch.BoolTensor([0, 0, 1, 1]))
+        self.assertEqual(torch.isnan(torch.atanh(sample)), nan_mask)
+        self.assertEqual(torch.isnan(sample.atanh()), nan_mask)
         # For values -1.0 and 1.0, atanh should return -inf and inf respectively
-        self.assertEqual(torch.isinf(torch.atanh(sample)), torch.BoolTensor([1, 1, 0, 0]))
-        self.assertEqual(torch.isinf(sample.atanh()), torch.BoolTensor([1, 1, 0, 0]))
+        self.assertEqual(torch.isinf(torch.atanh(sample)), inf_mask)
+        self.assertEqual(torch.isinf(sample.atanh()), inf_mask)
 
     # TODO: run on non-native device types
     @dtypes(torch.double)
