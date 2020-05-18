@@ -113,6 +113,7 @@ class CAFFE2_API Context {
   ErrorLevel deterministicErrorLevel() const;
   void setDeterministicErrorLevel(ErrorLevel e);
   ErrorLevel longToErrorLevel(long e);
+  void alertNotDeterministic(std::string const& caller);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   const std::vector<at::QEngine>& supportedQEngines() const;

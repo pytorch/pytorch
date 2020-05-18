@@ -86,6 +86,21 @@ Context::ErrorLevel Context::longToErrorLevel(long e) {
   }
 }
 
+void Context::alertNotDeterministic(std::string const& caller) {
+  if (globalContext().deterministic()) {
+    auto error_level = globalContext().deterministicErrorLevel();
+    switch (error_level) {
+      case Context::ErrorLevel::Warn:
+        TORCH_WARN(caller, " is not deterministic");
+        break;
+      case Context::ErrorLevel::Error:
+        TORCH_CHECK(false, caller, " is not deterministic");
+        break;
+      case Context::ErrorLevel::None:;
+    }
+  }
+}
+
 bool Context::benchmarkCuDNN() const {
   return benchmark_cudnn;
 }

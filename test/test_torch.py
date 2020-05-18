@@ -116,17 +116,34 @@ class AbstractTestCases:
             dir(torch)
 
         def test_deterministic_flag(self):
-            with torch.experimental.flags(deterministic=True):
-                self.assertTrue(torch.experimental.deterministic)
+            for deterministic in [True, False]:
+                for error_level in [0, 1, 2]:
+                    with torch.experimental.flags(deterministic=deterministic, deterministic_error_level=error_level):
+                        self.assertEqual(deterministic, torch.experimental.deterministic)
+                        self.assertEqual(error_level, torch.experimental.deterministic_error_level)
 
-            with torch.experimental.flags(deterministic=False):
-                self.assertFalse(torch.experimental.deterministic)
+            with torch.experimental.flags(deterministic=True, deterministic_error_level=0):
+                # Should not raise or warn
+                torch.experimental.alert_not_deterministic("caller")
 
+            with torch.experimental.flags(deterministic=True, deterministic_error_level=1):
+                self.assertWarnsRegex(UserWarning, "caller is not deterministic",
+                    lambda: torch.experimental.alert_not_deterministic("caller"))
+
+            with torch.experimental.flags(deterministic=True, deterministic_error_level=2):
+                self.assertRaisesRegex(RuntimeError, "caller is not deterministic",
+                    lambda: torch.experimental.alert_not_deterministic("caller"))
+
+            with torch.experimental.flags(deterministic=False, deterministic_error_level=2):
+                # Should not raise or warn
+                torch.experimental.alert_not_deterministic("caller")
+
+            # Make sure invalid error levels raise an exception
             for invalid_error_level in [-1, 3, 4]:
                 with self.assertRaisesRegex(RuntimeError,
                                             "error level %d" % invalid_error_level):
                     with torch.experimental.flags(deterministic_error_level=invalid_error_level):
-                        pass
+                    pass
 
         def test_type_conversion_via_dtype_name(self):
             x = torch.tensor([1])

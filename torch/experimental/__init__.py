@@ -36,6 +36,7 @@ class ExperimentalModule(PropModule):
 
     deterministic = ContextProp(torch._C._get_deterministic, torch._C._set_deterministic)
     deterministic_error_level = ContextProp(torch._C._get_deterministic_error_level, torch._C._set_deterministic_error_level)
+    alert_not_deterministic = torch._C._alert_not_deterministic
 
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273

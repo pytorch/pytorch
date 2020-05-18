@@ -456,6 +456,17 @@ PyObject *THPModule_deterministicErrorLevel(PyObject *_unused, PyObject *noargs)
   return PyInt_FromLong(static_cast<long>(at::globalContext().deterministicErrorLevel()));
 }
 
+PyObject *THPModule_alertNotDeterministic(PyObject *_unused, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkString(arg), "alert_not_deterministic expects a string, "
+          "but got %s", THPUtils_typename(arg));
+  std::string caller = THPUtils_unpackString(arg);
+  at::globalContext().alertNotDeterministic(caller);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_benchmark_cudnn expects a bool, "
@@ -571,6 +582,7 @@ static PyMethodDef TorchMethods[] = {
   {"_set_deterministic", (PyCFunction)THPModule_setDeterministic, METH_O,  nullptr},
   {"_get_deterministic_error_level", (PyCFunction)THPModule_deterministicErrorLevel, METH_NOARGS,     nullptr},
   {"_set_deterministic_error_level", (PyCFunction)THPModule_setDeterministicErrorLevel, METH_O,  nullptr},
+  {"_alert_not_deterministic", (PyCFunction)THPModule_alertNotDeterministic, METH_O, nullptr},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       nullptr},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       nullptr},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     nullptr},
