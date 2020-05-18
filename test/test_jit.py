@@ -15433,7 +15433,7 @@ a")
                     return x
 
             m = TestModule()
-            self.assertEqual(m.tags, expected_tags)
+            self.assertEqual(m.param.tags, expected_tags)
             m_traced = torch.jit.trace(m, torch.tensor(1.))
             m_scripted = torch.jit.script(m)
 
