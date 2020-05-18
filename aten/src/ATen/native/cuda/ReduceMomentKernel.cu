@@ -67,7 +67,7 @@ void nanmean_kernel_impl(TensorIterator& iter) {
   at::Tensor src = iter.tensor(1);
   at::Tensor dim_prod = at::sum(src.isnan().logical_not());
   float factor = float(iter.num_output_elements()) / dim_prod.item<float>();
-  gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps<acc_t, float> {factor});
+  gpu_reduce_kernel<scalar_t, out_t>(iter, NanMeanOps<acc_t, float> {factor});
 }
 
 static void nanmean_kernel_cuda(TensorIterator& iter) {
