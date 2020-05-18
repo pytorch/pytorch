@@ -5,7 +5,7 @@ NON_PR_BRANCH_LIST = [
 ]
 
 
-def gen_branch_filter_dict():
+def gen_unimportant_branch_filter_dict():
     return {
         "branches": {
             "only": NON_PR_BRANCH_LIST,
