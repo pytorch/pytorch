@@ -409,7 +409,6 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(cosh), "cosh", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(erfinv), "erfinv", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(exp), "exp", Tensor (const Tensor &), fp32)
-  KERNEL(ADD_NS(exp2), "exp2", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(expm1), "expm1", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(log), "log", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(log10), "log10", Tensor (const Tensor &), fp32)
