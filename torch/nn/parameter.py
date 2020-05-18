@@ -38,6 +38,7 @@ class Parameter(torch.Tensor):
     def __repr__(self):
         return 'Parameter containing:\n' + super(Parameter, self).__repr__()
 
+    # yf225 TODO: we can make this forward compat by checking whether tags is None / {} before serialization
     def __reduce_ex__(self, proto):
         # See Note [Don't serialize hooks]
         return (
