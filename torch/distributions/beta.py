@@ -4,7 +4,7 @@ import torch
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import broadcast_all, as_float
 
 
 class Beta(ExponentialFamily):
@@ -31,7 +31,7 @@ class Beta(ExponentialFamily):
         if isinstance(concentration1, Number) and isinstance(concentration0, Number):
             concentration1_concentration0 = torch.tensor([float(concentration1), float(concentration0)])
         else:
-            concentration1, concentration0 = broadcast_all(concentration1, concentration0)
+            concentration1, concentration0 = broadcast_all(as_float(concentration1), as_float(concentration0))
             concentration1_concentration0 = torch.stack([concentration1, concentration0], -1)
         self._dirichlet = Dirichlet(concentration1_concentration0)
         super(Beta, self).__init__(self._dirichlet._batch_shape, validate_args=validate_args)

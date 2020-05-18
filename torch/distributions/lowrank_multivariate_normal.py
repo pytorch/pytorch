@@ -4,7 +4,7 @@ import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.multivariate_normal import _batch_mahalanobis, _batch_mv
-from torch.distributions.utils import _standard_normal, lazy_property
+from torch.distributions.utils import _standard_normal, as_float, lazy_property
 
 
 def _batch_capacitance_tril(W, D):
@@ -82,6 +82,7 @@ class LowRankMultivariateNormal(Distribution):
     def __init__(self, loc, cov_factor, cov_diag, validate_args=None):
         if loc.dim() < 1:
             raise ValueError("loc must be at least one-dimensional.")
+        loc = as_float(loc)
         event_shape = loc.shape[-1:]
         if cov_factor.dim() < 2:
             raise ValueError("cov_factor must be at least two-dimensional, "
@@ -89,9 +90,10 @@ class LowRankMultivariateNormal(Distribution):
         if cov_factor.shape[-2:-1] != event_shape:
             raise ValueError("cov_factor must be a batch of matrices with shape {} x m"
                              .format(event_shape[0]))
+        cov_factor = as_float(cov_factor)
         if cov_diag.shape[-1:] != event_shape:
             raise ValueError("cov_diag must be a batch of vectors with shape {}".format(event_shape))
-
+        cov_diag = as_float(cov_diag)
         loc_ = loc.unsqueeze(-1)
         cov_diag_ = cov_diag.unsqueeze(-1)
         try:

@@ -5,7 +5,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import broadcast_all, as_float
 
 
 class Cauchy(Distribution):
@@ -29,7 +29,7 @@ class Cauchy(Distribution):
     has_rsample = True
 
     def __init__(self, loc, scale, validate_args=None):
-        self.loc, self.scale = broadcast_all(loc, scale)
+        self.loc, self.scale = broadcast_all(as_float(loc), as_float(scale))
         if isinstance(loc, Number) and isinstance(scale, Number):
             batch_shape = torch.Size()
         else:

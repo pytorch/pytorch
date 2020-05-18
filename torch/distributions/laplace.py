@@ -2,7 +2,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import as_float, broadcast_all
 
 
 class Laplace(Distribution):
@@ -36,7 +36,7 @@ class Laplace(Distribution):
         return (2 ** 0.5) * self.scale
 
     def __init__(self, loc, scale, validate_args=None):
-        self.loc, self.scale = broadcast_all(loc, scale)
+        self.loc, self.scale = broadcast_all(as_float(loc), as_float(scale))
         if isinstance(loc, Number) and isinstance(scale, Number):
             batch_shape = torch.Size()
         else:

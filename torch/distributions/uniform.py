@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import broadcast_all, as_float
 
 
 class Uniform(Distribution):
@@ -38,7 +38,7 @@ class Uniform(Distribution):
         return (self.high - self.low).pow(2) / 12
 
     def __init__(self, low, high, validate_args=None):
-        self.low, self.high = broadcast_all(low, high)
+        self.low, self.high = broadcast_all(as_float(low), as_float(high))
 
         if isinstance(low, Number) and isinstance(high, Number):
             batch_shape = torch.Size()

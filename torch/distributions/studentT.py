@@ -4,7 +4,7 @@ import torch
 from torch._six import inf, nan
 from torch.distributions import Chi2, constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import _standard_normal, broadcast_all
+from torch.distributions.utils import _standard_normal, broadcast_all, as_float
 
 
 class StudentT(Distribution):
@@ -42,7 +42,7 @@ class StudentT(Distribution):
         return m
 
     def __init__(self, df, loc=0., scale=1., validate_args=None):
-        self.df, self.loc, self.scale = broadcast_all(df, loc, scale)
+        self.df, self.loc, self.scale = broadcast_all(as_float(df), as_float(loc), as_float(scale))
         self._chi2 = Chi2(self.df)
         batch_shape = self.df.size()
         super(StudentT, self).__init__(batch_shape, validate_args=validate_args)

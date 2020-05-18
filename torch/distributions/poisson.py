@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import broadcast_all, as_float
 
 
 class Poisson(ExponentialFamily):
@@ -36,7 +36,7 @@ class Poisson(ExponentialFamily):
         return self.rate
 
     def __init__(self, rate, validate_args=None):
-        self.rate, = broadcast_all(rate)
+        self.rate, = broadcast_all(as_float(rate))
         if isinstance(rate, Number):
             batch_shape = torch.Size()
         else:

@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import broadcast_all, as_float
 
 
 def _standard_gamma(concentration):
@@ -40,7 +40,7 @@ class Gamma(ExponentialFamily):
         return self.concentration / self.rate.pow(2)
 
     def __init__(self, concentration, rate, validate_args=None):
-        self.concentration, self.rate = broadcast_all(concentration, rate)
+        self.concentration, self.rate = broadcast_all(as_float(concentration), as_float(rate))
         if isinstance(concentration, Number) and isinstance(rate, Number):
             batch_shape = torch.Size()
         else:

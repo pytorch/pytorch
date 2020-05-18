@@ -2,7 +2,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
+from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs, as_float
 
 
 def _clamp_by_zero(x):
@@ -41,11 +41,11 @@ class Binomial(Distribution):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
-            self.total_count, self.probs, = broadcast_all(total_count, probs)
+            self.total_count, self.probs, = broadcast_all(total_count, as_float(probs))
             self.total_count = self.total_count.type_as(self.logits)
             is_scalar = isinstance(self.probs, Number)
         else:
-            self.total_count, self.logits, = broadcast_all(total_count, logits)
+            self.total_count, self.logits, = broadcast_all(total_count, as_float(logits))
             self.total_count = self.total_count.type_as(self.logits)
             is_scalar = isinstance(self.logits, Number)
 

@@ -6,7 +6,7 @@ import torch
 import torch.jit
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all, lazy_property
+from torch.distributions.utils import broadcast_all, lazy_property, as_float
 
 
 def _eval_poly(y, coef):
@@ -88,7 +88,7 @@ class VonMises(Distribution):
     has_rsample = False
 
     def __init__(self, loc, concentration, validate_args=None):
-        self.loc, self.concentration = broadcast_all(loc, concentration)
+        self.loc, self.concentration = broadcast_all(as_float(loc), as_float(concentration))
         batch_shape = self.loc.shape
         event_shape = torch.Size()
 

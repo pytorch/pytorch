@@ -4,7 +4,7 @@ import math
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs
+from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs, as_float
 from torch.nn.functional import binary_cross_entropy_with_logits
 
 
@@ -44,7 +44,7 @@ class ContinuousBernoulli(ExponentialFamily):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             is_scalar = isinstance(probs, Number)
-            self.probs, = broadcast_all(probs)
+            self.probs, = broadcast_all(as_float(probs))
             # validate 'probs' here if necessary as it is later clamped for numerical stability
             # close to 0 and 1, later on; otherwise the clamped 'probs' would always pass
             if validate_args is not None:
@@ -53,7 +53,7 @@ class ContinuousBernoulli(ExponentialFamily):
             self.probs = clamp_probs(self.probs)
         else:
             is_scalar = isinstance(logits, Number)
-            self.logits, = broadcast_all(logits)
+            self.logits, = broadcast_all(as_float(logits))
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
             batch_shape = torch.Size()

@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
+from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, as_float, lazy_property
 from torch.nn.functional import binary_cross_entropy_with_logits
 
 
@@ -36,10 +36,10 @@ class Bernoulli(ExponentialFamily):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             is_scalar = isinstance(probs, Number)
-            self.probs, = broadcast_all(probs)
+            self.probs, = broadcast_all(as_float(probs))
         else:
             is_scalar = isinstance(logits, Number)
-            self.logits, = broadcast_all(logits)
+            self.logits, = broadcast_all(as_float(logits))
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
             batch_shape = torch.Size()
