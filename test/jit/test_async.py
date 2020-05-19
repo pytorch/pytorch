@@ -198,21 +198,46 @@ class TestAsync(JitTestCase):
         self.assertEqual(y3, foo3(x1, x2, x3))
 
     def test_async_kwargs(self):
-        @torch.jit.script
         def foo(x1, x2):
             return 2 * x1 + x2
 
         x1 = torch.rand(3, 4)
         x2 = torch.rand(3, 4)
         y_hat = foo(x1, x2)
-        for fut in [
-            torch.jit._fork(foo, x1, x2),
-            torch.jit._fork(foo, x1, x2=x2),
-            torch.jit._fork(foo, x1=x1, x2=x2),
-            torch.jit._fork(foo, x2=x2, x1=x1),
+
+        # Cover tracing and bare functions with permutations of args, kwargs
+        for func in [
+            lambda x1, x2: torch.jit._wait(torch.jit._fork(foo, x1, x2)),
+            lambda x1, x2: torch.jit._wait(torch.jit._fork(foo, x1, x2=x2)),
+            lambda x1, x2: torch.jit._wait(torch.jit._fork(foo, x1=x1, x2=x2)),
+            lambda x1, x2: torch.jit._wait(torch.jit._fork(foo, x2=x2, x1=x1))
         ]:
-            y = torch.jit._wait(fut)
-            self.assertEqual(y, y_hat)
+            for wrapper in [
+                func,
+                torch.jit.trace(func, (x1, x2)),
+            ]:
+                self.assertEqual(wrapper(x1, x2), y_hat)
+                self.assertEqual(wrapper(x1, x2=x2), y_hat)
+                self.assertEqual(wrapper(x1=x1, x2=x2), y_hat)
+                self.assertEqual(wrapper(x2=x2, x1=x1), y_hat)
+
+        # Cover scripting
+        @torch.jit.script
+        def foo_script_args(x1, x2):
+            return torch.jit._wait(torch.jit._fork(foo, x1, x2))
+
+        @torch.jit.script
+        def foo_script_kwargs(x1, x2):
+            return torch.jit._wait(torch.jit._fork(foo, x1=x1, x2=x2))
+
+        for wrapper in [
+                foo_script_args,
+                foo_script_kwargs,
+        ]:
+            self.assertEqual(wrapper(x1, x2), y_hat)
+            self.assertEqual(wrapper(x1, x2=x2), y_hat)
+            self.assertEqual(wrapper(x1=x1, x2=x2), y_hat)
+            self.assertEqual(wrapper(x2=x2, x1=x1), y_hat)
 
     @_inline_everything
     def test_async_script_trace(self):
