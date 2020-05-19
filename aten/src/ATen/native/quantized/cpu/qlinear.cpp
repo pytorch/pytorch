@@ -250,8 +250,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     float* weight_scales_data = w_scales.data_ptr<float>();
     // We calculate requant scale here as the vector holding the requant scale
     // is owned by this module. The pointer is then passed to qnnpack backend.
-    requantization_scales =
-        generate_requantization_scales(w_scales, input_scale, output_scale);
+    generate_requantization_scales(
+        w_scales, input_scale, output_scale, requantization_scales);
 
     at::Tensor qnnp_weight = at::_empty_affine_quantized(
         weight_contig.sizes(),
