@@ -47,8 +47,6 @@ def fuse_conv_bn_relu(conv, bn, relu):
     """
     assert(conv.training == bn.training == relu.training),\
         "Conv and BN both must be in the same mode (train or eval)."
-    is_3d = isinstance(conv, torch.nn.Conv3d)
-    is_1d = isinstance(conv, torch.nn.Conv1d)
     if conv.training:
         map_to_fused_module_train = {
             torch.nn.Conv2d: torch_fused.ConvBnReLU2d,
