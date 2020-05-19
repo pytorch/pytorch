@@ -99,17 +99,17 @@ def index(g, self, index):
         "Transpose",
         self,
         perm_i=tensor_indices + [i for i in range(rank) if i not in tensor_indices])
-    # Next we broadcast tensor indices and drop all ':' axes.
-    # First lets pull out the shapes of the indices.
-    index_shapes = [
-        numpy.asarray(sym_help._get_const(indices[i], 'is', 'indices')).shape
-        for i in tensor_indices
-    ]
+
     # Now we'll find the target shape to broadcast to, we do this by finding the maximum dimension along each
     # axis for the index shapes.
+    # Extract index shapes.
+    index_shapes = [
+        indices[i].type().sizes()
+        for i in tensor_indices
+    ]
     max_rank = max([len(s) for s in index_shapes])
     out_rank = len(skip_indices) + max_rank
-    # Now find the maximum dimension for each axis
+    # Find the maximum dimension for each axis
     base_shape = numpy.ones(max_rank)
     for i in range(len(base_shape)):
         for shape in index_shapes:
@@ -121,6 +121,7 @@ def index(g, self, index):
     base_shape = g.op("Constant", value_t=torch.LongTensor(base_shape))
     # Broadcast indices and stack into new tensor.
     indices = [g.op("Expand", indices[i], base_shape) for i in tensor_indices]
+
     # Finally, stack indices into a single tensor
     indices = g.op("Concat", *indices, axis_i=0)
     # Now we're ready to gather!
