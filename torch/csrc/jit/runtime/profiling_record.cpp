@@ -78,8 +78,8 @@ static void unprofileBlock(Block* start_block) {
 
 std::vector<c10::optional<c10::ShapeSymbol>> ProfilingRecord::
     mergeSymbolicShapes(
-        c10::VaryingShape<c10::ShapeSymbol> new_sizes,
-        c10::VaryingShape<c10::ShapeSymbol> sym_shapes,
+        const c10::VaryingShape<c10::ShapeSymbol>& new_sizes,
+        const c10::VaryingShape<c10::ShapeSymbol>& sym_shapes,
         SetPartitioningHelper& partition_helper) {
   std::vector<c10::optional<c10::ShapeSymbol>> new_symbols;
   TORCH_INTERNAL_ASSERT(
@@ -87,7 +87,7 @@ std::vector<c10::optional<c10::ShapeSymbol>> ProfilingRecord::
       *new_sizes.size() == *sym_shapes.size());
   for (size_t i = 0; i < new_sizes.size(); i++) {
     if (!sym_shapes[i].has_value() || !new_sizes[i].has_value()) {
-      new_symbols.push_back(c10::nullopt);
+      new_symbols.emplace_back(c10::nullopt);
       continue;
     }
     auto symbol = *sym_shapes[i];
@@ -95,7 +95,7 @@ std::vector<c10::optional<c10::ShapeSymbol>> ProfilingRecord::
     Dimension new_size = new_sizes[i]->static_size();
     GRAPH_DEBUG("Merging symbol ", symbol);
     auto new_sym = partition_helper.partitionSetByDimension(new_size, symbol);
-    new_symbols.push_back(new_sym);
+    new_symbols.emplace_back(new_sym);
   }
 
   return new_symbols;
@@ -106,7 +106,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
   auto pno = pn->addOutput();
   pno->setType(TensorType::get());
   std::function<void(Stack&)> shape_profiler = [this, pno](Stack& stack) {
-    int64_t frame_id;
+    int64_t frame_id = 0;
     pop(stack, frame_id);
     IValue v;
     pop(stack, v);
@@ -184,7 +184,7 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   pr->instrumentBlock(new_g->block());
 
   std::function<void(Stack&)> counter = [raw_pr](Stack& stack) {
-    int64_t frame_id;
+    int64_t frame_id = 0;
     pop(stack, frame_id);
 
     std::lock_guard<std::mutex> lock(raw_pr->mutex_);
@@ -211,7 +211,6 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
       // we make a copy of profiling information from the very first run
       // and use it for building the symbol sets
       auto profiled_types_iter = raw_pr->profiled_types_per_frame_.begin();
-      auto frame_id = profiled_types_iter->first;
       auto merged_profiled_types = profiled_types_iter->second;
       profiled_types_iter++;
 
@@ -219,7 +218,7 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
       for (; profiled_types_iter != raw_pr->profiled_types_per_frame_.end();
            profiled_types_iter++) {
         SetPartitioningHelper partition_helper;
-        for (auto val_type_pair : profiled_types_iter->second) {
+        for (const auto& val_type_pair : profiled_types_iter->second) {
           if (merged_profiled_types.count(val_type_pair.first) == 0) {
             merged_profiled_types[val_type_pair.first] = val_type_pair.second;
           } else {

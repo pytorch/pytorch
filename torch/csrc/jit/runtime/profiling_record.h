@@ -188,8 +188,8 @@ struct ProfilingRecord {
   // A thin wrapper around `partitionSetByDimension` to ensure
   // `new_sizes` and `sym_shapes` are of the same rank
   std::vector<c10::optional<c10::ShapeSymbol>> mergeSymbolicShapes(
-      c10::VaryingShape<c10::ShapeSymbol> new_sizes,
-      c10::VaryingShape<c10::ShapeSymbol> sym_shapes,
+      const c10::VaryingShape<c10::ShapeSymbol>& new_sizes,
+      const c10::VaryingShape<c10::ShapeSymbol>& sym_shapes,
       SetPartitioningHelper& symbol_table);
 
   bool ready() const {
