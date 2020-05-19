@@ -380,7 +380,9 @@ class GemmMicrokernelTester {
 #endif
           b.data(),
           nullptr,
+#if PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
           nullptr,
+#endif
           packedW.data());
 
       ASSERT_NE(

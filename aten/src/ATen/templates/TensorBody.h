@@ -401,6 +401,7 @@ class CAFFE2_API Tensor {
   C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
   GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() && = delete;
 
+  Tensor operator~() const;
   Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);
   Tensor& operator+=(Scalar other);
@@ -410,6 +411,9 @@ class CAFFE2_API Tensor {
   Tensor& operator*=(Scalar other);
   Tensor& operator/=(const Tensor & other);
   Tensor& operator/=(Scalar other);
+  Tensor& operator&=(const Tensor & other);
+  Tensor& operator|=(const Tensor & other);
+  Tensor& operator^=(const Tensor & other);
   Tensor operator[](Scalar index) const;
   Tensor operator[](Tensor index) const;
   Tensor operator[](int64_t index) const;
