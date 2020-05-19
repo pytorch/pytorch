@@ -186,9 +186,6 @@ bool validateKernelArgTensor(
   DataType param_data_type = *param->getDataType();
   bool match = false;
   switch (arg_data_type) {
-    case at::ScalarType::Int:
-      match = param_data_type == DataType::Int;
-      break;
     case at::ScalarType::Half:
       match = param_data_type == DataType::Half;
       break;
@@ -199,7 +196,9 @@ bool validateKernelArgTensor(
       match = param_data_type == DataType::Bool;
       break;
     default:
-      match = false;
+      msg << "Argument element type, " << arg_data_type
+          << ", is not supported.";
+      return false;
   }
   if (!match)
     msg << "Argument element type is " << arg_data_type
