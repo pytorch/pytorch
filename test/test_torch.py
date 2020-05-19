@@ -17825,8 +17825,8 @@ class _TestOperatorMeta():
     inplace = None
 
     def __init__(self, op_name, subtest_name='', ctor=None,
-                 arg_ctor=lambda t, d: [], dtypes=None, cpu_dtypes=[],
-                 has_inplace=True, decorators=[], *, half_tol=(None, None), win_float_tol=(None, None)):
+                 arg_ctor=None, dtypes=None, cpu_dtypes=None,
+                 has_inplace=True, decorators=None, *, half_tol=(None, None), win_float_tol=(None, None)):
 
         if has_inplace:
             self.inplace = _TestOperatorMeta(op_name + '_', 'inplace_' + subtest_name,
@@ -17839,11 +17839,11 @@ class _TestOperatorMeta():
         if self.subtest_name and op_name[-1] != '_':
             self.subtest_name = '_' + self.subtest_name
         self.ctor = _small_3d if ctor is None else ctor
-        self.arg_ctor = arg_ctor
+        self.arg_ctor = lambda t, d: [] if arg_ctor is None else arg_ctor
         self.dtypes = _types if dtypes is None else dtypes
-        self.cpu_dtypes = cpu_dtypes
+        self.cpu_dtypes = [] if cpu_dtypes is None else cpu_dtypes
         self.has_inplace = has_inplace
-        self.decorators = decorators
+        self.decorators = [] if decorators is None else decorators
         self.half_tol = half_tol
         self.win_float_tol = win_float_tol
 
