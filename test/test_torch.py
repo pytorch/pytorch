@@ -5779,15 +5779,6 @@ class TestTorchDeviceType(TestCase):
 
             self.assertRaises(RuntimeError, lambda: torch.sign(torch.tensor([4j], device=device, dtype=dtype)))
 
-            a = torch.rand((2, 2), dtype=dtype, device=device)
-            b = torch.rand((2, 2), dtype=dtype, device=device)
-            c = torch.rand((2, 2), dtype=dtype, device=device)
-            alpha = 3
-
-            # addcmul is not supported for complex dtypes on cuda yet
-            if device.startswith('cuda') and dtype.is_complex:
-                self.assertRaises(RuntimeError, lambda: torch.addcmul(a, b, c, value=alpha))
-
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
                                    dtype, device,
                                    expected_failure=False):
@@ -11612,14 +11603,10 @@ class TestTorchDeviceType(TestCase):
             a = rand_tensor((2, 2), dtype=dtype, device=device)
             b = rand_tensor((2, 2), dtype=dtype, device=device)
             c = rand_tensor((2, 2), dtype=dtype, device=device)
-            if dtype.is_floating_point:
+            if dtype.is_floating_point or dtype.is_complex:
                 alpha = 0.1
             else:
                 alpha = 3
-
-            # addcmul is not supported for complex dtypes on cuda yet
-            if device.startswith('cuda') and dtype.is_complex:
-                continue
 
             actual = torch.addcmul(a, b, c, value=alpha)
             expected = a + alpha * b * c
