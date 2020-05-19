@@ -221,7 +221,7 @@ def true_divide(g, self, other):
 
 
 def reciprocal(g, self):
-    return g.op("Div", torch.ones(1), self)
+    return g.op("Reciprocal", self)
 
 
 @parse_args("v", "i")
