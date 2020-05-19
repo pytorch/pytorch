@@ -63,6 +63,10 @@ namespace jit {
   _(Reduce3DRfactorRepeated)                \
   _(ReduceRfactorInsertionPoint)            \
   _(Reduce3DRfactorInsertionPoint)          \
+  _(ReduceSplitTail)                        \
+  _(ReduceSplitNoTail)                      \
+  _(ReduceSplitMask)                        \
+  _(ReduceSplitNoMask)                      \
   _(SplitReduceAxis)                        \
   _(SplitNonReduceAxis)                     \
   _(TypeTest01)                             \
