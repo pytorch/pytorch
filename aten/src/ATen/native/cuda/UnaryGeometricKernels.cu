@@ -164,7 +164,7 @@ __host__ __device__ static inline thrust::complex<T> tanh_wrapper(thrust::comple
 }
 
 void tanh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "tanh_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "tanh_cuda", [&]() {
     using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(thrust_t, "tanh_cuda", [&] {
       gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
