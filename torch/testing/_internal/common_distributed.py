@@ -29,7 +29,6 @@ TEST_SKIPS = {
     "no_cuda": TestSkip(74, "CUDA is not available."),
     "multi-gpu": TestSkip(75, "Need at least 2 CUDA devices"),
     "nccl": TestSkip(76, "c10d not compiled with NCCL support"),
-    "known_issues": TestSkip(77, "Test skipped due to known issues"),
     "skipIfRocm": TestSkip(78, "Test skipped for ROCm")
 }
 
@@ -80,16 +79,6 @@ def skip_if_lt_x_gpu(x):
 
     return decorator
 
-
-def skip_for_known_issues(func):
-    """Skips a test due to known issues (for c10d)."""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        sys.exit(TEST_SKIPS['known_issues'].exit_code)
-
-    return wrapper
-
-
 def requires_gloo():
     return unittest.skipUnless(
         c10d.is_gloo_available(),
@@ -126,6 +115,7 @@ def requires_mpi():
 def skip_if_rocm(func):
     """Skips a test for ROCm"""
     func.skip_if_rocm = True
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         if not TEST_WITH_ROCM:
