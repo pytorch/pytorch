@@ -144,6 +144,11 @@ struct GuardElimination {
           auto use = uses.at(uses.size() - 1);
           uses.pop_back();
 
+          // not all uses are guarded
+          if (use.user->kind() != prim::Guard) {
+            continue;
+          }
+
           if (!isDominatedBy(use.user, n)) {
             continue;
           }
