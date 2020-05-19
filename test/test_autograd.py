@@ -2767,6 +2767,22 @@ class TestAutograd(TestCase):
 
         assert([get_children_ids(event) for event in events] == res)
 
+    def test_profiler_aggregation_table(self):
+        """
+        Test if the profiling result is aggregated for `str(prof)`
+
+        See: https://github.com/pytorch/pytorch/issues/37500
+        """
+
+        x = torch.randn(1024)
+        with torch.autograd.profiler.profile() as prof:
+            torch.einsum("i->", x)
+
+        prof_str = str(prof)
+        prof_table = prof.table()
+
+        self.assertEqual(prof_table, prof_str)
+
     def test_profiler_function_event_avg(self):
         avg = FunctionEventAvg()
         avg.add(FunctionEvent(id=0, name="foo", thread=0, cpu_start=10, cpu_end=15))
@@ -4190,14 +4206,15 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # test for these ops with 'complex' in variant should only run for complex and
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
-separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
+
+separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan', 'tanh']
 
 # white list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
-                '__rmul__', '__rdiv__', 'sum', 'transpose', 'round'] + separate_complex_tests
-
+                '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add', 'roll',
+                '__radd__', 'repeat', 'expand', 'mul'] + separate_complex_tests
 
 def add_test(
         name,
