@@ -312,7 +312,6 @@ caffe2_params: &caffe2_params
     DOCKER_IMAGE: << parameters.docker_image >>
     BUILD_ONLY: << parameters.build_only >>
   resource_class: << parameters.resource_class >>
-
 binary_linux_build_params: &binary_linux_build_params
   parameters:
     build_environment:
@@ -379,7 +378,6 @@ binary_windows_params: &binary_windows_params
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     BUILD_FOR_SYSTEM: windows
     JOB_EXECUTOR: <<parameters.executor>>
-
 
 promote_common: &promote_common
   docker:
@@ -1311,7 +1309,6 @@ jobs:
       - persist_to_workspace:
           root: .
           paths: .circleci/scripts
-
   pytorch_python_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-python-doc-push
@@ -1980,7 +1977,6 @@ jobs:
           pip install awscli==1.16.46
 
           "/home/circleci/project/builder/cron/upload_binary_sizes.sh"
-
 
 # There is currently no testing for libtorch TODO
 #  binary_linux_libtorch_3.6m_cpu_test:
@@ -7414,7 +7410,6 @@ workflows:
           filters:
             branches:
               only: postnightly
-
   docker_build:
     triggers:
       - schedule:
@@ -7499,8 +7494,6 @@ workflows:
             project: tensorcomp
             tags_to_keep: "34"
       - docker_hub_index_job
-
-
   # Promotion workflow
   promote:
     jobs:
