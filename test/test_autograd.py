@@ -2767,6 +2767,22 @@ class TestAutograd(TestCase):
 
         assert([get_children_ids(event) for event in events] == res)
 
+    def test_profiler_aggregation_table(self):
+        """
+        Test if the profiling result is aggregated for `str(prof)`
+
+        See: https://github.com/pytorch/pytorch/issues/37500
+        """
+
+        x = torch.randn(1024)
+        with torch.autograd.profiler.profile() as prof:
+            torch.einsum("i->", x)
+
+        prof_str = str(prof)
+        prof_table = prof.table()
+
+        self.assertEqual(prof_table, prof_str)
+
     def test_profiler_function_event_avg(self):
         avg = FunctionEventAvg()
         avg.add(FunctionEvent(id=0, name="foo", thread=0, cpu_start=10, cpu_end=15))
@@ -4053,13 +4069,13 @@ for shape in [(1,), ()]:
         b = torch.tensor([-1., 0., 1.], requires_grad=True)
         c = torch.sum(a**b)
         c.backward()
-        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
 
         s = 0
         b = torch.tensor([-1., 0., 1.], requires_grad=True)
         c = torch.sum(s**b)
         c.backward()
-        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
 
     def test_custom_function_error(self):
         class BadFw(Function):
@@ -4194,13 +4210,15 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # test for these ops with 'complex' in variant should only run for complex and
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
-separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
+
+separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan', 'tanh']
 
 # white list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
-                '__rmul__', '__rdiv__', 'transpose', 'round'] + separate_complex_tests
+                '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add', 'roll',
+                '__radd__', 'repeat', 'expand', 'mul'] + separate_complex_tests
 
 def add_test(
         name,
@@ -5519,9 +5537,9 @@ class TestAutogradDeviceType(TestCase):
             f[0] = nan
             self.assertTrue(math.isnan(float(f)))
             f[0] = inf
-            self.assertEqual(float(f), inf, allow_inf=True)
+            self.assertEqual(float(f), inf)
             f[0] = -inf
-            self.assertEqual(float(f), -inf, allow_inf=True)
+            self.assertEqual(float(f), -inf)
 
             # integral -> floating point
             # check we can convert something that loses precision
@@ -6156,6 +6174,18 @@ class TestAutogradDeviceType(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1], [1, 1]])
 
+    @unittest.skip("Wrong Gradient: https://github.com/pytorch/pytorch/issues/38586")
+    def test_mv_grad_stride_0(self, device):
+        # Reference: https://github.com/pytorch/pytorch/issues/38315
+        mat = torch.randn(2, 2, device=device)
+        vec = torch.randn(1, device=device).expand(2).requires_grad_(True)
+
+        def fn(vec):
+            return (mat @ vec).sum()
+
+        gradcheck(fn, (vec))
+        gradgradcheck(fn, (vec))
+
     def test_logcumsumexp_large_value(self, device):
         a = torch.rand(4, 4, 4, dtype=torch.double, requires_grad=True)
         with torch.no_grad():
@@ -6170,6 +6200,7 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(lambda x: x.logcumsumexp(2), a)
         gradgradcheck(lambda x: x.logcumsumexp(2), a)
+
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
