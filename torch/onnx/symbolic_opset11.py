@@ -95,6 +95,11 @@ def index(g, self, index):
         return self
     # Transpose out any axes that represent ':'
     rank = self.type().dim()
+    index_shapes = [indices[i].type().sizes() for i in tensor_indices]
+    if rank is None or None in index_shapes:
+        raise NotImplementedError("Unsupported aten::index operator for tensors of unknown rank. " +
+                                  "Try turning on shape and type propagation during export: " +
+                                  "torch.onnx._export(..., propagate=True).")
     self = g.op(
         "Transpose",
         self,
@@ -102,11 +107,6 @@ def index(g, self, index):
 
     # Now we'll find the target shape to broadcast to, we do this by finding the maximum dimension along each
     # axis for the index shapes.
-    # Extract index shapes.
-    index_shapes = [
-        indices[i].type().sizes()
-        for i in tensor_indices
-    ]
     max_rank = max([len(s) for s in index_shapes])
     out_rank = len(skip_indices) + max_rank
     # Find the maximum dimension for each axis
