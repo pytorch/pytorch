@@ -300,6 +300,8 @@ void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, Sc
   );
 }
 
+// gpuAtomicAdd does not support complex numbers yet,
+// hence it is used on real and imaginary parts separatly
 template <
   typename scalar_t,
   typename std::enable_if<c10::is_complex_t<scalar_t>::value, int>::type = 0
@@ -321,7 +323,6 @@ void scatter_add_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, con
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/true, /*cast_to_opaque=*/false>()(
     self, dim, index, src,
     "scatter_add_cuda_", []C10_DEVICE(auto* lhs, const auto* rhs) {
-      using scalar_t = typename std::remove_pointer<decltype(lhs)>::type;
       scatter_add_op(lhs, rhs);
     }
   );

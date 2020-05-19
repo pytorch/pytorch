@@ -2595,6 +2595,20 @@ class _TestTorchMixin(object):
         self._test_gather(self, lambda t: t)
 
     @staticmethod
+    def _test_scatter_add_mult_index_base(self, cast):
+        m, n = 30, 40
+        idx = torch.zeros(m, n).long()
+        src = torch.ones(m, n)
+        res0 = torch.zeros(m, n).scatter_add_(0, idx, src)
+        res1 = torch.zeros(m, n).scatter_add_(1, idx, src)
+
+        self.assertEqual(res0[0, :], m * torch.ones(n), 0)
+        self.assertEqual(res1[:, 0], n * torch.ones(m), 0)
+
+    def test_scatter_add_mult_index(self):
+        self._test_scatter_add_mult_index_base(self, lambda t: t)
+
+    @staticmethod
     def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True, *, test_complex=False):
         if test_complex:
             dtypes = [torch.complex64, torch.complex128]

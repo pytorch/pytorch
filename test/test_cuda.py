@@ -1751,6 +1751,9 @@ class TestCuda(TestCase):
     def test_tensor_scatterAdd(self):
         _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False)
 
+    def test_scatter_add_mult_index_base(self):
+        _TestTorchMixin._test_scatter_add_mult_index_base(self, lambda t: t.cuda())
+
     def test_tensor_scatterFill(self):
         _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
 
