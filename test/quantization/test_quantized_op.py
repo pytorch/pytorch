@@ -378,10 +378,18 @@ class TestQuantizedOps(TestCase):
                 # Due to the numerics difference mentioned above between calculating
                 # the variance in float vs int, the results can still be slightly
                 # different.
-                self.assertQuantizedClose(
-                    qY, qY_hat,
-                    message="LayerNorm failed:\n {} input vs\n {} actual vs \n{} expected"
-                    .format(X, qY, qY_hat))
+                dqY = qY.dequantize()
+                dqY_hat = qY_hat.dequantize()
+                diff = dqY - dqY_hat
+
+                # off-by-one errors are magnitude of Y_scale
+                num_diff = torch.sum(diff > Y_scale * 1.0001)
+                pct_diff = float(num_diff) / (diff.numel() + 1e-5)
+                num_diff_off_by_one = torch.sum((diff > 0) * (diff <= Y_scale))
+                pct_diff_off_by_one = float(num_diff_off_by_one) / (diff.numel() + 1e-5)
+
+                self.assertTrue(pct_diff < 1e-6)
+                self.assertTrue(pct_diff_off_by_one < 0.01)
 
 
     """Tests the correctness of the quantized::qnnpack_tanh op."""
@@ -1671,16 +1679,25 @@ class TestQuantizedOps(TestCase):
                             or group_vals.numel() < 5)
 
                 qY = torch.ops.quantized.group_norm(qX, num_groups, weight, bias, eps, Y_scale, Y_zero_point)
+
                 dqY_hat = F.group_norm(dqX, num_groups=num_groups, weight=weight, bias=bias, eps=eps)
                 qY_hat = torch.quantize_per_tensor(dqY_hat, Y_scale, Y_zero_point, torch_type)
 
                 # Due to the numerics difference mentioned above between calculating
                 # the variance in float vs int, the results can still be slightly
                 # different.
-                self.assertQuantizedClose(
-                    qY, qY_hat,
-                    message="GroupNorm failed:\n {} input vs\n {} actual vs \n{} expected"
-                    .format(X, qY, qY_hat))
+                dqY = qY.dequantize()
+                dqY_hat = qY_hat.dequantize()
+                diff = dqY - dqY_hat
+
+                # off-by-one errors are magnitude of Y_scale
+                num_diff = torch.sum(diff > Y_scale * 1.0001)
+                pct_diff = float(num_diff) / (diff.numel() + 1e-5)
+                num_diff_off_by_one = torch.sum((diff > 0) * (diff <= Y_scale))
+                pct_diff_off_by_one = float(num_diff_off_by_one) / (diff.numel() + 1e-5)
+
+                self.assertTrue(pct_diff < 1e-6)
+                self.assertTrue(pct_diff_off_by_one < 0.01)
 
     @skipIfNoFBGEMM
     def test_instance_norm(self):
@@ -1749,10 +1766,18 @@ class TestQuantizedOps(TestCase):
                 # Due to the numerics difference mentioned above between calculating
                 # the variance in float vs int, the results can still be slightly
                 # different.
-                self.assertQuantizedClose(
-                    qY, qY_hat,
-                    message="InstanceNorm failed:\n {} input vs\n {} actual vs \n{} expected"
-                    .format(X, qY, qY_hat))
+                dqY = qY.dequantize()
+                dqY_hat = qY_hat.dequantize()
+                diff = dqY - dqY_hat
+
+                # off-by-one errors are magnitude of Y_scale
+                num_diff = torch.sum(diff > Y_scale * 1.0001)
+                pct_diff = float(num_diff) / (diff.numel() + 1e-5)
+                num_diff_off_by_one = torch.sum((diff > 0) * (diff <= Y_scale))
+                pct_diff_off_by_one = float(num_diff_off_by_one) / (diff.numel() + 1e-5)
+
+                self.assertTrue(pct_diff < 1e-6)
+                self.assertTrue(pct_diff_off_by_one < 0.01)
 
     @skipIfNoFBGEMM
     def test_batch_norm2d_relu(self):

@@ -55,9 +55,9 @@ Tensor quantized_group_norm_impl(
     double output_scale,
     int64_t output_zero_point) {
 
-  const auto& qx_contig = qx.is_contiguous() ? qx : qx.contiguous();
-  const auto& weight_contig = weight.is_contiguous() ? weight : weight.contiguous();
-  const auto& bias_contig = bias.is_contiguous() ? bias : bias.contiguous();
+  const auto& qx_contig = qx.contiguous();
+  const auto& weight_contig = weight.contiguous();
+  const auto& bias_contig = bias.contiguous();
 
   const auto input_ndim = qx_contig.dim();
   TORCH_CHECK(
