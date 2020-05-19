@@ -5323,6 +5323,7 @@ class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
     # Verifies that the inplace dunders (like idiv) actually are in place
+    @onlyOnCPUAndCUDA
     def test_inplace_dunders(self, device):
         t = torch.randn((1,), device=device)
         expected = t.data_ptr()
