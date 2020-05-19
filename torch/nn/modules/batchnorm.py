@@ -350,19 +350,21 @@ class SyncBatchNorm(_BatchNorm):
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
-    Because the Batch Normalization is done over the `C` dimension, computing statistics
-    on `(N, +)` slices, it's common terminology to call this Volumetric Batch Normalization
-    or Spatio-temporal Batch Normalization.
+    Because the Batch Normalization is done for each channel in the ``C`` dimension, computing
+    statistics on ``(N, +)`` slices, it's common terminology to call this Volumetric Batch
+    Normalization or Spatio-temporal Batch Normalization.
 
-    Currently SyncBatchNorm only supports DistributedDataParallel with single GPU per process. Use
-    torch.nn.SyncBatchNorm.convert_sync_batchnorm() to convert BatchNorm layer to SyncBatchNorm before wrapping
+    Currently :class:`SyncBatchNorm` only supports
+    :class:`~torch.nn.DistributedDataParallel` (DDP) with single GPU per process. Use
+    :meth:`torch.nn.SyncBatchNorm.convert_sync_batchnorm()` to convert
+    :class`BatchNorm` layer to :class:`SyncBatchNorm` before wrapping
     Network with DDP.
 
     Args:
         num_features: :math:`C` from an expected input of size
             :math:`(N, C, +)`
         eps: a value added to the denominator for numerical stability.
-            Default: 1e-5
+            Default: ``1e-5``
         momentum: the value used for the running_mean and running_var
             computation. Can be set to ``None`` for cumulative moving average
             (i.e. simple average). Default: 0.1

@@ -2,6 +2,7 @@
 
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/stack.h>
+#include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/backends/backend_interface.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
 #include <torch/csrc/jit/frontend/code_template.h>
@@ -13,83 +14,6 @@
 namespace torch {
 namespace jit {
 
-c10::FunctionSchema getPreprocessSchema() {
-  c10::Argument self("self", c10::AnyType::get());
-  c10::Argument mod("mod", c10::AnyType::get());
-  c10::Argument method_compile_spec(
-      "method_compile_spec",
-      c10::DictType::create(c10::StringType::get(), c10::AnyType::get()));
-
-  c10::FunctionSchema preprocessor_schema(
-      "preprocess",
-      /*overload_name=*/"",
-      /*arguments=*/{self, mod, method_compile_spec},
-      /*returns=*/{mod});
-  return preprocessor_schema;
-}
-
-template <typename TBackendInterface>
-std::function<void(Stack&)> getPreprocessFunc() {
-  return [](Stack& stack) {
-    auto method_compile_spec = pop(stack).toGenericDict();
-    auto mod = pop(stack);
-    auto self = pop(stack).toCustomClass<TBackendInterface>();
-    auto ret = self->preprocess(mod, method_compile_spec);
-    push(stack, ret);
-  };
-}
-
-c10::FunctionSchema getCompileSchema() {
-  c10::Argument self("self", c10::AnyType::get());
-  c10::Argument mod("processed", c10::AnyType::get());
-  auto any_dict_ty =
-      c10::DictType::create(c10::StringType::get(), c10::AnyType::get());
-  c10::Argument method_compile_spec("method_compile_spec", any_dict_ty);
-  c10::Argument handles("handles", any_dict_ty);
-
-  c10::FunctionSchema compile_schema(
-      "compile",
-      /*overload_name=*/"",
-      /*arguments=*/{self, mod, method_compile_spec},
-      /*returns=*/{handles});
-  return compile_schema;
-}
-
-template <typename TBackendInterface>
-std::function<void(Stack&)> getCompileFunc() {
-  return [](Stack& stack) {
-    auto method_compile_spec = pop(stack).toGenericDict();
-    auto processed = pop(stack);
-    auto self = pop(stack).toCustomClass<TBackendInterface>();
-    auto ret = self->compile(processed, method_compile_spec);
-    push(stack, ret);
-  };
-}
-
-c10::FunctionSchema getExecuteSchema() {
-  auto any_list_ty = c10::ListType::create(c10::AnyType::get());
-  c10::Argument self("self", c10::AnyType::get());
-  c10::Argument handle("handle", c10::AnyType::get());
-  c10::Argument input("input", any_list_ty);
-  c10::Argument output("output", any_list_ty);
-  return c10::FunctionSchema(
-      "execute",
-      /*overload_name=*/"",
-      /*arguments=*/{self, handle, input},
-      /*returns=*/{output});
-}
-
-template <typename TBackendInterface>
-std::function<void(Stack&)> getExecuteFunc() {
-  return [](Stack& stack) {
-    auto args = pop(stack);
-    auto handle = pop(stack);
-    auto self = pop(stack);
-    auto backend = self.toCustomClass<TBackendInterface>();
-    auto res = backend->execute(handle, args.toList());
-    push(stack, res);
-  };
-}
 
 // Static registration API for backends.
 template <class TBackendInterface>
@@ -106,16 +30,16 @@ class backend {
                           .def(torch::init<>())
                           ._def_unboxed(
                               "preprocess",
-                              getPreprocessFunc<TBackendInterface>(),
-                              getPreprocessSchema())
+                              detail::getPreprocessFunc<TBackendInterface>(),
+                              detail::getPreprocessSchema())
                           ._def_unboxed(
                               "compile",
-                              getCompileFunc<TBackendInterface>(),
-                              getCompileSchema())
+                              detail::getCompileFunc<TBackendInterface>(),
+                              detail::getCompileSchema())
                           ._def_unboxed(
                               "execute",
-                              getExecuteFunc<TBackendInterface>(),
-                              getExecuteSchema());
+                              detail::getExecuteFunc<TBackendInterface>(),
+                              detail::getExecuteSchema());
   }
 
   // Generates and returns a function that takes a Module and a lowering
