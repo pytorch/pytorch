@@ -189,10 +189,10 @@ class _ObserverBase(ObserverBase):
         # consistent with default values in FakeQuantize.
         if len(scale.shape) == 0:
             # TODO: switch to scale.item() after adding JIT support
-            scale = torch.tensor([float(scale)])
+            scale = torch.tensor([float(scale)], dtype=scale.dtype)
         if len(zero_point.shape) == 0:
             # TODO: switch to zero_point.item() after adding JIT support
-            zero_point = torch.tensor([float(zero_point)])
+            zero_point = torch.tensor([int(zero_point)], dtype=zero_point.dtype)
 
         return scale, zero_point
 
