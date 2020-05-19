@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -1219,8 +1220,10 @@ void initJitScriptBindings(PyObject* module) {
         auto typed_inputs = toTraceableStack(input_tuple);
         std::shared_ptr<Graph> graph = std::get<0>(tracer::createGraphByTracing(
             func, typed_inputs, var_lookup_fn, strict, force_outplace));
+
         auto cu = get_python_cu();
         auto name = c10::QualifiedName(qualname);
+        NormalizeOps(graph);
         auto result = cu->create_function(
             std::move(name), std::move(graph), /*shouldMangle=*/true);
         StrongFunctionPtr ret(std::move(cu), result);
