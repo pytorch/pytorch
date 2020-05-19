@@ -33,19 +33,18 @@ class MkldnnLinear(torch.jit.ScriptModule):
         return y
 
 
-class MkldnnConv1d(torch.jit.ScriptModule):
+class _MkldnnConvNd(torch.jit.ScriptModule):
+    """Common base of MkldnnConv1d and MkldnnConv2d"""
     __constants__ = ['stride', 'padding', 'dilation', 'groups']
 
     def __init__(self, dense_module):
-        super(MkldnnConv1d, self).__init__()
+        super(_MkldnnConvNd, self).__init__()
 
         self.stride = dense_module.stride
         self.padding = dense_module.padding
         self.dilation = dense_module.dilation
         self.groups = dense_module.groups
 
-        # TODO: fix ideep expected_weights_desc issue and enable weight prepacking
-        self.register_buffer('weight', dense_module.weight.to_mkldnn())
         if dense_module.bias is not None:
             self.register_buffer('bias', dense_module.bias.to_mkldnn())
         else:
@@ -57,12 +56,6 @@ class MkldnnConv1d(torch.jit.ScriptModule):
     @torch.jit.script_method
     def __getstate__(self):
         return (self.weight.to_dense(), self.bias.to_dense(), self.training)
-
-    @torch.jit.script_method
-    def __setstate__(self, state):
-        self.weight = state[0].to_mkldnn()
-        self.bias = state[1].to_mkldnn()
-        self.training = state[2]
 
     @torch.jit.script_method
     def forward(self, x):
@@ -76,16 +69,22 @@ class MkldnnConv1d(torch.jit.ScriptModule):
             self.groups)
 
 
-class MkldnnConv2d(torch.jit.ScriptModule):
-    __constants__ = ['stride', 'padding', 'dilation', 'groups']
-
+class MkldnnConv1d(_MkldnnConvNd):
     def __init__(self, dense_module):
-        super(MkldnnConv2d, self).__init__()
+        super(MkldnnConv1d, self).__init__(dense_module)
 
-        self.stride = dense_module.stride
-        self.padding = dense_module.padding
-        self.dilation = dense_module.dilation
-        self.groups = dense_module.groups
+        self.register_buffer('weight', dense_module.weight.to_mkldnn())
+
+    @torch.jit.script_method
+    def __setstate__(self, state):
+        self.weight = state[0].to_mkldnn()
+        self.bias = state[1].to_mkldnn()
+        self.training = state[2]
+
+
+class MkldnnConv2d(_MkldnnConvNd):
+    def __init__(self, dense_module):
+        super(MkldnnConv2d, self).__init__(dense_module)
 
         self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv2d_weight(
             dense_module.weight.to_mkldnn(),
@@ -93,17 +92,6 @@ class MkldnnConv2d(torch.jit.ScriptModule):
             self.stride,
             self.dilation,
             self.groups))
-        if dense_module.bias is not None:
-            self.register_buffer('bias', dense_module.bias.to_mkldnn())
-        else:
-            # TODO: Remove this once ScriptModule supports registering None buffer
-            self.register_buffer(
-                'bias',
-                torch.zeros([dense_module.weight.size(0)], dtype=torch.float).to_mkldnn())
-
-    @torch.jit.script_method
-    def __getstate__(self):
-        return (self.weight.to_dense(), self.bias.to_dense(), self.training)
 
     @torch.jit.script_method
     def __setstate__(self, state):
@@ -115,17 +103,6 @@ class MkldnnConv2d(torch.jit.ScriptModule):
             self.groups)
         self.bias = state[1].to_mkldnn()
         self.training = state[2]
-
-    @torch.jit.script_method
-    def forward(self, x):
-        return torch.conv2d(
-            x,
-            self.weight,
-            self.bias,
-            self.stride,
-            self.padding,
-            self.dilation,
-            self.groups)
 
 
 class MkldnnBatchNorm2d(torch.jit.ScriptModule):
