@@ -814,6 +814,7 @@ void initJITBindings(PyObject* module) {
       return op->schema();
     });
   });
+  m.def("_jit_get_custom_class_schemas", customClassSchemasForBCCheck);
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
     auto symbol = Symbol::fromQualString(qualified_name);
     auto operations = getAllOperatorsFor(symbol);
