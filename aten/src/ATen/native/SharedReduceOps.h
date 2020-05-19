@@ -332,15 +332,6 @@ struct GreaterOrNan {
   }
 };
 
-namespace {
-template <typename T>
-struct wrap_half { using type = T; };
-#if defined(__CUDACC__) || defined(__HIPCC__)
-template <>
-struct wrap_half<c10::Half> { using type = __half; };
-#endif
-}
-
 template <typename comp_t>
 struct MinMaxReductionOps {
   using scalar_t = typename binary_function_traits<comp_t>::arg1_t;
@@ -365,7 +356,7 @@ struct MinMaxReductionOps {
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
   static C10_DEVICE arg_t warp_shfl_down(arg_t arg, int offset) {
-    return arg_t(WARP_SHFL_DOWN<typename wrap_half<decltype(arg.first)>::type>(arg.first, offset),
+    return arg_t(WARP_SHFL_DOWN(arg.first, offset),
                  WARP_SHFL_DOWN(arg.second, offset));
   }
 #endif
