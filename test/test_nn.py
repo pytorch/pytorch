@@ -43,7 +43,8 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, NewCrit
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
-    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, largeCUDATensorTest, onlyOnCPUAndCUDA
+    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, largeCUDATensorTest, onlyOnCPUAndCUDA, \
+    deviceCountAtLeast
 
 from torch.nn import MultiheadAttention
 
@@ -11349,6 +11350,32 @@ class TestNNDeviceType(NNTestCase):
             x = torch.randn(shape, device=device, requires_grad=True)
             F.max_pool3d(x, kernel_size=(1, 1, 1)).sum().backward()
             self.assertTrue(torch.allclose(x.grad, torch.ones_like(x.grad)))
+
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    def test_clip_grad_norm_multi_device(self, devices):
+        class TestModel(nn.Module):
+            def __init__(self):
+                super(TestModel, self).__init__()
+                self.layer1 = nn.Linear(10, 10)
+                self.layer2 = nn.Linear(10, 10)
+
+        test_model = TestModel()
+        test_model.layer1.to(devices[0])
+        test_model.layer2.to(devices[1])
+        ref_model = TestModel().to(devices[0])
+        for norm_type in [2., math.inf]:
+            for p in test_model.parameters():
+                p.grad = torch.ones_like(p)
+            for p in ref_model.parameters():
+                p.grad = torch.ones_like(p)
+            norm = clip_grad_norm_(test_model.parameters(), 0.5, norm_type=norm_type)
+            expected = clip_grad_norm_(ref_model.parameters(), 0.5, norm_type=norm_type)
+            self.assertEqual(norm, expected)
+            for p, pe in zip(test_model.parameters(), ref_model.parameters()):
+                self.assertEqual(p.grad.to(devices[0]), pe.grad)
+
+
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
