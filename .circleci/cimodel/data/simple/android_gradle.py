@@ -1,4 +1,4 @@
-import cimodel.data.simple.branch_filters
+import cimodel.data.simple.util.branch_filters
 
 
 class AndroidJob:
@@ -10,7 +10,7 @@ class AndroidJob:
     def gen_tree(self):
 
         props_dict = {
-            "filters": cimodel.data.simple.branch_filters.gen_branch_filter_dict(),
+            "filters": cimodel.data.simple.util.branch_filters.gen_branch_filter_dict(),
             "name": self.job_name,
             "requires": self.dependencies,
         }

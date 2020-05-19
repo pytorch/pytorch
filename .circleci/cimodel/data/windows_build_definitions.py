@@ -1,5 +1,6 @@
 import cimodel.lib.miniutils as miniutils
-import cimodel.data.simple.branch_filters
+import cimodel.data.simple.util.branch_filters
+from cimodel.data.simple.util.versions import CudaVersion
 
 
 class WindowJob:
@@ -25,7 +26,7 @@ class WindowJob:
 
         cpu_forcing_name_parts = ["on", "cpu"] if self.force_on_cpu else []
 
-        target_arch = self.cuda_version.render() if self.cuda_version else "cpu"
+        target_arch = self.cuda_version.render_dots() if self.cuda_version else "cpu"
 
         base_name_parts = [
             "pytorch",
@@ -61,7 +62,7 @@ class WindowJob:
         }
 
         if self.run_on_prs_pred(self):
-            props_dict["filters"] = cimodel.data.simple.branch_filters.gen_branch_filter_dict()
+            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_branch_filter_dict()
 
         name_parts = base_name_parts + cpu_forcing_name_parts + [
             numbered_phase,
@@ -99,15 +100,6 @@ class VcSpec:
 
     def render(self):
         return "_".join(filter(None, [self.prefixed_year(), self.dotted_version()]))
-
-
-class CudaVersion:
-    def __init__(self, major, minor):
-        self.major = major
-        self.minor = minor
-
-    def render(self):
-        return "cuda" + str(self.major) + "." + str(self.minor)
 
 
 WORKFLOW_DATA = [
