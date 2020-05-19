@@ -282,7 +282,7 @@ void validateKernelArgs(
     const Val* param = entry.outputs[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
-        validateKernelArg(arg, param, entry.device_, msg),
+        validateKernelArgTensor(arg, param, entry.device_, msg),
         "Output argument at position ",
         i,
         " is invalid; ",
