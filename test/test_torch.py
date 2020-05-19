@@ -18034,8 +18034,6 @@ _cpu_types = []
 
 _unsigned_types = [torch.uint8]
 
-_complex_types = [torch.cfloat, torch.cdouble]
-
 # Helper values and functions for producing tensors and scalars to use in tensor op tests.
 # Tensor dimension sizes (Small, Medium, Large, Giant)
 _S = 5
