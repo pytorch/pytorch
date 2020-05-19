@@ -209,7 +209,9 @@ namespace c10 {
   _(onnx, Expand)                    \
   _(onnx, Equal)                     \
   _(onnx, Greater)                   \
+  _(onnx, GreaterOrEqual)            \
   _(onnx, Less)                      \
+  _(onnx, LessOrEqual)               \
   _(onnx, Not)                       \
   _(onnx, ATen)                      \
   _(onnx, Split)                     \

@@ -3,20 +3,8 @@ PyTorch Mobile PR builds (use linux host toolchain + mobile build options)
 """
 
 import cimodel.lib.miniutils as miniutils
-import cimodel.data.simple.branch_filters
-
-
-def gen_docker_name(specifier):
-    parts = [
-        "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-",
-        specifier,
-        ":9a3986fa-7ce7-4a36-a001-3c9bef9892e2",
-    ]
-    return "".join(parts)
-
-
-DOCKER_IMAGE_ASAN = gen_docker_name("asan")
-DOCKER_IMAGE_NDK = gen_docker_name("android-ndk-r19c")
+import cimodel.data.simple.util.branch_filters
+from cimodel.data.simple.util.docker_constants import DOCKER_IMAGE_ASAN, DOCKER_IMAGE_NDK
 
 
 class MobileJob:
@@ -47,7 +35,7 @@ class MobileJob:
         }
 
         if self.is_master_only:
-            props_dict["filters"] = cimodel.data.simple.branch_filters.gen_branch_filter_dict()
+            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_branch_filter_dict()
 
         return [{"pytorch_linux_build": props_dict}]
 
