@@ -1,42 +1,36 @@
-- name: aten::AA
+- name: __ROOT__
   depends:
-  - name: aten::AA
-  - name: aten::BB
-- name: aten::BB
+  - name: _test::AA
+  - name: _test::BB
+- name: _test::AA
   depends:
-  - name: aten::AA
-  - name: aten::BB
-- name: aten::CC
+  - name: _test::BB
+- name: _test::BB
   depends:
-  - name: aten::AA
-  - name: aten::BB
-- name: aten::DD
+  - name: _test::AA
+- name: _test::CC
   depends:
-  - name: aten::AA
-  - name: aten::BB
-  - name: aten::EE
-  - name: aten::FF
-- name: aten::EE
+  - name: _test::AA
+- name: _test::DD
   depends:
-  - name: aten::EE
-  - name: aten::FF
-- name: aten::FF
+  - name: _test::AA
+  - name: _test::EE
+- name: _test::EE
   depends:
-  - name: aten::EE
-  - name: aten::FF
-- name: aten::GG
+  - name: _test::FF
+- name: _test::FF
   depends:
-  - name: aten::EE
-  - name: aten::FF
-- name: aten::HH
+  - name: _test::EE
+- name: _test::GG
+  depends:
+  - name: _test::FF
+- name: _test::HH
 - name: quantized::t_add
   depends:
   - name: quantized::t_helper1
-  - name: quantized::t_helper3
 - name: quantized::t_add_relu
   depends:
   - name: quantized::t_helper2
-  - name: quantized::t_helper4
 - name: quantized::t_helper1
   depends:
   - name: quantized::t_helper3

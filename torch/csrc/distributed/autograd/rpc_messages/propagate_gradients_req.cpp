@@ -18,7 +18,7 @@ PropagateGradientsReq::PropagateGradientsReq(
       grads_(std::move(grads)),
       retainGraph_(retainGraph) {}
 
-Message PropagateGradientsReq::toMessage() && {
+Message PropagateGradientsReq::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
   // Add all the grad tensors.
   for (const auto& grad : grads_) {

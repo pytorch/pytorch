@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/jit/frontend/concrete_module_type.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/frontend/concrete_module_type.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -11,7 +11,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 std::string typeString(py::handle h);
 
@@ -147,10 +146,20 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   Value* asValue(const SourceRange& loc, Function& m) override;
 
   // select an attribute on it, e.g. `this.field`
+  std::shared_ptr<SugaredValue> tryGetAttr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field);
+
+  // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
       Function& m,
       const std::string& field) override;
+
+  // select an attribute on it, e.g. `this.field`
+  bool hasAttr(const SourceRange& loc, Function& m, const std::string& field)
+      override;
 
   // call module.forward
   std::shared_ptr<SugaredValue> call(
@@ -184,6 +193,9 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   Value* self_;
   std::shared_ptr<ConcreteModuleType> concreteType_;
 };
+
+bool isNamedTupleClass(const py::object& obj);
+TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc);
 
 void recurseThroughNestedModules(
     const SourceRange& loc,
@@ -263,10 +275,12 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
       Function& m,
       const std::string& field) override;
 
+  bool hasAttr(const SourceRange& loc, Function& m, const std::string& field)
+      override;
+
  private:
   py::object py_type_;
 };
 
-} // namespace script
 } // namespace jit
 } // namespace torch

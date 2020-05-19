@@ -1,12 +1,11 @@
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
 namespace jit {
-namespace script {
 
 static inline TypePtr unwrapOptional(TypePtr opt_type) {
   if (auto unwrap_list_type = opt_type->cast<OptionalType>()) {
@@ -96,17 +95,17 @@ Value* tryConvertToType(
     bool concrete_number = *concrete_type == *NumberType::get();
     if (value_isa_tensor) {
       if (concrete_float) {
-        value = graph.insert(aten::FloatImplicit, {value});
+        value = graph.insert(aten::FloatImplicit, {value}, {}, loc);
       } else if (concrete_int) {
-        value = graph.insert(aten::IntImplicit, {value});
+        value = graph.insert(aten::IntImplicit, {value}, {}, loc);
       } else if (concrete_number) {
-        value = graph.insert(aten::ScalarImplicit, {value});
+        value = graph.insert(aten::ScalarImplicit, {value}, {}, loc);
       }
     } else if (value_equals_number) {
       if (concrete_float) {
-        value = graph.insert(aten::Float, {value});
+        value = graph.insert(aten::Float, {value}, {}, loc);
       } else if (concrete_int) {
-        value = graph.insert(aten::Int, {value});
+        value = graph.insert(aten::Int, {value}, {}, loc);
       }
     }
 
@@ -145,8 +144,8 @@ static Value* tryMatchArgument(
   }
 
   // Resolve VarType variables
-  const MatchTypeReturn matched = matchTypeVariables(
-      arg.type(), value->type(), type_env);
+  const MatchTypeReturn matched =
+      matchTypeVariables(arg.type(), value->type(), type_env);
   if (!matched.success()) {
     if (failure_messages) {
       err() << "Could not match type " << value->type()->python_str() << " to "
@@ -612,6 +611,5 @@ Value* emitBuiltinCall(
   }
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

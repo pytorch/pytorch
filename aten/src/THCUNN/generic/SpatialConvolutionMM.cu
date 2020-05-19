@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/div_rtn.h>
+#include <ATen/cuda/CUDABlas.h>
 
 static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
                          THCState *state,
@@ -82,7 +83,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
       int64_t nOutputPlane = weight->size(0);
       THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
     } else if (bias != NULL) {
-      int64_t nOutputPlane = THTensor_sizeLegacyNoScalars(bias, 0);
+      int64_t nOutputPlane = bias->dim() == 0 ? 1 : bias->size(0);
       THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
     }
     THCUNN_check_dim_size(state, gradOutput, ndim, dimh, outputHeight);
@@ -502,12 +503,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
 
       // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
       #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-      #ifdef THC_REAL_IS_FLOAT
-      THCudaBlas_Sgemv(
-      #elif defined(THC_REAL_IS_DOUBLE)
-      THCudaBlas_Dgemv(
-      #endif
-          state,
+      at::cuda::blas::gemv<scalar_t>(
           't',
           k_, m_,
           scale,

@@ -34,9 +34,16 @@ LocalDispatchKeySet tls_local_dispatch_key_set() {
   if (FLAGS_disable_variable_dispatch) {
     raw_local_dispatch_key_set.set_excluded(
       raw_local_dispatch_key_set.excluded().add(
-        DispatchKey::VariableTensorId));
+        DispatchKey::Autograd));
   }
   return raw_local_dispatch_key_set;
+}
+
+void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
+  raw_local_dispatch_key_set = PODLocalDispatchKeySet {
+    key_set.included_.raw_repr(),
+    key_set.excluded_.raw_repr()
+  };
 }
 
 // An RAII guard could snapshot and restore the entire state (entire DispatchKeySet) as
@@ -108,7 +115,6 @@ void tls_set_dispatch_key_excluded(DispatchKey x, bool desired_state) {
 
 bool tls_is_dispatch_key_included(DispatchKey x) {
   return raw_local_dispatch_key_set.included().has(x);
-
 }
 
 void tls_set_dispatch_key_included(DispatchKey x, bool desired_state) {

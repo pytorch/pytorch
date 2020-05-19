@@ -7,7 +7,11 @@ import re
 import argparse
 
 from ..autograd.utils import YamlLoader, CodeTemplate, write
-from ..autograd.gen_python_functions import get_py_torch_functions, get_py_variable_methods
+from ..autograd.gen_python_functions import (
+    get_py_torch_functions,
+    get_py_variable_methods,
+    namedtuple_fieldnames,
+)
 from ..autograd.gen_autograd import load_aten_declarations
 
 """
@@ -67,13 +71,19 @@ blacklist = [
     'triplet_margin_loss',
     # Somehow, these are defined in both _C and in functional. Ick!
     'broadcast_tensors',
-    # type hints for named tensors are broken: https://github.com/pytorch/pytorch/issues/27846
+    # Manually define named tensor type stubs in __init__.pyi.in
+    'rename',
+    'refine_names',
+    'align_to',
     'align_tensors',
+    'unflatten',
     'meshgrid',
     'cartesian_prod',
+    'block_diag',
     'norm',
     'chain_matmul',
     'stft',
+    'istft',
     'tensordot',
     'norm',
     'split',
@@ -91,6 +101,8 @@ blacklist = [
     'div',
     'div_',
     'div_out',
+    'true_divide', 'true_divide_', 'true_divide_out',
+    'floor_divide', 'floor_divide_', 'floor_divide_out',
 ]
 
 
@@ -110,7 +122,7 @@ def type_to_python(typename, size=None):
 
     typename = {
         'Device': 'Union[_device, str, None]',
-        'Generator*': 'Generator',
+        'Generator': 'Generator',
         'IntegerTensor': 'Tensor',
         'Scalar': 'Number',
         'ScalarType': '_dtype',
@@ -131,8 +143,8 @@ def type_to_python(typename, size=None):
         'void*': '_int',    # data_ptr
         'void': 'None',
         'std::string': 'str',
-        'Dimname': 'Union[str, None]',
-        'DimnameList': 'List[Union[str, None]]',
+        'Dimname': 'Union[str, ellipsis, None]',
+        'DimnameList': 'Sequence[Union[str, ellipsis, None]]',
         'QScheme': '_qscheme',
     }[typename]
 
@@ -159,6 +171,8 @@ def arg_to_type_hint(arg):
             default = None
         elif isinstance(default, str) and default.startswith('{') and default.endswith('}'):
             if arg['dynamic_type'] == 'Tensor' and default == '{}':
+                default = None
+            elif arg['dynamic_type'] == 'Generator' and default == '{}':
                 default = None
             elif arg['dynamic_type'] == 'IntArrayRef':
                 default = '(' + default[1:-1] + ')'
@@ -218,12 +232,13 @@ def sig_for_ops(opname):
         raise Exception("unknown op", opname)
 
 
-def generate_type_hints(fname, decls, is_tensor=False):
+def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
     """generate_type_hints(fname, decls, is_tensor=False)
 
     Generates type hints for the declarations pertaining to the function
     :attr:`fname`. attr:`decls` are the declarations from the parsed
     Declarations.yaml.
+    :attr:`namedtuples` is a dictionary for accumulating NamedTuple definitions.
     The :attr:`is_tensor` flag indicates whether we are parsing
     members of the Tensor class (true) or functions in the
     `torch` namespace (default, false).
@@ -282,8 +297,18 @@ def generate_type_hints(fname, decls, is_tensor=False):
 
         python_args_s = ', '.join(python_args)
         python_returns = [type_to_python(r['dynamic_type']) for r in decl['returns']]
+        field_names = namedtuple_fieldnames(decl)
 
-        if len(python_returns) > 1:
+        if field_names:
+            namedtuple_name = '_'.join(['namedtuple'] + field_names)
+            tuple_args = ['("{}", {})'.format(name, typ) for name, typ in zip(field_names, python_returns)]
+            namedtuple_def = 'NamedTuple("{}", [{}])'.format(namedtuple_name, ', '.join(tuple_args))
+            if namedtuple_name in namedtuples:
+                assert namedtuples[namedtuple_name] == namedtuple_def
+            else:
+                namedtuples[namedtuple_name] = namedtuple_def
+            python_returns_s = namedtuple_name
+        elif len(python_returns) > 1:
             python_returns_s = 'Tuple[' + ', '.join(python_returns) + ']'
         elif len(python_returns) == 1:
             python_returns_s = python_returns[0]
@@ -294,7 +319,7 @@ def generate_type_hints(fname, decls, is_tensor=False):
         numargs = len(decl['arguments'])
         vararg_pos = int(is_tensor)
         have_vararg_version = (numargs > vararg_pos and
-                               decl['arguments'][vararg_pos]['dynamic_type'] in {'IntArrayRef', 'TensorList'} and
+                               decl['arguments'][vararg_pos]['dynamic_type'] in {'IntArrayRef'} and
                                (numargs == vararg_pos + 1 or python_args[vararg_pos + 1] == '*') and
                                (not is_tensor or decl['arguments'][0]['name'] == 'self'))
 
@@ -302,14 +327,11 @@ def generate_type_hints(fname, decls, is_tensor=False):
 
         if have_vararg_version:
             # Two things come into play here: PyTorch has the "magic" that if the first and only positional argument
-            # is an IntArrayRef or TensorList, it will be used as a vararg variant.
+            # is an IntArrayRef, it will be used as a vararg variant.
             # The following outputs the vararg variant, the "pass a list variant" is output above.
             # The other thing is that in Python, the varargs are annotated with the element type, not the list type.
             typelist = decl['arguments'][vararg_pos]['dynamic_type']
-            if typelist == 'IntArrayRef':
-                vararg_type = '_int'
-            else:
-                vararg_type = 'Tensor'
+            vararg_type = '_int'
             # replace first argument and eliminate '*' if present
             python_args = ((['self'] if is_tensor else []) + ['*' + decl['arguments'][vararg_pos]['name'] +
                                                               ': ' + vararg_type] + python_args[vararg_pos + 2:])
@@ -356,6 +378,7 @@ def gen_nn_functional(out):
         'celu_',
         'rrelu_',
         'pixel_shuffle',
+        'channel_shuffle',
         'pdist',
         'cosine_similarity',
     ]
@@ -392,6 +415,9 @@ def gen_nn_functional(out):
     }
     write(out, 'torch/nn/functional.pyi', stubs, env)
 
+    stubs = CodeTemplate.from_file(os.path.join('torch', '_C', '_nn.pyi.in'))
+    write(out, 'torch/_C/_nn.pyi', stubs, env)
+
 def gen_nn_pyi(out):
     gen_nn_functional(out)
     gen_nn_modules(out)
@@ -412,6 +438,9 @@ def gen_pyi(declarations_path, out):
     # Load information from YAML
     declarations = load_aten_declarations(declarations_path)
 
+    # Dictionary for NamedTuple definitions
+    namedtuples = {}
+
     # Generate type signatures for top-level functions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -426,6 +455,7 @@ def gen_pyi(declarations_path, out):
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
         'get_num_threads': ['def get_num_threads() -> _int: ...'],
         'set_num_threads': ['def set_num_threads(num: _int) -> None: ...'],
+        'init_num_threads': ['def init_num_threads() -> None: ...'],
         'get_num_interop_threads': ['def get_num_interop_threads() -> _int: ...'],
         'set_num_interop_threads': ['def set_num_interop_threads(num: _int) -> None: ...'],
         # These functions are explicitly disabled by
@@ -449,22 +479,30 @@ def gen_pyi(declarations_path, out):
                     .format(FACTORY_PARAMS),
                     'def randint(high: _int, size: _size, *, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS)],
-        'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...']
+        'full': ['def full(size: _size, fill_value: Number, *,'
+                 ' out: Optional[Tensor]=None, {}) -> Tensor: ...'
+                 .format(FACTORY_PARAMS),
+                 'def full(size: _size, fill_value: Number, *,'
+                 ' names: List[Union[str, None]], {}) -> Tensor: ...'
+                 .format(FACTORY_PARAMS)],
+        'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...'],
+        'nonzero': ['def nonzero(input: Tensor, *, out: Optional[Tensor]=None) -> Tensor: ...',
+                    'def nonzero(input: Tensor, *, as_tuple: bool=...) -> Tensor: ...'],
     })
-    for binop in ['add', 'sub', 'mul', 'div']:
+    for binop in ['mul', 'div', 'true_divide', 'floor_divide']:
         unsorted_function_hints[binop].append(
             'def {}(input: Union[Tensor, Number],'
             ' other: Union[Tensor, Number],'
             ' *, out: Optional[Tensor]=None) -> Tensor: ...'.format(binop))
+    for binop in ['add', 'sub']:
         unsorted_function_hints[binop].append(
             'def {}(input: Union[Tensor, Number],'
-            ' value: Number,'
             ' other: Union[Tensor, Number],'
-            ' *, out: Optional[Tensor]=None) -> Tensor: ...'.format(binop))
+            ' *, alpha: Optional[Number]=1, out: Optional[Tensor]=None) -> Tensor: ...'.format(binop))
 
     function_declarations = get_py_torch_functions(declarations)
     for name in sorted(function_declarations.keys()):
-        unsorted_function_hints[name] += generate_type_hints(name, function_declarations[name])
+        unsorted_function_hints[name] += generate_type_hints(name, function_declarations[name], namedtuples)
 
     # Generate type signatures for deprecated functions
 
@@ -533,9 +571,10 @@ def gen_pyi(declarations_path, out):
                'def to(self, other: Tensor, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',
                ],
         'item': ["def item(self) -> Number: ..."],
+        'copy_': ["def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."],
     })
-    for binop in ['add', 'sub', 'mul', 'div']:
-        for inplace in [True, False]:
+    for binop in ['mul', 'div', 'true_divide', 'floor_divide']:
+        for inplace in [False, True]:
             out_suffix = ', *, out: Optional[Tensor]=None'
             if inplace:
                 binop += '_'
@@ -543,9 +582,15 @@ def gen_pyi(declarations_path, out):
             unsorted_tensor_method_hints[binop].append(
                 'def {}(self, other: Union[Tensor, Number]{})'
                 ' -> Tensor: ...'.format(binop, out_suffix))
+    for binop in ['add', 'sub']:
+        for inplace in [False, True]:
+            out_suffix = ', out: Optional[Tensor]=None'
+            if inplace:
+                binop += '_'
+                out_suffix = ''
             unsorted_tensor_method_hints[binop].append(
-                'def {}(self, value: Number,'
-                ' other: Union[Tensor, Number]{})'
+                'def {}(self, other: Union[Tensor, Number], '
+                '*, alpha: Optional[Number]=1{})'
                 ' -> Tensor: ...'.format(binop, out_suffix))
     simple_conversions = ['byte', 'char', 'cpu', 'double', 'float',
                           'half', 'int', 'long', 'short', 'bool',
@@ -556,7 +601,7 @@ def gen_pyi(declarations_path, out):
     tensor_method_declarations = get_py_variable_methods(declarations)
     for name in sorted(tensor_method_declarations.keys()):
         unsorted_tensor_method_hints[name] += \
-            generate_type_hints(name, tensor_method_declarations[name], is_tensor=True)
+            generate_type_hints(name, tensor_method_declarations[name], namedtuples, is_tensor=True)
 
     for op in all_ops:
         name = '__{}__'.format(op)
@@ -570,15 +615,23 @@ def gen_pyi(declarations_path, out):
 
     # TODO: Missing type hints for nn
 
+    # Generate namedtuple definitions
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    namedtuple_defs = ['{} = {}'.format(name, defn) for name, defn in namedtuples.items()]
+
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     # TODO: These are deprecated, maybe we shouldn't type hint them
-    legacy_class_hints = []
-    for c in ('DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
-              'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage'):
-        legacy_class_hints.append('class {}(Storage): ...'.format(c))
+    legacy_storage_base_hints = []
+    for c in ('Double', 'Float', 'Long', 'Int',
+              'Short', 'Char', 'Byte', 'Bool',
+              'Half', 'BFloat16', 'ComplexDouble',
+              'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32'):
+        legacy_storage_base_hints.append('class {}StorageBase(object): ...'.format(c))
 
+    legacy_class_hints = []
     for c in ('DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
               'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor'):
         legacy_class_hints.append('class {}(Tensor): ...'.format(c))
@@ -592,20 +645,26 @@ def gen_pyi(declarations_path, out):
                          for n in
                          ['float32', 'float', 'float64', 'double', 'float16', 'bfloat16', 'half',
                           'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
-                          'complex32', 'complex64', 'complex128', 'quint8', 'qint8', 'qint32', 'bool']]
+                          'complex32', 'complex64', 'cfloat', 'complex128', 'cdouble',
+                          'quint8', 'qint8', 'qint32', 'bool']]
 
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~
 
     env = {
+        'namedtuple_defs': namedtuple_defs,
         'function_hints': function_hints,
         'tensor_method_hints': tensor_method_hints,
         'legacy_class_hints': legacy_class_hints,
+        'legacy_storage_base_hints': legacy_storage_base_hints,
         'dtype_class_hints': dtype_class_hints,
     }
-    TORCH_TYPE_STUBS = CodeTemplate.from_file(os.path.join('torch', '__init__.pyi.in'))
+    TORCH_C_TYPE_STUBS = CodeTemplate.from_file(os.path.join('torch', '_C', '__init__.pyi.in'))
+    TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS = \
+        CodeTemplate.from_file(os.path.join('torch', '_C', '_VariableFunctions.pyi.in'))
 
-    write(out, 'torch/__init__.pyi', TORCH_TYPE_STUBS, env)
+    write(out, 'torch/_C/__init__.pyi', TORCH_C_TYPE_STUBS, env)
+    write(out, 'torch/_C/_VariableFunctions.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
     gen_nn_pyi(out)
 
 

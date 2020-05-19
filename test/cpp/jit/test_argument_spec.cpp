@@ -29,7 +29,10 @@ bool isEqual(const ArgumentInfo& ti, const autograd::Variable& v) {
       ti.type() == v.scalar_type() && ti.dim() == v.dim();
 }
 
-autograd::Variable var(at::TensorOptions t, at::IntArrayRef sizes, bool requires_grad) {
+autograd::Variable var(
+    at::TensorOptions t,
+    at::IntArrayRef sizes,
+    bool requires_grad) {
   return autograd::make_variable(at::rand(sizes, t), requires_grad);
 }
 autograd::Variable undef() {
@@ -96,24 +99,17 @@ size_t hashCode(const TensorTypePtr& ptr) {
 }
 
 void testProfiledTensorTypeHashing() {
-  c10::VaryingShape vs(c10::optional<size_t>{});
+  c10::VaryingShape<int64_t> vs(c10::optional<size_t>{});
   auto ptt_empty1 = TensorType::create({}, {}, vs, vs, false);
   auto ptt_empty2 = TensorType::create({}, {}, vs, vs, false);
   ASSERT_EQ(hashCode(ptt_empty1), hashCode(ptt_empty2));
 
-  c10::VaryingShape vs22(std::vector<int64_t>{2, 2});
-  auto ptt_vs22_1 = TensorType::create({}, {}, vs22, vs, false);
-  auto ptt_vs22_2 = TensorType::create({}, {}, vs22, vs, false);
-  ASSERT_EQ(hashCode(ptt_vs22_1), hashCode(ptt_vs22_2));
-
-  c10::VaryingShape vs23(std::vector<int64_t>{2, 3});
-  auto ptt_vs23_1 = TensorType::create({}, {}, vs23, vs, false);
-  ASSERT_NE(hashCode(ptt_vs22_1), hashCode(ptt_vs23_1));
-
+  c10::VaryingShape<int64_t> vs22(std::vector<int64_t>{2, 2});
   auto ptt_vs22_vs22_1 = TensorType::create({}, {}, vs22, vs22, false);
   auto ptt_vs22_vs22_2 = TensorType::create({}, {}, vs22, vs22, false);
   ASSERT_EQ(hashCode(ptt_vs22_vs22_1), hashCode(ptt_vs22_vs22_2));
 
+  c10::VaryingShape<int64_t> vs23(std::vector<int64_t>{2, 3});
   auto ptt_vs22_vs23_2 = TensorType::create({}, {}, vs22, vs23, false);
   ASSERT_NE(hashCode(ptt_vs22_vs22_1), hashCode(ptt_vs22_vs23_2));
 
@@ -156,7 +152,6 @@ void testArgumentSpec() {
                             var(GD, {4, 5, 6}, false),
                             undef()});
   list2[1].toTensor().transpose_(0, 1);
-
 
   ArgumentSpec a = arg_spec_creator.create(true, list);
   ArgumentSpec b = arg_spec_creator.create(true, list);

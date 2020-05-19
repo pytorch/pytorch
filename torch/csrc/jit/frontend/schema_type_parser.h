@@ -1,13 +1,12 @@
 #pragma once
 
-#include <ATen/core/jit_type.h>
-#include <ATen/core/alias_info.h>
-#include <torch/csrc/jit/frontend/lexer.h>
 #include <ATen/core/Macros.h>
+#include <ATen/core/alias_info.h>
+#include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/frontend/lexer.h>
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using TypePtr = c10::TypePtr;
 
@@ -33,6 +32,5 @@ struct CAFFE2_API SchemaTypeParser {
   Lexer& L;
   size_t next_id = 0;
 };
-} // namespace script
 } // namespace jit
 } // namespace torch

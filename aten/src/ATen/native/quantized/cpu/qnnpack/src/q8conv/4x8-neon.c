@@ -517,50 +517,55 @@ void pytorch_q8conv_ukernel_4x8__neon(
     }
   } while (--ks != 0);
 
-  const int32x4_t vmultiplier =
-      vld1q_dup_s32(&quantization_params->neon.multiplier);
-  vacc0x0123 = vqrdmulhq_s32(vacc0x0123, vmultiplier);
-  vacc0x4567 = vqrdmulhq_s32(vacc0x4567, vmultiplier);
-  vacc1x0123 = vqrdmulhq_s32(vacc1x0123, vmultiplier);
-  vacc1x4567 = vqrdmulhq_s32(vacc1x4567, vmultiplier);
-  vacc2x0123 = vqrdmulhq_s32(vacc2x0123, vmultiplier);
-  vacc2x4567 = vqrdmulhq_s32(vacc2x4567, vmultiplier);
-  vacc3x0123 = vqrdmulhq_s32(vacc3x0123, vmultiplier);
-  vacc3x4567 = vqrdmulhq_s32(vacc3x4567, vmultiplier);
+  const float32x4_t requantization_scale_v =
+      vdupq_n_f32(quantization_params->neon.requantization_scale);
 
-  const int32x4_t vright_shift =
-      vld1q_dup_s32(&quantization_params->neon.right_shift);
-  const int32x4_t vzero_shift_mask =
-      vreinterpretq_s32_u32(vceqq_s32(vright_shift, vmovq_n_s32(0)));
-  vacc0x0123 =
-      vsraq_n_s32(vacc0x0123, vbicq_s32(vacc0x0123, vzero_shift_mask), 31);
-  vacc0x4567 =
-      vsraq_n_s32(vacc0x4567, vbicq_s32(vacc0x4567, vzero_shift_mask), 31);
-  vacc1x0123 =
-      vsraq_n_s32(vacc1x0123, vbicq_s32(vacc1x0123, vzero_shift_mask), 31);
-  vacc1x4567 =
-      vsraq_n_s32(vacc1x4567, vbicq_s32(vacc1x4567, vzero_shift_mask), 31);
-  vacc2x0123 =
-      vsraq_n_s32(vacc2x0123, vbicq_s32(vacc2x0123, vzero_shift_mask), 31);
-  vacc2x4567 =
-      vsraq_n_s32(vacc2x4567, vbicq_s32(vacc2x4567, vzero_shift_mask), 31);
-  vacc3x0123 =
-      vsraq_n_s32(vacc3x0123, vbicq_s32(vacc3x0123, vzero_shift_mask), 31);
-  vacc3x4567 =
-      vsraq_n_s32(vacc3x4567, vbicq_s32(vacc3x4567, vzero_shift_mask), 31);
+  /*
+   * Convert int32_t input to FP32 and multiply by FP32 scale.
+   * Both operations involve statistically unbiased roundings:
+   * - Large int32_t values can't be exactly represented as FP32. The
+   * conversion instruction in ARM NEON would round it to nearest FP32 value
+   * with ties to even.
+   * - Product of two FP32 values is generally not exactly representation as
+   * an FP32 value, and will be rounded to nearest FP32 value with ties to
+   * even.
+   */
+  const float32x4_t vacc0x0123_f =
+    vmulq_f32(vcvtq_f32_s32(vacc0x0123), requantization_scale_v);
+  const float32x4_t vacc1x0123_f =
+    vmulq_f32(vcvtq_f32_s32(vacc1x0123), requantization_scale_v);
+  const float32x4_t vacc2x0123_f =
+    vmulq_f32(vcvtq_f32_s32(vacc2x0123), requantization_scale_v);
+  const float32x4_t vacc3x0123_f =
+    vmulq_f32(vcvtq_f32_s32(vacc3x0123), requantization_scale_v);
+  const float32x4_t vacc0x4567_f =
+    vmulq_f32(vcvtq_f32_s32(vacc0x4567), requantization_scale_v);
+  const float32x4_t vacc1x4567_f =
+    vmulq_f32(vcvtq_f32_s32(vacc1x4567), requantization_scale_v);
+  const float32x4_t vacc2x4567_f =
+    vmulq_f32(vcvtq_f32_s32(vacc2x4567), requantization_scale_v);
+  const float32x4_t vacc3x4567_f =
+    vmulq_f32(vcvtq_f32_s32(vacc3x4567), requantization_scale_v);
 
-  vacc0x0123 = vrshlq_s32(vacc0x0123, vright_shift);
-  vacc0x4567 = vrshlq_s32(vacc0x4567, vright_shift);
-  vacc1x0123 = vrshlq_s32(vacc1x0123, vright_shift);
-  vacc1x4567 = vrshlq_s32(vacc1x4567, vright_shift);
-  vacc2x0123 = vrshlq_s32(vacc2x0123, vright_shift);
-  vacc2x4567 = vrshlq_s32(vacc2x4567, vright_shift);
-  vacc3x0123 = vrshlq_s32(vacc3x0123, vright_shift);
-  vacc3x4567 = vrshlq_s32(vacc3x4567, vright_shift);
-
+#ifdef __aarch64__
   const int16x8_t voutput_zero_point =
       vld1q_dup_s16(&quantization_params->neon.output_zero_point);
-#ifdef __aarch64__
+  /*
+   * Leverage "Floating-point Convert to Signed integer, rounding to nearest
+   * with ties to even" instruction. This is an ARMv8 instruction (always
+   * available in AArch64), which saturates result on overflow. We don't need
+   * to specifically consider saturated results, they will be clamped at the
+   * last stage.
+   */
+  vacc0x0123 = vcvtnq_s32_f32(vacc0x0123_f);
+  vacc1x0123 = vcvtnq_s32_f32(vacc1x0123_f);
+  vacc2x0123 = vcvtnq_s32_f32(vacc2x0123_f);
+  vacc3x0123 = vcvtnq_s32_f32(vacc3x0123_f);
+  vacc0x4567 = vcvtnq_s32_f32(vacc0x4567_f);
+  vacc1x4567 = vcvtnq_s32_f32(vacc1x4567_f);
+  vacc2x4567 = vcvtnq_s32_f32(vacc2x4567_f);
+  vacc3x4567 = vcvtnq_s32_f32(vacc3x4567_f);
+
   const int16x8_t vacc0x01234567 = vqaddq_s16(
       vqmovn_high_s32(vqmovn_s32(vacc0x0123), vacc0x4567), voutput_zero_point);
   const int16x8_t vacc1x01234567 = vqaddq_s16(
@@ -574,25 +579,7 @@ void pytorch_q8conv_ukernel_4x8__neon(
       vqmovun_high_s16(vqmovun_s16(vacc0x01234567), vacc1x01234567);
   uint8x16_t vout2x01234567_3x01234567 =
       vqmovun_high_s16(vqmovun_s16(vacc2x01234567), vacc3x01234567);
-#else
-  const int16x8_t vacc0x01234567 = vqaddq_s16(
-      vcombine_s16(vqmovn_s32(vacc0x0123), vqmovn_s32(vacc0x4567)),
-      voutput_zero_point);
-  const int16x8_t vacc1x01234567 = vqaddq_s16(
-      vcombine_s16(vqmovn_s32(vacc1x0123), vqmovn_s32(vacc1x4567)),
-      voutput_zero_point);
-  const int16x8_t vacc2x01234567 = vqaddq_s16(
-      vcombine_s16(vqmovn_s32(vacc2x0123), vqmovn_s32(vacc2x4567)),
-      voutput_zero_point);
-  const int16x8_t vacc3x01234567 = vqaddq_s16(
-      vcombine_s16(vqmovn_s32(vacc3x0123), vqmovn_s32(vacc3x4567)),
-      voutput_zero_point);
 
-  uint8x16_t vout0x01234567_1x01234567 =
-      vcombine_u8(vqmovun_s16(vacc0x01234567), vqmovun_s16(vacc1x01234567));
-  uint8x16_t vout2x01234567_3x01234567 =
-      vcombine_u8(vqmovun_s16(vacc2x01234567), vqmovun_s16(vacc3x01234567));
-#endif
   const uint8x16_t voutput_min =
       vld1q_dup_u8(&quantization_params->neon.output_min);
   const uint8x16_t voutput_max =
@@ -602,6 +589,76 @@ void pytorch_q8conv_ukernel_4x8__neon(
   vout2x01234567_3x01234567 = vmaxq_u8(vout2x01234567_3x01234567, voutput_min);
   vout0x01234567_1x01234567 = vminq_u8(vout0x01234567_1x01234567, voutput_max);
   vout2x01234567_3x01234567 = vminq_u8(vout2x01234567_3x01234567, voutput_max);
+#else
+  const float32x4_t vfmin = vdupq_n_f32(quantization_params->neon.vfmin);
+  const float32x4_t vfmax = vdupq_n_f32(quantization_params->neon.vfmax);
+  const float32x4_t vfmagic = vdupq_n_f32(quantization_params->neon.vfmagic);
+  const int32x4_t vimagic = vdupq_n_s32(quantization_params->neon.vimagic);
+  /*
+   * ARMv7 NEON offers only a floating-point to integer conversion instruction
+   * with rounding towards zero. In lieu of conversion instruction with
+   * rounding-to-nearest-even, we use a magic trick of adding a large number
+   * (1.5 * 2**23) to scaled value to cause rounding to integer, and then
+   * substracing this magic number as integer. This trick works only in a
+   * limited range (absolute value of input must be less than 2**22), so
+   * generally we have to clamp input to this range before using the magic.
+   * However, clamping to any smaller range works just as well, and thus we
+   * clamp to [qmin - zero point, qmax - zero point] range so that after we
+   * add zero point to the result, it gets into target [qmin, qmax] range.
+   */
+  const float32x4_t vacc0x0123_f_clamped =
+      vminq_f32(vmaxq_f32(vacc0x0123_f, vfmin), vfmax);
+  const float32x4_t vacc1x0123_f_clamped =
+      vminq_f32(vmaxq_f32(vacc1x0123_f, vfmin), vfmax);
+  const float32x4_t vacc2x0123_f_clamped =
+      vminq_f32(vmaxq_f32(vacc2x0123_f, vfmin), vfmax);
+  const float32x4_t vacc3x0123_f_clamped =
+      vminq_f32(vmaxq_f32(vacc3x0123_f, vfmin), vfmax);
+  const float32x4_t vacc0x4567_f_clamped =
+      vminq_f32(vmaxq_f32(vacc0x4567_f, vfmin), vfmax);
+  const float32x4_t vacc1x4567_f_clamped =
+      vminq_f32(vmaxq_f32(vacc1x4567_f, vfmin), vfmax);
+  const float32x4_t vacc2x4567_f_clamped =
+      vminq_f32(vmaxq_f32(vacc2x4567_f, vfmin), vfmax);
+  const float32x4_t vacc3x4567_f_clamped =
+      vminq_f32(vmaxq_f32(vacc3x4567_f, vfmin), vfmax);
+
+  /*
+   * Conversion to integer using the "magic trick". Rounding is performed in
+   * the output of addition operation, and result is rounded to nearest even
+   * integer with ties to even.
+   */
+  vacc0x0123 = vsubq_s32(
+      vreinterpretq_s32_f32(vaddq_f32(vacc0x0123_f_clamped, vfmagic)), vimagic);
+  vacc1x0123 = vsubq_s32(
+      vreinterpretq_s32_f32(vaddq_f32(vacc1x0123_f_clamped, vfmagic)), vimagic);
+  vacc2x0123 = vsubq_s32(
+      vreinterpretq_s32_f32(vaddq_f32(vacc2x0123_f_clamped, vfmagic)), vimagic);
+  vacc3x0123 = vsubq_s32(
+      vreinterpretq_s32_f32(vaddq_f32(vacc3x0123_f_clamped, vfmagic)), vimagic);
+  vacc0x4567 = vsubq_s32(
+      vreinterpretq_s32_f32(vaddq_f32(vacc0x4567_f_clamped, vfmagic)), vimagic);
+  vacc1x4567 = vsubq_s32(
+      vreinterpretq_s32_f32(vaddq_f32(vacc1x4567_f_clamped, vfmagic)), vimagic);
+  vacc2x4567 = vsubq_s32(
+      vreinterpretq_s32_f32(vaddq_f32(vacc2x4567_f_clamped, vfmagic)), vimagic);
+  vacc3x4567 = vsubq_s32(
+      vreinterpretq_s32_f32(vaddq_f32(vacc3x4567_f_clamped, vfmagic)), vimagic);
+
+  const int16x8_t vacc0x01234567 =
+      vcombine_s16(vqmovn_s32(vacc0x0123), vqmovn_s32(vacc0x4567));
+  const int16x8_t vacc1x01234567 =
+      vcombine_s16(vqmovn_s32(vacc1x0123), vqmovn_s32(vacc1x4567));
+  const int16x8_t vacc2x01234567 =
+      vcombine_s16(vqmovn_s32(vacc2x0123), vqmovn_s32(vacc2x4567));
+  const int16x8_t vacc3x01234567 =
+      vcombine_s16(vqmovn_s32(vacc3x0123), vqmovn_s32(vacc3x4567));
+
+  uint8x16_t vout0x01234567_1x01234567 =
+      vcombine_u8(vqmovun_s16(vacc0x01234567), vqmovun_s16(vacc1x01234567));
+  uint8x16_t vout2x01234567_3x01234567 =
+      vcombine_u8(vqmovun_s16(vacc2x01234567), vqmovun_s16(vacc3x01234567));
+#endif
 
   uint8_t* c0 = c;
   uint8_t* c1 = (uint8_t*)((uintptr_t)c0 + c_stride);

@@ -19,7 +19,8 @@ namespace cuda {
 
 // A class holding metadata for an actual CUDA function.
 // Note: CUDA functions are per device.
-struct TORCH_CUDA_API FusedKernelCUDA : public ::torch::jit::fuser::FusedKernel {
+struct TORCH_CUDA_API FusedKernelCUDA
+    : public ::torch::jit::fuser::FusedKernel {
   FusedKernelCUDA(
       int16_t device,
       std::string name,

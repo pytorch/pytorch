@@ -1,9 +1,9 @@
-if (__NNPACK_INCLUDED)
+if(__NNPACK_INCLUDED)
   return()
 endif()
 set(__NNPACK_INCLUDED TRUE)
- 
-if (NOT USE_NNPACK)
+
+if(NOT USE_NNPACK)
   return()
 endif()
 
@@ -17,7 +17,7 @@ endif()
 # (1) MSVC - unsupported 
 ##############################################################################
 
-if (MSVC)
+if(MSVC)
   message(WARNING "NNPACK not supported on MSVC yet. Turn this warning off by USE_NNPACK=OFF.")
   set(USE_NNPACK OFF)
   return()
@@ -40,7 +40,7 @@ endif()
 # (3) Android, iOS, Linux, macOS - supported
 ##############################################################################
 
-if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+if(ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
   message(STATUS "Brace yourself, we are building NNPACK")
   set(CAFFE2_THIRD_PARTY_ROOT ${PROJECT_SOURCE_DIR}/third_party)
 
@@ -48,7 +48,7 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
   set(PYTHON_SIX_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/python-six" CACHE STRING "six (Python package) source directory")
   set(PYTHON_ENUM_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/python-enum" CACHE STRING "enum34 (Python package) source directory")
   set(PYTHON_PEACHPY_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/python-peachpy" CACHE STRING "PeachPy (Python package) source directory")
-  if (NOT DEFINED CPUINFO_SOURCE_DIR)
+  if(NOT DEFINED CPUINFO_SOURCE_DIR)
     set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
   endif()
   set(NNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/NNPACK" CACHE STRING "NNPACK source directory")

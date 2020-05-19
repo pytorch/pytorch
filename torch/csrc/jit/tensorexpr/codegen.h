@@ -1,27 +1,35 @@
 #pragma once
 
-#include "torch/csrc/jit/tensorexpr/buffer.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/jit/tensorexpr/buffer.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class CodeGen {
+template <typename T>
+class PaddedBuffer;
+
+class TORCH_API CodeGen {
  public:
   class BufferArg;
   class CallArg;
 
   template <typename... Ts>
-  CodeGen(const Stmt& stmt, Ts... ts)
+  CodeGen(Stmt* stmt, Ts... ts)
       : stmt_(stmt), buffer_args_({BufferArg(ts)...}) {}
 
-  CodeGen(const Stmt& stmt, const std::vector<BufferArg>& buffer_args)
-      : stmt_(stmt), buffer_args_(buffer_args) {}
+  CodeGen(
+      Stmt* stmt,
+      const std::vector<BufferArg>& buffer_args,
+      at::Device device = at::kCPU)
+      : stmt_(stmt), buffer_args_(buffer_args), device_(device) {}
 
   virtual ~CodeGen() {}
 
-  const Stmt& stmt() const {
+  Stmt* stmt() const {
     return stmt_;
   }
 
@@ -33,25 +41,38 @@ class CodeGen {
     return buffer_args_;
   }
 
-  TORCH_API virtual void call(const std::vector<CallArg>& args) {
-    LOG(FATAL) << "unimplemented call";
+  at::Device device() {
+    return device_;
   }
 
+  virtual void call(const std::vector<CallArg>& args) = 0;
+
  private:
-  Stmt stmt_;
+  Stmt* stmt_;
   std::vector<BufferArg> buffer_args_;
+  at::Device device_ = at::kCPU;
 };
 
 class CodeGen::BufferArg {
  public:
   BufferArg(const Buffer& buffer)
-      : var_(buffer.data()), dtype_(buffer.dtype()) {}
-  BufferArg(const Var& var) : var_(var), dtype_(var.dtype()), isVar_(true) {}
-
-  const Var& var() const {
-    return var_;
+      : var_(buffer.data()->base_handle()), dtype_(buffer.dtype()) {}
+  BufferArg(Tensor* tensor)
+      : var_(tensor->function()
+                 ->func_var(tensor->output_index())
+                 ->base_handle()),
+        dtype_(tensor->function()->body(tensor->output_index())->dtype()) {}
+  BufferArg(const Function& func)
+      : var_(func.func_var(0)->base_handle()), dtype_(func.body(0)->dtype()) {
+    // TODO: Support multiple-output functions
+    if (func.func_vars().size() != 1) {
+      throw unimplemented_lowering();
+    }
   }
-  Var& var() {
+  BufferArg(const VarHandle& var)
+      : var_(var.node()), dtype_(var.dtype()), isVar_(true) {}
+
+  const Var* var() const {
     return var_;
   }
   Dtype dtype() const {
@@ -63,7 +84,7 @@ class CodeGen::BufferArg {
   }
 
  private:
-  Var var_;
+  const Var* var_;
   Dtype dtype_;
   bool isVar_{false};
 };
@@ -71,39 +92,43 @@ class CodeGen::BufferArg {
 class CodeGen::CallArg {
  public:
   template <typename T>
+  CallArg(const PaddedBuffer<T>& buffer);
+
+  template <typename T>
   CallArg(const std::vector<T>& buffer) : ptr_(const_cast<T*>(buffer.data())) {}
 
   CallArg(void* ptr) : ptr_(ptr) {}
 
-  CallArg(int32_t i) : ival_(i) {}
-
-  CallArg(float f) : fval_(f) {}
+#define ARG_TYPE_CTOR(Type, Name) \
+  CallArg(Type v) : Name##val_(v) {}
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_TYPE_CTOR);
+#undef ARG_TYPE_CTOR
 
   void* data() const {
     return ptr_;
   }
 
-  int32_t intData() const {
-    return ival_;
+#define ARG_DATA_DEFINE(Type, Name) \
+  Type Name##Data() const {         \
+    return Name##val_;              \
   }
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_DATA_DEFINE);
+#undef ARG_DATA_DEFINE
 
-  float floatData() const {
-    return fval_;
+#define ARG_PTR_DEFINE(Type, Name)         \
+  Type* Name##Ptr() const {                \
+    return const_cast<Type*>(&Name##val_); \
   }
-
-  int* intPtr() const {
-    return const_cast<int*>(&ival_);
-  }
-
-  float* floatPtr() const {
-    return const_cast<float*>(&fval_);
-  }
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_PTR_DEFINE);
+#undef ARG_PTR_DEFINE
 
  private:
   union {
     void* ptr_;
-    float fval_;
-    int32_t ival_;
+
+#define ARG_BACKING(Type, Name) Type Name##val_;
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_BACKING);
+#undef ARG_BACKING
   };
 };
 
@@ -115,8 +140,9 @@ class RegisterCodeGenList {
   }
 
   using StmtFactoryMethod = std::function<std::unique_ptr<CodeGen>(
-      const Stmt& stmt,
-      const std::vector<CodeGen::BufferArg>&)>;
+      Stmt* stmt,
+      const std::vector<CodeGen::BufferArg>&,
+      at::Device device)>;
 
   TORCH_API StmtFactoryMethod FindStmtFactoryMethod(const std::string& name);
 
@@ -140,8 +166,11 @@ class RegisterCodeGen {
     RegisterCodeGenList& codegen_list = RegisterCodeGenList::GetInstance();
     codegen_list.AddStmtFactoryMethod(
         name,
-        [](const Stmt& stmt, const std::vector<CodeGen::BufferArg>& params) {
-          std::unique_ptr<CodeGen> method(new CodeGenType(stmt, params));
+        [](Stmt* stmt,
+           const std::vector<CodeGen::BufferArg>& params,
+           at::Device device) {
+          std::unique_ptr<CodeGen> method(
+              new CodeGenType(stmt, params, device));
           return method;
         });
   }
@@ -149,8 +178,9 @@ class RegisterCodeGen {
 
 TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
-    const Stmt& stmt,
-    const std::vector<CodeGen::BufferArg>& params);
+    Stmt* stmt,
+    const std::vector<CodeGen::BufferArg>& params,
+    at::Device device = at::kCPU);
 
 } // namespace tensorexpr
 } // namespace jit

@@ -1,11 +1,11 @@
 #pragma once
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/runtime/instruction.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 
-namespace torch{
-namespace jit{
+namespace torch {
+namespace jit {
 namespace mobile {
 using Stack = std::vector<c10::IValue>;
 struct Code {
@@ -28,5 +28,5 @@ struct InterpreterState {
 };
 
 } // namespace mobile
-} // namespace torch
 } // namespace jit
+} // namespace torch

@@ -1,10 +1,10 @@
 #pragma once
 
+#include <ATen/core/Dimname.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <ATen/core/jit_type.h>
-#include <ATen/core/Dimname.h>
 
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/utils/variadic.h>
@@ -21,10 +21,7 @@ namespace jit {
 struct Node;
 struct Value;
 struct Graph;
-
-namespace script {
-  struct Module;
-}
+struct Module;
 
 namespace tracer {
 
@@ -33,10 +30,10 @@ using ::c10::ivalue::Shared;
 using ::c10::IValue;
 using ::c10::ivalue::Future;
 
-using ::c10::ivalue::ConstantString;
-using ::c10::TupleTypePtr;
-using ::c10::TupleType;
 using ::c10::ArrayRef;
+using ::c10::TupleType;
+using ::c10::TupleTypePtr;
+using ::c10::ivalue::ConstantString;
 
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
@@ -48,6 +45,7 @@ struct TORCH_API TracingState
 
   std::shared_ptr<Graph> graph;
   bool warn = true;
+  bool strict = true;
   bool force_outplace = false;
   std::function<std::string(const Variable& var)> lookup_var_name_fn =
       [](const Variable& var) { return ""; };
@@ -66,7 +64,7 @@ struct TORCH_API TracingState
   Value* getOutput(const IValue& var, size_t i);
   bool hasValue(const IValue& var) const;
 
-private:
+ private:
   using WeakIValue = at::WeakIValue;
 
   struct WeakIValueHasher {
@@ -81,18 +79,18 @@ private:
     }
   };
 
-  using Frame = std::unordered_map<WeakIValue, Value*, WeakIValueHasher, WeakIValueEq>;
+  using Frame =
+      std::unordered_map<WeakIValue, Value*, WeakIValueHasher, WeakIValueEq>;
   std::vector<Frame> env_stack;
-
 };
 
 // This is meant to be used as a thread local place, where we can store extra
 // info that gets lost when we call into ATen from Python bindings. One example
-// for when this happens is when we get an IntArrayRef argument with e.g. sizes for
-// view. When tracing, those might be tensors, which let us encode extra data
-// dependencies, but once they get to the ATen call where we actually have the
-// tracing logic, they get converted into a raw IntArrayRef, and we loose all
-// information. To prevent this, we temporarily stash it in here.
+// for when this happens is when we get an IntArrayRef argument with e.g. sizes
+// for view. When tracing, those might be tensors, which let us encode extra
+// data dependencies, but once they get to the ATen call where we actually have
+// the tracing logic, they get converted into a raw IntArrayRef, and we loose
+// all information. To prevent this, we temporarily stash it in here.
 struct ArgumentStash {
   struct IntArrayRefTrace : std::vector<Value*> {
     IntArrayRefTrace(int size) : std::vector<Value*>(size, nullptr) {}
@@ -156,6 +154,7 @@ using warn_fn_type = void (*)(const std::string& msg);
 TORCH_API extern const char* WARN_PYTHON_DATAFLOW;
 TORCH_API extern const char* WARN_CONSTRUCTOR;
 TORCH_API extern const char* WARN_RESIZE;
+TORCH_API extern const char* STRICT_TRACER_MSG;
 TORCH_API void _do_warn(const char* _reason, const char* _kind);
 inline void warn(const char* _reason, const char* _kind = nullptr) {
   if (const auto& state = getTracingState()) {
@@ -209,8 +208,9 @@ TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> trace(
     Stack inputs,
     const std::function<Stack(Stack)>& traced_fn,
     std::function<std::string(const Variable&)> var_name_lookup_fn,
+    bool strict = true,
     bool force_outplace = false,
-    script::Module* self = nullptr);
+    Module* self = nullptr);
 
 TORCH_API void abandon();
 
@@ -243,6 +243,11 @@ TORCH_API void addInputs(
     const char* name,
     ArrayRef<at::Tensor> value,
     bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    ArrayRef<c10::intrusive_ptr<c10::ivalue::Object>> value,
+    const ClassTypePtr& class_type);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<double> value);
 TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
 TORCH_API void addInputs(
@@ -265,21 +270,18 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<at::Layout>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
-TORCH_API void addInputs(Node* n, const char* name, c10::optional<at::DimnameList> value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    c10::optional<at::DimnameList> value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::MemoryFormat>& value);
-TORCH_API void addInputs(Node* n, const char* name, at::Generator* value);
-
-template <typename T>
-TORCH_API void addInputs(Node* n, const char* name, ArrayRef<T> value);
-
-template <typename K, typename V>
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const std::unordered_map<K, V>& value);
+    const c10::optional<at::Generator>& value);
 
 inline void addInputs(
     Node* n,
@@ -317,10 +319,13 @@ TORCH_API void ensureUniqueIfOutOfPlaced(
 
 template <
     typename T,
-    typename = torch::enable_if_t<
-        (!std::is_convertible<torch::decay_t<T>, at::TensorList>::value &&
-         !std::is_convertible<torch::decay_t<T>, c10::List<at::Tensor>>::value &&
-         !std::is_convertible<torch::decay_t<T>, at::Tensor>::value)>>
+    typename = torch::enable_if_t<(
+        !std::is_convertible<torch::decay_t<T>, at::TensorList>::value &&
+        !std::is_convertible<torch::decay_t<T>, c10::List<at::Tensor>>::value &&
+        !std::is_convertible<torch::decay_t<T>, at::Tensor>::value &&
+        !std::is_convertible<
+            torch::decay_t<T>,
+            c10::intrusive_ptr<c10::ivalue::Object>>::value)>>
 void addOutput(Node* node, T&&) {
   AT_ERROR(
       "Found an unsupported argument type ",
@@ -331,6 +336,9 @@ TORCH_API void addOutput(Node* node, const at::Tensor& tensor);
 TORCH_API void setOutput(Value* value, const at::Tensor& output);
 TORCH_API void addOutput(Node* node, const std::vector<at::Tensor>& list);
 TORCH_API void addOutput(Node* node, const c10::List<at::Tensor>& list);
+TORCH_API void addOutput(
+    Node* node,
+    const c10::intrusive_ptr<c10::ivalue::Object>& output);
 
 TORCH_API autograd::Variable getSizeOf(
     const autograd::Variable& var,

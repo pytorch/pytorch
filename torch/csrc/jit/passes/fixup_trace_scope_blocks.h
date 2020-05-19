@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
@@ -41,7 +41,7 @@ namespace jit {
 //  Then, we'll have a well-formed graph with proper method calls.
 TORCH_API void FixupTraceScopeBlocks(
     std::shared_ptr<Graph>& graph,
-    script::Module* self);
+    Module* self);
 
 } // namespace jit
 } // namespace torch

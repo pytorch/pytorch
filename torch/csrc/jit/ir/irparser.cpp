@@ -1,15 +1,14 @@
 #include <torch/csrc/jit/ir/irparser.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <string>
 #include <vector>
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct VarWithType;
 struct ParsedLiteral;
@@ -57,7 +56,7 @@ class IRParser {
 
   Value* findValueInVMap(const std::string& name);
 
-  torch::jit::script::Lexer L;
+  torch::jit::Lexer L;
   torch::jit::Graph* g = nullptr;
   std::unordered_map<std::string, Value*>& vmap;
   SchemaTypeParser type_parser;
@@ -86,7 +85,7 @@ void parseIR(
     const std::string& str,
     torch::jit::Graph* graph,
     std::unordered_map<std::string, Value*>& vmap) {
-  torch::jit::script::IRParser p(str, graph, vmap);
+  torch::jit::IRParser p(str, graph, vmap);
   p.parse();
 }
 
@@ -473,6 +472,5 @@ Value* IRParser::findValueInVMap(const std::string& name) {
   return vmap.at(name);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

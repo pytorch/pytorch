@@ -3,11 +3,11 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/ir/constants.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
 
 #include <ATen/ATen.h>
 #include <algorithm>
@@ -17,10 +17,8 @@ namespace torch {
 namespace jit {
 
 namespace {
-c10::OperatorOptions aliasAnalysisIsSpecialCase() {
-  c10::OperatorOptions options;
-  options.setAliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
-  return options;
+c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
+  return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
 }
 } // namespace
 

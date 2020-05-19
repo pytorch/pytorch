@@ -36,6 +36,7 @@
 #endif // __HIP_PLATFORM_HCC__
 
 #ifdef __HIP_PLATFORM_HCC__
+#include <hip/hip_version.h>
 using CUBLAS_HALF_TYPE = rocblas_half;
 #else // __HIP_PLATFORM_HCC
 using CUBLAS_HALF_TYPE = __half;
@@ -864,24 +865,6 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
   const cublasOperation_t cu_trans_B =
       (trans_B == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
   if (math_type == TensorProto_DataType_FLOAT) {
-#if CUDA_VERSION < 9010
-    // loop over matrices in the batch
-    for (int i = 0; i < batch_size; ++i) {
-      Gemm<at::Half, CUDAContext>(
-          trans_A,
-          trans_B,
-          M,
-          N,
-          K,
-          alpha,
-          A[i],
-          B[i],
-          beta,
-          C[i],
-          context,
-          math_type);
-    }
-#else
     thrust::device_vector<const void*> A_device(A, A + batch_size);
     thrust::device_vector<const void*> B_device(B, B + batch_size);
     thrust::device_vector<void*> C_device(C, C + batch_size);
@@ -908,14 +891,13 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
         batch_size,
         CUDA_R_32F,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
-#endif
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // Convert alpha, beta from float -> __half
     const __half alpha_fp16 = at::Half(alpha);
     const __half beta_fp16 = at::Half(beta);
-    std::vector<const __half*> A_array(batch_size);
-    std::vector<const __half*> B_array(batch_size);
-    std::vector<__half*> C_array(batch_size);
+    thrust::host_vector<const __half*> A_array(batch_size);
+    thrust::host_vector<const __half*> B_array(batch_size);
+    thrust::host_vector<__half*> C_array(batch_size);
     for (int i = 0; i < batch_size; ++i) {
       A_array[i] = reinterpret_cast<const __half*>(A[i]);
       B_array[i] = reinterpret_cast<const __half*>(B[i]);
@@ -988,16 +970,6 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
   const cublasOperation_t cu_trans_B =
       (trans_B == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
   if (math_type == TensorProto_DataType_FLOAT) {
-#if CUDA_VERSION < 9010 && !defined(__HIP_PLATFORM_HCC__)
-    // loop over matrices in the batch
-    for (int i = 0; i < batch_size; ++i) {
-      Gemm<at::Half, CUDAContext>(
-          trans_A, trans_B, M, N, K, alpha, A, B, beta, C, context, math_type);
-      A += A_stride;
-      B += B_stride;
-      C += C_stride;
-    }
-#else
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
 #ifdef __HIP_PLATFORM_HCC__
@@ -1059,7 +1031,6 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
         CUDA_R_32F,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 #endif // __HIP_PLATFORM_HCC__
-#endif
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // Convert alpha, beta from float -> __half
     const __half alpha_fp16 = at::Half(alpha);
@@ -1222,7 +1193,7 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
   }
 }
 
-#if CUDA_VERSION >= 9000
+#ifndef __HIP_PLATFORM_HCC__
 
 // No change, but required. Defer to default CUDA engine
 template <>
@@ -1472,7 +1443,7 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext, TensorCoreEngine>(
       trans_A, M, N, alpha, A, x, beta, y, context, math_type);
 }
 
-#endif // CUDA_VERSION >= 9000
+#endif
 
 template <>
 CAFFE2_CUDA_EXPORT void GemmEx<float, CUDAContext>(
@@ -1689,8 +1660,19 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
     const at::Half* b,
     at::Half* y,
     CUDAContext* context) {
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined __HIP_PLATFORM_HCC__ && HIP_VERSION < 210
   CAFFE_THROW("HIP currently does not support FP16 completely yet.");
+#elif defined __HIP_PLATFORM_HCC__ && HIP_VERSION >= 210
+  CUBLAS_ENFORCE(cublasSetPointerMode(
+      context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
+  CUBLAS_ENFORCE(rocblas_hdot(
+      context->cublas_handle(),
+      n,
+      reinterpret_cast<const rocblas_half*>(a),
+      1,
+      reinterpret_cast<const rocblas_half*>(b),
+      1,
+      reinterpret_cast<rocblas_half*>(y)));
 #else
   // execute with 32-bit math
   CUBLAS_ENFORCE(cublasSetPointerMode(

@@ -1,15 +1,16 @@
-#include "import_source.h"
+#include <torch/csrc/jit/serialization/import_source.h>
 
 #include <ATen/core/qualified_name.h>
-#include <torch/csrc/jit/api/custom_class.h>
-#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/custom_class.h>
+
+#include <regex>
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct OpsValue : public SugaredValue {
   OpsValue(size_t version) : version_(version) {}
@@ -177,7 +178,7 @@ struct SourceImporterImpl : public Resolver,
   }
 
   void LEGACY_import_methods(
-      const script::Module& mod,
+      const Module& mod,
       const std::shared_ptr<Source>& src) {
     auto self = SimpleSelf(mod.type());
     c10::QualifiedName prefix = *mod.type()->name();
@@ -250,19 +251,103 @@ struct SourceImporterImpl : public Resolver,
       // ClassTypes)
       return importNamedTuple(qualified_name, class_def);
     } else if (superclass_name == "Interface") {
-      cu_->define_interface(qualified_name, class_def, shared_from_this(), /*is_module=*/false);
+      cu_->define_interface(
+          qualified_name, class_def, shared_from_this(), /*is_module=*/false);
     } else if (superclass_name == "ModuleInterface") {
-      cu_->define_interface(qualified_name, class_def, shared_from_this(), /*is_module=*/true);
+      cu_->define_interface(
+          qualified_name, class_def, shared_from_this(), /*is_module=*/true);
     } else {
       throw ErrorReport(class_def.range())
           << "Torchscript does not support class inheritance.";
     }
   }
 
+  c10::optional<Assign> attributeAssignmentSpecialHandlingHack(
+      const QualifiedName& qualified_classname,
+      const Assign& assign) {
+    struct AttrTypeReplacementDescr {
+      std::string attr_name;
+      std::string expected_type;
+      std::string replacement_type;
+    };
+
+    // module demangled qualname -> ReplacementDescr
+    static std::unordered_map<std::string, AttrTypeReplacementDescr> replacements{
+        {"__torch__.torch.nn.quantized.modules.linear.LinearPackedParams",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+        {"__torch__.torch.nn.quantized.modules.linear.Linear",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+        {"__torch__.torch.nn.quantized.dynamic.modules.linear.Linear",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+        {"__torch__.torch.nn.quantized.modules.conv.Conv2d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
+        {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
+        {"__torch__.torch.nn.quantized.modules.conv.Conv3d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}},
+        {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}}};
+    static std::regex mangle_re("\\.___torch_mangle_\\d+");
+    auto demangled_classname =
+        std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
+    if (replacements.count(demangled_classname)) {
+      auto lhs = Var(assign.lhs());
+      if (!assign.type().present() || assign.type().get().kind() != TK_VAR) {
+        return c10::nullopt;
+      }
+      auto type = Var(assign.type().get());
+
+      auto& attr_name = replacements.at(demangled_classname).attr_name;
+      auto& expected_type = replacements.at(demangled_classname).expected_type;
+      auto& replacement_type =
+          replacements.at(demangled_classname).replacement_type;
+      if (lhs.name().name() == attr_name &&
+          type.name().name() == expected_type) {
+        Parser p(std::make_shared<Source>(replacement_type));
+        auto typename_expr = p.parseExp();
+        auto maybe_typename =
+            Maybe<Expr>::create(typename_expr.range(), typename_expr);
+        return Assign::create(
+            assign.range(), assign.lhs_list(), assign.rhs(), maybe_typename);
+      }
+    }
+    return c10::nullopt;
+  }
+
   void importClass(
       const QualifiedName& qualified_classname,
       const ClassDef& class_def,
       bool is_module) {
+    // BC for TorchBind classes
+    //
+    // Previously we would serialize TorchBind classes as actual
+    // classes with methods that delegate to things in the
+    // torch.ops.* namespace. We've switched away from this and
+    // now just rely on those classes being present in the binary
+    // and emit code for them based on the ClassType in memory.
+    //
+    // TODO: remove this once we no longer have old TorchBind code
+    // in production models
+    {
+      static QualifiedName torch_classes_qualname("__torch__.torch.classes");
+      if (torch_classes_qualname.isPrefixOf(qualified_classname)) {
+        return;
+      }
+    }
     auto class_type = ClassType::create(
         c10::QualifiedName(qualified_classname), cu_, is_module);
 
@@ -300,7 +385,10 @@ struct SourceImporterImpl : public Resolver,
                 // This is to initialize the annotations dict, just ignore.
                 continue;
               } else {
-                if (assign.rhs().present()) {
+                if (auto fixed_up = attributeAssignmentSpecialHandlingHack(
+                        qualified_classname, assign)) {
+                  attributes.push_back(std::move(*fixed_up));
+                } else if (assign.rhs().present()) {
                   // This is a constant assignment, of the form:
                   // foo : Final[int] = 3
                   constants.push_back(assign);
@@ -477,19 +565,18 @@ SourceImporter::SourceImporter(
           std::move(loader),
           version)) {}
 
-TypePtr SourceImporter::loadNamedType(const QualifiedName& name) const {
-  TypePtr t = pImpl->findNamedType(name);
-  TORCH_INTERNAL_ASSERT(t != nullptr);
+TypePtr SourceImporter::loadType(const QualifiedName& name) const {
+  ScriptTypeParser type_parser(pImpl);
+  TypePtr t = type_parser.parseType(name.qualifiedName());
   return t;
 }
 
 void SourceImporter::LEGACY_import_methods(
-    const script::Module& mod,
+    const Module& mod,
     const std::shared_ptr<Source>& src) {
   pImpl->LEGACY_import_methods(mod, src);
 }
 SourceImporter::~SourceImporter() = default;
 
-} // namespace script
 } // namespace jit
 } // namespace torch

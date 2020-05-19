@@ -1,10 +1,10 @@
 #include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
 
 #include <algorithm>
 
@@ -282,7 +282,8 @@ struct MakeDefsDominateUses {
         // the domination condition is met.
         while (b_itr != common_ancestor) {
           b_itr->registerOutput(v_itr);
-          Value* remapped = b_itr->owningNode()->addOutput();
+          Value* remapped =
+              b_itr->owningNode()->addOutput()->setType(v_itr->type());
           v_itr = remapped;
           b_itr = b_itr->owningNode()->owningBlock();
         }
@@ -334,7 +335,7 @@ void convertReturnsToTuples(Block* b) {
         // Make node outputs a single tuple;
         std::vector<TypePtr> types;
         for (size_t i = 0; i < n->outputs().size(); ++i) {
-          types.push_back(n->output(0)->type());
+          types.push_back(n->output(i)->type());
         }
         Value* tup_output = n->addOutput()->setType(TupleType::create(types));
         Node* tup_unpack = g->createTupleUnpack(tup_output)->insertAfter(n);
@@ -428,8 +429,7 @@ void createMethodCalls(const std::shared_ptr<Graph>& g) {
       for (Value* i : n->inputs()) {
         nvs.emplace_back(i->node()->sourceRange(), i);
       }
-      auto schema =
-          script::matchSchema(f->getSchema(), n->sourceRange(), *g, nvs, {});
+      auto schema = matchSchema(f->getSchema(), n->sourceRange(), *g, nvs, {});
       Value* retval = g->insertMethodCall(f->qualname().name(), schema);
       n->output()->replaceAllUsesWith(retval);
       n->destroy();
@@ -492,7 +492,7 @@ void runCleanupPasses(const std::shared_ptr<Graph>& g) {
   for (Node* n : g->nodes()) {
     if (n->kind() == prim::TracedFork) {
       auto subgraph = n->g(attr::Subgraph);
-      if (script::getInlineEverythingMode()) {
+      if (getInlineEverythingMode()) {
         Inline(*subgraph);
       }
       convertTracedForksToRealForks(subgraph);
@@ -501,7 +501,7 @@ void runCleanupPasses(const std::shared_ptr<Graph>& g) {
       LintGraph(subgraph);
     }
   }
-  if (script::getInlineEverythingMode()) {
+  if (getInlineEverythingMode()) {
     Inline(*g);
   }
   convertTracedForksToRealForks(g);
@@ -510,7 +510,7 @@ void runCleanupPasses(const std::shared_ptr<Graph>& g) {
   LintGraph(g);
 }
 
-void runCleanupPasses(script::Module* m) {
+void runCleanupPasses(Module* m) {
   auto methods = m->get_methods();
   for (auto module : m->children()) {
     runCleanupPasses(&module);
@@ -522,9 +522,7 @@ void runCleanupPasses(script::Module* m) {
 
 } // namespace
 
-void FixupTraceScopeBlocks(
-    std::shared_ptr<Graph>& graph,
-    script::Module* self) {
+void FixupTraceScopeBlocks(std::shared_ptr<Graph>& graph, Module* self) {
   if (self) {
     ConvertTracedAttrReferences().run(graph);
   } else {

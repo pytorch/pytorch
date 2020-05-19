@@ -1,104 +1,86 @@
 #pragma once
 
-#include "torch/csrc/jit/tensorexpr/ir.h"
+#include <torch/csrc/jit/tensorexpr/ir.h>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// TODO: Merge this class with 'BufHandle'
 class Buffer {
  public:
-  Buffer(const Var& data, const Dtype& dtype, const std::vector<Expr>& dims)
-      : data_(data), dtype_(dtype), dims_(dims), strides_(dims.size()) {
-    CHECK_EQ(data.dtype(), kHandle);
-    for (int i = ndim() - 1; i >= 0; i--) {
+  Buffer(const BufHandle& data) : data_(data.node()) {
+    if (data_->base_handle()->dtype() != kHandle) {
+      throw malformed_input("Buffer dtype must be Handle");
+    }
+
+    std::vector<ExprHandle> stride_handles(ndim());
+    for (int i = (int)ndim() - 1; i >= 0; i--) {
       if (i == ndim() - 1) {
-        strides_[i] = 1;
+        stride_handles[i] = 1;
       } else {
-        strides_[i] = strides_[i + 1] * dim(i + 1);
+        stride_handles[i] = stride_handles[i + 1] * ExprHandle(dim(i + 1));
       }
     }
+    strides_ = ExprHandleVectorToExprVector(stride_handles);
   }
   Buffer(
       const std::string& name,
       const Dtype& dtype,
-      const std::vector<Expr>& dims)
-      : Buffer(Var(name, kHandle), dtype, dims) {}
+      const std::vector<ExprHandle>& dims)
+      : Buffer(BufHandle(name, dims, dtype)) {}
 
-  const Var& data() const {
+  const Buf* data() const {
     return data_;
   }
-  const Dtype& dtype() const {
-    return dtype_;
+  Dtype dtype() const {
+    return data_->dtype();
   }
   int ndim() const {
-    return dims_.size();
+    return data_->ndim();
   }
-  const Expr& dim(int index) const {
-    return dims_[index];
+  const Expr* dim(int index) const {
+    return data_->dim(index);
+  }
+  std::vector<const Expr*> dims() const {
+    return data_->dims();
   }
 
   // TODO: consider defer the storage flatten to a later stage.
   template <typename... Args>
-  Expr operator()(Args... args) const {
-    Expr index = Index(std::forward<Args>(args)...);
-    return LoadValue(index);
+  ExprHandle operator()(Args... args) const {
+    return LoadValue(std::forward<Args>(args)...);
+  }
+
+  ExprHandle LoadValue(
+      const ExprHandle& x,
+      const ExprHandle& y,
+      const ExprHandle& z) const {
+    return Load::make(*this, {x, y, z}, ExprHandle(1));
+  }
+  ExprHandle LoadValue(const ExprHandle& x, const ExprHandle& y) const {
+    return Load::make(*this, {x, y}, ExprHandle(1));
+  }
+  ExprHandle LoadValue(const ExprHandle& x) const {
+    return Load::make(*this, {x}, ExprHandle(1));
   }
 
   template <typename T>
-  Expr call(const std::vector<T>& args) const {
-    std::vector<Expr> params(args.begin(), args.end());
-    Expr index = Index(params);
-    return LoadValue(index);
+  ExprHandle call(const std::vector<T>& args) const {
+    std::vector<ExprHandle> params(args.begin(), args.end());
+    return LoadValue(params);
   }
 
  private:
-  Expr Index(const Expr& x) const {
-    CHECK(ndim() == 1);
-    return x;
-  }
-  Expr Index(const Expr& x, const Expr& y) const {
-    CHECK(ndim() == 2);
-    return x * strides_[0] + y;
-  }
-  Expr Index(const Expr& x, const Expr& y, const Expr& z) const {
-    CHECK(ndim() == 3);
-    return x * strides_[0] + y * strides_[1] + z;
-  }
-  Expr Index(const Expr& x, const Expr& y, const Expr& z, const Expr& w) const {
-    CHECK(ndim() == 4);
-    return x * strides_[0] + y * strides_[1] + z * strides_[2] + w;
-  }
-  Expr Index(const std::vector<Expr>& indices) const {
-    CHECK(ndim() == (int)indices.size());
-    Expr total_index;
-    for (size_t i = 0; i < indices.size(); i++) {
-      Expr index;
-      if (i == indices.size() - 1) {
-        index = indices[i];
-      } else {
-        index = indices[i] * strides_[i];
-      }
-      if (i == 0) {
-        total_index = index;
-      } else {
-        total_index = total_index + index;
-      }
-    }
-    return total_index;
-  }
+  ExprHandle LoadValue(const std::vector<ExprHandle>& indices) const;
 
-  Expr LoadValue(const Expr& index) const;
-
-  Var data_;
-  Dtype dtype_;
-  std::vector<Expr> dims_;
-  std::vector<Expr> strides_;
-  // TODO: add strides
+  const Buf* data_;
+  std::vector<const Expr*> strides_;
 };
 
-inline Expr Buffer::LoadValue(const Expr& index) const {
-  return Load::make(*this, index, Expr(1));
+inline ExprHandle Buffer::LoadValue(
+    const std::vector<ExprHandle>& indices) const {
+  return Load::make(*this, indices, ExprHandle(1));
 }
 
 } // namespace tensorexpr

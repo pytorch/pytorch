@@ -13,7 +13,7 @@ DECLARE_DISPATCH(where_fn, where_kernel);
 namespace {
 
 void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBool, iter.dtype(), "where_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND2(kHalf, kBool, iter.dtype(), "where_cuda", [&] {
     if (condition_type == at::ScalarType::Byte) {
       gpu_kernel(
         iter,

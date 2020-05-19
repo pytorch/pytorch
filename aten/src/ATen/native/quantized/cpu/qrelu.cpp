@@ -1,13 +1,13 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <torch/library.h>
 
 #include <algorithm>
 
@@ -30,17 +30,15 @@ Tensor qnnpack_relu(Tensor input) {
 
   initQNNPACK();
 
-  size_t volume = input_contig.numel();
-
-  size_t num_elems_x = 1;
+  size_t num_elems = 1;
   for (int i = 1; i < input_contig.ndimension(); ++i) {
-    num_elems_x *= input_contig.size(i);
+    num_elems *= input_contig.size(i);
   }
 
   pytorch_qnnp_operator_t qnnpack_operator{nullptr};
 
   const pytorch_qnnp_status createStatus = pytorch_qnnp_create_clamp_nc_u8(
-      num_elems_x /* channels */,
+      num_elems /* channels */,
       zero_point /* output min */,
       std::numeric_limits<uint8_t>::max() /* output max */,
       0 /* flags */,
@@ -59,15 +57,13 @@ Tensor qnnpack_relu(Tensor input) {
       input_contig.q_scale(),
       input_contig.q_zero_point());
 
-  size_t num_elems_y = volume / qy.size(0);
-
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_clamp_nc_u8(
       qnnpack_operator, /* clamp */
       input_contig.size(0) /* batch size */,
       (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input data */,
-      num_elems_x /* input stride */,
+      num_elems /* input stride */,
       (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
-      num_elems_y /* output stride */);
+      num_elems /* output stride */);
   TORCH_INTERNAL_ASSERT(
       setupStatus == pytorch_qnnp_status_success,
       "failed to setup QNNPACK Relu operator");
@@ -142,8 +138,10 @@ Tensor quantized_relu6_(Tensor& qx) {
     using Vec = Vec256<scalar_t>;
     auto iter = TensorIterator::unary_op(qx, qx);
     auto zero_point_vec = Vec(scalar_t(zero_point));
-    scalar_t six = at::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(),
-                                              /*value=*/6.0);
+    scalar_t six = at::native::quantize_val<scalar_t>(
+        qx.q_scale(),
+        qx.q_zero_point(),
+        /*value=*/6.0);
     auto six_vec = Vec(six);
     cpu_kernel_vec(
         iter,
@@ -157,9 +155,9 @@ Tensor quantized_relu6_(Tensor& qx) {
   return qx;
 }
 
-class QRelu6 final : public c10::OperatorKernel {
+class QRelu6 final {
  public:
-  Tensor operator()(Tensor qx, bool inplace) {
+  static Tensor run(Tensor qx, bool inplace) {
     if (inplace) {
       return quantized_relu6_(qx);
     } else {
@@ -168,9 +166,10 @@ class QRelu6 final : public c10::OperatorKernel {
   }
 };
 
-static auto registry = c10::RegisterOperators()
-.op("quantized::relu6(Tensor qx, bool inplace=False) -> Tensor",
-    c10::RegisterOperators::options().kernel<QRelu6>(DispatchKey::QuantizedCPUTensorId));
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("relu6", QRelu6::run);
+}
+
 } // namespace
 
 }}  // namespace at::native

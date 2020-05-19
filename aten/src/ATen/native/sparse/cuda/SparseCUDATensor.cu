@@ -94,8 +94,9 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
     int64_t stride = at::prod_intlist(values.sizes().slice(1));
     dim3 grid(THCCeilDiv(newNnz, (int64_t) SZ), THCCeilDiv(stride, (int64_t) C10_WARP_SIZE*SZ));
     dim3 block(C10_WARP_SIZE, SZ);
-    AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::Half,values.scalar_type(), "coalesce_sparse_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16, values.scalar_type(), "coalesce_sparse_cuda", [&] {
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "coalesce_sparse_cuda", [&] {
           using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
           apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
             uniqueOffsets.data_ptr<int64_t>(),
@@ -107,6 +108,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
             stride
           );
         });
+      });
   }
 
 // this grid-strided version is slower but probably more flexible
@@ -138,7 +140,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
       // broadcasting logic; instead, it will blast the elements from one
       // to the other so long as the numel is the same
       indicesSlice.copy_(indices1D);
-      indices1D.div_(self.size(d));
+      indices1D.floor_divide_(self.size(d));
       indicesSlice.add_(indices1D, -self.size(d));
     }
   }

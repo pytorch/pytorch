@@ -280,7 +280,7 @@ def graph(model, args, verbose=False):
       verbose (bool): Whether to print out verbose information while
         processing.
     """
-    with torch.onnx.set_training(model, False):  # TODO: move outside of torch.onnx?
+    with torch.onnx.select_model_mode_for_export(model, torch.onnx.TrainingMode.EVAL):  # TODO: move outside of torch.onnx?
         try:
             trace = torch.jit.trace(model, args)
             graph = trace.graph

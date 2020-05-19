@@ -299,6 +299,10 @@ class C10_EXPORT ArgumentHelper {
 // name. Throws if argument does not exist.
 CAFFE2_API const Argument& GetArgument(const OperatorDef& def, const string& name);
 CAFFE2_API const Argument& GetArgument(const NetDef& def, const string& name);
+// Helper methods to get an argument from OperatorDef or NetDef given argument
+// name. Returns nullptr if argument does not exist.
+CAFFE2_API const Argument* GetArgumentPtr(const OperatorDef& def, const string& name);
+CAFFE2_API const Argument* GetArgumentPtr(const NetDef& def, const string& name);
 
 // Helper methods to query a boolean argument flag from OperatorDef or NetDef
 // given argument name. If argument does not exist, return default value.
@@ -316,12 +320,16 @@ CAFFE2_API Argument* GetMutableArgument(
     const string& name,
     const bool create_if_missing,
     OperatorDef* def);
+CAFFE2_API Argument* GetMutableArgument(
+    const string& name,
+    const bool create_if_missing,
+    NetDef* def);
 
 template <typename T>
 CAFFE2_API Argument MakeArgument(const string& name, const T& value);
 
-template <typename T>
-inline void AddArgument(const string& name, const T& value, OperatorDef* def) {
+template <typename T, typename Def>
+inline void AddArgument(const string& name, const T& value, Def* def) {
   GetMutableArgument(name, true, def)->CopyFrom(MakeArgument(name, value));
 }
 // **** End Arguments Utils *****

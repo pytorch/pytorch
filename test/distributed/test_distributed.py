@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import copy
 import errno
 import fcntl
-import multiprocessing
 import os
 import sys
 import time
@@ -17,10 +16,19 @@ import torch.cuda
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, find_free_port
+from torch.distributed.distributed_c10d import _get_default_group
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
-from torch.testing._internal.common_distributed import simple_sparse_reduce_tests, skip_if_rocm
+from torch.testing._internal.common_distributed import (
+    TEST_SKIPS,
+    MultiProcessTestCase,
+    simple_sparse_reduce_tests,
+    skip_if_rocm,
+    skip_if_small_worldsize,
+    skip_if_lt_x_gpu,
+    skip_if_no_gpu,
+)
 
 try:
     import torchvision
@@ -30,6 +38,12 @@ except ImportError:
 
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
+CPP_EXTENSIONS_WARNING = """
+Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
+but it could not be found. Install ninja with `pip install ninja`
+or `conda install ninja`.
+"""
 
 BACKEND = os.environ["BACKEND"]
 TEMP_DIR = os.environ["TEMP_DIR"]
@@ -101,54 +115,20 @@ if not dist.is_available():
     sys.exit(0)
 
 
-SKIP_IF_NO_CUDA_EXIT_CODE = 75
-SKIP_IF_NO_GPU_EXIT_CODE = 76
-SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE = 77
-SKIP_IF_BACKEND_UNAVAILABLE = 78
-SKIP_IF_ROCM_EXIT_CODE = 79
-
-
-def skip_if_no_cuda_distributed(func):
-    func.skip_if_no_cuda_distributed = True
+def skip_if_no_ninja(func):
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if not torch.cuda.is_available():
-            sys.exit(SKIP_IF_NO_CUDA_EXIT_CODE)
+        try:
+            import torch.utils.cpp_extension
+            torch.utils.cpp_extension.verify_ninja_availability()
+        except RuntimeError:
+            print(CPP_EXTENSIONS_WARNING)
+            return 0
 
         return func(*args, **kwargs)
 
     return wrapper
-
-
-def skip_if_no_gpu(func):
-    """ Nccl multigpu tests requires at least 2 GPUS. Skip if this is not met"""
-    func.skip_if_no_gpu = True
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not torch.cuda.is_available():
-            sys.exit(SKIP_IF_NO_CUDA_EXIT_CODE)
-        if torch.cuda.device_count() < int(os.environ["WORLD_SIZE"]):
-            sys.exit(SKIP_IF_NO_GPU_EXIT_CODE)
-
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
-def skip_if_small_worldsize(func):
-    func.skip_if_small_worldsize = True
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) <= 2:
-            sys.exit(SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE)
-
-        return func(*args, **kwargs)
-
-    return wrapper
-
 
 def require_backend(backends):
     if BACKEND not in backends:
@@ -178,30 +158,6 @@ def require_world_size(world_size):
     return lambda func: func
 
 
-def require_num_gpus(n):
-    """
-    Require environment to have access to at least `n` GPUs.
-    Test is skipped otherwise.
-
-    Note: this check cannot run in the parent process, because calling
-    `torch.cuda.is_initialized()` will cause lazy initialization of a
-    CUDA runtime API context, and CUDA doesn't support forking.
-    """
-    def decorator(func):
-        func.skip_if_no_gpu = True
-
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if not torch.cuda.is_available():
-                sys.exit(SKIP_IF_NO_CUDA_EXIT_CODE)
-            if torch.cuda.device_count() < n:
-                sys.exit(SKIP_IF_NO_GPU_EXIT_CODE)
-            return func(*args, **kwargs)
-        return wrapper
-
-    return decorator
-
-
 def apply_hack_for_nccl():
     # This is a hack for a known NCCL issue using multiprocess
     # in conjunction with multiple threads to manage different GPUs which
@@ -224,10 +180,10 @@ def _lock():
             lf.close()
 
 
-def _build_tensor(size, value=None):
+def _build_tensor(size, value=None, dtype=torch.float):
     if value is None:
         value = size
-    return torch.FloatTensor(size, size, size).fill_(value)
+    return torch.empty(size, size, size, dtype=dtype).fill_(value)
 
 
 def _build_multidim_tensor(dim, dim_size, value=None):
@@ -247,7 +203,7 @@ class Barrier(object):
             os.unlink(os.path.join(barrier_dir, f_name))
 
     @classmethod
-    def sync(cls, wait_for=None, timeout=5):
+    def sync(cls, wait_for=None, timeout=10):
         if wait_for is None:
             wait_for = dist.get_world_size()
         cls.barrier_id += 1
@@ -419,7 +375,7 @@ class _DistTestBase(object):
         # Only execute barrier on rank == 0, causing it to timeout
         if local_rank == 0:
             expected_time = time.time() + timeout.total_seconds()
-            with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
+            with self.assertRaisesRegex(Exception, " (Timed out|closed|timeout) "):
                 dist.barrier(group_id)
             self.assertGreaterEqual(time.time(), expected_time)
         else:
@@ -440,7 +396,7 @@ class _DistTestBase(object):
         self._barrier(wait_for=int(WORLD_SIZE))
 
         # Reinitialize global process group
-        timeout = timedelta(seconds=0.2)
+        timeout = timedelta(seconds=1)
         dist.init_process_group(
             init_method=INIT_METHOD,
             backend=BACKEND,
@@ -453,14 +409,14 @@ class _DistTestBase(object):
     @skip_if_small_worldsize
     @unittest.skipIf(BACKEND != "gloo", "Only gloo backend supports timeouts")
     def test_barrier_timeout_group(self):
-        timeout = timedelta(seconds=0.2)
+        timeout = timedelta(seconds=1)
         _, group_id, _ = self._init_group_test(timeout=timeout)
         if group_id is not None:
             self._test_barrier_timeout(group_id, timeout)
 
     @unittest.skipIf(BACKEND != "gloo", "Only gloo backend supports timeouts")
     def test_barrier_timeout_full_group(self):
-        timeout = timedelta(seconds=0.2)
+        timeout = timedelta(seconds=1)
         _, group_id, _ = self._init_full_group_test(timeout=timeout)
         if group_id is not None:
             self._test_barrier_timeout(group_id, timeout)
@@ -498,14 +454,13 @@ class _DistTestBase(object):
     @require_backend({"gloo", "nccl"})
     @require_backends_available({"gloo", "nccl"})
     @require_world_size(3)
-    @require_num_gpus(2)
-    @skip_if_rocm
+    @skip_if_lt_x_gpu(2)
     def test_backend_group(self):
         self._test_group_override_backend(self._init_group_test)
 
     @require_backend({"gloo", "nccl"})
     @require_backends_available({"gloo", "nccl"})
-    @require_num_gpus(3)
+    @skip_if_lt_x_gpu(3)
     def test_backend_full_group(self):
         self._test_group_override_backend(self._init_full_group_test)
 
@@ -629,25 +584,25 @@ class _DistTestBase(object):
     def _test_broadcast_helper(
         self, group, group_id, rank, cuda=False, rank_to_GPU=None
     ):
-        for ttype, value, requires_cuda in [
-            ("torch.FloatTensor", -1e-10, False),
-            ("torch.DoubleTensor", -1e-100, False),
-            ("torch.HalfTensor", -0.1, True),
-            ("torch.CharTensor", -2, False),
-            ("torch.ByteTensor", 129, False),
-            ("torch.IntTensor", -1e5, False),
-            ("torch.LongTensor", -1e15, False),
+        for dtype, value, requires_cuda in [
+            (torch.float, -1e-10, False),
+            (torch.double, -1e-100, False),
+            (torch.half, -0.1, True),
+            (torch.int8, -2, False),
+            (torch.uint8, 129, False),
+            (torch.int, -1e5, False),
+            (torch.long, -1e15, False),
         ]:
             if requires_cuda and not cuda:
                 continue
             for src in group:
-                expected_tensor = _build_tensor(src + 1, value).type(ttype)
+                expected_tensor = _build_tensor(src + 1, value, dtype)
                 if cuda:
                     expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                 if rank == src:
                     dist.broadcast(expected_tensor, src, group_id)
                 else:
-                    tensor = _build_tensor(src + 1, -1).type(ttype)
+                    tensor = _build_tensor(src + 1, -1, dtype)
                     if cuda:
                         tensor = tensor.cuda(rank_to_GPU[rank][0])
                     dist.broadcast(tensor, src, group_id)
@@ -665,7 +620,6 @@ class _DistTestBase(object):
         BACKEND != "gloo" and BACKEND != "nccl",
         "Only Gloo and Nccl backend supports CUDA allReduce",
     )
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_broadcast_cuda(self):
         group, group_id, rank = self._init_global_test()
@@ -725,7 +679,6 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA reduce")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     @skip_if_rocm
     def test_reduce_sum_cuda(self):
@@ -888,7 +841,6 @@ class _DistTestBase(object):
         BACKEND != "gloo",
         "Only Gloo backend will have CUDA allReduce tested",
     )
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_all_reduce_sum_cuda(self):
         group, group_id, rank = self._init_global_test()
@@ -1034,7 +986,6 @@ class _DistTestBase(object):
         self._test_sparse_all_reduce_sum(lambda t: t)
 
     @unittest.skipIf(BACKEND != "gloo", "Only Gloo backend support sparse all reduce")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     @skip_if_rocm
     def test_sparse_all_reduce_sum_cuda(self):
@@ -1388,7 +1339,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA all gather")
     @unittest.skipIf(BACKEND == "nccl", "CUDA all gather skipped for NCCL")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_all_gather_cuda(self):
         group, group_id, rank = self._init_global_test()
@@ -1510,6 +1460,92 @@ class _DistTestBase(object):
         assert self._run_all_gather_coalesced_and_verify(
             output_tensors_lists, input_tensors, expected_tensors, group_id)
         self._barrier()
+
+    # AllToAll
+    def _test_all_to_all_single_equal_split_helper(self, group, group_id, rank):
+        if group_id is not None:
+            size = len(group)
+            in_tensor = torch.ones([size, size]) * rank
+            expected_tensor = torch.cat([torch.ones([1, size]) * i for i in group])
+            out_tensor = torch.ones([size, size]) * -1
+            dist.all_to_all_single(out_tensor, in_tensor, group=group_id)
+            self.assertEqual(out_tensor, expected_tensor)
+        self._barrier()
+
+    def _test_all_to_all_single_unequal_split_helper(self, group, group_id, rank):
+        if group_id is not None:
+            size = len(group)
+            in_splits = [i + 1 for i in group]
+            out_splits = [rank + 1 for _ in group]
+            in_tensor = torch.ones([sum(in_splits), size]) * rank
+            out_tensor = torch.ones([(rank + 1) * size, size])
+            expected_tensor = torch.cat([torch.ones([rank + 1, size]) * i for i in group])
+            dist.all_to_all_single(
+                out_tensor, in_tensor, out_splits, in_splits, group=group_id)
+            self.assertEqual(out_tensor, expected_tensor)
+        self._barrier()
+
+    def _test_all_to_all_helper(self, group, group_id, rank):
+        if group_id is not None:
+            size = len(group)
+            in_splits = [i + 1 for i in group]
+            in_tensors = [
+                torch.ones([in_splits[i], size]) * rank for i, _ in enumerate(group)
+            ]
+            out_tensors = [torch.ones([(rank + 1), size]) for _ in group]
+            expected_tensors = [torch.ones([rank + 1, size]) * i for i in group]
+            dist.all_to_all(out_tensors, in_tensors, group=group_id)
+            for t1, t2 in zip(out_tensors, expected_tensors):
+                self.assertEqual(t1, t2)
+        self._barrier()
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    def test_all_to_all_single_equal_split(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    def test_all_to_all_single_unequal_split(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
+    def test_all_to_all(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_to_all_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    @skip_if_small_worldsize
+    def test_all_to_all_single_equal_split_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    @skip_if_small_worldsize
+    def test_all_to_all_single_unequal_split_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
+    @skip_if_small_worldsize
+    def test_all_to_all_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_to_all_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    def test_all_to_all_single_equal_split_full_group(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    def test_all_to_all_single_unequal_split_full_group(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
+    def test_all_to_all_full_group(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_to_all_helper(group, group_id, rank)
 
     # BARRIER
     def _test_barrier_helper(
@@ -1744,10 +1780,10 @@ class _DistTestBase(object):
         return global_bs, input_cpu, target, loss
 
     # END TO END TEST FOR DISTRIBUTEDDATAPARALLEL
-    def _test_DDP_helper(self, model, input_var, target, loss):
+    def _test_DDP_helper(self, model, input_var, target, loss, scale_factor=1.0):
         model.train()
         output = model(input_var)
-        l = loss(output, target)
+        l = loss(output, target) * scale_factor
         l.backward()
 
     def _assert_equal_param(self, param_gpu, param_DDP):
@@ -1756,18 +1792,22 @@ class _DistTestBase(object):
             self.assertEqual(p_gpu, p_DDP)
 
     def _test_DDP_5iter(
-        self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save
+        self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save, offset=None, world_size=0
     ):
         for idx in range(5):
             # single cpu/gpu training
             self._test_DDP_helper(model_base, input, target, loss)
 
+            if offset is None:
+                offset = rank * local_bs
+
             # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
             self._test_DDP_helper(
                 model_DDP,
-                input[rank * local_bs: (rank + 1) * local_bs],
-                target[rank * local_bs: (rank + 1) * local_bs],
+                input[offset: offset + local_bs],
+                target[offset: offset + local_bs],
                 loss,
+                world_size * local_bs / batch_size if world_size != 0 else 1,
             )
 
             # Update weights and run a second iteration to shake out errors
@@ -1868,7 +1908,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     @skip_if_rocm
     def test_DistributedDataParallel(self):
@@ -1884,7 +1923,7 @@ class _DistTestBase(object):
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
         self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
 
-    def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, output_device=None):
+    def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, local_bs, global_bs, offset, output_device=None):
         # Run a simple end to end DDP model, use result of single node model
         # as baseline
 
@@ -1907,9 +1946,10 @@ class _DistTestBase(object):
             torch.save(model_DDP, tmp.name)
             model_DDP = torch.load(tmp.name)
 
-        # dummy data initialization
-        local_bs = len(gpu_subset)
-        global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
+        # data initialization
+        input_cpu = torch.randn(global_bs, 2)
+        target = torch.randn(global_bs, 4)
+        loss = nn.MSELoss()
 
         # check two model parameters over 5 iterations
         self._test_DDP_5iter(
@@ -1921,13 +1961,14 @@ class _DistTestBase(object):
             local_bs,
             rank,
             global_bs,
-            True
+            True,
+            offset,
+            int(WORLD_SIZE)
         )
         self._barrier()
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_DistributedDataParallel_SyncBatchNorm(self):
         group, group_id, rank = self._init_global_test()
@@ -1935,20 +1976,41 @@ class _DistTestBase(object):
         # DDP does not support replicating BN layers within a process, hence
         # testing with one module replica per process
         gpus = [rank]
-        self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank)
+
+        num_processes = int(WORLD_SIZE)
+        local_bs = 2
+        bs_offset = int(rank * 2)
+        global_bs = int(num_processes * 2)
+
+        self._test_DistributedDataParallel_SyncBatchNorm(
+            gpu_subset=gpus,
+            rank=rank,
+            local_bs=local_bs,
+            global_bs=global_bs,
+            offset=bs_offset)
 
         # test output_device
-        self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+        self._test_DistributedDataParallel_SyncBatchNorm(
+            gpu_subset=gpus,
+            rank=rank,
+            local_bs=local_bs,
+            global_bs=global_bs,
+            offset=bs_offset,
+            output_device=torch.device('cuda'))
 
         # test device_ids
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
-        self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+        self._test_DistributedDataParallel_SyncBatchNorm(
+            gpu_subset=gpus,
+            rank=rank,
+            local_bs=local_bs,
+            global_bs=global_bs,
+            offset=bs_offset,
+            output_device=torch.device('cuda'))
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
-    @skip_if_rocm
     def test_DistributedDataParallel_SyncBatchNorm_2D_Input(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1995,7 +2057,55 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    @require_world_size(2)
+    @skip_if_rocm
+    def test_DistributedDataParallel_SyncBatchNorm_Single_Input_Per_Process(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        # DDP does not support replicating BN layers within a process, hence
+        # testing with one module replica per process
+        gpus = [rank]
+
+        model = nn.BatchNorm1d(2)
+
+        # single gpu training setup
+        model_gpu = copy.deepcopy(model)
+        model_gpu.cuda(gpus[0])
+
+        # DDP training setup
+        model_DDP = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(model))
+        model_DDP.cuda(gpus[0])
+        model_DDP = nn.parallel.DistributedDataParallel(
+            model_DDP, device_ids=gpus
+        )
+
+        local_bs = 1
+        global_bs = int(WORLD_SIZE)
+        input_cpu = torch.randn(global_bs, 2)
+        target = torch.randn(global_bs, 2)
+        loss = nn.MSELoss()
+
+        # disabling cudnn.
+        # SyncBatchNorm goes through native_batch_norm kernel, this avoids the
+        # numerical issue created by the divergent code path.
+        with torch.backends.cudnn.flags(False):
+            # check two model parameters over 5 iterations
+            self._test_DDP_5iter(
+                model_gpu,
+                model_DDP,
+                input_cpu.cuda(gpus[0]),
+                target.cuda(gpus[0]),
+                loss,
+                local_bs,
+                rank,
+                global_bs,
+                True
+            )
+            self._barrier()
+
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_gpu
     def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_Running_Value(self):
         group, group_id, rank = self._init_global_test()
@@ -2023,6 +2133,29 @@ class _DistTestBase(object):
         torch.testing.assert_allclose(running_mean, all_input_var.mean(1))
         torch.testing.assert_allclose(running_var, all_input_var.var(1))
 
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_gpu
+    def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_gradient(self):
+        group, group_id, rank = self._init_global_test()
+        # only do single GPU per process
+        gpus = [rank]
+
+        # cpu training setup
+        model = BN_NET
+
+        num_processes = int(WORLD_SIZE)
+        local_bs = rank + 2
+        bs_offset = int((rank + 3) * rank / 2)
+        global_bs = int((num_processes + 3) * num_processes / 2)
+
+        self._test_DistributedDataParallel_SyncBatchNorm(
+            gpu_subset=gpus,
+            rank=rank,
+            local_bs=local_bs,
+            global_bs=global_bs,
+            offset=bs_offset)
+
     @skipIfNoTorchVision
     def test_SyncBatchNorm_process_group(self):
         # When adopting `convert_sync_batchnorm` to convert a `nn.modules`,
@@ -2039,47 +2172,40 @@ class _DistTestBase(object):
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
 
-    class TestDistBackend(TestCase, _DistTestBase):
-        MANAGER_PROCESS_RANK = -1
+    class TestDistBackend(MultiProcessTestCase, _DistTestBase):
 
-        @staticmethod
-        def manager_join(fn):
-            @wraps(fn)
-            def wrapper(self):
-                if self.rank == self.MANAGER_PROCESS_RANK:
-                    self._join_and_reduce(fn)
-                else:
-                    fn(self)
-
-            return wrapper
+        # Needed since MultiProcessTestCase assumes a world_size of 4, but we
+        # run these tests under other various world_sizes.
+        @property
+        def world_size(self):
+            return os.environ["WORLD_SIZE"]
 
         @classmethod
         def setUpClass(cls):
             os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
             os.environ["MASTER_PORT"] = str(MASTER_PORT)
             os.environ["WORLD_SIZE"] = str(WORLD_SIZE)
-            for attr in dir(cls):
-                if attr.startswith("test"):
-                    fn = getattr(cls, attr)
-                    if not getattr(fn, "__unittest_skip__", False):
-                        setattr(cls, attr, cls.manager_join(fn))
+            super().setUpClass()
 
         def setUp(self):
-            super(TestDistBackend, self).setUp()
-            # We rely on the manager process to delete the temporary file.
+            super().setUp()
             global INIT_METHOD
+            # initialize Barrier.
+            Barrier.init()
+            # We rely on tearDown for deleting the temporary file
+            # TODO: this temporary file should be deduped with the file_name
+            # in MultiProcessTestCase as part of supporting spawn mode for these tests.
+            # https://github.com/pytorch/pytorch/issues/36663
             self.temporary_file = None
             if INIT_METHOD.startswith("file://"):
                 self.temporary_file = tempfile.NamedTemporaryFile(delete=False)
                 INIT_METHOD = "file://{}".format(self.temporary_file.name)
 
-            self.processes = []
-            self.rank = self.MANAGER_PROCESS_RANK
-            Barrier.init()
-            for rank in range(int(WORLD_SIZE)):
-                self.processes.append(self._spawn_process(rank))
+            # TODO: enable spawn mode https://github.com/pytorch/pytorch/issues/36663
+            self._fork_processes()
 
         def tearDown(self):
+            super(MultiProcessTestCase, self).tearDown()
             super(TestDistBackend, self).tearDown()
 
             # Clean up temporary file if we used one.
@@ -2091,18 +2217,11 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     if err.errno != errno.ENOENT:
                         raise
 
-            for p in self.processes:
-                p.terminate()
-
-        def _spawn_process(self, rank):
-            os.environ["RANK"] = str(rank)
-            name = "process " + str(rank)
-            process = multiprocessing.Process(target=self._run, name=name, args=(rank,))
-            process.start()
-            return process
-
-        def _run(self, rank):
+        @classmethod
+        def _run(cls, rank, test_name, file_name):
+            self = cls(test_name)
             self.rank = rank
+            self.file_name = file_name
             try:
                 dist.init_process_group(
                     init_method=INIT_METHOD,
@@ -2112,8 +2231,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 )
             except RuntimeError as e:
                 if "recompile" in e.args[0]:
-                    sys.exit(SKIP_IF_BACKEND_UNAVAILABLE)
-                    # sys.exit(0)
+                    sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
+
                 raise
 
             # Execute barrier prior to running test to ensure that every process
@@ -2123,55 +2242,10 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
             # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
             # We're retreiving a corresponding test and executing it.
-            getattr(self, self.id().split(".")[2])()
+            getattr(self, test_name)()
             self._barrier()
             dist.destroy_process_group()
             sys.exit(0)
-
-        def _join_and_reduce(self, fn):
-            skip_ok = (
-                getattr(fn, "skip_if_no_cuda_distributed", False) or
-                getattr(fn, "skip_if_no_gpu", False) or
-                getattr(fn, "skip_if_small_worldsize", False) or
-                getattr(fn, "skip_if_rocm", False)
-            )
-            join_timeout = get_timeout(self.id())
-            for rank, process in enumerate(self.processes):
-                process.join(join_timeout)
-                self.assertFalse(
-                    process.is_alive(),
-                    "Timeout waiting for rank %d to terminate" % rank)
-
-            first_process = self.processes[0]
-            for p in self.processes:
-                self.assertEqual(p.exitcode, first_process.exitcode)
-
-            if first_process.exitcode == SKIP_IF_BACKEND_UNAVAILABLE:
-                raise unittest.SkipTest("Compiled without the " + BACKEND + " backend")
-
-            if skip_ok:
-                # do this first so we don't give an error message about
-                # mismatched exit codes if the first isn't valid
-                assert (
-                    first_process.exitcode == 0 or
-                    first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE or
-                    first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE or
-                    first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE or
-                    first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE
-                )
-
-                if first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE:
-                    raise unittest.SkipTest("cuda is not available")
-                if first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE:
-                    raise unittest.SkipTest(
-                        "One unique gpu per process is not available"
-                    )
-                if first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE:
-                    raise unittest.SkipTest("worldsize is too small to run group tests")
-                if first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE:
-                    raise unittest.SkipTest("Test skipped for ROCm")
-
-            self.assertEqual(first_process.exitcode, 0)
 
 
 elif BACKEND == "mpi":
@@ -2181,6 +2255,45 @@ elif BACKEND == "mpi":
     class TestMPI(TestCase, _DistTestBase):
         pass
 
+elif BACKEND == "test":
+    class TestBackendDynamicLoad(TestCase):
+        def setUp(self):
+            super(TestBackendDynamicLoad, self).setUp()
+
+        def _load_test_backend(self):
+            temp_dir = tempfile.mkdtemp()
+            src = "{}/../cpp_extensions/cpp_c10d_extension.cpp".format(os.path.abspath(os.path.dirname(__file__)))
+            extension = torch.utils.cpp_extension.load(
+                name="torch_test",
+                sources=[src],
+                build_directory=temp_dir
+            )
+
+        @skip_if_no_ninja
+        def test_backend_apis(self):
+            self._load_test_backend()
+
+            os.environ['WORLD_SIZE'] = '1'
+            os.environ['MASTER_ADDR'] = '127.0.0.1'
+            os.environ['MASTER_PORT'] = str(find_free_port())
+            os.environ['RANK'] = '0'
+
+            dist.init_process_group(backend='test', init_method='env://', world_size=1, rank=0)
+            self.assertEqual(dist.get_rank(), 0)
+            self.assertEqual(dist.get_world_size(), 1)
+
+            process_group = _get_default_group()
+            work = process_group.allreduce([torch.rand(1), torch.rand(1)])
+            self.assertTrue(work.wait())
+            self.assertTrue(work.is_completed())
+            self.assertTrue(work.is_success())
+
+            work = process_group.broadcast([torch.rand(1)])
+            self.assertTrue(work.wait())
+            self.assertTrue(work.is_completed())
+            self.assertTrue(work.is_success())
+
+            dist.destroy_process_group()
 
 if __name__ == "__main__":
     assert (

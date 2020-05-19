@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode, enable_profiling_mode
+from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode, enable_profiling_mode_for_profiling_tests
 import torch
 
 # Make the helper files in test/ importable
@@ -28,7 +28,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
     # end-to-end fashion.
     def _perform_ad_subgraph_slicing(self, fn, *input_sizes):
         with disable_autodiff_subgraph_inlining():
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 ge = torch.jit.script(fn)
                 inputs = [torch.randn(size, requires_grad=True) for size in input_sizes]
                 ge(*inputs, profile_and_replay=True)
@@ -46,7 +46,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         input = torch.rand(6, 10).requires_grad_()
         with disable_autodiff_subgraph_inlining():
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 output = func(input, profile_and_replay=True)
                 self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
 

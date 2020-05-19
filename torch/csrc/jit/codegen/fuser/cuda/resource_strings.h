@@ -40,6 +40,7 @@ typedef unsigned char uint8_t;
 typedef signed char int8_t;
 typedef short int  int16_t;
 typedef long long int int64_t;
+typedef unsigned long long int uint64_t;
 ${HalfHeader}
 ${RandHeader}
 
@@ -171,14 +172,35 @@ ${type_declarations}
 extern "C" __global__
 void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
   ${RandInit}
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-        linearIndex < totalElements;
-        linearIndex += gridDim.x * blockDim.x) {
+  // check whether do vectorized load/store and allocate buffer
+  bool flag_vec4 = true;
+  ${tensorChecks}
+  if (flag_vec4) {
+    for (IndexType linearIndex = 4 * (blockIdx.x * blockDim.x + threadIdx.x);
+         linearIndex < totalElements;
+         linearIndex += 4 * gridDim.x * blockDim.x) {
+      // Convert `linearIndex` into an offset of tensor as it is:
+      ${tensorOffsets}
+      // load 4 at a time
+      ${kernelLoad}
+      #pragma unroll 4
+      for (int i=0; i<4; i++) {
+        // calculate the results
+        ${kernelBody_vec4}
+      }
+      // store 4 at a time
+      ${kernelStore}
+    }
+  } else {
+    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+         linearIndex < totalElements;
+         linearIndex += gridDim.x * blockDim.x) {
       // Convert `linearIndex` into an offset of tensor:
       ${tensorOffsets}
       // calculate the results
       ${kernelBody}
     }
+  }
 }
 )");
 
@@ -187,7 +209,8 @@ void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
 // with __half2float(). All mathematical operations are done on float
 // values, and if needed the intermediate float representation is
 // converted to half with __float2half() when writing to a half tensor.
-constexpr auto half_support_literal = R"(
+constexpr auto half_support_literal =
+    R"(
 #define __HALF_TO_US(var) *(reinterpret_cast<unsigned short *>(&(var)))
 #define __HALF_TO_CUS(var) *(reinterpret_cast<const unsigned short *>(&(var)))
 #if defined(__cplusplus)
@@ -213,14 +236,14 @@ constexpr auto half_support_literal = R"(
       return val;
     }
 )"
-// MSVC's preprocessor (but not the standard compiler) has a bug
-// where it incorrectly tokenizes raw string literals, ending when it sees a "
-// this causes the #endif in this string literal to be treated as a preprocessor
-// token which, in turn, cause sccache on windows CI to fail.
-// See https://godbolt.org/z/eVTIJq as an example.
-// This workaround uses string-pasting to separate the " and the #endif into different
-// strings
-R"(
+    // MSVC's preprocessor (but not the standard compiler) has a bug
+    // where it incorrectly tokenizes raw string literals, ending when it sees a
+    // " this causes the #endif in this string literal to be treated as a
+    // preprocessor token which, in turn, cause sccache on windows CI to fail.
+    // See https://godbolt.org/z/eVTIJq as an example.
+    // This workaround uses string-pasting to separate the " and the #endif into
+    // different strings
+    R"(
   #endif /* defined(__CUDACC__) */
 #endif /* defined(__cplusplus) */
 #undef __HALF_TO_US

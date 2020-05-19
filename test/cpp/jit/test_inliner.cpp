@@ -1,8 +1,8 @@
 #include <test/cpp/jit/test_base.h>
 
-#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 const auto testSource = R"JIT(
@@ -21,7 +21,6 @@ def foo3(x):
 
 namespace torch {
 namespace jit {
-using namespace script;
 using namespace testing;
 
 struct InlinerGuard {

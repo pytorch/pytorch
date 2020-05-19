@@ -437,9 +437,7 @@ void avg_pool3d_out_cuda_template(
               break;
           }
 
-          TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-            "avg_pool3d_out_cuda failed with error code ",
-            cudaGetLastError());
+          AT_CUDA_CHECK(cudaGetLastError()); 
 
           totalZ -= 65535;
           offsetZ += 65535;
@@ -577,9 +575,7 @@ void avg_pool3d_backward_out_cuda_template(
                 1.0f/divide_factor,
                 offsetZ);
 
-            TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-              "avg_pool3d_backward_out_frame failed with error code ",
-              cudaGetLastError());
+            AT_CUDA_CHECK(cudaGetLastError()); 
 
             totalZ -= 65535;
             offsetZ += 65535;
@@ -626,9 +622,7 @@ void avg_pool3d_backward_out_cuda_template(
                    offsetZ, divisor);
             }
 
-            TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-              "avg_pool3d_backward_out_frame failed with error code ",
-              cudaGetLastError());
+            AT_CUDA_CHECK(cudaGetLastError());
 
             totalZ -= 65535;
             offsetZ += 65535;

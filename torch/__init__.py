@@ -1,4 +1,3 @@
-# @lint-ignore-every PYTHON3COMPATIMPORTS
 
 r"""
 The torch package contains data structures for multi-dimensional
@@ -14,11 +13,17 @@ import os
 import sys
 import platform
 import ctypes
+
+if sys.version_info < (3,):
+    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+
 from ._utils import _import_dotted_name
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
-    USE_RTLD_GLOBAL_WITH_LIBTORCH
+    USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
 from .version import __version__
 from ._six import string_classes as _string_classes
+
+from typing import Set, Type
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -29,14 +34,14 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
+    'lobpcg',
 ]
 
 ################################################################################
 # Load the extension module
 ################################################################################
 
-if platform.system() == 'Windows':
-    is_conda = os.path.exists(os.path.join(sys.prefix, 'conda-meta'))
+if sys.platform == 'win32':
     py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
     th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
 
@@ -58,17 +63,46 @@ if platform.system() == 'Windows':
     else:
         cuda_path = ''
 
-    if sys.version_info >= (3, 8):
-        dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
+    kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
+    dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
+    with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
+    prev_error_mode = kernel32.SetErrorMode(0x0001)
 
-        for dll_path in dll_paths:
+    for dll_path in dll_paths:
+        if sys.version_info >= (3, 8):
             os.add_dll_directory(dll_path)
+        elif with_load_library_flags:
+            res = kernel32.AddDllDirectory(dll_path)
+            if res == 0:
+                err = ctypes.WinError(ctypes.get_last_error())
+                err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
+                raise err
 
-    if is_conda or sys.version_info < (3, 8):
-        dll_paths = [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]
-        dll_paths = list(filter(os.path.exists, dll_paths)) + [os.environ['PATH']]
+    import glob
+    dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
+    path_patched = False
+    for dll in dlls:
+        is_loaded = False
+        if with_load_library_flags:
+            res = kernel32.LoadLibraryExW(dll, 0, 0x00001100)
+            last_error = ctypes.get_last_error()
+            if res == 0 and last_error != 126:
+                err = ctypes.WinError(last_error)
+                err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
+                raise err
+            elif res != 0:
+                is_loaded = True
+        if not is_loaded:
+            if not path_patched:
+                os.environ['PATH'] = ';'.join(dll_paths + [os.environ['PATH']])
+                path_patched = True
+            res = kernel32.LoadLibraryW(dll)
+            if res == 0:
+                err = ctypes.WinError(ctypes.get_last_error())
+                err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
+                raise err
 
-        os.environ['PATH'] = ';'.join(dll_paths)
+    kernel32.SetErrorMode(prev_error_mode)
 
 
 # See Note [Global dependencies]
@@ -105,10 +139,10 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
     if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
         try:
             # next try if DLFCN exists
-            import DLFCN as _dl_flags
+            import DLFCN as _dl_flags  # type: ignore
         except ImportError:
             # as a last attempt, use compile-time constants
-            import torch._dl as _dl_flags
+            import torch._dl as _dl_flags  # type: ignore
     old_flags = sys.getdlopenflags()
     sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
     from torch._C import *
@@ -121,9 +155,19 @@ else:
     # C++ symbols from libtorch clobbering C++ symbols from other
     # libraries, leading to mysterious segfaults.
     #
+    # If building in an environment where libtorch_global_deps isn't available
+    # like parts of fbsource, but where RTLD_GLOBAL causes segfaults, you will
+    # want USE_RTLD_GLOBAL_WITH_LIBTORCH = False and USE_GLOBAL_DEPS = False
+    #
     # See Note [Global dependencies]
-    _load_global_deps()
+    if USE_GLOBAL_DEPS:
+        _load_global_deps()
     from torch._C import *
+
+# Appease the type checker; ordinarily this binding is inserted by the
+# torch._C module initialization code in C
+if False:
+    import torch._C as _C
 
 __all__ += [name for name in dir(_C)
             if name[0] != '_' and
@@ -156,6 +200,11 @@ def typename(o):
 
 def is_tensor(obj):
     r"""Returns True if `obj` is a PyTorch tensor.
+
+    Note that this function is simply doing ``isinstance(obj, Tensor)``.
+    Using that ``isinstance`` check is better for typechecking with mypy,
+    and more explicit - so it's recommended to use that instead of
+    ``is_tensor``.
 
     Args:
         obj (Object): Object to test
@@ -269,6 +318,11 @@ class BoolStorage(_C.BoolStorageBase, _StorageBase):
 class BFloat16Storage(_C.BFloat16StorageBase, _StorageBase):
     pass
 
+class ComplexDoubleStorage(_C.ComplexDoubleStorageBase, _StorageBase):
+    pass
+
+class ComplexFloatStorage(_C.ComplexFloatStorageBase, _StorageBase):
+    pass
 
 class QUInt8Storage(_C.QUInt8StorageBase, _StorageBase):
     pass
@@ -283,11 +337,11 @@ class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
     CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
-    QInt32Storage, BFloat16Storage
+    QInt32Storage, BFloat16Storage, ComplexFloatStorage, ComplexDoubleStorage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
-_tensor_classes = set()
+_tensor_classes: Set[Type] = set()
 
 
 ################################################################################
@@ -308,10 +362,18 @@ def manager_path():
 _C._initExtension(manager_path())
 del manager_path
 
+# Appease the type checker: it can't deal with direct setting of globals().
+# Note that we will see "too many" functions when reexporting this way; there
+# is not a good way to fix this problem.  Perhaps, try to redesign VariableFunctions
+# so that this import is good enough
+if False:
+    from torch._C._VariableFunctions import *
+
 for name in dir(_C._VariableFunctions):
     if name.startswith('__'):
         continue
     globals()[name] = getattr(_C._VariableFunctions, name)
+    __all__.append(name)
 
 ################################################################################
 # Import interface functions defined in Python
@@ -335,6 +397,8 @@ del ByteStorageBase
 del BoolStorageBase
 del QUInt8StorageBase
 del BFloat16StorageBase
+del ComplexDoubleStorageBase
+del ComplexFloatStorageBase
 
 ################################################################################
 # Import most common subpackages
@@ -394,3 +458,13 @@ legacy_contiguous_format = contiguous_format
 from torch.multiprocessing._atfork import register_after_fork
 register_after_fork(torch.get_num_threads)
 del register_after_fork
+
+# Import tools that require fully imported torch (for applying
+# torch.jit.script as a decorator, for instance):
+from ._lobpcg import lobpcg
+
+# These were previously defined in native_functions.yaml and appeared on the
+# `torch` namespace, but we moved them to c10 dispatch to facilitate custom
+# class usage. We add these lines here to preserve backward compatbility.
+quantized_lstm = torch.ops.aten.quantized_lstm
+quantized_gru = torch.ops.aten.quantized_gru

@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/MemoryOverlap.h>
 
 void THCTensor_(fill)(THCState* state, THCTensor *self_, scalar_t value)

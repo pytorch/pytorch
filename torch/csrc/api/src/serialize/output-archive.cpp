@@ -14,7 +14,7 @@
 
 namespace torch {
 namespace serialize {
-OutputArchive::OutputArchive(std::shared_ptr<jit::script::CompilationUnit> cu)
+OutputArchive::OutputArchive(std::shared_ptr<jit::CompilationUnit> cu)
     : cu_(std::move(cu)),
       module_("__torch__.Module", cu_, /*shouldMangle=*/true) {}
 

@@ -6,7 +6,7 @@ import torch.nn.qat as nnqat
 import torch.nn.functional as F
 from torch.nn import init
 from torch.nn.modules.utils import _pair
-
+from torch.nn.parameter import Parameter
 
 class _ConvBnNd(nn.modules.conv._ConvNd):
     def __init__(self,
@@ -14,7 +14,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                  in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
                  groups,
-                 # bias: None, only support Conv with no bias
+                 bias,
                  padding_mode,
                  # BatchNormNd args
                  # num_features: out_channels
@@ -43,6 +43,10 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
         self.reset_bn_parameters()
+        if bias:
+            self.bias = Parameter(torch.Tensor(out_channels))
+        else:
+            self.register_parameter('bias', None)
 
     def reset_running_stats(self):
         self.running_mean.zero_()
@@ -53,6 +57,10 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         self.reset_running_stats()
         init.uniform_(self.gamma)
         init.zeros_(self.beta)
+        if self.bias is not None:
+            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            init.uniform_(self.bias, -bound, bound)
 
     def reset_parameters(self):
         super(_ConvBnNd, self).reset_parameters()
@@ -96,24 +104,28 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
 
         if self.training and not self.freeze_bn:
             # recovering original conv to get original batch_mean and batch_var
-            conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
+            if self.bias is not None:
+                conv_orig = conv / scale_factor.reshape([1, -1, 1, 1]) + self.bias.reshape([1, -1, 1, 1])
+            else:
+                conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
             batch_mean = torch.mean(conv_orig, dim=[0, 2, 3])
             batch_var = torch.var(conv_orig, dim=[0, 2, 3], unbiased=False)
             n = float(conv_orig.numel() / conv_orig.size()[1])
             unbiased_batch_var = batch_var * (n / (n - 1))
             batch_rstd = torch.ones_like(batch_var, memory_format=torch.contiguous_format) / torch.sqrt(batch_var + self.eps)
 
-            rescale_factor = running_std * batch_rstd
-            conv = conv * rescale_factor.reshape([1, -1, 1, 1])
-            conv = conv + (self.beta - self.gamma * batch_mean * batch_rstd).reshape([1, -1, 1, 1])
-
+            conv = (self.gamma * batch_rstd).reshape([1, -1, 1, 1]) * conv_orig + \
+                (self.beta - self.gamma * batch_rstd * batch_mean).reshape([1, -1, 1, 1])
             self.running_mean = exponential_average_factor * batch_mean.detach() + \
                 (1 - exponential_average_factor) * self.running_mean
             self.running_var = exponential_average_factor * unbiased_batch_var.detach() + \
                 (1 - exponential_average_factor) * self.running_var
         else:
-            conv = conv + (self.beta - self.gamma * self.running_mean /
-                           running_std).reshape([1, -1, 1, 1])
+            if self.bias is None:
+                conv = conv + (self.beta - self.gamma * self.running_mean /
+                               running_std).reshape([1, -1, 1, 1])
+            else:
+                conv = conv + (self.gamma * (self.bias - self.running_mean) / running_std + self.beta).reshape([1, -1, 1, 1])
         return conv
 
     def extra_repr(self):
@@ -139,13 +151,13 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         conv, bn = mod[0], mod[1]
         qat_convbn = cls(conv.in_channels, conv.out_channels, conv.kernel_size,
                          conv.stride, conv.padding, conv.dilation,
-                         conv.groups,
+                         conv.groups, conv.bias is not None,
                          conv.padding_mode,
                          bn.eps, bn.momentum,
                          False,
                          qconfig)
-        assert qat_convbn.bias is None, 'QAT ConvBn should not have bias'
         qat_convbn.weight = conv.weight
+        qat_convbn.bias = conv.bias
         qat_convbn.gamma = bn.weight
         qat_convbn.beta = bn.bias
         qat_convbn.running_mean = bn.running_mean
@@ -179,7 +191,7 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
                  # ConvNd args
                  in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
-                 # bias: None, only support Conv with no bias
+                 bias=None,
                  padding_mode='zeros',
                  # BatchNorm2d args
                  # num_features: out_channels
@@ -194,7 +206,7 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
         padding = _pair(padding)
         dilation = _pair(dilation)
         _ConvBnNd.__init__(self, in_channels, out_channels, kernel_size, stride,
-                           padding, dilation, False, _pair(0), groups, padding_mode,
+                           padding, dilation, False, _pair(0), groups, bias, padding_mode,
                            eps, momentum, freeze_bn, qconfig)
 
 class ConvBnReLU2d(ConvBn2d):
@@ -223,7 +235,7 @@ class ConvBnReLU2d(ConvBn2d):
                  # Conv2d args
                  in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
-                 # bias: None, only support Conv with no bias
+                 bias=None,
                  padding_mode='zeros',
                  # BatchNorm2d args
                  # num_features: out_channels
@@ -234,7 +246,7 @@ class ConvBnReLU2d(ConvBn2d):
                  freeze_bn=False,
                  qconfig=None):
         super(ConvBnReLU2d, self).__init__(in_channels, out_channels, kernel_size, stride,
-                                           padding, dilation, groups,
+                                           padding, dilation, groups, bias,
                                            padding_mode, eps, momentum,
                                            freeze_bn,
                                            qconfig)

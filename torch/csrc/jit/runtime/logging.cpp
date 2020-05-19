@@ -22,9 +22,9 @@ int64_t LockingLogger::getCounterValue(const std::string& name) const {
   if (!raw_counters.count(name)) {
     return 0;
   }
-  AggregationType type = agg_types.count(name) ? agg_types.at(name)
-                                               : AggregationType::SUM;
-  const auto &raw_counter = raw_counters.at(name);
+  AggregationType type =
+      agg_types.count(name) ? agg_types.at(name) : AggregationType::SUM;
+  const auto& raw_counter = raw_counters.at(name);
   switch (type) {
     case AggregationType::SUM: {
       return raw_counter.sum;
@@ -42,15 +42,14 @@ void LockingLogger::setAggregationType(
   agg_types[stat_name] = type;
 }
 
-
 std::atomic<LoggerBase*> global_logger{new NoopLogger()};
 
 LoggerBase* getLogger() {
   return global_logger.load();
 }
 
-LoggerBase *setLogger(LoggerBase* logger) {
-  LoggerBase *previous = global_logger.load();
+LoggerBase* setLogger(LoggerBase* logger) {
+  LoggerBase* previous = global_logger.load();
   while (!global_logger.compare_exchange_strong(previous, logger)) {
     previous = global_logger.load();
   }

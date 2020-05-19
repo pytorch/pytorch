@@ -9,6 +9,12 @@
 #include <vector>
 #include <type_traits>
 
+#ifdef _WIN32
+#define DISABLED_ON_WINDOWS(x) DISABLED_##x
+#else
+#define DISABLED_ON_WINDOWS(x) x
+#endif
+
 using namespace at;
 
 namespace {
@@ -228,7 +234,8 @@ TEST(PowTest, IntTensorPowAllScalars) {
   tensor_pow_scalar(ints, c10::kInt, doubles, c10::kDouble);
 }
 
-TEST(PowTest, LongTensorPowAllScalars) {
+// See https://github.com/pytorch/pytorch/issues/35548
+TEST(PowTest, DISABLED_ON_WINDOWS(LongTensorPowAllScalars)) {
   tensor_pow_scalar(longs, c10::kLong, non_neg_ints, c10::kInt);
   tensor_pow_scalar(longs, c10::kLong, non_neg_longs, c10::kLong);
   tensor_pow_scalar(longs, c10::kLong, floats, c10::kFloat);

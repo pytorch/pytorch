@@ -276,9 +276,9 @@ class GemmMicrokernelTester {
               cZeroPoint,
               qmin(),
               qmax());
-      const union pytorch_qnnp_q31_requantization_params
+      const union pytorch_qnnp_fp32_requantization_params
           scalarRequantizationParams =
-              pytorch_qnnp_compute_scalar_requantization_params(
+              pytorch_qnnp_compute_scalar_fp32_requantization_params(
                   requantizationScale, cZeroPoint, qmin(), qmax());
 
       qgemm(
@@ -294,8 +294,13 @@ class GemmMicrokernelTester {
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
-          cRef[mIndex * n() + nIndex] = pytorch_qnnp_q31_requantize(
+#if defined(__arm__) || defined(_M_ARM)
+          cRef[mIndex * n() + nIndex] = pytorch_qnnp_fp32_requantize_magic(
               acc[mIndex * n() + nIndex], scalarRequantizationParams);
+#else
+          cRef[mIndex * n() + nIndex] = pytorch_qnnp_fp32_requantize(
+              acc[mIndex * n() + nIndex], scalarRequantizationParams);
+#endif
         }
       }
 
@@ -539,9 +544,9 @@ class GemmMicrokernelTester {
               cZeroPoint,
               qmin(),
               qmax());
-      const union pytorch_qnnp_q31_requantization_params
+      const union pytorch_qnnp_fp32_requantization_params
           scalarRequantizationParams =
-              pytorch_qnnp_compute_scalar_requantization_params(
+              pytorch_qnnp_compute_scalar_fp32_requantization_params(
                   requantizationScale, cZeroPoint, qmin(), qmax());
 
       qconv(
@@ -557,8 +562,13 @@ class GemmMicrokernelTester {
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
-          cRef[mIndex * n() + nIndex] = pytorch_qnnp_q31_requantize(
+#if defined(__arm__) || defined(_M_ARM)
+          cRef[mIndex * n() + nIndex] = pytorch_qnnp_fp32_requantize_magic(
               acc[mIndex * n() + nIndex], scalarRequantizationParams);
+#else
+          cRef[mIndex * n() + nIndex] = pytorch_qnnp_fp32_requantize(
+              acc[mIndex * n() + nIndex], scalarRequantizationParams);
+#endif
         }
       }
 

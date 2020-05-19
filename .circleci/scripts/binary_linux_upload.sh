@@ -23,7 +23,7 @@ CONDA_UPLOAD_CHANNEL=$(echo "${PIP_UPLOAD_FOLDER}" | sed 's:/*$::')
 pushd /home/circleci/project/final_pkgs
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   retry conda install -yq anaconda-client
-  anaconda -t "${CONDA_PYTORCHBOT_TOKEN}" upload  "$(ls)" -u "pytorch-${CONDA_UPLOAD_CHANNEL}" --label main --no-progress --force
+  retry anaconda -t "${CONDA_PYTORCHBOT_TOKEN}" upload  "$(ls)" -u "pytorch-${CONDA_UPLOAD_CHANNEL}" --label main --no-progress --force
 elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
   retry pip install -q awscli
   s3_dir="s3://pytorch/libtorch/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"

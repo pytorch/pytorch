@@ -2,8 +2,8 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
-#include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/python/module_python.h>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -14,7 +14,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
@@ -85,7 +84,8 @@ FunctionSchema PythonValue::getSchema(
 
     // arg_types does not include self but param_names does, so adjust for that
     // if needed
-    TORCH_INTERNAL_ASSERT(arg_types.size() == param_names.size() - (moduleSelf_ ? 1 : 0));
+    TORCH_INTERNAL_ASSERT(
+        arg_types.size() == param_names.size() - (moduleSelf_ ? 1 : 0));
 
     auto types_it = arg_types.begin();
     for (; types_it != arg_types.end(); ++types_it, ++names_it) {
@@ -227,7 +227,7 @@ SugaredValuePtr ModuleValue::getitem(
     return getSugaredModuleDict(loc, m)->getModules()->getitem(loc, m, idx);
   }
   throw ErrorReport(loc)
-      << "Only ModuleLists, Sequentials, and ModuleDict Modules are subscriptable";
+      << "Only ModuleList, Sequential, and ModuleDict modules are subscriptable";
 }
 
 void checkInterface(
@@ -352,23 +352,22 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto tp = v.toTuple();
     std::vector<Value*> values;
     values.reserve(tp->elements().size());
-    for (const auto& e: tp->elements()) {
+    for (const auto& e : tp->elements()) {
       values.push_back(toSugaredValue(e, m, loc)->asValue(loc, m));
     }
     return toSimple(
         m.graph()->insertNode(m.graph()->createTuple(values))->output());
   } else {
-    return toSimple(
-        m.graph()->insertConstant(v, loc));
+    return toSimple(m.graph()->insertConstant(v, loc));
   }
 }
 
-// This method controls how we desugar attribute lookups on ScriptModules.
-std::shared_ptr<SugaredValue> ModuleValue::attr(
+// This method controls how we desugar attribute lookups on ScriptModules
+std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
-  // 1. Look inside script::Module object for the field.
+  // 1. Look inside Module object for the field.
   const auto& selfType_ = concreteType_->getJitType();
   if (selfType_->cast<InterfaceType>()) {
     return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
@@ -376,13 +375,14 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   const auto& selfType = selfType_->expect<ClassType>();
 
-  if (selfType->hasAttribute(field) && selfType->getAttribute(field)->is_module()) {
+  if (selfType->hasAttribute(field) &&
+      selfType->getAttribute(field)->is_module()) {
     // ...if it's a submodule, return it as a new ModuleValue.
     const auto submoduleConcreteType =
         concreteType_->findSubmoduleConcreteType(field);
     return std::make_shared<ModuleValue>(
         m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
-  } else if (selfType->hasAttribute(field) || selfType->getMethod(field)) {
+  } else if (selfType->hasAttribute(field) || selfType->findMethod(field)) {
     // ...otherwise, methods, parameters, attributes, and buffers are all
     // first class so they get returned as SimpleValues
     return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
@@ -415,8 +415,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // 4. Check if it's a function attribute.
   if (const auto fnAttr = concreteType_->findFunctionAttribute(field)) {
     return std::make_shared<FunctionValue>(*fnAttr);
-  } else if (
-      const auto builtin = concreteType_->findBuiltinFunction(field)) {
+  } else if (const auto builtin = concreteType_->findBuiltinFunction(field)) {
     return std::make_shared<BuiltinFunction>(*builtin, /*self=*/c10::nullopt);
   }
 
@@ -427,7 +426,17 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       concreteType_->getPyClass(),
       field.c_str(),
       pybind11::cast<pybind11::none>(Py_None));
+
   if (py::isinstance<py::function>(unboundMethod)) {
+    bool isStaticFn =
+        py::cast<bool>(py::module::import("torch._jit_internal")
+                           .attr("is_static_fn")(concreteType_->getPyClass(), field.c_str()));
+    if (isStaticFn) {
+      // Functions within the module annotated with @staticmethod do not need binding.
+      py::object staticFn = py::module::import("torch._jit_internal")
+                           .attr("get_static_fn")(concreteType_->getPyClass(), field.c_str());
+      return toSugaredValue(staticFn, m, loc);
+    }
     // For Python methods that we're trying to call directly, we need to bind
     // the method to a self. (see the documentation for lazy_bind in Python for
     // more info).
@@ -456,14 +465,35 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return attr(loc, m, field);
   }
 
-  // We've exhausted all possibilities. Bailout with a hint to the user.
+  return nullptr;
+}
+
+bool ModuleValue::hasAttr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  return tryGetAttr(loc, m, field) != nullptr;
+}
+
+// This method controls how we desugar attribute lookups on ScriptModules.
+std::shared_ptr<SugaredValue> ModuleValue::attr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  if (auto attr = tryGetAttr(loc, m, field)) {
+    return attr;
+  }
+
+  // We don't define this attr. Bailout with a hint to the user.
   std::string hint;
   if (auto failureReason = concreteType_->findFailedAttribute(field)) {
     hint = *failureReason;
   }
 
-  throw ErrorReport(loc) << "Module '" << selfType->name()->name() << "'"
-                         << " has no attribute '" << field << "' " << hint;
+  throw ErrorReport(loc)
+      << "Module '"
+      << concreteType_->getJitType()->expect<ClassType>()->name()->name() << "'"
+      << " has no attribute '" << field << "' " << hint;
 }
 
 SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
@@ -484,9 +514,9 @@ SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
 }
 
 std::shared_ptr<SugaredValue> PythonClassValue::attr(
-      const SourceRange& loc,
-      Function& m,
-      const std::string& field) {
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
   // Resolve values from the Python object first (e.g. for static methods on
   // this type, resolve them as functions)
   auto py_attr = py::getattr(py_type_, field.c_str(), py::none());
@@ -495,6 +525,18 @@ std::shared_ptr<SugaredValue> PythonClassValue::attr(
   }
 
   return ClassValue::attr(loc, m, field);
+}
+
+bool PythonClassValue::hasAttr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  try {
+    py::getattr(py_type_, field.c_str());
+    return true;
+  } catch (py::error_already_set& e) {
+    return false;
+  }
 }
 
 void ModuleValue::setAttr(
@@ -549,12 +591,62 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   return value->call(loc, caller, inputs, attributes, n_binders);
 }
 
+bool isNamedTupleClass(const py::object& obj) {
+  auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
+  return PyObject_IsSubclass(obj.ptr(), tuple_type) &&
+      py::hasattr(obj, "_fields");
+}
+
+TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
+  TORCH_INTERNAL_ASSERT(isNamedTupleClass(obj));
+  auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
+      py::module::import("torch.jit").attr("_qualified_name")(obj)));
+  // Currently don't support default values
+  if (py::hasattr(obj, "_field_defaults")) {
+    auto default_dict = py::cast<std::map<std::string, py::object>>(
+        py::getattr(obj, "_field_defaults"));
+    if (default_dict.size()) {
+      std::string error_msg =
+          "Default values are currently not supported"
+          " on NamedTuple fields in TorchScript. Fields "
+          "with default values: [";
+      bool first = true;
+      for (const auto& kv : default_dict) {
+        if (!first) {
+          error_msg += ", ";
+        }
+        error_msg += kv.first;
+      }
+      error_msg += "]";
+      throw ErrorReport(loc) << error_msg;
+    }
+  }
+
+  py::object props =
+      py::module::import("torch.jit").attr("_get_named_tuple_properties")(obj);
+  std::string unqualName;
+  std::vector<std::string> fields;
+  std::vector<TypePtr> annotations;
+  std::tie(unqualName, fields, annotations) = py::cast<
+      std::tuple<std::string, decltype(fields), decltype(annotations)>>(props);
+
+  auto tt = TupleType::createNamed(qualifiedName, fields, annotations);
+  if (auto type = get_python_cu()->get_type(qualifiedName)) {
+    TORCH_CHECK(
+        type->isSubtypeOf(tt),
+        "Can't to redefine NamedTuple: ",
+        tt->python_str());
+    return type;
+  }
+  get_python_cu()->register_type(tt);
+  return tt;
+}
+
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
     SourceRange loc,
     bool is_constant) {
-
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
   // f = python_constant
@@ -619,13 +711,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return SpecialFormValue::create(prim::annotate);
 #ifdef USE_DISTRIBUTED
   } else if (
-      // RPC module is only avaialble for Python3
-      // when build flag "USE_DISTRIBUTED" is on.
-      !py::module::import("torch._six").attr("PY2").cast<bool>() &&
+      // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
       obj.ptr() ==
-          py::module::import("torch.distributed.rpc")
-              .attr("rpc_async")
-              .ptr()) {
+          py::module::import("torch.distributed.rpc").attr("rpc_async").ptr()) {
     return SpecialFormValue::create(prim::rpc_async);
 #endif
   } else if (auto callee = as_module(obj)) {
@@ -659,6 +747,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         script_class.class_type_.type_->expect<ClassType>(), obj);
   }
 
+  if (isNamedTupleClass(obj)) {
+    auto tuple_type = registerNamedTuple(obj, loc)->expect<TupleType>();
+    return std::make_shared<NamedTupleConstructor>(tuple_type);
+  }
+
   py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
   if (py::cast<bool>(isClass)) {
     py::str qualifiedName =
@@ -678,16 +771,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         // Register class
         auto rcb = py::module::import("torch._jit_internal")
                        .attr("createResolutionCallbackForClassMethods")(obj);
-
-        {
-          // We're starting a new compilation, so update the error call stack in
-          // case it fails
-          ErrorReport::CallStack stack(qualname.name());
-          ErrorReport::CallStack::update_pending_range(loc);
-
-          py::module::import("torch.jit")
-              .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
-        }
+        py::module::import("torch.jit")
+            .attr("_recursive_compile_class")(obj, loc);
 
         // Return class
         auto newClassType = pyCu->get_class(qualname);
@@ -710,8 +795,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return std::make_shared<FunctionValue>(std::move(compiled_fns));
     }
 
-    auto compiled_fn =
-        py::module::import("torch.jit._recursive").attr("try_compile_fn")(obj, loc);
+    auto compiled_fn = py::module::import("torch.jit._recursive")
+                           .attr("try_compile_fn")(obj, loc);
     if (auto callee = as_function(compiled_fn)) {
       return std::make_shared<FunctionValue>(*callee);
     }
@@ -728,6 +813,5 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   return std::make_shared<PythonValue>(obj);
 }
-} // namespace script
 } // namespace jit
 } // namespace torch

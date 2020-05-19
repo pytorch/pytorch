@@ -30,6 +30,9 @@ struct pytorch_qnnp_fp32_clamping_params {
 union pytorch_qnnp_fp32_requantization_params {
   struct {
     float scale;
+    uint8_t output_zero_point;
+    uint8_t output_max;
+    uint8_t output_min;
     float min_less_zero_point;
     float max_less_zero_point;
     float magic;
@@ -127,10 +130,7 @@ union pytorch_qnnp_conv_quantization_params {
   struct {
     int32_t kernel_zero_point;
     int32_t input_zero_point;
-    int32_t multiplier;
-    int32_t remainder_mask;
-    int32_t remainder_threshold;
-    uint32_t shift;
+    float requantization_scale;
     int32_t output_min_less_zero_point;
     int32_t output_max_less_zero_point;
     int32_t output_zero_point;
@@ -139,22 +139,24 @@ union pytorch_qnnp_conv_quantization_params {
   struct {
     int16_t kernel_zero_point;
     int16_t input_zero_point;
-    int32_t multiplier;
-    int32_t right_shift;
+    float requantization_scale;
     int16_t output_zero_point;
     uint8_t output_max;
     uint8_t output_min;
+    // Following four are for nearest-ties-to-even
+    // rounding in aarch32. This saves some instructions
+    // needed otherwise.
+    float vfmax;
+    float vfmin;
+    float vfmagic;
+    int32_t vimagic;
   } neon;
 #endif /* CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64 */
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
   struct {
     PYTORCH_QNNP_ALIGN(16) int16_t kernel_zero_point[8];
     PYTORCH_QNNP_ALIGN(16) int16_t input_zero_point[8];
-    PYTORCH_QNNP_ALIGN(16) uint32_t multiplier[4];
-    PYTORCH_QNNP_ALIGN(16) uint64_t rounding[2];
-    PYTORCH_QNNP_ALIGN(16) int32_t remainder_mask[4];
-    PYTORCH_QNNP_ALIGN(16) int32_t remainder_threshold[4];
-    PYTORCH_QNNP_ALIGN(16) uint64_t shift[2];
+    PYTORCH_QNNP_ALIGN(16) float requantization_scale[4];
     PYTORCH_QNNP_ALIGN(16) int16_t output_zero_point[8];
     PYTORCH_QNNP_ALIGN(16) uint8_t output_max[16];
     PYTORCH_QNNP_ALIGN(16) uint8_t output_min[16];
@@ -220,29 +222,31 @@ union pytorch_qnnp_add_quantization_params {
 union pytorch_qnnp_avgpool_quantization_params {
   struct {
     int32_t bias;
-    int32_t multiplier;
-    int64_t rounding;
-    uint32_t right_shift;
-    int32_t output_min_less_zero_point;
-    int32_t output_max_less_zero_point;
+    float scale;
     int32_t output_zero_point;
+    uint8_t output_max;
+    uint8_t output_min;
   } scalar;
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
   struct {
     int32_t bias;
-    int32_t multiplier;
-    int64_t left_shift;
+    float scale;
     int16_t output_zero_point;
     uint8_t output_max;
     uint8_t output_min;
+    // Following four are for nearest-ties-to-even
+    // rounding in aarch32. This saves some instructions
+    // needed otherwise.
+    float vfmax;
+    float vfmin;
+    float vfmagic;
+    int32_t vimagic;
   } neon;
 #endif /* CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64 */
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
   struct {
     PYTORCH_QNNP_ALIGN(16) int32_t bias[4];
-    PYTORCH_QNNP_ALIGN(16) uint32_t multiplier[4];
-    PYTORCH_QNNP_ALIGN(16) uint64_t rounding[2];
-    PYTORCH_QNNP_ALIGN(16) uint64_t right_shift[2];
+    PYTORCH_QNNP_ALIGN(16) float scale[4];
     PYTORCH_QNNP_ALIGN(16) int16_t output_zero_point[8];
     PYTORCH_QNNP_ALIGN(16) uint8_t output_max[16];
     PYTORCH_QNNP_ALIGN(16) uint8_t output_min[16];

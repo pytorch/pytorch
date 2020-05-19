@@ -37,6 +37,19 @@ C10_DEFINE_string(
     "semicolon to separate the dimension of different "
     "tensors.");
 C10_DEFINE_string(input_type, "", "Input type (uint8_t/float)");
+C10_DEFINE_string(
+    input_memory_format,
+    "contiguous_format",
+    "Input memory format (contiguous_format/channels_last)");
+C10_DEFINE_bool(
+  no_inputs,
+  false,
+  "Whether the model has any input. Will ignore other input arugments if true");
+C10_DEFINE_int(
+    use_bundled_input,
+    -1,
+    "If set, benchmark will expect the model to have bundled inputs "
+    "and will run on the input with this index. ");
 C10_DEFINE_bool(
   print_output,
   false,
@@ -63,19 +76,14 @@ split(char separator, const std::string& string, bool ignore_empty = true) {
   return pieces;
 }
 
-int main(int argc, char** argv) {
-  c10::SetUsageMessage(
-    "Run speed benchmark for pytorch model.\n"
-    "Example usage:\n"
-    "./speed_benchmark_torch"
-    " --model=<model_file>"
-    " --input_dims=\"1,3,224,224\""
-    " --input_type=float"
-    " --warmup=5"
-    " --iter=20");
-  if (!c10::ParseCommandLineFlags(&argc, &argv)) {
-    std::cerr << "Failed to parse command line flags!" << std::endl;
-    return 1;
+std::vector<c10::IValue> create_inputs() {
+  if (FLAGS_no_inputs) {
+    return {};
+  }
+
+  if (FLAGS_use_bundled_input >= 0) {
+    // Need to get these after the model is loaded.
+    return {};
   }
 
   CAFFE_ENFORCE_GE(FLAGS_input_dims.size(), 0, "Input dims must be specified.");
@@ -83,10 +91,17 @@ int main(int argc, char** argv) {
 
   std::vector<std::string> input_dims_list = split(';', FLAGS_input_dims);
   std::vector<std::string> input_type_list = split(';', FLAGS_input_type);
+  std::vector<std::string> input_memory_format_list =
+      split(';', FLAGS_input_memory_format);
+
   CAFFE_ENFORCE_EQ(
       input_dims_list.size(),
       input_type_list.size(),
       "Input dims and type should have the same number of items.");
+  CAFFE_ENFORCE_EQ(
+      input_dims_list.size(),
+      input_memory_format_list.size(),
+      "Input dims and format should have the same number of items.");
 
   std::vector<c10::IValue> inputs;
   for (size_t i = 0; i < input_dims_list.size(); ++i) {
@@ -95,15 +110,35 @@ int main(int argc, char** argv) {
     for (const auto& s : input_dims_str) {
       input_dims.push_back(c10::stoi(s));
     }
+
+    at::ScalarType input_type;
     if (input_type_list[i] == "float") {
-      inputs.push_back(torch::ones(input_dims, at::ScalarType::Float));
+      input_type = at::ScalarType::Float;
     } else if (input_type_list[i] == "uint8_t") {
-      inputs.push_back(torch::ones(input_dims, at::ScalarType::Byte));
+      input_type = at::ScalarType::Byte;
     } else if (input_type_list[i] == "int64") {
-      inputs.push_back(torch::ones(input_dims, torch::kI64));
+      input_type = at::ScalarType::Long;
     } else {
       CAFFE_THROW("Unsupported input type: ", input_type_list[i]);
     }
+
+    at::MemoryFormat input_memory_format;
+    if (input_memory_format_list[i] == "channels_last") {
+      if (input_dims.size() != 4u) {
+        CAFFE_THROW(
+            "channels_last memory format only available on 4D tensors!");
+      }
+      input_memory_format = at::MemoryFormat::ChannelsLast;
+    } else if (input_memory_format_list[i] == "contiguous_format") {
+      input_memory_format = at::MemoryFormat::Contiguous;
+    } else {
+      CAFFE_THROW(
+          "Unsupported input memory format: ", input_memory_format_list[i]);
+    }
+
+    inputs.push_back(torch::ones(
+        input_dims,
+        at::TensorOptions(input_type).memory_format(input_memory_format)));
   }
 
   if (FLAGS_pytext_len > 0) {
@@ -111,13 +146,46 @@ int main(int argc, char** argv) {
     inputs.push_back(stensor);
   }
 
-  auto qengines = at::globalContext().supportedQEngines();
-  if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) != qengines.end()) {
-    at::globalContext().setQEngine(at::QEngine::QNNPACK);
+  return inputs;
+}
+
+int main(int argc, char** argv) {
+  c10::SetUsageMessage(
+    "Run speed benchmark for pytorch model.\n"
+    "Example usage:\n"
+    "./speed_benchmark_torch"
+    " --model=<model_file>"
+    " --use_bundled_input=0"
+    " --warmup=5"
+    " --iter=20");
+  if (!c10::ParseCommandLineFlags(&argc, &argv)) {
+    std::cerr << "Failed to parse command line flags!" << std::endl;
+    return 1;
   }
+
+  std::vector<c10::IValue> inputs = create_inputs();
+
   torch::autograd::AutoGradMode guard(false);
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
   auto module = torch::jit::load(FLAGS_model);
+
+  if (FLAGS_use_bundled_input >= 0) {
+    auto get_method = module.find_method("get_all_bundled_inputs");
+    if (!get_method) {
+      std::cerr << "Model does not have bundled inputs.  Before saving," << std::endl
+        << "use torch.utils.bundled_inputs.augment_model_with_bundled_inputs." << std::endl;
+      return 1;
+    }
+
+    auto all_inputs = (*get_method)({}).toList();
+    if (FLAGS_use_bundled_input >= all_inputs.size()) {
+      // NOTE: This check is only to make the error message nicer.
+      // The get call below does internal bounds checking.
+      std::cerr << "Model has only " << all_inputs.size() << " bundled inputs." << std::endl;
+      return 1;
+    }
+    inputs = all_inputs.get(FLAGS_use_bundled_input).toTuple()->elements();
+  }
 
   module.eval();
   if (FLAGS_print_output) {
@@ -143,23 +211,23 @@ int main(int argc, char** argv) {
       ".");
   caffe2::Timer timer;
   std::vector<float> times;
-  auto millis = timer.MilliSeconds();
+  auto micros = timer.MicroSeconds();
   for (int i = 0; i < FLAGS_iter; ++i) {
     auto start = high_resolution_clock::now();
     module.forward(inputs);
     auto stop = high_resolution_clock::now();
-    auto duration = duration_cast<milliseconds>(stop - start);
+    auto duration = duration_cast<microseconds>(stop - start);
     times.push_back(duration.count());
   }
-  millis = timer.MilliSeconds();
+  micros = timer.MicroSeconds();
   if (FLAGS_report_pep) {
     for (auto t : times) {
       std::cout << "PyTorchObserver {\"type\": \"NET\", \"unit\": \"us\", \"metric\": \"latency\", \"value\": \"" << t << "\"}" << std::endl;
     }
   }
-  std::cout << "Main run finished. Milliseconds per iter: "
-            << millis / FLAGS_iter
-            << ". Iters per second: " << 1000.0 * FLAGS_iter / millis
+  std::cout << "Main run finished. Microseconds per iter: "
+            << micros / FLAGS_iter
+            << ". Iters per second: " << 1000.0 * 1000 * FLAGS_iter / micros
             << std::endl;
 
   return 0;

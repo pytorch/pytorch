@@ -22,10 +22,9 @@ const at::IValue& ScriptResp::value() {
   return value_;
 }
 
-Message ScriptResp::toMessage() && {
+Message ScriptResp::toMessageImpl() && {
   std::vector<torch::Tensor> tensor_table;
   auto payload = jit::pickle(value_, &tensor_table);
-  ;
   return Message(
       std::move(payload), std::move(tensor_table), MessageType::SCRIPT_RET);
 }

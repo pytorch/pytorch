@@ -197,9 +197,7 @@ void max_pool3d_with_indices_out_frame(
            offsetZ);
     }
 
-    TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-      "max_pool3d_backward_out_cuda_frame failed with error code ",
-      cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError()); 
 
     totalZ -= 65535;
     offsetZ += 65535;
@@ -265,9 +263,7 @@ void max_pool3d_with_indices_backward_out_frame(
         dilationT, dilationH, dilationW,
         offsetZ);
 
-    TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-      "max_pool3d_with_indices_backward_out_frame failed with error code ",
-      cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError()); 
 
     totalZ -= 65535;
     offsetZ += 65535;
@@ -483,7 +479,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
           grad_input_data, work_grad_output, work_indices,
           totalZ,
           itime, iheight, iwidth,
-          owidth, oheight,
+          oheight, owidth,
           dT, dH, dW,
           pT, pH, pW,
           dilationT, dilationH, dilationW);

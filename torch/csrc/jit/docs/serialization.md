@@ -120,11 +120,6 @@ the current code object depends on. For example, if we are printing a
 `Module`, it will depend on its submodules, as well as any classes used in
 its methods or attributes.
 
-This information is used to write an `import` statement at the top of the
-printed source, which tells the importer that they need to go compile those
-dependencies (covered more in the "Code layout and qualified naming" section
-below).
-
 **Uses of tensor constants**. Most constants are inlined as literals, like
 strings or ints. But since tensors are potentially very large, when
 `PythonPrint` encouters a constant tensor it will emit a reference to a
@@ -285,7 +280,7 @@ The load process has the following steps:
 
 1. Unpickle `constants.pkl`, which produces a tuple of all tensor constants
    referenced in code.
-2. Unpickle `data.pkl` into the top-level `script::Module` and return it.
+2. Unpickle `data.pkl` into the top-level `Module` and return it.
 
 The unpickling process consists of a single call to unpickle the module
 object contained in `data.pkl`. The `Unpickler` is given a callback that lets it

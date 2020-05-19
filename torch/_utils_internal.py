@@ -34,7 +34,7 @@ def resolve_library_path(path):
     return os.path.realpath(path)
 
 
-def get_source_lines_and_file(obj):
+def get_source_lines_and_file(obj, error_msg=None):
     """
     Wrapper around inspect.getsourcelines and inspect.getsourcefile.
 
@@ -45,13 +45,21 @@ def get_source_lines_and_file(obj):
         filename = inspect.getsourcefile(obj)
         sourcelines, file_lineno = inspect.getsourcelines(obj)
     except OSError as e:
-        raise OSError((
-            "Can't get source for {}. TorchScript requires source access in order to carry out compilation. " +
-            "Make sure original .py files are available. Original error: {}").format(filename, e))
+        msg = ("Can't get source for {}. TorchScript requires source access in "
+               "order to carry out compilation, make sure original .py files are "
+               "available. Original error: {}".format(obj, e))
+        if error_msg:
+            msg += '\n' + error_msg
+        raise OSError(msg)
 
     return sourcelines, file_lineno, filename
 
 
 TEST_MASTER_ADDR = '127.0.0.1'
 TEST_MASTER_PORT = 29500
+# USE_GLOBAL_DEPS controls whether __init__.py tries to load 
+# libtorch_global_deps, see Note [Global dependencies]
+USE_GLOBAL_DEPS = True
+# USE_RTLD_GLOBAL_WITH_LIBTORCH controls whether __init__.py tries to load
+# _C.so with RTLD_GLOBAL during the call to dlopen.
 USE_RTLD_GLOBAL_WITH_LIBTORCH = False

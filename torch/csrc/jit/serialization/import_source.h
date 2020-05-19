@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <functional>
 #include <memory>
 #include <string>
@@ -9,7 +9,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct SourceImporterImpl;
 
@@ -27,12 +26,12 @@ struct TORCH_API SourceImporter {
       SourceLoader loader,
       size_t version);
 
-  TypePtr loadNamedType(const QualifiedName& name) const;
+  TypePtr loadType(const QualifiedName& name) const;
 
   // Add the methods defined in `src` to the module `mod`, using SourceImporter
-  // to resolve any classes via loadNamedType
+  // to resolve any classes via loadType
   void LEGACY_import_methods(
-      const script::Module& mod,
+      const Module& mod,
       const std::shared_ptr<Source>& src);
   ~SourceImporter();
 
@@ -40,6 +39,5 @@ struct TORCH_API SourceImporter {
   std::shared_ptr<SourceImporterImpl> pImpl;
 };
 
-} // namespace script
 } // namespace jit
 } // namespace torch

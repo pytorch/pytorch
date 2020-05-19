@@ -1,11 +1,11 @@
 #pragma once
 
+#include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/api/method.h>
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct Resolver;
 using ResolverPtr = std::shared_ptr<Resolver>;
@@ -48,9 +48,7 @@ struct TORCH_API Object {
           "'");
       _ivalue()->setSlot(*slot, std::move(v));
     } else {
-      TORCH_CHECK(
-          false,
-          "Module has no attribute '", name, "'");
+      TORCH_CHECK(false, "Module has no attribute '", name, "'");
     }
   }
 
@@ -80,8 +78,8 @@ struct TORCH_API Object {
   }
 
   bool hasattr(const std::string& name) const {
-    return _ivalue()->type()->hasAttribute(name)
-      || _ivalue()->type()->hasConstant(name);
+    return _ivalue()->type()->hasAttribute(name) ||
+        _ivalue()->type()->hasConstant(name);
   }
 
   // each object owns its methods. The reference returned here
@@ -94,7 +92,7 @@ struct TORCH_API Object {
   }
 
   const std::vector<Method> get_methods() const {
-    return fmap(type()->methods(), [&](Function* func) {
+    return c10::fmap(type()->methods(), [&](Function* func) {
       return Method(_ivalue(), func);
     });
   }
@@ -126,11 +124,22 @@ struct TORCH_API Object {
     return _ivalue()->slots().size();
   }
 
+  // shallow copy the object
+  Object copy() const;
+
+  // Copies all the attributes of the object recursively without creating new
+  // `ClassType`, including deepcopy of Tensors
+  Object deepcopy() const;
+
  private:
   // mutable be we lazily initialize in module_object.
   mutable ObjectPtr _ivalue_;
 };
 
+namespace script {
+// We once had a `script::` namespace that was deleted. This is for backcompat
+// of the public API; new code should not use this type alias.
+using Object = ::torch::jit::Object;
 } // namespace script
 } // namespace jit
 } // namespace torch

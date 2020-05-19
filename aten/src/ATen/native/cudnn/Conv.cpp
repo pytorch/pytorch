@@ -116,6 +116,10 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
 // This is a workaround for a CuDNN bug that gave wrong results in certain strided convolution
 // gradient setups. Check Issue #16610 for bug details. Bug is there for CUDNN version < 7.5 .
 
+constexpr size_t operator "" _TiB(unsigned long long n) {
+  return size_t(n) * 1024 * 1024 * 1024 * 1024;
+}
+
 namespace at { namespace native {
 
 // TODO: Go through all the checking code again and make sure
@@ -298,6 +302,10 @@ BenchmarkCache<cudnnConvolutionBwdFilterAlgoPerf_t> bwd_filter_algos;
 // tensor instead.
 struct Workspace {
   Workspace(size_t size) : size(size), data(NULL) {
+    // Sometimes cuDNN returns a workspace size > 2^63, this could makes the allocation of
+    // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
+    // we manually fail with OOM.
+    TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
     data = THCudaMalloc(globalContext().lazyInitCUDA(), size);
   }
   Workspace(const Workspace&) = delete;
@@ -363,24 +371,23 @@ size_t getMaxWorkspaceSize(
     const ConvolutionArgs& args,
     const algo_t *algo, int n_algo)
 {
-    THCState *state = globalContext().lazyInitCUDA();
+  size_t max_ws_size = 0;
+  size_t max_block_size = 0;
+  size_t tmp_bytes = 0;  // Only used for filling pointer parameters that aren't used later
 
-    size_t max_ws_size = 0;
-    size_t max_block_size = 0;
-    size_t total_gpu_mem = 0;
-    size_t free_gpu_mem = 0;
+  int device;
+  THCudaCheck(cudaGetDevice(&device));
+  c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
 
-    THCudaCheck(THCudaMemGetInfo(state, &free_gpu_mem, &total_gpu_mem, &max_block_size));
-
-    for (int i = 0; i < n_algo; i++) {
-        cudnnStatus_t err;
-        size_t sz;
-        err = getWorkspaceSize(args, algo[i], &sz);
-        if (CUDNN_STATUS_SUCCESS != err || sz == 0
-            || sz < max_ws_size || sz > max_block_size) continue;
-        max_ws_size = sz;
-    }
-    return max_ws_size;
+  for (int i = 0; i < n_algo; i++) {
+    cudnnStatus_t err;
+    size_t sz;
+    err = getWorkspaceSize(args, algo[i], &sz);
+    if (CUDNN_STATUS_SUCCESS != err || sz == 0 || sz < max_ws_size || sz > max_block_size)
+      continue;
+    max_ws_size = sz;
+  }
+  return max_ws_size;
 }
 
 template<typename perf_t>
@@ -390,7 +397,7 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
 #if CUDNN_VERSION < 7500
   bool blacklist = std::is_same<decltype(perfResults[0].algo), cudnnConvolutionBwdDataAlgo_t>::value;
   int stride_dim = args.input.dim() - 2;
-  blacklist &&= std::any_of(std::begin(args.params.stride),
+  blacklist &= std::any_of(std::begin(args.params.stride),
                             std::begin(args.params.stride) + stride_dim,
                             [=](int n){return n != 1;});
 #endif
@@ -408,8 +415,8 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
         // See Note [blacklist fft algorithms for strided dgrad]
 #if CUDNN_VERSION < 7500
         bool skip = blacklist;
-        skip &&= (static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING ||
-                  static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)
+        skip &= (static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING ||
+                  static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT);
         if (skip) {
           continue;
         }
@@ -686,6 +693,14 @@ public:
   }
 };
 
+inline Tensor allocate_workspace(size_t size, const Tensor &other) {
+  // Sometimes cuDNN returns a workspace size > 2^63, this could makes the allocation of
+  // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
+  // we manually fail with OOM.
+  TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
+  return at::empty({static_cast<int64_t>(size)}, other.options().dtype(kByte));
+}
+
 // NOTE [ Convolution design ]
 //
 // cuDNN convolutions does not handle bias. Bias is handled outside.
@@ -812,7 +827,7 @@ void raw_cudnn_convolution_forward_out_32bit(
   // matter.  (This applies to raw_cudnn_convolution_backward_input as well.)
   AlgoIterator<cudnnConvolutionFwdAlgoPerf_t>(args, benchmark).try_all(
     [&](const cudnnConvolutionFwdAlgoPerf_t &fwdAlgPerf){
-      Tensor workspace = at::empty({static_cast<int64_t>(fwdAlgPerf.memory)}, input.options().dtype(kByte));
+      Tensor workspace = allocate_workspace(fwdAlgPerf.memory, input);
 
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
@@ -947,7 +962,7 @@ void raw_cudnn_convolution_backward_input_out_32bit(
 
   AlgoIterator<cudnnConvolutionBwdDataAlgoPerf_t>(args, benchmark).try_all(
     [&](const cudnnConvolutionBwdDataAlgoPerf_t &bwdDataAlgPerf){
-      Tensor workspace = at::empty({static_cast<int64_t>(bwdDataAlgPerf.memory)}, grad_output.options().dtype(kByte));
+      Tensor workspace = allocate_workspace(bwdDataAlgPerf.memory, grad_output);
 
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
@@ -1108,7 +1123,7 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
 
   AlgoIterator<cudnnConvolutionBwdFilterAlgoPerf_t>(args, benchmark).try_all(
     [&](const cudnnConvolutionBwdFilterAlgoPerf_t &bwdFilterAlgPerf){
-      Tensor workspace = at::empty({static_cast<int64_t>(bwdFilterAlgPerf.memory)}, input.options().dtype(kByte));
+      Tensor workspace = allocate_workspace(bwdFilterAlgPerf.memory, input);
 
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not

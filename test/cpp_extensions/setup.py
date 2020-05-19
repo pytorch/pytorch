@@ -23,6 +23,9 @@ ext_modules = [
     CppExtension(
         'torch_test_cpp_extension.msnpu', ['msnpu_extension.cpp'],
         extra_compile_args=CXX_FLAGS),
+    CppExtension(
+        'torch_test_cpp_extension.rng', ['rng_extension.cpp'],
+        extra_compile_args=CXX_FLAGS),
 ]
 
 if torch.cuda.is_available() and CUDA_HOME is not None:
@@ -56,4 +59,5 @@ setup(
     name='torch_test_cpp_extension',
     packages=['torch_test_cpp_extension'],
     ext_modules=ext_modules,
+    include_dirs='self_compiler_include_dirs_test',
     cmdclass={'build_ext': BuildExtension.with_options(use_ninja=USE_NINJA)})

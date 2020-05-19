@@ -49,6 +49,7 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/QScheme.h>
+#include <torch/csrc/Layout.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -153,7 +154,7 @@ struct PythonArgs {
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
-  inline at::Generator* generator(int i);
+  inline c10::optional<at::Generator> generator(int i);
   inline at::Storage storage(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
@@ -162,8 +163,9 @@ struct PythonArgs {
   inline c10::optional<int64_t> toInt64Optional(int i);
   inline c10::optional<bool> toBoolOptional(int i);
   inline c10::optional<double> toDoubleOptional(int i);
-  inline const THPLayout& layout(int i);
-  inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
+  inline at::Layout layout(int i);
+  inline at::Layout layoutWithDefault(int i, at::Layout default_layout);
+  inline c10::optional<at::Layout> layoutOptional(int i);
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
@@ -217,7 +219,7 @@ struct FunctionParameter {
     double default_double;
     double default_complex[2]; // see Scalar
     at::ScalarType default_scalartype;
-    THPLayout* default_layout;
+    at::Layout default_layout;
   };
 };
 
@@ -353,11 +355,7 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
   if (obj == (PyObject*)&PyBool_Type) {
     return at::ScalarType::Bool;
   }
-  if (obj == (PyObject*)&PyLong_Type
-#if PY_MAJOR_VERSION == 2
-      || obj == (PyObject*)&PyInt_Type
-#endif
-  ) {
+  if (obj == (PyObject*)&PyLong_Type) {
     return at::ScalarType::Long;
   }
   return reinterpret_cast<THPDtype*>(obj)->scalar_type;
@@ -369,13 +367,18 @@ inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
   return scalartype(i);
 }
 
-inline const THPLayout& PythonArgs::layout(int i) {
-  if (!args[i]) return *signature.params[i].default_layout;
-  return *reinterpret_cast<THPLayout*>(args[i]);
+inline at::Layout PythonArgs::layout(int i) {
+  if (!args[i]) return signature.params[i].default_layout;
+  return reinterpret_cast<THPLayout*>(args[i])->layout;
 }
 
-inline const THPLayout& PythonArgs::layoutWithDefault(int i, const THPLayout& default_layout) {
+inline at::Layout PythonArgs::layoutWithDefault(int i, at::Layout default_layout) {
   if (!args[i]) return default_layout;
+  return layout(i);
+}
+
+inline c10::optional<at::Layout> PythonArgs::layoutOptional(int i) {
+  if (!args[i]) return c10::nullopt;
   return layout(i);
 }
 
@@ -390,7 +393,7 @@ inline at::Device PythonArgs::device(int i) {
   if (THPUtils_checkLong(args[i])) {
     const auto device_index = THPUtils_unpackLong(args[i]);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(at::DeviceType::CUDA, device_index);
+    return at::Device(DeviceType::CUDA, device_index);
   }
   const std::string &device_str = THPUtils_unpackString(args[i]);
   return at::Device(device_str);
@@ -536,8 +539,8 @@ inline bool PythonArgs::isNone(int i) {
   return args[i] == nullptr;
 }
 
-inline at::Generator* PythonArgs::generator(int i) {
-  if (!args[i]) return nullptr;
+inline c10::optional<at::Generator> PythonArgs::generator(int i) {
+  if (!args[i]) return c10::nullopt;
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
@@ -616,10 +619,6 @@ static bool _is_basic_python_type(PyTypeObject *tp)
     tp == &PyFrozenSet_Type ||
     tp == &PyUnicode_Type ||
     tp == &PyBytes_Type ||
-
-#if PY_MAJOR_VERSION == 2
-    tp == &PyString_Type ||
-#endif
 
     /* other builtins */
     tp == &PySlice_Type ||

@@ -80,7 +80,7 @@ struct CAFFE2_API NoNamesGuard {
 };
 
 void check_names_valid_for(const Tensor& tensor, DimnameList names);
-void check_names_valid_for(int64_t tensor_dim, DimnameList names);
+void check_names_valid_for(size_t tensor_dim, DimnameList names);
 
 // Sets the names of `tensor` to be `names`.
 CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);

@@ -578,9 +578,6 @@ namespace {
   }
 
   cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input){
-#if CUDNN_VERSION < 7200 || CUDA_VERSION < 9010
-      return CUDNN_RNN_ALGO_STANDARD;
-#else
       cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
       const int64_t bsize = tensors.mini_batch;
       //excluding Turing from using persistent rnn.
@@ -599,17 +596,12 @@ namespace {
           }
       }
       return CUDNN_RNN_ALGO_STANDARD;
-#endif
   }
 
   cudnnDataType_t promote_rnn_math_type(cudnnDataType_t dtype) {
-#if CUDNN_VERSION != 7103
-// CUDNN 7.1.3 enforces RNN descriptor type to be identical to input/weight. This check throws an error for type
-// promotion. The check has since been removed.
     if (dtype == CUDNN_DATA_HALF) {
       return CUDNN_DATA_FLOAT;
     }
-#endif
     return dtype;
   }
 
@@ -1236,7 +1228,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
   if (!weight_buf.defined()) {
-    AT_WARN(WEIGHT_FORMAT_WARN);
+    TORCH_WARN(WEIGHT_FORMAT_WARN);
   }
 
   TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
@@ -1266,7 +1258,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
   if (!weight_buf.defined()) {
-    AT_WARN(WEIGHT_FORMAT_WARN);
+    TORCH_WARN(WEIGHT_FORMAT_WARN);
   }
 
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());

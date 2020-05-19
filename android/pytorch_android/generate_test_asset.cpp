@@ -13,7 +13,7 @@ int main(int argc, char* argv[]) {
   std::ifstream ifs(input_file_path);
   std::stringstream buffer;
   buffer << ifs.rdbuf();
-  torch::jit::script::Module m("TestModule");
+  torch::jit::Module m("TestModule");
 
   m.define(buffer.str());
   m.save(output_file_path);

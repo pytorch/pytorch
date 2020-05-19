@@ -11,7 +11,10 @@ void THNN_(ClassNLLCriterion_updateOutput)(
            THCTensor *weights,
            THCTensor *total_weight,
            int64_t ignore_index) {
-  if (THCIndexTensor_(nDimensionLegacyNoScalars)(state, target) > 1) {
+  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
+  TORCH_CHECK(false, "ClassNLLCriterion_updateOutput not suppported with BFloat16");
+  #else
+  if (THCIndexTensor_(nDimension)(state, target) > 1) {
     THError("multi-target not supported");
   }
 
@@ -119,6 +122,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   }
   THCIndexTensor_(free)(state, target);
   THCTensor_(free)(state, input);
+  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 void THNN_(ClassNLLCriterion_updateGradInput)(
@@ -131,6 +135,9 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
            THCTensor *weights,
            THCTensor *total_weight,
            int64_t ignore_index) {
+  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
+  TORCH_CHECK(false, "SpatialConvolutionMM_updateGradInput not suppported with BFloat16");
+  #else
   if (THCIndexTensor_(nDimensionLegacyNoScalars)(state, target) > 1) {
     THError("multi-target not supported");
   }
@@ -238,6 +245,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     THCTensor_(free)(state, weights);
   }
   THCIndexTensor_(free)(state, target);
+  #endif // THC_REAL_IS_BFLOAT16 && !HIP_PLATFORM_HCC__
 }
 
 #endif

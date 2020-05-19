@@ -2,14 +2,12 @@
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/qualified_name.h>
-#include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/torch.h>
 
 namespace torch {
 namespace jit {
-
-using namespace torch::jit::script;
 
 static const auto classSrcs1 = R"JIT(
 class FooNestedTest:
@@ -42,11 +40,9 @@ static void import_libs(
   SourceImporter si(
       cu,
       &tensor_table,
-      [&](const std::string& name) -> std::shared_ptr<Source> {
-        return src;
-      },
+      [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
       /*version=*/2);
-  si.loadNamedType(QualifiedName(class_name));
+  si.loadType(QualifiedName(class_name));
 }
 
 void testClassImport() {
@@ -125,22 +121,22 @@ void testClassDerive() {
   auto methods = cu->define("foo.bar", methodSrc, nativeResolver(), &self);
   auto method = methods[0];
   cls->addAttribute("attr", TensorType::get());
-  ASSERT_TRUE(cls->getMethod(method->name()));
+  ASSERT_TRUE(cls->findMethod(method->name()));
 
   // Refining a new class should retain attributes and methods
   auto newCls = cls->refine({TensorType::get()});
   ASSERT_TRUE(newCls->hasAttribute("attr"));
-  ASSERT_TRUE(newCls->getMethod(method->name()));
+  ASSERT_TRUE(newCls->findMethod(method->name()));
 
   auto newCls2 = cls->withContained({TensorType::get()})->expect<ClassType>();
   ASSERT_TRUE(newCls2->hasAttribute("attr"));
-  ASSERT_TRUE(newCls2->getMethod(method->name()));
+  ASSERT_TRUE(newCls2->findMethod(method->name()));
 }
 
 static const auto torchbindSrc = R"JIT(
 class FooBar1234(Module):
   __parameters__ = []
-  f : __torch__.torch.classes._TorchScriptTesting_StackString
+  f : __torch__.torch.classes._TorchScriptTesting._StackString
   training : bool
   def forward(self: __torch__.FooBar1234) -> str:
     return (self.f).top()

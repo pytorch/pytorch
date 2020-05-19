@@ -181,87 +181,6 @@ void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, sca
   at::namedinference::propagate_names_for_addmm(r_, m1, m2, t);
 }
 
-static void THTensor_(addmvImpl)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha)
-{
-  if( (mat->dim() != 2) || (THTensor_nDimension(vec) != 1) )
-    THError("matrix and vector expected, got %dD, %dD",
-      mat->dim(), THTensor_nDimension(vec));
-
-  if( mat->size(1) != THTensor_sizeLegacyNoScalars(vec, 0) ) {
-    THDescBuff bm = THTensor_(sizeDesc)(mat);
-    THDescBuff bv = THTensor_(sizeDesc)(vec);
-    THError("size mismatch, %s, %s", bm.str, bv.str);
-  }
-
-  if(THTensor_nDimension(t) != 1)
-    THError("vector expected, got t: %dD", t->dim());
-
-  if(THTensor_sizeLegacyNoScalars(t, 0) != mat->size(0)) {
-    THDescBuff bt = THTensor_(sizeDesc)(t);
-    THDescBuff bm = THTensor_(sizeDesc)(mat);
-    THError("size mismatch, t: %s, mat: %s", bt.str, bm.str);
-  }
-
-  if(r_ != t)
-  {
-    THTensor_(resizeAs)(r_, t);
-    at::Tensor r__wrap = THTensor_wrap(r_);
-    at::Tensor t_wrap = THTensor_wrap(t);
-    at::native::copy_(r__wrap, t_wrap);
-  }
-
-  auto r_stride = THTensor_strideLegacyNoScalars(r_, 0);
-
-  // n == 1 || lda >= max(1, m)
-  #define LDA_COND(M, N, LDA) ((N) == 1 || (LDA) >= THMax(1, (M)))
-
-  if(mat->stride(0) == 1 && LDA_COND(mat->size(0), mat->size(1), mat->stride(1)))
-  {
-    THBlas_(gemv)('n', mat->size(0), mat->size(1),
-                  alpha, mat->data<scalar_t>(), mat->stride(1),
-                  vec->data<scalar_t>(), THTensor_strideLegacyNoScalars(vec, 0),
-                  beta, r_->data<scalar_t>(), r_stride);
-  }
-  else if(mat->stride(1) == 1 && LDA_COND(mat->size(1), mat->size(0), mat->stride(0)))
-  {
-    THBlas_(gemv)('t',  mat->size(1), mat->size(0),
-                  alpha, mat->data<scalar_t>(), mat->stride(0),
-                  vec->data<scalar_t>(), THTensor_strideLegacyNoScalars(vec, 0),
-                  beta, r_->data<scalar_t>(), r_stride);
-  }
-  else
-  {
-    THTensor *cmat = THTensor_(newContiguous)(mat);
-
-    THBlas_(gemv)('t',  mat->size(1), mat->size(0),
-                  alpha, cmat->data<scalar_t>(), cmat->stride(0),
-                  vec->data<scalar_t>(), THTensor_strideLegacyNoScalars(vec, 0),
-                  beta, r_->data<scalar_t>(), r_stride);
-
-    c10::raw::intrusive_ptr::decref(cmat);
-  }
-
-  // In gemv (x,0).mv(0) does not
-  // handle beta, whereas gemm does for case where (x,0).mm(0,y).
-  if (THTensor_sizeLegacyNoScalars(vec, 0) == 0 && mat->size(0) != 0) {
-    if (beta == 0) {
-      THTensor_(zero)(r_);
-    } else if (beta != 1) {
-      THTensor_(mul)(r_, r_, beta);
-    }
-  }
-
-  #undef LDA_COND
-}
-
-void THTensor_(addmv)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha) {
-  {
-    at::NoNamesGuard guard;
-    THTensor_(addmvImpl)(r_, t, mat, vec, beta, alpha);
-  }
-  at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
-}
-
 void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, scalar_t beta, scalar_t alpha)
 {
   if( (THTensor_nDimension(vec1) != 1) || (THTensor_nDimension(vec2) != 1) )
@@ -271,10 +190,10 @@ void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, 
   if(t->dim() != 2)
     THError("expected matrix, got %dD tensor for t", t->dim());
 
-  auto vec1_size = THTensor_sizeLegacyNoScalars(vec1, 0);
-  auto vec2_size = THTensor_sizeLegacyNoScalars(vec2, 0);
-  auto vec1_stride = THTensor_strideLegacyNoScalars(vec1, 0);
-  auto vec2_stride = THTensor_strideLegacyNoScalars(vec2, 0);
+  auto vec1_size = THTensor_(size)(vec1, 0);
+  auto vec2_size = THTensor_(size)(vec2, 0);
+  auto vec1_stride = THTensor_(stride)(vec1, 0);
+  auto vec2_stride = THTensor_(stride)(vec2, 0);
 
   if( (t->size(0) != vec1_size) || (t->size(1) != vec2_size) ) {
     THDescBuff bt  = THTensor_(sizeDesc)(t);
@@ -330,57 +249,6 @@ void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, 
 }
 
 #ifndef TH_REAL_IS_BFLOAT16 /* non bfloat16 only part */
-
-// Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
-static inline bool modulo_wrap(scalar_t a, scalar_t b) {
-  return (a != 0) && (a < 0) != (b < 0);
-}
-
-void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int64_t srcSize = THTensor_(nElement)(src);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  int srcContig = THTensor_(isContiguous)(src);
-  if (srcSize == r_Size){
-    if (r_Contig && tContig && srcContig) {
-      scalar_t *tp = t->data<scalar_t>();
-      scalar_t *sp = src->data<scalar_t>();
-      scalar_t *rp = r_->data<scalar_t>();
-      at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD,
-          [&](int64_t start, int64_t end) {
-        for (auto i = start; i < end; i++) {
-  #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-          rp[i] = (sp[i] == 0)? NAN : tp[i] - sp[i] * floor(tp[i] / sp[i]);
-  #else
-          // There is no NAN for integers
-          rp[i] = tp[i] % sp[i];
-          if (modulo_wrap(rp[i], sp[i]))
-            rp[i] += sp[i];
-  #endif
-        }
-      });
-    } else {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#else
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data % *src_data;
-                                                    if (modulo_wrap(*r__data, *src_data)) *r__data += *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#endif
-    }
-  } else {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data););
-#else
-    // There is no NAN for integers
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data % *src_data;
-                                                     if (modulo_wrap(*r__data, *src_data)) *r__data += *src_data;);
-#endif
-
-  }
-}
 
 void THTensor_(addbmm)(THTensor *result, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha)
 {

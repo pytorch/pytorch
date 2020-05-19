@@ -134,7 +134,7 @@ void adaptivemaxpool_loop(
 
     totalZ -= 65535;
     offsetZ += 65535;
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -212,7 +212,7 @@ void adaptivemaxgradinput_loop(
 
     totalZ -= 65535;
     offsetZ += 65535;
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -289,7 +289,7 @@ void atomicadaptivemaxgradinput_loop(
 
     totalZ -= 65535;
     offsetZ += 65535;
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 

@@ -45,6 +45,7 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/TensorOptions.h \
                          ../../../aten/src/ATen/core/Tensor.h \
                          ../../../build/aten/src/ATen/Functions.h \
+                         ../../../build/aten/src/ATen/core/TensorBody.h \
                          ../../../c10/core/Device.h \
                          ../../../c10/core/DeviceType.h \
                          ../../../c10/util/Half.h \
@@ -55,10 +56,16 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../c10/cuda/CUDAStream.h \
                          ../../../torch/csrc/api/include \
                          ../../../torch/csrc/api/src \
+                         ../../../torch/csrc/autograd/autograd.h \
+                         ../../../torch/csrc/autograd/custom_function.h \
+                         ../../../torch/csrc/autograd/function.h \
+                         ../../../torch/csrc/autograd/variable.h \
                          ../../../torch/csrc/autograd/generated/variable_factories.h \
                          ../../../torch/csrc/jit/runtime/custom_operator.h \
                          ../../../torch/csrc/jit/serialization/import.h \
-                         ../../../torch/csrc/jit/api/module.h
+                         ../../../torch/csrc/jit/api/module.h \
+                         ../../../torch/library.h \
+                         ../../../torch/custom_class.h
 # Don't include .cpp files!
 FILE_PATTERNS          = *.h
 # If you need this to be YES, exhale will probably break.

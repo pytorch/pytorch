@@ -85,7 +85,6 @@ class Adamax(Optimizer):
                 bias_correction = 1 - beta1 ** state['step']
                 clr = group['lr'] / bias_correction
 
-                # Need to avoid version tracking for parameter.
-                p.data.addcdiv_(exp_avg, exp_inf, value=-clr)
+                p.addcdiv_(exp_avg, exp_inf, value=-clr)
 
         return loss

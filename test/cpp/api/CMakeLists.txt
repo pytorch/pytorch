@@ -15,6 +15,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/module.cpp
   ${TORCH_API_TEST_DIR}/modulelist.cpp
   ${TORCH_API_TEST_DIR}/modules.cpp
+  ${TORCH_API_TEST_DIR}/namespace.cpp
   ${TORCH_API_TEST_DIR}/nn_utils.cpp
   ${TORCH_API_TEST_DIR}/optim.cpp
   ${TORCH_API_TEST_DIR}/ordered_dict.cpp
@@ -31,7 +32,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/torch_include.cpp
 )
 
-if (USE_CUDA)
+if(USE_CUDA)
   list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/parallel.cpp)
 endif()
 
@@ -39,7 +40,7 @@ add_executable(test_api ${TORCH_API_TEST_SOURCES})
 target_include_directories(test_api PRIVATE ${ATen_CPU_INCLUDE})
 target_link_libraries(test_api PRIVATE torch gtest)
 
-if (USE_CUDA)
+if(USE_CUDA)
   target_link_libraries(test_api PRIVATE
     ${CUDA_LIBRARIES}
     ${CUDA_NVRTC_LIB}
@@ -49,8 +50,8 @@ if (USE_CUDA)
   target_compile_definitions(test_api PRIVATE "USE_CUDA")
 endif()
 
-if (NOT MSVC)
-  if (APPLE)
+if(NOT MSVC)
+  if(APPLE)
     target_compile_options(test_api PRIVATE
       # Clang has an unfixed bug leading to spurious missing braces
       # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
@@ -65,10 +66,14 @@ if (NOT MSVC)
   endif()
 endif()
 
-if (INSTALL_TEST)
+if(INSTALL_TEST)
   install(TARGETS test_api DESTINATION bin)
   # Install PDB files for MSVC builds
-  if (MSVC AND BUILD_SHARED_LIBS)
+  if(MSVC AND BUILD_SHARED_LIBS)
     install(FILES $<TARGET_PDB_FILE:test_api> DESTINATION bin OPTIONAL)
   endif()
 endif()
+
+add_executable(parallel_benchmark ${TORCH_API_TEST_DIR}/parallel_benchmark.cpp)
+target_include_directories(parallel_benchmark PRIVATE ${ATen_CPU_INCLUDE})
+target_link_libraries(parallel_benchmark PRIVATE torch)

@@ -271,9 +271,9 @@ class DWConvMicrokernelTester {
               outputZeroPoint,
               qmin(),
               qmax());
-      const union pytorch_qnnp_q31_requantization_params
+      const union pytorch_qnnp_fp32_requantization_params
           scalarRequantizationParams =
-              pytorch_qnnp_compute_scalar_requantization_params(
+              pytorch_qnnp_compute_scalar_fp32_requantization_params(
                   requantizationScale, outputZeroPoint, qmin(), qmax());
 
       q8dwconv(
@@ -288,8 +288,13 @@ class DWConvMicrokernelTester {
 
       for (size_t x = 0; x < width(); x++) {
         for (size_t c = 0; c < channels(); c++) {
-          const uint8_t referenceOutput = pytorch_qnnp_q31_requantize(
+#if defined(__arm__) || defined(_M_ARM)
+          const uint8_t referenceOutput = pytorch_qnnp_fp32_requantize_magic(
               accumulators[x * channels() + c], scalarRequantizationParams);
+#else
+          const uint8_t referenceOutput = pytorch_qnnp_fp32_requantize(
+              accumulators[x * channels() + c], scalarRequantizationParams);
+#endif
           const double scaledAccumulator =
               accumulators[x * channels() + c] / outputScale +
               double(outputZeroPoint);
@@ -445,9 +450,9 @@ class DWConvMicrokernelTester {
               outputZeroPoint,
               qmin(),
               qmax());
-      const union pytorch_qnnp_q31_requantization_params
+      const union pytorch_qnnp_fp32_requantization_params
           scalarRequantizationParams =
-              pytorch_qnnp_compute_scalar_requantization_params(
+              pytorch_qnnp_compute_scalar_fp32_requantization_params(
                   requantizationScale, outputZeroPoint, qmin(), qmax());
 
       q8dwconv(
@@ -463,8 +468,13 @@ class DWConvMicrokernelTester {
 
       for (size_t x = 0; x < width(); x++) {
         for (size_t c = 0; c < channels(); c++) {
-          const uint8_t referenceOutput = pytorch_qnnp_q31_requantize(
+#if defined(__arm__) || defined(_M_ARM)
+          const uint8_t referenceOutput = pytorch_qnnp_fp32_requantize_magic(
               accumulators[x * channels() + c], scalarRequantizationParams);
+#else
+          const uint8_t referenceOutput = pytorch_qnnp_fp32_requantize(
+              accumulators[x * channels() + c], scalarRequantizationParams);
+#endif
           const double scaledAccumulator =
               accumulators[x * channels() + c] / outputScale +
               double(outputZeroPoint);

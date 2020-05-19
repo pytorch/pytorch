@@ -26,9 +26,11 @@ namespace autograd {
 
 
 DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
+  c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn,
   CreationMeta creation_meta)
     : AutogradMeta(self_impl), creation_meta(creation_meta) {
   base_ = std::move(base);
+  view_fn_ = std::move(view_fn);
   TORCH_CHECK(base_.defined(), "base is undefined");
   if (base_.is_view()) {
     base_ = base_._base();
@@ -87,7 +89,7 @@ namespace impl {
           "Functions which modify views in-place must return a single Variable");
       diff_view_meta->output_nr_ = gradient_edge.input_nr;
       auto copy_slices = std::make_shared<CopySlices>(
-          diff_view_meta->base_, at::TensorGeometry(self), std::move(gradient_edge.function));
+          diff_view_meta->base_, at::TensorGeometry(self), diff_view_meta->view_fn_, std::move(gradient_edge.function));
       set_gradient_edge(diff_view_meta->base_, {std::move(copy_slices), 0});
       self.grad_fn(); // trigger an update to the view's grad_fn
     } else {
@@ -164,6 +166,16 @@ namespace impl {
     auto* meta = materialize_autograd_meta(self);
     meta->grad_fn_ = std::move(edge.function);
     meta->output_nr_ = edge.input_nr;
+    // For views, make sure this new grad_fn_ is not overwritten unless it is necessary
+    // in the VariableHooks::grad_fn below.
+    // This logic is only relevant for custom autograd Functions for which multiple
+    // operations can happen on a given Tensor before its gradient edge is set when
+    // exiting the custom Function.
+    if (self.is_view()) {
+      // NB: is_view() ==> get_autograd_meta()
+      auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(meta);
+      diff_view_meta->attr_version = self._version();
+    }
   }
 
   Node* grad_fn_unsafe(const Variable& self) {
@@ -330,17 +342,48 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       // This is an indirect rebase_history due to another view or the base being modified inplace
       handle_view_on_rebase(diff_view_meta, /* indirect */ true);
       TORCH_INTERNAL_ASSERT(diff_view_meta->output_nr_ == 0);
-      auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
-      fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
-      fn->size = self.sizes().vec();
-      fn->stride = self.strides().vec();
-      fn->storage_offset = self.storage_offset();
-      fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
-      fn->add_input_metadata(
-        diff_view_meta->base_.options()
-      , self.sizes() // Note: sizes(), not base_.sizes(), is intentional
-      , diff_view_meta->base_.device());
-      diff_view_meta->grad_fn_ = std::move(fn);
+      // Note [View + Inplace update for view tensor]
+      // An inplace update happened on Tensor `self` (which is a view).
+      // For example:
+      //   view_1 = view_op_1(diff_view_meta->base_)
+      //   view_2 = view_op_2(view_1)
+      //   ...
+      //   self = view_op_n(view_n-1)
+      //   self = inplace_op(self)
+      //
+      // For CPU/CUDA backends, we employ one AsStridedBackward Node to represent the chain of
+      // view backward ops for effienciency.
+      //
+      // However in XLA backend we don't have full support of AsStridedBackward, we instead run a full
+      // forward pass with a tensor that requires gradient to get proper grad_fn setup,
+      // then save it to DifferentiableViewMeta for future use.
+      // This is fairly cheap for XLA lazy tensor approach (but would be really expensive for CPU/CUDA).
+      // XLA Tensor only run thorugh VariableType dispatch and lower the forward pass to a XLA HLO graph,
+      // then we take grad_fn and never materialize the tensor content.
+      // So we only construct the graph but not execute it, which is a fairly cheap operation to do.
+      //
+      // See Note [View + Inplace update for base tensor] for what we do to base tensor when
+      // an in-place operation happens.
+      //
+      // TODO: Potentially the following logic can be replaced by special logic in VariableType_x.cpp
+      //       that would provide a way to recreate the grad_fn chain.
+      if (diff_view_meta->has_view_fn()) {
+        auto view_fn = diff_view_meta->view_fn();
+        auto diff_view = view_fn(diff_view_meta->base_);
+        diff_view_meta->grad_fn_ = diff_view.grad_fn();
+      } else {
+        auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
+        fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
+        fn->size = self.sizes().vec();
+        fn->stride = self.strides().vec();
+        fn->storage_offset = self.storage_offset();
+        fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
+        fn->add_input_metadata(
+          diff_view_meta->base_.options(),
+          self.sizes(), // Note: sizes(), not base_.sizes(), is intentional
+          diff_view_meta->base_.device());
+        diff_view_meta->grad_fn_ = std::move(fn);
+      }
       diff_view_meta->attr_version = current_version;
     }
     return diff_view_meta->grad_fn_;

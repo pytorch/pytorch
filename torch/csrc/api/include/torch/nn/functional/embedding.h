@@ -10,6 +10,7 @@ inline Tensor one_hot(const Tensor& tensor, int64_t num_classes = -1) {
   return torch::one_hot(tensor, num_classes);
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline void _no_grad_embedding_renorm_(Tensor weight, const Tensor& input, float max_norm, float norm_type) {
   torch::NoGradGuard no_grad;
@@ -44,7 +45,19 @@ inline Tensor embedding(const Tensor& input,
   return torch::embedding(weight, input_, *padding_idx, scale_grad_by_freq, sparse);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.embedding
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::EmbeddingFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::embedding(input, weight, F::EmbeddingFuncOptions().norm_type(2.5).scale_grad_by_freq(true).sparse(true));
+/// ```
 inline Tensor embedding(const Tensor& input, const Tensor& weight, const EmbeddingFuncOptions& options = {}) {
   return detail::embedding(
     input,
@@ -56,6 +69,7 @@ inline Tensor embedding(const Tensor& input, const Tensor& weight, const Embeddi
     options.sparse());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor embedding_bag(
     const Tensor& input,
@@ -127,7 +141,19 @@ inline Tensor embedding_bag(
       include_last_offset));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.embedding_bag
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::EmbeddingBagFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::embedding_bag(input, weight, F::EmbeddingBagFuncOptions().mode(torch::kSum).offsets(offsets));
+/// ```
 inline Tensor embedding_bag(const Tensor& input, const Tensor& weight, const EmbeddingBagFuncOptions& options = {}) {
   return detail::embedding_bag(
     input,

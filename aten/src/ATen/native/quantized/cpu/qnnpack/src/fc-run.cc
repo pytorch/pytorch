@@ -80,17 +80,6 @@ enum pytorch_qnnp_status qnnpackLinear(
 
   const size_t output_size = batch_size * 1;
   const float requantization_scale = input_scale * kernel_scale / output_scale;
-  if (requantization_scale >= 1.0f) {
-    pytorch_qnnp_log_error(
-        "failed to create fully connected operator with %.7g input scale, %.7g "
-        "kernel scale, and %.7g output scale: "
-        "requantization scale %.7g is greater or equal to 1.0",
-        input_scale,
-        kernel_scale,
-        output_scale,
-        requantization_scale);
-    return pytorch_qnnp_status_unsupported_parameter;
-  }
   union pytorch_qnnp_conv_quantization_params conv_quantization_params = pytorch_qnnp_compute_conv_quantization_params(
       input_zero_point, kernel_zero_point, requantization_scale, output_zero_point, output_min, output_max);
 

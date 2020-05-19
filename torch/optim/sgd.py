@@ -109,7 +109,6 @@ class SGD(Optimizer):
                     else:
                         d_p = buf
 
-                # Need to avoid version tracking for parameter.
-                p.data.add_(d_p, alpha=-group['lr'])
+                p.add_(d_p, alpha=-group['lr'])
 
         return loss

@@ -53,7 +53,7 @@
 #define TH_CPP_API
 #endif
 
-#define TH_API TH_EXTERNC TH_CPP_API
+#define TH_API TH_CPP_API
 
 #ifdef _WIN32
 # define TH_NO_RETURN __declspec(noreturn)
@@ -67,12 +67,6 @@
 # define TH_UNUSED __attribute__((unused))
 #else
 # define TH_UNUSED
-#endif
-
-#if defined(__clang__)
-#define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
-#else
-#define __ubsan_ignore_float_divide_by_zero__
 #endif
 
 #ifndef M_PI

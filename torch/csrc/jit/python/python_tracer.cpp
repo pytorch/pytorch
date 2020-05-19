@@ -1,12 +1,12 @@
 #include <torch/csrc/python_headers.h>
 
-#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/jit/python/python_tracer.h>
-#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/utils/python_strings.h>
 
 #include <c10/util/Exception.h>
@@ -53,8 +53,9 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     const py::function& func,
     Stack trace_inputs,
     const py::function& var_name_lookup_fn,
+    bool strict,
     bool force_outplace,
-    script::Module* self) {
+    Module* self) {
   C10_LOG_API_USAGE_ONCE("torch.tracer");
 
   auto lookup_fn_adapter =
@@ -80,6 +81,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
         return {toTypeInferredIValue(out)};
       },
       lookup_fn_adapter,
+      strict,
       force_outplace,
       self);
   return std::make_pair(std::get<0>(outs)->graph, std::get<1>(outs));
@@ -158,9 +160,15 @@ void initPythonTracerBindings(PyObject* module) {
       .def("graph", [](TracingState& s) { return s.graph; });
 
   m.def("_tracer_warn_use_python", []() { tracer::setWarn(pythonWarn); });
-  m.def("_create_graph_by_tracing", createGraphByTracing,
-    py::arg("func"), py::arg("inputs"), py::arg("var_name_lookup_fn"),
-    py::arg("force_outplace"), py::arg("self") = nullptr);
+  m.def(
+      "_create_graph_by_tracing",
+      createGraphByTracing,
+      py::arg("func"),
+      py::arg("inputs"),
+      py::arg("var_name_lookup_fn"),
+      py::arg("strict"),
+      py::arg("force_outplace"),
+      py::arg("self") = nullptr);
   m.def("_get_tracing_state", []() { return getTracingState(); });
   m.def("_set_tracing_state", [](std::shared_ptr<TracingState> state) {
     return setTracingState(state);

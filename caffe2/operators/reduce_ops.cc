@@ -218,7 +218,7 @@ Y:
       std::sort(axis.begin(), axis.end());
       auto keepdims = helper.GetSingleArgument<bool>("keepdims", true);
       size_t cursor = 0;
-      size_t id = 0;
+      int32_t id = 0;
       for (const auto d : dims) {
         if (cursor < axis.size() && id == axis[cursor]) {
           if (keepdims) {

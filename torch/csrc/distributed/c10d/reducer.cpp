@@ -8,30 +8,12 @@
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/utils/hash.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
 namespace {
-
-// Turns lambda without input/output into a torch::autograd::FunctionPostHook.
-class LambdaPostHook : public torch::autograd::FunctionPostHook {
-  using variable_list = std::vector<torch::autograd::Variable>;
-
- public:
-  /* implicit */ LambdaPostHook(std::function<void(void)> fn)
-      : fn_(std::move(fn)) {}
-
-  variable_list operator()(
-      const variable_list& outputs,
-      const variable_list& /* unused */) override {
-    fn_();
-    return outputs;
-  }
-
- protected:
-  std::function<void(void)> fn_;
-};
 
 inline int64_t current_time_in_nanos() {
   return torch::autograd::profiler::getTime();
@@ -53,6 +35,8 @@ Reducer::Reducer(
       has_marked_unused_parameters_(false),
       local_used_maps_reduced_(false),
       backward_stats_base_(0) {
+  C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
+
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
 
@@ -133,8 +117,13 @@ Reducer::Reducer(
 
         // Hook to execute after the gradient accumulator has executed.
         hooks_.emplace_back(
-            grad_accumulator->add_post_hook(torch::make_unique<LambdaPostHook>(
-                [=] { this->autograd_hook(index); })),
+            grad_accumulator->add_post_hook(
+                torch::make_unique<torch::autograd::utils::LambdaPostHook>(
+                    [=](const torch::autograd::variable_list& outputs,
+                        const torch::autograd::variable_list& /* unused */) {
+                      this->autograd_hook(index);
+                      return outputs;
+                    })),
             grad_accumulator);
 
         // Map raw function pointer to replica index and parameter index.
@@ -320,26 +309,34 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   // Something is wrong if all variables contained in this bucket replica have
   // already been marked as ready.
   if (replica.pending == 0) {
-    // Receiving a call to `mark_variable_ready` twice for the same variable
-    // is only possible if the variable was initially deemed unused, and was
-    // marked ready from the `prepare_for_backward` function, only to become
-    // part of the autograd graph at a later point in time.
-    TORCH_INTERNAL_ASSERT(has_marked_unused_parameters_);
-    TORCH_CHECK(
-        false,
+    const auto common_error = c10::str(
         "Expected to mark a variable ready only once. ",
         "",
-        "This error is caused by use of a module parameter outside the ",
-        "`forward` function. The return value of the `forward` function ",
-        "is inspected by the distributed data parallel wrapper to figure ",
-        "out if any of the module's parameters went unused. If this is the ",
-        "case, it knows they won't receive gradients in a backward pass. ",
-        "If any of those parameters are then used outside `forward`, this ",
-        "error condition is triggered. ",
-        "",
-        "You can disable unused parameter detection by passing the keyword "
-        "argument `find_unused_parameters=False` to ",
+        "This error is caused by one of the following reasons: ",
+        "1) Use of a module parameter outside the `forward` function. ",
+        "Please make sure model parameters are not shared across multiple ",
+        "concurrent forward-backward passes",
+        "2) Reused parameters in multiple reentrant backward passes. For ",
+        "example, if you use multiple `checkpoint` functions to wrap the ",
+        "same part of your model, it would result in the same set of ",
+        "parameters been used by different reentrant backward passes ",
+        "multiple times, and hence marking a variable ready multiple times. ",
+        "DDP does not support such use cases yet.");
+    TORCH_CHECK(
+        has_marked_unused_parameters_,
+        common_error,
+        "3) Incorrect unused parameter detection. The return value of the ",
+        "`forward` function is inspected by the distributed data parallel ",
+        "wrapper to figure out if any of the module's parameters went ",
+        "unused. For unused parameters, DDP would not expect gradients from ",
+        "then. However, if an unused parameter becomes part of the autograd ",
+        "graph at a later point in time (e.g., in a reentrant backward when ",
+        "using `checkpoint`), the gradient will show up unexpectedly. If all ",
+        "parameters in the model participate in the backward pass, you can ",
+        "disable unused parameter detection by passing the keyword argument ",
+        "`find_unused_parameters=False` to ",
         "`torch.nn.parallel.DistributedDataParallel`.");
+    TORCH_CHECK(!has_marked_unused_parameters_, common_error);
   }
 
   if (bucket.expect_sparse_gradient) {

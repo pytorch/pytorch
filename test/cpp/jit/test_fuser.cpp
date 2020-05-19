@@ -4,16 +4,12 @@
 #include "ATen/core/interned_strings.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/runtime/argument_spec.h"
-#include "torch/csrc/jit/ir/attributes.h"
-#include "torch/csrc/jit/runtime/autodiff.h"
-#include "torch/csrc/jit/frontend/code_template.h"
-#include "torch/csrc/jit/runtime/custom_operator.h"
 #include "torch/csrc/jit/codegen/fuser/interface.h"
-#include "torch/csrc/jit/serialization/import.h"
-#include "torch/csrc/jit/ir/irparser.h"
-#include "torch/csrc/jit/runtime/interpreter.h"
+#include "torch/csrc/jit/frontend/code_template.h"
+#include "torch/csrc/jit/frontend/tracer.h"
 #include "torch/csrc/jit/ir/alias_analysis.h"
+#include "torch/csrc/jit/ir/attributes.h"
+#include "torch/csrc/jit/ir/irparser.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
@@ -24,19 +20,21 @@
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
+#include "torch/csrc/jit/runtime/argument_spec.h"
+#include "torch/csrc/jit/runtime/autodiff.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
+#include "torch/csrc/jit/runtime/interpreter.h"
 #include "torch/csrc/jit/runtime/symbolic_script.h"
-#include "torch/csrc/jit/frontend/tracer.h"
-
-
+#include "torch/csrc/jit/serialization/import.h"
 
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
 #include "ATen/core/ivalue.h"
-#include "torch/csrc/jit/runtime/graph_executor.h"
-#include "torch/csrc/jit/frontend/ir_emitter.h"
 #include "torch/csrc/jit/api/module.h"
+#include "torch/csrc/jit/frontend/ir_emitter.h"
+#include "torch/csrc/jit/runtime/graph_executor.h"
 
 #include "onnx/onnx_pb.h"
 
@@ -67,7 +65,7 @@ void testFusion() {
         %2 : Tensor = aten::mul(%0, %1)
         return (%2))IR";
     Graph graph;
-    torch::jit::script::parseIR(graph_string, &graph);
+    torch::jit::parseIR(graph_string, &graph);
 
     auto a = at::rand({3, 4}, at::kCUDA);
     auto b = at::rand({4, 3}, at::kCUDA).transpose(0, 1);
@@ -100,7 +98,7 @@ void testFusion() {
         %14 : Tensor = aten::mul(%8, %13)
         return (%14, %12))IR";
     Graph graph;
-    torch::jit::script::parseIR(graph_string, &graph);
+    torch::jit::parseIR(graph_string, &graph);
 
     graph.lint();
 
@@ -159,12 +157,12 @@ void testFusion() {
   auto b = at::rand({4, 3, 5}, at::kCUDA).transpose(0, 1);
   const auto o_r = a * b;
 
-  std::vector<std::string> graph_strings{graph_string0,
-                                         graph_string1,
-                                         graph_string2};
-  for (auto i = decltype(graph_strings.size()){0}; i < graph_strings.size(); ++i) {
+  std::vector<std::string> graph_strings{
+      graph_string0, graph_string1, graph_string2};
+  for (auto i = decltype(graph_strings.size()){0}; i < graph_strings.size();
+       ++i) {
     Graph g;
-    torch::jit::script::parseIR(graph_strings[i], &g);
+    torch::jit::parseIR(graph_strings[i], &g);
 
     auto outputs = debugLaunchGraph(g, {a, b});
     ASSERT_EQ(outputs.size(), 2);
@@ -178,6 +176,31 @@ void testFusion() {
   };
 }
 
+void testFusionAliasing() {
+  const auto graph_string = R"IR(
+    graph(%0 : Tensor,
+          %1 : Tensor):
+      %12 : int = prim::Constant[value=1]()
+      %2.1 : Tensor = aten::mul(%0, %1)
+      %2 : Tensor = aten::mul(%2.1, %1)
+      %3 : Tensor = aten::add_(%2, %1, %12)
+      %4 : Tensor = aten::mul(%2, %1)
+      %5 : Tensor = aten::add(%2, %4, %12)
+      return (%5))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseGraph(g);
+
+  // We should not be able to fuse across the in-place operation here.
+  testing::FileCheck()
+      .check("prim::FusionGroup_0")
+      ->check("aten::add_")
+      ->check("prim::FusionGroup_1")
+      ->run(*g);
+}
+
 void testRegisterFusionCachesKernel() {
   // Constructs two functionally equivalent graphs
   const auto graph0_string = R"IR(
@@ -187,7 +210,7 @@ void testRegisterFusionCachesKernel() {
       %d0 : Float(2, 3, 4) = aten::mul(%c0, %0)
       return (%d0))IR";
   auto g0 = std::make_shared<Graph>();
-  torch::jit::script::parseIR(graph0_string, g0.get());
+  torch::jit::parseIR(graph0_string, g0.get());
 
   const auto graph1_string = R"IR(
     graph(%0 : Float(2, 3, 4),
@@ -196,7 +219,7 @@ void testRegisterFusionCachesKernel() {
       %d1 : Float(2, 3, 4) = aten::mul(%c1, %0)
       return (%d1))IR";
   auto g1 = std::make_shared<Graph>();
-  torch::jit::script::parseIR(graph1_string, g1.get());
+  torch::jit::parseIR(graph1_string, g1.get());
 
   auto getFusionGroup = [](const std::shared_ptr<Graph>& graph) {
     const auto& nodes = graph->nodes();

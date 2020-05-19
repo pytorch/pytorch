@@ -37,19 +37,20 @@ variable_list _wrap_outputs(const variable_list &input_vars,
       if (!var.requires_grad()) {
         return;
       }
-      // NB: we don't support returning non-differentiable views that could require grad
-      if (var.is_view()) {
-        throw std::runtime_error("Returning Variables sharing storage with other Variables "
-                                 "that require grad is not supported in Python functions. "
-                                 "Please submit a feature request if you hit this error.");
-      }
       // Return detached aliases of inputs, instead of changing their requires_grad
       // property.
       if (is_input) {
         var = var.detach();
-      } else {
+      } else if (!var.is_view()) {
         var.detach_();
       }
+      // If var is a view of one of the inputs of the custom autograd Function,
+      // we don't detach it in a no_grad block. This is so that we can mimic the
+      // behavior of returning a view from a no_grad block:
+      //   x = torch.randn(3, requires_grad=True)
+      //   with torch.no_grad():
+      //       y = x.view(-1)
+      // Here, `y` requires_grad (!).
     } else if (is_modified) {
       if (var.is_leaf() && var.requires_grad()) {
         throw std::runtime_error("a leaf Variable that requires grad has been used in an in-place operation.");
