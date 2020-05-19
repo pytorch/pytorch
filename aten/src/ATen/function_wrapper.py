@@ -25,11 +25,11 @@ except ImportError:
 # by a native function that handles dispatch
 
 LEGACY_TH_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals});
+${return_type} ${api_name}(${formals});
 """)
 
 LEGACY_TH_DEFINITION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${formals}) {
     ${named_guard_declaration}
     ${device_guard_declaration}
     ${type_definition_body}
@@ -59,23 +59,23 @@ case ScalarType::${ScalarName}: {
 # In this case, it will be called for all backends, but can be overwritten on a
 # per backend basis.
 NATIVE_DISPATCH_DECLARATION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals});
+${return_type} ${type_wrapper_name}(${formals});
 """)
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${formals}) {
     ${named_guard_declaration}
     ${device_guard_declaration}
-    ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
+    ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
 
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${formals}) {
     ${named_guard_declaration}
     ${device_init}
     ${device_guard_declaration}
-    ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
+    ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
 
@@ -159,7 +159,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
-    return op.call<${formals_types_with_return}>(${native_actuals});
+    return op.call<${formals_types_with_return}>(${actuals});
 #endif
 }
 """)
@@ -173,7 +173,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 # the time you get to the implementation.
 STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
-${return_call} TypeDefault::${type_wrapper_name}(${native_arguments});
+${return_call} TypeDefault::${type_wrapper_name}(${actuals});
 """)
 
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
@@ -188,7 +188,7 @@ switch (dispatchKeyToBackend(${dispatch_key_var_name})) {
 
 STATIC_DISPATCH_FUNCTION_SWITCH_CASE = CodeTemplate("""\
 case Backend::${backend}:
-    ${return_call} ${backend}Type::${type_wrapper_name}(${native_arguments});
+    ${return_call} ${backend}Type::${type_wrapper_name}(${actuals});
     break;
 """)
 
@@ -491,7 +491,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'name': str,
     'operator_name': str,
     'overload_name': str,
-    'native_actuals': List[str],
     'native_type_method_dispatch': str,
     # options should be List[FunctionOption]
     'options': Any,
@@ -503,9 +502,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'returns': List[ReturnType],
     'sparse': bool,
     'type_definition_body': List[str],
-    'type_method_actuals': List[str],
     'type_method_definition_dispatch': str,
-    'type_method_formals': List[str],
     'variants': str,
     'with_gil': bool,
 })
@@ -888,10 +885,6 @@ def create_generic(top_env, declarations):
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
 
-        # There are no cases where these differ, but they do in native_functions
-        option['type_method_formals'] = option['formals']
-        option['type_method_actuals'] = option['actuals']
-
         assert 'method' not in option['variants'], 'TH functions cannot be methods'
         is_function = 'function' in option['variants']
         # NB: TH functions don't support multiple dispatch
@@ -1023,7 +1016,6 @@ def create_generic(top_env, declarations):
         option['actuals'] = [f['name'] for f in formals]
 
         option['formals_types'] = [f['type'] for f in option['formals_list']]
-        option['native_actuals'] = [f['name'] for f in option['formals_list']]
 
         option['formals_types_with_return'] = [option['return_type']]
         if len(option['formals_types']) > 0:
@@ -1071,7 +1063,7 @@ def create_generic(top_env, declarations):
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
-                            native_arguments=option['method_actuals']))
+                            actuals=option['method_actuals']))
 
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
@@ -1080,7 +1072,7 @@ def create_generic(top_env, declarations):
                     static_dispatch_function_cases=static_dispatch_function_cases)
             else:
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
-                    option, native_arguments=option['method_actuals'])
+                    option, actuals=option['method_actuals'])
 
             method_definition = C10_TENSOR_METHOD_DEFINITION
             return FunctionCode(
@@ -1106,7 +1098,7 @@ def create_generic(top_env, declarations):
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
-                            native_arguments=option['native_actuals']))
+                            actuals=option['actuals']))
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
                     dispatch_key_var_name=dispatch_key_var_name,
@@ -1114,7 +1106,7 @@ def create_generic(top_env, declarations):
                     static_dispatch_function_cases=static_dispatch_function_cases)
             else:
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
-                    option, native_arguments=option['native_actuals'])
+                    option, actuals=option['actuals'])
 
             fn_definition = C10_FUNCTION_DEFINITION.substitute(
                 option, static_dispatch_function_body=static_dispatch_function_body)
@@ -1126,10 +1118,6 @@ def create_generic(top_env, declarations):
                 option['name'], ", ".join(option['method_formals_with_defaults']))
 
         type_method_dispatch = option['type_method_definition_dispatch']
-
-        option['type_method_formals'] = [format_formal(f) for f in formals]
-        option['type_method_actuals'] = [f['name'] for f in formals]
-        option['native_actuals'] = [f['name'] for f in formals]
 
         is_method = 'method' in option['variants']
         is_namespace_function = 'function' in option['variants']
