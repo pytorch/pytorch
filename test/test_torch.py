@@ -5587,6 +5587,18 @@ def add_neg_dim_tests():
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
+    # Verifies that the inplace dunders (like idiv) actually are in place
+    @onlyOnCPUAndCUDA
+    def test_inplace_dunders(self, device):
+        t = torch.randn((1,), device=device)
+        expected = t.data_ptr()
+        t += 1
+        t -= 1
+        t *= 1
+        t /= 1
+        t //= 1
+        self.assertEqual(expected, t.data_ptr())
+
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
                                    dtype, device,
                                    expected_failure=False):
