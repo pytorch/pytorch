@@ -92,6 +92,7 @@ void sin_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+// We manually overload cos because std::cos does not work with thrust::complex types.
 template<typename scalar_t>
 __host__ __device__ static inline scalar_t cos_wrapper(scalar_t v) {
   return ::cos(v);
@@ -131,6 +132,7 @@ void sinh_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+// We manually overload cosh because std::cosh does not work with thrust::complex types.
 template<typename scalar_t>
 __host__ __device__ static inline scalar_t cosh_wrapper(scalar_t v) {
   return ::cosh(v);
@@ -150,13 +152,19 @@ void cosh_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+// We manually overload tanh because std::tanh does not work with thrust::complex types.
 template<typename scalar_t>
 __host__ __device__ static inline scalar_t tanh_wrapper(scalar_t v) {
   return ::tanh(v);
 }
 
+template<typename T>
+__host__ __device__ static inline c10::complex<T> tanh_wrapper(c10::complex<T> v) {
+  return thrust::tanh(v);
+}
+
 void tanh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "tanh_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "tanh_cuda", [&]() {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "tanh_cuda", [&] {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
         return tanh_wrapper(a);
