@@ -23,7 +23,12 @@ CONFIG_TREE_DATA = [
             ]),
         ]),
         ("cuda", [
-            ("9.2", [X("3.6")]),
+            ("9.2", [
+                X("3.6"),
+                ("3.6", [
+                    ("cuda_gcc_override", [X("gcc5.4")])
+                ])
+            ]),
             ("10.1", [X("3.6")]),
             ("10.2", [
                 XImportant("3.6"),
@@ -126,6 +131,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
             "android_abi": AndroidAbiConfigNode,
+            "cuda_gcc_override": CudaGccOverrideConfigNode
         }
         return next_nodes[experimental_feature]
 
@@ -182,6 +188,12 @@ class AndroidAbiConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
+class CudaGccOverrideConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["cuda_gcc_override"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
 
 class ImportantConfigNode(TreeConfigNode):
     def modify_label(self, label):
