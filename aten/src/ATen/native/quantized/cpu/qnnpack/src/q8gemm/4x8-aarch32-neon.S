@@ -90,7 +90,6 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
 
     # Load output channel index
     LDR r5, [sp, 104]
-    CMP r0, 2
     # Load pointer to per channel zero points array
     # Post-index: After load increment r7 by 4
     LDR r4, [r7], #4
@@ -116,11 +115,11 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     # add 8 bytes to get to vfmax
     ADD r7, r7, 12
 
+    CMP r0, 2
     ADD r4, r3, r9
 
     # Store in r8 pointer from where to load requant scale.
     ADD r8, r8, r6
-
 
     MOVLO r4, r3
 

@@ -227,10 +227,6 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
   // matrices, respectively.
 
   auto packB = w.get();
-  // Adjust weight zero point, similar to weight data.
-  float* weight_scales_data = w_scales.data_ptr<float>();
-  auto kernel_zp = w_zero_points[0];
-  auto kernel_scale = weight_scales_data[0];
   size_t rows_w = bias_.size(0);
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
 
@@ -251,15 +247,17 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
       /*max=*/x_max,
       /*qmin=*/0,
       /*qmax=*/255);
+  float* weight_scales_data = w_scales.data_ptr<float>();
+  if (!input_scale.has_value() || input_scale.value() != q_params.scale) {
+    generate_requantization_scales(
+        w_scales, q_params.scale, 1.f, requantization_scales);
+  }
+
   if (!input_scale.has_value()) {
     // Get the original weight and adjust it to uint8 from int8
     auto weight_contig = orig_weight;
 
-    float* weight_scales_data = w_scales.data_ptr<float>();
-    requantization_scales =
-        generate_requantization_scales(w_scales, q_params.scale, 1.f);
-
-    // TODO Kimish, we are allocating affine_quantized regardless of per channel or not.
+    // TODO(kimishpatel), we are allocating affine_quantized regardless of per channel or not.
     // This allocation is actually used only for packing weight and thus will be freed.
     // Still we should be consistent. Fix this.
     Tensor qnnp_weight = at::_empty_affine_quantized(
@@ -274,9 +272,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
 
-    // Update the input scale to not pack again.
     // Pass in nullptr for bias, as we pass FP32 bias to run function.
-    input_scale = q_params.scale;
     w.reset();
     w = std::make_unique<qnnpack::PackBMatrix>(
         cols_w /* input_channels */,
@@ -292,6 +288,10 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
       orig_weight.reset();
     }
   }
+
+  // Update the input scale to not pack weights again.
+  // as well as to avoid repopulating requant scale if scale has not changed.
+  input_scale = q_params.scale;
 
   // Quantize input
   Tensor q_input = at::quantize_per_tensor(

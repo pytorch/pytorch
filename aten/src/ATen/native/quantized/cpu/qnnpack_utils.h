@@ -246,12 +246,15 @@ namespace {
 std::vector<float> generate_requantization_scales(
     const at::Tensor& weight_scales,
     const float input_scale,
-    const float output_scale) {
+    const float output_scale,
+    std::vector<float>& requant_scales) {
   // Since weight scale is allocated with padding
   // weight_scales.numel() gives us padded num elements.
   auto num_output_channels_padded = weight_scales.numel();
   float* weight_scales_data = weight_scales.data_ptr<float>();
-  std::vector<float> requant_scales(num_output_channels_padded, 1.f);
+  if (requant_scales.size() < num_output_channels_padded) {
+    requant_scales.resize(num_output_channels_padded);
+  }
   for (int i = 0; i < num_output_channels_padded; ++i) {
     requant_scales[i] = weight_scales_data[i] * input_scale / output_scale;
     TORCH_CHECK(

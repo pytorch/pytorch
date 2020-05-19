@@ -46,10 +46,6 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     # Load params
     LDP x16, x8, [sp]
 
-    # a1
-    CMP x0, 2
-    ADD x9, x3, x4
-
     STP d15, d14, [sp, -16]
 
     # Load pointer to per channel zero points array
@@ -117,6 +113,9 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     // - v27 = requantization_scale channels 4-7
     LD1 {v26.4s}, [x17], 16
 
+    # a1
+    CMP x0, 2
+    ADD x9, x3, x4
     CSEL x9, x3, x9, LO
 
     # a2
