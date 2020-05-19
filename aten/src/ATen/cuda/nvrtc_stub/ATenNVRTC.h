@@ -84,10 +84,7 @@ namespace at { namespace cuda {
   _(nvrtcCompileProgram)                         \
   _(cuCtxGetCurrent)                             \
   _(cuModuleUnload)                              \
-  _(cuDevicePrimaryCtxGetState)                  \
-  _(cuLinkCreate)                                \
-  _(cuLinkAddData)                               \
-  _(cuLinkComplete)
+  _(cuDevicePrimaryCtxGetState)
 
 #endif
 
