@@ -4,6 +4,7 @@ import glob
 import imp
 import os
 import re
+import shlex
 import setuptools
 import subprocess
 import sys
@@ -423,8 +424,6 @@ class BuildExtension(build_ext, object):
                                              include_dirs, sources,
                                              depends, extra_postargs)
             common_cflags = self.compiler._get_cc_args(pp_opts, debug, extra_preargs)
-            from shlex import quote
-            common_cflags = [quote(f) for f in common_cflags]
             extra_cc_cflags = self.compiler.compiler_so[1:]
             with_cuda = any(map(_is_cuda_file, sources))
 
@@ -455,10 +454,10 @@ class BuildExtension(build_ext, object):
             _write_ninja_file_and_compile_objects(
                 sources=sources,
                 objects=objects,
-                cflags=extra_cc_cflags + common_cflags,
-                post_cflags=post_cflags,
-                cuda_cflags=cuda_cflags,
-                cuda_post_cflags=cuda_post_cflags,
+                cflags=[shlex.quote(f) for f in extra_cc_cflags + common_cflags],
+                post_cflags=[shlex.quote(f) for f in post_cflags],
+                cuda_cflags=[shlex.quote(f) for f in cuda_cflags],
+                cuda_post_cflags=[shlex.quote(f) for f in cuda_post_cflags],
                 build_directory=output_dir,
                 verbose=True,
                 with_cuda=with_cuda)
