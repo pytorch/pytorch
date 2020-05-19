@@ -659,7 +659,6 @@ class TestUtilityFuns(TestCase):
         graph, _, __ = utils._model_to_graph(model, (x,), example_outputs=output,
                                              operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
         iter = graph.nodes()
-        print(graph)
         assert next(iter).kind() == "prim::ListConstruct"
 
     @skipIfUnsupportedMinOpsetVersion(12)
