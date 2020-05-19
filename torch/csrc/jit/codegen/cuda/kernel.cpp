@@ -168,12 +168,10 @@ bool validateKernelArgTensor(
   }
   // Check the rank of the tensors.
   size_t arg_dim = arg.dim();
-  const auto& root_dom = *static_cast<const TensorView*>(param)->getRootDomain();
-  size_t param_dim = 0;
-  for (size_t i = 0; i < root_dom.nDims(); ++i) {
-    if (!root_dom.axis(i)->isReduction())
-      ++param_dim;
-  }
+  size_t param_dim = static_cast<const TensorView*>(param)
+                         ->getRootDomain()
+                         ->noReductions()
+                         ->nDims();
   if (arg_dim != param_dim) {
     msg << "Argument tensor's rank is " << arg_dim << ", but the parameter is "
         << param_dim;
