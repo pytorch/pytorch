@@ -95,7 +95,6 @@ coverage_ignore_modules = [
 coverage_ignore_functions = [
     # torch.jit
     "annotate",
-    "annotate",
     "export_opnames",
     "indent",
     "interface",
