@@ -1275,7 +1275,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               if (t.defined()) {
                 // check if symbols in the `expected_type` can bind to
                 // `t.sizes()`
-                bound_successfully &=
+                bound_successfully =
                     frames.back().symbols2dims.bindSymbolicShapes(
                         t.sizes(), expected_type->symbolic_sizes());
 

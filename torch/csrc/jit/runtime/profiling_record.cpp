@@ -241,7 +241,6 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
               merged_profiled_types[val_type_pair.first] = merged_type;
             } else {
               // reset symbolic shapes when ranks are different
-              auto type = merged_profiled_types[val_type_pair.first];
               type = type->merge(val_type_pair.second);
               // type = type->withSymbolicShapes(c10::nullopt);
               merged_profiled_types[val_type_pair.first] = type;
