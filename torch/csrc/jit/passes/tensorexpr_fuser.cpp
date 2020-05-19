@@ -316,30 +316,7 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   return {++(++iter), false};
 }
 
-void BuildGradientsForTensorExprGroups(Block* block) {
-  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
-    Node* n = *it;
-    it++;
-    if (n->kind() == getTensorExprSymbol()) {
-      TORCH_INTERNAL_ASSERT(n->hasAttribute(attr::Subgraph));
-      // change the node kind from tensorexpr_Group to DifferentiableGraph
-      auto diff_te =
-          SubgraphUtils::createSingletonSubgraph(n, prim::DifferentiableGraph);
-      // differentiate
-      auto diff_graph = std::move(diff_te->g(attr::Subgraph));
-      Gradient gradient = differentiate(diff_graph);
-      packGradient(gradient, diff_te);
-      // we know this is now fully fusible
-      FuseTensorExprs(diff_te->g(attr::Subgraph), false);
-    } else {
-      for (Block* ib : n->blocks()) {
-        BuildGradientsForTensorExprGroups(ib);
-      }
-    }
-  }
-}
-
-void FuseTensorExprs(std::shared_ptr<Graph>& graph, bool run_build_diff_graph) {
+void fuseTensorExprs_(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Get rid of dead code so that we don't waste effort fusing it.
@@ -386,12 +363,50 @@ void FuseTensorExprs(std::shared_ptr<Graph>& graph, bool run_build_diff_graph) {
     }
   }
   GRAPH_DUMP("After TExprFuser: ", graph);
-  if (run_build_diff_graph) {
-    BuildGradientsForTensorExprGroups(graph->block());
-  }
-  GRAPH_DUMP("BuildGradientsForTensorExprGroups: ", graph);
   EliminateCommonSubexpression(graph);
   EliminateDeadCode(graph);
+}
+
+static bool inputsRequireGrad(Node* n) {
+  auto input_requires_grad = [](Value* v) {
+    return v->type()->requires_grad();
+  };
+  return std::any_of(
+      n->inputs().begin(), n->inputs().end(), input_requires_grad);
+}
+
+void BuildGradientsForTensorExprGroups(Block* block) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+    Node* n = *it;
+    it++;
+    if (n->kind() == getTensorExprSymbol()) {
+      TORCH_INTERNAL_ASSERT(n->hasAttribute(attr::Subgraph));
+
+      if (!inputsRequireGrad(n)) {
+        continue;
+      }
+
+      // change the node kind from tensorexpr_Group to DifferentiableGraph
+      auto diff_te =
+          SubgraphUtils::createSingletonSubgraph(n, prim::DifferentiableGraph);
+      // differentiate
+      auto diff_graph = std::move(diff_te->g(attr::Subgraph));
+      Gradient gradient = differentiate(diff_graph);
+      packGradient(gradient, diff_te);
+      // we know this is now fully fusible
+      fuseTensorExprs_(diff_te->g(attr::Subgraph));
+    } else {
+      for (Block* ib : n->blocks()) {
+        BuildGradientsForTensorExprGroups(ib);
+      }
+    }
+  }
+}
+
+void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
+  fuseTensorExprs_(graph);
+  GRAPH_DUMP("BuildGradientsForTensorExprGroups: ", graph);
+  BuildGradientsForTensorExprGroups(graph->block());
 }
 
 Operation createTensorExprOp(const Node* node) {
