@@ -178,7 +178,7 @@ void cpu_masked_select_serial_kernel(TensorIterator& iter, const func_t& f) {
       }
       if (mask_value) {
         int64_t offset_bytes = offset * sizeof(scalar_t);
-        f(dst + strides[0] * i, src + strides[1] * i, offset_bytes);
+        f(dst, src + strides[1] * i, offset_bytes);
         offset++;
       }
     }
@@ -218,7 +218,7 @@ void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
       if (mask_value) {
         int64_t offset = *(int64_t*)(mask_prefix_sum + strides[3] * i);
         int64_t offset_bytes = (offset - 1) * sizeof(scalar_t);
-        f(dst + strides[0] * i, src + strides[1] * i, offset_bytes);
+        f(dst, src + strides[1] * i, offset_bytes);
       }
     }
   };

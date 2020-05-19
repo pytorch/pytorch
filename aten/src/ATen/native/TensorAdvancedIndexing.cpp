@@ -651,7 +651,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
 
-  auto shape = _self.sizes().vec();
+  auto shape = _self.sizes();
   int64_t numel = _mask.sum().item().toLong();
   result.resize_({numel});
   if (numel == 0) {
