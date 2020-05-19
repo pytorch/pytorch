@@ -647,17 +647,20 @@ class TestUtilityFuns(TestCase):
         class PrimModule(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                if x.shape[0] == 0:
-                    return torch.tensor(0)
-                return x
+                if isinstance(x, list):
+                    y = x
+                else:
+                    y = [torch.sum(x, dim=0)]
+                return y
 
-        x = torch.randn(2, 3)
+        x = torch.tensor([2])
         model = PrimModule()
         output = model(x)
         graph, _, __ = utils._model_to_graph(model, (x,), example_outputs=output,
                                              operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
         iter = graph.nodes()
-        assert next(iter).kind() == "prim::Uninitialized"
+        print(graph)
+        assert next(iter).kind() == "prim::ListConstruct"
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training_zero(self):

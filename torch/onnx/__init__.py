@@ -100,15 +100,16 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             this mode, it can be registered and implemented by the user for their
             runtime backend.
             Example graph:
-                graph(%x.1 : Float):
-                  %1 : Tensor = prim::Uninitialized()
-                  %2 : int[] = aten::size(%x.1)
-                  return (%2)
+                graph(%x.1 : Long(1:1)):
+                  %1 : None = prim::Constant()
+                  %2 : Tensor = aten::sum(%x.1, %1)
+                  %y.1 : Tensor[] = prim::ListConstruct(%2)
+                  return (%y.1)
             is exported as:
-                graph(%x.2 : Float):
-                  %1 : Tensor = prim::Uninitialized()
-                  %2 : int[] = onnx::Shape(%x.2)
-                  return (%2)
+                graph(%x.1 : Long(1:1)):
+                  %1 : Tensor = onnx::ReduceSum[keepdims=0](%x.1)
+                  %y.1 : Long() = prim::ListConstruct(%1)
+                  return (%y.1)
 
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
