@@ -35,7 +35,7 @@ void testKernel_1() {
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
-  Stmt* s = k.getStmtForInputs(fmap<IValue>(inputs));
+  Stmt* s = k.getCodeGenStmt();
   // TODO: verify stmt
 
   std::vector<IValue> stack = fmap<IValue>(inputs);
@@ -65,7 +65,7 @@ void testKernel_2() {
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
-  Stmt* s = k.getStmtForInputs(fmap<IValue>(inputs));
+  Stmt* s = k.getCodeGenStmt();
   // TODO: verify stmt
 
   std::vector<IValue> stack = fmap<IValue>(inputs);
@@ -95,7 +95,7 @@ void testKernel_3() {
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
-  Stmt* s = k.getStmtForInputs(fmap<IValue>(inputs));
+  Stmt* s = k.getCodeGenStmt();
   // TODO: verify stmt
 
   std::vector<IValue> stack = fmap<IValue>(inputs);
