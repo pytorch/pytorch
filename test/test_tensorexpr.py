@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 import unittest
 
-from torch.testing._internal.common_utils import suppress_warnings, set_num_profiled_runs
+from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs
 
 from te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
     LLVMCodeGenExecuted, SimpleIREvalExecuted
