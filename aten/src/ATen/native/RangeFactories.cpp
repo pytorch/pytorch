@@ -9,6 +9,7 @@
 
 namespace at { namespace native {
 
+DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar, Scalar, Scalar), arange_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar, Scalar, int64_t), linspace_stub);
 
 Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
@@ -167,23 +168,14 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
       result.resize_({size});
     }
 
-    Tensor r = result.is_contiguous() ? result : result.contiguous();
-    scalar_t *data_ptr = r.data_ptr<scalar_t>();
-
-    at::parallel_for(0, size, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
-      scalar_t is = p_begin;
-      for (int64_t i = p_begin; i < p_end; ++i, ++is) {
-        data_ptr[i] = xstart + is * xstep;
-      }
-    });
-    if (!result.is_contiguous()) {
-      result.copy_(r);
-    }
+    auto iter = TensorIterator::nullary_op(result, /*check_mem_overlap=*/true);
+    arange_stub(iter.device_type(), iter, start, size, step);
   });
 
   return result;
 }
 
+DEFINE_DISPATCH(arange_stub);
 DEFINE_DISPATCH(linspace_stub);
 
 }} // namespace at::native

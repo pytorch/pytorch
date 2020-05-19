@@ -2,6 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 
+#include <ATen/AccumulateType.h>
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
@@ -11,6 +12,30 @@ namespace at { namespace native {
 namespace {
 
 using namespace vec256;
+
+static void arange_kernel(TensorIterator& iter, Scalar scalar_start, Scalar scalar_steps, Scalar scalar_step) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "arange_cpu", [&]() {
+    using accscalar_t = at::acc_type<scalar_t, false>;
+    auto start = scalar_start.to<accscalar_t>();
+    auto steps = scalar_steps.to<accscalar_t>();
+    auto step = scalar_step.to<accscalar_t>();
+    at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
+      int64_t idx(p_begin);
+      TensorIterator it(iter);
+      cpu_serial_kernel_vec(
+          it,
+          [start, step, steps, &idx]() -> scalar_t {
+            return start + step * (idx++);
+          },
+          [start, step, steps, &idx]() -> Vec256<scalar_t> {
+            Vec256<scalar_t> res;
+            res = Vec256<scalar_t>::arange(start + step * idx, step);
+            idx += Vec256<scalar_t>::size();
+            return res;
+          }, {p_begin, p_end});
+    });
+  });
+}
 
 static void linspace_kernel(TensorIterator& iter, Scalar scalar_start, Scalar scalar_end, int64_t steps) {
   AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX(iter.dtype(), "linspace_cpu", [&]() {
@@ -49,6 +74,7 @@ static void linspace_kernel(TensorIterator& iter, Scalar scalar_start, Scalar sc
 
 } // anonymous namespace
 
+REGISTER_DISPATCH(arange_stub, &arange_kernel);
 REGISTER_DISPATCH(linspace_stub, &linspace_kernel);
 
 }} // namespace at::native
