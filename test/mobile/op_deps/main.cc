@@ -13,7 +13,9 @@ int main() {
   at::call_DD_op(input);
   at::call_EE_op(input);
   at::call_FF_op(input);
-  call_unboxed_super_slow_temp_shim("quantized::t_add", "", input, input, 1.0, 0);
-  call_unboxed_super_slow_temp_shim("quantized::t_add_relu", "", input, input, 1.0, 0);
+  const c10::OperatorHandle t_add = c10::Dispatcher::singleton().findSchema({"quantized::t_add", ""}).value();
+  const c10::OperatorHandle t_add_relu = c10::Dispatcher::singleton().findSchema({"quantized::t_add_relu", ""}).value();
+  t_add.call<Tensor, Tensor, Tensor, double, int64_t>(input, input, 1.0, 0);
+  t_add_relu.call<Tensor, Tensor, Tensor, double, int64_t>(input, input, 1.0, 0);
   return 0;
 }

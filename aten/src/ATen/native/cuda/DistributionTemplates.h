@@ -401,6 +401,38 @@ struct RandomKernel {
   }
 };
 
+// ====================================================================================================================
+
+template<typename scalar_t, typename accscalar_t, size_t curand4_engine_calls, typename RNG, typename transform_t>
+void uniform_and_transform(TensorIterator& iter, RNG gen, transform_t transform) {
+  if (std::is_same<scalar_t, double>::value) {
+    distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+      gen,
+      [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
+      transform);
+  } else {
+    distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+      gen,
+      [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
+      transform);
+  }
+}
+
+template<typename scalar_t, typename accscalar_t, size_t curand4_engine_calls, typename RNG, typename transform_t>
+void normal_and_transform(TensorIterator& iter, RNG gen, transform_t transform) {
+  if (std::is_same<scalar_t, double>::value) {
+    distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+      gen,
+      [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal2_double(state); },
+      transform);
+  } else {
+    distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+      gen,
+      [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal4(state); },
+      transform);
+  }
+}
+
 // ==================================================== Normal ========================================================
 
 template<typename RNG>
@@ -412,19 +444,9 @@ void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
     auto std = static_cast<accscalar_t>(std_);
     // define lambda to multiply std and add mean
     auto normal_func = [mean, std] __device__ (accscalar_t rand) {
-      return static_cast<scalar_t>(rand * std + mean);
+      return static_cast<scalar_t>(transformation::normal<accscalar_t>(rand, mean, std));
     };
-    if (std::is_same<scalar_t, double>::value) {
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal2_double(state); },
-        normal_func);
-    } else {
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal4(state); },
-        normal_func);
-    }
+    normal_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, normal_func);
    });
 }
 
@@ -450,27 +472,17 @@ void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG gen) {
     auto to = static_cast<scalar_t>(to_);
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto range = static_cast<accscalar_t>(to-from);
-    from = static_cast<accscalar_t>(from);
     // define lambda to reverse bounds, multiply 'range' and add 'from_'
     auto uniform_func = [range, from] __device__ (accscalar_t rand) {
       // reverse the bounds of curand4 from (0, 1] to [0, 1)
       // Note that this method is from legacy THCTensorRandom and is likely to give
       // you more 0-s, since, the probability of gettings 1-s is higher than 0-s and
       // by reversing the bounds, we are flipping the probabilities of 1-s and 0-s.
+      // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/16706
       auto reverse_bound_rand = rand == static_cast<accscalar_t>(1.0) ? static_cast<accscalar_t>(0.0) : rand;
       return static_cast<scalar_t>(reverse_bound_rand * range + from);
     };
-    if (std::is_same<scalar_t, double>::value) {
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
-        uniform_func);
-    } else {
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
-        uniform_func);
-    }
+    uniform_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, uniform_func);
    });
 }
 
@@ -489,25 +501,11 @@ void log_normal_kernel(TensorIterator& iter, double mean_, double std_, RNG gen)
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto mean = static_cast<accscalar_t>(mean_);
     auto std = static_cast<accscalar_t>(std_);
-    if (std::is_same<scalar_t, double>::value) {
-      // define lambda for log_normal transformation
-      auto log_normal_func = [mean, std] __device__ (accscalar_t rand) {
-        return static_cast<scalar_t>(::exp(rand * std + mean));
-      };
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal2_double(state); },
-        log_normal_func);
-    } else {
-      auto log_normal_func = [mean, std] __device__ (accscalar_t rand) {
-        // use __expf fast approximation for peak bandwidth
-        return static_cast<scalar_t>(__expf(rand * std + mean));
-      };
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal4(state); },
-        log_normal_func);
-    }
+    // define lambda for log_normal transformation
+    auto log_normal_func = [mean, std] __device__ (accscalar_t rand) {
+      return static_cast<scalar_t>(transformation::log_normal<accscalar_t>(transformation::normal<accscalar_t>(rand, mean, std)));
+    };
+    normal_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, log_normal_func);
    });
 }
 
@@ -521,28 +519,14 @@ struct LogNormalKernel {
 // =================================================== Geometric ======================================================
 
 template<typename RNG>
-void geometric_kernel(TensorIterator& iter, double p_, RNG gen) {
+void geometric_kernel(TensorIterator& iter, double p, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "geometric_cuda", [&] {
-    if (std::is_same<scalar_t, double>::value) {
-      // define lambda for geometric transformation
-      auto geometric_func = [p_] __device__ (double rand) {
-        return static_cast<scalar_t>(::ceil(::log(rand) / ::log(static_cast<double>(1.0)-p_)));
-      };
-      distribution_nullary_kernel<scalar_t, double, curand4_engine_calls/2>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
-        geometric_func);
-    } else {
-      auto p = static_cast<float>(p_);
-      auto geometric_func = [p] __device__ (float rand) {
-        // use __logf fast approximation for peak bandwidth
-        return static_cast<scalar_t>(::ceil(__logf(rand) / __logf(static_cast<float>(1.0)-p)));
-      };
-      distribution_nullary_kernel<scalar_t, float, curand4_engine_calls>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
-        geometric_func);
-    }
+    using accscalar_t = at::GeometricType<scalar_t>::type;
+    // define lambda for geometric transformation
+    auto geometric_func = [p] __device__ (accscalar_t rand) {
+      return static_cast<scalar_t>(transformation::geometric<accscalar_t>(rand, p));
+    };
+    uniform_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, geometric_func);
   });
 }
 
@@ -557,45 +541,20 @@ struct GeometricKernel {
 
 template<typename RNG>
 void exponential_kernel(TensorIterator& iter, double lambda_, RNG gen) {
-  // Note that HIP doesn't support std::nextafter in device code.
-  auto nextafter_1_0_float = std::nextafter(1.0f, 0.0f);
-  auto nextafter_1_0_double = std::nextafter(1.0, 0.0);
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "exponential_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto lambda = static_cast<accscalar_t>(lambda_);
-    if (std::is_same<scalar_t, double>::value) {
-      // define lambda for exponential transformation
-      auto exponential_func = [lambda, nextafter_1_0_double] __device__ (accscalar_t rand) {
-        accscalar_t sample;
-        // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
-        // Hence, squash the 1 to just below 1.
-        if(rand == static_cast<accscalar_t>(1.0)) {
-          sample = ::log(nextafter_1_0_double);
-        } else {
-          sample = ::log(rand);
-        }
-        return static_cast<scalar_t>(static_cast<accscalar_t>(-1.0) / lambda * sample);
-      };
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
-        exponential_func);
-    } else {
-      // use __logf fast approximation for peak bandwidth
-      auto exponential_func = [lambda, nextafter_1_0_float] __device__ (accscalar_t rand) {
-        accscalar_t sample;
-        if(rand == static_cast<accscalar_t>(1.0)) {
-          sample = __logf(nextafter_1_0_float);
-        } else {
-          sample = __logf(rand);
-        }
-        return static_cast<scalar_t>(static_cast<accscalar_t>(-1.0) / lambda * sample);
-      };
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
-        exponential_func);
-    }
+    // define lambda for exponential transformation
+    auto exponential_func = [lambda] __device__ (accscalar_t rand) {
+      // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
+      // Hence, squash the 1 to just below 1.
+      // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/16706
+      if(rand == static_cast<accscalar_t>(1.0)) {
+        rand = ::nextafter(static_cast<accscalar_t>(1.0), static_cast<accscalar_t>(0.0));
+      }
+      return static_cast<scalar_t>(transformation::exponential<accscalar_t>(rand, lambda));
+    };
+    uniform_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, exponential_func);
    });
 }
 
@@ -614,27 +573,11 @@ void cauchy_kernel(TensorIterator& iter, double median_, double sigma_, RNG gen)
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto median = static_cast<accscalar_t>(median_);
     auto sigma = static_cast<accscalar_t>(sigma_);
-    if (std::is_same<scalar_t, double>::value) {
-      // define lambda for cauchy transformation
-      auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
-        return static_cast<scalar_t>(median + sigma *
-                ::tan(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
-      };
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
-        cauchy_func);
-    } else {
-      // use __tanf fast approximation for peak bandwidth
-      auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
-        return static_cast<scalar_t>(median + sigma *
-                __tanf(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
-      };
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
-        cauchy_func);
-    }
+    // define lambda for cauchy transformation
+    auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
+      return static_cast<scalar_t>(transformation::cauchy<accscalar_t>(rand, median, sigma));
+    };
+    uniform_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, cauchy_func);
    });
 }
 

@@ -312,7 +312,6 @@ caffe2_params: &caffe2_params
     DOCKER_IMAGE: << parameters.docker_image >>
     BUILD_ONLY: << parameters.build_only >>
   resource_class: << parameters.resource_class >>
-
 binary_linux_build_params: &binary_linux_build_params
   parameters:
     build_environment:
@@ -379,7 +378,6 @@ binary_windows_params: &binary_windows_params
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     BUILD_FOR_SYSTEM: windows
     JOB_EXECUTOR: <<parameters.executor>>
-
 
 promote_common: &promote_common
   docker:
@@ -1311,7 +1309,6 @@ jobs:
       - persist_to_workspace:
           root: .
           paths: .circleci/scripts
-
   pytorch_python_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-python-doc-push
@@ -1981,7 +1978,6 @@ jobs:
 
           "/home/circleci/project/builder/cron/upload_binary_sizes.sh"
 
-
 # There is currently no testing for libtorch TODO
 #  binary_linux_libtorch_3.6m_cpu_test:
 #    environment:
@@ -2591,6 +2587,33 @@ workflows:
                 - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:9a3986fa-7ce7-4a36-a001-3c9bef9892e2"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - pytorch_linux_build:
+          name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc5_4_build
+          requires:
+            - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4:9a3986fa-7ce7-4a36-a001-3c9bef9892e2"
+      - pytorch_linux_test:
+          name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc5_4_test
+          requires:
+            - setup
+            - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc5_4_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4:9a3986fa-7ce7-4a36-a001-3c9bef9892e2"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_build:
@@ -7387,7 +7410,6 @@ workflows:
           filters:
             branches:
               only: postnightly
-
   docker_build:
     triggers:
       - schedule:
@@ -7472,8 +7494,6 @@ workflows:
             project: tensorcomp
             tags_to_keep: "34"
       - docker_hub_index_job
-
-
   # Promotion workflow
   promote:
     jobs:
