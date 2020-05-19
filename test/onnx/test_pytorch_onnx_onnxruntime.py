@@ -3162,6 +3162,19 @@ class TestONNXRuntime(unittest.TestCase):
         mat2 = torch.randn(3, 3)
         self.run_test(M(), input=(mat1, mat2))
 
+    def test_dropout(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.dropout = torch.nn.Dropout(0.3)
+
+            def forward(self, x):
+                dropout = self.dropout(x)
+                return dropout
+
+        x = torch.randn(10, 3, 53)
+        self.run_test(M(), (x))
+
     def test_shape_constant_fold(self):
         class ShapeModule(torch.nn.Module):
             def __init__(self):
