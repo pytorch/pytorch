@@ -64,4 +64,3 @@ binary_windows_params: &binary_windows_params
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     BUILD_FOR_SYSTEM: windows
     JOB_EXECUTOR: <<parameters.executor>>
-
