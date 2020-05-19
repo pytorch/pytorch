@@ -76,6 +76,7 @@ struct TORCH_API StringView {
 constexpr std::size_t kSoftLimitCallbacks = 4;
 
 typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> CallbackHandles;
+typedef uint64_t RecordFunctionHandle;
 
 struct TORCH_API RecordFunction {
   // Default constructor is used with before function called afterwards:
@@ -153,8 +154,13 @@ struct TORCH_API RecordFunction {
   // Calls end callbacks
   void _end();
 
-  // Returns whether some of the callbacks require function inputs
-  bool _needsInputs();
+  inline RecordFunctionHandle handle() const {
+    return handle_;
+  }
+
+  inline void setHandle(RecordFunctionHandle handle) {
+    handle_ = handle;
+  }
 
   // Used internally to keep track of thread local and global callbacks
   // that were picked to run; must be sorted;
@@ -187,6 +193,10 @@ struct TORCH_API RecordFunction {
 
   // The logical thread_id that this RecordFunction was created with
   uint64_t thread_id_ = 0;
+
+  // Unique id for this RecordFunction, used in callbacks to track start
+  // and end of ranges
+  RecordFunctionHandle handle_ {0};
 };
 
 //

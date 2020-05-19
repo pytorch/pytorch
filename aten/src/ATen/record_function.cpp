@@ -9,8 +9,13 @@ namespace {
 
 // Used to generate unique callback handles
 CallbackHandle next_unique_callback_handle() {
-  static std::atomic<uint64_t> unique_id {0};
-  return CallbackHandle(++unique_id);
+  static std::atomic<uint64_t> unique_cb_id {0};
+  return CallbackHandle(++unique_cb_id);
+}
+
+RecordFunctionHandle next_unique_record_function_handle() {
+  static std::atomic<uint64_t> unique_rf_id {0};
+  return RecordFunctionHandle(++unique_rf_id);
 }
 
 // Thread local vector of callbacks, holds pairs (callbacks, unique_id);
@@ -100,6 +105,7 @@ class CallbackManager {
     init_handles(rec_fn.sorted_active_global_handles_, sorted_global_callbacks_);
     rec_fn.active_ = found_active_cb;
     rec_fn.needs_inputs_ = found_needs_inputs;
+    rec_fn.setHandle(next_unique_record_function_handle());
   }
 
   void runStartCallbacks(RecordFunction& rf) {
