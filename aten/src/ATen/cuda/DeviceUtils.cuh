@@ -91,7 +91,7 @@ __device__ __forceinline__ T WARP_SHFL_DOWN(T value, unsigned int delta, int wid
 template<>
 __device__ __forceinline__ c10::Half WARP_SHFL_DOWN<c10::Half>(c10::Half value, unsigned int delta, int width, unsigned int mask)
 {
-  WARP_SHFL_DOWN<__half>(__half(value), delta, width, mask);
+  return WARP_SHFL_DOWN<__half>(__half(value), delta, width, mask);
 }
 
 template <typename T>
