@@ -945,7 +945,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     static std::atomic<size_t> num_frames;
 
     // RecordFunction object associated with this frame
-    std::shared_ptr<at::RecordFunction> record_function;
+    std::unique_ptr<at::RecordFunction> record_function;
   };
 
   // saved-by-value stuff that can exist on the stack inside runInterpreter
@@ -1025,15 +1025,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     frames.back().pc = af->pc + 1;
     enterFrame(code, stack.size() - code.num_inputs());
     if (at::hasCallbacks() && at::isRecordFunctionEnabled()) {
-      auto rec_fn = std::make_shared<at::RecordFunction>(
+      auto rec_fn = std::make_unique<at::RecordFunction>(
           at::RecordScope::TORCHSCRIPT_FUNCTION);
       if (rec_fn->active) {
-        frames.back().record_function = rec_fn;
         if (rec_fn->needs_inputs) {
           rec_fn->before(fn->name(), last(stack, code.num_inputs()));
         } else {
           rec_fn->before(fn->name());
         }
+        frames.back().record_function = std::move(rec_fn);
       }
     }
     *af = ActiveFrame(frames.back());
