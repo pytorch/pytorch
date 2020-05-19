@@ -62,7 +62,7 @@ class WindowsJob:
         }
 
         if self.run_on_prs_pred(self):
-            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_unimportant_branch_filter_dict()
+            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_branches_only_filter_dict()
 
         name_parts = base_name_parts + cpu_forcing_name_parts + [
             numbered_phase,
