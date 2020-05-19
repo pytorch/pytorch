@@ -12384,10 +12384,10 @@ class TestTorchDeviceType(TestCase):
                                 device=device)
         inf_mask = torch.tensor([False, False, True, False, False, False, False, False, False, False, False],
                                 device=device)
-        self.assertEqual(torch.isnan(torch.acosh(sample)), nan_mask)
-        self.assertEqual(torch.isnan(sample.acosh()), nan_mask)
-        self.assertEqual(torch.isinf(torch.acosh(sample)), inf_mask)
-        self.assertEqual(torch.isinf(sample.acosh()), inf_mask)
+        self.assertEqual(torch.isnan(torch.atanh(sample)), nan_mask)
+        self.assertEqual(torch.isnan(sample.atanh()), nan_mask)
+        self.assertEqual(torch.isinf(torch.atanh(sample)), inf_mask)
+        self.assertEqual(torch.isinf(sample.atanh()), inf_mask)
 
     # TODO: run on non-native device types
     @dtypes(torch.double)
