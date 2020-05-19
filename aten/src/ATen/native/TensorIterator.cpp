@@ -691,8 +691,9 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
   return iter;
 }
 
-TensorIterator TensorIterator::nullary_op(Tensor& out) {
+  TensorIterator TensorIterator::nullary_op(Tensor& out, bool check_mem_overlap) {
   auto iter = TensorIterator();
+  iter.set_check_mem_overlap(check_mem_overlap);
   iter.add_output(out);
   // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
   iter.resize_outputs_ = false;
