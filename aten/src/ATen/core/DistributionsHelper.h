@@ -177,7 +177,7 @@ struct normal_distribution {
       generator->set_next_float_normal_sample(c10::optional<float>(cache));
     }
 #endif
-    ret = r * ::cos(theta) * stdv + mean;
+    ret = transformation::normal(r * ::cos(theta), mean, stdv);
     return ret;
   }
 
@@ -291,8 +291,8 @@ struct lognormal_distribution {
 
   template<typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator){
-    normal_distribution<T> normal(0.0, 1.0);
-    return transformation::log_normal<T>(normal(generator), mean, stdv);
+    normal_distribution<T> normal(mean, stdv);
+    return transformation::log_normal<T>(normal(generator));
   }
 
   private:

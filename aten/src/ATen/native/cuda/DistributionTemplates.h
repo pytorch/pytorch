@@ -503,7 +503,7 @@ void log_normal_kernel(TensorIterator& iter, double mean_, double std_, RNG gen)
     auto std = static_cast<accscalar_t>(std_);
     // define lambda for log_normal transformation
     auto log_normal_func = [mean, std] __device__ (accscalar_t rand) {
-      return static_cast<scalar_t>(transformation::log_normal<accscalar_t>(rand, mean, std));
+      return static_cast<scalar_t>(transformation::log_normal<accscalar_t>(transformation::normal<accscalar_t>(rand, mean, std)));
     };
     normal_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, log_normal_func);
    });
