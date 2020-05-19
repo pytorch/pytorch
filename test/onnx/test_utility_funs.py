@@ -650,7 +650,7 @@ class TestUtilityFuns(TestCase):
                 if isinstance(x, list):
                     y = x
                 else:
-                    y = [torch.sum(x, dim=0)]
+                    y = [x]
                 return y
 
         x = torch.tensor([2])
