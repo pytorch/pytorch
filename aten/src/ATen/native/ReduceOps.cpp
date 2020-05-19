@@ -508,7 +508,7 @@ Tensor& nanmean_out_cpu_gpu(Tensor& result, const Tensor& self, IntArrayRef dim,
       " instead.");
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
   Tensor without_nans = at::where(at::isnan(self), at::zeros_like(self), self);
-  const at::Tensor dim_prod = at::sum(self.isnan().logical_not(), dim, keepdim, dtype);
+  const Tensor dim_prod = at::sum(self.isnan().logical_not(), dim, keepdim, dtype);
   if (self.device().is_cpu()) {
     at::sum_out(result, without_nans, dim, keepdim, dtype).div_(dim_prod);
     return result;

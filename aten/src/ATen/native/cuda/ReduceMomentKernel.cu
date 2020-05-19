@@ -63,13 +63,13 @@ static void mean_kernel_cuda(TensorIterator& iter) {
 }
 
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
-void nanmean_kernel_impl(TensorIterator& iter, at::Tensor size_without_nans) {
+void nanmean_kernel_impl(TensorIterator& iter, const Tensor& size_without_nans) {
   at::Tensor src = iter.tensor(1);
-  float factor = size_without_nans.item<float>();
+  float factor = float(iter.num_output_elements()) / size_without_nans.item<float>();
   gpu_reduce_kernel<scalar_t, out_t>(iter, NanMeanOps<acc_t, float> {factor});
 }
 
-static void nanmean_kernel_cuda(TensorIterator& iter, at::Tensor size_without_nans) {
+static void nanmean_kernel_cuda(TensorIterator& iter, const Tensor& size_without_nans) {
   if (iter.dtype() == kHalf) {
     return nanmean_kernel_impl<at::Half, float>(iter, size_without_nans);
   } else if (iter.dtype(1) == kHalf && iter.dtype() == kFloat) {

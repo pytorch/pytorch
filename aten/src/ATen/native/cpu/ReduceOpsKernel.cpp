@@ -120,14 +120,13 @@ static void mean_kernel_impl(TensorIterator& iter) {
   });
 }
 
-static void nanmean_kernel_impl(TensorIterator& iter) {
+static void nanmean_kernel_impl(TensorIterator& iter, const Tensor& size_without_nans) {
   AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX(iter.dtype(), "nanmean_cpu", [&] {
     at::Tensor src = iter.tensor(1);
-    at::Tensor dim_prod = at::sum(src.isnan().logical_not());
-    scalar_t factor = scalar_t(iter.num_output_elements()) / dim_prod.item<scalar_t>();
+    scalar_t factor = scalar_t(iter.num_output_elements()) / size_without_nans.item<scalar_t>();
     binary_kernel_reduce(
       iter,
-      MeanOps<scalar_t, scalar_t> {factor},
+      NanMeanOps<scalar_t, scalar_t> {factor},
       scalar_t(0)
     );
   });
