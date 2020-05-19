@@ -9,7 +9,6 @@ from torch._C import parse_ir
 # torch.quantization
 from torch.quantization import QConfig
 from torch.quantization import default_dynamic_qconfig
-from torch.quantization import QConfigDynamic
 from torch.quantization import default_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
@@ -33,7 +32,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
 from torch.testing._internal.jit_utils import get_forward
 from torch.testing._internal.jit_utils import get_forward_graph
-from torch.testing._internal.jit_utils import get_module_method
 
 from torch.jit._recursive import wrap_cpp_module
 
@@ -404,6 +402,9 @@ graph(%input, %weight):
         # weight of linear
         assert len(attrs_with_prefix(m.sub.fc, '_observer_')) == 1
 
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     def test_insert_observers_skip_values(self):
         class ConvFunctionalReLU(torch.nn.Module):
             def __init__(self):
@@ -426,18 +427,20 @@ graph(%input, %weight):
             def __init__(self):
                 super(AddReLUModule, self).__init__()
                 self.relu = torch.nn.ReLU()
+                self.conv = torch.nn.Conv2d(3, 3, 3).float()
 
             def forward(self, x):
-                out = x
+                out = self.conv(x)
                 out += x
                 return self.relu(out)
 
         class AddFunctionalReLU(torch.nn.Module):
             def __init__(self):
                 super(AddFunctionalReLU, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3).float()
 
             def forward(self, x):
-                out = x
+                out = self.conv(x)
                 out += x
                 return F.relu(out)
 
@@ -1094,12 +1097,17 @@ graph(%input, %weight):
                    .check_not("aten::_convolution") \
                    .run(str(get_forward_graph(m.conv3d._c)))
 
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     def test_replicate_dequant_same_value(self):
         class Mul(torch.nn.Module):
             def __init__(self):
                 super(Mul, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3).float()
 
             def forward(self, x):
+                x = self.conv(x)
                 return x * x
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float),
@@ -1108,7 +1116,7 @@ graph(%input, %weight):
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(Mul()).eval()
         m = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data])
-        FileCheck().check("quantized::mul") \
+        FileCheck().check("quantized::mul(") \
                    .check_not("aten::mul") \
                    .run(m.graph)
 
@@ -1311,7 +1319,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x += y
                 return x
 
-        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float), torch.randn(1, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float),
+                 torch.randn(1, 3, 10, 10, dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m, quantized in [(QuantizedAdd(), True),
                              (QuantizedInplaceAdd(), True),
                              (NonQuantizedAdd(), False),
@@ -1365,7 +1375,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x += 3
                 return x
 
-        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m, quantized in [(QuantizedAddScalar(), True),
                              (QuantizedInplaceAddScalar(), True),
                              (NonQuantizedAddScalar(), False),
@@ -1459,7 +1470,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x += y
                 return F.relu(x, True)
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.rand((1, 3, 10, 10), dtype=torch.float),
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float),
+                 torch.rand((1, 3, 10, 10), dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m in [AddRelu(True), AddRelu(False),
                   InplaceAddRelu(True), InplaceAddRelu(False),
@@ -1518,25 +1530,6 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x += 3
                 return F.relu(x)
 
-        class AddScalarFunctionalRelu(torch.nn.Module):
-            def __init__(self):
-                super(AddScalarFunctionalRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
-
-            def forward(self, x):
-                x = self.conv(x)
-                return F.relu(x + 3)
-
-        class InplaceAddScalarFunctionalRelu(torch.nn.Module):
-            def __init__(self):
-                super(InplaceAddScalarFunctionalRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
-
-            def forward(self, x):
-                x = self.conv(x)
-                x += 3
-                return F.relu(x)
-
         class AddScalarInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(AddScalarInplaceFunctionalRelu, self).__init__()
@@ -1556,7 +1549,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x += 3
                 return F.relu(x, True)
 
-        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float),
+                 torch.randn(1, 3, 10, 10, dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m in [AddScalarRelu(True), AddScalarRelu(False),
                   InplaceAddScalarRelu(True), InplaceAddScalarRelu(False),
                   AddScalarFunctionalRelu(),
@@ -1903,25 +1898,6 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = self.conv(x)
                 x *= 3
                 return self.relu(x)
-
-        class MulScalarFunctionalRelu(torch.nn.Module):
-            def __init__(self):
-                super(MulScalarFunctionalRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
-
-            def forward(self, x):
-                x = self.conv(x)
-                return F.relu(x * 3)
-
-        class InplaceMulScalarFunctionalRelu(torch.nn.Module):
-            def __init__(self):
-                super(InplaceMulScalarFunctionalRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
-
-            def forward(self, x):
-                x = self.conv(x)
-                x *= 3
-                return F.relu(x)
 
         class MulScalarFunctionalRelu(torch.nn.Module):
             def __init__(self):
@@ -2320,22 +2296,3 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         FileCheck().check("quantized::linear_dynamic") \
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(model.graph)
-
-    def test_prepare_dynamic_lstm(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
-
-            def forward(self, x):
-                return self.lstm(x)
-        from torch.quantization.observer import default_dynamic_quant_observer, _MinMaxTensorListObserver
-        qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                 weight=_MinMaxTensorListObserver)
-        m = torch.jit.script(M())
-        m = prepare_dynamic_script(m, {'': qconfig})
-        assert len(attrs_with_prefix(m.lstm, '_observer_')) == 1
-        FileCheck().check('_MinMaxTensorListObserver = prim::GetAttr[name="_observer_0') \
-                   .check("aten::lstm") \
-                   .check("return") \
-                   .run(str(get_module_method(m, 'lstm', 'forward__0').graph))
