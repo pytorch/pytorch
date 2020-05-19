@@ -66,7 +66,7 @@ from torch.testing._internal.test_module.future_div import div_int_future, div_f
 from torch.testing._internal.test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 # Standard library
-from collections import namedtuple, OrderedDict
+from collections import defaultdict, namedtuple, OrderedDict
 from copy import deepcopy
 from itertools import product, chain
 import itertools
@@ -3451,6 +3451,50 @@ graph(%Ra, %Rb):
             buffer.seek(0)
             model_loaded = torch.jit.load(buffer)
             self.assertEqual(model_loaded(), model())
+
+    def test_profiler(self):
+        prev_opt = torch._C._get_graph_executor_optimize()
+        torch._C._set_graph_executor_optimize(False)
+
+        def other_fn(x):
+            return x * 2
+
+        x = torch.rand(3, 4)
+        traced_other_fn = torch.jit.trace(other_fn, x)
+
+        def fn(x):
+            y = traced_other_fn(x)
+            fut = torch.jit._fork(traced_other_fn, x)
+            y = torch.jit._wait(fut)
+            return y
+
+        traced_fn = torch.jit.trace(fn, x)
+        with torch.autograd.profiler.profile() as prof:
+            traced_fn(x)
+
+        # expecting to see other_fn TS function call
+        # with cpu time >= mul cpu time and
+        # a forked other_fn
+
+        mul_events = defaultdict(int)
+        other_fn_events = defaultdict(int)
+        for e in prof.function_events:
+            if e.name == "mul":
+                self.assertTrue(e.thread not in mul_events)
+                mul_events[e.thread] = e.cpu_interval.elapsed_us()
+            elif e.name == "other_fn":
+                self.assertTrue(e.thread not in other_fn_events)
+                other_fn_events[e.thread] = e.cpu_interval.elapsed_us()
+
+        self.assertTrue(len(mul_events) == 2)
+        self.assertTrue(len(other_fn_events) == 2)
+
+        for thread, mul_time in mul_events.items():
+            self.assertTrue(thread in other_fn_events)
+            self.assertTrue(other_fn_events[thread] >= mul_time)
+
+        torch._C._set_graph_executor_optimize(prev_opt)
+
 
 class TestFrontend(JitTestCase):
 
