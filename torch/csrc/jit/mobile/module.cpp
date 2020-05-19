@@ -1,9 +1,7 @@
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
-#include <torch/csrc/jit/runtime/jit_exception.h>
-#if defined(PYTORCH_MOBILE_OBSERVER)
 #include <torch/csrc/jit/mobile/observer.h>
-#endif
+#include <torch/csrc/jit/runtime/jit_exception.h>
 
 #include <ATen/record_function.h>
 
@@ -34,19 +32,18 @@ Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
 }
 
 c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
-#if defined(PYTORCH_MOBILE_OBSERVER)
   auto observer = torch::observerConfig().getModuleObserver();
   if (observer) {
     observer->onEnter(name(), method_name);
   }
-#endif
 
-#if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
-  auto debug_info = std::make_shared<MobileDebugInfo>();
-  debug_info->setModelName(name());
-  debug_info->setMethodName(method_name);
-  at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
-#endif
+  if (at::hasGlobalCallbacks()) {
+    auto debug_info = std::make_shared<MobileDebugInfo>();
+    debug_info->setModelName(name());
+    debug_info->setMethodName(method_name);
+    at::DebugInfoGuard guard(
+        at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
+  }
 
   auto m = find_method(method_name);
   if (m == nullptr) {
@@ -56,11 +53,9 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   m->run(stack);
   c10::IValue result = stack.front();
 
-#if defined(PYTORCH_MOBILE_OBSERVER)
   if (observer) {
     observer->onExit();
   }
-#endif
   return result;
 }
 
