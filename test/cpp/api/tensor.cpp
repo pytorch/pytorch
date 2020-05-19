@@ -915,3 +915,17 @@ TEST(TensorTest, RequiresGradInplace) {
   ASSERT_THROWS_WITH(int_tensor.requires_grad_(true),
     "Only Tensors of floating point and complex dtype can require gradients");
 }
+
+TEST(TensorTest, RequiresGradFactory) {
+  ASSERT_THROWS_WITH(
+  torch::tensor({5}, at::TensorOptions().dtype(torch::kInt).requires_grad(true)),
+  "Only Tensors of floating point and complex dtype can require gradients");
+
+  ASSERT_THROWS_WITH(
+  torch::zeros({5}, at::TensorOptions().dtype(torch::kInt).requires_grad(true)),
+  "Only Tensors of floating point and complex dtype can require gradients");
+
+  ASSERT_THROWS_WITH(
+  torch::empty({5}, at::TensorOptions().dtype(torch::kInt).requires_grad(true)),
+  "Only Tensors of floating point and complex dtype can require gradients");
+}

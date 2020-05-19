@@ -489,6 +489,8 @@ inline Variable make_variable(
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
+    TORCH_CHECK(!requires_grad || isDifferentiableType(at::typeMetaToScalarType(data.dtype())),
+                "Only Tensors of floating point and complex dtype can require gradients");
     if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
       auto data_impl = data.getIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
@@ -522,6 +524,8 @@ inline Variable make_variable(
     at::Tensor data,
     Edge gradient_edge,
     bool allow_tensor_metadata_change = true) {
+  TORCH_CHECK(isDifferentiableType(at::typeMetaToScalarType(data.dtype())),
+              "Only Tensors of floating point and complex dtype can require gradients");
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/0,

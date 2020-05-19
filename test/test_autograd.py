@@ -5571,9 +5571,9 @@ class TestAutogradDeviceType(TestCase):
 
         _test_pyscalar_conversions(lambda x: x.to(device), lambda x: int(x))
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double, torch.int8, torch.int16, torch.int32, torch.int64)
-    @dtypes(torch.float, torch.double, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_set_requires_grad_only_for_floats(self, device, dtype):
+    @dtypesIfCUDA(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_half=False))
+    def test_set_requires_grad_only_for_continuous_dtypes(self, device, dtype):
         def f1():
             a = torch.ones(1, dtype=dtype, device=device)
             a.requires_grad_()
@@ -5590,7 +5590,7 @@ class TestAutogradDeviceType(TestCase):
         a.requires_grad_(False)
 
         for f in [f1, f2, f3]:
-            if dtype.is_floating_point:
+            if dtype.is_floating_point or dtype.is_complex:
                 f()
             else:
                 with self.assertRaisesRegex(RuntimeError, 'floating point', msg="dt: {} device: {}".format(a.dtype, a.device)):
@@ -5913,7 +5913,7 @@ class TestAutogradDeviceType(TestCase):
                 x.grad = torch.randn(5, 5, device=devices[1])
 
     @deviceCountAtLeast(1)
-    @dtypes(torch.float, torch.double)
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False) + torch.testing.get_all_complex_dtypes()))
     def test_requires_grad_factory(self, devices, dtype):
         fns = [torch.ones_like, torch.testing.randn_like]
         x = torch.randn(2, 3, dtype=dtype, device=devices[0])
