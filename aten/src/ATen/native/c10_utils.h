@@ -1,8 +1,7 @@
 #pragma once
 
-#include <ATen/Tensor.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 
-// special op invocation pattern from: ATen/native/c10_utils.h
 template <class... Inputs>
 inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
   return {std::forward<Inputs>(inputs)...};
