@@ -131,10 +131,10 @@ struct _cpu_scatter_gather_dim_loop {
         " is out of bounds for dimension ", dim,
         " with size ", index_upper_bound
       );
-
+      // using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
       f(
         self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-        value
+        value.to<scalar_t*>()
       );
     }
   }
@@ -190,17 +190,6 @@ auto scalar_reduce_divide = [](auto * self_data, Scalar src_data) {
                        using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
                        *self_data /= src_data.to<scalar_t>();
                      };
-
-  class Awesome {
-  public:
-    Awesome(int op) {
-      
-    }
-
-    void operator()(auto * self_data, auto * src_data) {
-      
-    }
-  };
 
 template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
@@ -260,13 +249,21 @@ struct cpu_scatter_gather_base_kernel {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
 
-        using binary_func_t = std::function<void(scalar_t*, Scalar)>;
+        using binary_func_t = std::function<void(scalar_t*, scalar_t*)>;
         std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
-        binary_funcs[SCATTER_GATHER_OP::SCALAR_ASSIGN] =  scalar_assign;
-        binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_ADD] = scalar_reduce_add;
-        binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_SUBTRACT] = scalar_reduce_subtract;
-        binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_MULTIPLY] = scalar_reduce_multiply;
-        binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_DIVIDE] = scalar_reduce_divide;
+        binary_funcs[SCATTER_GATHER_OP::REDUCE_ADD] = reduce_add;
+        binary_funcs[SCATTER_GATHER_OP::REDUCE_SUBTRACT] = reduce_subtract;
+        binary_funcs[SCATTER_GATHER_OP::REDUCE_MULTIPLY] = reduce_multiply;
+        binary_funcs[SCATTER_GATHER_OP::REDUCE_DIVIDE] = reduce_divide;
+        binary_funcs[SCATTER_GATHER_OP::TENSOR_ASSIGN] = tensor_assign;
+        
+        // using binary_func_t = std::function<void(scalar_t*, Scalar)>;
+        // std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
+        // binary_funcs[SCATTER_GATHER_OP::SCALAR_ASSIGN] =  scalar_assign;
+        // binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_ADD] = scalar_reduce_add;
+        // binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_SUBTRACT] = scalar_reduce_subtract;
+        // binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_MULTIPLY] = scalar_reduce_multiply;
+        // binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_DIVIDE] = scalar_reduce_divide;
 
         auto run_loop = [&](const auto& kernel_func) {
           auto loop = [&](char** data, const int64_t* strides, int64_t n) {
@@ -306,7 +303,7 @@ struct cpu_scatter_gather_base_kernel {
 
                   kernel_func(
                               (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-                              value);
+                              value.to<scalar_t*>());
 
                   self_data += strides[SELF_ITER_STRIDE_IDX];
                   index_data += strides[INDEX_ITER_STRIDE_IDX];
