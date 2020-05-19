@@ -49,9 +49,11 @@ void pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon(
       const uint8_t* i9 = input[9];
 
       size_t c = channels;
+      const uint8_t* kernel_zero_points_ptr =
+          quantization_params->neon.kernel_zero_points + channels;
       for (; c >= 8; c -= 8) {
         const uint8x8_t vkernel_zero_point =
-            vld1_u8(&quantization_params->neon.kernel_zero_points[channels - c]);
+            vld1_u8(kernel_zero_points_ptr - c);
         int32x4_t vaccX1_lo = vld1q_s32(w);
         w = (void*)((uintptr_t)w + sizeof(int32x4_t));
         int32x4_t vaccX1_hi = vld1q_s32(w);
@@ -368,9 +370,11 @@ void pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon(
       outacc = outacc32;
 
       size_t c = channels;
+      const uint8_t* kernel_zero_points_ptr =
+          quantization_params->neon.kernel_zero_points + channels;
       for (; c >= 8; c -= 8) {
         const uint8x8_t vkernel_zero_point =
-            vld1_u8(&quantization_params->neon.kernel_zero_points[channels - c]);
+            vld1_u8(kernel_zero_points_ptr - c);
         const uint8x8_t vk0 = vld1_u8(w);
         w += 8;
         const uint8x8_t vi0 = vld1_u8(i0);
@@ -680,9 +684,13 @@ void pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon(
       outacc = outacc32;
 
       size_t c = channels;
+      const uint8_t* kernel_zero_points_ptr =
+          quantization_params->neon.kernel_zero_points + channels;
+      const float* requantization_scales_ptr =
+          quantization_params->neon.requantization_scales + channels;
       for (; c >= 8; c -= 8) {
         const uint8x8_t vkernel_zero_point =
-            vld1_u8(&quantization_params->neon.kernel_zero_points[channels - c]);
+            vld1_u8(kernel_zero_points_ptr - c);
         const uint8x8_t vk0 = vld1_u8(w);
         w += 8;
         const uint8x8_t vi0 = vld1_u8(i0);
@@ -757,9 +765,9 @@ void pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon(
         vacc_hi = vaddq_s32(vacc_hi, vacc_hi_old);
 
         const float32x4_t requantization_scale_v_lo =
-            vld1q_f32(&quantization_params->neon.requantization_scales[channels - c]);
+            vld1q_f32(requantization_scales_ptr - c);
         const float32x4_t requantization_scale_v_hi =
-            vld1q_f32(&quantization_params->neon.requantization_scales[channels - c + 4]);
+            vld1q_f32(requantization_scales_ptr - c + 4);
 
         const float32x4_t vacc_lo_f =
           vmulq_f32(vcvtq_f32_s32(vacc_lo), requantization_scale_v_lo);
