@@ -163,17 +163,17 @@ std::pair<std::string, std::string> codeGeneration(Fusion* fusion) {
 
 bool validateKernelArgTensor(
     const at::Tensor& arg,
-    const Val& param,
+    const Val* param,
     int device_index,
     std::stringstream& msg) {
   // Arg is a tensor. Param must be a tensor too.
-  if (*param.getValType() != ValType::TensorView) {
+  if (*param->getValType() != ValType::TensorView) {
     msg << "Argument is a tensor, but the parameter is not.";
     return false;
   }
   // Check the rank of the tensors.
   size_t arg_dim = arg.dim();
-  const auto& root_dom = *static_cast<const TensorView&>(param).getRootDomain();
+  const auto& root_dom = *static_cast<const TensorView*>(param).getRootDomain();
   size_t param_dim = 0;
   for (size_t i = 0; i < root_dom.nDims(); ++i) {
     if (!root_dom.axis(i)->isReduction())
@@ -190,7 +190,7 @@ bool validateKernelArgTensor(
   }
   // Check element type
   at::ScalarType arg_data_type = arg.scalar_type();
-  DataType param_data_type = *param.getDataType();
+  DataType param_data_type = *param->getDataType();
   bool match = false;
   switch (arg_data_type) {
     case at::ScalarType::Int:
@@ -215,16 +215,16 @@ bool validateKernelArgTensor(
 }
 
 bool validateKernelArgScalar(
-    const c10::Type& arg_type,
-    const Val& param,
+    const c10::TypePtr arg_type,
+    const Val* param,
     std::stringstream& msg) {
-  if (!param.isScalar()) {
+  if (!param->isScalar()) {
     msg << "Argument is a scalar, but the parameter is not.";
     return false;
   }
-  DataType param_type = *param.getDataType();
+  DataType param_type = *param->getDataType();
   bool match = false;
-  switch (arg_type.kind()) {
+  switch (arg_type->kind()) {
     case c10::TypeKind::IntType:
       match = param_type == DataType::Int;
       break;
@@ -238,7 +238,7 @@ bool validateKernelArgScalar(
       match = false;
   }
   if (!match) {
-    msg << "Argument type is " << arg_type << ", but the parameter is "
+    msg << "Argument type is " << *arg_type << ", but the parameter is "
         << param_type;
   }
   return match;
@@ -246,11 +246,11 @@ bool validateKernelArgScalar(
 
 bool validateKernelArg(
     const c10::IValue& arg,
-    const Val& param,
+    const Val* param,
     int device_index,
     std::stringstream& msg) {
   if (arg.type()->kind() != c10::TypeKind::TensorType) {
-    return validateKernelArgScalar(*arg.type(), param, msg);
+    return validateKernelArgScalar(arg.type(), param, msg);
   } else {
     return validateKernelArgTensor(arg.toTensor(), param, device_index, msg);
   }
@@ -265,7 +265,7 @@ void validateKernelArgs(
       inputs.size() == entry.inputs.size(), "Wrong number of kernel inputs.");
   for (size_t i = 0; i < inputs.size(); ++i) {
     const IValue& arg = inputs[i];
-    const Val& param = *entry.inputs[i];
+    const Val* param = entry.inputs[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
         validateKernelArg(arg, param, entry.device_, msg),
@@ -284,7 +284,7 @@ void validateKernelArgs(
       "Wrong number of kernel outputs.");
   for (size_t i = 0; i < outputs.size(); ++i) {
     const at::Tensor& arg = outputs[i];
-    const Val& param = *entry.outputs[i];
+    const Val* param = entry.outputs[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
         validateKernelArg(arg, param, entry.device_, msg),
