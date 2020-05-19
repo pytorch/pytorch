@@ -32,7 +32,7 @@ python tools/setup_helpers/generate_code.py                 \
 popd
 
 # Run doxygen and log all output.
-doxygen $(dirname $0) 2> original-doxygen-log.txt
+doxygen "$(dirname $0)" 2> original-doxygen-log.txt
 cp original-doxygen-log.txt doxygen-log.txt
 
 # Uncomment this if you need it for debugging; we're not printing this
