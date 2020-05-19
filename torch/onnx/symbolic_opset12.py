@@ -26,8 +26,10 @@ def dropout(g, input, p, train):
     # in eval mode, dropout is non-op - if the node's train param is set to False, dropout is non-op
     if not sym_help._training_mode:
         return input
+
     p = g.op("Constant", value_t=torch.tensor(p))
-    r, _ = g.op("Dropout", input, p, outputs=2)
+    t = g.op("Constant", value_t=torch.tensor(True))
+    r, _ = g.op("Dropout", input, p, t, outputs=2)
     return r
 
 
@@ -62,3 +64,9 @@ def nll_loss2d(g, self, target, weight, reduction, ignore_index):
 
 def pow(g, self, exponent):
     return g.op("Pow", self, exponent)
+
+def ge(g, input, other):
+    return g.op('GreaterOrEqual', input, other)
+
+def le(g, input, other):
+    return g.op('LessOrEqual', input, other)
