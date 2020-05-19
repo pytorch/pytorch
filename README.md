@@ -324,6 +324,19 @@ Three pointers to get you started:
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)
 
+## Resources
+
+* [PyTorch.org](https://pytorch.org/)
+* [PyTorch Tutorials](https://pytorch.org/tutorials/)
+* [PyTorch Examples](https://github.com/pytorch/examples)
+* [PyTorch Models](https://pytorch.org/hub/)
+* [Intro to Deep Learning with PyTorch from Udacity](https://www.udacity.com/course/deep-learning-pytorch--ud188)
+* [Intro to Machine Learning with PyTorch from Udacity](https://www.udacity.com/course/intro-to-machine-learning-nanodegree--nd229)
+* [Deep Neural Networks with PyTorch from Coursera](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
+* [PyTorch Twitter](https://twitter.com/PyTorch)
+* [PyTorch Blog](https://pytorch.org/blog/)
+* [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
+
 ## Communication
 * forums: discuss implementations, research, etc. https://discuss.pytorch.org
 * GitHub issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.

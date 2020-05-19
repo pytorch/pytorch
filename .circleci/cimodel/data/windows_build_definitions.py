@@ -1,11 +1,6 @@
 import cimodel.lib.miniutils as miniutils
-
-
-NON_PR_BRANCH_LIST = [
-    "master",
-    r"/ci-all\/.*/",
-    r"/release\/.*/",
-]
+import cimodel.data.simple.util.branch_filters
+from cimodel.data.simple.util.versions import CudaVersion
 
 
 class WindowJob:
@@ -31,7 +26,7 @@ class WindowJob:
 
         cpu_forcing_name_parts = ["on", "cpu"] if self.force_on_cpu else []
 
-        target_arch = self.cuda_version if self.cuda_version else "cpu"
+        target_arch = self.cuda_version.render_dots() if self.cuda_version else "cpu"
 
         base_name_parts = [
             "pytorch",
@@ -45,7 +40,7 @@ class WindowJob:
         if base_phase == "test":
             prerequisite_jobs.append("_".join(base_name_parts + ["build"]))
 
-        arch_env_elements = ["cuda10", "cudnn7"] if self.cuda_version else ["cpu"]
+        arch_env_elements = ["cuda" + str(self.cuda_version.major), "cudnn7"] if self.cuda_version else ["cpu"]
 
         build_environment_string = "-".join([
             "pytorch",
@@ -67,11 +62,7 @@ class WindowJob:
         }
 
         if self.run_on_prs_pred(self):
-            props_dict["filters"] = {
-                "branches": {
-                    "only": NON_PR_BRANCH_LIST,
-                },
-            }
+            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_branch_filter_dict()
 
         name_parts = base_name_parts + cpu_forcing_name_parts + [
             numbered_phase,
@@ -84,7 +75,7 @@ class WindowJob:
             if is_running_on_cuda:
                 props_dict["executor"] = "windows-with-nvidia-gpu"
 
-        props_dict["cuda_version"] = miniutils.quote(str(10)) if self.cuda_version else "cpu"
+        props_dict["cuda_version"] = miniutils.quote(str(self.cuda_version.major)) if self.cuda_version else "cpu"
         props_dict["name"] = "_".join(name_parts)
 
         return [{key_name: props_dict}]
@@ -111,16 +102,16 @@ class VcSpec:
         return "_".join(filter(None, [self.prefixed_year(), self.dotted_version()]))
 
 
-WINDOWS_WORKFLOW_DATA = [
-    WindowJob(None, VcSpec(2017, ["14", "11"]), "cuda10.1"),
-    WindowJob(1, VcSpec(2017, ["14", "11"]), "cuda10.1"),
-    WindowJob(2, VcSpec(2017, ["14", "11"]), "cuda10.1"),
-    WindowJob(None, VcSpec(2017, ["14", "16"]), "cuda10.1"),
-    WindowJob(1, VcSpec(2017, ["14", "16"]), "cuda10.1"),
-    WindowJob(2, VcSpec(2017, ["14", "16"]), "cuda10.1"),
-    WindowJob(None, VcSpec(2019), "cuda10.1"),
-    WindowJob(1, VcSpec(2019), "cuda10.1"),
-    WindowJob(2, VcSpec(2019), "cuda10.1"),
+WORKFLOW_DATA = [
+    WindowJob(None, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
+    WindowJob(1, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
+    WindowJob(2, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
+    WindowJob(None, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
+    WindowJob(1, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
+    WindowJob(2, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
+    WindowJob(None, VcSpec(2019), CudaVersion(10, 1)),
+    WindowJob(1, VcSpec(2019), CudaVersion(10, 1)),
+    WindowJob(2, VcSpec(2019), CudaVersion(10, 1)),
     WindowJob(None, VcSpec(2017, ["14", "11"]), None),
     WindowJob(1, VcSpec(2017, ["14", "11"]), None),
     WindowJob(2, VcSpec(2017, ["14", "11"]), None),
@@ -130,10 +121,10 @@ WINDOWS_WORKFLOW_DATA = [
     WindowJob(None, VcSpec(2019), None),
     WindowJob(1, VcSpec(2019), None),
     WindowJob(2, VcSpec(2019), None),
-    WindowJob(1, VcSpec(2019), "cuda10.1", force_on_cpu=True),
-    WindowJob(2, VcSpec(2019), "cuda10.1", force_on_cpu=True),
+    WindowJob(1, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True),
+    WindowJob(2, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True),
 ]
 
 
 def get_windows_workflows():
-    return [item.gen_tree() for item in WINDOWS_WORKFLOW_DATA]
+    return [item.gen_tree() for item in WORKFLOW_DATA]

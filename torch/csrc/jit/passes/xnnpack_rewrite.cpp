@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
+#include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 
@@ -308,6 +309,7 @@ c10::optional<script::Module> optimizeForMobile(const script::Module& m) {
   cloned_module = freeze_module(cloned_module);
   fusePrePackedLinearConvWithClamp(cloned_module);
   FoldPrePackingOps(cloned_module);
+  removeDropout(cloned_module);
   return cloned_module;
 }
 
