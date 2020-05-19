@@ -17,6 +17,24 @@ namespace tensorexpr {
 static int te_cuda_pointwise_loop_levels = -1;
 static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
+static bool fallback_allowed = true;
+
+bool setFallbackAllowed(bool value) {
+  bool old_value = fallback_allowed;
+  fallback_allowed = value;
+  return old_value;
+}
+
+bool fallbackAllowed() {
+  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
+  if (!enable_c_str) {
+    return fallback_allowed;
+  }
+  if (std::string(enable_c_str) == "0") {
+    return false;
+  }
+  return true;
+}
 
 int& getTECudaPointwiseLoopLevels() {
   return te_cuda_pointwise_loop_levels;
@@ -38,7 +56,8 @@ static at::ScalarType tensorType(Tensor* t) {
   return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
 }
 
-static std::vector<ExprHandle> texprSizes(const c10::VaryingShape& shape) {
+static std::vector<ExprHandle> texprSizes(
+    const c10::VaryingShape<int64_t>& shape) {
   std::vector<ExprHandle> dims;
   for (size_t i = 0; i < *shape.size(); i++) {
     dims.push_back(IntImm::make(*shape[i]));
@@ -76,6 +95,8 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
       return FloatImm::make(static_cast<float>(val.toDouble()));
     } else if (val.isInt()) {
       return IntImm::make(val.toInt());
+    } else if (val.isBool()) {
+      return BoolImm::make(val.toBool());
     } else if (val.isNone()) {
       // This is just a placeholder so we don't throw.  None-handling
       // is operator-specific and should be handled properly in
@@ -135,7 +156,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     const ExprHandle& e,
     const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
-    throw malformed_input("type is not tensor in demoteOutput");
+    return e;
   }
 
   auto tt = *v->type()->cast<TensorType>()->scalarType();
@@ -152,7 +173,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
     case at::ScalarType::Bool:
-      return e;
+      return cast<bool>(e);
     default:
       throw unsupported_dtype();
   }
@@ -395,10 +416,14 @@ Tensor* TensorExprKernel::computeFourOperand(
 Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   switch (v->node()->kind()) {
     case aten::add: {
-      return computeTwoOperandWithAlpha(
-          "aten_add", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs + rhs;
-          });
+      auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return lhs + rhs;
+      };
+      TORCH_INTERNAL_ASSERT(
+          v->node()->inputs().size() == 2 || v->node()->inputs().size() == 3);
+      return (v->node()->inputs().size() > 2)
+          ? computeTwoOperandWithAlpha("aten_add", v, add_lambda)
+          : computeTwoOperand("aten_add", v, add_lambda);
     } break;
 
     case aten::_cast_Float: {
@@ -408,10 +433,14 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::sub: {
-      return computeTwoOperandWithAlpha(
-          "aten_sub", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs - rhs;
-          });
+      auto sub_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return lhs - rhs;
+      };
+      TORCH_INTERNAL_ASSERT(
+          v->node()->inputs().size() == 2 || v->node()->inputs().size() == 3);
+      return (v->node()->inputs().size() > 2)
+          ? computeTwoOperandWithAlpha("aten_sub", v, sub_lambda)
+          : computeTwoOperand("aten_sub", v, sub_lambda);
     } break;
 
     case aten::mul: {
@@ -1073,7 +1102,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
         Block* b = blocks.back();
         blocks.pop_back();
 
-        for (Stmt* s : b->stmts()) {
+        for (Stmt* s : *b) {
           if (For* f = dynamic_cast<For*>(s)) {
             worklist.push_back(f);
           } else if (Block* b2 = dynamic_cast<Block*>(s)) {
@@ -1091,7 +1120,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
       bool containsSubLoops = false;
       if (Block* body = dynamic_cast<Block*>(f->body())) {
-        for (Stmt* s2 : body->stmts()) {
+        for (Stmt* s2 : *body) {
           if (For* f2 = dynamic_cast<For*>(s2)) {
             containsSubLoops = true;
             worklist.push_back(f2);
@@ -1129,7 +1158,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   return stmt;
 }
 
-std::string TensorExprKernel::getCodegenName(BackendType backendType) {
+std::string TensorExprKernel::getCodeGenName(BackendType backendType) {
   switch (backendType) {
     case kCudaCodeGen:
       return "cuda_codegen";
@@ -1167,7 +1196,7 @@ static bool isValidPrimProperty(const c10::optional<T>& a, T b) {
 }
 
 static bool isValidVaryingShape(
-    const c10::VaryingShape& vs,
+    const c10::VaryingShape<int64_t>& vs,
     at::IntArrayRef sz) {
   if (!vs.size().has_value()) {
     // TODO: does it make sense to have kernels with completely unspecified
@@ -1243,10 +1272,11 @@ static void checkInputs(
 }
 
 at::Device TensorExprKernel::pickDeviceType(
-    const at::ArrayRef<IValue>& inputs) {
+    const at::ArrayRef<torch::jit::Value*>& inputs) {
   for (auto const& input : inputs) {
-    if (input.isTensor()) {
-      return input.toTensor().device();
+    auto tt = input->type()->cast<TensorType>();
+    if (tt && tt->device()) {
+      return *tt->device();
     }
   }
   throw std::runtime_error("No tensor inputs");
@@ -1280,11 +1310,11 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
           {0});
       std::vector<DimArg> inputTensorDims;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
-        auto const& size = *tt->sizes()[i];
+        auto const size = *tt->sizes()[i];
         inputTensorDims.emplace_back(
             DimArg(IntImm::make(size), "i" + c10::to_string(i)));
       }
-      auto const& strides = tt->strides();
+      auto const strides = tt->strides();
       tensors_.emplace(
           input->unique(),
           Compute(
@@ -1303,6 +1333,12 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
     }
     case TypeKind::FloatType: {
       VarHandle v("v" + input->debugName(), kFloat);
+      kernelArgs_.emplace_back(v);
+      scalars_.emplace(input->unique(), v);
+      break;
+    }
+    case TypeKind::BoolType: {
+      VarHandle v("v" + input->debugName(), kBool);
       kernelArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
@@ -1355,10 +1391,25 @@ void TensorExprKernel::compile() {
     tensorOutputs_.emplace_back(tensors_.at(output->unique()));
     tensors_.erase(output->unique());
   }
+
+  device_ = pickDeviceType(graph_->inputs());
+  BackendType backendType = inferBackendTypeFromDevice(device_);
+  Stmt* stmt = generateStmt(backendType);
+
+  // Set up formal params (inputs, then outputs) for kernel.
+  std::vector<CodeGen::BufferArg> params = prepareBufferArgs();
+
+  // Generate code.
+  codegen_ = CreateCodeGen(getCodeGenName(backendType), stmt, params, device_);
 }
 
 TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
     : graph_(subgraph), code_(subgraph, "") {
+  if (!fallbackAllowed()) {
+    compile();
+    return;
+  }
+
   try {
     compile();
   } catch (...) {
@@ -1367,6 +1418,11 @@ TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
 }
 
 void TensorExprKernel::run(Stack& stack) {
+  if (!fallbackAllowed()) {
+    runKernel(stack);
+    return;
+  }
+
   if (fallback_) {
     fallback(stack);
     return;
@@ -1381,8 +1437,7 @@ void TensorExprKernel::run(Stack& stack) {
 
 std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     const at::ArrayRef<IValue>& inputs,
-    std::vector<at::Tensor>& outputs,
-    at::Device device) {
+    std::vector<at::Tensor>& outputs) {
   std::map<const Expr*, int32_t> varToSize;
 
   std::vector<CodeGen::CallArg> runArgs;
@@ -1423,57 +1478,27 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     }
 
     outputs.push_back(at::empty(
-        tensorSize, c10::TensorOptions(tensorType(o)).device(device)));
+        tensorSize, c10::TensorOptions(tensorType(o)).device(device_)));
     runArgs.emplace_back(outputs.back().data_ptr());
   }
   return runArgs;
 }
 
-void TensorExprKernel::lowerToBackend(const at::ArrayRef<IValue>& inputs) {
-  checkInputs(inputs, inputTypes_);
-
-  at::Device device = pickDeviceType(inputs);
-  if (!codegenCache_.count(torch::get_hash(device))) {
-    BackendType backendType = inferBackendTypeFromDevice(device);
-    Stmt* stmt = generateStmt(backendType);
-
-    // Set up formal params (inputs, then outputs) for kernel.
-    std::vector<CodeGen::BufferArg> params = prepareBufferArgs();
-
-    // Generate code.
-    codegenCache_.emplace(
-        torch::get_hash(device),
-        CreateCodeGen(getCodegenName(backendType), stmt, params, device));
-  }
-}
-
-void TensorExprKernel::codegenRun(
-    at::Device device,
-    const std::vector<CodeGen::CallArg>& runArgs) {
-  codegenCache_.at(torch::get_hash(device))->call(runArgs);
-}
-
-Stmt* TensorExprKernel::getStmtForInputs(const at::ArrayRef<IValue>& inputs) {
-  lowerToBackend(inputs);
-  at::Device device = pickDeviceType(inputs);
-  return codegenCache_.at(torch::get_hash(device))->stmt();
+Stmt* TensorExprKernel::getCodeGenStmt() {
+  return codegen_->stmt();
 }
 
 void TensorExprKernel::runKernel(Stack& stack) {
   KernelScope kernelScope(&kernelArena_);
+
   // Set up arguments (inputs, then outputs) for kernel call.
   auto inputs = last(stack, nInputs_);
-
-  lowerToBackend(inputs);
-
-  at::Device device = pickDeviceType(inputs);
-
   std::vector<at::Tensor> outputs;
-  std::vector<CodeGen::CallArg> runArgs =
-      prepareRunArgs(inputs, outputs, device);
+
+  std::vector<CodeGen::CallArg> runArgs = prepareRunArgs(inputs, outputs);
 
   // Call the kernel.
-  codegenRun(device, runArgs);
+  codegen_->call(runArgs);
 
   // Update the stack.
   drop(stack, nInputs_);

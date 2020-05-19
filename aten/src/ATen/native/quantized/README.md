@@ -62,7 +62,7 @@ a `def` for your new operator:
 
 ```c++
 TORCH_LIBRARY(quantized, m) {
-  // ... the existing definitions ... 
+  // ... the existing definitions ...
   m.def("quantized::xand(Tensor qa, Tensor qb) -> Tensor");
 }
 ```
@@ -188,7 +188,11 @@ namespace at {
     return {std::forward<Inputs>(inputs)...};
   }
 
-  /* Given an operator handle, calls it using some arguments.*/
+  /* Given an operator handle, calls it using some arguments.
+     Note: this is slow because it boxes every argument
+     and likely has to re-unbox them when calling the kernel.
+     Prefer calling c10::OperatorHandle::callUnboxed<Args...>(args...).
+  */
   template <class... Args>
   inline std::vector<torch::IValue> callOp(
       const torch::OperatorHandle& op,
@@ -199,7 +203,11 @@ namespace at {
     return stack;
   }
 
-  /* Finds the op and calls the callOp on it.*/
+  /* Finds the op and calls the callOp on it.
+     Note: this is slow because it boxes every argument
+     and likely has to re-unbox them when calling the kernel.
+     Prefer calling c10::OperatorHandle::callUnboxed<Args...>(args...).
+  */
   template <class... Args>
   inline std::vector<torch::IValue> callOp(
       const char* func_name,

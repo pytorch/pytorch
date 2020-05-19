@@ -18,12 +18,7 @@ c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
     c10::optional<Scalar> output_min,
     c10::optional<Scalar> output_max);
 
-class LinearClampRun final : public torch::OperatorKernel {
- public:
-  Tensor operator()(
-      const Tensor& input,
-      const c10::intrusive_ptr<xnnpack::LinearOpContext>& op_context);
-};
+Tensor linear_clamp_run(const Tensor& input, const c10::intrusive_ptr<xnnpack::LinearOpContext>& op_context);
 
 ContextLinear create(
     const Tensor& weight,

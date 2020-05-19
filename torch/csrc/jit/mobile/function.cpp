@@ -38,9 +38,7 @@ bool Function::append_operator(
   } else {
     auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
     if (op.has_value()) {
-      fn = [op](Stack& stack) {
-        c10::Dispatcher::singleton().callBoxed(*op, &stack);
-      };
+      fn = [op](Stack& stack) { op->callBoxed(&stack); };
     } else {
       return false;
     }

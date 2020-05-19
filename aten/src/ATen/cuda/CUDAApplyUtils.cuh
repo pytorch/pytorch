@@ -406,7 +406,7 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
                                const Op op,
                                TensorArgType aType = TensorArgType::ReadWrite,
                                TensorArgType bType = TensorArgType::ReadOnly) {
-  checkBackend("CUDA_tensor_apply2", {a, b}, Backend::CUDA);
+  checkDeviceType("CUDA_tensor_apply2", {a, b}, DeviceType::CUDA);
   int64_t totalElements = a.numel();
 
   if (totalElements != b.numel()) {

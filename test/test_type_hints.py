@@ -63,12 +63,6 @@ def get_all_examples():
     """
     blacklist = {
         "_np",
-        "refine_names",
-        "rename",
-        "names",
-        "align_as",
-        "align_to",
-        "unflatten",
     }
     allexamples = ""
 
@@ -192,7 +186,6 @@ class TestTypeHints(TestCase):
             except subprocess.CalledProcessError as e:
                 raise AssertionError("mypy failed for example {}.  Look above this error for mypy's output.".format(example))
 
-    @unittest.skipIf(sys.version_info[0] == 2, "no type hints for Python 2")
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_run_mypy(self):
         """
@@ -218,7 +211,8 @@ class TestTypeHints(TestCase):
         cwd = os.getcwd()
         try:
             os.chdir(repo_rootdir)
-            subprocess.run([sys.executable, '-mmypy'], check=True)
+            subprocess.run([sys.executable, '-mmypy', '--check-untyped-defs',
+                            '--follow-imports', 'silent'], check=True)
         except subprocess.CalledProcessError as e:
             raise AssertionError("mypy failed. Look above this error for mypy's output.")
         finally:

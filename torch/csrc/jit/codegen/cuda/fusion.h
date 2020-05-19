@@ -80,18 +80,16 @@ struct ExprSort : public IterVisitor {
       bool breadth_first);
 };
 
-// Expr sort will take a fusion and return a topologically sorted list of
-// expressions.
 struct InputsOf : public IterVisitor {
   using IterVisitor::handle;
 
  private:
-  std::vector<TensorView*> inputs;
+  std::set<Val*> inputs;
 
-  void handle(TensorView* tv) override;
+  std::vector<Statement*> next(Val* v) final;
 
  public:
-  static std::vector<TensorView*> output(Fusion* fusion, Val* output_);
+  static std::set<Val*> output(Fusion* fusion, Val* output_);
 };
 
 /*
@@ -154,10 +152,18 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
       bool from_outputs_only = false,
       bool breadth_first = false);
 
-  std::vector<TensorView*> inputsOf(Val* val);
+  std::set<Val*> inputsOf(Val* val);
+
+  // Assert that all leaves found from outputs are registered as an input.
+  void validateInputs();
 
   // Print this fusion to cout.
   void print();
+
+  // Print Arith exprs used in outputs
+  void printMath();
+  // Print transformations used in fusion (can be very verbose)
+  void printTransforms();
 
   // Register the Val with this fusion
   StmtNameType registerVal(Val* val);
@@ -191,6 +197,10 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   // Return the Expr that produces val (const version)
   const Expr* origin(const Val* val) const;
 
+  void setRandom(bool r);
+
+  bool random() const noexcept;
+
  private:
   // Sets of all Vals/Exprs registered with this fusion
   std::set<Val*> val_set_;
@@ -216,6 +226,9 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   // Dependency tracking for Vals. Where did it come from? Where is it used?
   std::unordered_map<Val*, Expr*> origin_;
   std::unordered_map<Val*, std::set<Expr*>> uses_;
+
+  // Indicate to kernel to set itself up to generate random numbers
+  bool random_ = false;
 };
 
 } // namespace fuser

@@ -1210,7 +1210,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
     def test_backward_node_failure(self):
-        rpc._set_rpc_timeout(timedelta(milliseconds=5000))
+        rpc._set_rpc_timeout(5)  # 5 seconds
         initialize_pg(self.init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
@@ -1433,7 +1433,7 @@ class DistAutogradTest(RpcAgentTestFixture):
     )
     def test_backward_node_failure_python_udf(self):
         # Set a short timeout to quickly time out failed RPCs.
-        rpc._set_rpc_timeout(timedelta(milliseconds=5000))
+        rpc._set_rpc_timeout(5)  # 5 seconds
         initialize_pg(self.init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
@@ -2100,6 +2100,42 @@ class DistAutogradTest(RpcAgentTestFixture):
             grads = dist_autograd.get_gradients(context_id)
             self.assertEqual(1, len(grads))
             self.assertTrue(t in grads)
+
+    @staticmethod
+    def _slow_add(t1, t2):
+        time.sleep(1)
+        t3 = t1 + t2
+        t3.requires_grad = True
+        return t3
+
+    @dist_init
+    def test_thread_local_context_id(self):
+        t1 = torch.rand((3, 3))
+        t2 = torch.rand((3, 3))
+
+        t3 = t1 + t2
+        t3.requires_grad = True
+        t3.sum().backward()
+
+        dst = worker_name((self.rank + 1) % self.world_size)
+        rref = rpc.remote(dst, DistAutogradTest._slow_add, args=(t1, t2))
+
+        with dist_autograd.context() as context_id:
+            loss = rref.to_here().sum()
+            # due to slow add, the continuation of this backward pass will be
+            # invoked by the previous rpc.remote thread which does not have a
+            # valid context_id. So, this can test whether we propagate
+            # thread_local states properly when jumping across threads on the
+            # server side.
+            dist_autograd.backward(context_id, [loss])
+            self.assertTrue(
+                rpc.rpc_sync(
+                    dst,
+                    _compare_owner_value,
+                    args=(context_id, rref, t3.grad)
+                )
+            )
+
 
 class FaultyAgentDistAutogradTest(FaultyRpcAgentTestFixture):
     # Reusing a simplified helper function from DistAutogradTest to ensure

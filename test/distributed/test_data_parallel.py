@@ -1,4 +1,5 @@
 import contextlib
+import io
 import unittest
 from copy import deepcopy
 from collections import OrderedDict
@@ -646,7 +647,7 @@ class TestDataParallel(TestCase):
             def forward(self, x):
                 with self._testcase.assertWarnsRegex(
                         UserWarning,
-                        r"Calling \.zero_grad\(\) from a module that was passed to a nn\.DataParallel\(\) has no effect."):
+                        r"Calling \.zero_grad\(\) from a module created with nn\.DataParallel\(\) has no effect."):
                     self.zero_grad()
                 return x
 
@@ -668,6 +669,17 @@ class TestDataParallel(TestCase):
         model = dp.DataParallel(Model().cuda().to(dtype=torch.float32))
         input = torch.randn((8, 8), dtype=torch.float32, device="cuda")
         self.assertTrue(model(input).dtype is torch.float16)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_save_replica_module(self):
+        # DataParallel replicas can be saved (gh-37182)
+        module = torch.nn.Linear(8, 8).cuda()
+        dpm = torch.nn.parallel.replicate(module, devices=[0, 1], detach=False)
+        data = io.BytesIO()
+        torch.save(dpm, data)
+        dpm = torch.nn.parallel.replicate(module, devices=[0, 1], detach=True)
+        torch.save(dpm, data)
 
 
 if __name__ == '__main__':

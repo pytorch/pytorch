@@ -73,7 +73,11 @@ void TestAdd(DeprecatedTypeProperties& type) {
   Tensor c = add(a, add(a, b));
   // TODO:0-dim Tensor d(3.f);
   Scalar d = 3.f;
-  ASSERT_TRUE(add(c, d).allclose(a + a + b + d));
+  if (type.backend() == Backend::CPU && type.scalarType() == kHalf) {
+      ASSERT_TRUE(add(c, d).allclose(a + a + b + d, 1e-2));
+  } else {
+      ASSERT_TRUE(add(c, d).allclose(a + a + b + d));
+  }
 }
 
 void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
@@ -125,10 +129,12 @@ void TestPermute(DeprecatedTypeProperties& type) {
 }
 
 void TestMm(DeprecatedTypeProperties& type) {
-  Tensor a = rand({3, 4}, type);
-  Tensor b = rand({4}, type);
-  Tensor c = mv(a, b);
-  ASSERT_TRUE(c.equal(addmv(zeros({3}, type), a, b, 0, 1)));
+  if (type.backend() != Backend::CPU || type.scalarType() != kHalf) {
+    Tensor a = rand({3, 4}, type);
+    Tensor b = rand({4}, type);
+    Tensor c = mv(a, b);
+    ASSERT_TRUE(c.equal(addmv(zeros({3}, type), a, b, 0, 1)));
+  }
 }
 
 void TestSqueeze(DeprecatedTypeProperties& type) {
@@ -288,10 +294,12 @@ void TestView(DeprecatedTypeProperties& type) {
 }
 
 void TestIntArrayRefExpansion(DeprecatedTypeProperties& type) {
-  max_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
-  max_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
-  avg_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1);
-  avg_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1);
+  if (type.backend() != Backend::CPU || type.scalarType() != kHalf) {
+    max_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
+    max_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
+    avg_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1);
+    avg_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1);
+  }
 }
 
 void test(DeprecatedTypeProperties& type) {
@@ -328,6 +336,12 @@ TEST(BasicTest, BasicTestCPU) {
   manual_seed(123);
 
   test(CPU(kFloat));
+}
+
+TEST(BasicTest, BasicTestHalfCPU) {
+  manual_seed(234);
+
+  test(CPU(kHalf));
 }
 
 TEST(BasicTest, BasicTestCUDA) {

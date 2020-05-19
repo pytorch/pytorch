@@ -72,7 +72,7 @@ if(NOT USE_SYSTEM_CPUINFO)
   endif()
 endif()
 
-if(NOT DEFINED FP16_SOURCE_DIR)
+if(NOT DEFINED FP16_SOURCE_DIR AND NOT USE_SYSTEM_FP16)
   message(STATUS "Downloading FP16 to ${CONFU_DEPENDENCIES_SOURCE_DIR}/fp16 (define FP16_SOURCE_DIR to avoid it)")
   configure_file(cmake/DownloadFP16.cmake "${CONFU_DEPENDENCIES_BINARY_DIR}/fp16-download/CMakeLists.txt")
   execute_process(COMMAND "${CMAKE_COMMAND}" -G "${CMAKE_GENERATOR}" .
@@ -82,7 +82,7 @@ if(NOT DEFINED FP16_SOURCE_DIR)
   set(FP16_SOURCE_DIR "${CONFU_DEPENDENCIES_SOURCE_DIR}/fp16" CACHE STRING "FP16 source directory")
 endif()
 
-if(NOT DEFINED FXDIV_SOURCE_DIR)
+if(NOT DEFINED FXDIV_SOURCE_DIR AND NOT USE_SYSTEM_FXDIV)
   message(STATUS "Downloading FXdiv to ${CONFU_DEPENDENCIES_SOURCE_DIR}/fxdiv (define FXDIV_SOURCE_DIR to avoid it)")
   configure_file(cmake/DownloadFXdiv.cmake "${CONFU_DEPENDENCIES_BINARY_DIR}/fxdiv-download/CMakeLists.txt")
   execute_process(COMMAND "${CMAKE_COMMAND}" -G "${CMAKE_GENERATOR}" .
@@ -92,7 +92,7 @@ if(NOT DEFINED FXDIV_SOURCE_DIR)
   set(FXDIV_SOURCE_DIR "${CONFU_DEPENDENCIES_SOURCE_DIR}/fxdiv" CACHE STRING "FXdiv source directory")
 endif()
 
-if(NOT DEFINED PSIMD_SOURCE_DIR)
+if(NOT DEFINED PSIMD_SOURCE_DIR AND NOT USE_SYSTEM_PSIMD)
   message(STATUS "Downloading PSimd to ${CONFU_DEPENDENCIES_SOURCE_DIR}/psimd (define PSIMD_SOURCE_DIR to avoid it)")
   configure_file(cmake/DownloadPSimd.cmake "${CONFU_DEPENDENCIES_BINARY_DIR}/psimd-download/CMakeLists.txt")
   execute_process(COMMAND "${CMAKE_COMMAND}" -G "${CMAKE_GENERATOR}" .
@@ -102,7 +102,7 @@ if(NOT DEFINED PSIMD_SOURCE_DIR)
   set(PSIMD_SOURCE_DIR "${CONFU_DEPENDENCIES_SOURCE_DIR}/psimd" CACHE STRING "PSimd source directory")
 endif()
 
-if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+if(NOT DEFINED PTHREADPOOL_SOURCE_DIR AND NOT USE_SYSTEM_PTHREADPOOL)
   message(STATUS "Downloading pthreadpool to ${CONFU_DEPENDENCIES_SOURCE_DIR}/pthreadpool (define PTHREADPOOL_SOURCE_DIR to avoid it)")
   configure_file(cmake/DownloadPThreadPool.cmake "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool-download/CMakeLists.txt")
   execute_process(COMMAND "${CMAKE_COMMAND}" -G "${CMAKE_GENERATOR}" .
@@ -307,6 +307,9 @@ target_link_libraries(pytorch_qnnpack PUBLIC clog)
 if(NOT TARGET cpuinfo AND USE_SYSTEM_CPUINFO)
   add_library(cpuinfo SHARED IMPORTED)
   find_library(CPUINFO_LIBRARY cpuinfo)
+  if(NOT CPUINFO_LIBRARY)
+    message(FATAL_ERROR "Cannot find cpuinfo")
+  endif()
   message("Found cpuinfo: ${CPUINFO_LIBRARY}")
   set_target_properties(cpuinfo PROPERTIES IMPORTED_LOCATION "${CPUINFO_LIBRARY}")
 elseif(NOT TARGET cpuinfo)
@@ -321,12 +324,22 @@ endif()
 target_link_libraries(pytorch_qnnpack PRIVATE cpuinfo)
 
 # ---[ Configure pthreadpool
-if(NOT TARGET pthreadpool)
+if(NOT TARGET pthreadpool AND NOT USE_SYSTEM_PTHREADPOOL)
   set(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
   set(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
   add_subdirectory(
     "${PTHREADPOOL_SOURCE_DIR}"
     "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool")
+elseif(NOT TARGET pthreadpool AND USE_SYSTEM_PTHREADPOOL)
+  add_library(pthreadpool SHARED IMPORTED)
+  find_library(PTHREADPOOL_LIBRARY pthreadpool)
+  if(NOT PTHREADPOOL_LIBRARY)
+    message(FATAL_ERROR "Cannot find pthreadpool")
+  endif()
+  message("-- Found pthreadpool: ${PTHREADPOOL_LIBRARY}")
+  set_target_properties(pthreadpool PROPERTIES
+    IMPORTED_LOCATION "${PTHREADPOOL_LIBRARY}")
+  add_library(pthreadpool_interface INTERFACE)
 endif()
 if(PYTORCH_QNNPACK_CUSTOM_THREADPOOL)
   # Depend on pthreadpool interface, but not on implementation.
@@ -337,30 +350,51 @@ else()
 endif()
 
 # ---[ Configure FXdiv
-if(NOT TARGET fxdiv)
+if(NOT TARGET fxdiv AND NOT USE_SYSTEM_FXDIV)
   set(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
   set(FXDIV_BUILD_BENCHMARKS OFF CACHE BOOL "")
   add_subdirectory(
     "${FXDIV_SOURCE_DIR}"
     "${CONFU_DEPENDENCIES_BINARY_DIR}/fxdiv")
+elseif(NOT TARGET fxdiv AND USE_SYSTEM_FXDIV)
+  find_file(FXDIV_HDR fxdiv.h PATH_SUFFIXES include)
+  if(NOT FXDIV_HDR)
+    message(FATAL_ERROR "Cannot find fxdiv")
+  endif()
+  add_library(fxdiv STATIC "${FXDIV_HDR}")
+  set_property(TARGET fxdiv PROPERTY LINKER_LANGUAGE C)
 endif()
 target_link_libraries(pytorch_qnnpack PRIVATE fxdiv)
 
 # ---[ Configure psimd
-if(NOT TARGET psimd)
+if(NOT TARGET psimd AND NOT USE_SYSTEM_PSIMD)
   add_subdirectory(
     "${PSIMD_SOURCE_DIR}"
     "${CONFU_DEPENDENCIES_BINARY_DIR}/psimd")
+elseif(NOT TARGET psimd AND USE_SYSTEM_PSIMD)
+  find_file(PSIMD_HDR psimd.h PATH_SUFFIXES include)
+  if(NOT PSIMD_HDR)
+    message(FATAL_ERROR "Cannot find psimd")
+  endif()
+  add_library(psimd STATIC "${PSIMD_HDR}")
+  set_property(TARGET psimd PROPERTY LINKER_LANGUAGE C)
 endif()
 target_link_libraries(pytorch_qnnpack PRIVATE psimd)
 
 # ---[ Configure FP16
-if(NOT TARGET fp16)
+if(NOT TARGET fp16 AND NOT USE_SYSTEM_FP16)
   set(FP16_BUILD_TESTS OFF CACHE BOOL "")
   set(FP16_BUILD_BENCHMARKS OFF CACHE BOOL "")
   add_subdirectory(
     "${FP16_SOURCE_DIR}"
     "${CONFU_DEPENDENCIES_BINARY_DIR}/fp16")
+elseif(NOT TARGET fp16 AND USE_SYSTEM_FP16)
+  find_file(FP16_HDR fp16.h PATH_SUFFIXES include)
+  if(NOT FP16_HDR)
+    message(FATAL_ERROR "Cannot find fp16")
+  endif()
+  add_library(fp16 STATIC "${FP16_HDR}")
+  set_target_properties(fp16 PROPERTIES LINKER_LANGUAGE C)
 endif()
 target_link_libraries(pytorch_qnnpack PRIVATE fp16)
 

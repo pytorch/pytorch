@@ -11,7 +11,7 @@
 #
 # 2. Analyze test project and compare with expected result:
 # LLVM_DIR=${HOME}/src/llvm8/build/install \
-# ANALYZE_TEST=1 CHECK_RESULT=1 tools/code_analyzer/build.sh
+# ANALYZE_TEST=1 tools/code_analyzer/build.sh
 #
 # 3. Analyze torch and generate yaml file of op dependency with debug path:
 # LLVM_DIR=${HOME}/src/llvm8/build/install \
@@ -80,15 +80,14 @@ build_test_project() {
 
 call_analyzer() {
   ANALYZER_BIN="${BUILD_ROOT}/analyzer" \
-    INPUT="${INPUT}" OUTPUT="${OUTPUT}" FORMAT="${FORMAT}" \
+    INPUT="${INPUT}" OUTPUT="${OUTPUT}" \
     EXTRA_ANALYZER_FLAGS="${EXTRA_ANALYZER_FLAGS}" \
     "${ANALYZER_SRC_HOME}/run_analyzer.sh"
 }
 
 analyze_torch_mobile() {
   INPUT="${WORK_DIR}/torch.ll"
-  FORMAT="${FORMAT:=yaml}"
-  OUTPUT="${WORK_DIR}/torch_result.${FORMAT}"
+  OUTPUT="${WORK_DIR}/torch_result.yaml"
 
   if [ ! -f "${INPUT}" ]; then
     # Link libtorch into a single module
@@ -101,24 +100,32 @@ analyze_torch_mobile() {
 
   # Analyze dependency
   call_analyzer
+}
 
-  if [ -n "${DEPLOY}" ]; then
-    DEST="${BUILD_ROOT}/pt_deps.bzl"
-    cat > ${DEST} <<- EOM
-# Generated for selective build without using static dispatch.
-# Manually run the script to update:
-# ANALYZE_TORCH=1 FORMAT=py DEPLOY=1 tools/code_analyzer/build.sh
-EOM
-    printf "TORCH_DEPS = " >> ${DEST}
-    cat "${OUTPUT}" >> ${DEST}
-    echo "Deployed file at: ${DEST}"
+convert_output_to_bazel() {
+  cd "${SRC_ROOT}"
+
+  DEST="${BUILD_ROOT}/pt_deps.bzl"
+
+  args=(
+    --op_dependency "${OUTPUT}"
+    --output "${DEST}"
+  )
+
+  if [ -n "${BASE_OPS_FILE}" ] && [ -f "${BASE_OPS_FILE}" ]; then
+    args+=(
+      --base_ops $(< ${BASE_OPS_FILE})
+    )
   fi
+
+  python -m tools.code_analyzer.op_deps_processor "${args[@]}"
+
+  echo "Deployed file at: ${DEST}"
 }
 
 analyze_test_project() {
   INPUT="${WORK_DIR}/test.ll"
-  FORMAT="${FORMAT:=yaml}"
-  OUTPUT="${WORK_DIR}/test_result.${FORMAT}"
+  OUTPUT="${WORK_DIR}/test_result.yaml"
 
   # Link into a single module (only need c10 and OpLib srcs)
   # TODO: invoke llvm-link from cmake directly to avoid this hack.
@@ -129,10 +136,6 @@ analyze_test_project() {
 
   # Analyze dependency
   call_analyzer
-
-  if [ -n "${CHECK_RESULT}" ]; then
-    check_test_result
-  fi
 }
 
 check_test_result() {
@@ -150,10 +153,14 @@ build_analyzer
 if [ -n "${ANALYZE_TORCH}" ]; then
   build_torch_mobile
   analyze_torch_mobile
+  if [ -n "${DEPLOY}" ]; then
+    convert_output_to_bazel
+  fi
 fi
 
 if [ -n "${ANALYZE_TEST}" ]; then
   build_torch_mobile
   build_test_project
   analyze_test_project
+  check_test_result
 fi

@@ -40,7 +40,7 @@ class EventList(list):
         Example: In event list [[0, 10], [1, 3], [3, 4]] would have make [0, 10]
         be a parent of two other intervals.
 
-        If for any reason two intervals intersect only partialy, this function
+        If for any reason two intervals intersect only partially, this function
         will not record a parent child relationship between then.
         """
         if self.cpu_children_populated:
@@ -210,6 +210,7 @@ class profile(object):
     Under the hood it just records events of functions being executed in C++ and
     exposes those events to Python. You can wrap any code into it and it will
     only report runtime of PyTorch functions.
+    Note: profiler is thread local and is automatically propagated into the async tasks
 
     Arguments:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
@@ -231,8 +232,8 @@ class profile(object):
             collection.
 
     .. warning:
-        This context managers should not be called recursively, i.e. at most one
-        instance should be enabled at any given time.
+        This context managers should not be called recursively, i.e. no nested
+        instances are allowed
 
     .. warning:
         Due to some CUDA multiprocessing limitations (multiprocessing-cuda-note_),
@@ -276,8 +277,8 @@ class profile(object):
         self.entered = True
         profiler_kind = torch.autograd.ProfilerState.CUDA if self.use_cuda \
             else torch.autograd.ProfilerState.CPU
-        torch.autograd._enable_profiler(
-            torch.autograd.ProfilerConfig(profiler_kind, self.record_shapes))
+        config = torch.autograd.ProfilerConfig(profiler_kind, self.record_shapes)
+        torch.autograd._enable_profiler(config)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -295,6 +296,7 @@ class profile(object):
     def __str__(self):
         if self.function_events is None:
             return '<unfinished torch.autograd.profile>'
+        self.function_events.populate_cpu_children()
         return str(self.function_events)
 
     def _check_finish(self):
@@ -388,8 +390,13 @@ class record_function(ContextDecorator):
         times.
 
         Arguments:
-            fut: (torch.distributed.rpc.Future or torch._C.Future): future for which to schedule
+            fut: (torch._C.Future): future for which to schedule
             callback for.
+
+        Returns:
+            A future that completes with the value of the passed in future when
+            the profiling callbacks have ran.
+
         """
         # Throw if we have already attached a callback onto the future.
         if not self.run_callbacks_on_exit:
@@ -398,14 +405,8 @@ class record_function(ContextDecorator):
         # We are scheduling to run this RecordFunction's end callbacks when the
         # passed in future completes, so don't run end callbacks on exit.
         self.run_callbacks_on_exit = False
-        # TODO: Currently, we have two different futures that can be returned,
-        # thus, two different code paths. We should clean this up when the
-        # futures are merged and rpc_async returns a consistent type (https://github.com/pytorch/pytorch/issues/34999).
-        if isinstance(fut, torch.distributed.rpc.Future):
-            torch.autograd._call_end_callbacks_on_fut(self.handle, fut)
-        else:
-            # jit Future, call jit operator
-            torch.ops.profiler._call_end_callbacks_on_jit_fut(self.handle, fut)
+        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(self.handle, fut)
+        return profiled_future
 
 
 class emit_nvtx(object):
@@ -751,7 +752,13 @@ def parse_cpu_trace(thread_records):
                                  cuda_end)
             functions.append(fe)
 
-    functions.sort(key=lambda evt: evt.cpu_interval.start)
+    # Sort functions by start time then by end time ascending.
+    # This ensures that--in the case of nested events which
+    # have the same start time (which may happen due to the
+    # granularity of the given clock tick)--we always show
+    # the outermost nested call first. This adds stability
+    # in how FunctionEvents appear
+    functions.sort(key=lambda evt: [evt.cpu_interval.start, -evt.cpu_interval.end])
     return functions
 
 

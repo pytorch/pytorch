@@ -16,7 +16,7 @@ from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, enableScriptTest,
-                                 skipIfNoLapack)
+                                 skipIfUnsupportedOpsetVersion, skipIfNoLapack)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -450,16 +450,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(-5, 5).to(dtype=torch.float32)
         self.run_test(MyModel(), x)
 
-    @skipIfUnsupportedMinOpsetVersion(12)
-    @unittest.skip("Enable once inverse is supported in ORT")
-    def test_inverse(self):
-        class Inverse(torch.nn.Module):
-            def forward(self, x):
-                return torch.inverse(x)
-
-        x = torch.randn(2, 3, 4, 4)
-        self.run_test(Inverse(), x)
-
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
             def forward(self, x):
@@ -781,7 +771,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_test(NegSlice(), x)
 
-    @unittest.skip('https://github.com/pytorch/pytorch/issues/10984')
     def test_slice_neg_large_negone(self):
         class NegSlice(torch.nn.Module):
             def forward(self, x):
@@ -832,7 +821,6 @@ class TestONNXRuntime(unittest.TestCase):
                       'output_1': [0, 1, 2]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @unittest.skip("relies on not constant folding size calls, but other tests rely on constant folding")
     def test_arange_dynamic(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
@@ -1322,7 +1310,6 @@ class TestONNXRuntime(unittest.TestCase):
         self._interpolate_tests(False)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @unittest.skip("Interpolate script NYI")
     def test_interpolate_no_shape(self):
         class MyModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1370,6 +1357,27 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         model = StandardDeviation()
         self.run_test(model, x)
+
+    def test_pow(self):
+        class PowModule(torch.nn.Module):
+            def forward(self, x, y):
+                return x.pow(y)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 3, 4)
+        self.run_test(PowModule(), (x, y))
+
+        x = torch.randint(10, (2, 3, 4))
+        y = torch.randint(10, (2, 3, 4)).to(dtype=torch.int32)
+        self.run_test(PowModule(), (x, y))
+
+        x = torch.randint(10, (2, 3, 4))
+        y = torch.randint(10, (2, 3, 4))
+        self.run_test(PowModule(), (x, y))
+
+        x = torch.randn(2, 3, 4).to(dtype=torch.float64)
+        y = torch.randint(10, (2, 3, 4))
+        self.run_test(PowModule(), (x, y))
 
     def test_std_along_dims(self):
         class StandardDeviation(torch.nn.Module):
@@ -1492,7 +1500,11 @@ class TestONNXRuntime(unittest.TestCase):
     def test_topk_smallest_unsorted(self):
         class MyModule(torch.nn.Module):
             def forward(self, x, k):
-                return torch.topk(x, k, largest=False, sorted=False)
+                # When sorted=False, order of elements in the outout tensors
+                # are not expected to match between PyTorch and ORT
+                topk_unsorted = torch.topk(x, k, largest=False, sorted=False)
+                topk_sorted = torch.topk(x, k, largest=False, sorted=True)
+                return topk_sorted, torch.sort(topk_unsorted.values).values
 
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)
@@ -1508,6 +1520,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)
         self.run_test(MyModuleDynamic(), [x, k])
+
+    @skipIfUnsupportedOpsetVersion([7])
+    def test_normalize(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.normalize(x)
+
+        x = torch.randn(3, 3)
+        self.run_test(Model(), x)
 
     def test_layer_norm(self):
         model = torch.nn.LayerNorm([10, 10])
@@ -1657,6 +1678,40 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(4, 4, requires_grad=True)
         self.run_test(ReduceLogSumExpModel(), x)
+
+    def test_softmax(self):
+        for i in range(-4, 3):
+            model = torch.nn.Softmax(dim=i)
+            input = torch.randn(3, 4, 5, 6)
+            self.run_test(model, input)
+
+            class SoftmaxUnknownRank(torch.nn.Module):
+                def __init__(self, i):
+                    super().__init__()
+                    self.softmax = torch.nn.Softmax(dim=i)
+
+                def forward(self, x):
+                    return self.softmax(x.reshape(3, 4, 5, 6))
+
+            model = torch.jit.script(SoftmaxUnknownRank(i))
+            self.run_test(model, input)
+
+    def test_softmax_large_values(self):
+        input = torch.tensor([[-1e12, -1e12, -1e12], [1e12, 0.0, -5.0], [3.0, 4.0, 5.0]])
+        for i in range(-2, 1):
+            model = torch.nn.Softmax(dim=i)
+            self.run_test(model, input)
+
+            class SoftmaxUnknownRank(torch.nn.Module):
+                def __init__(self, i):
+                    super().__init__()
+                    self.softmax = torch.nn.Softmax(dim=i)
+
+                def forward(self, x):
+                    return self.softmax(x.reshape(3, 3))
+
+            model = torch.jit.script(SoftmaxUnknownRank(i))
+            self.run_test(model, input)
 
     def test_logsoftmax(self):
         for i in range(7)[2:]:
@@ -1898,42 +1953,71 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.ones(5, 6)
         self.run_test(DimArange(), x)
 
+    def _test_compare_ops(self, model, num_inputs):
+        x_float = torch.randn(1, 2, 3, 4, requires_grad=True)
+        x_int = torch.randint(10, (3, 4), dtype=torch.int32)
+        if num_inputs > 1:
+            y_float = torch.randn(1, 2, 3, 4, requires_grad=True)
+            y_int = torch.randint(10, (3, 4), dtype=torch.int32)
+            self.run_test(model, (x_float, y_float))
+            self.run_test(model, (x_float, y_int))
+            self.run_test(model, (x_int, y_float))
+            self.run_test(model, (x_int, y_int))
+        else:
+            self.run_test(model, x_float)
+            self.run_test(model, x_int)
+
     def test_gt(self):
         class GreaterModel(torch.nn.Module):
             def forward(self, input, other):
                 return input > other
+        self._test_compare_ops(GreaterModel(), 2)
 
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        y = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.run_test(GreaterModel(), (x, y))
-
-        x = torch.randint(10, (3, 4), dtype=torch.int32)
-        y = torch.randint(10, (3, 4), dtype=torch.int32)
-        self.run_test(GreaterModel(), (x, y))
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_ge(self):
+        class GreaterOrEqualModel(torch.nn.Module):
+            def forward(self, input, other):
+                return input >= other
+        self._test_compare_ops(GreaterOrEqualModel(), 2)
 
     def test_gt_scalar(self):
         class GreaterModel(torch.nn.Module):
             def forward(self, input):
                 return input > 1
+        self._test_compare_ops(GreaterModel(), 1)
 
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.run_test(GreaterModel(), x)
-
-        x = torch.randint(10, (3, 4), dtype=torch.int32)
-        self.run_test(GreaterModel(), x)
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_ge_scalar(self):
+        class GreaterOrEqualModel(torch.nn.Module):
+            def forward(self, input):
+                return input >= 1
+        self._test_compare_ops(GreaterOrEqualModel(), 1)
 
     def test_lt(self):
         class LessModel(torch.nn.Module):
             def forward(self, input, other):
                 return input > other
+        self._test_compare_ops(LessModel(), 2)
 
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        y = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.run_test(LessModel(), (x, y))
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_le(self):
+        class LessOrEqualModel(torch.nn.Module):
+            def forward(self, input, other):
+                return input <= other
+        self._test_compare_ops(LessOrEqualModel(), 2)
 
-        x = torch.randint(10, (3, 4), dtype=torch.int32)
-        y = torch.randint(10, (3, 4), dtype=torch.int32)
-        self.run_test(LessModel(), (x, y))
+    def test_lt_scalar(self):
+        class LessModel(torch.nn.Module):
+            def forward(self, input):
+                return input < 1
+        self._test_compare_ops(LessModel(), 1)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_le_scalar(self):
+        class LessOrEqualModel(torch.nn.Module):
+            def forward(self, input):
+                return input <= 1
+        self._test_compare_ops(LessOrEqualModel(), 1)
 
     def test_matmul(self):
         class MatmulModel(torch.nn.Module):
@@ -2366,7 +2450,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(MaskedSelectModel(), x)
 
-    @unittest.skip("Enable this once depthToSpace attr 'mode' is supported in ORT")
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pixel_shuffle(self):
         class PixelShuffle(torch.nn.Module):
@@ -2601,6 +2684,37 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModule()
         self.run_test(model, (x, batch1, batch2, alpha, beta))
 
+    def test_numel(self):
+        class MyModule(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.numel() * input
+
+        x = torch.randn(2, 3, 5)
+        model = MyModule()
+        self.run_test(model, (x,))
+
+    def test_numel_empty(self):
+        class MyModule(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.numel() * input
+
+        x = torch.randn(0)
+        model = MyModule()
+        self.run_test(model, (x,))
+
+    def test_cast_to(self):
+        class MyModule(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input, other):
+                return input.to(other) + other
+
+        x = torch.randn(2, 3, 4)
+        y = torch.tensor([1], dtype=torch.int64)
+        model = MyModule()
+        self.run_test(model, (x, y))
+
     def test_log(self):
         class Log(torch.nn.Module):
             def forward(self, input):
@@ -2726,7 +2840,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(DimModel(), empty_input)
         self.run_test(DimModel(), multi_dim_input)
 
-    @unittest.skip("Enable this once einsum supported in ORT")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_einsum(self):
         class EinsumModelBatchDiagonal(torch.nn.Module):
@@ -2763,6 +2876,141 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(EinsumModelTranspose(), input=(x,))
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_crossentropyloss(self):
+        x = torch.randn(3, 5)
+        y = torch.empty(3, dtype=torch.long).random_(5)
+        self._crossentropyloss(x, y)
+
+        x = torch.randn(3, 5, 2)
+        y = torch.empty(3, 2, dtype=torch.long).random_(5)
+        self._crossentropyloss(x, y)
+
+        x = torch.randn(3, 5, 2, 7)
+        y = torch.empty(3, 2, 7, dtype=torch.long).random_(5)
+        self._crossentropyloss(x, y)
+
+    def _crossentropyloss(self, x, y):
+        class CrossEntropyLossNone(torch.nn.Module):
+            def __init__(self):
+                super(CrossEntropyLossNone, self).__init__()
+                self.loss = torch.nn.CrossEntropyLoss(reduction='none')
+
+            def forward(self, input, target):
+                return self.loss(input, target)
+
+        self.run_test(CrossEntropyLossNone(), input=(x, y))
+
+        class CrossEntropyLossNoneWeight(torch.nn.Module):
+            def __init__(self):
+                super(CrossEntropyLossNoneWeight, self).__init__()
+                self.loss = torch.nn.CrossEntropyLoss(reduction='none', weight=torch.randn(5))
+
+            def forward(self, input, target):
+                return self.loss(input, target)
+
+        self.run_test(CrossEntropyLossNoneWeight(), input=(x, y))
+
+        class CrossEntropyLossSum(torch.nn.Module):
+            def __init__(self):
+                super(CrossEntropyLossSum, self).__init__()
+                self.loss = torch.nn.CrossEntropyLoss(reduction='sum')
+
+            def forward(self, input, target):
+                return self.loss(input, target)
+
+        self.run_test(CrossEntropyLossSum(), input=(x, y))
+
+        class CrossEntropyLossSumWeight(torch.nn.Module):
+            def __init__(self):
+                super(CrossEntropyLossSumWeight, self).__init__()
+                self.loss = torch.nn.CrossEntropyLoss(reduction='sum', weight=torch.randn(5))
+
+            def forward(self, input, target):
+                return self.loss(input, target)
+
+        self.run_test(CrossEntropyLossSumWeight(), input=(x, y))
+
+        class CrossEntropyLossMean(torch.nn.Module):
+            def __init__(self):
+                super(CrossEntropyLossMean, self).__init__()
+                self.loss = torch.nn.CrossEntropyLoss()
+
+            def forward(self, input, target):
+                return self.loss(input, target)
+
+        self.run_test(CrossEntropyLossMean(), input=(x, y))
+
+        class CrossEntropyLossMeanWeight(torch.nn.Module):
+            def __init__(self):
+                super(CrossEntropyLossMeanWeight, self).__init__()
+                self.loss = torch.nn.CrossEntropyLoss(weight=torch.randn(5))
+
+            def forward(self, input, target):
+                return self.loss(input, target)
+
+        self.run_test(CrossEntropyLossMeanWeight(), input=(x, y))
+
+        class CrossEntropyLossNoneIgnoreIndex(torch.nn.Module):
+            def __init__(self):
+                super(CrossEntropyLossNoneIgnoreIndex, self).__init__()
+                self.loss = torch.nn.CrossEntropyLoss(reduction='none', ignore_index=1)
+
+            def forward(self, input, target):
+                return self.loss(input, target)
+
+        self.run_test(CrossEntropyLossNoneIgnoreIndex(), input=(x, y))
+
+        class CrossEntropyLossNoneWeightIgnoreIndex(torch.nn.Module):
+            def __init__(self):
+                super(CrossEntropyLossNoneWeightIgnoreIndex, self).__init__()
+                self.loss = torch.nn.CrossEntropyLoss(reduction='none', weight=torch.randn(5), ignore_index=1)
+
+            def forward(self, input, target):
+                return self.loss(input, target)
+
+        self.run_test(CrossEntropyLossNoneWeightIgnoreIndex(), input=(x, y))
+
+        class CrossEntropyLossSumIgnoreIndex(torch.nn.Module):
+            def __init__(self):
+                super(CrossEntropyLossSumIgnoreIndex, self).__init__()
+                self.loss = torch.nn.CrossEntropyLoss(reduction='sum', ignore_index=1)
+
+            def forward(self, input, target):
+                return self.loss(input, target)
+
+        self.run_test(CrossEntropyLossSumIgnoreIndex(), input=(x, y))
+
+        class CrossEntropyLossSumWeightIgnoreIndex(torch.nn.Module):
+            def __init__(self):
+                super(CrossEntropyLossSumWeightIgnoreIndex, self).__init__()
+                self.loss = torch.nn.CrossEntropyLoss(reduction='sum', weight=torch.randn(5), ignore_index=1)
+
+            def forward(self, input, target):
+                return self.loss(input, target)
+
+        self.run_test(CrossEntropyLossSumWeightIgnoreIndex(), input=(x, y))
+
+        class CrossEntropyLossMeanIgnoreIndex(torch.nn.Module):
+            def __init__(self):
+                super(CrossEntropyLossMeanIgnoreIndex, self).__init__()
+                self.loss = torch.nn.CrossEntropyLoss(ignore_index=1)
+
+            def forward(self, input, target):
+                return self.loss(input, target)
+
+        self.run_test(CrossEntropyLossMeanIgnoreIndex(), input=(x, y))
+
+        class CrossEntropyLossMeanWeightIgnoreIndex(torch.nn.Module):
+            def __init__(self):
+                super(CrossEntropyLossMeanWeightIgnoreIndex, self).__init__()
+                self.loss = torch.nn.CrossEntropyLoss(weight=torch.randn(5), ignore_index=1)
+
+            def forward(self, input, target):
+                return self.loss(input, target)
+
+        self.run_test(CrossEntropyLossMeanWeightIgnoreIndex(), input=(x, y))
+
     def test_empty_branch(self):
         class EmptyBranchModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -2779,7 +3027,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, requires_grad=True)
         self.run_test(EmptyBranchModel(), x)
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss(self):
         class NLLModel(torch.nn.Module):
@@ -2797,7 +3044,6 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_none(self):
         class NLLModel(torch.nn.Module):
@@ -2816,7 +3062,6 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_mean(self):
         class NLLModel(torch.nn.Module):
@@ -2835,7 +3080,6 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_sum(self):
         class NLLModel(torch.nn.Module):
@@ -2854,7 +3098,6 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_mean_weights(self):
         class NLLModel(torch.nn.Module):
@@ -2873,7 +3116,6 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_mean_ignore_index(self):
         class NLLModel(torch.nn.Module):
@@ -2892,7 +3134,6 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
-    @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_mean_ignore_index_weights(self):
         class NLLModel(torch.nn.Module):
@@ -2921,6 +3162,19 @@ class TestONNXRuntime(unittest.TestCase):
         mat2 = torch.randn(3, 3)
         self.run_test(M(), input=(mat1, mat2))
 
+    def test_dropout(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.dropout = torch.nn.Dropout(0.3)
+
+            def forward(self, x):
+                dropout = self.dropout(x)
+                return dropout
+
+        x = torch.randn(10, 3, 53)
+        self.run_test(M(), (x))
+
     def test_shape_constant_fold(self):
         class ShapeModule(torch.nn.Module):
             def __init__(self):
@@ -2932,7 +3186,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x + shape
 
         x = torch.randn(2, 5)
-        self.run_test(ShapeModule(), (x,), rtol=1e-3, atol=1e-5) 
+        self.run_test(ShapeModule(), (x,), rtol=1e-3, atol=1e-5)
 
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):

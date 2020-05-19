@@ -8,13 +8,11 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 
+#include <ATen/Tensor.h>
 #include <ATen/TensorUtils.h>
 
 #include <cmath>
 #include <memory>
-
-// TODO: move to c10 namespace after we
-// unified caffe2::Tensor and at::Tensor
 
 namespace at {
 
@@ -231,29 +229,6 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
 // This may be called repeatedly, so make sure it's pretty cheap.
 CAFFE2_API QTensorImpl* get_qtensorimpl(const Tensor& self);
 
-// Quantize a float value into a uint value given scale and zero_point
-template <typename T>
-CAFFE2_API T quantize_val(double scale, int64_t zero_point, float value);
-template <typename T, int precision=8>
-void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, size_t count=8);
-template <typename T>
-CAFFE2_API Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
-template <typename T>
-CAFFE2_API float dequantize_val(double scale, int64_t zero_point, T value);
-template <typename T>
-CAFFE2_API float dequantize_vec(double scale, int64_t zero_point, const T* src, float* dst, size_t count=8);
-template <typename T>
-CAFFE2_API Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point);
-template <typename SRC_T, typename DST_T>
-CAFFE2_API DST_T requantize_val(double, int64_t, double, int64_t, SRC_T src);
-
-// Given a multiplier and a zero_point, requantize int32_t computed values back
-// to quantized values. See comment above
-// make_per_tensor_affine_quantizer function for the usage of int64_t
-template <typename DST_T>
-CAFFE2_API DST_T
-requantize_from_int(double multiplier, int64_t zero_point, int64_t src);
-
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions
 CAFFE2_API QuantizerPtr
@@ -267,7 +242,7 @@ CAFFE2_API QuantizerPtr make_per_channel_affine_quantizer(
     ScalarType scalar_type);
 
 // Create a Quantized Tensor given arguments for normal Tensor and a quantizer
-CAFFE2_API Tensor new_qtensor_cpu(
+CAFFE2_API Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
     QuantizerPtr quantizer);

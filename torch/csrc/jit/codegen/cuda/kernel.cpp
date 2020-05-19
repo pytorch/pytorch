@@ -1,3 +1,4 @@
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/core/ScalarType.h>
@@ -120,6 +121,10 @@ struct KernelArgumentHolder {
         " Tried to create argument to send to a fused kernel, but got a non-scalar type.");
   }
 
+  void push(const uint64_t& val) {
+    arguments.push_back(new ULongArg(val));
+  }
+
   // Create buffer, flatten arguments into it, align by 8 Bytes, return pointers
   // in the buffer
   void** getBuffer() {
@@ -136,7 +141,10 @@ struct KernelArgumentHolder {
 std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
   std::stringstream str_stream;
   str_stream << "namespace " << CG_NAMESPACE << " {\n"
-             << code_template_tensor_struct << "\n";
+             << code_template_tensor_struct << "\n"
+             << code_fp16_support << "\n"
+             << code_random_number_gen << "\n"
+             << code_helper_funcs << "\n";
   std::stringstream cdg;
   GPULower gpulw(&fusion);
   gpulw.printKernel(str_stream, KERNEL_NAME);
@@ -169,17 +177,18 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
   // vvv NVRTC COMPILATION vvv
 
   // lazily construct context if non-existing yet;
-  CUcontext pctx = 0;
+  CUcontext pctx = nullptr;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
         *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    cudaFree(0);
+    cudaFree(nullptr);
   }
 
   // set device for the operation;
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry->device_);
+  entry->has_random_ = fusion.random();
 
   const auto prop = at::cuda::getCurrentDeviceProperties();
   int nvrtc_major, nvrtc_minor;
@@ -247,8 +256,7 @@ void runKernel(
   size_t numel = outputs[0].numel();
 
   // TODO: we can't randomly clap down this until we got striding.
-  // const auto nBlocks = std::min(entry->max_blocks_, ceilDiv(numel, 128));
-  const auto nBlocks = ceilDiv(numel, 128);
+  const auto nBlocks = ceilDiv(numel, 128 * entry->unroll_factor_);
 
   KernelArgumentHolder kernel_args;
 
@@ -257,6 +265,9 @@ void runKernel(
   // from I/O expected by the generated CUDA kernel.
   for (auto& input : inputs) {
     if (input.isTensor()) {
+      TORCH_INTERNAL_ASSERT(
+          input.toTensor().device().index() == entry->device_,
+          "input to kernel on device that is not compiled for");
       kernel_args.push(input.toTensor(), outputs[0].sizes());
     } else {
       kernel_args.push(input);
@@ -265,6 +276,22 @@ void runKernel(
 
   for (auto& output : outputs) {
     kernel_args.push(output);
+  }
+
+  // TODO: this probably won't work for us.
+  if (entry->has_random_) {
+    std::pair<uint64_t, uint64_t> philox_engine_inputs;
+    const auto rand_offset = 4 * (std::ceil(numel / (4.0 * 128 * nBlocks)) + 1);
+    auto gen = at::cuda::detail::getDefaultCUDAGenerator();
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen.mutex());
+      philox_engine_inputs =
+          at::check_generator<at::CUDAGeneratorImpl>(gen)->philox_engine_inputs(
+              rand_offset);
+    }
+    kernel_args.push(philox_engine_inputs.first);
+    kernel_args.push(philox_engine_inputs.second);
   }
 
   // launch kernel;
@@ -288,12 +315,19 @@ void runKernel(
 // WARNING:
 // This function is here for testing purposes only
 void runTestKernel(
-    CudaKernel& entry,
-    const std::vector<at::Tensor>& inputs,
+    CudaKernel* entry,
+    const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs) {
   const auto prior_device = at::cuda::current_device();
-  at::cuda::set_device(entry.device_);
+  at::cuda::set_device(entry->device_);
   auto stream = at::cuda::getCurrentCUDAStream();
+
+  // TODO: Proper API to establish reasonable launch configurations;
+  // Naive launch config;
+  size_t numel = outputs[0].numel();
+
+  // TODO: we can't randomly clap down this until we got striding.
+  const auto nBlocks = ceilDiv(numel, 128 * entry->unroll_factor_);
 
   KernelArgumentHolder kernel_args;
 
@@ -301,22 +335,45 @@ void runTestKernel(
   // allocated here from the subgraph could be, and very likely are, different
   // from I/O expected by the generated CUDA kernel.
   for (auto& input : inputs) {
-    kernel_args.push(input, outputs[0].sizes());
+    if (input.isTensor()) {
+      TORCH_INTERNAL_ASSERT(
+          input.toTensor().device().index() == entry->device_,
+          "input to kernel on device that is not compiled for");
+      kernel_args.push(input.toTensor(), outputs[0].sizes());
+    } else {
+      kernel_args.push(input);
+    }
   }
 
   for (auto& output : outputs) {
     kernel_args.push(output);
   }
 
+  // TODO: this probably won't work for us.
+  if (entry->has_random_) {
+    std::pair<uint64_t, uint64_t> philox_engine_inputs;
+    const auto rand_offset = 4 * (std::ceil(numel / (4.0 * 128 * nBlocks)) + 1);
+    auto gen = at::cuda::detail::getDefaultCUDAGenerator();
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen.mutex());
+      philox_engine_inputs =
+          at::check_generator<at::CUDAGeneratorImpl>(gen)->philox_engine_inputs(
+              rand_offset);
+    }
+    kernel_args.push(philox_engine_inputs.first);
+    kernel_args.push(philox_engine_inputs.second);
+  }
+
   // launch kernel;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
-      entry.function_,
-      entry.grid_.x,
-      entry.grid_.y,
-      entry.grid_.z,
-      entry.block_.x,
-      entry.block_.y,
-      entry.block_.z,
+      entry->function_,
+      entry->grid_.x,
+      entry->grid_.y,
+      entry->grid_.z,
+      entry->block_.x,
+      entry->block_.y,
+      entry->block_.z,
       0,
       stream,
       kernel_args.getBuffer(),

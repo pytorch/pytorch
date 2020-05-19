@@ -380,7 +380,13 @@ void Caffe2UsePinnedCPUAllocator() {
     return;
   }
   VLOG(1) << "Caffe2 gpu: setting CPUAllocator to PinnedCPUAllocator.";
-  SetCPUAllocator(&g_pinned_cpu_alloc);
+
+  // If CUDA is enabled, using CPU allocators other than PinnedCPUAllocator
+  // will cause memory corruptions. Therefore, we need to set the priority
+  // to highest to avoid being overwritten.
+  SetCPUAllocator(
+      &g_pinned_cpu_alloc,
+      std::numeric_limits<uint8_t>::max() /* priority */);
 #endif
 }
 

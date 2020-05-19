@@ -8,7 +8,7 @@ namespace jit {
 
 struct Call {
   std::string fn_name;
-  c10::optional<SourceRange> caller_range;
+  SourceRange caller_range;
 };
 
 struct CAFFE2_API ErrorReport : public std::exception {
@@ -24,7 +24,7 @@ struct CAFFE2_API ErrorReport : public std::exception {
     // These functions are used to report why a function was being compiled
     // (i.e. what was the call stack of user functions at compilation time that
     // led to this error)
-    CallStack(const std::string& name);
+    CallStack(const std::string& name, const SourceRange& range);
     ~CallStack();
 
     // Change the range that is relevant for the current function (i.e. after
