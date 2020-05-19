@@ -16,20 +16,29 @@ namespace at {
 
 // TensorImpl has a unique_ptr<NamedTensorMetaInterface> field.
 // XXX: Ideally we would just put optional<vector<Dimname>> into TensorImpl.
-struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
-  explicit NamedTensorMeta(int64_t num_names)
-    : names_(std::vector<Dimname>(num_names, Dimname::wildcard())) {}
+//
+// This class has an important invariant: there must be at least ONE
+// non-wildcard
+struct CAFFE2_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
+  // This enum is to remind people that the invariant on constructors is that
+  // the list of dimnames must have at least one non-wilddcard
+  enum HAS_NON_WILDCARD {
+    HasNonWildcard
+  };
 
-  explicit NamedTensorMeta(DimnameList names)
-    : names_(names.vec()) {}
-  explicit NamedTensorMeta(std::vector<Dimname>&& names)
-    : names_(std::move(names)) {}
-
-  std::unique_ptr<c10::NamedTensorMetaInterface> clone() const override {
-    return std::make_unique<NamedTensorMeta>(names_);
+  explicit NamedTensorMeta(HAS_NON_WILDCARD, DimnameList names)
+    : names_(names.vec()) {
+    check_invariants();
+  }
+  explicit NamedTensorMeta(HAS_NON_WILDCARD, std::vector<Dimname>&& names)
+    : names_(std::move(names)) {
+    check_invariants();
   }
 
-  bool has_names() const;
+  std::unique_ptr<c10::NamedTensorMetaInterface> clone() const override {
+    return std::make_unique<NamedTensorMeta>(HasNonWildcard, names_);
+  }
+
   DimnameList names() const { return names_; }
 
   // Used for an assertion in TensorImpl.h
@@ -37,17 +46,25 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
     return names_.size();
   }
 
-  void set_names(DimnameList new_names) {
+  void check_invariants() const {
+    // TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+    TORCH_INTERNAL_ASSERT(
+      std::any_of(names_.begin(), names_.end(), [](const Dimname& n) { return !n.isWildcard(); }));
+  }
+
+  void set_names(HAS_NON_WILDCARD, DimnameList new_names) {
     TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());
     std::copy(new_names.begin(), new_names.end(), names_.begin());
+    check_invariants();
   }
 
-  void set_names(std::vector<Dimname>&& new_names) {
+  void set_names(HAS_NON_WILDCARD, std::vector<Dimname>&& new_names) {
     TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());
     names_ = std::move(new_names);
+    check_invariants();
   }
 
- private:
+  // INVARIANT: at least one Dimname is non-WILDCARD
   std::vector<Dimname> names_;
 };
 
