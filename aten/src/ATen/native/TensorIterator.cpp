@@ -691,7 +691,7 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
   return iter;
 }
 
-  TensorIterator TensorIterator::nullary_op(Tensor& out, bool check_mem_overlap) {
+TensorIterator TensorIterator::nullary_op(Tensor& out, bool check_mem_overlap) {
   auto iter = TensorIterator();
   iter.set_check_mem_overlap(check_mem_overlap);
   iter.add_output(out);
