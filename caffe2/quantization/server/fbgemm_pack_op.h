@@ -10,6 +10,13 @@ namespace caffe2 {
 
 using FCFp32Op = FullyConnectedOp<CPUContext>;
 
+void QuantizeConvBias(
+    const Blob& blob,
+    int M,
+    const dnnlowp::TensorQuantizationParams& in_qparams,
+    const vector<dnnlowp::TensorQuantizationParams>& filter_qparams,
+    std::vector<int32_t>& b_quantized);
+
 class FullyConnectedDNNLowPPackWeightOp final
     : public DNNLowPOp<std::uint8_t, FCFp32Op> {
  public:
