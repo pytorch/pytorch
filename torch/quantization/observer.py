@@ -188,9 +188,11 @@ class _ObserverBase(ObserverBase):
         # For scalar values, cast them to Tensors of size 1 to keep the shape
         # consistent with default values in FakeQuantize.
         if len(scale.shape) == 0:
-            scale = torch.tensor([scale])
+            # TODO: switch to scale.item() after adding JIT support
+            scale = torch.tensor([float(scale)])
         if len(zero_point.shape) == 0:
-            zero_point = torch.tensor([zero_point])
+            # TODO: switch to zero_point.item() after adding JIT support
+            zero_point = torch.tensor([float(zero_point)])
 
         return scale, zero_point
 
