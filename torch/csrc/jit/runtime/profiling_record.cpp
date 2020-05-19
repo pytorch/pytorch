@@ -7,7 +7,7 @@
 #include <ostream>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include "ATen/core/interned_strings.h"
+#include <ATen/core/interned_strings.h>
 
 namespace torch {
 namespace jit {

@@ -14,6 +14,6 @@ TORCH_API void FuseTensorExprs(std::shared_ptr<Graph>& graph);
 
 TORCH_API void setTensorExprFuserEnabled(bool val);
 TORCH_API bool tensorExprFuserEnabled();
-
+TORCH_API bool isSupported(Node* node);
 } // namespace jit
 } // namespace torch
