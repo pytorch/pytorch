@@ -5323,6 +5323,18 @@ def add_neg_dim_tests():
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
+    # Verifies that the inplace dunders (like idiv) actually are in place
+    @onlyOnCPUAndCUDA
+    def test_inplace_dunders(self, device):
+        t = torch.randn((1,), device=device)
+        expected = t.data_ptr()
+        t += 1
+        t -= 1
+        t *= 1
+        t /= 1
+        t //= 1
+        self.assertEqual(expected, t.data_ptr())
+
     @dtypes(torch.float32, torch.complex64)
     def test_storage(self, device, dtype):
         v = torch.randn(3, 5, dtype=dtype, device=device)
@@ -18051,7 +18063,7 @@ tensor_op_tests = [
     _tc('std', 'neg_dim', _small_3d, lambda t, d: [-1], _float_types, _cpu_types, False),
     _tc('var', '', _small_3d, lambda t, d: [], _float_types, _cpu_types, False),
     _tc('var', 'dim', _small_3d, lambda t, d: [1], _float_types, _cpu_types, False),
-    _tc('var', 'neg_dim', _small_3d, lambda t, d: [-1], _float_types, _cpu_types, False),
+    _tc('var', 'neg_dim', _small_3d, lambda t, d: [-1], _float_types2, _cpu_types, False),
     _tc('ndimension', '', _small_3d, lambda t, d: [], _types, _cpu_types, False),
     _tc('nelement', '', _small_3d, lambda t, d: [], _types, _cpu_types, False),
     _tc('numel', '', _small_3d, lambda t, d: [], _types, _cpu_types, False),
@@ -18149,11 +18161,11 @@ tensor_op_tests = [
     _tc('__lshift__', '',
         lambda t, d: torch.pow(2, torch.arange(1, 5).to(dtype=_convert_t(t, d), device=d)),
         lambda t, d: [2],
-        _signed_types_no_half, _cpu_types, False),
+        _signed_types, _cpu_types, False),
     _tc('__rshift__', '',
         lambda t, d: torch.pow(2, torch.arange(3, 7).to(dtype=_convert_t(t, d), device=d)),
         lambda t, d: [2],
-        _signed_types_no_half, _cpu_types, False),
+        _signed_types, _cpu_types, False),
     # lapack tests
     _tc('qr', 'square', _small_2d, lambda t, d: [],
         _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
@@ -18174,9 +18186,9 @@ tensor_op_tests = [
     _tc('log1p', '', _small_3d, lambda t, d: [], _float_types_no_half, [torch.bfloat16]),
     _tc('log2', '', _small_3d, lambda t, d: [], _float_types2, [torch.bfloat16]),
     _tc('sigmoid', '', _small_3d, lambda t, d: [], _float_types2),
-    _tc('sin', '', _small_3d, lambda t, d: [], _float_types2, [torch.bfloat16]),
+    _tc('sin', '', _small_3d, lambda t, d: [], _float_types, [torch.bfloat16]),
     _tc('sqrt', '', _small_3d, lambda t, d: [], _float_types2, [torch.bfloat16]),
-    _tc('tanh', '', _small_3d, lambda t, d: [], _float_types, [torch.bfloat16]),
+    _tc('tanh', '', _small_3d, lambda t, d: [], _float_types2, [torch.bfloat16]),
     _tc('acos', '', _small_3d, lambda t, d: [], _float_types, [torch.bfloat16]),
     _tc('asin', '', _small_3d, lambda t, d: [], _float_types, [torch.bfloat16]),
     _tc('atan', '', _small_3d, lambda t, d: [], _float_types, [torch.bfloat16]),
