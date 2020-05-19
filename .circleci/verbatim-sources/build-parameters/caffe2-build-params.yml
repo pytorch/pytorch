@@ -25,4 +25,3 @@ caffe2_params: &caffe2_params
     DOCKER_IMAGE: << parameters.docker_image >>
     BUILD_ONLY: << parameters.build_only >>
   resource_class: << parameters.resource_class >>
-
