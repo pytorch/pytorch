@@ -78,6 +78,8 @@ templates_path = ['_templates']
 if RELEASE:
     templates_path = ['_templates-stable'] + templates_path
 
+# TODO: document these and remove them from here.
+
 coverage_ignore_modules = [
     "torch.autograd",
     "torch.cuda",
