@@ -96,8 +96,9 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                   return (%3)
             OperatorExportTypes.RAW: Export raw ir.
             OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not supported in
-            ONNX, fall through and export the operator as is. This mode can be used
-            if you are trying to export a custom op that is not supported in ONNX.
+            ONNX, fall through and export the operator as is. Using this mode,
+            a custom operator can be registered and implemented by the user for
+            their runtime backend.
             Example graph:
                 graph(%x.1 : Float):
                   %1 : Tensor = prim::Uninitialized()
