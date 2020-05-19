@@ -229,7 +229,7 @@ struct conv_param_t {
 
     if (per_channel && ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
       pytorch_qnnp_log_error(
-          "Per channel quantized weights are not supported for XZP kernesl");
+          "Per channel quantized weights are not supported for XZP kernels");
       assert("Failed to initialize QNNPACK conv_param_t struct.");
     }
   }
