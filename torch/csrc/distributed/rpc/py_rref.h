@@ -23,12 +23,12 @@ class PyRRef {
   bool confirmedByOwner() const;
   WorkerInfo owner() const;
   std::string ownerName() const;
-  py::object toHere();
-  py::object localValue();
+  py::object toHere() const;
+  py::object localValue() const;
   std::string str() const;
   py::tuple pickle() const;
   static PyRRef unpickle(const py::tuple& t);
-  c10::IValue toIValue();
+  c10::IValue toIValue() const;
   // Future that is associated with the creation of this RRef on the remote end.
   // This is only used to get the future corresponding to the rref for profiling
   // use cases.

@@ -319,6 +319,7 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
     }
   }
 #endif
+  c10::reportMemoryUsageToProfiler(base_ptr_, size_, c10::Device(c10::DeviceType::CPU));
 }
 
 THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
@@ -383,6 +384,7 @@ void THMapAllocator::close() {
     }
   }
 #endif /* _WIN32 */
+  c10::reportMemoryUsageToProfiler(base_ptr_, -size_, c10::Device(c10::DeviceType::CPU));
 }
 
 #else /* defined(_WIN32) || defined(HAVE_MMAP) */
@@ -482,6 +484,7 @@ void THRefcountedMapAllocator::close() {
     AT_ERROR("could not unmap the shared memory file ", filename_);
   }
 #endif /* _WIN32 */
+  c10::reportMemoryUsageToProfiler(base_ptr_, -size_, c10::Device(c10::DeviceType::CPU));
 }
 
 void THRefcountedMapAllocator::incref()
