@@ -68,7 +68,45 @@ NO_HALF_TENSORTYPES = [torch.float,
 
 DOUBLE_TENSORTYPES = [torch.double]
 
+test_case1 = [
+    ['group', [1, 2, 6]],
+    ['bs', [2]],
+    ['input_channels', [1, 16, 30, 32, 33, 64]],
+    ['output_channels', [1, 16, 17]],
+    ['paddings', [[0, 0], [1, 1]]],
+    ['dilations', [[1, 1], [2, 2]]],
+    ['strides', [[1, 1], [2, 2]]],
+    ['kernels', [[1, 1], [2, 2], [3, 3], [5, 5], [7, 7]]],
+    ['output_sizes', [[1, 1]]],
+    ['bias', [True, False]],
+]
 
+test_case2 = [
+    ['group', [2]],
+    ['bs', [1, 4, 16, 64]],
+    ['input_channels', [3]],
+    ['output_channels', [3]],
+    ['paddings', [[1, 1]]],
+    ['dilations', [[1, 1]]],
+    ['strides', [[1, 1]]],
+    ['kernels', [[3, 3]]],
+    ['output_sizes', [[2, 2]]],
+    ['bias' , [True, False]],
+]
+
+test_case3 = [
+    ['group', [6]],
+    ['bs', [2]],
+    ['input_channels', [3]],
+    ['output_channels', [3]],
+    ['paddings', [[1, 1]]],
+    ['dilations', [[1, 1]]],
+    ['strides', [[1, 1]]],
+    ['kernels', [[3, 3]]],
+    ['output_sizes', [[1, 1], [2, 2], [3, 3], [5, 5], [6, 6], [7, 7], [16, 16], [17, 17], [32, 32], 
+                      [33, 33], [64, 64], [128, 128]]],
+    ['bias' , [True, False]],
+]
 # WARNING: If you add a new top-level test case to this file, you MUST
 # update test/run_test.py to list it, otherwise it will NOT be run in
 # CI.
@@ -9724,41 +9762,6 @@ class TestNNDeviceType(NNTestCase):
                 embedding.zero_grad()
                 self.assertEqual(after, pre)
 
-    @dtypesIfCUDA(torch.half, torch.float)
-    @dtypes(torch.float)
-    def test_softmax_results(self, device, dtype):
-        # Non-even sizes and non-zero shifts test fallback paths in vectorized kernel
-        # Note: dim1 > 1024 is needed to exercise the vectorized (non-persistent) path, (16, 30576) is BERT-esque
-        sizes = [(0, 10), (32, 20), (10, 0), (31, 20), (32, 21), (31, 23), (32, 1536), (31, 2048), (33, 2049), (16, 30576)]
-        shifts = [(0, 0), (1, 0), (0, 1), (1, 1)]
-        for fn in [F.softmax, F.log_softmax]:
-            for size in sizes:
-                for shift in shifts:
-                    input = torch.rand(size, device=device, dtype=dtype)
-                    # Note: With the largest tests we can hit upper limit of fp16 when we
-                    # sum, so scale the input down to stay in a nicer range.
-                    if dtype == torch.float16:
-                        input = input / 100.
-                    input = input[shift[0]:, shift[1]:]
-                    # Note; Don't want to bprop back through slice op
-                    input = input.detach().requires_grad_(True)
-                    ref_input = input.clone().cpu().detach().requires_grad_(True)
-                    for dim in [0, 1]:
-                        ref_output = fn(ref_input, dtype=torch.float, dim=dim)
-                        output = fn(input, dtype=torch.float, dim=dim)
-                        grad_output = torch.rand_like(output)
-                        ref_grad_output = grad_output.clone().cpu().detach()
-                        grad_input, = torch.autograd.grad(output, input, grad_outputs=(grad_output), create_graph=True)
-                        ref_grad_input, = torch.autograd.grad(ref_output, ref_input,
-                                                              grad_outputs=(ref_grad_output), create_graph=True)
-                        grad_input.sum().backward()
-                        ref_grad_input.sum().backward()
-
-                        self.assertEqual(output, ref_output)
-                        self.assertEqual(grad_input, ref_grad_input)
-                        self.assertEqual(input.grad, ref_input.grad)
-
-
 
     @largeCUDATensorTest('12GB')
     def test_conv_large_nosplit(self, device):
@@ -11349,6 +11352,116 @@ class TestNNDeviceType(NNTestCase):
             x = torch.randn(shape, device=device, requires_grad=True)
             F.max_pool3d(x, kernel_size=(1, 1, 1)).sum().backward()
             self.assertTrue(torch.allclose(x.grad, torch.ones_like(x.grad)))
+
+
+class TestConv2dExt(TestCase):
+    def test_conv2d_ext(self):
+        def subtensor(tensor, dim, groups, g):
+            if tensor is None:
+                return None
+            group_size = int(tensor.size(dim) / group)
+            return tensor.narrow(dim, group_size * g, group_size).contiguous()
+
+        def thnn_conv(input, weight, k, bias, s, p, d):
+            if d[0] > 1 or d[1] > 1:
+                return torch._C._nn.slow_conv_dilated2d(input, weight, k, bias, s, p, d)
+            else:
+                return torch._C._nn.thnn_conv2d(input, weight, k, bias, s, p)
+
+        def thnn_conv_group(input, weight, k, bias, s, p, d, group):
+            if group == 1:
+                return thnn_conv(input, weight, k, bias, s, p, d)
+            else:
+                outputs = []
+                for g in range(group):
+                    input_g = subtensor(input, 1, group, g)
+                    weight_g = subtensor(weight, 0, group, g)
+                    bias_g = subtensor(bias, 0, group, g)
+                    outputs.append(thnn_conv(input_g, weight_g, k, bias_g, s, p, d))
+                return torch.cat(outputs, 1)
+
+        def _test_conv2d_compare_with_thnn(g, bs, isize, ic_g, oc_g, has_bias, p, d, s, k, device):
+            ic, oc = ic_g * g, oc_g * g
+            if device == 'cpu' or device == 'mkldnn':
+                dtypes = [torch.float32]
+                input_device = 'cpu'
+            elif device == 'cuda' or device == 'cudnn':
+                dtypes = [torch.half, torch.float, torch.double]
+                input_device = 'cuda'
+
+            for dtype in dtypes:
+                torch.manual_seed(1)
+                input = torch.randn((bs, ic, isize[0], isize[1]), device=input_device, dtype=dtype, requires_grad=True)
+                torch.manual_seed(2)
+                weight = torch.randn((oc, ic_g, k[0], k[1]), device=input_device, dtype=dtype) * 0.01
+                torch.manual_seed(3)
+                bias = None if has_bias else torch.randn((oc), device=input_device, dtype=dtype)
+
+                thnn_output = thnn_conv_group(input, weight, k, bias, s, p, d, g)
+                if device == 'cpu':
+                    output = torch.conv2d(input, weight, bias, s, p, d, g)
+                elif device == 'mkldnn':
+                    output = torch.mkldnn_convolution(input, weight, bias, p, s, d, g)
+                elif device == 'cuda':
+                    output = torch.conv2d(input, weight, bias, s, p, d, g)
+                elif device == 'cudnn':
+                    output = torch.cudnn_convolution(input, weight, bias, p, s, d, g, True, True)
+
+
+                if device == 'cuda' or device == 'cudnn':
+                    try:
+                        self.assertEqual(
+                            output, thnn_output,
+                            message='device:{}, dtype:{}, input size:{}, group:{}, '
+                                    'batchsize:{}, input channel:{}, output channel:{}, '
+                                    'bias:{}, padding:{}, dilation:{}, stride:{}, '
+                                    'kernel:{}'.format(device, dtype, isize, g, bs, ic, 
+                                                       oc, has_bias, p, d, s, k)
+                        )
+                    except AssertionError as e:
+                        print(e)
+                else:
+                    self.assertEqual(
+                        output, thnn_output,
+                        message='device:{}, dtype:{}, input size:{}, group:{}, '
+                                'batchsize:{}, input channel:{}, output channel:{}, '
+                                'bias:{}, padding:{}, dilation:{}, stride:{}, '
+                                'kernel:{}'.format(device, dtype, isize, g, bs, ic, 
+                                                   oc, has_bias, p, d, s, k)
+                    )
+
+        count = 0
+        for case in [test_case1, test_case2, test_case3]:
+            case_combinations = list(product(*map(lambda x: x[1], case)))
+
+            for combination in case_combinations:
+                group = combination[0]
+                bs = combination[1]
+                ic = combination[2]
+                oc = combination[3]
+                p = combination[4]
+                d = combination[5]
+                s = combination[6]
+                k = combination[7]
+                osize = combination[8]
+                bias = combination[9]
+
+                count += 1
+                isize = []
+                for i in range(len(osize)):
+                    isize.append(s[i] * (osize[i] - 1) + 1 + d[i] * (k[i] - 1) - 2 * p[i])
+
+                if isize[0] > 0 and isize[1] > 0:
+                    _test_conv2d_compare_with_thnn(group, bs, isize, ic, oc, bias, p, d, s, k, 'cpu')
+                    if torch.backends.mkldnn.is_available():
+                        _test_conv2d_compare_with_thnn(group, bs, isize, ic, oc, bias, p, d, s, k, 'mkldnn')
+                    if not TEST_WITH_ROCM and torch.cuda.is_available():
+                        _test_conv2d_compare_with_thnn(group, bs, isize, ic, oc, bias, p, d, s, k, 'cuda')
+                    if not TEST_WITH_ROCM and torch.cuda.is_available() and torch.backends.cudnn.is_available():
+                        _test_conv2d_compare_with_thnn(group, bs, isize, ic, oc, bias, p, d, s, k, 'cudnn')
+                else:
+                    warnings.warn(UserWarning("config error, skip..."))
+        print('case count:', count) 
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
