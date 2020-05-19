@@ -620,7 +620,7 @@ def _run_symbolic_method(op_name, symbolic_fn, args):
         # Handle the specific case where we didn't successfully dispatch
         # to symbolic_fn.  Otherwise, the backtrace will have the clues
         # you need.
-        e.args = ("{} (occurred when translating {})".format(e.args[0], op_name), )
+        e.args = ("{} (occurred when translating {})".format(e.args[0], op_name),)
         raise
 
 
@@ -857,7 +857,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch.
         # Otherwise, the backtrace will have the clues you need.
-        e.args = ("{} (occurred when translating {})".format(e.args[0], op_name))
+        e.args = ("{} \n(Occurred when translating {}).".format(e.args[0], op_name),)
         raise
 
 
