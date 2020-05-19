@@ -7,6 +7,7 @@ import threading
 
 import torch
 import torch.distributed as dist
+from torch.distributed.nn.jit import instantiator
 from torch.jit import Future  # noqa F401
 
 from . import (
@@ -260,6 +261,14 @@ def shutdown(graceful=True):
         # resolved.
         _cleanup_python_rpc_handler()
         _reset_current_rpc_agent()
+    try:
+        # This API removes files. There is chance of failure doing IO.
+        instantiator.cleanup_generated_modules()
+    except Exception:
+        import traceback
+
+        print("Encountered exception in instantiator.cleanup_generated_modules()")
+        traceback.print_exc()
 
 
 # TODO: add a context manager to wrap _init_rpc_backend and shutdown
