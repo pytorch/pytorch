@@ -123,13 +123,12 @@ C10_HOST_DEVICE inline T geometric(T val, T p) {
 }
 
 /**
- * Transforms normally distributed `val` with mean 0.0 and standard deviation 1.0 to
- * log-normally distributed with `mean` and standard deviation `std`.
+ * Transforms normally distributed `val` to log-normally distributed.
  */
 template <typename T>
-C10_HOST_DEVICE inline T log_normal(T val, T mean, T std) {
+C10_HOST_DEVICE inline T log_normal(T val) {
   // https://en.wikipedia.org/wiki/Log-normal_distribution#Mode,_median,_quantiles
-  return at::exp(val * std + mean);
+  return at::exp(val);
 }
 
 }} // namespace at::transformation
