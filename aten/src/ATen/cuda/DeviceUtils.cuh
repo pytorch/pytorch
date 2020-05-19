@@ -68,26 +68,6 @@ __device__ __forceinline__ T WARP_SHFL_DOWN(T value, unsigned int delta, int wid
 #endif
 }
 
-template<>
-__device__ __forceinline__ c10::Half WARP_SHFL_DOWN<c10::Half>(c10::Half value, unsigned int delta, int width, unsigned int mask)
-{
-  return WARP_SHFL_DOWN<__half>(__half(value), delta, width, mask);
-}
-
-template <typename T>
-__device__ __forceinline__ c10::complex<T> WARP_SHFL_DOWN(c10::complex<T> value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
-{
-#ifndef __HIP_PLATFORM_HCC__
-    return c10::complex<T>(
-        __shfl_down_sync(mask, value.storage[0], delta, width),
-        __shfl_down_sync(mask, value.storage[1], delta, width));
-#else
-    return c10::complex<T>(
-        __shfl_down(value.storage[0], delta, width),
-        __shfl_down(value.storage[1], delta, width));
-#endif
-}
-
 #ifdef __HIP_PLATFORM_HCC__
 template<>
 __device__ __forceinline__ int64_t WARP_SHFL_DOWN<int64_t>(int64_t value, unsigned int delta, int width , unsigned int mask)
@@ -107,3 +87,23 @@ __device__ __forceinline__ __half WARP_SHFL_DOWN<__half>(__half value, unsigned 
   return *reinterpret_cast<__half*>(&a);
 }
 #endif
+
+template<>
+__device__ __forceinline__ c10::Half WARP_SHFL_DOWN<c10::Half>(c10::Half value, unsigned int delta, int width, unsigned int mask)
+{
+  return WARP_SHFL_DOWN<__half>(__half(value), delta, width, mask);
+}
+
+template <typename T>
+__device__ __forceinline__ c10::complex<T> WARP_SHFL_DOWN(c10::complex<T> value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
+{
+#ifndef __HIP_PLATFORM_HCC__
+    return c10::complex<T>(
+        __shfl_down_sync(mask, value.storage[0], delta, width),
+        __shfl_down_sync(mask, value.storage[1], delta, width));
+#else
+    return c10::complex<T>(
+        __shfl_down(value.storage[0], delta, width),
+        __shfl_down(value.storage[1], delta, width));
+#endif
+}
