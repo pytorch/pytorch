@@ -4,6 +4,7 @@ import numpy as np
 import unittest
 import torch.onnx
 import torch.nn as nn
+import torch.nn.quantized as nnq
 import io
 
 import onnx
@@ -262,6 +263,7 @@ class TestQuantizedOps(unittest.TestCase):
                 super(SimpleModel, self).__init__()
                 self.quant = torch.quantization.QuantStub()
                 self.dequant = torch.quantization.DeQuantStub()
+                self.func_add = nnq.FloatFunctional()
                 self.conv1 = nn.Conv2d(3, 2, 5, bias=None).to(dtype=torch.float)
                 self.act1 = nn.Sigmoid()
                 self.conv2 = nn.Conv2d(2, 2, 1, bias=None).to(dtype=torch.float)
@@ -270,6 +272,7 @@ class TestQuantizedOps(unittest.TestCase):
 
             def forward(self, x):
                 x = self.quant(x)
+                x = self.func_add.add(x, x)
                 x = self.conv1(x)
                 x = self.act1(x)
                 x = self.conv2(x)
@@ -280,6 +283,21 @@ class TestQuantizedOps(unittest.TestCase):
 
         x = np.random.rand(2, 3, 10, 10).astype("float32")
         self.generic_test(SimpleModel(), (x,), input_names=["x"], relaxed_check=True)
+
+    def test_sequential(self):
+        model = nn.Sequential(
+            nn.Conv2d(1, 1, kernel_size=(1, 1), bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(1, 1, kernel_size=(1, 1), bias=False),
+        )
+        # quantize
+        model.eval()
+        torch.quantization.fuse_modules(model, ["0", "1"], inplace=True)
+        model = torch.quantization.QuantWrapper(model)
+        torch.backends.quantized.engine = "qnnpack"
+        model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        x = np.random.rand(1, 1, 1, 1).astype("float32")
+        self.generic_test(model, (x,), input_names=["x"], relaxed_check=True)
 
 if __name__ == '__main__':
     unittest.main()

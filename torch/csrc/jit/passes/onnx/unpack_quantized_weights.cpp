@@ -19,7 +19,9 @@ using namespace ::c10::onnx;
 // and likely has to re-unbox them when calling the kernel.
 // Prefer calling c10::OperatorHandle::callUnboxed<Args...>(args...).
 template <class Result, class... Args>
-inline Result call_unboxed_super_slow_temp_shim(const c10::OperatorHandle& op, Args... args) {
+inline Result call_unboxed_super_slow_temp_shim(
+    const c10::OperatorHandle& op,
+    Args... args) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
   // Temporary hack: when the `Profiler` dispatch key is inserted, this call
   // will fail since the `unpack()` ops return multiple values, however the
@@ -60,27 +62,25 @@ double getScaleFromInput(Node* input_node) {
     scale = toIValue(input_node->inputs()[1]);
     return scale.value().toDouble();
   } else if (input_name == "quantized::linear") {
-    // %r = quantized::linear(%input, %unpacked_weight, %bias, %w_scale,
-    // %w_zero_point)
+    // %r = quantized::linear(%input, %packed_weight, %w_scale, %w_zero_point)
     TORCH_CHECK(
-        input_node->inputs().size() > 3,
-        "quantized::linear expected scale to be 4th input");
-    scale = toIValue(input_node->inputs()[3]);
+        input_node->inputs().size() > 2,
+        "quantized::linear expected scale to be 3rd input");
+    scale = toIValue(input_node->inputs()[2]);
     return scale.value().toDouble();
   } else if (input_name == "quantized::conv2d") {
-    // %r = quantized::conv2d(%input, %unpacked_weight, %bias, %stride,
-    // %padding, %dilation, %groups, %w_scale, %w_zero_point)
+    // %r = quantized::conv2d(%input, %packed_weight, %w_scale, %w_zero_point)
     TORCH_CHECK(
-        input_node->inputs().size() > 7,
+        input_node->inputs().size() > 2,
         "quantized::conv2d expected scale to be 8th input");
     auto num_inputs = input_node->inputs().size();
     scale = toIValue(input_node->inputs()[num_inputs - 2]);
     return scale.value().toDouble();
   } else if (input_name == "quantized::conv2d_relu") {
-    // %r = quantized::conv2d_relu(%input, %unpacked_weight, %stride,
-    // %padding, %dilation, %groups, %w_scale, %w_zero_point)
+    // %r = quantized::conv2d_relu(%input, %packed_weight, %w_scale,
+    // %w_zero_point)
     TORCH_CHECK(
-        input_node->inputs().size() > 6,
+        input_node->inputs().size() > 2,
         "quantized::conv2d_relu expected scale to be 7th input");
     auto num_inputs = input_node->inputs().size();
     scale = toIValue(input_node->inputs()[num_inputs - 2]);
