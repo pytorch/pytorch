@@ -9,7 +9,6 @@ from torch._C import parse_ir
 # torch.quantization
 from torch.quantization import QConfig
 from torch.quantization import default_dynamic_qconfig
-from torch.quantization import QConfigDynamic
 from torch.quantization import default_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
@@ -27,12 +26,12 @@ from torch.quantization._quantize_script import quantize_dynamic_script
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
 from torch.testing._internal.common_quantized import override_qengines
 
+from torch.testing._internal.common_quantization import QuantizationTestCase
+
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
-from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.jit_utils import get_forward
 from torch.testing._internal.jit_utils import get_forward_graph
-from torch.testing._internal.jit_utils import get_module_method
 
 from torch.jit._recursive import wrap_cpp_module
 
@@ -40,7 +39,7 @@ from torch.jit._recursive import wrap_cpp_module
 import itertools
 import unittest
 
-class TestQuantizeScriptJitPasses(JitTestCase):
+class TestQuantizeScriptJitPasses(QuantizationTestCase):
     """ Test graph mode quantization passes used by quantize_script
     """
     def test_foldbn_trivial(self):
@@ -1015,6 +1014,21 @@ graph(%input, %weight):
                    .check("aten::dequantize") \
                    .run(model.graph)
 
+    def test_finalize_no_extra_dequantize(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x.size(0) * x
+
+        model = torch.jit.script(M()).eval()
+        model = quantize_script(model, {'': default_qconfig}, _test_only_eval_fn, [self.img_data])
+        FileCheck().check_not("aten::dequantize(") \
+                   .run(model.graph)
+
     def test_module_list(self):
         class SimpleLinearLayer(torch.nn.Module):
             def __init__(self):
@@ -1096,7 +1110,7 @@ graph(%input, %weight):
                    .check_not("aten::mul") \
                    .run(m.graph)
 
-class TestQuantizeScriptPTSQOps(JitTestCase):
+class TestQuantizeScriptPTSQOps(QuantizationTestCase):
     """ Test graph mode post training static quantization works
     for individual ops end to end.
     """
@@ -1737,7 +1751,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .check("aten::dequantize(") \
                    .run(m2.graph)
 
-class TestQuantizeDynamicScript(JitTestCase):
+class TestQuantizeDynamicScript(QuantizationTestCase):
     def test_prepare_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1890,22 +1904,3 @@ class TestQuantizeDynamicScript(JitTestCase):
         FileCheck().check("quantized::linear_dynamic") \
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(model.graph)
-
-    def test_prepare_dynamic_lstm(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
-
-            def forward(self, x):
-                return self.lstm(x)
-        from torch.quantization.observer import default_dynamic_quant_observer, _MinMaxTensorListObserver
-        qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                 weight=_MinMaxTensorListObserver)
-        m = torch.jit.script(M())
-        m = prepare_dynamic_script(m, {'': qconfig})
-        assert len(attrs_with_prefix(m.lstm, '_observer_')) == 1
-        FileCheck().check('_MinMaxTensorListObserver = prim::GetAttr[name="_observer_0') \
-                   .check("aten::lstm") \
-                   .check("return") \
-                   .run(str(get_module_method(m, 'lstm', 'forward__0').graph))

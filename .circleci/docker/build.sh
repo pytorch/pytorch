@@ -76,14 +76,6 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-xenial-cuda9-cudnn7-py3)
-    CUDA_VERSION=9.0
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.6
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
   pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4)
     CUDA_VERSION=9.2
     CUDNN_VERSION=7

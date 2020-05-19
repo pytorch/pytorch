@@ -74,7 +74,7 @@ class ComputeNormForBlobs(NetModifier):
                 norm = net.LpNorm(
                     cast_blob, norm_name, p=p, average=compute_averaged_norm
                 )
-                norm = net.StopGradient(norm, net.NextScopedBlob(norm_name + "_stop_gradient"))
+                norm_stop_gradient = net.StopGradient(norm, net.NextScopedBlob(norm_name + "_stop_gradient"))
 
                 if self._logging_frequency >= 1:
                     net.Print(norm, [], every_n=self._logging_frequency)
