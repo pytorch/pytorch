@@ -170,7 +170,8 @@ void IRPrinter::handle(const Float* const f) {
     os << "f" << f->name();
   } else {
     os << "float("
-       << std::setprecision(std::numeric_limits<float>::max_digits10)
+       << std::setprecision(
+              std::numeric_limits<Float::ScalarType>::max_digits10)
        << *(f->value()) << ")";
   }
 }
