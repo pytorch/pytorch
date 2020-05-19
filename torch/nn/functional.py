@@ -1052,10 +1052,10 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
 def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
     # type: (Tensor, float, bool, bool) -> Tensor
     r"""
-    Randomly masks out entire channels (a channel is a feature map, 
-    e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input 
-    is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of 
-    setting activations to zero, as in regular Dropout, the activations are set 
+    Randomly masks out entire channels (a channel is a feature map,
+    e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input
+    is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of
+    setting activations to zero, as in regular Dropout, the activations are set
     to the negative saturation value of the SELU activation function.
 
     Each element will be masked independently on every forward call with

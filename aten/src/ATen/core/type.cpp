@@ -964,11 +964,12 @@ void ClassType::unsafeRemoveMethod(const std::string& name) {
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
-  auto ptr = ClassType::create(name(), compilation_unit_);
+  auto ptr = ClassType::create(name(), compilation_unit_, is_module());
   AT_ASSERT(numAttributes() == refined_slots.size());
-  for (size_t i = 0; i < attributeNames_.size(); ++i) {
-    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
-    ptr->addAttribute(attributeNames_[i], refined_slots[i]);
+  for (size_t i = 0; i < attributes_.size(); ++i) {
+    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributes_[i].getType()));
+    ptr->addAttribute(attributes_[i].getName(), refined_slots[i], (attributes_[i].getKind() == AttributeKind::PARAMETER), false,
+    (attributes_[i].getKind() == AttributeKind::BUFFER));
   }
   // Copy methods over
   for (const auto& method : methods()) {
@@ -1098,12 +1099,10 @@ ClassTypePtr ClassType::create(
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module)
+    bool is_module = false)
     : NamedType(TypeKind::ClassType, std::move(name)),
-      compilation_unit_(std::move(cu)) {
-  if (is_module) {
-    parameterSlots_ = std::make_shared<std::vector<bool>>();
-  }
+      compilation_unit_(std::move(cu)),
+      isModule_(is_module) {
 }
 
 const std::vector<torch::jit::Function*>& ClassType::methods() const {
@@ -1126,9 +1125,9 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
   }
 
   // Check no overlap with existing attributes
-  for (size_t i = 0; i < attributeNames_.size(); ++i) {
+  for (size_t i = 0; i < attributes_.size(); ++i) {
     TORCH_CHECK(
-        name != attributeNames_[i],
+        name != attributes_[i].getName(),
         "attempting to add ",
         what,
         " '",
@@ -1136,49 +1135,66 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
         "' to ",
         python_str(),
         " but an attribute field of the same name already exists with type ",
-        attributeTypes_[i]->python_str());
+        attributes_[i].getType()->python_str());
   }
+}
+
+void ClassType::addAttribute(ClassAttribute classAttribute) {
+    attributes_.push_back(classAttribute);
+    attributeTypes_.push_back(classAttribute.getType());
+    AT_ASSERT(attributes_.size() == attributeTypes_.size());
 }
 
 size_t ClassType::addAttribute(
     const std::string& name,
     const TypePtr& type,
     bool is_parameter,
-    bool allow_any) {
-  const char* what = is_parameter ? "parameter" : "attribute";
-  checkNotExist(name, what);
-
-  if (!allow_any) {
-    checkNoAny(*this, what, name, type);
+    bool allow_any,
+    bool is_buffer) {
+  if (is_parameter && is_buffer){
+    TORCH_INTERNAL_ASSERT(false, "Attribute cannot be both a parameter and a buffer!");
   }
 
-  size_t slot = attributeNames_.size();
-  attributeNames_.push_back(name);
-  attributeTypes_.push_back(type);
+  std::string what = is_parameter ? "parameter" : "attribute";
+  what += (is_buffer? "buffer" : "not buffer");
+  checkNotExist(name, what);
+  if (!allow_any) {
+    checkNoAny(*this, what.c_str(), name, type);
+  }
+
+  size_t slot = attributes_.size();
+
+  AttributeKind kind = AttributeKind::REGULAR_ATTRIBUTE;
   if (is_parameter) {
-    TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter to a non module");
+    kind = AttributeKind::PARAMETER;
+  } else if (is_buffer) {
+    kind = AttributeKind::BUFFER;
+  }
+
+  ClassAttribute ClassAttribute(kind, type, name);
+
+  addAttribute(ClassAttribute);
+
+  if (is_parameter || is_buffer) {
+    TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter or buffer to a non module");
     TORCH_CHECK(
         (type->kind() == TensorType::Kind) ||
             (type->kind() == OptionalType::Kind &&
             type->expect<OptionalType>()->getElementType()->kind() ==
                 TensorType::Kind) ||
             (type->kind() == NoneType::Kind),
-        "Expecting parameter to have either None, Tensor or Optional[Tensor] type, but got: ",
+        "Expecting parameter or buffer to have either None, Tensor or Optional[Tensor] type, but got: ",
         toString(type));
   }
-  if (is_module()) {
-    parameterSlots_->push_back(is_parameter);
-  }
+
   return slot;
 }
 
 void ClassType::unsafeRemoveAttribute(const std::string& name) {
   auto slot = getAttributeSlot(name);
-  attributeNames_.erase(attributeNames_.begin() + slot);
+  attributes_.erase(attributes_.begin() + slot);
   attributeTypes_.erase(attributeTypes_.begin() + slot);
-  if (is_module()) {
-    parameterSlots_->erase(parameterSlots_->begin() + slot);
-  }
+  AT_ASSERT(attributes_.size() == attributeTypes_.size());
 }
 
 size_t ClassType::addConstant(const std::string& name, const IValue& value) {
@@ -1245,7 +1261,7 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
 static bool containsAny(const TypePtr& type) {
   std::vector<TypePtr> to_scan = { type };
   while (!to_scan.empty()) {
-    TypePtr typ = to_scan.back();
+    const auto typ = to_scan.back();
     to_scan.pop_back();
     if (typ->kind() == AnyType::Kind) {
       return true;

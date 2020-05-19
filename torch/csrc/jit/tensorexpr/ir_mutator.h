@@ -49,7 +49,6 @@ class Polynomial;
 class RoundOff;
 class ReduceOp;
 class AtomicAdd;
-class NoOp;
 
 class TORCH_API IRMutator {
  public:
@@ -88,7 +87,6 @@ class TORCH_API IRMutator {
   virtual const Expr* mutate(const BaseCallNode* v);
   virtual const Expr* mutate(const Intrinsics* v);
   virtual const Expr* mutate(const FunctionCall* v);
-  virtual const Expr* mutate(const NoOp* v);
 
   virtual const Expr* mutate(const Term* v);
   virtual const Expr* mutate(const Polynomial* v);
