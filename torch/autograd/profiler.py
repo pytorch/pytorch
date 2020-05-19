@@ -40,7 +40,7 @@ class EventList(list):
         Example: In event list [[0, 10], [1, 3], [3, 4]] would have make [0, 10]
         be a parent of two other intervals.
 
-        If for any reason two intervals intersect only partialy, this function
+        If for any reason two intervals intersect only partially, this function
         will not record a parent child relationship between then.
         """
         if self.cpu_children_populated:
@@ -296,6 +296,7 @@ class profile(object):
     def __str__(self):
         if self.function_events is None:
             return '<unfinished torch.autograd.profile>'
+        self.function_events.populate_cpu_children()
         return str(self.function_events)
 
     def _check_finish(self):
@@ -391,6 +392,11 @@ class record_function(ContextDecorator):
         Arguments:
             fut: (torch._C.Future): future for which to schedule
             callback for.
+
+        Returns:
+            A future that completes with the value of the passed in future when
+            the profiling callbacks have ran.
+
         """
         # Throw if we have already attached a callback onto the future.
         if not self.run_callbacks_on_exit:
@@ -399,7 +405,8 @@ class record_function(ContextDecorator):
         # We are scheduling to run this RecordFunction's end callbacks when the
         # passed in future completes, so don't run end callbacks on exit.
         self.run_callbacks_on_exit = False
-        torch.ops.profiler._call_end_callbacks_on_jit_fut(self.handle, fut)
+        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(self.handle, fut)
+        return profiled_future
 
 
 class emit_nvtx(object):
