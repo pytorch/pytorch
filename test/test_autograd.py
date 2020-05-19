@@ -2767,6 +2767,22 @@ class TestAutograd(TestCase):
 
         assert([get_children_ids(event) for event in events] == res)
 
+    def test_profiler_aggregation_table(self):
+        """
+        Test if the profiling result is aggregated for `str(prof)`
+
+        See: https://github.com/pytorch/pytorch/issues/37500
+        """
+
+        x = torch.randn(1024)
+        with torch.autograd.profiler.profile() as prof:
+            torch.einsum("i->", x)
+
+        prof_str = str(prof)
+        prof_table = prof.table()
+
+        self.assertEqual(prof_table, prof_str)
+
     def test_profiler_function_event_avg(self):
         avg = FunctionEventAvg()
         avg.add(FunctionEvent(id=0, name="foo", thread=0, cpu_start=10, cpu_end=15))
@@ -4049,13 +4065,13 @@ for shape in [(1,), ()]:
         b = torch.tensor([-1., 0., 1.], requires_grad=True)
         c = torch.sum(a**b)
         c.backward()
-        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
 
         s = 0
         b = torch.tensor([-1., 0., 1.], requires_grad=True)
         c = torch.sum(s**b)
         c.backward()
-        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
 
     def test_custom_function_error(self):
         class BadFw(Function):
@@ -4185,11 +4201,20 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
         test_case.assertEqualTypeString(self_variable, self_variable.grad)
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
+# this list corresponds to ops which have separate tests defined for complex dtypes in
+# common_methods_invocations.py
+# test for these ops with 'complex' in variant should only run for complex and
+# the tests for these ops which do not have 'complex' in variant should not run for complex
+# and only run for floating point
+
+separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan', 'tanh']
+
 # white list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
-                '__rmul__', '__rdiv__']
+                '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add', 'roll',
+                '__radd__', 'repeat', 'expand', 'mul'] + separate_complex_tests
 
 def add_test(
         name,
@@ -4206,17 +4231,29 @@ def add_test(
     if variant_name != '':
         basic_test_name += '_' + variant_name
 
+    if name in separate_complex_tests and 'complex' in variant_name:
+        run_only_complex = True
+    else:
+        run_only_complex = False
+
     for dtype in [torch.double, torch.cdouble]:
         for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
             test_name = basic_test_name
             new_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg for i, arg in enumerate(args)]
             test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
+
             if dtype.is_complex:
                 # TODO: remove this. this is temporary while we ramp up the complex support.
                 if name in complex_list and 'scalar' not in test_name and 'constant' not in test_name:
-                    test_name = test_name + '_complex'
+                    if name in separate_complex_tests and 'complex' not in variant_name:
+                        continue
+                    if not run_only_complex:
+                        test_name = test_name + '_complex'
                 else:
                     continue
+            elif run_only_complex:
+                continue
+
             new_args = tuple(new_args)
 
             # for-loop bodies don't define scopes, so we have to save the variables
@@ -4239,8 +4276,6 @@ def add_test(
                         output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                         output_tensor = getattr(self_tensor, name)(*args_tensor, **kwargs_variable)
                         if not isinstance(output_tensor, torch.Tensor) and not istuple(output_tensor):
-                            # TODO: I'm not sure why we insert an outer dimension
-                            # here, seems a bit strange
                             if dtype.is_complex:
                                 output_tensor = torch.tensor((output_tensor, ), dtype=torch.cfloat, device=device)
                             else:
@@ -5498,9 +5533,9 @@ class TestAutogradDeviceType(TestCase):
             f[0] = nan
             self.assertTrue(math.isnan(float(f)))
             f[0] = inf
-            self.assertEqual(float(f), inf, allow_inf=True)
+            self.assertEqual(float(f), inf)
             f[0] = -inf
-            self.assertEqual(float(f), -inf, allow_inf=True)
+            self.assertEqual(float(f), -inf)
 
             # integral -> floating point
             # check we can convert something that loses precision
@@ -6134,6 +6169,19 @@ class TestAutogradDeviceType(TestCase):
         v2.mul_(2)
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1], [1, 1]])
+
+    @unittest.skip("Wrong Gradient: https://github.com/pytorch/pytorch/issues/38586")
+    def test_mv_grad_stride_0(self, device):
+        # Reference: https://github.com/pytorch/pytorch/issues/38315
+        mat = torch.randn(2, 2, device=device)
+        vec = torch.randn(1, device=device).expand(2).requires_grad_(True)
+
+        def fn(vec):
+            return (mat @ vec).sum()
+
+        gradcheck(fn, (vec))
+        gradgradcheck(fn, (vec))
+
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
