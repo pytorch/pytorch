@@ -10316,6 +10316,13 @@ class TestTorchDeviceType(TestCase):
         t[3] = True
         self.assertEqual(torch.tensor([False, True, False, False, True, False]), t.roll(1, 0))
 
+        # test complex tensor
+        t = torch.tensor([1, 2 + 1j, 3.5, 4. + 2j, 5j, 6.], device=device)
+        t[0] = 1 + 0.5j
+        t[3] = 4.
+        expected = torch.tensor([6., 1 + 0.5j, 2 + 1j, 3.5, 4., 5j], device=device)
+        self.assertEqual(expected, t.roll(1, 0))
+
     def test_nonzero_empty(self, device):
         def assert_tuple_empty(tup, dim):
             self.assertEqual(dim, len(tup))

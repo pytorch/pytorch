@@ -8,16 +8,22 @@ Please see README.md in this directory for details.
 import os
 import sys
 import shutil
-from collections import namedtuple, OrderedDict
+from collections import namedtuple
 
 import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
 import cimodel.data.windows_build_definitions as windows_build_definitions
 import cimodel.data.binary_build_definitions as binary_build_definitions
 import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
+import cimodel.data.simple.setup_job
 import cimodel.data.simple.macos_definitions
 import cimodel.data.simple.mobile_definitions
+import cimodel.data.simple.bazel_definitions
+import cimodel.data.simple.ge_config_tests
+import cimodel.data.simple.binary_smoketest
 import cimodel.data.simple.ios_definitions
 import cimodel.data.simple.android_gradle
+import cimodel.data.simple.nightly_android
+import cimodel.data.simple.nightly_ios
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.miniyaml as miniyaml
 
@@ -44,9 +50,7 @@ class Treegen(FunctionGen):
     """
 
     def write(self, output_filehandle):
-        build_dict = OrderedDict()
-        self.function(build_dict)
-        miniyaml.render(output_filehandle, build_dict, self.depth)
+        miniyaml.render(output_filehandle, self.function(), self.depth)
 
 
 class Listgen(FunctionGen):
@@ -76,16 +80,46 @@ class Header(object):
             output_filehandle.write(line + "\n")
 
 
+def gen_build_workflows_tree():
+    build_workflows_functions = [
+        cimodel.data.simple.setup_job.get_workflow_jobs,
+        windows_build_definitions.get_windows_workflows,
+        pytorch_build_definitions.get_workflow_jobs,
+        cimodel.data.simple.macos_definitions.get_workflow_jobs,
+        cimodel.data.simple.android_gradle.get_workflow_jobs,
+        cimodel.data.simple.ios_definitions.get_workflow_jobs,
+        cimodel.data.simple.mobile_definitions.get_workflow_jobs,
+        cimodel.data.simple.ge_config_tests.get_workflow_jobs,
+        cimodel.data.simple.bazel_definitions.get_workflow_jobs,
+        caffe2_build_definitions.get_workflow_jobs,
+        cimodel.data.simple.binary_smoketest.get_workflow_jobs,
+        binary_build_definitions.get_binary_smoke_test_jobs,
+        binary_build_definitions.get_binary_build_jobs,
+        cimodel.data.simple.nightly_ios.get_workflow_jobs,
+        cimodel.data.simple.nightly_android.get_workflow_jobs,
+    ]
+
+    return {
+        "workflows": {
+            "build": {
+                "jobs": [f() for f in build_workflows_functions],
+            }
+        },
+    }
+
+
 # Order of this list matters to the generated config.yml.
 YAML_SOURCES = [
     File("header-section.yml"),
     File("commands.yml"),
     File("nightly-binary-build-defaults.yml"),
+
     Header("Build parameters"),
     File("pytorch-build-params.yml"),
     File("caffe2-build-params.yml"),
     File("binary-build-params.yml"),
     File("promote-build-params.yml"),
+
     Header("Job specs"),
     File("pytorch-job-specs.yml"),
     File("caffe2-job-specs.yml"),
@@ -96,23 +130,9 @@ YAML_SOURCES = [
     File("binary_update_htmls.yml"),
     File("binary-build-tests.yml"),
     File("docker_jobs.yml"),
-    File("workflows.yml"),
 
-    File("workflows-setup-job.yml"),
-    Listgen(windows_build_definitions.get_windows_workflows, 3),
-    Listgen(pytorch_build_definitions.get_workflow_jobs, 3),
-    Listgen(cimodel.data.simple.macos_definitions.get_workflow_jobs, 3),
-    Listgen(cimodel.data.simple.android_gradle.get_workflow_jobs, 3),
-    Listgen(cimodel.data.simple.ios_definitions.get_workflow_jobs, 3),
-    Listgen(cimodel.data.simple.mobile_definitions.get_workflow_jobs, 3),
-    File("workflows-pytorch-ge-config-tests.yml"),
-    File("workflows-pytorch-bazel-builds.yml"),
-    Listgen(caffe2_build_definitions.get_workflow_jobs, 3),
-    File("workflows-binary-builds-smoke-subset.yml"),
-    Listgen(binary_build_definitions.get_binary_smoke_test_jobs, 3),
-    Listgen(binary_build_definitions.get_binary_build_jobs, 3),
-    File("workflows-nightly-ios-binary-builds.yml"),
-    File("workflows-nightly-android-binary-builds.yml"),
+    Header("Workflows"),
+    Treegen(gen_build_workflows_tree, 0),
 
     Header("Nightly tests"),
     Listgen(binary_build_definitions.get_nightly_tests, 3),
@@ -121,7 +141,7 @@ YAML_SOURCES = [
     File("workflows-s3-html.yml"),
     File("workflows-docker-builder.yml"),
     File("workflows-ecr-gc.yml"),
-    File("workflows-promote.yml")
+    File("workflows-promote.yml"),
 ]
 
 
