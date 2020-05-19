@@ -598,7 +598,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
          const py::args& args,
          const py::kwargs& kwargs) {
         return std::make_shared<jit::PythonFutureWrapper>(pyRpcTorchscript(
-            dstWorkerName, qualifiedNameStr, args, kwargs, rpcTimeoutSeconds));
+            dstWorkerName, qualifiedNameStr, rpcTimeoutSeconds, args, kwargs));
       },
       py::call_guard<py::gil_scoped_release>());
 
