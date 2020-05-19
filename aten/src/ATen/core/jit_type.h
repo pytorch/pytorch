@@ -542,8 +542,6 @@ struct CAFFE2_API TensorType : public Type {
       at::Device device,
       at::IntArrayRef sizes);
 
-  static TensorTypePtr createInferred();
-
   static TypePtr fromNumberType(TypePtr typ);
   static TypePtr fromBoolType();
 
@@ -664,11 +662,13 @@ struct CAFFE2_API TensorType : public Type {
   }
 
   bool isInferredType() const {
-    return is_inferred_type_;
+    return is_inferred_;
   }
 
   static TensorTypePtr getInferred() {
-    static auto valueInferred = createInferred();
+    auto valueInferred = TensorType::create(
+      {}, {}, VaryingShape<ShapeSymbol>{}, VaryingShape<Stride>{}, {});
+    valueInferred->is_inferred_ = true;
     return valueInferred;
   }
 
@@ -744,7 +744,7 @@ struct CAFFE2_API TensorType : public Type {
   // `undefined_` set to `c10::nullopt`
   c10::optional<bool> undefined_;
   // Represents whether or not this type was inferred.
-  bool is_inferred_type_= false;
+  bool is_inferred_ = false;
 };
 
 struct ListType;
