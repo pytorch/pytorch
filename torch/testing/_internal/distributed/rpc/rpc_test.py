@@ -844,14 +844,11 @@ class RpcTest(RpcAgentTestFixture):
                     self.assertTrue(rpc_exec_mode == RPCExecMode.REMOTE)
                     rref = rpc.remote(worker_name(dst), func, args=args)
                     rref.to_here()
-                    # We need to wait for the instance to be created on
-                    # the owner, and get back a positive confirmation.
-                    # Calling to_here does not ensure that we have finished
-                    # processing the Owner's confirmation of this RRef. To do
-                    # this, we wait until the current RRef context doesn't have
-                    # any pending users, which indicates that the confirmation
-                    # was processed on this worker.
-                    wait_until_pending_users_flushed()
+                    # To avoid flakiness, wait for the RRef to be profiled. This
+                    # means that we received the acknowledgement of successful
+                    # creation on the owner and ran the callbacks responsible
+                    # for recording the profiling event.
+                    rref._get_profiling_future().wait()
                 if use_record_function:
                     record_function.__exit__()
 
@@ -882,14 +879,12 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_event_idx = next(i for i, event in enumerate(events) if rpc_exec_mode.value in event.name)
                 self.assertLess(foo_event_ix, rpc_event_idx)
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_sync_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_sync_rpc_builtin(self):
         self._profiler_test_with_rpc(
@@ -900,14 +895,12 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True
         )
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_async_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_async_rpc_builtin(self):
         self._profiler_test_with_rpc(
@@ -918,14 +911,12 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True
         )
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_remote_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_remote_builtin(self):
         self._profiler_test_with_rpc(
@@ -936,7 +927,6 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True
         )
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_script_async_rpc(self):
         self._profiler_test_with_rpc(
@@ -949,7 +939,6 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_script_sync_rpc(self):
         self._profiler_test_with_rpc(
@@ -962,7 +951,6 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_profiler_with_script_remote_rpc(self):
         self._profiler_test_with_rpc(
@@ -975,7 +963,6 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_async_record_function_double_end_callbacks(self):
         num_sleep_seconds = 1
@@ -993,7 +980,6 @@ class RpcTest(RpcAgentTestFixture):
                         rf._call_end_callbacks_on_future(fut)
                 fut.wait()
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_async_record_function_cbs_jit_call(self):
         if self.rank == 1:
@@ -1009,8 +995,12 @@ class RpcTest(RpcAgentTestFixture):
                         worker_name(0), my_script_func, args=(torch.tensor(1),)
                     )
                     # Intentionally calling record_function internals
-                    torch.ops.profiler._call_end_callbacks_on_jit_fut(rf.handle, fut)
-                fut.wait()
+                    fut = torch.ops.profiler._call_end_callbacks_on_jit_fut(rf.handle, fut)
+                result = fut.wait()
+                # Validate that the profiling future returns the same value as the RPC
+                # future.
+                expected = torch.add(torch.tensor(1), torch.tensor(1))
+                self.assertEqual(result, expected)
             events = pf.function_events
             rpc_event = get_function_event(
                 events, torch.jit._qualified_name(my_script_func)

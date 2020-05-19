@@ -3,7 +3,6 @@
 #else
 
 #include <ATen/core/Generator.h>
-#include <ATen/core/DistributionsHelper.h>
 
 TH_API void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor);
 TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
