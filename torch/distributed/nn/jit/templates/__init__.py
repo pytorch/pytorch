@@ -1,4 +1,4 @@
 import os
 
 
-dir_path = os.path.dirname(__file__)
+TEMPLATES_DIR_PATH = os.path.dirname(__file__)

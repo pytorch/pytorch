@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import unittest
+import pathlib
 from typing import Tuple
 
 import torch
@@ -57,6 +58,13 @@ class TestInstantiator(unittest.TestCase):
         )
         self.assertTrue(hasattr(generated_module, "_RemoteModule"))
         self.assertTrue(hasattr(generated_module, "_remote_forward"))
+
+        dir_path = pathlib.Path(instantiator.INSTANTIATED_TEMPLATE_DIR_PATH)
+        num_files_before_cleanup = len(list(dir_path.iterdir()))
+        instantiator.cleanup_generated_modules()
+        num_files_after_cleanup = len(list(dir_path.iterdir()))
+        # This test assumes single RPC worker group in the same time.
+        self.assertGreater(num_files_before_cleanup, num_files_after_cleanup)
 
 
 if __name__ == "__main__":

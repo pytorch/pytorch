@@ -2,10 +2,12 @@
 import importlib
 import inspect
 import os
+import pathlib
 
 import torch
 from torch.distributed.nn.jit.code_template import CodeTemplate
-from torch.distributed.nn.jit.templates import dir_path as TEMPLATE_DIR_PATH
+from torch.distributed.nn.jit.templates import TEMPLATES_DIR_PATH
+from torch.distributed.nn.jit.templates.instantiated import INSTANTIATED_TEMPLATE_DIR_PATH
 
 
 def infer_module_interface_cls(module_creator, module_interface_cls):
@@ -64,7 +66,7 @@ def get_arg_return_types_from_interface(module_interface):
     return args_str, arg_types_str, return_type_str
 
 
-def write(out_path, text):
+def _write(out_path, text):
     try:
         with open(out_path, "r") as f:
             old_text = f.read()
@@ -76,6 +78,14 @@ def write(out_path, text):
             f.write(text)
     else:
         print("Skipped writing {}".format(out_path))
+
+
+def cleanup_generated_modules():
+    generated_module_paths = pathlib.Path(INSTANTIATED_TEMPLATE_DIR_PATH).glob("_remote_module*.py")
+    for file_path in generated_module_paths:
+        assert file_path.is_file(), f"Epect {file_path} to be a file"
+        print(f"Removing {file_path}")
+        file_path.unlink()
 
 
 def instantiate_remote_module_template(module_interface_cls, is_scriptable):
@@ -110,7 +120,7 @@ def instantiate_remote_module_template(module_interface_cls, is_scriptable):
         }
 
     remote_forward_template = CodeTemplate.from_file(
-        os.path.join(TEMPLATE_DIR_PATH, "remote_module.py.template")
+        os.path.join(TEMPLATES_DIR_PATH, "remote_module.py.template")
     )
     env = dict(
         generated_module_name=generated_module_name,
@@ -125,9 +135,9 @@ def instantiate_remote_module_template(module_interface_cls, is_scriptable):
     )
     generated_code_text = remote_forward_template.substitute(env)
     out_path = os.path.join(
-        TEMPLATE_DIR_PATH, "instantiated", f"{generated_module_name}.py"
+        INSTANTIATED_TEMPLATE_DIR_PATH, f"{generated_module_name}.py"
     )
-    write(out_path, generated_code_text)
+    _write(out_path, generated_code_text)
 
     # From importlib doc,
     # > If you are dynamically importing a module that was created since
