@@ -12323,7 +12323,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.isinf(torch.acosh(sample)), inf_mask)
         self.assertEqual(torch.isinf(sample.acosh()), inf_mask)
 
-    @dtypes(torch.complex32, torch.complex64, torch.complex126)
+    @dtypes(torch.complex32, torch.complex64, torch.complex128)
     def test_acosh_domain_complex(self, device, dtype):
         # Handle complex type tests for acosh domain
         sample = torch.tensor([
@@ -12364,7 +12364,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.isinf(torch.atanh(sample)), inf_mask)
         self.assertEqual(torch.isinf(sample.atanh()), inf_mask)
 
-    @dtypes(torch.complex32, torch.complex64, torch.complex126)
+    @dtypes(torch.complex32, torch.complex64, torch.complex128)
     def test_atanh_domain_complex(self, device, dtype):
         # Handle complex type tests for atanh domain
         sample = torch.tensor([
