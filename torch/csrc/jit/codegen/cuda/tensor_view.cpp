@@ -67,7 +67,10 @@ TensorView* TensorView::newForReduction(std::vector<unsigned int> axes) const {
   std::vector<IterDomain*> new_domain;
 
   TORCH_INTERNAL_ASSERT(
-      (*axes_set.end()) < orig_domain->nDims(),
+      !axes_set.empty(),
+      "Asked for ouput of reduction, but no reduction axis provided.");
+  TORCH_INTERNAL_ASSERT(
+      (*(axes_set.rbegin())) < orig_domain->nDims(),
       "Error setting up reduction, reduction axis is outside nDims. Keep in mind reductions are relative to root domains, not modified views.");
 
   for (decltype(orig_domain->nDims()) dim = 0; dim < orig_domain->nDims();
