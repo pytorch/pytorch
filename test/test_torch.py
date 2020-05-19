@@ -17618,8 +17618,6 @@ _complex_types = [torch.cfloat, torch.cdouble]
 
 _float_types_no_half = [torch.float, torch.double]
 
-_complex_types = [torch.cfloat, torch.cdouble]
-
 # _float_types2 adds bfloat16 type to _float_types only on ROCm. Should eventually be unified
 # with _float_types when bfloat16 bringup is complete on all platforms
 _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
