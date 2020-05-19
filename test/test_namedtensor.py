@@ -1092,7 +1092,7 @@ class TestNamedTensor(TestCase):
     def test_unsupported_op_error_msg(self):
         named = torch.randn(3, 3, names=('N', 'C'))
         with self.assertRaisesRegex(
-                RuntimeError, "pdist is not yet supported with named tensors"):
+                RuntimeError, r"pdist.+is not yet supported with named tensors"):
             torch.pdist(named)
 
     def test_reduction_fns(self):
