@@ -289,6 +289,30 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
   }
 }
 
+void RemoveRedundantDequantize(std::shared_ptr<Graph>& graph) {
+  const std::string dequantize = R"(
+    graph(%a_quant):
+        %a_dequant = aten::dequantize(%a_quant)
+        return (%a_dequant) )";
+  const std::string dequantize_replacement = R"(
+    graph(%a):
+        return (%a) )";
+  auto filter = [&](const Match& match,
+                    const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto dequant_node = match_vmap.at(vmap.at("a_dequant"))->node();
+    Value* dequant_out = dequant_node->output();
+    TORCH_CHECK(
+        dequant_out->uses().size() == 1,
+        "Expect dequant output to have single use");
+    Node* user = dequant_out->uses()[0].user;
+    return isTensorInfoNode(user);
+  };
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(dequantize, dequantize_replacement);
+  rewriter.runOnGraph(graph, filter);
+}
+
 void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
   const std::string dynamic_quant_ops = R"(
     graph(%a, %reduce_range, %a_dtype):
@@ -812,6 +836,7 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
   RemoveRedundantQuantizationOps(graph);
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
+  RemoveRedundantDequantize(graph);
   PropagateQuantizationOps(graph);
 }
 
