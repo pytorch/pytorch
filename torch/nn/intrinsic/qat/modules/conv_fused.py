@@ -30,6 +30,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                                          output_padding, groups, False, padding_mode)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
+        self.freeze_bn = freeze_bn if self.training else True
         self.bn = nn.BatchNorm2d(out_channels, eps, momentum, True, True)
         self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
@@ -66,10 +67,12 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         super(_ConvBnNd, self).reset_parameters()
 
     def update_bn_stats(self):
+        self.freeze_bn = False
         self.bn.training = True
         return self
 
     def freeze_bn_stats(self):
+        self.freeze_bn = True
         self.bn.training = False
         return self
 
@@ -91,6 +94,18 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
 
     def forward(self, input):
         return self.activation_post_process(self._forward(input))
+
+    def train(self, mode=True):
+        """
+        Batchnorm's training behavior is using the self.training flag. Prevent
+        changing it if BN is frozen. This makes sure that calling `model.train()`
+        on a model with a frozen BN will behave properly.
+        """
+        self.training = mode
+        if not self.freeze_bn:
+            for module in self.children():
+                module.train(mode)
+        return self
 
     @classmethod
     def from_float(cls, mod, qconfig=None):

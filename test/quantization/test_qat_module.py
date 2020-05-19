@@ -449,6 +449,12 @@ class TestQATModule(TestCase):
             qat_ref_op_optim = torch.optim.SGD(qat_ref_op.parameters(), lr=lr)
 
             for i in range(5):
+
+                # make sure that calling model.train() does not override the
+                # bn freeze setting
+                qat_op.train()
+                qat_ref_op.train()
+
                 qat_op_optim.zero_grad()
                 qat_ref_op_optim.zero_grad()
 
