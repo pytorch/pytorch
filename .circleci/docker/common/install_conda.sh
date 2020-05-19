@@ -65,11 +65,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # DO NOT install cmake here as it would install a version newer than 3.5, but
   # we want to pin to version 3.5.
   conda_install numpy pyyaml mkl mkl-include setuptools cffi typing future six
-  if [[ "$CUDA_VERSION" == 9.0* ]]; then
-    conda_install magma-cuda90 -c pytorch
-  elif [[ "$CUDA_VERSION" == 9.1* ]]; then
-    conda_install magma-cuda91 -c pytorch
-  elif [[ "$CUDA_VERSION" == 9.2* ]]; then
+  if [[ "$CUDA_VERSION" == 9.2* ]]; then
     conda_install magma-cuda92 -c pytorch
   elif [[ "$CUDA_VERSION" == 10.0* ]]; then
     conda_install magma-cuda100 -c pytorch

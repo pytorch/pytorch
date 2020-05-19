@@ -24,5 +24,3 @@
             project: tensorcomp
             tags_to_keep: "34"
       - docker_hub_index_job
-
-
