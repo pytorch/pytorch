@@ -1,3 +1,4 @@
+load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("//third_party:substitution.bzl", "template_rule")
@@ -1922,6 +1923,8 @@ cc_library(
         "test/cpp/api/support.cpp",
     ],
     hdrs = [
+        "test/cpp/api/init_baseline.h",
+        "test/cpp/api/optim_baseline.h",
         "test/cpp/api/support.h",
         "test/cpp/common/support.h",
     ],
@@ -1931,315 +1934,22 @@ cc_library(
     ],
 )
 
-cc_test(
-    name = "any_test",
-    srcs = ["test/cpp/api/any.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "autograd_test",
-    srcs = ["test/cpp/api/autograd.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "dataloader_test",
-    srcs = ["test/cpp/api/dataloader.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "enum_test",
-    srcs = ["test/cpp/api/enum.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "expanding_array_test",
-    srcs = ["test/cpp/api/expanding-array.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "functional_test",
-    srcs = ["test/cpp/api/functional.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "init_test",
-    srcs = [
-        "test/cpp/api/init.cpp",
-        "test/cpp/api/init_baseline.h",
-    ],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
 # Torch integration tests rely on a labeled data set from the MNIST database.
 # http://yann.lecun.com/exdb/mnist/
-cc_test(
-    name = "integration_test",
-    srcs = ["test/cpp/api/integration.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
 
-cc_test(
-    name = "jit_test",
-    srcs = ["test/cpp/api/jit.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "memory_test",
-    srcs = ["test/cpp/api/memory.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "misc_test",
-    srcs = ["test/cpp/api/misc.cpp"],
-    tags = [
-        "exclusive",
-        "gpu-required",
-    ],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "module_test",
-    srcs = ["test/cpp/api/module.cpp"],
-    tags = [
-        "exclusive",
-        "gpu-required",
-    ],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "modulelist_test",
-    srcs = ["test/cpp/api/modulelist.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "modules_test",
-    srcs = ["test/cpp/api/modules.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "nn_utils_test",
-    srcs = ["test/cpp/api/nn_utils.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "optim_test",
-    srcs = [
-        "test/cpp/api/optim.cpp",
-        "test/cpp/api/optim_baseline.h",
-    ],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "ordered_dict_test",
-    srcs = ["test/cpp/api/ordered_dict.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "parallel_test",
-    srcs = ["test/cpp/api/parallel.cpp"],
-    copts = COMMON_COPTS,
-    tags = [
-        "exclusive",
-        "gpu-required",
-    ],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "rnn_test",
-    size = "small",
-    srcs = ["test/cpp/api/rnn.cpp"],
-    tags = [
-        "exclusive",
-        "gpu-required",
-    ],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "sequential_test",
-    size = "small",
-    srcs = ["test/cpp/api/sequential.cpp"],
-    copts = ["-Wno-deprecated-declarations"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "serialize_test",
-    size = "small",
-    srcs = ["test/cpp/api/serialize.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "static_test",
-    size = "small",
-    srcs = ["test/cpp/api/static.cpp"],
-    deps = [
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "tensor_test",
-    size = "small",
-    srcs = ["test/cpp/api/tensor.cpp"],
-    copts = ["-Wno-deprecated-declarations"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "tensor_cuda_test",
-    size = "small",
-    srcs = ["test/cpp/api/tensor_cuda.cpp"],
-    tags = [
-        "exclusive",
-        "gpu-required",
-    ],
-    deps = [
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "tensor_options_test",
-    size = "small",
-    srcs = ["test/cpp/api/tensor_options.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "tensor_options_cuda_test",
-    size = "small",
-    srcs = ["test/cpp/api/tensor_options_cuda.cpp"],
-    tags = [
-        "exclusive",
-        "gpu-required",
-    ],
-    deps = [
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "torch_include_test",
-    size = "small",
-    srcs = ["test/cpp/api/torch_include.cpp"],
-    deps = [
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
+cpp_api_tests = glob(["test/cpp/api/*.cpp"])
+[
+  cc_test(
+      name = paths.split_extension(paths.basename(filename))[0].replace("-","_") + "_test",
+    size = "medium",
+      srcs = [filename],
+      deps = [
+          ":test_support",
+          ":torch",
+          "@com_google_googletest//:gtest_main",
+      ],
+  ) for filename in cpp_api_tests
+]
 
 test_suite(
     name = "api_tests",
