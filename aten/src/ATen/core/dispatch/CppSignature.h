@@ -30,7 +30,21 @@ public:
     }
 
     friend bool operator==(const CppSignature& lhs, const CppSignature& rhs) {
-        return lhs.signature_ == rhs.signature_;
+        if (lhs.signature_ == rhs.signature_) {
+            return true;
+        }
+        // Without RTLD_GLOBAL, the type_index comparison could yield false because
+        // they point to different instances of the RTTI data, but the types would
+        // still be the same. Let's check for that case too.
+        // Note that there still is a case where this might not work, i.e. when
+        // linking libraries of different compilers together, they might have
+        // different ways to serialize a type name. That, together with a missing
+        // RTLD_GLOBAL, would still fail this.
+        if (lhs.name() == rhs.name()) {
+            return true;
+        }
+
+        return false;
     }
 
 private:
