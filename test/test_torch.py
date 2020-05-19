@@ -17818,26 +17818,29 @@ def _wrap_maybe_warns(regex):
 # - cpu_dtype_list (=[]), a list of torch dtypes to test the op(s) on cpu
 # - make_inplace_variant (=True), if true the inplace version of the op (op_) is also tested
 # - decorators (=[]), a list of decorators to apply to the test
-# - half_tol (=None) override rtol for half tests
+# - half_tol (=None, None) override (rtol,atol) for half tests
+# - win_float_tol (=None, None) override (rtol,atol) for float tests on windows
 class _TestOperatorMeta():
 
     inplace = None
 
-    def __init__(self, op_name, subtest_name='', ctor=_small_3d,
-                 arg_ctor=lambda t, d: [], dtypes=_types, cpu_dtypes=[],
+    def __init__(self, op_name, subtest_name='', ctor=None,
+                 arg_ctor=lambda t, d: [], dtypes=None, cpu_dtypes=[],
                  has_inplace=True, decorators=[], *, half_tol=(None, None), win_float_tol=(None, None)):
+
         if has_inplace:
             self.inplace = _TestOperatorMeta(op_name + '_', 'inplace_' + subtest_name,
                                              ctor=ctor, arg_ctor=arg_ctor,
                                              dtypes=dtypes, cpu_dtypes=cpu_dtypes, has_inplace=False,
-                                             decorators=decorators, half_tol=half_tol, win_float_tol=win_float_tol)
+                                             decorators=decorators, half_tol=half_tol,
+                                             win_float_tol=win_float_tol)
         self.op_name = op_name
         self.subtest_name = subtest_name
         if self.subtest_name and op_name[-1] != '_':
             self.subtest_name = '_' + self.subtest_name
-        self.ctor = ctor
+        self.ctor = _small_3d if ctor is None else ctor
         self.arg_ctor = arg_ctor
-        self.dtypes = dtypes
+        self.dtypes = _types if dtypes is None else dtypes
         self.cpu_dtypes = cpu_dtypes
         self.has_inplace = has_inplace
         self.decorators = decorators
@@ -17892,7 +17895,8 @@ tensor_op_tests = [
     _tc('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         _float_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
-    _tc('addbmm', 'two_scalars', _small_2d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
+    _tc('addbmm', 'two_scalars', _small_2d,
+        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         _float_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     _tc('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
@@ -17900,7 +17904,8 @@ tensor_op_tests = [
     _tc('baddbmm', 'scalar', _small_3d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         _float_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")], half_tol=(0.05, 1e-4)),
-    _tc('baddbmm', 'two_scalars', _small_3d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
+    _tc('baddbmm', 'two_scalars', _small_3d,
+        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         _float_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")], half_tol=(0.05, 1e-4)),
     _tc('bmm', '', _small_3d, lambda t, d: [_small_3d(t, d)],
