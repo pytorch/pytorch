@@ -1303,24 +1303,25 @@ class TestFusion(QuantizationTestCase):
             self.assertEqual(type(model.sub2.conv), nn.Conv2d)
             self.assertEqual(type(model.sub2.relu), nn.ReLU)
             test_only_eval_fn(model, self.img_data_1d)
-        checkQuantized(model)
+        with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm' with arguments from the 'QuantizedCPU'"):
+            checkQuantized(model)
 
         model = ModelForFusion(default_qat_qconfig).train()
         model = fuse_modules(model, [['conv1', 'bn1', 'relu1'],
                              ['sub1.conv', 'sub1.bn']])
         model = quantize_qat(model, test_only_train_fn, self.img_data_1d)
-        checkQuantized(model)
+        with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm' with arguments from the 'QuantizedCPU'"):
+            checkQuantized(model)
 
 
     def test_fuse_module_eval(self):
         model = ModelForFusion(default_qconfig)
         model.eval()
-        model = fuse_modules(model, [['conv3', 'relu4'],
+        model = fuse_modules(model, [['conv3', 'bn3', 'relu4'],
                              ['conv1', 'bn1', 'relu1'],
                              ['conv2', 'relu2'],
                              ['bn2', 'relu3'],
                              ['sub1.conv', 'sub1.bn']])
-
         self.assertEqual(type(model.conv1), nni.ConvReLU2d,
                          "Fused Conv + BN + Relu first layer (BN is folded)")
         self.assertEqual(type(model.conv1[0]), nn.Conv2d,
@@ -1345,11 +1346,13 @@ class TestFusion(QuantizationTestCase):
                          "Fused Conv + BN + Relu second layer (Skipped Relu)")
 
         self.assertEqual(type(model.conv3), nni.ConvReLU1d,
-                         "Fused Conv + Relu for conv1d")
+                         "Fused Conv + Relu for Conv1d (folded BN)")
         self.assertEqual(type(model.conv3[0]), nn.Conv1d,
-                         "Fused Conv + Relu for conv1d ")
+                         "Fused Conv + Relu for Conv1d ")
         self.assertEqual(type(model.conv3[1]), nn.ReLU,
-                         "Fused Conv + Relu for conv1d")
+                         "Fused Conv + Relu for Conv1d")
+        self.assertEqual(type(model.bn3), nn.Identity,
+                         "Fused Conv + BN + Relu for Conv1d (Skipped BN)")
 
         self.assertEqual(type(model.sub1.conv), nn.Conv2d,
                          "Fused submodule Conv + folded BN")
@@ -1383,7 +1386,7 @@ class TestFusion(QuantizationTestCase):
                              ['conv2', 'relu2'],
                              ['bn2', 'relu3'],
                              ['sub1.conv', 'sub1.bn'],
-                             ['conv3', 'relu4']])
+                             ['conv3', 'bn3', 'relu4']])
         model = quantize(model, test_only_eval_fn, self.img_data_1d)
         checkQuantized(model)
 
