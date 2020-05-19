@@ -519,7 +519,8 @@ struct CAFFE2_API TensorType : public Type {
       const VaryingShape<int64_t>& sizes,
       const VaryingShape<int64_t>& strides,
       c10::optional<bool> requires_grad,
-      c10::optional<bool> undefined = false);
+      c10::optional<bool> undefined = false,
+      bool tensor_continuity = false);
 
   static TensorTypePtr create(
       c10::optional<at::ScalarType> scalar_type,
@@ -572,6 +573,7 @@ struct CAFFE2_API TensorType : public Type {
 
   bool operator==(const Type& rhs) const override;
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+  bool matchTensor(const at::Tensor& t);
 
   std::string str() const override;
 
@@ -713,7 +715,8 @@ struct CAFFE2_API TensorType : public Type {
 
   static VaryingShape<Stride> computeStrideProps(
       at::IntArrayRef sizes,
-      at::IntArrayRef strides);
+      at::IntArrayRef strides,
+      bool tensor_continuity = false);
 
   c10::optional<at::ScalarType> scalar_type_;
   c10::optional<at::Device> device_;
