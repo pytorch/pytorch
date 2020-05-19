@@ -163,7 +163,7 @@ std::pair<std::string, std::string> codeGeneration(Fusion* fusion) {
 
 bool validateKernelArgTensor(
     const at::Tensor& arg,
-    const Val* param,
+    const Val* const param,
     int device_index,
     std::stringstream& msg) {
   // Arg is a tensor. Param must be a tensor too.
@@ -214,7 +214,7 @@ bool validateKernelArgTensor(
 
 bool validateKernelArgScalar(
     const c10::TypePtr arg_type,
-    const Val* param,
+    const Val* const param,
     std::stringstream& msg) {
   if (!param->isScalar()) {
     msg << "Argument is a scalar, but the parameter is not.";
@@ -244,7 +244,7 @@ bool validateKernelArgScalar(
 
 bool validateKernelArg(
     const c10::IValue& arg,
-    const Val* param,
+    const Val* const param,
     int device_index,
     std::stringstream& msg) {
   if (arg.type()->kind() != c10::TypeKind::TensorType) {
@@ -263,7 +263,7 @@ void validateKernelArgs(
       inputs.size() == entry.inputs.size(), "Wrong number of kernel inputs.");
   for (size_t i = 0; i < inputs.size(); ++i) {
     const IValue& arg = inputs[i];
-    const Val* param = entry.inputs[i];
+    const Val* const param = entry.inputs[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
         validateKernelArg(arg, param, entry.device_, msg),
@@ -282,7 +282,7 @@ void validateKernelArgs(
       "Wrong number of kernel outputs.");
   for (size_t i = 0; i < outputs.size(); ++i) {
     const at::Tensor& arg = outputs[i];
-    const Val* param = entry.outputs[i];
+    const Val* const param = entry.outputs[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
         validateKernelArgTensor(arg, param, entry.device_, msg),
