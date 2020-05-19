@@ -32,7 +32,6 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "matmul",
     "add_",
     "add",
-    "cat",
     "mul",
     "mul_",
     "hardswish",
