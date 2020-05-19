@@ -49,17 +49,15 @@ void record_function_exit(const at::Tensor& handle) {
   rec._end();
 }
 
-void _call_end_callbacks_on_fut(
+c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
     const at::Tensor& handle,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
   // Save and pass thread local state into the callback
   at::ThreadLocalState tls_state;
-  // Add a callback onto the future to mark run RecordFunction's end callbacks
-  // when the future is completed.
-  fut->addCallback(
-      // Copy handle and tls_state by value to persist after the python
-      // context manager is exited.
-      [handle, tls_state = std::move(tls_state)]() {
+  // Profiling callback that ends the associated record_function
+  // and returns the value of the passed in future.
+  std::function<c10::IValue(void)> futureProfilingFunc =
+      [fut, handle, tls_state = std::move(tls_state)]() {
         TORCH_INTERNAL_ASSERT(
             handle.defined(),
             "Undefined RecordFunction handle. This can happen if the handle is "
@@ -68,7 +66,15 @@ void _call_end_callbacks_on_fut(
         at::ThreadLocalStateGuard g(tls_state);
         auto& rec = getRecordFunctionFromTensor(handle);
         rec._end();
-      });
+        // Note: this future is returned to the user to ensure that a call to wait()
+        // ensures that profiling callbacks have ran. To ensure that this is
+        // transparent, we must make this future propagate the value of the RPC
+        // future.
+        return fut->constValue();
+      };
+  // Define a future that completes after the profiling callbacks are run.
+  auto profiledFut = fut->then(futureProfilingFunc, fut->type());
+  return profiledFut;
 }
 
 // Internal only, do not use directly, use Python's record_function()
@@ -84,12 +90,14 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 
 jit::RegisterOperators reg_fut_ops({
     jit::Operator(
-        "profiler::_call_end_callbacks_on_jit_fut(Tensor x, Future(t) y) -> ()",
+        "profiler::_call_end_callbacks_on_jit_fut(Tensor x, Future(t) y) -> Future(t)",
         [](jit::Stack& stack) {
           // Pop inputs, which should be a future and a tensor
           auto fut = jit::pop(stack).toFuture();
           auto tensor = jit::pop(stack).toTensor();
-          _call_end_callbacks_on_fut(tensor, fut);
+          auto profiledFut = _call_end_callbacks_on_fut(tensor, fut);
+          // return future that completes when profiling callbacks have run.
+          jit::push(stack, std::move(profiledFut));
           return 0;
         },
         aliasAnalysisFromSchema()),

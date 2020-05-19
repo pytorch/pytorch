@@ -217,6 +217,10 @@ void IRVisitor::visit(const ReduceOp* v) {
   }
 }
 
+void IRVisitor::visit(const NoOp* v) {
+  // do nothing
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
