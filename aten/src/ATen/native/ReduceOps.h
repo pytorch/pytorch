@@ -30,12 +30,13 @@ using reduce_norm_fn =
     void (*)(Tensor&, const Tensor&, Scalar, c10::optional<int64_t>);
 DECLARE_DISPATCH(reduce_norm_fn, norm_kernel);
 
+using reduce_nanmean_fn = void (*)(TensorIterator &, const Tensor&);
+DECLARE_DISPATCH(reduce_nanmean_fn, nanmean_stub);
+
 using reduce_fn_flag = void(*)(TensorIterator &, Scalar);
 DECLARE_DISPATCH(reduce_fn_flag, norm_stub);
 
 using cum_fn = void (*)(Tensor&, const Tensor&, int64_t);
-
-using nanmean_fn = void (*)(Tensor&, const Tensor&);
 
 DECLARE_DISPATCH(cum_fn, cumsum_stub);
 DECLARE_DISPATCH(cum_fn, cumprod_stub);
