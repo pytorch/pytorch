@@ -15,7 +15,6 @@ using reduce_fn = void(*)(TensorIterator &);
 DECLARE_DISPATCH(reduce_fn, sum_stub);
 DECLARE_DISPATCH(reduce_fn, prod_stub);
 DECLARE_DISPATCH(reduce_fn, mean_stub);
-DECLARE_DISPATCH(reduce_fn, nanmean_stub);
 DECLARE_DISPATCH(reduce_fn, and_stub);
 DECLARE_DISPATCH(reduce_fn, or_stub);
 DECLARE_DISPATCH(reduce_fn, min_values_stub);
@@ -35,7 +34,11 @@ using reduce_fn_flag = void(*)(TensorIterator &, Scalar);
 DECLARE_DISPATCH(reduce_fn_flag, norm_stub);
 
 using cum_fn = void (*)(Tensor&, const Tensor&, int64_t);
+
+using nanmean_fn = void (*)(Tensor&, const Tensor&);
+
 DECLARE_DISPATCH(cum_fn, cumsum_stub);
 DECLARE_DISPATCH(cum_fn, cumprod_stub);
+DECLARE_DISPATCH(nanmean_fn, nanmean_stub);
 
 }} // namespace at::native

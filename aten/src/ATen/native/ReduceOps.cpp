@@ -508,10 +508,8 @@ Tensor& nanmean_out_cpu_gpu(Tensor& result, const Tensor& self, IntArrayRef dim,
       " instead.");
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
   Tensor without_nans = at::where(at::isnan(self), at::zeros_like(self), self);
+  const at::Tensor dim_prod = at::sum(self.isnan().logical_not(), dim, keepdim, dtype);
   if (self.device().is_cpu()) {
-    at::Tensor dim_prod = at::sum(self.isnan().logical_not(), dim, keepdim, dtype);
-    // TODO: Check if .div_() works or we should use true_divide here
-    // Python script gives warning to use true_divide or float_divide
     at::sum_out(result, without_nans, dim, keepdim, dtype).div_(dim_prod);
     return result;
   } else {
@@ -519,7 +517,7 @@ Tensor& nanmean_out_cpu_gpu(Tensor& result, const Tensor& self, IntArrayRef dim,
     if (iter.numel() == 0) {
       result.fill_(std::numeric_limits<double>::quiet_NaN());
     } else {
-      nanmean_stub(iter.device_type(), iter);
+      nanmean_stub(iter.device_type(), iter, dim_prod);
     }
     return result;
   }
