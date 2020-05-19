@@ -13272,7 +13272,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.full((2, 3), beta * value, dtype=dtype, device=device),
                          torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta, out=out))
 
-    @onlyCPU  # not supported by CUBLAS
     def test_blas_nan_out(self, device):
         # These functions should work correctly with NaN filled outputs,
         # but need special handling, see [NOTE: cpu_zero]
@@ -16878,6 +16877,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                                  torch.cuda.amp.grad_scaler._refresh_per_optimizer_state())
                 if lazy_init_scale:
                     self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
+
+    @onlyCUDA
+    def test_mv_stride_0(self, device):
+        # Reference: https://github.com/pytorch/pytorch/issues/38315
+        mat = torch.randn(2, 2, device=device)
+        vec = torch.tensor(2., device=device).expand(2)
+        mat_cpu = mat.cpu()
+        vec_cpu = vec.cpu()
+        self.assertEqual(mat @ vec, mat_cpu @ vec_cpu)
 
 
 # NOTE [Linspace+Logspace precision override]
