@@ -17722,8 +17722,7 @@ _complex_types = [torch.cfloat, torch.cdouble]
 # with _float_types when bfloat16 bringup is complete on all platforms
 _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
 
-# TODO: this will be replaced by _float_types2 + _complex_types when #38400 is merged
-_complex_and_float_types2 = _float_types2 + [torch.cfloat, torch.cdouble]
+_complex_and_float_types2 = _float_types2 + _complex_types
 
 _signed_types = [
     torch.half, torch.float, torch.double,
