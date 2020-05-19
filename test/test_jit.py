@@ -17056,6 +17056,46 @@ a")
         f = Foo()
         torch.jit.script(f)
 
+
+    def test_named_buffers_are_iterable(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+                self.mod = (torch.nn.ReLU())
+                self.mod2 = (torch.nn.ReLU())
+                self.mod3 = torch.nn.Sequential(torch.nn.Sequential(torch.nn.ReLU()))
+                self.register_buffer('x', torch.zeros(3))
+                self.register_buffer('y', torch.zeros(3))
+                self.z = torch.zeros(3)
+
+            def bleh(self):
+                return self.z + 4
+
+            @torch.jit.export
+            def method(self):
+                names = [""]
+                vals = []
+                for name, buffer in self.named_buffers():
+                    names.append(name)
+                    vals.append(buffer + 2)
+
+                return names, vals
+
+            def forward(self, x):
+                return x
+
+        model = MyMod()
+        x = torch.jit.script(model)
+        z = self.getExportImportCopy(x)
+
+        self.assertEqual(z.method(), x.method())
+        self.assertEqual(z.method(), model.method())
+        self.assertEqual(x.method(), model.method())
+        names = x.method()
+        for name in names:
+            self.assertNotEqual('z', name)
+
+
     def test_static_if_prop(self):
         class MaybeHasAttr(torch.nn.Module):
             def __init__(self, add_attr):
