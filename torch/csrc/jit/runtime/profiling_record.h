@@ -24,7 +24,7 @@
 // * We may see the same `Dimension` at different positions `i` in
 // `tensor.sizes()` or even in different `tensor`
 //   * First, we would like associate the same `ShapeSymbol` to the same
-//   `Dimension` across **one** profiling execution or run 	of a TorchScript
+//   `Dimension` across **one** profiling execution or run of a TorchScript
 //   function.
 //     * The same `ShapeSymbol`s in different positions of `symbolic_shapes_` in
 //     possibly different `TensorType`s (i.e. `TensorType`s for different
