@@ -48,4 +48,6 @@ void reportMemoryUsageToProfiler(void* ptr, int64_t alloc_size, Device device) {
   }
 }
 
+MemoryReportingInfoBase::MemoryReportingInfoBase() {}
+
 } // namespace c10

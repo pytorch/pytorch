@@ -224,7 +224,7 @@ struct AllocatorRegisterer {
 // per device
 struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
   MemoryReportingInfoBase() {}
-  virtual ~MemoryReportingInfoBase() {}
+  virtual ~MemoryReportingInfoBase();
 
   // Negative alloc_size corresponds to freeing of the memory
   virtual void reportMemoryUsage(void* ptr, int64_t alloc_size, Device device) = 0;

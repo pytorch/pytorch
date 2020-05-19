@@ -326,15 +326,16 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
 
   const at::SmallVector<int64_t, kSpatialDim + 2> output_shape =
       MakeConvOutputShape<kSpatialDim>(N, M, conv_p.OUT_DIM);
-  TORCH_CHECK(
-      std::all_of(
-          output_shape.begin(),
-          output_shape.end(),
-          [](int64_t i) { return i > 0; }),
-      "[QConv",
-      kSpatialDim,
-      "D] each dimension of output tensor should be greater than 0");
-
+  if (N > 0) {
+    TORCH_CHECK(
+        std::all_of(
+            output_shape.begin(),
+            output_shape.end(),
+            [](int64_t i) { return i > 0; }),
+        "[QConv",
+        kSpatialDim,
+        "D] each dimension of output tensor should be greater than 0");
+  }
   at::Tensor output = kSpatialDim == 2
       ? at::_empty_affine_quantized(
             output_shape,

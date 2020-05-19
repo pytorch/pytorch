@@ -164,7 +164,7 @@ public:
   static Vec256<T> arange(T base = static_cast<T>(0), step_t step = static_cast<step_t>(1)) {
     Vec256 vec;
     for (int64_t i = 0; i < size(); i++) {
-      vec.values[i] = base + static_cast<step_t>(i) * step;
+      vec.values[i] = base + i * step;
     }
     return vec;
   }
