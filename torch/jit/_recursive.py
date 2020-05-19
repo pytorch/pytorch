@@ -108,13 +108,13 @@ def infer_concrete_type_builder(nn_module):
         # allows NoneType parameters. These parameters are not returned as
         # part of `parameters()` and its variants, but are available
         # through direct attribute access.
-        concrete_type_builder.add_attribute(name, attr_type, True)
+        concrete_type_builder.add_attribute(name, attr_type, True, False)
         added_names.add(name)
 
     for name, item in nn_module._buffers.items():
         assert item is None or isinstance(item, torch.Tensor)
         attr_type = infer_type(name, item)
-        concrete_type_builder.add_attribute(name, attr_type, False)
+        concrete_type_builder.add_attribute(name, attr_type, False, True)
         added_names.add(name)
 
     for name, item in nn_module._modules.items():
@@ -122,7 +122,7 @@ def infer_concrete_type_builder(nn_module):
         if item is None:
             # Modules can be None. We don't have direct support for optional
             # Modules, so the register it as an NoneType attribute instead.
-            concrete_type_builder.add_attribute(name, attr_type, False)
+            concrete_type_builder.add_attribute(name, attr_type, False, False)
             continue
         if attr_type is not None:
             assert attr_type.is_interface_type()
@@ -225,7 +225,7 @@ def infer_concrete_type_builder(nn_module):
         # If we got here, this is a regular "data" attribute, Add it to the concrete type
         attr_type = infer_type(name, value)
         if attr_type is not None:
-            concrete_type_builder.add_attribute(name, attr_type, False)
+            concrete_type_builder.add_attribute(name, attr_type, False, False)
         else:
             # TODO: could add more detail here. For example, what the user should do
             # when the pytype is `list` or `NoneType`
