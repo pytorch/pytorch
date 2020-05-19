@@ -776,3 +776,37 @@ class TestDistributed(QuantizationTestCase):
                 quant_model = torch.quantization.convert(quant_model.eval().cpu(), inplace=False)
                 with torch.no_grad():
                     out = quant_model(torch.rand(1, 3, 28, 28))
+
+    def test_qat_convbn_fused_syncbn_replacement(self):
+        """
+        Tests that SyncBatchNorm replacement works for fused ConvBN.
+        """
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            return
+        with override_quantized_engine('fbgemm'):
+            # create conv-bn
+            class Model(nn.Module):
+                def __init__(self):
+                    super(Model, self).__init__()
+                    self.conv = nn.Conv2d(4, 1, 3, padding=1)
+                    self.bn = nn.BatchNorm2d(1)
+
+                def forward(self, x):
+                    x = self.conv(x)
+                    x = self.bn(x)
+                    return x
+
+            model = Model()
+            # fuse it
+            fused_model = torch.quantization.fuse_modules(
+                model,
+                [['conv', 'bn']],
+            )
+            # convert to QAT
+            fused_model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+            torch.quantization.prepare_qat(fused_model, inplace=True)
+            # replace with DDP
+            fused_model = nn.SyncBatchNorm.convert_sync_batchnorm(fused_model)
+            self.assertTrue(
+                isinstance(fused_model.conv.bn, nn.SyncBatchNorm),
+                "Expected BN to be converted to SyncBN")
