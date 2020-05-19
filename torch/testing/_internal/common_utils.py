@@ -1044,30 +1044,6 @@ class TestCase(expecttest.TestCase):
             prec = 10**(-places)
         self.assertEqual(x, y, msg, atol=prec, allow_inf=allow_inf)
 
-    def assertQuantizedClose(self, qx, qy, tol_off_by_one=1e-2,
-                             tol_off_by_two=1e-6, message=''):
-        # Asserts that qx is close to qy, allowing for tol_off_by_y_scale
-        # errors.
-
-        self.assertTrue(qx.is_quantized and qy.is_quantized)
-
-        self.assertEqual(qx.qscheme(), qy.qscheme(), message=message)
-        # TODO: add support for per tensor quant
-        self.assertEqual(qx.qscheme(), torch.per_tensor_affine)
-        self.assertEqual(qx.q_scale(), qy.q_scale(), message=message)
-        self.assertEqual(qx.q_zero_point(), qy.q_zero_point(), message=message)
-
-        diff = torch.abs(qx.int_repr() - qy.int_repr())
-        off_by_one = torch.sum(diff == 1)
-        off_by_two = torch.sum(diff == 2)
-        off_by_three_plus = torch.sum(diff > 2)
-        if off_by_three_plus > 0:
-            print(message)
-
-        self.assertTrue(float(off_by_one) / diff.numel() < tol_off_by_one, message)
-        self.assertTrue(float(off_by_two) / diff.numel() < tol_off_by_two, message)
-        self.assertTrue(off_by_three_plus == 0)
-
     def assertNotEqual(self, x, y, message='', *, atol=None):
         if not isinstance(message, str):
             raise Error("fix this test, message should be a string")
