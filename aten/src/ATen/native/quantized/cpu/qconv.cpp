@@ -515,8 +515,8 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     float* weight_scales_data = w_scales.data_ptr<float>();
     // We calculate requant scale here as the vector holding the requant scale
     // is owned by this module. The pointer is then passed to qnnpack backend.
-    requantization_scales = generate_requantization_scales(
-        w_scales, act_input_scale, output_scale);
+    generate_requantization_scales(
+        w_scales, act_input_scale, output_scale, requantization_scales);
 
     // TODO Kimish, we are allocating affine_quantized regardless of per channel or not.
     // This allocation is actually used only for packing weight and thus will be freed.
