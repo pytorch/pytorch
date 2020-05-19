@@ -94,7 +94,8 @@ static void adaptive_avg_pool2d_single_out_frame(
 std::vector<int64_t> get_output_shape(
     const Tensor& input,
     IntArrayRef output_size) {
-  for (int64_t i = 0; i < input.dim(); i++) {
+  for (int64_t i = 1; i < input.dim(); i++) {
+    // Allow for empty batch.
     TORCH_CHECK(
         input.size(i) > 0,
         "adaptive_avg_pooling2d(): expected input to have non-empty spatial "
