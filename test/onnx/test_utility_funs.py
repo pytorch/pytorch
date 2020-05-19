@@ -591,6 +591,34 @@ class TestUtilityFuns(TestCase):
 
         np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_celu_cast(self):
+        class Celu(torch.nn.Module):
+            def __init__(self):
+                super(Celu, self).__init__()
+                self.celu = torch.nn.CELU()
+
+            def forward(self, input):
+                return self.celu(input)
+
+        x = torch.randn(2, 5, 7)
+        y = x.to(dtype=torch.float64)
+
+        model = Celu()
+
+        f = io.BytesIO()
+        torch.onnx.export(model, (x,), f,
+                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
+        ort_inputs = {ort_sess.get_inputs()[0].name : x.cpu().numpy()}
+        ort_outs = ort_sess.run(None, ort_inputs)
+
+        pyt_outs = model(y)
+        pyt_outs = pyt_outs.cpu().numpy()
+
+        np.testing.assert_allclose(pyt_outs, ort_outs[0], rtol=0.001, atol=1e-7)
+
+
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
                                (TestCase,),

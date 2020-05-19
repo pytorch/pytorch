@@ -3011,22 +3011,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(CrossEntropyLossMeanWeightIgnoreIndex(), input=(x, y))
 
-    def test_empty_branch(self):
-        class EmptyBranchModel(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, input):
-                out = input + 1
-                if out.dim() > 2:
-                    if out.dim() > 3:
-                        out += 3
-                    else:
-                        pass
-                else:
-                    pass
-                return out
-        x = torch.randn(1, 2, 3, requires_grad=True)
-        self.run_test(EmptyBranchModel(), x)
-
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss(self):
         class NLLModel(torch.nn.Module):
@@ -3228,7 +3212,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Celu(), (input,))
 
     @skipIfUnsupportedMinOpsetVersion(12)
-    def test_celu_dim(self):
+    def test_celu_cast(self):
         class Celu(torch.nn.Module):
             def __init__(self):
                 super(Celu, self).__init__()
@@ -3237,7 +3221,7 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input):
                 return self.celu(input)
 
-        input = torch.randn(2, 5, 7)
+        input = torch.randn(2, 5, 7, dtype=torch.float64)
         self.run_test(Celu(), (input,))
 
     def test_empty_branch(self):
