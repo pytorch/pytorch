@@ -64,6 +64,7 @@ namespace jit {
   _(Reduce3DRfactorRepeated)                \
   _(ReduceRfactorInsertionPoint)            \
   _(Reduce3DRfactorInsertionPoint)          \
+  _(ReduceRepeatedInternalRfactor)          \
   _(ReduceSplitTail)                        \
   _(ReduceSplitNoTail)                      \
   _(ReduceOverSplitTail)                    \
