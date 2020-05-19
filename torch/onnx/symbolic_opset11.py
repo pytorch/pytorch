@@ -7,6 +7,7 @@ import torch.onnx.symbolic_helper as sym_help
 import warnings
 import numpy
 
+from torch.onnx import OperatorExportTypes
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_opset9 import expand, unused
 from torch.nn.modules.utils import _single, _pair, _triple
@@ -505,21 +506,47 @@ def squeeze(g, self, dim=None):
         # return g.op("Squeeze", self, axes_i=dims)
 
     dim = sym_help._get_const(dim, 'i', 'dim')
+    class Squeeze(torch.jit.ScriptModule):
+        @torch.jit.script_method
+        def forward(self, x):
+            if x.shape[0] > 1:
+                return x
+            else:
+                x.squeeze(0)
+    
+    sq = Squeeze()
+    sq_graph = sq.forward.graph
+    
+    for i, n in enumerate(sq_graph.nodes()):
+        if n.kind() == 'prim::If':
+            sq_if_node = n
+            break
+
     # create 'cond' node (condition is shape[i]==1)
-    shape_op = g.op("Shape", self)
-    slice_op = sym_help._slice_helper(g, shape_op, axes = [0], starts = [dim], ends = [dim])
+    size = sym_help._size_helper(g, self, dim)
+    # shape_op = g.op("Shape", self)
+    # slice_op = sym_help._slice_helper(g, shape_op, axes = [0], starts = [dim], ends = [dim])
     const_one = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
-    cond = g.op("Equal", slice_op, const_one)
+    cond = g.op("Equal", size, const_one)
     # create a subgraph containing "Squeeze" called branch1
-    class Identity(torch.jit.Module):
-        def forward(self, input):
-            return input
-    from torch.onnx.utils import _trace_and_get_graph_from_model
-    branch1_graph, torch_out = _trace_and_get_graph_from_model(Identity(), torch.tensor(self.type().sizes()))
-    branch1_graph.op("Squeeze", *(branch1_graph.nodes()), axes_i=[dim])
+    # class Identity(torch.jit.Module):
+    #     def forward(self, input):
+    #         return input
+    # from torch.onnx.utils import _trace_and_get_graph_from_model
+    # branch1_graph, torch_out = _trace_and_get_graph_from_model(Identity(), torch.tensor(self.type().sizes()))
+    # branch1_graph.op("Squeeze", *(branch1_graph.nodes()), axes_i=[dim])
     # and a subgraph containing no-op called branch2
-    branch2_graph, torch_out = _trace_and_get_graph_from_model(Identity(), torch.tensor(self.type().sizes()))
-    g = g.op("If", cond, then_branch_g=branch1_graph, else_branch_g=branch2_graph)
+    # branch2_graph, torch_out = _trace_and_get_graph_from_model(Identity(), torch.tensor(self.type().sizes()))
+    # if_node = g.op("If", cond, then_branch_g=branch1_graph, else_branch_g=branch2_graph)
+    if_node_outputs = g.op("If", cond)
+    if_node = if_node_outputs.node()
+    for b in sq_if_node.blocks():
+        new_block = if_node.addBlock()
+        torch._C._jit_pass_onnx_block(b, new_block, OperatorExportTypes.ONNX, dict())
+
+    # then_block = if_node.addBlock()
+    # torch._C._jit_pass_onnx_block(branch1_graph, then_block, OperatorExportTypes.ONNX)
+
     return g
 
 @parse_args('v', 'i')
