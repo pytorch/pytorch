@@ -47,8 +47,11 @@ class FakeQuantize(Module):
             'quant_min must be less than or equal to quant_max'
         self.quant_min = quant_min
         self.quant_max = quant_max
-        self.fake_quant_enabled = True
-        self.observer_enabled = True
+        # fake_quant_enabled and observer_enabled are buffers to support their
+        # replication in DDP. Data type is uint8 because NCCL does not support
+        # bool tensors.
+        self.register_buffer('fake_quant_enabled', torch.tensor([1], dtype=torch.uint8))
+        self.register_buffer('observer_enabled', torch.tensor([1], dtype=torch.uint8))
         self.activation_post_process = observer(**observer_kwargs)
         assert torch.iinfo(self.activation_post_process.dtype).min <= quant_min, 'quant_min out of bound'
         assert quant_max <= torch.iinfo(self.activation_post_process.dtype).max, 'quant_max out of bound'
@@ -59,14 +62,14 @@ class FakeQuantize(Module):
         self.ch_axis = self.activation_post_process.ch_axis if hasattr(self.activation_post_process, 'ch_axis') else None
 
     def enable_fake_quant(self, enabled=True):
-        self.fake_quant_enabled = enabled
+        self.fake_quant_enabled[0] = 1 if enabled else 0
         return self
 
     def disable_fake_quant(self):
         return self.enable_fake_quant(False)
 
     def enable_observer(self, enabled=True):
-        self.observer_enabled = enabled
+        self.observer_enabled[0] = 1 if enabled else 0
         return self
 
     def disable_observer(self):
@@ -76,7 +79,7 @@ class FakeQuantize(Module):
         return self.activation_post_process.calculate_qparams()
 
     def forward(self, X):
-        if self.observer_enabled:
+        if self.observer_enabled[0] == 1:
             self.activation_post_process(X.detach())
             _scale, _zero_point = self.calculate_qparams()
             _scale, _zero_point = _scale.to(self.scale.device), _zero_point.to(self.zero_point.device)
@@ -85,7 +88,7 @@ class FakeQuantize(Module):
             self.zero_point.resize_(_zero_point.shape)
             self.zero_point.copy_(_zero_point)
 
-        if self.fake_quant_enabled:
+        if self.fake_quant_enabled[0] == 1:
             if self.qscheme == torch.per_channel_symmetric or self.qscheme == torch.per_channel_affine:
                 X = torch.fake_quantize_per_channel_affine(X, self.scale, self.zero_point,
                                                            self.ch_axis, self.quant_min, self.quant_max)
