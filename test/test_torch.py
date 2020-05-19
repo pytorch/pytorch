@@ -12310,8 +12310,8 @@ class TestTorchDeviceType(TestCase):
                     non_zero_rand((2, 2), dtype=dtype, device=device))
 
     # This function tests that a nan value is returned for input values not in domain
-    @dtypes(torch.float32, torch.complex64)
-    def test_acosh_domain(self, device, dtype):
+    @dtypes(torch.float32, torch.float64)
+    def test_acosh_domain_float(self, device, dtype):
         # Domain of acosh is [1, inf), for values outside the domain - output is mapped
         # to NaN, except for input value `inf` - output is mapped to `inf`
         sample = torch.tensor([float('-inf'), 1.00, -1.23, -0.06, 0.98, float('inf')],
@@ -12323,9 +12323,34 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.isinf(torch.acosh(sample)), inf_mask)
         self.assertEqual(torch.isinf(sample.acosh()), inf_mask)
 
+    @dtypes(torch.complex32, torch.complex64, torch.complex126)
+    def test_acosh_domain_complex(self, device, dtype):
+        # Handle complex type tests for acosh domain
+        sample = torch.tensor([
+            complex(0, 0),
+            complex(-1.23, float('inf')),
+            complex(0.06, float('nan')),
+            complex(float('-inf'), 2.98),
+            complex(float('inf'), 1.23),
+            complex(float('-inf'), float('inf')),
+            complex(float('inf'), float('nan')),
+            complex(float('-inf'), float('nan')),
+            complex(float('nan'), -0.06),
+            complex(float('nan'), float('inf')),
+            complex(float('nan'), float('nan'))
+        ], device=device, dtype=dtype)
+        nan_mask = torch.tensor([False, False, True, False, False, False, True, True, True, True, True],
+                                device=device)
+        inf_mask = torch.tensor([False, True, False, True, True, True, True, True, False, True, False],
+                                device=device)
+        self.assertEqual(torch.isnan(torch.acosh(sample)), nan_mask)
+        self.assertEqual(torch.isnan(sample.acosh()), nan_mask)
+        self.assertEqual(torch.isinf(torch.acosh(sample)), inf_mask)
+        self.assertEqual(torch.isinf(sample.acosh()), inf_mask)
+
     # This function tests that a nan value is returned for input values not in domain
-    @dtypes(torch.float32, torch.complex64)
-    def test_atanh_domain(self, device, dtype):
+    @dtypes(torch.float32, torch.float64)
+    def test_atanh_domain_float(self, device, dtype):
         # Domain of atanh is (-1, 1), for edge values (-1 and 1) - output is mapped
         # to inf and for other values outside this range - output is mapped to NaN
         sample = torch.tensor([float('-inf'), -1.00, 1.00, -1.23, 1.06, float('inf')],
@@ -12338,6 +12363,31 @@ class TestTorchDeviceType(TestCase):
         # For values -1.0 and 1.0, atanh should return -inf and inf respectively
         self.assertEqual(torch.isinf(torch.atanh(sample)), inf_mask)
         self.assertEqual(torch.isinf(sample.atanh()), inf_mask)
+
+    @dtypes(torch.complex32, torch.complex64, torch.complex126)
+    def test_atanh_domain_complex(self, device, dtype):
+        # Handle complex type tests for atanh domain
+        sample = torch.tensor([
+            complex(0, 0),
+            complex(0, float('nan')),
+            complex(1, 0),
+            complex(1.23, float('inf')),
+            complex(1.06, float('nan')),
+            complex(float('inf'), 1.98),
+            complex(float('inf'), float('inf')),
+            complex(float('inf'), float('nan')),
+            complex(float('nan'), 1.23),
+            complex(float('nan'), float('inf')),
+            complex(float('nan'), float('nan'))
+        ], device=device, dtype=dtype)
+        nan_mask = torch.tensor([False, True, False, False, True, False, False, True, True, False, True],
+                                device=device)
+        inf_mask = torch.tensor([False, False, True, False, False, False, False, False, False, False, False],
+                                device=device)
+        self.assertEqual(torch.isnan(torch.acosh(sample)), nan_mask)
+        self.assertEqual(torch.isnan(sample.acosh()), nan_mask)
+        self.assertEqual(torch.isinf(torch.acosh(sample)), inf_mask)
+        self.assertEqual(torch.isinf(sample.acosh()), inf_mask)
 
     # TODO: run on non-native device types
     @dtypes(torch.double)
