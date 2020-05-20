@@ -93,4 +93,3 @@
           pip install awscli==1.16.46
 
           "/home/circleci/project/builder/cron/upload_binary_sizes.sh"
-

@@ -103,7 +103,7 @@ def gen_build_workflows_tree():
         "workflows": {
             "build": {
                 "jobs": [f() for f in build_workflows_functions],
-            }
+            },
         },
     }
 
@@ -115,33 +115,33 @@ YAML_SOURCES = [
     File("nightly-binary-build-defaults.yml"),
 
     Header("Build parameters"),
-    File("pytorch-build-params.yml"),
-    File("caffe2-build-params.yml"),
-    File("binary-build-params.yml"),
-    File("promote-build-params.yml"),
+    File("build-parameters/pytorch-build-params.yml"),
+    File("build-parameters/caffe2-build-params.yml"),
+    File("build-parameters/binary-build-params.yml"),
+    File("build-parameters/promote-build-params.yml"),
 
     Header("Job specs"),
-    File("pytorch-job-specs.yml"),
-    File("caffe2-job-specs.yml"),
-    File("binary-job-specs.yml"),
-    File("job-specs-setup.yml"),
-    File("job-specs-custom.yml"),
-    File("job-specs-promote.yml"),
-    File("binary_update_htmls.yml"),
-    File("binary-build-tests.yml"),
-    File("docker_jobs.yml"),
+    File("job-specs/pytorch-job-specs.yml"),
+    File("job-specs/caffe2-job-specs.yml"),
+    File("job-specs/binary-job-specs.yml"),
+    File("job-specs/job-specs-setup.yml"),
+    File("job-specs/job-specs-custom.yml"),
+    File("job-specs/job-specs-promote.yml"),
+    File("job-specs/binary_update_htmls.yml"),
+    File("job-specs/binary-build-tests.yml"),
+    File("job-specs/docker_jobs.yml"),
 
     Header("Workflows"),
     Treegen(gen_build_workflows_tree, 0),
 
     Header("Nightly tests"),
     Listgen(binary_build_definitions.get_nightly_tests, 3),
-    File("workflows-nightly-uploads-header.yml"),
+    File("workflows/workflows-nightly-uploads-header.yml"),
     Listgen(binary_build_definitions.get_nightly_uploads, 3),
-    File("workflows-s3-html.yml"),
-    File("workflows-docker-builder.yml"),
-    File("workflows-ecr-gc.yml"),
-    File("workflows-promote.yml"),
+    File("workflows/workflows-s3-html.yml"),
+    File("workflows/workflows-docker-builder.yml"),
+    File("workflows/workflows-ecr-gc.yml"),
+    File("workflows/workflows-promote.yml"),
 ]
 
 

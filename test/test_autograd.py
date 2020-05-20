@@ -2648,8 +2648,8 @@ class TestAutograd(TestCase):
         self.assertFalse(torch.autograd._profiler_enabled())
 
         last_end = 0
-        names = ['is_complex', 'mul', 'mul', 'to', 'empty_strided', 'copy_', 'empty', 'is_complex',
-                 'add', 'add', 'to', 'empty_strided', 'copy_', 'empty']
+        names = ['is_complex', 'mul', 'to', 'empty_strided', 'copy_', 'empty', 'is_complex',
+                 'add', 'to', 'empty_strided', 'copy_', 'empty']
         top_level_names = ['is_complex', 'mul', 'is_complex', 'add']
         top_level_iter = iter(top_level_names)
         self.assertEqual(len(p.function_events), len(names))
@@ -2874,6 +2874,115 @@ class TestAutograd(TestCase):
             with tempfile.NamedTemporaryFile() as trace_file:
                 prof.export_chrome_trace(trace_file.name)
 
+    def test_memory_profiler(self):
+        def run_profiler(tensor_creation_fn, metric):
+            # collecting allocs / deallocs
+            with profile(profile_memory=True, record_shapes=True) as prof:
+                x = None
+                with record_function("test_user_scope_alloc"):
+                    x = tensor_creation_fn()
+                with record_function("test_user_scope_dealloc"):
+                    del x
+            stats = prof.key_averages(group_by_input_shape=True)
+            print(stats.table(sort_by=metric))
+            return stats
+
+        def check_metrics(stats, metric, allocs=None, deallocs=None):
+            stat_metrics = {}
+            for stat in stats:
+                stat_metrics[stat.key] = getattr(stat, metric)
+            if allocs is not None:
+                for alloc_fn in allocs:
+                    self.assertTrue(alloc_fn in stat_metrics)
+                    self.assertTrue(stat_metrics[alloc_fn] > 0)
+            if deallocs is not None:
+                for dealloc_fn in deallocs:
+                    self.assertTrue(dealloc_fn in stat_metrics)
+                    self.assertTrue(stat_metrics[dealloc_fn] < 0)
+
+        def create_cpu_tensor():
+            return torch.rand(10, 10)
+
+        def create_cuda_tensor():
+            return torch.rand(10, 10).cuda()
+
+        def create_mkldnn_tensor():
+            return torch.rand(10, 10, dtype=torch.float32).to_mkldnn()
+
+        print("Running CPU test")
+        stats = run_profiler(create_cpu_tensor, "cpu_memory_usage")
+        check_metrics(
+            stats,
+            "cpu_memory_usage",
+            allocs=[
+                "empty",
+                "rand",
+                "test_user_scope_alloc",
+            ],
+            deallocs=[
+                "test_user_scope_dealloc",
+            ]
+        )
+
+        if torch.cuda.is_available():
+            create_cuda_tensor()
+            print("Running CUDA test")
+            stats = run_profiler(create_cuda_tensor, "cuda_memory_usage")
+            check_metrics(
+                stats,
+                "cuda_memory_usage",
+                allocs=[
+                    "test_user_scope_alloc",
+                    "to",
+                    "empty_strided",
+                ],
+                deallocs=[
+                    "test_user_scope_dealloc",
+                ]
+            )
+            check_metrics(
+                stats,
+                "cpu_memory_usage",
+                allocs=[
+                    "rand",
+                    "empty",
+                ]
+            )
+
+        if torch._C.has_mkldnn:
+            create_mkldnn_tensor()
+            print("Running MKLDNN test")
+            stats = run_profiler(create_mkldnn_tensor, "cpu_memory_usage")
+            check_metrics(
+                stats,
+                "cpu_memory_usage",
+                allocs=[
+                    "test_user_scope_alloc",
+                    "rand",
+                    "empty",
+                    "to_mkldnn",
+                ],
+                deallocs=[
+                    "test_user_scope_dealloc",
+                ]
+            )
+
+        # check partial overlap of tensor allocation with memory profiler
+        x = torch.rand(10, 10)
+        with profile(profile_memory=True, record_shapes=True) as prof:
+            del x
+            x = torch.rand(10, 10)
+        del x
+        stats = prof.key_averages(group_by_input_shape=True)
+        check_metrics(
+            stats,
+            "cpu_memory_usage",
+            allocs=[
+                "rand",
+                "empty",
+            ]
+        )
+
     def test_record_function(self):
         x = torch.randn(10, 10)
 
@@ -2905,26 +3014,6 @@ class TestAutograd(TestCase):
             if idx == len(important_events):
                 break
         self.assertEqual(idx, len(important_events))
-
-        def count_events_before(before, target):
-            matches = [e for e in events if e.name == before]
-            self.assertEqual(len(matches), 1)
-            match = matches[0]
-
-            count = 0
-            for e in events:
-                if e.name == target and e.cpu_interval.end <= match.cpu_interval.end:
-                    count += 1
-            return count
-
-        self.assertEqual(
-            count_events_before("inner", "profiler::_record_function_exit"),
-            1,
-        )
-        self.assertEqual(
-            count_events_before("outer", "profiler::_record_function_exit"),
-            2,
-        )
 
         # We can also use record_function to decorate arbitrary function
         @record_function('my_func')
@@ -4213,7 +4302,7 @@ separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan', 
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
-                '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add',
+                '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add', 'roll',
                 '__radd__', 'repeat', 'expand', 'mul'] + separate_complex_tests
 
 def add_test(
@@ -6169,6 +6258,19 @@ class TestAutogradDeviceType(TestCase):
         v2.mul_(2)
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1], [1, 1]])
+
+    @unittest.skip("Wrong Gradient: https://github.com/pytorch/pytorch/issues/38586")
+    def test_mv_grad_stride_0(self, device):
+        # Reference: https://github.com/pytorch/pytorch/issues/38315
+        mat = torch.randn(2, 2, device=device)
+        vec = torch.randn(1, device=device).expand(2).requires_grad_(True)
+
+        def fn(vec):
+            return (mat @ vec).sum()
+
+        gradcheck(fn, (vec))
+        gradgradcheck(fn, (vec))
+
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
