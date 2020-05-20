@@ -63,7 +63,6 @@ ${return_type} ${type_wrapper_name}(${formals});
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
 ${return_type} ${type_wrapper_name}(${formals}) {
-    ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
