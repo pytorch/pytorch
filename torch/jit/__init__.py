@@ -1678,6 +1678,11 @@ if _enabled:
             return script_module
 
         def _reconstruct(self, init_fn=None):
+            cpp_module = self._c
+            # delete all existing attributes
+            for attr in dir(self):
+                delattr(self, attr)
+            self.__init__(cpp_module)
             if init_fn:
                 init_fn(self)
             else:
