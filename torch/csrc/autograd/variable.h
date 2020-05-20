@@ -210,6 +210,10 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::mutex mutex_;
   public:
 
+  std::mutex& get_mutex() {
+    return mutex_;
+  }
+
   /// Sets the `requires_grad` property of `Variable`. This should be true for
   /// leaf variables that want to accumulate gradients, and false for all other
   /// variables.
@@ -221,8 +225,12 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     requires_grad_ = requires_grad;
   }
 
-  void reset_grad_accumulator() override {
+  void reset_grad_accumulator() {
     grad_accumulator_.reset();
+  }
+
+  void lock_grad_accumulator() {
+    grad_accumulator_.lock();
   }
 
   bool requires_grad() const override {
@@ -390,7 +398,6 @@ enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NOD
 TORCH_API void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect=false);
 
 struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
-  private:
   /// The base `Variable` (never a view).
   Variable base_;
 
@@ -406,6 +413,10 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 
   CreationMeta creation_meta;
   public:
+
+  void set_creation_meta(const CreationMeta& creation_meta_) {
+    creation_meta = creation_meta_;
+  }
 
   bool requires_grad() const override {
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());

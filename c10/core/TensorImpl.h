@@ -136,7 +136,6 @@ struct C10_API AutogradMetaInterface {
   virtual bool requires_grad() const = 0;
   virtual at::Tensor& grad() = 0;
   virtual const at::Tensor& grad() const = 0;
-  virtual void reset_grad_accumulator() = 0;
   virtual ~AutogradMetaInterface();
 };
 
