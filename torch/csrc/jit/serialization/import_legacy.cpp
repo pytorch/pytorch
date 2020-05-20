@@ -184,10 +184,10 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
         std::move(storage_ptr),
         /*allocator=*/nullptr,
         /*resizable=*/false); // NB: we didn't set any allocator for the tensor
-    if (device.type() == at::DeviceType::CPU) {
+    if (device.type() == DeviceType::CPU) {
       storage_it =
           storageMap.insert(std::make_pair(record_key, cpu_storage)).first;
-    } else if (device.type() == at::DeviceType::CUDA) {
+    } else if (device.type() == DeviceType::CUDA) {
       at::Tensor cpu_tensor =
           at::empty({0}, at::CPU(type).options()).set_(cpu_storage);
       at::Storage cuda_storage =
@@ -197,7 +197,7 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
     } else {
       AT_ERROR(
           "supported devices include CPU and CUDA, however got ",
-          at::DeviceTypeName(device.type(), false));
+          DeviceTypeName(device.type(), false));
     }
   }
   if (storage_it->second.device().type() != device.type() ||
@@ -212,7 +212,7 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
 
   at::Tensor result;
 
-  if (device.type() == at::DeviceType::CPU) {
+  if (device.type() == DeviceType::CPU) {
     if (tensor_proto.is_quantized()) {
       result =
           at::_empty_affine_quantized(
@@ -223,7 +223,7 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
           at::empty({0}, at::CPU(type).options())
               .set_(storage_it->second, tensor_proto.offset(), dims, strides);
     }
-  } else if (device.type() == at::DeviceType::CUDA) {
+  } else if (device.type() == DeviceType::CUDA) {
     result =
         at::empty(
             {0}, c10::TensorOptions(type).device(storage_it->second.device()))

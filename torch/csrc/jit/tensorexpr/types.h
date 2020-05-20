@@ -84,6 +84,7 @@ class TORCH_API Dtype {
 
 extern TORCH_API Dtype kUninitialized;
 extern TORCH_API Dtype kHandle;
+extern TORCH_API Dtype kVoid;
 
 #define NNC_DTYPE_DECLARATION(ctype, name) extern TORCH_API Dtype k##name;
 

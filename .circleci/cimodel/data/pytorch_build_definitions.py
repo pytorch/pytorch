@@ -4,16 +4,11 @@ from cimodel.data.pytorch_build_data import TopLevelNode, CONFIG_TREE_DATA
 import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
+from cimodel.data.simple.util.branch_filters import gen_branches_only_filter_dict
+from cimodel.data.simple.util.docker_constants import gen_docker_image_path
 
 from dataclasses import dataclass, field
 from typing import List, Optional
-
-
-DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
-
-# ARE YOU EDITING THIS NUMBER?  MAKE SURE YOU READ THE GUIDANCE AT THE
-# TOP OF .circleci/config.yml
-DOCKER_IMAGE_VERSION = "9a3986fa-7ce7-4a36-a001-3c9bef9892e2"
 
 
 @dataclass
@@ -55,7 +50,7 @@ class Conf:
         if self.cuda_version:
             cuda_parms.extend(["cuda" + self.cuda_version, "cudnn7"])
         result = leading + ["linux", self.distro] + cuda_parms + self.parms
-        if (not for_docker and self.parms_list_ignored_for_docker_image is not None):
+        if not for_docker and self.parms_list_ignored_for_docker_image is not None:
             result = result + self.parms_list_ignored_for_docker_image
         return result
 
@@ -64,7 +59,7 @@ class Conf:
         parms_source = self.parent_build or self
         base_build_env_name = "-".join(parms_source.get_parms(True))
 
-        return miniutils.quote(DOCKER_IMAGE_PATH_BASE + base_build_env_name + ":" + str(DOCKER_IMAGE_VERSION))
+        return miniutils.quote(gen_docker_image_path(base_build_env_name))
 
     def get_build_job_name_pieces(self, build_or_test):
         return self.get_parms(False) + [build_or_test]
@@ -110,11 +105,8 @@ class Conf:
         else:
             job_name = "pytorch_linux_build"
 
-
         if not self.is_important:
-            # If you update this, update
-            # caffe2_build_definitions.py too
-            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/", r"/release\/.*/"]}}
+            job_def["filters"] = gen_branches_only_filter_dict()
         job_def.update(self.gen_workflow_params(phase))
 
         return {job_name : job_def}
@@ -161,6 +153,7 @@ def gen_dependent_configs(xenial_parent_config):
         configs.append(c)
 
     return configs
+
 
 def gen_docs_configs(xenial_parent_config):
     configs = []
