@@ -352,13 +352,9 @@ return c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${profiled_
 
 
 # TraceType templates
-TRACE_DISPATCH_FIND_OP = CodeTemplate("""\
-static auto op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"});
-TORCH_INTERNAL_ASSERT(op);
-""")
-
-TRACE_DISPATCH_CALL_OP = CodeTemplate("""\
-c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${trace_dispatch_args});
+TRACE_DISPATCH_UNBOXED = CodeTemplate("""\
+static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
+${assign_return_values}c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${trace_dispatch_args});
 """)
 
 
@@ -732,16 +728,16 @@ def emit_trace_body(declaration):
 
     trace_body.append(pre_record_trace)
     trace_body.append(declare_returned_variables)
-    trace_body.append(TRACE_DISPATCH_FIND_OP.substitute(declaration))
 
     ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['arguments']])
-    trace_dispatch_args = ['*op', 'c10::DispatchKey::Tracer'] + declaration['args']
-    call = TRACE_DISPATCH_CALL_OP.substitute(
+    trace_dispatch_args = ['op', 'c10::DispatchKey::Tracer'] + declaration['args']
+    assign_return_values = '{} = '.format(tie_return_values) if not modifies_arguments and not returns_void else ''
+    call = TRACE_DISPATCH_UNBOXED.substitute(
+        declaration,
         ret_and_arg_types=ret_and_arg_types,
         trace_dispatch_args=trace_dispatch_args,
+        assign_return_values=assign_return_values,
     )
-    if not modifies_arguments and not returns_void:
-        call = '{} = {}'.format(tie_return_values, call)
     trace_body.append(call)
     trace_body.append(post_record_trace)
     if not returns_void:
@@ -1073,7 +1069,7 @@ def emit_body(declaration):
                 RUN_ONLY_IN_DEBUG_MODE.substitute(statements=enforce_same_ptrs_stmts)
         return call
 
-    def emit_call(env):
+    def emit_call(env, tie_return_values):
         combined = nested_dict(env, declaration)
         if strategy == 'use_derived':
             # We only care about adding `at::AutoNonVariableTypeMode` guard for non-variable dispatch
@@ -1143,7 +1139,7 @@ def emit_body(declaration):
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables)
 
-    body.append(emit_call(env))
+    body.append(emit_call(env, tie_return_values))
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
