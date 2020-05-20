@@ -63,7 +63,7 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
     } else {
       torch::jit::push(*stack, std::move(args[i]));
     }
-  }
+ }
 
   op.callBoxed(stack);
 
@@ -79,16 +79,17 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   }
 }
 
-bool _is_leaf(const Tensor& tensor) {
+Tensor& _requires_grad_(Tensor& tensor, bool requires_grad) {
   TORCH_CHECK(false, "nope nope nope");
 }
+
 
 TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericMode);
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
 
   auto m2 = MAKE_TORCH_LIBRARY_IMPL(aten, TESTING_ONLY_GenericMode);
-  m2.impl("is_leaf", _is_leaf);
+  m2.impl_UNBOXED("requires_grad_", _requires_grad_);
 
   c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
 
@@ -97,8 +98,8 @@ TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   Tensor b = batch_norm(a, {}, {}, {}, {}, true, 0.1, 1e-05, false);
   ASSERT_EQ(override_call_count, 2);
 
-  // This does raise an error; _is_leaf is called
-  a.is_leaf();
+  // Throws
+  a.requires_grad_(true);
 }
 
 TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
@@ -106,15 +107,15 @@ TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&generic_wrapper_fallback>());
 
   auto m2 = MAKE_TORCH_LIBRARY_IMPL(aten, TESTING_ONLY_GenericWrapper);
-  m2.impl("is_leaf", _is_leaf);
+  m2.impl_UNBOXED("requires_grad_", _requires_grad_);
 
   override_call_count = 0;
   Tensor a = at::detail::make_tensor<GenericWrapperTensorImpl>(ones({5, 5}, kDouble));
   Tensor b = batch_norm(a, {}, {}, {}, {}, true, 0.1, 1e-05, false);
   ASSERT_EQ(override_call_count, 1);
 
-  // This doesn't raise the error :(; _is_leaf isn't called.
-  a.is_leaf();
+  // Throws
+  a.requires_grad_(true);
 }
 
 TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
