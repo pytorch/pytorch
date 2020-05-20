@@ -267,19 +267,23 @@ class GemmMicrokernelTester {
               long(std::numeric_limits<uint8_t>::max())),
           long(std::numeric_limits<uint8_t>::min())));
 
-      const float requantizationScale = 1.0f / float(cScale);
+      size_t num_zero_points_padded = ((nr() + 7) / 8) * 8;
+      std::vector<float> requantization_scale(num_zero_points_padded, 1.0f / float(cScale));
+      std::vector<uint8_t> kernel_zero_points(num_zero_points_padded, bZeroPoint());
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               aZeroPoint(),
-              &this->bZeroPoint_,
-              &requantizationScale,
+              kernel_zero_points.data(),
+              requantization_scale.data(),
               cZeroPoint,
               qmin(),
               qmax());
       const union pytorch_qnnp_fp32_requantization_params
+          // TODO Kimish: This needs fixing. It shoul use the entire vector
+          // of requant scale
           scalarRequantizationParams =
               pytorch_qnnp_compute_scalar_fp32_requantization_params(
-                  requantizationScale, cZeroPoint, qmin(), qmax());
+                  requantization_scale[0], cZeroPoint, qmin(), qmax());
 
       qgemm(
           m(),
@@ -290,6 +294,7 @@ class GemmMicrokernelTester {
           packedW.data(),
           c.data(),
           cStride() * sizeof(uint8_t),
+          0,
           &quantizationParams);
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
@@ -317,7 +322,7 @@ class GemmMicrokernelTester {
               << "), optimized = " << (uint32_t)c[mIndex * cStride() + nIndex]
               << ", Mr x Nr x Kr = " << mr() << " x " << nr() << " x " << kr()
               << ", M x N x K = " << m() << " x " << n() << " x " << k()
-              << ", requantization scale = " << requantizationScale
+              << ", requantization scale = " << requantization_scale[nIndex]
               << ", output zero point = " << int32_t(cZeroPoint);
         }
       }
@@ -535,19 +540,23 @@ class GemmMicrokernelTester {
               long(std::numeric_limits<uint8_t>::max())),
           long(std::numeric_limits<uint8_t>::min())));
 
-      const float requantizationScale = 1.0f / float(cScale);
+      size_t num_zero_points_padded = ((nr() + 7) / 8) * 8;
+      std::vector<float> requantization_scale(num_zero_points_padded, 1.0f / float(cScale));
+      std::vector<uint8_t> kernel_zero_points(num_zero_points_padded, bZeroPoint());
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               aZeroPoint(),
-              &this->bZeroPoint_,
-              &requantizationScale,
+              kernel_zero_points.data(),
+              requantization_scale.data(),
               cZeroPoint,
               qmin(),
               qmax());
       const union pytorch_qnnp_fp32_requantization_params
+          // TODO Kimish: This needs fixing. It shoul use the entire vector
+          // of requant scale
           scalarRequantizationParams =
               pytorch_qnnp_compute_scalar_fp32_requantization_params(
-                  requantizationScale, cZeroPoint, qmin(), qmax());
+                  requantization_scale[0], cZeroPoint, qmin(), qmax());
 
       qconv(
           m(),
@@ -558,6 +567,7 @@ class GemmMicrokernelTester {
           packedW.data(),
           c.data(),
           cStride() * sizeof(uint8_t),
+          0,
           &quantizationParams);
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
@@ -585,7 +595,7 @@ class GemmMicrokernelTester {
               << "), optimized = " << uint32_t(c[mIndex * cStride() + nIndex])
               << ", Mr x Nr x Kr = " << mr() << " x " << nr() << " x " << kr()
               << ", M x N x K = " << m() << " x " << n() << " x " << k()
-              << ", requantization scale = " << requantizationScale
+              << ", requantization scale = " << requantization_scale[nIndex]
               << ", output zero point = " << int32_t(cZeroPoint);
         }
       }

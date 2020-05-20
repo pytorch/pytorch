@@ -11,6 +11,39 @@
 
 .syntax unified
 
+#  Args passed via 4 registers (16 bytes)
+#  r0: mr
+#  r1: nr
+#  r2: kc
+#  r3: ks
+#
+
+#  Args passed via stack.
+#  TOS
+#  |-----------|
+#  |a          | 0
+#  |w          | 4
+#  |c          | 8
+#  |c_stride   | 12
+#  |out ch indx| 16
+#  |params     | 20
+#  |-----------|
+#  
+
+#  After loading w pointer in ip reg.
+#  And after pushing r4-r8 and d8-d15 on stack
+#  |-----------|
+#  |d8 - d15   | 0
+#  |r4 - r11   | 64
+#  |a          | 96
+#  |w          | 100
+#  |c          | 104
+#  |c_stride   | 108
+#  |out ch indx| 112
+#  |params     | 116
+#  |-----------|
+#  
+
 # void pytorch_q8conv_ukernel_4x8__aarch32_neon(
 #     size_t mr,
 #     size_t nr,
@@ -38,11 +71,17 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     VLDM ip!, {d16-d19}
     # Load params:
     # - r9 = params
-    LDR r9, [sp, 112]
+    LDR r9, [sp, 116]
+
+    # Load output channel index
+    LDR r5, [sp, 112]
+    # Load pointer to per channel zero points array
+    LDR r4, [r9], 4
+    # Add offset to the base pointer
+    ADD r5, r4, r5
 
     # q10 := vacc1x0123
     VMOV.I32 q10, q8
-    MOV r4, 2
     # q11 := vacc1x4567
     VMOV.I32 q11, q9
     # Load a
@@ -56,10 +95,12 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     VMOV.I32 q14, q8
     # Load b_zero_point:
     # - d15 = b_zero_point
-    VLD1.8 {d15[]}, [r9], r4
+    VLD1.8 {d15}, [r5]
+
     # Load a_zero_point:
     # - d14 = a_zero_point
-    VLD1.8 {d14[]}, [r9], r4
+    VLD1.8 {d14[]}, [r9]
+    ADD r9, r9, 4
     # q15 := vacc3x4567
     VMOV.I32 q15, q9
     # Load multiplier:

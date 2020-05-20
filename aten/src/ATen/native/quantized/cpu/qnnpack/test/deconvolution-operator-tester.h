@@ -400,7 +400,12 @@ class DeconvolutionOperatorTester {
 
     const uint8_t* inputPtr = input.data() + 8;
     const uint8_t inputZeroPoint = 127;
-    const uint8_t kernelZeroPoint = 127;
+    // Make num zero points multiple of 8.
+    // This is the least common denominator for SSE/ARM kernels we have.
+    size_t num_zero_points_padded =
+      ((groups() * groupOutputChannels() + 7) / 8) * 8;
+    std::vector<uint8_t> kernelZeroPoints(num_zero_points_padded, 127);
+
 
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
@@ -461,7 +466,7 @@ class DeconvolutionOperatorTester {
                                              kx) *
                                                 groupOutputChannels() +
                                             oc]) -
-                               int32_t(kernelZeroPoint));
+                               int32_t(kernelZeroPoints[g* groupOutputChannels() + oc]));
                         }
                       }
                     }
@@ -494,6 +499,7 @@ class DeconvolutionOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
+      std::vector<float> requantization_scales(num_zero_points_padded, 1.0 * 1.0 / outputScale);
       pytorch_qnnp_operator_t deconvolution = nullptr;
 
       ASSERT_EQ(
@@ -515,16 +521,14 @@ class DeconvolutionOperatorTester {
               groupInputChannels(),
               groupOutputChannels(),
               inputZeroPoint,
-              1.0f /* input scale */,
-              kernelZeroPoint,
-              1.0f /* kernel scale */,
+              kernelZeroPoints.data(),
               kernel.data(),
               bias.data(),
               outputZeroPoint,
-              outputScale,
               qmin(),
               qmax(),
               0,
+              requantization_scales.data(),
               &deconvolution));
 
       ASSERT_EQ(
@@ -560,8 +564,8 @@ class DeconvolutionOperatorTester {
                               groups() +
                           g) *
                              groupOutputChannels() +
-                         c] /
-                    outputScale;
+                         c] *
+                         requantization_scales[g * groupOutputChannels() + c];
                 const double clampedAccumulator = std::max(
                     std::min(
                         scaledAccumulator,

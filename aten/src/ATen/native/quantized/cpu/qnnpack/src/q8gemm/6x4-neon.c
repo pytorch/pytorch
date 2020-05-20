@@ -20,6 +20,7 @@ void pytorch_q8gemm_ukernel_6x4__neon(
     const void* restrict w,
     uint8_t* restrict c,
     size_t c_stride,
+    size_t output_channel_index,
     const union pytorch_qnnp_conv_quantization_params
         quantization_params[restrict static 1]) {
   int32x4_t vacc0x0123 = vld1q_s32(w);
@@ -54,8 +55,16 @@ void pytorch_q8gemm_ukernel_6x4__neon(
 
   const uint8x8_t va_zero_point =
       vld1_dup_u8((const uint8_t*)&quantization_params->neon.input_zero_point);
-  const uint8x8_t vb_zero_point =
-      vld1_dup_u8((const uint8_t*)&quantization_params->neon.kernel_zero_point);
+  uint8x8_t vb_zero_point =
+      vld1_u8((const uint8_t*)&quantization_params->neon.kernel_zero_points
+          [output_channel_index]);
+  // Since only lower 4 values are used in this kernel. We replicate lower 4
+  // values in upper 4 values. Still we end up loading 8 values assuming
+  // zero point array is always multiple of 8.
+  vb_zero_point = vset_lane_u8(vget_lane_u8(vb_zero_point, 0), vb_zero_point, 4);
+  vb_zero_point = vset_lane_u8(vget_lane_u8(vb_zero_point, 1), vb_zero_point, 5);
+  vb_zero_point = vset_lane_u8(vget_lane_u8(vb_zero_point, 2), vb_zero_point, 6);
+  vb_zero_point = vset_lane_u8(vget_lane_u8(vb_zero_point, 3), vb_zero_point, 7);
   for (; k >= 8; k -= 8) {
     const uint8x8_t va0 = vld1_u8(a0);
     a0 += 8;

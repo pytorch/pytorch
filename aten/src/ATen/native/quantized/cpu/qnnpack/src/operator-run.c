@@ -56,6 +56,7 @@ static void compute_q8gemm(
   uint8_t* restrict c = context->c;
   const size_t c_stride = context->c_stride;
 
+  size_t output_channel_index = nr_block_start + group_index * n;
   context->ukernel(
       mr_block_size,
       nr_block_size,
@@ -66,6 +67,7 @@ static void compute_q8gemm(
       c + (pixel_index + mr_block_start) * c_stride + nr_block_start +
           group_index * n,
       c_stride,
+      output_channel_index,
       &context->quantization_params);
 }
 
@@ -204,6 +206,7 @@ static void compute_q8conv(
   uint8_t* restrict c = context->c;
   const size_t c_stride = context->c_stride;
 
+  size_t output_channel_index = nr_block_start + group_index * n;
   context->ukernel(
       mr_block_size,
       nr_block_size,
@@ -215,6 +218,7 @@ static void compute_q8conv(
       c + (mr_block_start + image_index * m) * c_stride + group_index * n +
           nr_block_start,
       c_stride,
+      output_channel_index,
       &context->quantization_params);
 }
 
