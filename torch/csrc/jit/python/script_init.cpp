@@ -15,7 +15,6 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -1223,7 +1222,6 @@ void initJitScriptBindings(PyObject* module) {
 
         auto cu = get_python_cu();
         auto name = c10::QualifiedName(qualname);
-        NormalizeOps(graph);
         auto result = cu->create_function(
             std::move(name), std::move(graph), /*shouldMangle=*/true);
         StrongFunctionPtr ret(std::move(cu), result);

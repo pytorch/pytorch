@@ -4,6 +4,8 @@
 namespace torch {
 namespace jit {
 
+namespace {
+
 // map from op alias -> normalized op
 static const std::unordered_map<Symbol, Symbol> alias_map = {
     {aten::absolute, aten::abs},
@@ -42,7 +44,7 @@ bool normalizeOpAliases(graph_node_list_iterator& iter) {
   return false;
 }
 
-static void NormalizeOps(Block* block) {
+void NormalizeOps(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     for (auto sub : it->blocks()) {
@@ -56,6 +58,8 @@ static void NormalizeOps(Block* block) {
     it++;
   }
 }
+
+} // namespace
 
 void NormalizeOps(const std::shared_ptr<Graph>& graph) {
   NormalizeOps(graph->block());
