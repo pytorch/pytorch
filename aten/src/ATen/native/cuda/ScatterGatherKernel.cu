@@ -118,10 +118,12 @@ struct cuda_scatter_gather_base_kernel {
       scatter_shape_check(self, dim, index, src);
     }
     else {
-      gather_shape_check(self, dim, index);
+      gather_shape_check(self, dim, index, src);
     }
 
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
+    auto self_strides = ensure_nonempty_vec(self.strides().vec());
+    auto src_strides = ensure_nonempty_vec(src.strides().vec());
 
     // restride self and src such that
     // self.shape = src.shape = index.shape
@@ -131,9 +133,9 @@ struct cuda_scatter_gather_base_kernel {
     // else src.stride[dim] = 0
     auto self_restrided = is_scatter_like ?
         restride_dim(self, dim, index_sizes)
-      : self.as_strided(index.sizes(), self.strides());
+      : self.as_strided(index_sizes, self_strides);
     auto src_restrided = is_scatter_like ? 
-        src.as_strided(index.sizes(), src.strides())
+        src.as_strided(index_sizes, src_strides)
       : restride_dim(src, dim, index_sizes);
 
     auto iter = TensorIterator();
@@ -270,6 +272,15 @@ struct cuda_scatter_fill_base_kernel {
   }
 }; // struct cuda_scatter_fill_base_kernel
 
+void gather_cuda_kernel(Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
+  cuda_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
+    result, dim, index, self,
+    "gather_out_cuda", []C10_DEVICE(auto* lhs, const auto* rhs) {
+      *lhs = *rhs;
+    }
+  );
+}
+
 void scatter_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cuda_scatter_gather_base_kernel<>()(
     self, dim, index, src,
@@ -288,6 +299,7 @@ void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, Sc
   );
 }
 
+REGISTER_DISPATCH(gather_stub, &gather_cuda_kernel);
 REGISTER_DISPATCH(scatter_stub, &scatter_cuda_kernel);
 REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cuda_kernel);
 

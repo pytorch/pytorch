@@ -472,7 +472,8 @@ def remote(to, func, args=None, kwargs=None):
         if should_profile:
             assert torch.autograd._profiler_enabled()
             assert rf is not None
-            rf._call_end_callbacks_on_future(rref._get_future())
+            fut = rf._call_end_callbacks_on_future(rref._get_future())
+            rref._set_profiling_future(fut)
 
     return rref
 
@@ -516,7 +517,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
             fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rpc_timeout, *args, **kwargs)
         elif isinstance(func, torch.jit.ScriptFunction):
             fut = _invoke_rpc_torchscript(
-                dst_worker_info.name, torch.jit._qualified_name(func), args, kwargs, rpc_timeout
+                dst_worker_info.name, torch.jit._qualified_name(func), rpc_timeout, *args, **kwargs,
             )
         else:
             (pickled_python_udf, tensors) = _default_pickler.serialize(
@@ -527,7 +528,11 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
             assert torch.autograd._profiler_enabled()
             assert rf is not None
             # Schedule profiling callbacks to run when the future completes.
-            rf._call_end_callbacks_on_future(fut)
+            # This returns a future that is completed when the original future
+            # completes and the profiling callbacks have been completed as well,
+            # to guarantee that fut.wait() completes the profiling. This new
+            # future will contain the same value as the original future.
+            fut = rf._call_end_callbacks_on_future(fut)
     return fut
 
 
