@@ -28,8 +28,7 @@
 // For now the search doesn't go beyond the function boundary because the
 // reference to op name string literals and c10 op registration/invocation
 // APIs are almost always in the same function. If we create helper function
-// around c10 API (e.g. the "call_unboxed_super_slow_temp_shim" method defined in aten/native), we could
-// simply add them to the regular expression used to identify c10 API.
+// around c10 API, we could simply add them to the regular expression used to identify c10 API.
 //
 // [Example]
 // In the following example, it finds out:
