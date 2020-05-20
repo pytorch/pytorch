@@ -157,9 +157,9 @@ pytorch_qnnp_compute_conv_quantization_params(
 
   union pytorch_qnnp_conv_quantization_params params;
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
+  params.sse2.kernel_zero_points = kernel_zero_points;
   for (uint32_t i = 0; i < 8; i++) {
     params.sse2.input_zero_point[i] = (int16_t)(uint16_t)input_zero_point;
-    params.sse2.kernel_zero_point[i] = (int16_t)(uint16_t)kernel_zero_points[0];
   }
   params.sse2.requantization_scale[0] = requantization_scales[0];
   params.sse2.requantization_scale[1] = requantization_scales[0];
@@ -174,7 +174,7 @@ pytorch_qnnp_compute_conv_quantization_params(
   }
 #elif CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
   params.neon.input_zero_point = (int16_t)(uint16_t)input_zero_point;
-  params.neon.kernel_zero_point = (int16_t)(uint16_t)kernel_zero_points[0];
+  params.neon.kernel_zero_points = kernel_zero_points;
   params.neon.requantization_scale = requantization_scales[0];
   params.neon.output_zero_point = (int16_t)(uint16_t)output_zero_point;
   params.neon.output_max = output_max;
@@ -188,7 +188,7 @@ pytorch_qnnp_compute_conv_quantization_params(
       (int32_t)(uint32_t)output_zero_point);
 #else
   params.scalar.input_zero_point = (int32_t)(uint32_t)input_zero_point;
-  params.scalar.kernel_zero_point = (int32_t)(uint32_t)kernel_zero_points[0];
+  params.scalar.kernel_zero_points = kernel_zero_points;
   params.scalar.requantization_scale = requantization_scales[0];
   params.scalar.output_min_less_zero_point =
       (int32_t)(uint32_t)output_min - (int32_t)(uint32_t)output_zero_point;

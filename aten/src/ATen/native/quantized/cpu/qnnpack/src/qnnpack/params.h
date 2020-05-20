@@ -128,7 +128,7 @@ union pytorch_qnnp_q31_requantization_params {
 
 union pytorch_qnnp_conv_quantization_params {
   struct {
-    int32_t kernel_zero_point;
+    const uint8_t* kernel_zero_points;
     int32_t input_zero_point;
     float requantization_scale;
     int32_t output_min_less_zero_point;
@@ -137,7 +137,7 @@ union pytorch_qnnp_conv_quantization_params {
   } scalar;
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
   struct {
-    int16_t kernel_zero_point;
+    const uint8_t* kernel_zero_points;
     int16_t input_zero_point;
     float requantization_scale;
     int16_t output_zero_point;
@@ -154,7 +154,7 @@ union pytorch_qnnp_conv_quantization_params {
 #endif /* CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64 */
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
   struct {
-    PYTORCH_QNNP_ALIGN(16) int16_t kernel_zero_point[8];
+    PYTORCH_QNNP_ALIGN(16) const uint8_t* kernel_zero_points;
     PYTORCH_QNNP_ALIGN(16) int16_t input_zero_point[8];
     PYTORCH_QNNP_ALIGN(16) float requantization_scale[4];
     PYTORCH_QNNP_ALIGN(16) int16_t output_zero_point[8];
@@ -282,6 +282,7 @@ typedef void (*pytorch_q8gemm_ukernel_function)(
     const void* w,
     uint8_t* c,
     size_t c_stride,
+    size_t output_channel_index,
     const union pytorch_qnnp_conv_quantization_params* quantization_params);
 
 /*
@@ -324,6 +325,7 @@ typedef void (*pytorch_q8conv_ukernel_function)(
     const void* w,
     uint8_t* c,
     size_t c_stride,
+    size_t output_channel_index,
     const union pytorch_qnnp_conv_quantization_params* quantization_params);
 
 typedef void (*pytorch_q8gemm_xzp_ukernel_function)(

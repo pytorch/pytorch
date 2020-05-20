@@ -268,37 +268,41 @@ std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
   // Add 8 to account for bufferring needed by QNNPACK.
   auto num_output_channels_padded = weight_contig.size(0) + 8;
   const auto qtype = weight_contig.qscheme();
-  std::vector<uint8_t> weight_zp(1, 0);
+  std::vector<uint8_t> weight_zp(num_output_channels_padded, 0);
   // Adjust weight zero point, similar to weight data.
   if (qtype == at::kPerTensorAffine) {
-    weight_zp[0] = (uint8_t)(weight_contig.q_zero_point() + 128);
+    for (int i = 0; i < num_output_channels; ++i) {
+      weight_zp[i] = (uint8_t)(weight_contig.q_zero_point() + 128);
+    }
   } else if (qtype == at::kPerChannelAffine) {
-    weight_zp.resize(num_output_channels_padded);
     for (int i = 0; i < num_output_channels; ++i) {
       weight_zp[i] =
           (uint8_t)(
               weight_contig.q_per_channel_zero_points()[i].item<int32_t>() +
               128);
     }
-    std::fill(weight_zp.begin() + num_output_channels, weight_zp.end(), 0);
   } else {
     TORCH_INTERNAL_ASSERT("Unsupported quantization scheme.");
   }
   at:: Tensor weight_scales =
-    at::empty({1}, at::device(at::kCPU).dtype(at::kFloat));
-  float* weight_scales_data;
+    at::empty(
+        {num_output_channels_padded},
+        at::device(at::kCPU).dtype(at::kFloat));
+  float* weight_scales_data = weight_scales.data_ptr<float>();
   if (qtype == at::kPerTensorAffine) {
-    weight_scales_data = weight_scales.data_ptr<float>();
-    weight_scales_data[0] = weight_contig.q_scale();
+    for (int i = 0; i < num_output_channels; ++i) {
+      weight_scales_data[i] = weight_contig.q_scale();
+    }
   } else if (qtype == at::kPerChannelAffine) {
-    weight_scales.resize_({num_output_channels_padded});
-    weight_scales_data = weight_scales.data_ptr<float>();
     for (int i = 0; i < num_output_channels; ++i) {
       weight_scales_data[i] =
         weight_contig.q_per_channel_scales()[i].item<float>();
     }
   } else {
     TORCH_INTERNAL_ASSERT("Unsupported quantization scheme.");
+  }
+  for (int i = num_output_channels; i <  num_output_channels_padded; ++i) {
+    weight_scales_data[i] = 1.f;
   }
   return {weight_zp, weight_scales};
 }

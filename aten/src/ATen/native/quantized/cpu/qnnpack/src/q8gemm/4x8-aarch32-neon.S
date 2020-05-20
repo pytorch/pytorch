@@ -11,6 +11,39 @@
 
 .syntax unified
 
+#  Args passed via 4 registers (16 bytes)
+#  r0: mr
+#  r1: nr
+#  r2: k
+#  r3: a
+#
+
+#  Args passed via stack.
+#  TOS
+#  |-----------|
+#  |a_stride   | 0
+#  |w          | 4
+#  |c          | 8
+#  |c_stride   | 12
+#  |out ch indx| 16
+#  |params     | 20
+#  |-----------|
+#  
+
+#  After loading w pointer in ip reg.
+#  And after pushing r4-r8 and d8-d15 on stack
+#  |-----------|
+#  |d8 - d15   | 0
+#  |r4 - r7    | 64
+#  |a_stride   | 80
+#  |w          | 84
+#  |c          | 88
+#  |c_stride   | 92
+#  |out ch indx| 96
+#  |params     | 100
+#  |-----------|
+#  
+
 #
 # New Struct for pytorch_qnnp_conv_quantization_params
 # kernel zp             : 0 offset
@@ -34,6 +67,7 @@
 #     const void*restrict w,
 #     uint8_t*restrict c,
 #     size_t c_stride,
+#     size_t output_channel_index,
 #     const union pytorch_qnnp_conv_quantization_params quantization_params[restrict static 1])
 BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     .arm
@@ -49,7 +83,14 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     VPUSH {d8-d15}
     # Load quantization params
     # - r7 = quantization_params
-    LDR r7, [sp, 96]
+    LDR r7, [sp, 100]
+
+    # Load output channel index
+    LDR r5, [sp, 96]
+    # Load pointer to per channel zero points array
+    LDR r4, [r7]
+    # Add offset to the base pointer
+    ADD r5, r4, r5
 
     # Load bias0123, bias4567
     VLDM ip!, {d16-d19}
@@ -63,8 +104,8 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
 
     # Load b_zero_point:
     # - d15 = b_zero_point
-    VLD1.8 {d15[]}, [r7]
-    ADD r7, r7, 2
+    VLD1.8 {d15}, [r5]
+    ADD r7, r7, 4
 
     # Load a_zero_point:
     # - d14 = a_zero_point
@@ -72,7 +113,7 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
 
     MOVLO r4, r3
 
-    ADD r7, r7, 2
+    ADD r7, r7, 4
     ADD r5, r4, r6
 
     # q10 := vacc1x0123
