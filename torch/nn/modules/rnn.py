@@ -379,7 +379,8 @@ class RNN(RNNBase):
             hidden states will be concatenated and fed as input to each
             layer, except for the first one. If set to ``False``, each hidden
             state will be processed independently and concatenated just at the
-            end of the network. Default: ``True``
+            end of the network. This option is ignored if
+            ``bidirectional = False``. Default: ``True``
 
     Inputs: input, h_0
         - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features
@@ -517,7 +518,8 @@ class LSTM(RNNBase):
             hidden states will be concatenated and fed as input to each
             layer, except for the first one. If set to ``False``, each hidden
             state will be processed independently and concatenated just at the
-            end of the network. Default: ``True``
+            end of the network. This option is ignored if
+            ``bidirectional = False``. Default: ``True``
 
     Inputs: input, (h_0, c_0)
         - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features
@@ -696,7 +698,8 @@ class GRU(RNNBase):
             hidden states will be concatenated and fed as input to each
             layer, except for the first one. If set to ``False``, each hidden
             state will be processed independently and concatenated just at the
-            end of the network. Default: ``True``
+            end of the network. This option is ignored if
+            ``bidirectional = False``. Default: ``True``
 
     Inputs: input, h_0
         - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features
