@@ -164,6 +164,15 @@ case "$image" in
     DB=yes
     VISION=tes
     ;;
+  pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9)
+    CUDA_VERSION=10.2
+    CUDNN_VERSION=7
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
   pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9)
     CUDA_VERSION=10.2
     CUDNN_VERSION=7
