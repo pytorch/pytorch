@@ -10,7 +10,7 @@
 
 #include <qnnpack/q8dwconv.h>
 
-void pytorch_q8dwconv_ukernel_mp8x25__sse2(
+void pytorch_q8dwconv_ukernel_mp8x25_per_channel__sse2(
     size_t channels,
     size_t output_width,
     const uint8_t** input,
@@ -23,8 +23,6 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         quantization_params[RESTRICT_STATIC 1]) {
   const __m128i vinput_zero_point = _mm_load_si128(
       (const __m128i*)quantization_params->sse2.input_zero_point);
-  const __m128i vkernel_zero_point = _mm_set1_epi16(
-      quantization_params->sse2.kernel_zero_points[0]);
   const __m128i vzero = _mm_setzero_si128();
 
   do {
@@ -46,6 +44,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
       for (; c >= 8; c -= 8) {
         __m128i vacc_lo = _mm_loadu_si128((const __m128i*)w);
         __m128i vacc_hi = _mm_loadu_si128((const __m128i*)((uintptr_t)w + 16));
+        const __m128i vkernel_zero_point = _mm_loadl_epi64(
+            (const __m128i*)
+            &quantization_params->sse2.kernel_zero_points[channels - c]);
 
         const __m128i vi00 = _mm_loadl_epi64((const __m128i*)i00);
         i00 += 8;
@@ -54,7 +55,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk00 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 32));
         const __m128i vxk00 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk00, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk00, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod00_odd = _mm_mullo_epi16(vxi00, vxk00);
         const __m128i vprod00_even = _mm_mulhi_epi16(vxi00, vxk00);
         vacc_lo = _mm_add_epi32(
@@ -69,7 +72,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk01 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 40));
         const __m128i vxk01 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk01, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk01, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod01_odd = _mm_mullo_epi16(vxi01, vxk01);
         const __m128i vprod01_even = _mm_mulhi_epi16(vxi01, vxk01);
         vacc_lo = _mm_add_epi32(
@@ -84,7 +89,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk02 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 48));
         const __m128i vxk02 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk02, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk02, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod02_odd = _mm_mullo_epi16(vxi02, vxk02);
         const __m128i vprod02_even = _mm_mulhi_epi16(vxi02, vxk02);
         vacc_lo = _mm_add_epi32(
@@ -99,7 +106,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk10 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 56));
         const __m128i vxk10 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk10, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk10, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod10_odd = _mm_mullo_epi16(vxi10, vxk10);
         const __m128i vprod10_even = _mm_mulhi_epi16(vxi10, vxk10);
         vacc_lo = _mm_add_epi32(
@@ -114,7 +123,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk11 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 64));
         const __m128i vxk11 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk11, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk11, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod11_odd = _mm_mullo_epi16(vxi11, vxk11);
         const __m128i vprod11_even = _mm_mulhi_epi16(vxi11, vxk11);
         vacc_lo = _mm_add_epi32(
@@ -129,7 +140,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk12 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 72));
         const __m128i vxk12 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk12, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk12, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod12_odd = _mm_mullo_epi16(vxi12, vxk12);
         const __m128i vprod12_even = _mm_mulhi_epi16(vxi12, vxk12);
         vacc_lo = _mm_add_epi32(
@@ -144,7 +157,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk20 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 80));
         const __m128i vxk20 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk20, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk20, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod20_odd = _mm_mullo_epi16(vxi20, vxk20);
         const __m128i vprod20_even = _mm_mulhi_epi16(vxi20, vxk20);
         vacc_lo = _mm_add_epi32(
@@ -159,7 +174,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk21 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 88));
         const __m128i vxk21 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk21, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk21, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod21_odd = _mm_mullo_epi16(vxi21, vxk21);
         const __m128i vprod21_even = _mm_mulhi_epi16(vxi21, vxk21);
         vacc_lo = _mm_add_epi32(
@@ -174,7 +191,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk22 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 96));
         const __m128i vxk22 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk22, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk22, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod22_odd = _mm_mullo_epi16(vxi22, vxk22);
         const __m128i vprod22_even = _mm_mulhi_epi16(vxi22, vxk22);
         vacc_lo = _mm_add_epi32(
@@ -189,7 +208,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk23 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 104));
         const __m128i vxk23 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk23, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk23, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod23_odd = _mm_mullo_epi16(vxi23, vxk23);
         const __m128i vprod23_even = _mm_mulhi_epi16(vxi23, vxk23);
         vacc_lo = _mm_add_epi32(
@@ -206,6 +227,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
       if (c != 0) {
         const size_t i_predecrement = 8 - c;
         const __m128i vi_shift = _mm_cvtsi32_si128(8 * i_predecrement);
+        const __m128i vkernel_zero_point = _mm_loadl_epi64(
+            (const __m128i*)
+            &quantization_params->sse2.kernel_zero_points[channels - c]);
         i00 -= i_predecrement;
         i01 -= i_predecrement;
         i02 -= i_predecrement;
@@ -227,7 +251,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk00 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 32));
         const __m128i vxk00 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk00, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk00, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod00_odd = _mm_mullo_epi16(vxi00, vxk00);
         const __m128i vprod00_even = _mm_mulhi_epi16(vxi00, vxk00);
         vacc_lo = _mm_add_epi32(
@@ -242,7 +268,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk01 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 40));
         const __m128i vxk01 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk01, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk01, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod01_odd = _mm_mullo_epi16(vxi01, vxk01);
         const __m128i vprod01_even = _mm_mulhi_epi16(vxi01, vxk01);
         vacc_lo = _mm_add_epi32(
@@ -257,7 +285,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk02 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 48));
         const __m128i vxk02 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk02, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk02, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod02_odd = _mm_mullo_epi16(vxi02, vxk02);
         const __m128i vprod02_even = _mm_mulhi_epi16(vxi02, vxk02);
         vacc_lo = _mm_add_epi32(
@@ -272,7 +302,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk10 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 56));
         const __m128i vxk10 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk10, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk10, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod10_odd = _mm_mullo_epi16(vxi10, vxk10);
         const __m128i vprod10_even = _mm_mulhi_epi16(vxi10, vxk10);
         vacc_lo = _mm_add_epi32(
@@ -287,7 +319,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk11 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 64));
         const __m128i vxk11 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk11, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk11, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod11_odd = _mm_mullo_epi16(vxi11, vxk11);
         const __m128i vprod11_even = _mm_mulhi_epi16(vxi11, vxk11);
         vacc_lo = _mm_add_epi32(
@@ -302,7 +336,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk12 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 72));
         const __m128i vxk12 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk12, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk12, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod12_odd = _mm_mullo_epi16(vxi12, vxk12);
         const __m128i vprod12_even = _mm_mulhi_epi16(vxi12, vxk12);
         vacc_lo = _mm_add_epi32(
@@ -317,7 +353,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk20 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 80));
         const __m128i vxk20 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk20, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk20, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod20_odd = _mm_mullo_epi16(vxi20, vxk20);
         const __m128i vprod20_even = _mm_mulhi_epi16(vxi20, vxk20);
         vacc_lo = _mm_add_epi32(
@@ -332,7 +370,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk21 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 88));
         const __m128i vxk21 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk21, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk21, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod21_odd = _mm_mullo_epi16(vxi21, vxk21);
         const __m128i vprod21_even = _mm_mulhi_epi16(vxi21, vxk21);
         vacc_lo = _mm_add_epi32(
@@ -347,7 +387,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk22 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 96));
         const __m128i vxk22 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk22, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk22, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod22_odd = _mm_mullo_epi16(vxi22, vxk22);
         const __m128i vprod22_even = _mm_mulhi_epi16(vxi22, vxk22);
         vacc_lo = _mm_add_epi32(
@@ -362,7 +404,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk23 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 104));
         const __m128i vxk23 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk23, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk23, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod23_odd = _mm_mullo_epi16(vxi23, vxk23);
         const __m128i vprod23_even = _mm_mulhi_epi16(vxi23, vxk23);
         vacc_lo = _mm_add_epi32(
@@ -393,12 +437,17 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
       size_t c = channels;
       for (; c >= 8; c -= 8) {
         const __m128i vi00 = _mm_loadl_epi64((const __m128i*)i00);
+        const __m128i vkernel_zero_point = _mm_loadl_epi64(
+            (const __m128i*)
+            &quantization_params->sse2.kernel_zero_points[channels - c]);
         i00 += 8;
         const __m128i vxi00 =
             _mm_sub_epi16(_mm_unpacklo_epi8(vi00, vzero), vinput_zero_point);
         const __m128i vk00 = _mm_loadl_epi64((const __m128i*)((uintptr_t)w));
         const __m128i vxk00 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk00, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk00, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod00_odd = _mm_mullo_epi16(vxi00, vxk00);
         const __m128i vprod00_even = _mm_mulhi_epi16(vxi00, vxk00);
         __m128i vacc_lo = _mm_unpacklo_epi16(vprod00_odd, vprod00_even);
@@ -411,7 +460,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk01 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 8));
         const __m128i vxk01 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk01, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk01, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod01_odd = _mm_mullo_epi16(vxi01, vxk01);
         const __m128i vprod01_even = _mm_mulhi_epi16(vxi01, vxk01);
         vacc_lo = _mm_add_epi32(
@@ -426,7 +477,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk02 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 16));
         const __m128i vxk02 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk02, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk02, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod02_odd = _mm_mullo_epi16(vxi02, vxk02);
         const __m128i vprod02_even = _mm_mulhi_epi16(vxi02, vxk02);
         vacc_lo = _mm_add_epi32(
@@ -441,7 +494,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk10 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 24));
         const __m128i vxk10 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk10, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk10, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod10_odd = _mm_mullo_epi16(vxi10, vxk10);
         const __m128i vprod10_even = _mm_mulhi_epi16(vxi10, vxk10);
         vacc_lo = _mm_add_epi32(
@@ -456,7 +511,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk11 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 32));
         const __m128i vxk11 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk11, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk11, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod11_odd = _mm_mullo_epi16(vxi11, vxk11);
         const __m128i vprod11_even = _mm_mulhi_epi16(vxi11, vxk11);
         vacc_lo = _mm_add_epi32(
@@ -471,7 +528,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk12 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 40));
         const __m128i vxk12 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk12, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk12, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod12_odd = _mm_mullo_epi16(vxi12, vxk12);
         const __m128i vprod12_even = _mm_mulhi_epi16(vxi12, vxk12);
         vacc_lo = _mm_add_epi32(
@@ -486,7 +545,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk20 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 48));
         const __m128i vxk20 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk20, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk20, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod20_odd = _mm_mullo_epi16(vxi20, vxk20);
         const __m128i vprod20_even = _mm_mulhi_epi16(vxi20, vxk20);
         vacc_lo = _mm_add_epi32(
@@ -501,7 +562,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk21 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 56));
         const __m128i vxk21 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk21, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk21, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod21_odd = _mm_mullo_epi16(vxi21, vxk21);
         const __m128i vprod21_even = _mm_mulhi_epi16(vxi21, vxk21);
         vacc_lo = _mm_add_epi32(
@@ -516,7 +579,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk22 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 64));
         const __m128i vxk22 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk22, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk22, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod22_odd = _mm_mullo_epi16(vxi22, vxk22);
         const __m128i vprod22_even = _mm_mulhi_epi16(vxi22, vxk22);
         vacc_lo = _mm_add_epi32(
@@ -531,7 +596,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk23 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 72));
         const __m128i vxk23 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk23, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk23, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod23_odd = _mm_mullo_epi16(vxi23, vxk23);
         const __m128i vprod23_even = _mm_mulhi_epi16(vxi23, vxk23);
         vacc_lo = _mm_add_epi32(
@@ -551,6 +618,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
       if (c != 0) {
         const size_t i_predecrement = 8 - c;
         const __m128i vi_shift = _mm_cvtsi32_si128(8 * i_predecrement);
+        const __m128i vkernel_zero_point = _mm_loadl_epi64(
+            (const __m128i*)
+            &quantization_params->sse2.kernel_zero_points[channels - c]);
         i00 -= i_predecrement;
         i01 -= i_predecrement;
         i02 -= i_predecrement;
@@ -568,7 +638,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
             _mm_sub_epi16(_mm_unpacklo_epi8(vi00, vzero), vinput_zero_point);
         const __m128i vk00 = _mm_loadl_epi64((const __m128i*)((uintptr_t)w));
         const __m128i vxk00 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk00, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk00, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod00_odd = _mm_mullo_epi16(vxi00, vxk00);
         const __m128i vprod00_even = _mm_mulhi_epi16(vxi00, vxk00);
         __m128i vacc_lo = _mm_unpacklo_epi16(vprod00_odd, vprod00_even);
@@ -581,7 +653,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk01 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 8));
         const __m128i vxk01 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk01, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk01, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod01_odd = _mm_mullo_epi16(vxi01, vxk01);
         const __m128i vprod01_even = _mm_mulhi_epi16(vxi01, vxk01);
         vacc_lo = _mm_add_epi32(
@@ -596,7 +670,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk02 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 16));
         const __m128i vxk02 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk02, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk02, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod02_odd = _mm_mullo_epi16(vxi02, vxk02);
         const __m128i vprod02_even = _mm_mulhi_epi16(vxi02, vxk02);
         vacc_lo = _mm_add_epi32(
@@ -611,7 +687,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk10 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 24));
         const __m128i vxk10 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk10, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk10, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod10_odd = _mm_mullo_epi16(vxi10, vxk10);
         const __m128i vprod10_even = _mm_mulhi_epi16(vxi10, vxk10);
         vacc_lo = _mm_add_epi32(
@@ -626,7 +704,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk11 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 32));
         const __m128i vxk11 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk11, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk11, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod11_odd = _mm_mullo_epi16(vxi11, vxk11);
         const __m128i vprod11_even = _mm_mulhi_epi16(vxi11, vxk11);
         vacc_lo = _mm_add_epi32(
@@ -641,7 +721,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk12 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 40));
         const __m128i vxk12 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk12, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk12, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod12_odd = _mm_mullo_epi16(vxi12, vxk12);
         const __m128i vprod12_even = _mm_mulhi_epi16(vxi12, vxk12);
         vacc_lo = _mm_add_epi32(
@@ -656,7 +738,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk20 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 48));
         const __m128i vxk20 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk20, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk20, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod20_odd = _mm_mullo_epi16(vxi20, vxk20);
         const __m128i vprod20_even = _mm_mulhi_epi16(vxi20, vxk20);
         vacc_lo = _mm_add_epi32(
@@ -671,7 +755,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk21 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 56));
         const __m128i vxk21 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk21, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk21, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod21_odd = _mm_mullo_epi16(vxi21, vxk21);
         const __m128i vprod21_even = _mm_mulhi_epi16(vxi21, vxk21);
         vacc_lo = _mm_add_epi32(
@@ -686,7 +772,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk22 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 64));
         const __m128i vxk22 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk22, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk22, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod22_odd = _mm_mullo_epi16(vxi22, vxk22);
         const __m128i vprod22_even = _mm_mulhi_epi16(vxi22, vxk22);
         vacc_lo = _mm_add_epi32(
@@ -701,7 +789,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk23 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 72));
         const __m128i vxk23 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk23, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk23, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod23_odd = _mm_mullo_epi16(vxi23, vxk23);
         const __m128i vprod23_even = _mm_mulhi_epi16(vxi23, vxk23);
         vacc_lo = _mm_add_epi32(
@@ -730,12 +820,17 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
       size_t c = channels;
       for (; c >= 8; c -= 8) {
         const __m128i vi00 = _mm_loadl_epi64((const __m128i*)i00);
+        const __m128i vkernel_zero_point = _mm_loadl_epi64(
+            (const __m128i*)
+            &quantization_params->sse2.kernel_zero_points[channels - c]);
         i00 += 8;
         const __m128i vxi00 =
             _mm_sub_epi16(_mm_unpacklo_epi8(vi00, vzero), vinput_zero_point);
         const __m128i vk00 = _mm_loadl_epi64((const __m128i*)((uintptr_t)w));
         const __m128i vxk00 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk00, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk00, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod00_odd = _mm_mullo_epi16(vxi00, vxk00);
         const __m128i vprod00_even = _mm_mulhi_epi16(vxi00, vxk00);
         __m128i vacc_lo = _mm_unpacklo_epi16(vprod00_odd, vprod00_even);
@@ -748,7 +843,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk01 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 8));
         const __m128i vxk01 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk01, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk01, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod01_odd = _mm_mullo_epi16(vxi01, vxk01);
         const __m128i vprod01_even = _mm_mulhi_epi16(vxi01, vxk01);
         vacc_lo = _mm_add_epi32(
@@ -763,7 +860,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk02 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 16));
         const __m128i vxk02 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk02, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk02, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod02_odd = _mm_mullo_epi16(vxi02, vxk02);
         const __m128i vprod02_even = _mm_mulhi_epi16(vxi02, vxk02);
         vacc_lo = _mm_add_epi32(
@@ -778,7 +877,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk10 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 24));
         const __m128i vxk10 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk10, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk10, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod10_odd = _mm_mullo_epi16(vxi10, vxk10);
         const __m128i vprod10_even = _mm_mulhi_epi16(vxi10, vxk10);
         vacc_lo = _mm_add_epi32(
@@ -793,7 +894,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk11 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 32));
         const __m128i vxk11 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk11, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk11, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod11_odd = _mm_mullo_epi16(vxi11, vxk11);
         const __m128i vprod11_even = _mm_mulhi_epi16(vxi11, vxk11);
         vacc_lo = _mm_add_epi32(
@@ -808,19 +911,21 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
             _mm_add_epi32(vacc_hi, _mm_loadu_si128((__m128i*)(outacc + 4)));
         outacc += 8;
 
-        const __m128 vmultiplier =
-            _mm_set1_ps(quantization_params->sse2.requantization_scales[0]);
+        const __m128 vmultiplier_lo =
+            _mm_loadu_ps(&quantization_params->sse2.requantization_scales[channels - c]);
+        const __m128 vmultiplier_hi =
+            _mm_loadu_ps(&quantization_params->sse2.requantization_scales[channels - c + 4]);
 
         vacc_lo = _mm_cvtps_epi32(
                       _mm_mul_ps(
                         _mm_cvtepi32_ps(vacc_lo),
-                        vmultiplier
+                        vmultiplier_lo
                         )
                       );
         vacc_hi = _mm_cvtps_epi32(
                       _mm_mul_ps(
                         _mm_cvtepi32_ps(vacc_hi),
-                        vmultiplier
+                        vmultiplier_hi
                         )
                       );
 
@@ -844,6 +949,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
       if (c != 0) {
         const size_t i_predecrement = 8 - c;
         const __m128i vi_shift = _mm_cvtsi32_si128(8 * i_predecrement);
+        const __m128i vkernel_zero_point = _mm_loadl_epi64(
+            (const __m128i*)
+            &quantization_params->sse2.kernel_zero_points[channels - c]);
         i00 -= i_predecrement;
         i01 -= i_predecrement;
         i02 -= i_predecrement;
@@ -856,7 +964,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
             _mm_sub_epi16(_mm_unpacklo_epi8(vi00, vzero), vinput_zero_point);
         const __m128i vk00 = _mm_loadl_epi64((const __m128i*)((uintptr_t)w));
         const __m128i vxk00 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk00, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk00, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod00_odd = _mm_mullo_epi16(vxi00, vxk00);
         const __m128i vprod00_even = _mm_mulhi_epi16(vxi00, vxk00);
         __m128i vacc_lo = _mm_unpacklo_epi16(vprod00_odd, vprod00_even);
@@ -869,7 +979,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk01 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 8));
         const __m128i vxk01 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk01, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk01, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod01_odd = _mm_mullo_epi16(vxi01, vxk01);
         const __m128i vprod01_even = _mm_mulhi_epi16(vxi01, vxk01);
         vacc_lo = _mm_add_epi32(
@@ -884,7 +996,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk02 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 16));
         const __m128i vxk02 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk02, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk02, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod02_odd = _mm_mullo_epi16(vxi02, vxk02);
         const __m128i vprod02_even = _mm_mulhi_epi16(vxi02, vxk02);
         vacc_lo = _mm_add_epi32(
@@ -899,7 +1013,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk10 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 24));
         const __m128i vxk10 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk10, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk10, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod10_odd = _mm_mullo_epi16(vxi10, vxk10);
         const __m128i vprod10_even = _mm_mulhi_epi16(vxi10, vxk10);
         vacc_lo = _mm_add_epi32(
@@ -914,7 +1030,9 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         const __m128i vk11 =
             _mm_loadl_epi64((const __m128i*)((uintptr_t)w + 32));
         const __m128i vxk11 =
-            _mm_sub_epi16(_mm_unpacklo_epi8(vk11, vzero), vkernel_zero_point);
+            _mm_sub_epi16(
+                _mm_unpacklo_epi8(vk11, vzero),
+                _mm_unpacklo_epi8(vkernel_zero_point, vzero));
         const __m128i vprod11_odd = _mm_mullo_epi16(vxi11, vxk11);
         const __m128i vprod11_even = _mm_mulhi_epi16(vxi11, vxk11);
         vacc_lo = _mm_add_epi32(
@@ -927,19 +1045,21 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
             _mm_add_epi32(vacc_hi, _mm_loadu_si128((__m128i*)(outacc + 4)));
         outacc += 8;
 
-        const __m128 vmultiplier =
-            _mm_set1_ps(quantization_params->sse2.requantization_scales[0]);
+        const __m128 vmultiplier_lo =
+            _mm_loadu_ps(&quantization_params->sse2.requantization_scales[channels - c]);
+        const __m128 vmultiplier_hi =
+            _mm_loadu_ps(&quantization_params->sse2.requantization_scales[channels - c + 4]);
 
         vacc_lo = _mm_cvtps_epi32(
                       _mm_mul_ps(
                         _mm_cvtepi32_ps(vacc_lo),
-                        vmultiplier
+                        vmultiplier_lo
                         )
                       );
         vacc_hi = _mm_cvtps_epi32(
                       _mm_mul_ps(
                         _mm_cvtepi32_ps(vacc_hi),
-                        vmultiplier
+                        vmultiplier_hi
                         )
                       );
 
