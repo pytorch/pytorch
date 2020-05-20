@@ -83,11 +83,11 @@ static void min_kernel_impl(
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
-        using value_t = typename ztype<scalar_t>::value_t;
+        using value_t = typename c10::scalar_value_type<scalar_t>::type;
         value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
         scalar_t min_number = self_data[0];
         int64_t index = 0;
@@ -117,11 +117,11 @@ static void max_kernel_impl(
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
-        using value_t = typename ztype<scalar_t>::value_t;
+        using value_t = typename c10::scalar_value_type<scalar_t>::type;
         value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
         scalar_t max_number = self_data[0];
         int64_t index = 0;
