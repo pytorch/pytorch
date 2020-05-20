@@ -284,7 +284,7 @@ struct Vec256<c10::qint32> : public Vec256qi {
       return retval;
     }
 
-    Vec256<c10::qint32> maximum(Vec256<c10::qint32> b) const {
+    Vec256<c10::qint32> maximum(const Vec256<c10::qint32>& b) const {
 #ifdef CPU_CAPABILITY_AVX2
       return _mm256_max_epi32(vals, b.vals);
 #else
@@ -302,7 +302,7 @@ struct Vec256<c10::qint32> : public Vec256qi {
 #endif
     }
 
-    Vec256<c10::qint32> minimum(Vec256<c10::qint32> b) const {
+    Vec256<c10::qint32> minimum(const Vec256<c10::qint32>& b) const {
 #ifdef CPU_CAPABILITY_AVX2
       return _mm256_min_epi32(vals, b.vals);
 #else
@@ -320,13 +320,13 @@ struct Vec256<c10::qint32> : public Vec256qi {
 #endif
     }
 
-    Vec256<c10::qint32> relu(Vec256<c10::qint32> zero_point) const {
+    Vec256<c10::qint32> relu(const Vec256<c10::qint32>& zero_point) const {
         return maximum(zero_point);
     }
 
     Vec256<c10::qint32> relu6(
-        Vec256<c10::qint32> zero_point,
-        Vec256<c10::qint32> q_six) {
+        const Vec256<c10::qint32>& zero_point,
+        const Vec256<c10::qint32>& q_six) {
 #ifdef CPU_CAPABILITY_AVX2
       return _mm256_min_epi32(
           _mm256_max_epi32(vals, zero_point.vals), q_six.vals);
@@ -348,7 +348,7 @@ struct Vec256<c10::qint32> : public Vec256qi {
 #endif
     }
 
-    int_vec_return_type widening_subtract(Vec256<c10::qint32> b) const {
+    int_vec_return_type widening_subtract(const Vec256<c10::qint32>& b) const {
 #ifdef CPU_CAPABILITY_AVX2
       return {_mm256_sub_epi32(vals, b)};
 #else
@@ -608,7 +608,7 @@ struct Vec256<c10::qint8> : public Vec256qi {
     return Vec256<c10::qint8>::loadu(quantized_values);
   }
 
-  Vec256<c10::qint8> maximum(Vec256<c10::qint8> b) const {
+  Vec256<c10::qint8> maximum(const Vec256<c10::qint8>& b) const {
 #ifdef CPU_CAPABILITY_AVX2
       return _mm256_max_epi8(vals, b.vals);
 #else
@@ -626,7 +626,7 @@ struct Vec256<c10::qint8> : public Vec256qi {
 #endif
     }
 
-  Vec256<c10::qint8> minimum(Vec256<c10::qint8> b) const {
+  Vec256<c10::qint8> minimum(const Vec256<c10::qint8>& b) const {
 #ifdef CPU_CAPABILITY_AVX2
       return _mm256_min_epi8(vals, b.vals);
 #else
@@ -644,13 +644,13 @@ struct Vec256<c10::qint8> : public Vec256qi {
 #endif
     }
 
-    Vec256<c10::qint8> relu(Vec256<c10::qint8> zero_point) const {
+    Vec256<c10::qint8> relu(const Vec256<c10::qint8>& zero_point) const {
         return maximum(zero_point);
     }
 
     Vec256<c10::qint8> relu6(
-        Vec256<c10::qint8> zero_point,
-        Vec256<c10::qint8> q_six) {
+        const Vec256<c10::qint8>& zero_point,
+        const Vec256<c10::qint8>& q_six) {
 #ifdef CPU_CAPABILITY_AVX2
       return _mm256_min_epi8(
           _mm256_max_epi8(vals, zero_point.vals), q_six.vals);
@@ -672,7 +672,7 @@ struct Vec256<c10::qint8> : public Vec256qi {
 #endif
     }
 
-    int_vec_return_type widening_subtract(Vec256<c10::qint8> b) const {
+    int_vec_return_type widening_subtract(const Vec256<c10::qint8>& b) const {
 #ifdef CPU_CAPABILITY_AVX2
       __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
       __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
@@ -883,7 +883,7 @@ struct Vec256<c10::quint8> : public Vec256qi {
     return Vec256<c10::quint8>::loadu(quantized_values);
   }
 
-  Vec256<c10::quint8> maximum(Vec256<c10::quint8> b) const {
+  Vec256<c10::quint8> maximum(const Vec256<c10::quint8>& b) const {
 #ifdef CPU_CAPABILITY_AVX2
       return _mm256_max_epu8(vals, b.vals);
 #else
@@ -901,7 +901,7 @@ struct Vec256<c10::quint8> : public Vec256qi {
 #endif
     }
 
-  Vec256<c10::quint8> minimum(Vec256<c10::quint8> b) const {
+  Vec256<c10::quint8> minimum(const Vec256<c10::quint8>& b) const {
 #ifdef CPU_CAPABILITY_AVX2
       return _mm256_min_epu8(vals, b.vals);
 #else
@@ -919,13 +919,13 @@ struct Vec256<c10::quint8> : public Vec256qi {
 #endif
     }
 
-    Vec256<c10::quint8> relu(Vec256<c10::quint8> zero_point) const {
+    Vec256<c10::quint8> relu(const Vec256<c10::quint8>& zero_point) const {
         return maximum(zero_point);
     }
 
     Vec256<c10::quint8> relu6(
-        Vec256<c10::quint8> zero_point,
-        Vec256<c10::quint8> q_six) {
+        const Vec256<c10::quint8>& zero_point,
+        const Vec256<c10::quint8>& q_six) {
 #ifdef CPU_CAPABILITY_AVX2
       return _mm256_min_epu8(
           _mm256_max_epu8(vals, zero_point.vals), q_six.vals);
@@ -947,7 +947,7 @@ struct Vec256<c10::quint8> : public Vec256qi {
 #endif
     }
 
-    int_vec_return_type widening_subtract(Vec256<c10::quint8> b) const {
+    int_vec_return_type widening_subtract(const Vec256<c10::quint8>& b) const {
 #ifdef CPU_CAPABILITY_AVX2
       __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
       __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
@@ -1171,7 +1171,7 @@ struct Vec256<c10::qint32> : public Vec256QuantizedConverter<
     return Vec256<c10::qint32>::loadu(qvals.data());
   }
 
-  Vec256<c10::qint32> maximum(Vec256<c10::qint32> b) const {
+  Vec256<c10::qint32> maximum(const Vec256<c10::qint32>& b) const {
     Vec256<c10::qint32> retval;
     for (size_t i = 0; i < size(); ++i) {
       retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
@@ -1179,7 +1179,7 @@ struct Vec256<c10::qint32> : public Vec256QuantizedConverter<
     return retval;
   }
 
-  Vec256<c10::qint32> minimum(Vec256<c10::qint32> b) const {
+  Vec256<c10::qint32> minimum(const Vec256<c10::qint32>& b) const {
     Vec256<c10::qint32> retval;
     for (size_t i = 0; i < size(); ++i) {
       retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
@@ -1187,14 +1187,14 @@ struct Vec256<c10::qint32> : public Vec256QuantizedConverter<
     return retval;
   }
 
-  Vec256<c10::qint32> relu(Vec256<c10::qint32> zero_point) const  {
+  Vec256<c10::qint32> relu(const Vec256<c10::qint32>& zero_point) const  {
     return maximum(zero_point);
   }
 
 
   Vec256<c10::qint32> relu6(
-      Vec256<c10::qint32> zero_point,
-      Vec256<c10::qint32> q_six) {
+      const Vec256<c10::qint32>& zero_point,
+      const Vec256<c10::qint32>& q_six) {
     Vec256<c10::qint32> retval;
     for (size_t i = 0; i < size(); ++i) {
       retval.vals[i] = std::min<value_type>(
@@ -1203,7 +1203,7 @@ struct Vec256<c10::qint32> : public Vec256QuantizedConverter<
     return retval;
   }
 
-  int_vec_return_type widening_subtract(Vec256<c10::qint32> b) const {
+  int_vec_return_type widening_subtract(const Vec256<c10::qint32>& b) const {
     int_vec_return_type retval;
     for (size_t i = 0; i < size(); ++i) {
       retval[0].vals[i] = vals[i] - b.vals[i];
@@ -1303,7 +1303,7 @@ struct Vec256<c10::qint8> : public Vec256QuantizedConverter<
     return Vec256<c10::qint8>::loadu(qvals.data());
   }
 
-  Vec256<c10::qint8> maximum(Vec256<c10::qint8> b) const {
+  Vec256<c10::qint8> maximum(const Vec256<c10::qint8>& b) const {
     Vec256<c10::qint8> retval;
     for (size_t i = 0; i < size(); ++i) {
       retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
@@ -1311,7 +1311,7 @@ struct Vec256<c10::qint8> : public Vec256QuantizedConverter<
     return retval;
   }
 
-  Vec256<c10::qint8> minimum(Vec256<c10::qint8> b) const {
+  Vec256<c10::qint8> minimum(const Vec256<c10::qint8>& b) const {
     Vec256<c10::qint8> retval;
     for (size_t i = 0; i < size(); ++i) {
       retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
@@ -1319,13 +1319,13 @@ struct Vec256<c10::qint8> : public Vec256QuantizedConverter<
     return retval;
   }
 
-  Vec256<c10::qint8> relu(Vec256<c10::qint8> zero_point) const {
+  Vec256<c10::qint8> relu(const Vec256<c10::qint8>& zero_point) const {
     return maximum(zero_point);
   }
 
   Vec256<c10::qint8> relu6(
-      Vec256<c10::qint8> zero_point,
-      Vec256<c10::qint8> q_six) {
+      const Vec256<c10::qint8>& zero_point,
+      const Vec256<c10::qint8>& q_six) {
     Vec256<c10::qint8> retval;
     for (size_t i = 0; i < size(); ++i) {
       retval.vals[i] = std::min<value_type>(
@@ -1334,7 +1334,7 @@ struct Vec256<c10::qint8> : public Vec256QuantizedConverter<
     return retval;
   }
 
-  int_vec_return_type widening_subtract(Vec256<c10::qint8> b) const {
+  int_vec_return_type widening_subtract(const Vec256<c10::qint8>& b) const {
     int_vec_return_type retval;
     constexpr int elem_per_int_vec = size() / int_num_vecs();
     for (size_t i = 0; i < int_num_vecs(); ++i) {
@@ -1423,7 +1423,7 @@ struct Vec256<c10::quint8> : public Vec256QuantizedConverter<
     return Vec256<c10::quint8>::loadu(qvals.data());
   }
 
-  Vec256<c10::quint8> maximum(Vec256<c10::quint8> b) const {
+  Vec256<c10::quint8> maximum(const Vec256<c10::quint8>& b) const {
     Vec256<c10::quint8> retval;
     for (size_t i = 0; i < size(); ++i) {
       retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
@@ -1431,7 +1431,7 @@ struct Vec256<c10::quint8> : public Vec256QuantizedConverter<
     return retval;
   }
 
-  Vec256<c10::quint8> minimum(Vec256<c10::quint8> b) const {
+  Vec256<c10::quint8> minimum(const Vec256<c10::quint8>& b) const {
     Vec256<c10::quint8> retval;
     for (size_t i = 0; i < size(); ++i) {
       retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
@@ -1439,14 +1439,14 @@ struct Vec256<c10::quint8> : public Vec256QuantizedConverter<
     return retval;
   }
 
-  Vec256<c10::quint8> relu(Vec256<c10::quint8> zero_point) const {
+  Vec256<c10::quint8> relu(const Vec256<c10::quint8>& zero_point) const {
     return maximum(zero_point);
   }
 
 
   Vec256<c10::quint8> relu6(
-      Vec256<c10::quint8> zero_point,
-      Vec256<c10::quint8> q_six) {
+      const Vec256<c10::quint8>& zero_point,
+      const Vec256<c10::quint8>& q_six) {
     Vec256<c10::quint8> retval;
     for (size_t i = 0; i < size(); ++i) {
       retval.vals[i] = std::min<value_type>(
@@ -1455,7 +1455,7 @@ struct Vec256<c10::quint8> : public Vec256QuantizedConverter<
     return retval;
   }
 
-  int_vec_return_type widening_subtract(Vec256<c10::quint8> b) const {
+  int_vec_return_type widening_subtract(const Vec256<c10::quint8>& b) const {
     int_vec_return_type retval;
     constexpr int elem_per_int_vec = size() / int_num_vecs();
     for (size_t i = 0; i < int_num_vecs(); ++i) {
