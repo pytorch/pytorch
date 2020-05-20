@@ -21,7 +21,7 @@ namespace at {
 // non-wildcard
 struct CAFFE2_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
   // This enum is to remind people that the invariant on constructors is that
-  // the list of dimnames must have at least one non-wilddcard
+  // the list of dimnames must have at least one non-wildcard
   enum HAS_NON_WILDCARD {
     HasNonWildcard
   };
@@ -47,8 +47,7 @@ struct CAFFE2_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
   }
 
   void check_invariants() const {
-    // TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-    TORCH_INTERNAL_ASSERT(
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       std::any_of(names_.begin(), names_.end(), [](const Dimname& n) { return !n.isWildcard(); }));
   }
 
