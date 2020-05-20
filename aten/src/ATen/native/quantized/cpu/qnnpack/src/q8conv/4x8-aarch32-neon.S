@@ -77,8 +77,16 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     LDR r5, [sp, 112]
     # Load pointer to per channel zero points array
     LDR r4, [r9], 4
+    # Byte offset of output channel index for requant scale.
+    LSL r6, r5, 2
+    # Load pointer to per channel requant scale
+    # Register offset, load r9+4
+    LDR r11, [r9, 4]
     # Add offset to the base pointer
     ADD r5, r4, r5
+
+    # Store in r11 pointer from where to load requant scale.
+    ADD r11, r11, r6
 
     # q10 := vacc1x0123
     VMOV.I32 q10, q8
@@ -100,14 +108,10 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     # Load a_zero_point:
     # - d14 = a_zero_point
     VLD1.8 {d14[]}, [r9]
-    ADD r9, r9, 4
+    # add 12 bytes to get to vfmax
+    ADD r9, r9, 12
     # q15 := vacc3x4567
     VMOV.I32 q15, q9
-    # Load multiplier:
-    # - d12 = vmultiplier
-    VLD1.32 {d12[]}, [r9]!
-    # add 4 bytes to get to vfmax
-    ADD r9, r9, 4
 
     .p2align 5
 0:
@@ -680,8 +684,12 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     SUBS r3, r3, 1
     BNE 0b
 
+    # Load requantization_scale:
+    # - d12 = requantization_scale
+    VLD1.32 {d12, d13}, [r11]!
     # Load vfmax:
     VLD1.32 {d10[], d11[]}, [r9]!
+    VLD1.32 {d4, d5}, [r11]
     # Load vfmin:
     VLD1.32 {d8[], d9[]}, [r9]!
     # Load vfmagic:
@@ -698,14 +706,14 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     VCVT.F32.S32 q14, q14
     VCVT.F32.S32 q15, q15
 
-    VMUL.F32 q8, q8, d12[0]
-    VMUL.F32 q9, q9, d12[0]
-    VMUL.F32 q10, q10, d12[0]
-    VMUL.F32 q11, q11, d12[0]
-    VMUL.F32 q12, q12, d12[0]
-    VMUL.F32 q13, q13, d12[0]
-    VMUL.F32 q14, q14, d12[0]
-    VMUL.F32 q15, q15, d12[0]
+    VMUL.F32 q8, q8, q6
+    VMUL.F32 q9, q9, q2
+    VMUL.F32 q10, q10, q6
+    VMUL.F32 q11, q11, q2
+    VMUL.F32 q12, q12, q6
+    VMUL.F32 q13, q13, q2
+    VMUL.F32 q14, q14, q6
+    VMUL.F32 q15, q15, q2
 
     VMIN.F32 q8, q8, q5
     VMIN.F32 q9, q9, q5

@@ -77,6 +77,7 @@ static void convolution_q8(benchmark::State& state, const char* net) {
   std::vector<uint8_t> kernel_zero_points(num_zero_points_padded, 127);
   std::vector<float> requantization_scale(
       num_zero_points_padded, 0.5 * 0.5 / 0.5);
+  bool per_channel{false};
   status = pytorch_qnnp_create_convolution2d_nhwc_q8(
       paddingTop,
       paddingRight,
@@ -100,6 +101,7 @@ static void convolution_q8(benchmark::State& state, const char* net) {
       255,
       0 /* flags */,
       requantization_scale.data(),
+      per_channel,
       &convolutionObject);
   if (status != pytorch_qnnp_status_success) {
     state.SkipWithError("failed to create Convolution operator");

@@ -98,6 +98,9 @@ class Q8GEMM : public benchmark::Fixture {
         kcStride() * ncStride() +
         ncStride() * sizeof(int32_t) / sizeof(uint8_t));
     std::fill(w_.begin(), w_.end(), 127);
+    size_t num_zero_points_kernel = (nc_ + (nr_ -1)) & -nr_;
+    std::vector<uint8_t> kernel_zero_points(num_zero_points_kernel, 127);
+    std::vector<float> requantization_scales(num_zero_points_kernel, 0.75f);
     pytorch_pack_q8gemm_w(
         nc(),
         kc(),
@@ -110,17 +113,16 @@ class Q8GEMM : public benchmark::Fixture {
 #endif
         k(),
         b(),
+#if PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
+        kernel_zero_points.data(),
+#endif
         w());
     c_.resize(mc() * nc());
     std::fill(c_.begin(), c_.end(), 0xA5);
 
-    // Assuming nr_ is power of 2.
-    size_t num_zero_points_kernel = (nc_ + (nr_ -1)) & -nr_;
-    std::vector<uint8_t> kernel_zero_points(num_zero_points_kernel, 127);
-    std::vector<float> requantization_scale(num_zero_points_kernel, 0.75f);
     quantizationParams_ = pytorch_qnnp_compute_conv_quantization_params(
         127, kernel_zero_points.data(),
-        requantization_scale.data(), 127, 1, 254);
+        requantization_scales.data(), 127, 1, 254);
   }
 
   virtual void TearDown(benchmark::State& state) override {

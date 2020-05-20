@@ -37,28 +37,31 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     STR r0, [sp, #-8]
     STR r3, [sp, #-4]
 
+    # Load the address zero_point array.
+    # For depth wise kernels the array is of single element.
+    LDR r5, [r12], 4
+
     # Load o:
     # - lr = o = output
     LDR lr, [sp, 100]
 
     # Load kernel zero point:
     # - d31 = vkernel_zero_point
-    # Load the address zero_point array.
-    # For depth wise kernels the array is of single element.
-    LDR r5, [r12], 4
     VLD1.8 {d31[]}, [r5]
-    # Advance r12 by 4 since the first element is a pointer
 
     # Load input zero point:
     # - d30 = vinput_zero_point
     VLD1.8 {d30[]}, [r12]
-    ADD r12, r12, 4
+    # Load the address requantization_scale array.
+    # For depth wise kernels the array is of single element.
+    # pre-index r12 = r12 + 4
+    LDR r5, [r12, 4]!
 
+    # add 8 bytes to get to vfmax
+    ADD r12, r12, 8
     # Load requantization_scale:
     # - q14 = d28:d29 = requantization_scale
-    VLD1.32 {d28[], d29[]}, [r12]!
-    # add 4 bytes to get to vfmax
-    ADD r12, r12, 4
+    VLD1.32 {d28[], d29[]}, [r5]
 
     # Load vfmax:
     # - q13 = d26:d27 = vfmax

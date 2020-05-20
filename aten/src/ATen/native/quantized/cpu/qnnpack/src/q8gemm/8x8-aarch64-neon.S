@@ -40,6 +40,8 @@
 #     const union pytorch_qnnp_conv_quantization_params quantization_params[restrict static 1])
 BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
 
+    # https://developer.arm.com/docs/ihi0055/d/procedure-call-standard-for-the-arm-64-bit-architecture
+    # Callee need to save 8-15 vector registers and only the lower 64 bits of each.
     STP d15, d14, [sp, -16]
     STP d13, d12, [sp, -32]
     STP d11, d10, [sp, -48]
@@ -55,6 +57,8 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     LDR x17, [x8]
     # Add offset to the base pointer
     ADD x17, x17, x16
+    # Mul by 4 to get byte offset for requant scale.
+    LSL x16, x16, 2
 
     # Load b_zero_point
     LD1 {v25.8b}, [x17]
@@ -62,7 +66,9 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     ADD x8, x8, 8
     # Load a_zero_point
     LD1R {v24.8b}, [x8]
-    ADD x8, x8, 4
+    # Load pointer to per channel requant scale
+    LDR x17, [x8, 8]!
+    ADD x8, x8, 8
 
     # v10 := vacc1x0123
     MOV v10.16b, v8.16b
@@ -99,9 +105,12 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     # v23 := vacc7x4567
     MOV v23.16b, v9.16b
 
+    # Add offset to the base pointer
+    ADD x17, x17, x16
     // Load requantization_scale
-    // - v26 = requantization_scale 
-    LD1R {v26.4s}, [x8], 4
+    // - v26 = requantization_scale channels 0-3
+    // - v27 = requantization_scale channels 4-7
+    LD1 {v26.4s}, [x17], 16
 
     # a1
     CMP x0, 2
@@ -550,6 +559,8 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     .p2align 4
 #endif
 2:
+    # Load requant scale for channels 4-7
+    LD1 {v27.4s}, [x17]
     // Load zero_point:
     // - v29 = vzero_point
     LD1R {v29.8h}, [x8], 2
@@ -581,22 +592,22 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
     SCVTF v23.4s, v23.4s
 
     FMUL v8.4s, v8.4s, v26.4s
-    FMUL v9.4s, v9.4s, v26.4s
+    FMUL v9.4s, v9.4s, v27.4s
     FMUL v10.4s, v10.4s, v26.4s
-    FMUL v11.4s, v11.4s, v26.4s
+    FMUL v11.4s, v11.4s, v27.4s
     FMUL v12.4s, v12.4s, v26.4s
-    FMUL v13.4s, v13.4s, v26.4s
+    FMUL v13.4s, v13.4s, v27.4s
     FMUL v14.4s, v14.4s, v26.4s
-    FMUL v15.4s, v15.4s, v26.4s
+    FMUL v15.4s, v15.4s, v27.4s
 
     FMUL v16.4s, v16.4s, v26.4s
-    FMUL v17.4s, v17.4s, v26.4s
+    FMUL v17.4s, v17.4s, v27.4s
     FMUL v18.4s, v18.4s, v26.4s
-    FMUL v19.4s, v19.4s, v26.4s
+    FMUL v19.4s, v19.4s, v27.4s
     FMUL v20.4s, v20.4s, v26.4s
-    FMUL v21.4s, v21.4s, v26.4s
+    FMUL v21.4s, v21.4s, v27.4s
     FMUL v22.4s, v22.4s, v26.4s
-    FMUL v23.4s, v23.4s, v26.4s
+    FMUL v23.4s, v23.4s, v27.4s
 
     FCVTNS v8.4s, v8.4s
     FCVTNS v9.4s, v9.4s

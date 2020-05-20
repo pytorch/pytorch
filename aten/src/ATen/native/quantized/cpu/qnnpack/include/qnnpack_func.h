@@ -41,8 +41,21 @@ class PackBMatrix final {
   PackBMatrix(
       size_t input_channels,
       size_t output_channels,
-      uint8_t kernel_zero_point,
-      float requantization_scale,
+      const uint8_t* kernel_zero_points,
+      const float* requantization_scale,
+      const uint8_t* kernel,
+      const int32_t* bias);
+
+  // This constructor is to be used for dynamic mode
+  // quantization. In dynamic mode, we dont yet support
+  // per channel quantization, and paying the cost of
+  // memory allocation for per channel zero point and
+  // requant scale will hurt performance.
+  PackBMatrix(
+      size_t input_channels,
+      size_t output_channels,
+      const uint8_t kernel_zero_point,
+      const float requantization_scale,
       const uint8_t* kernel,
       const int32_t* bias);
 
