@@ -82,6 +82,15 @@ class FullyConnectedOperatorTester {
     }
   }
 
+  inline FullyConnectedOperatorTester& per_channel(bool per_channel) {
+    this->per_channel_ = per_channel;
+    return *this;
+  }
+
+  inline bool per_channel() const {
+    return this->per_channel_;
+  }
+
   inline FullyConnectedOperatorTester& qmin(uint8_t qmin) {
     this->qmin_ = qmin;
     return *this;
@@ -144,7 +153,9 @@ class FullyConnectedOperatorTester {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
       std::generate(kernel.begin(), kernel.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
-      std::generate(kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
+      if (per_channel()) {
+        std::generate(kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
+      }
       std::fill(output.begin(), output.end(), 0xA5);
       std::fill(output_dynamic.begin(), output_dynamic.end(), 0.0f);
       std::fill(accumulators.begin(), accumulators.end(), 0);
@@ -189,12 +200,15 @@ class FullyConnectedOperatorTester {
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
       // 1 bcz input_scale and kernel_scale are both 1.
-      std::vector<float> requantization_scales(num_zero_points_padded);
-      auto scale_generator = [&]() -> float {return (f32rng()/outputScale);};
-      std::generate(
-          requantization_scales.begin(),
-          requantization_scales.end(),
-          std::ref(scale_generator));
+      std::vector<float>
+        requantization_scales(num_zero_points_padded, 1.0 * 1.0 / outputScale);
+      if (per_channel()) {
+        auto scale_generator = [&]() -> float {return (f32rng()/outputScale);};
+        std::generate(
+            requantization_scales.begin(),
+            requantization_scales.end(),
+            std::ref(scale_generator));
+      }
 
       switch(mode) {
         case Mode::Static:
@@ -372,4 +386,5 @@ class FullyConnectedOperatorTester {
   uint8_t qmin_{0};
   uint8_t qmax_{255};
   size_t iterations_{1};
+  bool per_channel_{false};
 };
