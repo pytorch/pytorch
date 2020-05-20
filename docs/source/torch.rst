@@ -124,10 +124,6 @@ Random sampling
     get_rng_state
     set_rng_state
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
     bernoulli
     multinomial
     normal
