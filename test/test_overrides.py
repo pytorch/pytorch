@@ -521,12 +521,6 @@ class TestEinsumOverride(TestCase):
         self.assertTrue(torch.allclose(torch.einsum('ik,jkl,il->ij', [a, b, c]),
                                        torch.nn.functional.bilinear(a, c, b)))
 
-        # `equation` input is wrapped
-        As = Wrapper(torch.randn(3, 2, 5))
-        Bs = Wrapper(torch.randn(3, 5, 4))
-        equation = Wrapper('bij,bjk->bik')
-        self.assertTrue(torch.allclose(torch.einsum(equation, As, Bs),
-                                       torch.matmul(As, Bs)))
 
 if __name__ == '__main__':
     unittest.main()
