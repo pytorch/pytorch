@@ -20,7 +20,7 @@ def script_qconfig(qconfig):
 def script_qconfig_dict(qconfig_dict):
     return {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
 
-def _prepare_script(model, qconfig_dict, is_dynamic):
+def _prepare_script(model, qconfig_dict, inplace=False, is_dynamic=False):
     _check_is_script_module(model)
     _check_forward_method(model)
     if not all(isinstance(x, str) for x in qconfig_dict.keys()):
@@ -31,28 +31,26 @@ def _prepare_script(model, qconfig_dict, is_dynamic):
     return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                'forward',
                                                                scripted_qconfig_dict,
-                                                               False,
+                                                               inplace,
                                                                is_dynamic))
 
 def prepare_script(model, qconfig_dict, inplace=False):
-    if not inplace:
-        model = model.copy()
-    return _prepare_script(model, qconfig_dict, is_dynamic=False)
+    assert not inplace, "The inplace support is still in development"
+    return _prepare_script(model, qconfig_dict, inplace, is_dynamic=False)
 
-def prepare_dynamic_script(model, qconfig_dict):
-    return _prepare_script(model, qconfig_dict, is_dynamic=True)
+def prepare_dynamic_script(model, qconfig_dict, inplace=False):
+    assert not inplace, "The inplace support is still in development"
+    return _prepare_script(model, qconfig_dict, inplace, is_dynamic=True)
 
 def _convert_script(model, is_dynamic, debug=False):
     _check_is_script_module(model)
     model.eval()
-    model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', False, is_dynamic))
+    model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', is_dynamic))
     if not debug:
         model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c, is_dynamic))
     return model
 
-def convert_script(model, inplace=False, debug=False):
-    if not inplace:
-        model = model.copy()
+def convert_script(model, debug=False):
     return _convert_script(model, is_dynamic=False, debug=debug)
 
 def convert_dynamic_script(model, debug=False):
