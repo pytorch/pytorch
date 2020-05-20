@@ -4,9 +4,10 @@ import torch
 import torch.cuda.nccl as nccl
 import torch.cuda
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS, load_tests
+from torch.testing._internal.common_utils import (TestCase, run_tests,
+                                                  IS_WINDOWS, load_tests,
+                                                  TEST_WITH_ROCM)
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
-from torch.testing._internal.common_device_type import skipCUDAIfRocm
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -18,15 +19,16 @@ if not TEST_CUDA:
     TestCase = object  # noqa: F811
 
 
-@skipCUDAIfRocm
 class TestNCCL(TestCase):
 
+    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     def test_unique_id(self):
         uid = nccl.unique_id()
         self.assertIsInstance(uid, bytes)
         self.assertGreater(len(uid), 1)
 
+    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_broadcast(self):
@@ -40,6 +42,7 @@ class TestNCCL(TestCase):
         for i in range(torch.cuda.device_count()):
             self.assertEqual(tensors[i], expected)
 
+    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_reduce(self):
@@ -53,6 +56,7 @@ class TestNCCL(TestCase):
 
         self.assertEqual(tensors[0], expected)
 
+    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_all_reduce(self):
@@ -67,6 +71,7 @@ class TestNCCL(TestCase):
         for tensor in tensors:
             self.assertEqual(tensor, expected)
 
+    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_all_gather(self):
@@ -81,6 +86,7 @@ class TestNCCL(TestCase):
         for tensor in outputs:
             self.assertEqual(tensor, expected)
 
+    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_reduce_scatter(self):
