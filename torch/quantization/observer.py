@@ -66,14 +66,6 @@ class ObserverBase(ABC, nn.Module):
     def calculate_qparams(self, **kwargs):
         pass
 
-    # Returns all quantization parameters that's needed
-    # for a quantize function call
-    # For instance, per channel obsserver will return
-    # scales, zero_points and axis
-    @abstractmethod
-    def get_qparams(self, **kwargs):
-        pass
-
     with_args = classmethod(_with_args)
 
 
@@ -194,10 +186,6 @@ class _ObserverBase(ObserverBase):
 
         return scale, zero_point
 
-    @torch.jit.export
-    def get_qparams(self):
-        r"""Get all quantization parameters needed for quantize call"""
-        return self.calculate_qparams()
 
 class MinMaxObserver(_ObserverBase):
     r"""Observer module for computing the quantization parameters based on the
@@ -545,11 +533,6 @@ class PerChannelMinMaxObserver(_ObserverBase):
     @torch.jit.export
     def calculate_qparams(self):
         return self._calculate_qparams(self.min_vals, self.max_vals)
-
-    @torch.jit.export
-    def get_qparams(self):
-        scales, zero_points = self.calculate_qparams()
-        return scales, zero_points, self.ch_axis
 
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
@@ -966,11 +949,9 @@ class NoopObserver(ObserverBase):
     def forward(self, x):
         return x
 
+    @torch.jit.export
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
-
-    def get_qparams(self):
-        return self.calculate_qparams()
 
 
 # Restrict activations to be in the range (0,127)
