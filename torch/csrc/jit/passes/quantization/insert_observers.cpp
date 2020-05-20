@@ -124,7 +124,8 @@ class ModuleCloneHelper {
       s = inplace ? s : s.deepcopy(memo);
       if (type->getAttribute(i)->is_module()) {
         const Module& orig = Module(s.toObject());
-        Module cloned = clone_impl(orig, module_qconfig_map, type_remap, inplace, memo);
+        Module cloned =
+            clone_impl(orig, module_qconfig_map, type_remap, inplace, memo);
         r.register_module(type->getAttributeName(i), cloned);
       } else {
         r.register_attribute(
@@ -346,10 +347,10 @@ class InsertObserversHelper {
       std::unordered_set<Value*>& block_observed_values);
 
   bool shouldPropagateQuant(
-      Node* n, const std::unordered_set<Value*>& block_observed_values) {
+      Node* n,
+      const std::unordered_set<Value*>& block_observed_values) {
     return isObserved(n->input(0), block_observed_values);
   }
-
 
   void delayObservingValuesInPattern(Graph& graph, const PatternInfo& pattern);
 
