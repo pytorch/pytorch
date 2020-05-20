@@ -455,22 +455,6 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     }                                                                       \
   }()
 
-#define AT_DISPATCH_COMPLEX_TYPES_AND(SCALARTYPE, TYPE, NAME, ...)          \
-  [&] {                                                                     \
-    switch (TYPE) {                                                         \
-      AT_PRIVATE_CASE_TYPE(                                                 \
-          at::ScalarType::ComplexFloat, c10::complex<float>, __VA_ARGS__)   \
-      AT_PRIVATE_CASE_TYPE(                                                 \
-          at::ScalarType::ComplexDouble, c10::complex<double>, __VA_ARGS__) \
-      AT_PRIVATE_CASE_TYPE(                                                 \
-          SCALARTYPE,                                                       \
-          decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE>::t),          \
-          __VA_ARGS__)                                                      \
-      default:                                                              \
-        AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");     \
-    }                                                                       \
-  }()
-
 #define AT_DISPATCH_ALL_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...) \
   [&] {                                                                       \
     switch (TYPE) {                                                           \
