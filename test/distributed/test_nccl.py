@@ -28,7 +28,7 @@ class TestNCCL(TestCase):
         self.assertIsInstance(uid, bytes)
         self.assertGreater(len(uid), 1)
 
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm')
+    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38833')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_broadcast(self):
@@ -42,7 +42,7 @@ class TestNCCL(TestCase):
         for i in range(torch.cuda.device_count()):
             self.assertEqual(tensors[i], expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm')
+    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38834')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_reduce(self):
@@ -86,7 +86,7 @@ class TestNCCL(TestCase):
         for tensor in outputs:
             self.assertEqual(tensor, expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm')
+    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38835')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_reduce_scatter(self):
