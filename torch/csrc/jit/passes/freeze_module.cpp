@@ -14,7 +14,33 @@ namespace {
 
 class AttributePropagator {
  public:
-  AttributePropagator(Module& module) : module_(module) {}
+  AttributePropagator(Module& module, std::vector<std::string>& preservedAttrs)
+      : module_(module) {
+    // Currently only top level attributes and functions can  be preserved
+    // explicitely.
+    auto checkName = [this](std::string& name) {
+      if (module_.hasattr(name)) {
+        insertMutableAttr(name, module_.attr(name), module_._ivalue());
+        return true;
+      }
+
+      for (auto& fn : module_.type()->methods()) {
+        if (fn->name() == name) {
+          preservedMethods_.insert(fn);
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // forward is preserved by default.
+    auto method = module_.get_method("forward");
+    preservedMethods_.insert(&method.function());
+
+    for (auto name : preservedAttrs) {
+      TORCH_CHECK(checkName(name), "Unknown name: " + name);
+    }
+  }
 
   void optimizeSubGraphs(
       std::shared_ptr<Graph>& graph,
@@ -36,17 +62,24 @@ class AttributePropagator {
     }
   }
 
-  void run(std::shared_ptr<Graph>& graph) {
+  void run() {
     auto applyInline = [](std::shared_ptr<Graph>& subgraph) {
       Inline(*subgraph);
     };
     auto applyOptimizations = [](std::shared_ptr<Graph>& subgraph) {
       runOptimization(subgraph, /* unroll? */ false);
     };
-    optimizeSubGraphs(graph, applyInline);
-    propagateAttributes(graph);
-    optimizeSubGraphs(graph, applyOptimizations);
-    cleanupFrozenModule(graph);
+    for (auto function : preservedMethods_) {
+      auto graph = function->graph();
+      optimizeSubGraphs(graph, applyInline);
+      propagateAttributes(graph);
+    }
+
+    for (auto function : preservedMethods_) {
+      auto graph = function->graph();
+      optimizeSubGraphs(graph, applyOptimizations);
+      cleanupFrozenModule(graph);
+    }
   }
 
  private:
@@ -464,8 +497,7 @@ class AttributePropagator {
         }
       }
       for (auto& fn : type->methods()) {
-        auto& name = fn->name();
-        if ("forward" == name && *type == *module_.type())
+        if (preservedMethods_.count(fn) && *type == *module_.type())
           continue;
         funcsToRemove.push_back(fn);
       }
@@ -495,6 +527,9 @@ class AttributePropagator {
   std::unordered_map<ModulePtr, std::unordered_set<std::string>>
       preservedScalarAttrs_;
 
+  // Contains user specified methods to be preserved in frozen module.
+  std::unordered_set<Function*> preservedMethods_;
+
   // Track all used attributes ivalues that can be aliased.
   IValue::HashAliasedIValues usedAttrs_;
 
@@ -512,7 +547,9 @@ class AttributePropagator {
 }; // class AttributePropagator
 } // namespace
 
-Module freeze_module(const Module& module) {
+Module freeze_module(
+    const Module& module,
+    std::vector<std::string> preservedAttrs) {
   // Currently freezing module is supported only in eval mode.
   // If assertion below is commented and module is in training mode then this
   // implementation folds attributes correctly. Tensor attributes with
@@ -533,13 +570,8 @@ Module freeze_module(const Module& module) {
   }
 
   auto moduleClone = module.clone();
-  AttributePropagator attrPropagator(moduleClone);
-  method = moduleClone.get_method("forward");
-  auto graph = method.graph();
-  attrPropagator.run(graph);
-  GRAPH_DUMP(
-      moduleClone.type()->name()->name() + "::forward() after freezing module",
-      method.graph());
+  AttributePropagator attrPropagator(moduleClone, preservedAttrs);
+  attrPropagator.run();
   return moduleClone;
 }
 
