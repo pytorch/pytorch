@@ -38,7 +38,7 @@ static void compute_q8gemm(
   uint8_t* c = context->c;
   const size_t c_stride = context->c_stride;
 
-  size_t output_channel_index = nr_block_start + group_index * n;
+  size_t output_channel_index = nr_block_start;
   context->ukernel(
       mr_block_size,
       nr_block_size,
