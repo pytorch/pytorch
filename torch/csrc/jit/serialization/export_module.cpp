@@ -179,7 +179,7 @@ class ScriptModuleSerializer {
     writeExtraFiles(module, extra_files);
     // Serialize the model object
     writeArchive("data", module._ivalue());
-    // Then we werialize all code info.
+    // Then we serialize all code info.
     writeCode(module.type());
     // The tensor constants from the code are written to a separate archive
     // so loading the code does not depend on loading the data
