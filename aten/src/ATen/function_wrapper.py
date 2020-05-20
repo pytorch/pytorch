@@ -117,11 +117,6 @@ m.impl("${unqual_operator_name_with_overload}",
 );
 """)
 
-NAMED_SUPPORTED_REGISTRATION = CodeTemplate("""\
-m.impl("${unqual_operator_name_with_overload}",
-       torch::dispatch(DispatchKey::Named, torch::CppFunction::makeFallthrough()));
-""")
-
 # add non-virtual declaration to TensorBody.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
