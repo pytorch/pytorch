@@ -13,7 +13,9 @@ using ParamMap = std::map<std::string, IValue>;
 
 ValueToParamPairMap buildValueToParamsMap(Block* b, const ParamMap& paramsDict);
 void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap);
-void buildParamsMapFromValueToParamsMap(const ValueToParamPairMap& valsToParamsMap, ParamMap& paramsDict);
+void buildParamsMapFromValueToParamsMap(
+    const ValueToParamPairMap& valsToParamsMap,
+    ParamMap& paramsDict);
 
 } // namespace jit
 } // namespace torch
