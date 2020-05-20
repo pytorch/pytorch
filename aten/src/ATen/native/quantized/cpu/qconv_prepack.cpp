@@ -173,10 +173,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
       "quantized::conv2d_prepack (qnnpack): Weights are expected to have 4 "
       "dimensions");
   TORCH_CHECK(
-      weight.qscheme() == c10::kPerTensorAffine,
-      "quantized::conv2d_prepack (qnnpack): only supports Per Tensor "
-      "Quantization Scheme")
-  TORCH_CHECK(
       stride.size() == 2,
       "quantized::conv2d_prepack (qnnpack): 2D convolution only");
   TORCH_CHECK(

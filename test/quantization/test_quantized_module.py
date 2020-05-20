@@ -439,8 +439,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         stride = (stride_h, stride_w)
         padding = (pad_h, pad_w)
         dilation = (dilation, dilation)
-        if torch.backends.quantized.engine == 'qnnpack':
-            use_channelwise = False
         if use_fused:
             module_name = "QuantizedConvReLU2d"
             qconv_module = nnq_fused.ConvReLU2d(

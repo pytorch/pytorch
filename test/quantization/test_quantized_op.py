@@ -2152,7 +2152,6 @@ class TestQuantizedLinear(unittest.TestCase):
                      use_relu, use_multi_dim_input, use_channelwise):
         decimal_val = 4
         if torch.backends.quantized.engine == 'qnnpack':
-            use_channelwise = False
             use_multi_dim_input = False
             # QNNPACK supports uint8 in the kernels. In the op we shift the int8
             # weight values to uint8 to be on par with fbgemm. However, this causes
@@ -2268,8 +2267,6 @@ class TestQuantizedLinear(unittest.TestCase):
            use_channelwise=st.booleans())
     @override_qengines
     def test_qlinear_unpack(self, W, use_channelwise):
-        if torch.backends.quantized.engine == 'qnnpack':
-            use_channelwise = False
 
         W, (W_scale, W_zp, torch_type) = W
         if use_channelwise:
@@ -2525,9 +2522,6 @@ class TestQuantizedConv(unittest.TestCase):
             use_relu,
             use_channelwise,
     ):
-        if torch.backends.quantized.engine == 'qnnpack':
-            use_channelwise = False
-
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         kernels = (kernel_h, kernel_w)
@@ -2578,8 +2572,6 @@ class TestQuantizedConv(unittest.TestCase):
     def test_qconv_unpack(
         self, inputs, stride_h, stride_w, pad_h, pad_w, channelwise
     ):
-        if torch.backends.quantized.engine == 'qnnpack':
-            channelwise = False
 
         qconv_prepack = torch.ops.quantized.conv2d_prepack
         qconv_unpack = torch.ops.quantized.conv2d_unpack
