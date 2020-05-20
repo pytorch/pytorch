@@ -56,7 +56,7 @@ elif torch.cuda.is_available() and ROCM_HOME is not None:
     ext_modules.append(extension)
 
 # test that ninja support dirs with space; the path without ninja doesn't support it yet.
-include_dirs="self_compiler_include_dirs_test with spaces" if USE_NINJA else "self_compiler_include_dirs_test"
+include_dirs = "self_compiler_include_dirs_test with spaces" if USE_NINJA else "self_compiler_include_dirs_test"
 setup(
     name='torch_test_cpp_extension',
     packages=['torch_test_cpp_extension'],
