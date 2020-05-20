@@ -245,7 +245,6 @@ def method_tests():
         ('log2', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
         ('log2', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
         ('tanh', (S, S, S), NO_ARGS, '', (True,)),
-        ('tanh', (S, S, S), NO_ARGS, 'complex', (True,), [], [expectedFailureCUDA]),
         ('tanh', (), NO_ARGS, 'scalar', (True,)),
         ('sigmoid', (S, S, S), NO_ARGS, '', (True,)),
         ('sigmoid', (), NO_ARGS, 'scalar', (True,)),

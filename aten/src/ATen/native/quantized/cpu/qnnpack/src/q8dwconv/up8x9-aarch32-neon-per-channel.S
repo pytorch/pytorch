@@ -11,7 +11,7 @@
 
 .syntax unified
 
-# void pytorch_q8dwconv_ukernel_up8x9__aarch32_neon(
+# void pytorch_q8dwconv_ukernel_up8x9_per_channel__aarch32_neon(
 #     size_t channels,
 #     size_t output_width,
 #     const uint8_t** input,
@@ -20,7 +20,7 @@
 #     size_t input_stride,
 #     size_t output_increment,
 #     const union pytorch_qnnp_conv_quantization_params quantization_params[restrict static 1])
-BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
+BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9_per_channel__aarch32_neon
     .arm
 #ifndef __APPLE__
     .arch armv7-a
@@ -36,18 +36,23 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
 
     STR r0, [sp, #-8]
     STR r3, [sp, #-4]
+    STR r1, [sp, #-12]
+    STR r2, [sp, #-16]
 
     # Load the address zero_point array.
-    # For depth wise kernels the array is of single element.
     LDR r5, [r12], 4
+    # Push the zero_point_array base pointer on stack
+    # We dont have enough registers to maintain
+    # base pointers. Thus we will have to do some pushes
+    # and pops.
+    # At sp #-20 we store updated/working copy pointers
+    # At sp #-28 we store orig pointers that can be reloaded
+    # for more output pixels
+    STR r5, [sp, #-28]
 
     # Load o:
     # - lr = o = output
     LDR lr, [sp, 100]
-
-    # Load kernel zero point:
-    # - d31 = vkernel_zero_point
-    VLD1.8 {d31[]}, [r5]
 
     # Load input zero point:
     # - d30 = vinput_zero_point
@@ -56,12 +61,14 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     # For depth wise kernels the array is of single element.
     # pre-index r12 = r12 + 4
     LDR r5, [r12, 4]!
+    # Push the requantization_scales base pointer on stack
+    # At sp #-24 we store updated/working copy pointers
+    # At sp #-32 we store orig pointers that can be reloaded
+    # for more output pixels
+    STR r5, [sp, #-32]
 
     # add 8 bytes to get to vfmax
     ADD r12, r12, 8
-    # Load requantization_scale:
-    # - q14 = d28:d29 = requantization_scale
-    VLD1.32 {d28[], d29[]}, [r5]
 
     # Load vfmax:
     # - q13 = d26:d27 = vfmax
@@ -83,14 +90,25 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     # on the stack and pop it back.
     VLD1.32 {d22[], d23[]}, [r12]
 
-    VSTR d22, [sp, #-16]
-    VSTR d23, [sp, #-24]
+    VSTR d22, [sp, #-40]
+    VSTR d23, [sp, #-48]
 
     .p2align 3
 0:
+    # Load original zero point base pointer
+    LDR r4, [sp, #-28]
+    # Load original requant scale base pointer
+    LDR r5, [sp, #-32]
+    # Load indirection pointer from stack
+    LDR r2, [sp, #-16]
     # Load input stride
     # - r3 = input_stride
     LDR r3, [sp, 104]
+
+    # Store original zero point to working copy
+    STR r4, [sp, #-20]
+    # Store original requant scale to working copy
+    STR r5, [sp, #-24]
 
     # Load c:
     # - r0 = c = channels
@@ -114,6 +132,7 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     # Increment input by input stride
     # - input = r2 := input + input_stride
     ADD r2, r2, r3
+    STR r2, [sp, #-16]
 
     # Load w:
     # - r3 = w = weights
@@ -128,8 +147,22 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     VLD1.8 {d4}, [r4]!
     VLD1.8 {d6}, [r3]!
 
+    # zero point array base address
+    LDR r1, [sp, #-20]
+    # requantization scale array base address
+    LDR r2, [sp, #-24]
+
     VLD1.8 {d8}, [r5]!
     VLD1.8 {d10}, [r3]!
+
+    # - d31 = vkernel_zero_point
+    VLD1.8 {d31}, [r1]!
+    # - q8 = d16:d17= requantization_scale_lo
+    VLD1.32 {d16, d17}, [r2]!
+    # - q14 = d28:d29 = requantization_scale_hi
+    VLD1.32 {d28, d29}, [r2]!
+    STR r1, [sp, #-20]
+    STR r2, [sp, #-24]
 
     SUB_ZERO_POINT q2, d4, d30
     VSUBL.U8 q3, d6, d31
@@ -209,7 +242,7 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     VCVT.F32.S32 q0, q0
     VCVT.F32.S32 q1, q1
 
-    VMUL.F32 q0, q0, q14
+    VMUL.F32 q0, q0, q8
     VMUL.F32 q1, q1, q14
 
     VMIN.F32 q0, q0, q13
@@ -236,6 +269,11 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     CMP r0, -8
     BEQ 5f
 
+    # zero point array base address
+    LDR r1, [sp, #-20]
+    # requantization scale array base address
+    LDR r2, [sp, #-24]
+
     ADD r4, r4, r0
     ADD r5, r5, r0
     ADD r6, r6, r0
@@ -245,6 +283,9 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     ADD r10, r10, r0
     ADD r11, r11, r0
     ADD r12, r12, r0
+
+    # - d31 = vkernel_zero_point
+    VLD1.8 {d31}, [r1]
 
     LSL r0, r0, 3
     VDUP.32 d22, r0
@@ -346,16 +387,21 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     VMLAL.S16 q0, d16, d18
     VMLAL.S16 q1, d17, d19
 
+    # - q8 = d16:d17= requantization_scale_lo
+    VLD1.32 {d16, d17}, [r2]!
+    # - q14 = d28:d29 = requantization_scale_hi
+    VLD1.32 {d28, d29}, [r2]
+
     VMLAL.S16 q0, d4, d6
     VMLAL.S16 q1, d5, d7
 
-    VLDR.64 d22, [sp, #-16]
-    VLDR.64 d23, [sp, #-24]
+    VLDR.64 d22, [sp, #-40]
+    VLDR.64 d23, [sp, #-48]
 
     VCVT.F32.S32 q0, q0
     VCVT.F32.S32 q1, q1
 
-    VMUL.F32 q0, q0, q14
+    VMUL.F32 q0, q0, q8
     VMUL.F32 q1, q1, q14
 
     VMIN.F32 q0, q0, q13
@@ -392,12 +438,16 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     VST1.8 {d0[0]}, [lr]!
 
 5:
+    # Load output_width from stack
+    LDR r1, [sp, #-12]
     # Load output increment
     # - r3 = output_increment
     LDR r3, [sp, 108]
 
     # Decrement output width
     SUBS r1, r1, 1
+    # store output_width on stack
+    STR r1, [sp, #-12]
 
     # Increment output by output_increment
     ADD lr, lr, r3
@@ -407,7 +457,7 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
 
     VPOP {d8-d15}
     POP {r4, r5, r6, r7, r8, r9, r10, r11, pc}
-END_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
+END_FUNCTION pytorch_q8dwconv_ukernel_up8x9_per_channel__aarch32_neon
 
 #ifdef __ELF__
 .section ".note.GNU-stack","",%progbits

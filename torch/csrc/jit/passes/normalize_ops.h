@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-// This passes converts aten ops to a normalized form. It is
+// This pass converts aten ops to a normalized form. It is
 // run immediately after IR generation in both the tracer and compiler,
 // so downstream consumers of the IR do not need handle ops in their
 // pre-normalized form.
