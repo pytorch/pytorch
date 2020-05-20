@@ -68,9 +68,9 @@ namespace at { namespace cuda {
 // HIP from ROCm 3.5 on renamed hipOccupancyMaxActiveBlocksPerMultiprocessor
 // to hipModuleOccupancyMaxActiveBlocksPerMultiprocessor.
 #if HIP_VERSION < 305
-#define HIP_RENAME hipOccupancyMaxActiveBlocksPerMultiprocessor
+#define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR hipOccupancyMaxActiveBlocksPerMultiprocessor
 #else
-#define HIP_RENAME cuOccupancyMaxActiveBlocksPerMultiprocessor
+#define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR cuOccupancyMaxActiveBlocksPerMultiprocessor
 #endif
 
 #define AT_FORALL_NVRTC(_)                       \
@@ -81,7 +81,7 @@ namespace at { namespace cuda {
   _(nvrtcGetPTX)                                 \
   _(cuModuleLoadData)                            \
   _(cuModuleGetFunction)                         \
-  _(HIP_RENAME)                                  \
+  _(HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR)\
   _(nvrtcGetErrorString)                         \
   _(nvrtcGetProgramLogSize)                      \
   _(nvrtcGetProgramLog)                          \
@@ -90,6 +90,8 @@ namespace at { namespace cuda {
   _(cuCtxGetCurrent)                             \
   _(cuModuleUnload)                              \
   _(cuDevicePrimaryCtxGetState)
+
+#undef HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR
 
 #endif
 
