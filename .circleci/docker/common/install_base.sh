@@ -51,14 +51,15 @@ apt-get install -y --no-install-recommends \
 
 # Install Valgrind separately since the apt-get version is too old.
 mkdir valgrind_build && cd valgrind_build
-if ! wget http://valgrind.org/downloads/valgrind-3.14.0.tar.bz2
+VALGRIND_VERSION=3.15.0
+if ! wget http://valgrind.org/downloads/valgrind-${VALGRIND_VERSION}.tar.bz2
 then
-  wget https://sourceware.org/ftp/valgrind/valgrind-3.14.0.tar.bz2
+  wget https://sourceware.org/ftp/valgrind/valgrind-${VALGRIND_VERSION}.tar.bz2
 fi
-tar -xjf valgrind-3.14.0.tar.bz2
-cd valgrind-3.14.0
+tar -xjf valgrind-${VALGRIND_VERSION}.tar.bz2
+cd valgrind-${VALGRIND_VERSION}
 ./configure --prefix=/usr/local
-make
+make -j 4
 sudo make install
 cd ../../
 rm -rf valgrind_build
