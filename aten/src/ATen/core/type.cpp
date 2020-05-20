@@ -6,6 +6,7 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/function.h>
 #include <iostream>
+#include <torch/csrc/utils/hash.h>
 
 namespace c10 {
 
