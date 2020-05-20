@@ -27,7 +27,7 @@ Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
   TORCH_CHECK(at::can_cast(common_dtype, result.scalar_type()),
            "result type ", common_dtype, "can't be cast to the desired output type ",
            result.scalar_type());
-  // Avoid runtime error when typecasting
+
   if (!exp.isComplex() && (exp.toDouble() == 0.0)) {
     result.resize_as_(base).fill_(1);
   } else if (!exp.isComplex() && (exp.toDouble() == 1.0)) {

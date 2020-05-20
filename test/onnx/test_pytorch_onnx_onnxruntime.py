@@ -2045,6 +2045,32 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randint(10, (2, 4, 5))
         self.run_test(MatmulModel(), (x, y))
 
+    def _argmin_argmax_model(self, input):
+        class ArgminArgmaxModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmin(input), \
+                    torch.argmax(input), \
+                    torch.argmin(input, keepdim=True), \
+                    torch.argmax(input, keepdim=True)
+
+        self.run_test(ArgminArgmaxModel(), input)
+
+    def test_argmin_argmax(self):
+        input = torch.randn(7, 3, 5)
+        self._argmin_argmax_model(input)
+
+    # Argmin and Argmax with "select_last_index" is not supprted before opset 12
+    # "select_last_index" was added in opset 12 to deal with corner case where the
+    # same value appears multiple times in the tensor
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_argmin_argmax_select_last_index(self):
+        input = torch.tensor([[1., 2., 3.],
+                             [1., 1., 2.]])
+        self._argmin_argmax_model(input)
+
+        input = torch.ones(7, 3, 5)
+        self._argmin_argmax_model(input)
+
     def test_view(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input):
