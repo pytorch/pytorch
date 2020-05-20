@@ -337,18 +337,18 @@ class InsertObserversHelper {
       std::unordered_set<Value*>& block_observed_values);
 
   bool shouldPropagateQuant(
-      Node* n, const std::unordered_set<Value*>& block_observed_values) {
+      Node* n,
+      const std::unordered_set<Value*>& block_observed_values) {
     if (isPropagateQuantSingleInputOp(n)) {
       return isObserved(n->input(0), block_observed_values);
     } else if (isPropagateQuantBinaryOp(n)) {
       // either both of the tensor inputs are observed, or the first tensor
       // tensor input is observed and second input is scalar
       return isObserved(n->input(0), block_observed_values) &&
-        isObserved(n->input(1), block_observed_values);
+          isObserved(n->input(1), block_observed_values);
     }
     return true;
   }
-
 
   void delayObservingValuesInPattern(Graph& graph, const PatternInfo& pattern);
 
@@ -765,8 +765,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   // of the quantizable function.
   if (!is_dynamic_) {
     // Check whether producer is quantizable
-    if (nodeQuantizable(v->node()) ||
-        isPropagateQuantNode(v->node())) {
+    if (nodeQuantizable(v->node()) || isPropagateQuantNode(v->node())) {
       return true;
     }
   }
