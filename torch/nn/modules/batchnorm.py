@@ -502,9 +502,6 @@ class SyncBatchNorm(_BatchNorm):
                 with torch.no_grad():
                     module_output.weight = module.weight
                     module_output.bias = module.bias
-                # keep requires_grad unchanged
-                module_output.weight.requires_grad = module.weight.requires_grad
-                module_output.bias.requires_grad = module.bias.requires_grad
             module_output.running_mean = module.running_mean
             module_output.running_var = module.running_var
             module_output.num_batches_tracked = module.num_batches_tracked
