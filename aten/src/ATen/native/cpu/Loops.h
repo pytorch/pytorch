@@ -224,7 +224,7 @@ void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
 }
 
 template <typename func_t>
-void cpu_serial_kernel(TensorIterator& iter, func_t&& op) {
+void cpu_serial_kernel(TensorIterator& iter, func_t&& op, const Range& range) {
   using traits = function_traits<func_t>;
   TORCH_INTERNAL_ASSERT((std::is_void<typename traits::result_type>::value &&
     iter.noutputs() == 0 && iter.ntensors() == traits::arity) || (iter.ntensors() >= traits::arity + 1));
@@ -238,12 +238,17 @@ void cpu_serial_kernel(TensorIterator& iter, func_t&& op) {
         basic_loop(data, strides, 0, n, std::forward<func_t>(op));
       });
     }
-  }, {0, iter.numel()});
+  }, range);
   iter.cast_outputs();
 }
 
+template <typename func_t>
+void cpu_serial_kernel(TensorIterator& iter, func_t&& op) {
+  cpu_serial_kernel(iter, op, {0, iter.numel()});
+}
+
 template <typename func_t, typename vec_func_t>
-void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
+void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop, const Range& range) {
   using traits = function_traits<func_t>;
   TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
 
@@ -260,8 +265,13 @@ void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) 
         }
       });
     }
-  }, {0, iter.numel()});
+  }, range);
   iter.cast_outputs();
+}
+
+template <typename func_t, typename vec_func_t>
+void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
+  cpu_serial_kernel_vec(iter, op, vop, {0, iter.numel()});
 }
 
 }}}  // namespace at::native::<anonymous>

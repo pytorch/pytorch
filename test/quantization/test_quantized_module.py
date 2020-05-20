@@ -343,6 +343,67 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           length=st.integers(4, 16),
+           out_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           groups=st.integers(1, 4),
+           kernel=st.integers(1, 7),
+           stride=st.integers(1, 2),
+           pad=st.integers(0, 2),
+           dilation=st.integers(1, 2),
+           X_scale=st.floats(1.2, 1.6),
+           X_zero_point=st.integers(0, 4),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           Y_zero_point=st.integers(0, 4),
+           use_bias=st.booleans(),
+           use_fused=st.booleans(),
+           use_channelwise=st.booleans())
+    @override_qengines
+    def test_conv1d_api(
+        self, batch_size, in_channels_per_group, length, out_channels_per_group,
+        groups, kernel, stride, pad, dilation,
+        X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
+        use_bias, use_fused, use_channelwise
+    ):
+        # Tests the correctness of the conv2d module.
+        in_channels = in_channels_per_group * groups
+        out_channels = out_channels_per_group * groups
+        input_feature_map_size = (length,)
+        kernel_size = (kernel, )
+        stride = (stride, )
+        pad = (pad, )
+        dilation = (dilation, )
+        if torch.backends.quantized.engine == 'qnnpack':
+            use_channelwise = False
+        if use_fused:
+            module_name = "QuantizedConvReLU1d"
+            qconv_module = nnq_fused.ConvReLU1d(
+                in_channels, out_channels, kernel, stride, pad,
+                dilation, groups, use_bias, padding_mode="zeros")
+        else:
+            module_name = "QuantizedConv1d"
+            qconv_module = nnq.Conv1d(
+                in_channels, out_channels, kernel, stride, pad,
+                dilation, groups, use_bias, padding_mode="zeros")
+
+        conv_module = nn.Conv1d(
+            in_channels, out_channels, kernel, stride, pad,
+            dilation, groups, use_bias, padding_mode="zeros")
+        if use_fused:
+            relu_module = nn.ReLU()
+            conv_module = nni.ConvReLU1d(conv_module, relu_module)
+        conv_module = conv_module.float()
+
+        self._test_conv_api_impl(
+            module_name, qconv_module, conv_module, batch_size,
+            in_channels_per_group, input_feature_map_size,
+            out_channels_per_group, groups, kernel_size, stride, pad,
+            dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
+            Y_zero_point, use_bias, use_fused, use_channelwise)
+
+    @given(batch_size=st.integers(1, 3),
+           in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            H=st.integers(4, 16),
            W=st.integers(4, 16),
            out_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),

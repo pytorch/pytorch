@@ -645,7 +645,8 @@ def gen_pyi(declarations_path, out):
                          for n in
                          ['float32', 'float', 'float64', 'double', 'float16', 'bfloat16', 'half',
                           'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
-                          'complex32', 'complex64', 'complex128', 'quint8', 'qint8', 'qint32', 'bool']]
+                          'complex32', 'complex64', 'cfloat', 'complex128', 'cdouble',
+                          'quint8', 'qint8', 'qint32', 'bool']]
 
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~

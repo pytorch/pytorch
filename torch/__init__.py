@@ -41,8 +41,7 @@ __all__ = [
 # Load the extension module
 ################################################################################
 
-if platform.system() == 'Windows':
-    is_conda = os.path.exists(os.path.join(sys.prefix, 'conda-meta'))
+if sys.platform == 'win32':
     py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
     th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
 

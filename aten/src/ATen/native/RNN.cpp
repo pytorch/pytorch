@@ -4,7 +4,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
-#include <ATen/native/c10_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
@@ -425,7 +424,6 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
         std::ignore, std::ignore, std::ignore, std::ignore, packed_params) =
         std::move(state);
     TORCH_INTERNAL_ASSERT(packed_params.size() == 2);
-
     return make_quantized_cell_params_fp16(
         /*w_ih_packed=*/std::move(packed_params[0]),
         /*w_hh_packed=*/std::move(packed_params[1]));

@@ -118,8 +118,7 @@ template <class F, class Tuple, std::size_t... INDEX>
 C10_HOST_DEVICE constexpr auto apply_impl(F&& f, Tuple&& t, std::index_sequence<INDEX...>)
 #else
 // GCC/Clang need the decltype() return type
-CUDA_HOST_DEVICE constexpr auto apply_impl(F&& f, Tuple&& t, std::index_sequence<INDEX...>)
--> decltype(std::forward<F>(f)(std::get<INDEX>(std::forward<Tuple>(t))...))
+CUDA_HOST_DEVICE constexpr decltype(auto) apply_impl(F&& f, Tuple&& t, std::index_sequence<INDEX...>)
 #endif
 {
     return std::forward<F>(f)(std::get<INDEX>(std::forward<Tuple>(t))...);
@@ -127,10 +126,7 @@ CUDA_HOST_DEVICE constexpr auto apply_impl(F&& f, Tuple&& t, std::index_sequence
 }  // namespace detail
 
 template <class F, class Tuple>
-CUDA_HOST_DEVICE constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
-    std::forward<F>(f), std::forward<Tuple>(t),
-    std::make_index_sequence<std::tuple_size<std::remove_reference_t<Tuple>>::value>{}))
-{
+CUDA_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
     return detail::apply_impl(
         std::forward<F>(f), std::forward<Tuple>(t),
         std::make_index_sequence<std::tuple_size<std::remove_reference_t<Tuple>>::value>{});

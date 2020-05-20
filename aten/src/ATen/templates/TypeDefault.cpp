@@ -73,6 +73,10 @@ TORCH_LIBRARY(aten, m) {
   m.def("Int.float(float a) -> int");
   m.def("Int.Scalar(Scalar a) -> int");
   m.def("Int.str(str a) -> int");
+
+  // Distributed Ops
+  // Implementations located in torch/csrc/jit/runtime/register_distributed_ops.cpp
+  m.def("get_gradients(int context_id) -> Dict(Tensor, Tensor)");
 }
 
 }  // namespace at
