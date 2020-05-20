@@ -221,8 +221,6 @@ bool THPGenerator_init(PyObject *module)
     return false;
   Py_INCREF(&THPGeneratorType);
   PyModule_AddObject(module, "Generator", (PyObject *)&THPGeneratorType);
-  auto defaultGenerator = at::detail::getDefaultCPUGenerator();
-  PyModule_AddObject(module, "default_generator", (PyObject *)THPGenerator_initDefaultGenerator(defaultGenerator));
   return true;
 }
 

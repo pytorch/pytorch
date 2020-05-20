@@ -27,7 +27,7 @@ from typing import Set, Type
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
-    'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
+    'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed', 'default_generator'
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
@@ -270,6 +270,10 @@ def set_default_dtype(d):
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
 from .serialization import save, load
 from ._tensor_str import set_printoptions
+
+from torch._C import _default_generator
+default_generator = _default_generator
+"""Returns the default CPU torch.Generator"""
 
 ################################################################################
 # Define Storage and Tensor classes

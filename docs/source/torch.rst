@@ -107,6 +107,7 @@ Generators
     :nosignatures:
 
     _C.Generator
+    default_generator
 
 .. _random-sampling:
 
@@ -121,9 +122,6 @@ Random sampling
     initial_seed
     get_rng_state
     set_rng_state
-
-.. autoattribute:: torch.default_generator
-   :annotation:  Returns the default CPU torch.Generator
 
 .. The following doesn't actually seem to exist.
    https://github.com/pytorch/pytorch/issues/27780
