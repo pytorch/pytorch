@@ -7670,33 +7670,33 @@ Example::
             [100, 200]], dtype=torch.uint8)
 """)
 
-add_docstr(torch.default_generator,
-           r"""
-default_generator -> Generator
-
-Returns the default CPU torch.Generator
-
-Example::
-
-    >>> g_cpu = torch.default_generator
-    >>> g_cpu.device
-    device(type='cpu')
-""")
-
-add_docstr(torch.cuda.default_generators,
-           r"""
-default_generator -> Generator
-
-If cuda is available, returns a tuple of default CUDA torch.Generator-s.
-The number of CUDA torch.Generator-s returned is equal to the number of
-GPUs available in the system.
-
-Example::
-
-    >>> torch.cuda.init()
-    >>> torch.cuda.default_generators[0].device
-    device(type='cuda', index=0)
-""")
+# add_docstr(torch.default_generator,
+#            r"""
+# default_generator -> Generator
+#
+# Returns the default CPU torch.Generator
+#
+# Example::
+#
+#     >>> g_cpu = torch.default_generator
+#     >>> g_cpu.device
+#     device(type='cpu')
+# """)
+#
+# add_docstr(torch.cuda.default_generators,
+#            r"""
+# default_generator -> Generator
+#
+# If cuda is available, returns a tuple of default CUDA torch.Generator-s.
+# The number of CUDA torch.Generator-s returned is equal to the number of
+# GPUs available in the system.
+#
+# Example::
+#
+#     >>> torch.cuda.init()
+#     >>> torch.cuda.default_generators[0].device
+#     device(type='cuda', index=0)
+# """)
 
 add_docstr(torch.Generator,
            r"""
