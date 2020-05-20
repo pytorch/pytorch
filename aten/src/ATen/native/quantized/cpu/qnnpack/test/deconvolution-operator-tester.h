@@ -403,7 +403,7 @@ class DeconvolutionOperatorTester {
     // Make num zero points multiple of 8.
     // This is the least common denominator for SSE/ARM kernels we have.
     size_t num_zero_points_padded =
-      ((groups() * groupOutputChannels() + 7) / 8) * 8;
+      groups() * groupOutputChannels() + 8;
     std::vector<uint8_t> kernelZeroPoints(num_zero_points_padded, 127);
 
 
@@ -411,6 +411,7 @@ class DeconvolutionOperatorTester {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
       std::generate(kernel.begin(), kernel.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
+      //std::generate(kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
       std::fill(output.begin(), output.end(), 0xA5);
       std::fill(accumulators.begin(), accumulators.end(), 0);
 

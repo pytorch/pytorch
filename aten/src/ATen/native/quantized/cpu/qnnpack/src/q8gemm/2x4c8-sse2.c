@@ -177,7 +177,8 @@ void pytorch_q8gemm_ukernel_2x4c8__sse2(
   __m128i vacc1x0123 = pytorch_sse_reduce4_i32(vacc10, vacc11, vacc12, vacc13);
 
   const __m128 vmultiplier =
-      _mm_loadu_ps(quantization_params->sse2.requantization_scale);
+      _mm_loadu_ps(&quantization_params->sse2.requantization_scales
+          [output_channel_index]);
 
   vacc0x0123 = _mm_cvtps_epi32(
                 _mm_mul_ps(

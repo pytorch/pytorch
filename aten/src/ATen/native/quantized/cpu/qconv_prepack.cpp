@@ -214,6 +214,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
       " instead");
 
   auto weight_contig = weight.contiguous(c10::MemoryFormat::ChannelsLast);
+  const bool is_per_channel = weight_contig.qscheme() == at::kPerChannelAffine;
 
   std::vector<uint8_t> w_zero_points;
   at::Tensor  w_scales;
@@ -236,7 +237,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
               c10::nullopt, /* input_scale */
               {kernel_h, kernel_w},
               w_scales,
-              std::move(w_zero_points)});
+              std::move(w_zero_points),
+              is_per_channel});
 
   return ret_ptr;
 }

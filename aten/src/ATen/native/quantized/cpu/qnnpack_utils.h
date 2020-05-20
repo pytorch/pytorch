@@ -95,7 +95,8 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       c10::optional<double> input_scale,
       std::vector<int64_t> kernel,
       at::Tensor w_scale,
-      std::vector<uint8_t>&& w_zps)
+      std::vector<uint8_t>&& w_zps,
+      bool is_per_channel)
       : w(std::move(w)),
         orig_weight(std::move(orig_weight)),
         bias(std::move(bias)),
@@ -117,7 +118,8 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
             groups_,
             groups_ * this->orig_weight.size(1),
             this->orig_weight.size(0),
-            /*transpose=*/false)
+            /*transpose=*/false,
+            is_per_channel)
         {}
 
   std::unique_ptr<qnnpack::PrePackConvWeights> w;

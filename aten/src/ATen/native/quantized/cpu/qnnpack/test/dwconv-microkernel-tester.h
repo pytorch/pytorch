@@ -277,7 +277,7 @@ class DWConvMicrokernelTester {
       const union pytorch_qnnp_fp32_requantization_params
           scalarRequantizationParams =
               pytorch_qnnp_compute_scalar_fp32_requantization_params(
-                  requantization_scale[0], outputZeroPoint, qmin(), qmax());
+                  requantization_scale.data(), outputZeroPoint, qmin(), qmax());
 
       q8dwconv(
           channels(),
@@ -293,10 +293,10 @@ class DWConvMicrokernelTester {
         for (size_t c = 0; c < channels(); c++) {
 #if defined(__arm__) || defined(_M_ARM)
           const uint8_t referenceOutput = pytorch_qnnp_fp32_requantize_magic(
-              accumulators[x * channels() + c], scalarRequantizationParams);
+              accumulators[x * channels() + c], scalarRequantizationParams, 0);
 #else
           const uint8_t referenceOutput = pytorch_qnnp_fp32_requantize(
-              accumulators[x * channels() + c], scalarRequantizationParams);
+              accumulators[x * channels() + c], scalarRequantizationParams, 0);
 #endif
           const double scaledAccumulator =
               accumulators[x * channels() + c] / outputScale +
@@ -458,7 +458,7 @@ class DWConvMicrokernelTester {
       const union pytorch_qnnp_fp32_requantization_params
           scalarRequantizationParams =
               pytorch_qnnp_compute_scalar_fp32_requantization_params(
-                  requantization_scale[0], outputZeroPoint, qmin(), qmax());
+                  requantization_scale.data(), outputZeroPoint, qmin(), qmax());
 
       q8dwconv(
           channels(),
@@ -475,10 +475,10 @@ class DWConvMicrokernelTester {
         for (size_t c = 0; c < channels(); c++) {
 #if defined(__arm__) || defined(_M_ARM)
           const uint8_t referenceOutput = pytorch_qnnp_fp32_requantize_magic(
-              accumulators[x * channels() + c], scalarRequantizationParams);
+              accumulators[x * channels() + c], scalarRequantizationParams, 0);
 #else
           const uint8_t referenceOutput = pytorch_qnnp_fp32_requantize(
-              accumulators[x * channels() + c], scalarRequantizationParams);
+              accumulators[x * channels() + c], scalarRequantizationParams, 0);
 #endif
           const double scaledAccumulator =
               accumulators[x * channels() + c] / outputScale +

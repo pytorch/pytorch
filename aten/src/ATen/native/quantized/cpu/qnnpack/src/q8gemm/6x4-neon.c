@@ -400,7 +400,9 @@ void pytorch_q8gemm_ukernel_6x4__neon(
   }
 
   const float32x4_t requantization_scale_v =
-      vdupq_n_f32(quantization_params->neon.requantization_scale);
+      vld1q_f32(
+          &quantization_params->neon.requantization_scales[
+              output_channel_index]);
 
   const float32x4_t vacc0x0123_f =
     vmulq_f32(vcvtq_f32_s32(vacc0x0123), requantization_scale_v);

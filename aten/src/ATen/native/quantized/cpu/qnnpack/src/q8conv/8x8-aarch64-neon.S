@@ -56,8 +56,12 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
     LD1 {v8.4s, v9.4s}, [x5], 32
 
     LDR x10, [x8]
+    # To go to a_zero_point
+    ADD x8, x8, 8
     # Add offset to the base pointer
     ADD x10, x10, x9
+    # Mul by 4 to get byte offset for requant scale.
+    LSL x9, x9, 2
 
     # v10 := vacc1x0123
     MOV v10.16b, v8.16b
@@ -66,10 +70,11 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
     MOV v11.16b, v9.16b
     # Load b_zero_point
     LD1 {v25.8b}, [x10]
-    ADD x8, x8, 8
     # Load a_zero_point
     LD1R {v24.8b}, [x8]
-    ADD x8, x8, 4
+    # Load pointer to per channel requant scale
+    LDR x10, [x8, 8]!
+    ADD x8, x8, 8
 
     # v12 := vacc2x0123
     MOV v12.16b, v8.16b
@@ -101,9 +106,13 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
     # v23 := vacc7x4567
     MOV v23.16b, v9.16b
 
-    # Load multiplier
-    # - v26 = vmultiplier
-    LD1R {v26.4s}, [x8], 4
+    # Add offset to the base pointer
+    ADD x10, x10, x9
+    // Load requantization_scale
+    // - v26 = requantization_scale channels 0-3
+    // - v31 = requantization_scale channels 4-7
+    LD1 {v26.4s}, [x10], 16
+    LD1 {v30.4s}, [x10]
 
 #ifndef IGNORE_CODE_ALIGN_DIRECTIVES
     .p2align 4
@@ -543,14 +552,6 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
     // - v29 = vzero_point
     LD1R {v29.8h}, [x8], 2
 
-    // Load max:
-    // - v30 = vmax
-    LD1R {v30.16b}, [x8], 1
-
-    // Load min:
-    // - v31 = vmin
-    LD1R {v31.16b}, [x8]
-
     SCVTF v8.4s, v8.4s
     SCVTF v9.4s, v9.4s
     SCVTF v10.4s, v10.4s
@@ -570,22 +571,30 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
     SCVTF v23.4s, v23.4s
 
     FMUL v8.4s, v8.4s, v26.4s
-    FMUL v9.4s, v9.4s, v26.4s
+    FMUL v9.4s, v9.4s, v30.4s
     FMUL v10.4s, v10.4s, v26.4s
-    FMUL v11.4s, v11.4s, v26.4s
+    FMUL v11.4s, v11.4s, v30.4s
     FMUL v12.4s, v12.4s, v26.4s
-    FMUL v13.4s, v13.4s, v26.4s
+    FMUL v13.4s, v13.4s, v30.4s
     FMUL v14.4s, v14.4s, v26.4s
-    FMUL v15.4s, v15.4s, v26.4s
+    FMUL v15.4s, v15.4s, v30.4s
 
     FMUL v16.4s, v16.4s, v26.4s
-    FMUL v17.4s, v17.4s, v26.4s
+    FMUL v17.4s, v17.4s, v30.4s
     FMUL v18.4s, v18.4s, v26.4s
-    FMUL v19.4s, v19.4s, v26.4s
+    FMUL v19.4s, v19.4s, v30.4s
     FMUL v20.4s, v20.4s, v26.4s
-    FMUL v21.4s, v21.4s, v26.4s
+    FMUL v21.4s, v21.4s, v30.4s
     FMUL v22.4s, v22.4s, v26.4s
-    FMUL v23.4s, v23.4s, v26.4s
+    FMUL v23.4s, v23.4s, v30.4s
+
+    // Load max:
+    // - v30 = vmax
+    LD1R {v30.16b}, [x8], 1
+
+    // Load min:
+    // - v31 = vmin
+    LD1R {v31.16b}, [x8]
 
     FCVTNS v8.4s, v8.4s
     FCVTNS v9.4s, v9.4s
