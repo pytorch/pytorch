@@ -77,7 +77,7 @@ Tensor& addcdiv_out(
       "The historic addcdiv behavior can be replicated using floor_divide ",
       "for integral inputs (self + value * tensor1 // tensor2) and ",
       "division for float inputs (self + value * tensor1 / tensor2). ",
-      "The new addcdiv behavior can be implemented with true_divide ",
+      "The future addcdiv behavior can be implemented with true_divide ",
       "(self + value * torch.true_divide(tensor1, tensor2).");
   }
   checkBackend("addcdiv_cpu", result, self.options().backend());
