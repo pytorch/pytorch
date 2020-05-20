@@ -321,6 +321,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
           "Failed to swap deleter (already swapped?)");
     } else {
       CUDA_ENFORCE(cudaMallocHost(&data, nbytes));
+      profiledCPUMemoryReporter().New(data, nbytes);
       data_ptr = {data, data, &Delete, at::Device(CPU)};
     }
     memset(data, 0, nbytes);
@@ -347,6 +348,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
       GetDefaultCPUAllocator()->raw_deleter()(data);
     } else {
       cudaError_t err = cudaFreeHost(data);
+      profiledCPUMemoryReporter().Delete(data);
       if (err == cudaErrorInvalidValue) {
         free(data);
         // Calling cudaGetLastError will reset the cuda error.
