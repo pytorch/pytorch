@@ -180,6 +180,7 @@ namespace impl {
 /// constructed AutogradMeta.
 
 struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
+  protected:
   std::string name_;
 
   Variable grad_;
@@ -207,6 +208,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // state are still thread-safe. Used by grad_fn() and
   // grad_accumulator().
   std::mutex mutex_;
+  public:
 
   /// Sets the `requires_grad` property of `Variable`. This should be true for
   /// leaf variables that want to accumulate gradients, and false for all other
@@ -217,6 +219,10 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       at::isComplexType(at::typeMetaToScalarType(self_impl->dtype())),
       "Only Tensors of floating point and complex dtype can require gradients");
     requires_grad_ = requires_grad;
+  }
+
+  void reset_grad_accumulator() override {
+    grad_accumulator_.reset();
   }
 
   bool requires_grad() const override {
@@ -232,7 +238,10 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     return grad_;
   }
 
-  AutogradMeta(at::TensorImpl* self_impl = nullptr, bool requires_grad = false, Edge gradient_edge = Edge() ) {
+  AutogradMeta(
+      at::TensorImpl* self_impl = nullptr,
+      bool requires_grad = false,
+      Edge gradient_edge = Edge()) {
     grad_fn_ = std::move(gradient_edge.function);
     requires_grad_ = false;
     retains_grad_ = false;
@@ -381,6 +390,7 @@ enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NOD
 TORCH_API void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect=false);
 
 struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
+  private:
   /// The base `Variable` (never a view).
   Variable base_;
 
@@ -395,6 +405,7 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn_;
 
   CreationMeta creation_meta;
+  public:
 
   bool requires_grad() const override {
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
