@@ -95,7 +95,6 @@ class ProcessGroupAgent : public RpcAgent {
   virtual void enqueueSend(SendWork work);
 
  private:
-
   class MessageCounter {
    public:
     explicit MessageCounter(int worldSize);
