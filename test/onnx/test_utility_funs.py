@@ -591,6 +591,40 @@ class TestUtilityFuns(TestCase):
 
         np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
 
+    def test_unused_initializers(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+               super(Model, self).__init__()
+               self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1))
+               self.k_proj = torch.nn.Linear(5, 5, bias=True)
+
+            def forward(self, x):
+               x = self.conv2(x)
+               return x
+        
+        x = torch.randn(20, 16, 50, 100)
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        _, params_dict, __ = utils._model_to_graph(Model(), (x, ), do_constant_folding=False,
+                                                   operator_export_type=OperatorExportTypes.ONNX)
+
+        assert(len(params_dict), 2)
+
+    def test_unused_inputs(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+               return x + 1.0
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        graph, params_dict, __ = utils._model_to_graph(Model(), (x, y), do_constant_folding=False,
+                                                   operator_export_type=OperatorExportTypes.ONNX)
+
+        print(graph)
+
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
                                (TestCase,),
