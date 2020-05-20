@@ -1958,7 +1958,6 @@ class TestDynamicQuantizedLinear(TestCase):
                      use_bias, use_relu, use_multi_dim_input, use_channelwise):
 
         if torch.backends.quantized.engine == 'qnnpack':
-            use_channelwise = False
             use_relu = False
 
         qlinear_prepack = torch.ops.quantized.linear_prepack

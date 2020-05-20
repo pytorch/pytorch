@@ -60,6 +60,7 @@ PackBMatrix::PackBMatrix(
 }
 
 // For dynamic quantization packing.
+// TODO Kimish: Dont needs this with per channel dynamic linear
 PackBMatrix::PackBMatrix(
     const size_t input_channels,
     const size_t output_channels,
