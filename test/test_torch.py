@@ -27,7 +27,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
-    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy
+    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -12642,6 +12642,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.ones((2, 1, 4), device=device, dtype=torch.uint8), xb.all(1, keepdim=True))
         self.assertEqual(torch.ones((), device=device, dtype=torch.uint8), xb.all())
 
+    @onlyOnCPUAndCUDA
     def test_addcdiv(self, device):
         def _test_addcdiv(a, alpha, b, c):
             actual = torch.addcdiv(a, b, c, value=alpha)
@@ -12649,7 +12650,7 @@ class TestTorchDeviceType(TestCase):
             if not actual.dtype.is_floating_point:
                 alpha = int(alpha)
             expected = a + (alpha * b) / c
-            self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
+            self.assertEqual(expected, actual)
 
             with self.maybeWarnsRegex(
                     UserWarning, "This overload of addcdiv is deprecated"):
@@ -12664,14 +12665,24 @@ class TestTorchDeviceType(TestCase):
                 a = torch.randint(-5, 5, size=size, dtype=dtype, device=device)
             return a + (a == 0).to(dtype)
 
+        def _helper():
+            _test_addcdiv(
+                non_zero_rand((2, 2), dtype=dtype, device=device),
+                0.5,
+                non_zero_rand((2, 2), dtype=dtype, device=device),
+                non_zero_rand((2, 2), dtype=dtype, device=device))
+
         for dtype in torch.testing.get_all_math_dtypes(device):
-            # TODO: update this after torch.allclose is added for complex
-            if not dtype.is_complex:
-                _test_addcdiv(
-                    non_zero_rand((2, 2), dtype=dtype, device=device),
-                    0.5,
-                    non_zero_rand((2, 2), dtype=dtype, device=device),
-                    non_zero_rand((2, 2), dtype=dtype, device=device))
+            # CPU complex addcdiv is wildly inaccurate
+            if dtype.is_complex and self.device_type == 'cpu':
+                with self.assertRaises(AssertionError):
+                    _helper()
+            # CUDA complex addcdiv is not implemented
+            elif dtype.is_complex and self.device_type == 'cuda':
+                with self.assertRaises(RuntimeError):
+                    _helper()
+            else:
+                _helper()
 
     # TODO: run on non-native device types
     @dtypes(torch.double)
@@ -13633,7 +13644,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to(devices[1]))    # __radd__
         self.assertEqual(2 - torch.tensor(3), 2 - torch.tensor(3).to(devices[1]))    # __rsub__
         self.assertEqual(2 * torch.tensor(3), 2 * torch.tensor(3).to(devices[1]))    # __rmul__
-        self.assertEqual(2 / torch.tensor(3), 2 / torch.tensor(3).to(devices[1]))    # __rtruediv__
+        self.assertEqual(2 / torch.tensor(3.), 2 / torch.tensor(3.).to(devices[1]))  # __rtruediv__
         self.assertEqual(2 // torch.tensor(3), 2 // torch.tensor(3).to(devices[1]))  # __rfloordiv__
 
         self.assertEqual(
@@ -13646,8 +13657,8 @@ class TestTorchDeviceType(TestCase):
             torch.tensor(2).to(devices[1]) * torch.tensor(3).to(devices[0]),
             torch.tensor(2) * torch.tensor(3))
         self.assertEqual(
-            torch.tensor(2).to(devices[1]) / torch.tensor(3).to(devices[0]),
-            torch.tensor(2) / torch.tensor(3))
+            torch.tensor(2.).to(devices[1]) / torch.tensor(3.).to(devices[0]),
+            torch.tensor(2.) / torch.tensor(3.))
         self.assertEqual(
             torch.tensor(2).to(devices[1]) // torch.tensor(3).to(devices[0]),
             torch.tensor(2) // torch.tensor(3))
@@ -16550,7 +16561,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = torch.tensor([0, 1], dtype=dtype, device=device)
         b = torch.tensor([0, 1], dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
-            a.div(b)
+            a // b
 
     @onlyCPU
     def test_cat_bad_input_sizes(self, device):
@@ -16686,6 +16697,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy has the same behavior.
     @onlyOnCPUAndCUDA
+    @unittest.skipIf(IS_MACOS, "Test is broken on MacOS, see https://github.com/pytorch/pytorch/issues/38752")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):
@@ -17851,7 +17863,7 @@ class _TestOperatorMeta():
         if self.subtest_name and op_name[-1] != '_':
             self.subtest_name = '_' + self.subtest_name
         self.ctor = _small_3d if ctor is None else ctor
-        self.arg_ctor = lambda t, d: [] if arg_ctor is None else arg_ctor
+        self.arg_ctor = (lambda t, d: []) if arg_ctor is None else arg_ctor
         self.dtypes = _types if dtypes is None else dtypes
         self.cpu_dtypes = [] if cpu_dtypes is None else cpu_dtypes
         self.has_inplace = has_inplace
@@ -17883,13 +17895,13 @@ tensor_op_tests = [
     _tc('true_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)],
         _types, _cpu_types, False),
     _tc('true_divide', 'with_inplace', _small_3d, lambda t, d: [_number(3.14, 3, t)],
-        _float_types),
+        _float_types2),
     _tc('true_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)],
         _types, _cpu_types, False),
     _tc('true_divide', 'tensor_with_inplace', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)],
-        _float_types),
+        _float_types2),
     _tc('floor_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], _types, half_tol=(0.05, 1e-4)),
     _tc('floor_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], _types, half_tol=(0.05, 1e-4)),
@@ -17925,13 +17937,11 @@ tensor_op_tests = [
     _tc('addcdiv', '', _small_2d,
         lambda t, d: [_small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)],
-        _types2, _cpu_types, True,
-        [_wrap_maybe_warns("Integer division .+")]),
+        _types2, _cpu_types, True),
     _tc('addcdiv', 'scalar', _small_2d,
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)],
-        _types, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addcdiv_? is deprecated|Integer division .+")]),
+        _types, _cpu_types, True),
     _tc('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], _types2, half_tol=(0.1, 1e-4)),
     _tc('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
