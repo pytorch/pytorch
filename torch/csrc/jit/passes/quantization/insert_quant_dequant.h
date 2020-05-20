@@ -48,6 +48,7 @@ TORCH_API void PropagateQuantizationOps(std::shared_ptr<Graph>& graph);
 TORCH_API Module InsertQuantDeQuant(
     Module& module,
     const std::string& method_name,
+    bool inplace = true,
     bool is_dynamic = false);
 
 } // namespace jit

@@ -961,8 +961,9 @@ void PropagateQuantizationOps(std::shared_ptr<Graph>& graph) {
 Module InsertQuantDeQuant(
     Module& input_module,
     const std::string& method_name,
+    bool inplace,
     bool is_dynamic) {
-  Module module = input_module.clone();
+  Module module = input_module.clone(inplace);
   InsertQuantDeQuantHelper h;
   h.setDynamicFlag(is_dynamic);
   h.run(module, method_name);
