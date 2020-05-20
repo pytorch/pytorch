@@ -41,6 +41,15 @@ TORCH_CUDA_API Val* lt(Val* v1, Val* v2);
 TORCH_CUDA_API Val* ceilDiv(Val* v1, Val* v2);
 TORCH_CUDA_API Val* andOp(Val* v1, Val* v2);
 
+TORCH_CUDA_API Val* add_alpha(Val* v1, Val* v2, Val* s);
+TORCH_CUDA_API Val* sub_alpha(Val* v1, Val* v2, Val* s);
+TORCH_CUDA_API Val* lerp(Val* start, Val* end, Val* weight);
+TORCH_CUDA_API Val* addcmul(Val* v1, Val* v2, Val* v3, Val* s);
+
+TORCH_CUDA_API Val* where(Val* c, Val* v1, Val* v2);
+TORCH_CUDA_API Val* threshold(Val* in, Val* thresh, Val* value);
+TORCH_CUDA_API Val* clamp(Val* in, Val* min_val, Val* max_val);
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

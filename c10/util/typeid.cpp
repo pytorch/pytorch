@@ -44,8 +44,6 @@ CAFFE_KNOWN_TYPE(at::Half)
 CAFFE_KNOWN_TYPE(float)
 CAFFE_KNOWN_TYPE(double)
 CAFFE_KNOWN_TYPE(c10::complex<c10::Half>)
-CAFFE_KNOWN_TYPE(std::complex<float>)
-CAFFE_KNOWN_TYPE(std::complex<double>)
 CAFFE_KNOWN_TYPE(c10::complex<float>)
 CAFFE_KNOWN_TYPE(c10::complex<double>)
 // 11 = undefined type id

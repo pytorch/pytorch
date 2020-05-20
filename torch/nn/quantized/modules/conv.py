@@ -20,6 +20,7 @@ from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
 class _ConvNd(nn.Module):
+
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation,
                  transposed, output_padding,
@@ -74,13 +75,20 @@ class _ConvNd(nn.Module):
     # their regular QTensor form for serialization. Packed weights should not
     # live outside the process in which they were created, rather they should be
     # derived from the QTensor weight.
+    #   self
+    #   |--- weight : Tensor
+    #   |--- bias : Tensor
+    #
+    # TODO: maybe change to this when https://github.com/pytorch/pytorch/pull/32958 is landed
+    #   self
+    #   |--- _packed_params : Conv2dPackedParamsBase or Conv3dPackedParamsBase
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(_ConvNd, self)._save_to_state_dict(destination, prefix, keep_vars)
         (w, b) = self._weight_bias()
         destination[prefix + 'weight'] = w
+        destination[prefix + 'bias'] = b
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
-        destination[prefix + 'bias'] = b
 
     @torch.jit.export
     def __getstate__(self):
@@ -171,35 +179,20 @@ class Conv1d(_ConvNd):
         >>> input = torch.randn(20, 16, 100)
         >>> # quantize input to quint8
         >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0,
-                                                dtype=torch.quint32)
+                                                dtype=torch.quint8)
         >>> output = m(q_input)
 
     """
 
     _FLOAT_MODULE = nn.Conv1d
 
-    # We are using Conv2d to run the Conv1d. For that we need to know which
-    # dimension is squeezed/unsqueezed.
-    _SQUEEZE_DIM = -2  # -2 is faster than -1.
-
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros'):
-        kernel_size = list(_pair_from_first(kernel_size))
-        kernel_size[self._SQUEEZE_DIM] = 1
-        kernel_size = tuple(kernel_size)
-
-        stride = list(_pair_from_first(stride))
-        stride[self._SQUEEZE_DIM] = 1
-        stride = tuple(stride)
-
-        padding = list(_pair_from_first(padding))
-        padding[self._SQUEEZE_DIM] = 0
-        padding = tuple(padding)
-
-        dilation = list(_pair_from_first(dilation))
-        dilation[self._SQUEEZE_DIM] = 1
-        dilation = tuple(dilation)
+        kernel_size = _pair_from_first(kernel_size)
+        stride = _pair_from_first(stride)
+        padding = _pair_from_first(padding)
+        dilation = _pair_from_first(dilation)
 
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -210,15 +203,11 @@ class Conv1d(_ConvNd):
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        # Check if need to unsqueeze
-        if len(w.shape) == 3:
-            w = w.unsqueeze(dim=self._SQUEEZE_DIM)
-        self._packed_params = torch.ops.quantized.conv2d_prepack(
+        self._packed_params = torch.ops.quantized.conv1d_prepack(
             w, b, self.stride, self.padding, self.dilation, self.groups)
 
     def _weight_bias(self):
-        w, b = torch.ops.quantized.conv2d_unpack(self._packed_params)
-        w = w.squeeze(dim=self._SQUEEZE_DIM)
+        w, b = torch.ops.quantized.conv1d_unpack(self._packed_params)
         return w, b
 
     def weight(self):
@@ -232,11 +221,7 @@ class Conv1d(_ConvNd):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 3:
             raise ValueError("Input shape must be `(N, C, L)`!")
-        input = input.unsqueeze(dim=self._SQUEEZE_DIM)
-        output = ops.quantized.conv2d(
-            input, self._packed_params, self.stride, self.padding,
-            self.dilation, self.groups, self.scale, self.zero_point)
-        return output.squeeze(dim=self._SQUEEZE_DIM)
+        return ops.quantized.conv1d(input, self._packed_params, self.scale, self.zero_point)
 
     @classmethod
     def from_float(cls, mod):
@@ -251,6 +236,11 @@ class Conv1d(_ConvNd):
             cls._FLOAT_MODULE.__name__
         assert hasattr(mod, 'qconfig'), \
             'Input float module must have qconfig defined.'
+        if type(mod) == nni.ConvReLU1d:
+            activation_post_process = mod[1].activation_post_process
+            mod = mod[0]
+        else:
+            activation_post_process = mod.activation_post_process
         weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
         act_scale, act_zp = mod.activation_post_process.calculate_qparams()
@@ -303,7 +293,6 @@ class Conv2d(_ConvNd):
         >>> output = m(q_input)
 
     """
-
     _FLOAT_MODULE = nn.Conv2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -326,15 +315,13 @@ class Conv2d(_ConvNd):
             w, b, self.stride, self.padding, self.dilation, self.groups)
 
     def _weight_bias(self):
-        return torch.ops.quantized.conv2d_unpack(self._packed_params)
+        return self._packed_params.unpack()
 
     def weight(self):
-        (w, _) = torch.ops.quantized.conv2d_unpack(self._packed_params)
-        return w
+        return self._weight_bias()[0]
 
     def bias(self):
-        (_, b) = torch.ops.quantized.conv2d_unpack(self._packed_params)
-        return b
+        return self._weight_bias()[1]
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -342,8 +329,7 @@ class Conv2d(_ConvNd):
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
         return ops.quantized.conv2d(
-            input, self._packed_params, self.stride, self.padding,
-            self.dilation, self.groups, self.scale, self.zero_point)
+            input, self._packed_params, self.scale, self.zero_point)
 
     @classmethod
     def from_float(cls, mod):
@@ -358,8 +344,8 @@ class Conv2d(_ConvNd):
             # '.from_float only works for ' + cls.__QAT_MODULE.__name__
             if type(mod) == nniqat.ConvBn2d:
                 mod.weight, mod.bias = fuse_conv_bn_weights(
-                    mod.weight, mod.bias, mod.running_mean, mod.running_var,
-                    mod.eps, mod.gamma, mod.beta)
+                    mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
+                    mod.bn.eps, mod.bn.weight, mod.bn.bias)
             assert hasattr(mod, 'activation_post_process'), \
                 'Input QAT module must have observer attached'
             weight_post_process = mod.weight_fake_quant
@@ -429,7 +415,6 @@ class Conv3d(_ConvNd):
         >>> output = m(q_input)
 
     """
-
     _FLOAT_MODULE = nn.Conv3d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -452,15 +437,13 @@ class Conv3d(_ConvNd):
             w, b, self.stride, self.padding, self.dilation, self.groups)
 
     def _weight_bias(self):
-        return torch.ops.quantized.conv3d_unpack(self._packed_params)
+        return self._packed_params.unpack()
 
     def weight(self):
-        (w, _) = torch.ops.quantized.conv3d_unpack(self._packed_params)
-        return w
+        return self._weight_bias()[0]
 
     def bias(self):
-        (_, b) = torch.ops.quantized.conv3d_unpack(self._packed_params)
-        return b
+        return self._weight_bias()[1]
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -468,8 +451,7 @@ class Conv3d(_ConvNd):
         if len(input.shape) != 5:
             raise ValueError("Input shape must be `(N, C, D, H, W)`!")
         return ops.quantized.conv3d(
-            input, self._packed_params, self.stride, self.padding,
-            self.dilation, self.groups, self.scale, self.zero_point)
+            input, self._packed_params, self.scale, self.zero_point)
 
     @classmethod
     def from_float(cls, mod):

@@ -55,7 +55,7 @@ bool ThreadPool::inThreadPool() const {
   return false;
 }
 
-void ThreadPool::run(const std::function<void()>& func) {
+void ThreadPool::run(std::function<void()> func) {
   if (threads_.size() == 0) {
     throw std::runtime_error("No threads to run a task");
   }
@@ -63,7 +63,7 @@ void ThreadPool::run(const std::function<void()>& func) {
 
   // Set task and signal condition variable so that a worker thread will
   // wake up and use the task.
-  tasks_.push(task_element_t(func));
+  tasks_.emplace(std::move(func));
   complete_ = false;
   condition_.notify_one();
 }
@@ -94,7 +94,7 @@ void ThreadPool::main_loop(std::size_t index) {
     // useful in the event that the function contains
     // shared_ptr arguments bound via bind.
     {
-      auto tasks = tasks_.front();
+      task_element_t tasks = std::move(tasks_.front());
       tasks_.pop();
       // Decrement count, indicating thread is no longer available.
       --available_;

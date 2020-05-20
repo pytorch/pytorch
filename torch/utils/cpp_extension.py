@@ -324,10 +324,7 @@ class BuildExtension(build_ext, object):
             # Test if we can use ninja. Fallback otherwise.
             msg = ('Attempted to use ninja as the BuildExtension backend but '
                    '{}. Falling back to using the slow distutils backend.')
-            if IS_HIP_EXTENSION:
-                warnings.warn(msg.format('HIP extensions is not supported yet for ninja.'))
-                self.use_ninja = False
-            elif not _is_ninja_available():
+            if not _is_ninja_available():
                 warnings.warn(msg.format('we could not find ninja.'))
                 self.use_ninja = False
 
@@ -361,6 +358,13 @@ class BuildExtension(build_ext, object):
             return (COMMON_NVCC_FLAGS +
                     ['--compiler-options', "'-fPIC'"] +
                     cflags + _get_cuda_arch_flags(cflags))
+
+        def convert_to_absolute_paths_inplace(paths):
+            # Helper function. See Note [Absolute include_dirs]
+            if paths is not None:
+                for i in range(len(paths)):
+                    if not os.path.isabs(paths[i]):
+                        paths[i] = os.path.abspath(paths[i])
 
         def unix_wrap_single_compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
             # Copy before we make any modifications.
@@ -410,6 +414,10 @@ class BuildExtension(build_ext, object):
             # Use absolute path for output_dir so that the object file paths
             # (`objects`) get generated with absolute paths.
             output_dir = os.path.abspath(output_dir)
+
+            # See Note [Absolute include_dirs]
+            convert_to_absolute_paths_inplace(self.compiler.include_dirs)
+
             _, objects, extra_postargs, pp_opts, _ = \
                 self.compiler._setup_compile(output_dir, macros,
                                              include_dirs, sources,
@@ -435,7 +443,11 @@ class BuildExtension(build_ext, object):
                     cuda_post_cflags = extra_postargs['nvcc']
                 else:
                     cuda_post_cflags = list(extra_postargs)
-                cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
+                if IS_HIP_EXTENSION:
+                    cuda_post_cflags = cuda_post_cflags + _get_rocm_arch_flags(cuda_post_cflags)
+                    cuda_post_cflags = cuda_post_cflags + COMMON_HIPCC_FLAGS
+                else:
+                    cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
                 append_std14_if_no_std_present(cuda_post_cflags)
 
             _write_ninja_file_and_compile_objects(
@@ -535,6 +547,15 @@ class BuildExtension(build_ext, object):
             if not self.compiler.initialized:
                 self.compiler.initialize()
             output_dir = os.path.abspath(output_dir)
+
+            # Note [Absolute include_dirs]
+            # Convert relative path in self.compiler.include_dirs to absolute path if any,
+            # For ninja build, the build location is not local, the build happens
+            # in a in script created build folder, relative path lost their correctness.
+            # To be consistent with jit extension, we allow user to enter relative include_dirs
+            # in setuptools.setup, and we convert the relative path to absolute path here
+            convert_to_absolute_paths_inplace(self.compiler.include_dirs)
+
             _, objects, extra_postargs, pp_opts, _ = \
                 self.compiler._setup_compile(output_dir, macros,
                                              include_dirs, sources,
@@ -1297,7 +1318,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
             extra_ldflags.append('cudart.lib')
             if CUDNN_HOME is not None:
                 extra_ldflags.append(os.path.join(CUDNN_HOME, 'lib/x64'))
-        else:
+        elif not IS_HIP_EXTENSION:
             extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
             extra_ldflags.append('-lcudart')
             if CUDNN_HOME is not None:

@@ -801,6 +801,14 @@ void addOutput(Node* node, const c10::List<at::Tensor>& outputs) {
   return addOutput(node, outputs.vec());
 }
 
+void addOutput(
+    Node* node,
+    const c10::intrusive_ptr<c10::ivalue::Object>& output) {
+  Value* output_val = node->addOutput();
+  output_val->inferTypeFrom(output);
+  setValueTrace(output, output_val);
+}
+
 const std::shared_ptr<TracingState>& getTracingState() {
   return detail::tracing_state;
 }

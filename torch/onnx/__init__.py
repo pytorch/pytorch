@@ -192,6 +192,8 @@ def select_model_mode_for_export(model, mode):
     A context manager to temporarily set the training mode of 'model'
     to 'mode', resetting it when we exit the with-block.  A no-op if
     mode is None.
+
+    In version 1.6 changed to this from set_training
     """
 
     from torch.onnx import utils

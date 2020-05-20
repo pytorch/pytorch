@@ -250,25 +250,6 @@ RegisterOperators reg({
           return 0;
         },
         aliasAnalysisFromSchema()),
-    // not currently being generated, here for BC
-    Operator(
-        "aten::list_with_default(int[] list, int[] defaults) -> int[]",
-        [](Stack& stack) {
-          RECORD_FUNCTION("sizes", last(stack, 2));
-
-          auto list = peek(stack, 0, 2).toIntList().copy();
-          auto defaults = peek(stack, 1, 2).toIntVector();
-          drop(stack, 2);
-
-          AT_ASSERT(defaults.size() > list.size());
-
-          // TODO: allow list of optionals to be filled in with defaults
-          // i.e. list_with_default([1, 2, None], [1, 2, 3]) -> [1, 2, 3]
-
-          push(stack, std::move(list));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
     Operator(
         "aten::_infer_size(int[] a, int[] b) -> int[]",
         [](Stack& stack) {

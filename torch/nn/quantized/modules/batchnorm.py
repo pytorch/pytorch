@@ -10,7 +10,8 @@ import torch.nn.intrinsic as nni
 class BatchNorm2d(torch.nn.BatchNorm2d):
     r"""Applies Quantized Batch Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift
+     <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -73,7 +74,9 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
 class BatchNorm3d(torch.nn.BatchNorm3d):
     r"""Applies Quantized Batch Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift
+     <https://arxiv.org/abs/1502.03167>`__ .
+
     .. math::
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
     Because the Batch Normalization is done over the `C` dimension, computing statistics

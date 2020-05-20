@@ -90,6 +90,15 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   return size;
 }
 
+std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const Tensor & x1, const Tensor & x2, const Tensor & res) {
+  // handle case at 0 where we return a subgradient containing 0
+  Tensor ratio = grad / res;
+  ratio.masked_fill_(res == 0, 0);
+  return std::tuple<Tensor, Tensor>{
+            x1 * ratio.sum(-1, true) - ratio.matmul(x2),
+            x2 * ratio.sum(-2, false).unsqueeze(-1) - ratio.transpose(-2, -1).matmul(x1)};
+}
+
 Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Scalar> & p_, const Tensor & norm) {
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
@@ -642,9 +651,19 @@ Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
   }
 }
 
-Tensor select_equals_backward(Tensor grad, const Tensor & input, const Tensor & value) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  grad_input.masked_fill_(input == value, grad);
+Tensor select_first_equal_backward(Tensor grad, const Tensor & input, const Tensor & value) {
+  auto grad_input = at::zeros_like(input);
+
+  // find indices of the first element for which input[idx] == value
+  auto first_value_idx = (input == value).nonzero().select(0, 0);
+
+  if (grad_input.dim() == 0) {
+    grad_input.copy_(grad);
+  }
+  else {
+    grad_input.index_put_(at::chunk(first_value_idx, grad_input.dim()), grad);
+  }
+
   return grad_input;
 }
 
@@ -677,20 +696,6 @@ Tensor trace_backward(const Tensor & grad, IntArrayRef sizes) {
   auto indices = at::arange(0, grad_input.numel(), sizes[1] + 1, grad.options().dtype(at::kLong));
   grad_input.index_fill_(0, indices, grad);
   return grad_input.view(sizes);
-}
-
-Tensor unfold_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t dim, int64_t size, int64_t step) {
-
-  int64_t numel = 1;
-  for (auto size : input_sizes) {
-    numel *= size;
-  }
-
-  auto idx = at::arange(0, numel, grad.options().dtype(at::kLong)).view(input_sizes);
-  auto idx_unfolded = idx.unfold(dim, size, step).contiguous().view(-1);
-  auto grad_input = at::zeros({numel}, grad.options());
-  grad_input.index_add_(0, idx_unfolded, grad.contiguous().view(-1));
-  return grad_input.view(input_sizes);
 }
 
 Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {

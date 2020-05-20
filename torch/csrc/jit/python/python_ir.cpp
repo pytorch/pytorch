@@ -400,7 +400,13 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .VS(type)
       .VS(setType)
-      .VS(inferTypeFrom)
+      .def(
+          "inferTypeFrom",
+          py::overload_cast<const at::Tensor&>(&Value::inferTypeFrom))
+      .def(
+          "inferTypeFrom",
+          py::overload_cast<const c10::intrusive_ptr<c10::ivalue::Object>&>(
+              &Value::inferTypeFrom))
       // skip owningGraph because it returns a raw pointer to a otherwise
       // std::shared_ptr stored graph object, and would cause a double free
       .VS(unique)

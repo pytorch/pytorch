@@ -1384,7 +1384,13 @@ The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
 
-.. include:: cuda_deterministic.rst
+Note:
+    In some circumstances when using the CUDA backend with CuDNN, this operator
+    may select a nondeterministic algorithm to increase performance. If this is
+    undesirable, you can try to make the operation deterministic (potentially at
+    a performance cost) by setting ``torch.backends.cudnn.deterministic =
+    True``.
+    Please see the notes on :doc:`/notes/randomness` for background.
 
 Args:
     dim (int): dimension along which to index
@@ -1477,9 +1483,10 @@ Args:
 
 add_docstr_all('index_put',
                r"""
-index_put(indices, value, accumulate=False) -> Tensor
+index_put(tensor1, indices, value, accumulate=False) -> Tensor
 
-Out-place version of :meth:`~Tensor.index_put_`
+Out-place version of :meth:`~Tensor.index_put_`.
+`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_put_`.
 """)
 
 add_docstr_all('index_select',
@@ -1533,6 +1540,27 @@ add_docstr_all('inverse',
 inverse() -> Tensor
 
 See :func:`torch.inverse`
+""")
+
+add_docstr_all('isnan',
+               r"""
+isnan() -> Tensor
+
+See :func:`torch.isnan`
+""")
+
+add_docstr_all('isinf',
+               r"""
+isinf() -> Tensor
+
+See :func:`torch.isinf`
+""")
+
+add_docstr_all('isfinite',
+               r"""
+isfinite() -> Tensor
+
+See :func:`torch.isfinite`
 """)
 
 add_docstr_all('isclose',
@@ -2511,7 +2539,13 @@ dimensions. It is also required that ``index.size(d) <= src.size(d)`` for all
 dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``.
 
-.. include:: cuda_deterministic.rst
+Note:
+    In some circumstances when using the CUDA backend with CuDNN, this operator
+    may select a nondeterministic algorithm to increase performance. If this is
+    undesirable, you can try to make the operation deterministic (potentially at
+    a performance cost) by setting ``torch.backends.cudnn.deterministic =
+    True``.
+    Please see the notes on :doc:`/notes/randomness` for background.
 
 Args:
     dim (int): the axis along which to index
@@ -3545,23 +3579,26 @@ See :func:`torch.pinverse`
 
 add_docstr_all('index_add',
                r"""
-index_add(dim, index, tensor) -> Tensor
+index_add(tensor1, dim, index, tensor2) -> Tensor
 
-Out-of-place version of :meth:`torch.Tensor.index_add_`
+Out-of-place version of :meth:`torch.Tensor.index_add_`.
+`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_add_`.
 """)
 
 add_docstr_all('index_copy',
                r"""
-index_copy(dim, index, tensor) -> Tensor
+index_copy(tensor1, dim, index, tensor2) -> Tensor
 
-Out-of-place version of :meth:`torch.Tensor.index_copy_`
+Out-of-place version of :meth:`torch.Tensor.index_copy_`.
+`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_copy_`.
 """)
 
 add_docstr_all('index_fill',
                r"""
-index_fill(dim, index, value) -> Tensor
+index_fill(tensor1, dim, index, value) -> Tensor
 
-Out-of-place version of :meth:`torch.Tensor.index_fill_`
+Out-of-place version of :meth:`torch.Tensor.index_fill_`.
+`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_fill_`.
 """)
 
 add_docstr_all('scatter',

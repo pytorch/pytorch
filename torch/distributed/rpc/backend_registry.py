@@ -152,3 +152,44 @@ register_backend(
     _process_group_construct_rpc_backend_options_handler,
     _process_group_init_backend_handler,
 )
+
+def _tensorpipe_construct_rpc_backend_options_handler(
+    rpc_timeout,
+    init_method,
+    **kwargs
+):
+    from . import TensorPipeRpcBackendOptions
+
+    rpc_backend_options = TensorPipeRpcBackendOptions()
+    rpc_backend_options.rpc_timeout = rpc_timeout
+    rpc_backend_options.init_method = init_method
+    return rpc_backend_options
+
+
+def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
+    from . import TensorPipeRpcBackendOptions
+    from . import TensorPipeAgent
+
+    if not isinstance(store, dist.Store):
+        raise RuntimeError("`store` must be a c10d::Store. {}".format(store))
+
+    if not isinstance(
+        rpc_backend_options, TensorPipeRpcBackendOptions
+    ):
+        raise RuntimeError(
+            "`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`. {}".format(
+                rpc_backend_options
+            )
+        )
+
+    agent = TensorPipeAgent(
+        store, name, rank, world_size, rpc_backend_options
+    )
+    return agent
+
+
+register_backend(
+    "TENSORPIPE",
+    _tensorpipe_construct_rpc_backend_options_handler,
+    _tensorpipe_init_backend_handler,
+)
