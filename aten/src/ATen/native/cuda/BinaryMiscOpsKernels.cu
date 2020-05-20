@@ -40,7 +40,7 @@ void mse_kernel_cuda(TensorIterator& iter) {
 }
 
 void logaddexp_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "logaddexp_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp_cuda", [&]() {
     gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
       if (::isinf(a) && a == b) {
         return a;
@@ -54,7 +54,7 @@ void logaddexp_kernel_cuda(TensorIterator& iter) {
 }
 
 void logaddexp2_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "logaddexp2_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp2_cuda", [&]() {
     gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
       if (::isinf(a) && a == b) {
         return a;
