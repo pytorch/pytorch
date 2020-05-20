@@ -4,6 +4,7 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <c10/cuda/CUDAGuard.h>
 
 namespace at { namespace native {
 
@@ -76,6 +77,7 @@ namespace at { namespace native {
 
 template <typename func_t>
 void gpu_kernel(TensorIterator& iter, const func_t& f) {
+  c10::cuda::CUDAGuard g(iter.device());
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
   for (int arg = 0; arg < iter.ntensors(); arg++) {
@@ -98,6 +100,7 @@ void gpu_kernel(TensorIterator& iter, const func_t& f) {
 
 template <typename func_t>
 void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
+  c10::cuda::CUDAGuard g(iter.device());
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
 
