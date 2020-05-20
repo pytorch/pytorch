@@ -555,20 +555,18 @@ def device_guard(option, dispatch_options, dispatch_tensor):
 
 def named_guard(option, tensors, tensorlists):
     if option.get('supports_named_tensor', False) or (len(tensors) + len(tensorlists) == 0):
-        return ''
+        return '// NamedGuard omitted'
     # Override: supports_named_tensor = False for _th_ functions. This is because:
     # There is always some at:: function that calls the _th_ function.
     if option['name'].startswith('_th_'):
         return ''
     named_conditions = []
     for tensor in tensors:
-        named_conditions.append('{}.has_names()'.format(tensor))
+        named_conditions.append('!{}.has_names()'.format(tensor))
     for tensorlist in tensorlists:
-        named_conditions.append('at::has_names({})'.format(tensorlist))
-    return ("""\
-if ({named_conditions}) {{
-    AT_ERROR("{op}", named_tensors_unsupported_error);
-}}""".format(named_conditions=' || '.join(named_conditions), op=option['name']))
+        named_conditions.append('!at::has_names({})'.format(tensorlist))
+    return 'TORCH_CHECK({named_conditions}, "{op}", named_tensors_unsupported_error);'.format(
+        named_conditions=' && '.join(named_conditions), op=option['name'])
 
 
 def dispatch_scalar_type(option, dispatch_options, dispatch_tensor):
