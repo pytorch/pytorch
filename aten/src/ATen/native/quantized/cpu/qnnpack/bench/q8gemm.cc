@@ -114,8 +114,10 @@ class Q8GEMM : public benchmark::Fixture {
     c_.resize(mc() * nc());
     std::fill(c_.begin(), c_.end(), 0xA5);
 
+    std::vector<uint8_t> kernel_zero_points(1, 127);
+    std::vector<float> requantization_scale(1, 0.75f);
     quantizationParams_ = pytorch_qnnp_compute_conv_quantization_params(
-        127, 127, 0.75f, 127, 1, 254);
+        127, kernel_zero_points.data(), requantization_scale.data(), 127, 1, 254);
   }
 
   virtual void TearDown(benchmark::State& state) override {

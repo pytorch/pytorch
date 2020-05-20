@@ -9,14 +9,14 @@ PackBMatrix::PackBMatrix(
     const size_t input_channels,
     const size_t output_channels,
     const uint8_t kernel_zero_point,
-    const float kernel_scale,
+    const float requantization_scale,
     const uint8_t* kernel,
     const int32_t* bias) {
-  if (kernel_scale <= 0.0f || !std::isnormal(kernel_scale)) {
+  if (requantization_scale <= 0.0f || !std::isnormal(requantization_scale)) {
     pytorch_qnnp_log_error(
-        "failed to create fully connected operator with %.7g kernel scale: "
+        "failed to create fully connected operator with %.7g requantization scale: "
         "scale must be finite and positive",
-        kernel_scale);
+        requantization_scale);
     assert("QNNPACK Runtime Error.");
   }
 
