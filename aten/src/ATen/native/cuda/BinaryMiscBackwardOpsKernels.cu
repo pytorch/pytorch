@@ -21,8 +21,9 @@ void sigmoid_backward_kernel_cuda(TensorIterator& iter) {
 
 void tanh_backward_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "tanh_backward_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return a * (scalar_t(1.) - b * b);
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
+      return a * (thrust_t(1.) - b * b);
     });
   });
 }
