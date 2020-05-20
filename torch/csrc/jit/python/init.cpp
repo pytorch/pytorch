@@ -836,7 +836,7 @@ void initJITBindings(PyObject* module) {
           &PythonFutureWrapper::then,
           py::call_guard<py::gil_scoped_release>());
 
-  m.def("fork", [](py::args args) {
+  m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);
 
     py::function f = py::cast<py::function>(args[0]);
@@ -860,7 +860,7 @@ void initJITBindings(PyObject* module) {
         tracer::WithNestedTracingFrame env_guard;
 
         // Run the user-supplied function
-        py_func_output = f(*args_tup);
+        py_func_output = f(*args_tup, **kwargs);
 
         // Convert the output of the user-supplied function to IValue. The type
         // information of this IValue is used both to record the correct type in
@@ -883,7 +883,7 @@ void initJITBindings(PyObject* module) {
 
       return std::make_shared<PythonFutureWrapper>(retval);
     } else {
-      auto result = toTypeInferredIValue(f(*args_tup));
+      auto result = toTypeInferredIValue(f(*args_tup, **kwargs));
       auto retval = c10::make_intrusive<c10::ivalue::Future>(result.type());
       retval->markCompleted(std::move(result));
       return std::make_shared<PythonFutureWrapper>(retval);

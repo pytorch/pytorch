@@ -81,7 +81,7 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
 
-    AT_DISPATCH_ALL_TYPES_AND2(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Bool, ScalarType::Half, iter.dtype(),
       method_name, [&] {
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {

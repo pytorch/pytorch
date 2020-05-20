@@ -4,6 +4,7 @@
 namespace torch {
 namespace jit {
 
+// map from op alias -> normalized op
 static const std::unordered_map<Symbol, Symbol> alias_map = {
     {aten::absolute, aten::abs},
     {aten::absolute_, aten::abs_},
@@ -23,11 +24,14 @@ void replaceNodeWithNewSymbol(Node* node, Symbol new_symbol) {
   replace_node->copyMetadata(node);
   TORCH_INTERNAL_ASSERT(
       replace_node->maybeOperator(),
-      "invalid symbol replacemnet:",
+      "invalid symbol replacement:",
       new_symbol,
       node->kind());
 }
 
+// having multiple ops in our IR that do the same thing makes the IR more
+// difficult to consumer for downstream user of the IR, such as our own
+// optimization passes here, we convert op aliases into a standard form
 bool normalizeOpAliases(graph_node_list_iterator& iter) {
   auto alias = alias_map.find(iter->kind());
   if (alias != alias_map.end()) {
