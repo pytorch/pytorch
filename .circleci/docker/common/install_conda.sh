@@ -81,6 +81,13 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install magma-cuda102 -c pytorch
   fi
 
+  if [[ "$CONDA_COMPILER" != "" ]]; then
+    if [[ "$CUDA_VERSION" != "" ]]; then
+        nvcc="nvcc_linux-64=${CUDA_VERSION}"
+    fi
+    conda_install compilers ${nvcc}
+  fi
+
   # TODO: This isn't working atm
   conda_install nnpack -c killeent
 
