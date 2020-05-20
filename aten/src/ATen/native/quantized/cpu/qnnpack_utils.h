@@ -240,7 +240,6 @@ Tensor qnnpack_avg_pool2d(
 } // qnnp_avgpool_helper
 } // namespace native
 } // namespace at
-#endif
 
 namespace {
 std::vector<float> generate_requantization_scales(
@@ -311,5 +310,6 @@ std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
   }
   return {weight_zp, weight_scales};
 }
-
 } // namespace
+
+#endif
