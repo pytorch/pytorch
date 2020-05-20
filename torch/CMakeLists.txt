@@ -178,9 +178,6 @@ if(USE_DISTRIBUTED)
       append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
-      if(USE_CUDA OR USE_ROCM)
-        list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/c10d/ddp.cpp)
-      endif()
     endif()
 endif()
 
@@ -268,7 +265,8 @@ set(ModulesStubOut
     ${TORCH_SRC_DIR}/nn/modules/upsampling.pyi
 )
 add_custom_target(torch_python_stubs DEPENDS
-    "${TORCH_SRC_DIR}/__init__.pyi"
+    "${TORCH_SRC_DIR}/_C/__init__.pyi"
+    "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     ${ModuleStubOut}
 )
@@ -276,7 +274,8 @@ add_custom_target(torch_python_stubs DEPENDS
 add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
 add_custom_command(
     OUTPUT
-    "${TORCH_SRC_DIR}/__init__.pyi"
+    "${TORCH_SRC_DIR}/_C/__init__.pyi"
+    "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     ${ModuleStubOut}
     COMMAND
@@ -284,7 +283,8 @@ add_custom_command(
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
-    "${TORCH_SRC_DIR}/__init__.pyi.in"
+    "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
+    "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
     "${TORCH_SRC_DIR}/nn/functional.pyi.in"
     ${ModuleStubIn}
     "${TOOLS_PATH}/pyi/gen_pyi.py"

@@ -121,6 +121,8 @@ void _parallel_run(
   const int64_t end,
   const int64_t grain_size,
   const std::function<void(int64_t, int64_t, size_t)>& f) {
+  at::internal::lazy_init_num_threads();
+
   size_t num_tasks, chunk_size;
   std::tie(num_tasks, chunk_size) =
       internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);

@@ -42,21 +42,18 @@ using supported_primitive_arg_types = guts::typelist::typelist<
     at::Tensor,
     at::Scalar,
     c10::QScheme,
-    c10::ScalarType>;
+    c10::ScalarType
+  >;
 
-template <class T, bool AllowDeprecatedTypes, class Enable = void>
-struct assert_is_valid_input_type {
-  assert_is_valid_input_type() {
-    auto tmap = c10::getCustomClassTypeMap();
-    TORCH_CHECK(
-        c10::isCustomClassRegistered<T>(),
-        "Tried to use undefined class as input argument");
-  }
-  };
-
-  template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
-    // everything is ok, this is a primitive type
+  template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
+    assert_is_valid_input_type() {
+      guts::if_constexpr<guts::typelist::contains<supported_primitive_arg_types, T>::value>([] {
+        /* everything is ok, this is a primitive type */
+      }, /* else */ [] {
+        auto tmap = c10::getCustomClassTypeMap();
+        TORCH_CHECK(c10::isCustomClassRegistered<T>(), "Tried to use undefined class as input argument");
+      });
+    }
   };
 
   template<class T, bool AllowDeprecatedTypes>
@@ -139,14 +136,13 @@ struct assert_is_valid_input_type {
 
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_output_type {
     assert_is_valid_output_type() {
-      auto tmap = getCustomClassTypeMap();
-      TORCH_CHECK(c10::isCustomClassRegistered<T>(), "Tried to use undefined class as output");
+      guts::if_constexpr<guts::typelist::contains<supported_primitive_arg_types, T>::value>([] {
+        /* everything is ok, this is a primitive type */
+      }, /* else */ [] {
+        auto tmap = getCustomClassTypeMap();
+        TORCH_CHECK(c10::isCustomClassRegistered<T>(), "Tried to use undefined class as output");
+      });
     }
-  };
-
-  template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
-    // everything is ok, this is a primitive type
   };
 
   template<class T, bool AllowDeprecatedTypes>
@@ -268,33 +264,30 @@ struct assert_is_valid_input_type {
       torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>(std::move(std::get<indices>(output)))...);
     }
   };
-
-  template<class KernelFunctor, bool AllowDeprecatedTypes, class Enable = void> struct make_boxed_from_unboxed_functor final {};
-
-  // SFINAE version for kernels that return an output
-  template<class KernelFunctor, bool AllowDeprecatedTypes>
-  struct make_boxed_from_unboxed_functor<KernelFunctor, AllowDeprecatedTypes, std::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
-    static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
-
-    static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
-      constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
-      KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
-      auto output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
-      torch::jit::drop(*stack, num_inputs);
-      push_outputs<typename guts::infer_function_traits_t<KernelFunctor>::return_type, AllowDeprecatedTypes>::call(std::move(output), stack);
+  template<bool AllowDeprecatedTypes>
+  struct push_outputs<void, AllowDeprecatedTypes> final {
+    static void call(int /*dummy*/, Stack* /*stack*/) {
     }
   };
 
-  // SFINAE version for kernels that don't return an output
   template<class KernelFunctor, bool AllowDeprecatedTypes>
-  struct make_boxed_from_unboxed_functor<KernelFunctor, AllowDeprecatedTypes, std::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  struct make_boxed_from_unboxed_functor final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
-      call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
-      torch::jit::pop(*stack, num_inputs);
+
+      using ReturnType = typename guts::infer_function_traits_t<KernelFunctor>::return_type;
+      constexpr bool has_outputs = !std::is_same<void, ReturnType>::value;
+      guts::if_constexpr<has_outputs>([&] (auto _) {
+        auto output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, _(stack));
+        torch::jit::drop(*stack, num_inputs);
+        push_outputs<ReturnType, AllowDeprecatedTypes>::call(std::move(output), stack);
+      }, /* else */ [&] {
+        call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
+        torch::jit::drop(*stack, num_inputs);
+      });
     }
   };
 

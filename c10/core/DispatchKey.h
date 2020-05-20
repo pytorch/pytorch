@@ -151,6 +151,10 @@ enum class DispatchKey : uint8_t {
   // autograd; for example, error checking, tracing, profiling or vmap.  They
   // go here.
 
+  // This is the dispatch key for BatchedTensorImpl, which is used to implement
+  // batching rules for vmap.
+  BatchedTensorKey,
+
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single
   // process test.  Use it by creating a TensorImpl with this DispatchKey, and

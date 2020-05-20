@@ -945,6 +945,9 @@
 - name: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
   self: unfold_backward(grad, self.sizes(), dimension, size, step)
 
+- name: unfold_backward(Tensor grad_in, int[] input_sizes, int dim, int size, int step) -> Tensor
+  grad_in: grad.unfold(dim, size, step)
+
 - name: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
@@ -1123,6 +1126,9 @@
 - name: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _log_softmax_backward_data(grad, result, dim, self)
 
+- name: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  self: _sparse_log_softmax_backward_data(grad, result, dim, self)
+
 - name: prelu(Tensor self, Tensor weight) -> Tensor
   self, weight: prelu_backward(grad, self, weight)
 
@@ -1137,6 +1143,9 @@
 
 - name: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _softmax_backward_data(grad, result, dim, self)
+
+- name: _sparse_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  self: _sparse_softmax_backward_data(grad, result, dim, self)
 
 - name: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
   self: softplus_backward(grad, self, beta, threshold, result)
