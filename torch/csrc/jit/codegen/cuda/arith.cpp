@@ -62,7 +62,7 @@ TORCH_CUDA_API Val* promoteNew(Val* v1, Val* v2) {
   return newValLike(v1, out_dtype);
 }
 
-Val* newConstScalar(DataType dtype, long int val) {
+Val* newConstScalar(DataType dtype, int val) {
   switch (dtype) {
     case (DataType::Int):
       return new Int(val);
@@ -77,7 +77,7 @@ Val* newConstScalar(DataType dtype, long int val) {
       val);
 }
 
-Val* newConstScalar(DataType dtype, double val) {
+Val* newConstScalar(DataType dtype, float val) {
   switch (dtype) {
     case (DataType::Float):
       return new Float(val);

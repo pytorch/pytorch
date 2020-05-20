@@ -53,7 +53,7 @@ void IterVisitor::traverseFrom(
   FusionGuard fg(fusion);
   std::unordered_set<Statement*> visited;
   stmt_stack.clear();
-  stmt_stack.push_back(std::vector<Statement*>(from.rbegin(), from.rend()));
+  stmt_stack.emplace_back(from.rbegin(), from.rend());
 
   while (!stmt_stack.empty()) {
     auto next_stmts = next(stmt_stack.back().back());
@@ -64,8 +64,7 @@ void IterVisitor::traverseFrom(
 
     // Traverse down until we get to a leaf
     while (!next_stmts.empty()) {
-      stmt_stack.push_back(
-          std::vector<Statement*>(next_stmts.rbegin(), next_stmts.rend()));
+      stmt_stack.emplace_back(next_stmts.rbegin(), next_stmts.rend());
       next_stmts = next(stmt_stack.back().back());
       // Remove statements we already visited if we're not traversing all paths
       if (!traverseAllPaths)
@@ -153,7 +152,7 @@ struct DependencyChains : public IterVisitor {
           deps.push_back(static_cast<Val*>(stack.back()));
       }
       // Order as dependency -> of
-      dep_chains.push_back(std::deque<Val*>(deps.rbegin(), deps.rend()));
+      dep_chains.emplace_back(deps.rbegin(), deps.rend());
     }
   }
 
@@ -170,10 +169,8 @@ struct DependencyChains : public IterVisitor {
       traverse(_dependency->fusion(), false);
   }
 
-  DependencyChains(
-      const std::set<Val*>& _dependencies,
-      bool all_chains_ = false)
-      : dependencies_(_dependencies) {
+  DependencyChains(std::set<Val*> _dependencies, bool all_chains_ = false)
+      : dependencies_(std::move(_dependencies)) {
     if (dependencies_.empty())
       return;
 

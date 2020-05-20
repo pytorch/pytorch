@@ -236,7 +236,8 @@ struct Influence : public TransformIter {
 
   std::vector<bool> influence;
 
-  Influence(const std::vector<bool>& td_influence) : influence(td_influence) {}
+  Influence(std::vector<bool> td_influence)
+      : influence(std::move(td_influence)) {}
 
   using TransformIter::replayBackward;
   using TransformIter::runReplay;
@@ -514,7 +515,7 @@ struct Replay : public TransformIter {
   }
 
   std::vector<int> axis_map;
-  Replay(const std::vector<int>& _axis_map) : axis_map(_axis_map) {}
+  Replay(std::vector<int> _axis_map) : axis_map(std::move(_axis_map)) {}
 
  public:
   // Replays history provided on td, axis_map is the mapping from td axes to
@@ -826,7 +827,7 @@ struct ReplaySelf : public TransformIter {
   }
 
   std::vector<int> axis_map;
-  ReplaySelf(const std::vector<int>& _axis_map) : axis_map(_axis_map) {}
+  ReplaySelf(std::vector<int> _axis_map) : axis_map(std::move(_axis_map)) {}
 
  public:
   // Replays history provided on td, axis_map is the mapping from td axes to
@@ -1067,7 +1068,8 @@ struct TransformBackward : public TransformIter {
 
   std::vector<int> axis_map;
 
-  TransformBackward(const std::vector<int>& _axis_map) : axis_map(_axis_map){};
+  TransformBackward(std::vector<int> _axis_map)
+      : axis_map(std::move(_axis_map)){};
 
  public:
   static TensorDomain* replay(

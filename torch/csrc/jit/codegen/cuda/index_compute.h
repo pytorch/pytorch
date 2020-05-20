@@ -66,7 +66,7 @@ struct IndexCompute : public TransformIter {
   // Otherwise warning on runBackward as it hides an overloaded virtual function
   using TransformIter::runBackward;
 
-  IndexCompute(TensorDomain* td, const std::vector<Val*>& _indices);
+  IndexCompute(TensorDomain* td, std::vector<Val*> _indices);
   std::vector<Val*> indices;
 
  public:

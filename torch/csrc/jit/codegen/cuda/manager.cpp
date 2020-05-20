@@ -20,7 +20,7 @@ namespace {
 std::unique_ptr<KernelArgsReq> makePWKernelSupport(
     const at::ArrayRef<IValue>& inputs) {
   auto req_ptr = std::make_unique<NaivePWKernelArgsReq>();
-  for (auto input : inputs) {
+  for (const auto& input : inputs) {
     req_ptr->dims_.push_back(input.isTensor() ? input.toTensor().dim() : -1);
   }
   return req_ptr;

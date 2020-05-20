@@ -69,8 +69,8 @@ TensorDomain* IndexCompute::runBackward(std::vector<Expr*> history) {
   return running_td;
 }
 
-IndexCompute::IndexCompute(TensorDomain* td, const std::vector<Val*>& _indices)
-    : indices(_indices) {
+IndexCompute::IndexCompute(TensorDomain* td, std::vector<Val*> _indices)
+    : indices(std::move(_indices)) {
   bool exclude_reduction = td->nDims() > indices.size();
 
   TORCH_INTERNAL_ASSERT(
