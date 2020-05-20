@@ -517,7 +517,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
             fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rpc_timeout, *args, **kwargs)
         elif isinstance(func, torch.jit.ScriptFunction):
             fut = _invoke_rpc_torchscript(
-                dst_worker_info.name, torch.jit._qualified_name(func), args, kwargs, rpc_timeout
+                dst_worker_info.name, torch.jit._qualified_name(func), rpc_timeout, *args, **kwargs,
             )
         else:
             (pickled_python_udf, tensors) = _default_pickler.serialize(

@@ -5,7 +5,7 @@ import cimodel.lib.conf_tree as conf_tree
 from cimodel.lib.conf_tree import Ver
 import cimodel.lib.miniutils as miniutils
 from cimodel.data.caffe2_build_data import CONFIG_TREE_DATA, TopLevelNode
-
+from cimodel.data.simple.util.branch_filters import gen_branches_only_filter_dict
 
 from dataclasses import dataclass
 
@@ -127,7 +127,7 @@ class Conf:
             job_name = "caffe2_" + self.get_platform() + "_build"
 
         if not self.is_important:
-            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/", r"/release\/.*/"]}}
+            job_def["filters"] = gen_branches_only_filter_dict()
         job_def.update(self.gen_workflow_params(phase))
         return {job_name : job_def}
 
