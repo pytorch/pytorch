@@ -73,6 +73,8 @@ void RRef::handleError(
       errorHandlers = {
           {RPCErrorType::TIMEOUT,
            [this](const FutureMessage& /* unused */) { setTimedOut(); }},
+          {RPCErrorType::INTENTIONAL_FAILURE,
+           [this](const FutureMessage& /* unused */) { setTimedOut(); }},
           {RPCErrorType::UNKNOWN_ERROR, [](const FutureMessage& fm) {
              // Default error handler, equivalent to
              // RRefContext::handleException().
@@ -80,7 +82,7 @@ void RRef::handleError(
              throw std::runtime_error(fm.error()->what());
            }}};
   errorHandlers.find(errorType)->second(futMessage);
-}
+} // namespace rpc
 
 //////////////////////////  UserRRef  /////////////////////////////////////
 

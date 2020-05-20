@@ -183,4 +183,18 @@ class JitFaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         # ensure error is raised.
         with self.assertRaisesRegex(RuntimeError, "RRef creation"):
             rpc_async_with_rref_arg(dst_worker, (rref, ))
-        # test with regular rpc_sync but scriptFunction, see script_check_rref_confirmed
+
+    @dist_init(faulty_messages=["SCRIPT_REMOTE_CALL"])
+    def test_rref_timeout_pickle_script_func(self):
+        # Similar to above test, but calls python rpc with script function.
+        if self.rank != 0:
+            return
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker = "worker{}".format(dst_rank)
+        rref = rpc.remote(
+            dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
+        )
+        wait_until_pending_users_flushed()
+        # Call RPC with script function that takes RRef, ensure timeout during pickling
+        with self.assertRaisesRegex(RuntimeError, "RRef creation"):
+            rpc.rpc_sync(dst_worker, rref_to_here, args=(rref, ))

@@ -242,11 +242,6 @@ void ProcessGroupAgent::sync() {
   } while (hasPendingMessage());
 }
 
-std::vector<std::string> ProcessGroupAgent::getTimeoutErrorDescription() {
-  return std::vector<std::string>{
-      kRPCTimeoutErrorStr.substr(0, kRPCTimeoutErrorStr.find("{}") - 1)};
-}
-
 void ProcessGroupAgent::startImpl() {
   timeoutThreadEnabled_.store(true);
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
@@ -802,11 +797,13 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     futureCV_.notify_all();
 
     for (const auto& timedOutFuture : timedOutFutures) {
-      auto err =
-          fmt::format(kRPCTimeoutErrorStr, timedOutFuture.timeout_.count());
+      auto err = makeRPCError(
+          fmt::format(kRPCTimeoutErrorStr, timedOutFuture.timeout_.count()),
+          RPCErrorType::TIMEOUT);
+
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
-        timedOutFuture.future_->setError(err);
+        timedOutFuture.future_->setError(std::move(err));
         // The future timed out and will not be processed by handleRecv(), even
         // if we eventually get a response. In order to keep track of all
         // send/recv pairs, we increment the count here.

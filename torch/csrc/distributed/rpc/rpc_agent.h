@@ -17,6 +17,7 @@ constexpr float kDefaultRpcTimeoutSeconds = 60;
 // timeout for RPCs.
 constexpr float kUnsetRpcTimeout = -1;
 constexpr auto kDefaultInitMethod = "env://";
+extern const std::string kRPCErrorPrefix;
 
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
@@ -244,8 +245,6 @@ class TORCH_API RpcAgent {
 
   // Retrieve wheher we should profile GIL wait times or not.
   bool isGILProfilingEnabled();
-
-  virtual std::vector<std::string> getTimeoutErrorDescription();
 
   // Set type resolver that will be passed to JIT pickler to resolver type Ptr
   // based on type str.

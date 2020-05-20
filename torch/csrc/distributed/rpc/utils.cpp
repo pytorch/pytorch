@@ -17,6 +17,8 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
+#include <fmt/format.h>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -25,21 +27,28 @@ RPCErrorType getRPCErrorType(const FutureMessage& fm) {
   TORCH_INTERNAL_ASSERT(
       fm.hasError(),
       "FutureMessage passed to getRPCErrorType does not have an error.");
-  auto timeoutErrors =
-      RpcAgent::getCurrentRpcAgent()->getTimeoutErrorDescription();
-  timeoutErrors.emplace_back("failed intentionally");
 
+  // Attempt to parse for error string given by makeRPCError, otherwise return
+  // unknown error.
   auto err = std::string(fm.error()->what());
-  if (std::any_of(
-          timeoutErrors.begin(),
-          timeoutErrors.end(),
-          [&err](const std::string& timeoutErrorStr) {
-            return err.find(timeoutErrorStr) != std::string::npos;
-          })) {
-    return RPCErrorType::TIMEOUT;
+  size_t pos = err.find(torch::distributed::rpc::kRPCErrorPrefix);
+  if (pos != std::string::npos) {
+    // Parse the RPCErrorType.
+    auto errIdx = pos + torch::distributed::rpc::kRPCErrorPrefix.size() + 1;
+    auto errStr = err.substr(errIdx, err.find(":", errIdx) - errIdx);
+    auto errType = static_cast<RPCErrorType>(std::stoi(errStr));
+    return errType;
+  } else {
+    return RPCErrorType::UNKNOWN_ERROR;
   }
-  LOG(INFO) << "Unknown error: " << err;
-  return RPCErrorType::UNKNOWN_ERROR;
+}
+
+std::string makeRPCError(std::string rpcErrorStr, RPCErrorType errorType) {
+  return fmt::format(
+      "{}:{}:{}",
+      torch::distributed::rpc::kRPCErrorPrefix,
+      errorType,
+      rpcErrorStr);
 }
 
 std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
