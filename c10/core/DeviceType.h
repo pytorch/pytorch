@@ -36,6 +36,7 @@ constexpr DeviceType kCUDA = DeviceType::CUDA;
 constexpr DeviceType kHIP = DeviceType::HIP;
 constexpr DeviceType kMSNPU = DeviceType::MSNPU;
 constexpr DeviceType kXLA = DeviceType::XLA;
+constexpr DeviceType kOPENCL = DeviceType::OPENCL;
 
 // define explicit int constant
 constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =

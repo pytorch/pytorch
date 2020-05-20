@@ -55,6 +55,7 @@ enum class DispatchKey : uint8_t {
   MSNPU, // unused externally, but tested at
          // test/cpp_extensions/msnpu_extension.cpp
   XLA, // lives out of tree at https://github.com/pytorch/xla
+  OpenCL, //out-of-tree example at https://gitlab.com/pytorch-complex/vitis_kernels
 
   // These are Caffe2 device types which we grandfathered into
   // DispatchKey.
@@ -62,7 +63,6 @@ enum class DispatchKey : uint8_t {
   // and just simply be undispatchable.
   MKLDNN, // (MKLDNN is treated as another "device" in Caffe2)
   OpenGL,
-  OpenCL,
   IDEEP,
 
   // Here are backends which specify more specialized operators

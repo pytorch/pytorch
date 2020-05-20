@@ -34,6 +34,7 @@ enum class Backend {
   SparseHIP,
   MSNPU,
   XLA,
+  OpenCL,
   QuantizedCPU,
   QuantizedCUDA,
   Undefined,
@@ -72,6 +73,8 @@ static inline Backend toDense(Backend b) {
       return Backend::MSNPU;
     case Backend::XLA:
       return Backend::XLA;
+    case Backend::OpenCL:
+      return Backend::OpenCL;
     case Backend::SparseCPU:
       return Backend::CPU;
     case Backend::SparseCUDA:
@@ -98,6 +101,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::MSNPU;
   } else if (t == DispatchKey::XLA || t == DispatchKey::XLAPreAutograd) {
     return Backend::XLA;
+  } else if (t == DispatchKey::OpenCL) {
+    return Backend::OpenCL;
   } else if (t == DispatchKey::SparseCPU) {
     return Backend::SparseCPU;
   } else if (t == DispatchKey::SparseCUDA) {
@@ -129,6 +134,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::MSNPU;
     case Backend::XLA:
       return DispatchKey::XLA;
+    case Backend::OpenCL:
+      return DispatchKey::OpenCL;
     case Backend::SparseCPU:
       return DispatchKey::SparseCPU;
     case Backend::SparseCUDA:
@@ -160,6 +167,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::MSNPU;
     case Backend::XLA:
       return DeviceType::XLA;
+    case Backend::OpenCL:
+      return DeviceType::OPENCL;
     case Backend::SparseCPU:
       return DeviceType::CPU;
     case Backend::SparseCUDA:
@@ -194,6 +203,7 @@ static inline Backend backendToCPU(Backend b) {
       return Backend::SparseCPU;
     case Backend::MSNPU:
     case Backend::XLA:
+    case Backend::OpenCL:
       return Backend::CPU;
     case Backend::MkldnnCPU:
       return Backend::MkldnnCPU;
@@ -215,6 +225,7 @@ static inline Backend backendToCUDA(Backend b) {
     case Backend::HIP:
     case Backend::MSNPU:
     case Backend::XLA:
+    case Backend::OpenCL:
       return Backend::CUDA;
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
@@ -234,6 +245,7 @@ static inline Backend backendToHIP(Backend b) {
     case Backend::HIP:
     case Backend::MSNPU:
     case Backend::XLA:
+    case Backend::OpenCL:
       return Backend::HIP;
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
@@ -259,6 +271,8 @@ static inline const char* toString(Backend b) {
       return "MSNPU";
     case Backend::XLA:
       return "XLA";
+    case Backend::OpenCL:
+      return "OPENCL";
     case Backend::SparseCPU:
       return "SparseCPU";
     case Backend::SparseCUDA:
