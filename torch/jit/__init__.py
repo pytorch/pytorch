@@ -1677,8 +1677,15 @@ if _enabled:
             script_module._reconstruct(init_fn)
             return script_module
 
-        def _reconstruct(self, init_fn):
-            init_fn(self)
+        def _reconstruct(self, init_fn=None):
+            if init_fn:
+                init_fn(self)
+            else:
+                def init_fn(script_module):
+                    for name, cpp_module in torch._C.ModuleDict(script_module._c).items():
+                        setattr(self, name, wrap_cpp_module(cpp_module))
+                        self._concrete_type = torch._C.ConcreteModuleType.from_jit_type(self._c._type())
+                init_fn(self)
 
             # Finalize the ScriptModule: replace the nn.Module state with our
             # custom implementations and flip the _initializing bit.
