@@ -6,6 +6,8 @@ for which gradients should be computed with the ``requires_grad=True`` keyword.
 """
 import torch
 import warnings
+from typing import Any, Callable, Union, Tuple, Sequence, Optional
+from torch.types import _TensorOrTensors
 
 from .variable import Variable
 from .function import Function, NestedIOFunction
@@ -50,7 +52,13 @@ def _make_grads(outputs, grads):
     return tuple(new_grads)
 
 
-def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, grad_variables=None):
+def backward(
+    tensors: _TensorOrTensors,
+    grad_tensors: Optional[_TensorOrTensors] = None,
+    retain_graph: Optional[bool] = None,
+    create_graph: bool = False,
+    grad_variables: Optional[_TensorOrTensors] = None,
+) -> None:
     r"""Computes the sum of gradients of given tensors w.r.t. graph leaves.
 
     The graph is differentiated using the chain rule. If any of ``tensors``
@@ -115,8 +123,15 @@ def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, 
         allow_unreachable=True)  # allow_unreachable flag
 
 
-def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=False,
-         only_inputs=True, allow_unused=False):
+def grad(
+    outputs: _TensorOrTensors,
+    inputs: _TensorOrTensors,
+    grad_outputs: Optional[_TensorOrTensors] = None,
+    retain_graph: Optional[bool] = None,
+    create_graph: bool = False,
+    only_inputs: bool = True,
+    allow_unused: bool = False
+) -> Tuple[torch.Tensor, ...]:
     r"""Computes and returns the sum of gradients of outputs w.r.t. the inputs.
 
     ``grad_outputs`` should be a sequence of length matching ``output``

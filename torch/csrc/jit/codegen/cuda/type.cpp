@@ -182,13 +182,14 @@ static _enum_unordered_map<ParallelType, std::string> thread_size_string_map{
     {ParallelType::TIDy, "blockDim.y"},
     {ParallelType::TIDx, "blockDim.x"}};
 
-static std::unordered_set<BinaryOpType> logical_binary_ops{BinaryOpType::And,
-                                                           BinaryOpType::Eq,
-                                                           BinaryOpType::GE,
-                                                           BinaryOpType::GT,
-                                                           BinaryOpType::LE,
-                                                           BinaryOpType::LT,
-                                                           BinaryOpType::NE};
+static std::unordered_set<BinaryOpType, _enum_class_hash<BinaryOpType>>
+    logical_binary_ops{BinaryOpType::And,
+                       BinaryOpType::Eq,
+                       BinaryOpType::GE,
+                       BinaryOpType::GT,
+                       BinaryOpType::LE,
+                       BinaryOpType::LT,
+                       BinaryOpType::NE};
 
 bool is_logical_op(const BinaryOpType& bot) {
   return logical_binary_ops.count(bot) > 0;

@@ -4,6 +4,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/TypeProperties.h>
+#include <ATen/MemoryOverlap.h>
 
 namespace at {
 

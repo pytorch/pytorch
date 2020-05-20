@@ -8,7 +8,7 @@ from torch.nn.parameter import Parameter
 from .. import functional as F
 from .. import init
 from .module import Module
-from .utils import _single, _pair, _triple, _repeat_tuple
+from .utils import _single, _pair, _triple, _reverse_repeat_tuple
 from ..._jit_internal import List, Optional
 
 
@@ -41,7 +41,11 @@ class _ConvNd(Module):
         self.output_padding = output_padding
         self.groups = groups
         self.padding_mode = padding_mode
-        self._padding_repeated_twice = _repeat_tuple(self.padding, 2)
+        # `_reversed_padding_repeated_twice` is the padding to be passed to
+        # `F.pad` if needed (e.g., for non-zero padding types that are
+        # implemented as two ops: padding + conv). `F.pad` accepts paddings in
+        # reverse order than the dimension.
+        self._reversed_padding_repeated_twice = _reverse_repeat_tuple(self.padding, 2)
         if transposed:
             self.weight = Parameter(torch.Tensor(
                 in_channels, out_channels // groups, *kernel_size))
@@ -213,7 +217,7 @@ class Conv1d(_ConvNd):
 
     def forward(self, input):
         if self.padding_mode != 'zeros':
-            return F.conv1d(F.pad(input, self._padding_repeated_twice, mode=self.padding_mode),
+            return F.conv1d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
                             self.weight, self.bias, self.stride,
                             _single(0), self.dilation, self.groups)
         return F.conv1d(input, self.weight, self.bias, self.stride,
@@ -363,7 +367,7 @@ class Conv2d(_ConvNd):
 
     def _conv_forward(self, input, weight):
         if self.padding_mode != 'zeros':
-            return F.conv2d(F.pad(input, self._padding_repeated_twice, mode=self.padding_mode),
+            return F.conv2d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
                             weight, self.bias, self.stride,
                             _pair(0), self.dilation, self.groups)
         return F.conv2d(input, weight, self.bias, self.stride,
@@ -505,7 +509,7 @@ class Conv3d(_ConvNd):
 
     def forward(self, input):
         if self.padding_mode != 'zeros':
-            return F.conv3d(F.pad(input, self._padding_repeated_twice, mode=self.padding_mode),
+            return F.conv3d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
                             self.weight, self.bias, self.stride, _triple(0),
                             self.dilation, self.groups)
         return F.conv3d(input, self.weight, self.bias, self.stride,

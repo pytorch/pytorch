@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
+#include <ATen/native/quantized/cpu/packed_params.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
@@ -13,17 +14,6 @@ namespace jit {
 namespace onnx {
 using namespace ::c10::onnx;
 
-}
-template <class Result, class... Args>
-inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
-  // Temporary hack: when the `Profiler` dispatch key is inserted, this call
-  // will fail since the `unpack()` ops return multiple values, however the
-  // boxing code currently does not support this. Instead, exclude the Profiler
-  // dispatch key and go through unboxed dispatch, avoiding boxing altogether
-  c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
-  return c10::Dispatcher::singleton().template callUnboxed<Result, Args...>(
-      op, std::forward<Args>(args)...);
 }
 
 // Get the scale of the input to quantized op. There are two cases here
@@ -182,7 +172,7 @@ void unpackQuantizedWeightsHelper(
     c10::optional<int64_t> groups;
 
     if (itr->second.isTuple()) {
-      // Pre-unpacked weights. Comes from Conv weights which are
+      // Pre-unpacked weights. Comes from Conv/Linear weights which are
       // stored as bound C++ classes.
       auto ser_tup = itr->second.toTuple();
       unpacked_weight = ser_tup->elements()[0].toTensor();
@@ -215,9 +205,15 @@ void unpackQuantizedWeightsHelper(
       at::Tensor packed_weight = itr->second.toTensor();
       auto op = Dispatcher::singleton().findSchema({unpack_fn, ""});
       assert(op.has_value());
-      std::tie(unpacked_weight, bias) = callOpUnboxed<
+      // Temporary hack: when the `Profiler` dispatch key is inserted, this call
+      // will fail since the `unpack()` ops return multiple values, however the
+      // boxing code currently does not support this. Instead, exclude the
+      // Profiler dispatch key and go through unboxed dispatch, avoiding boxing
+      // altogether
+      c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
+      std::tie(unpacked_weight, bias) = op->call<
           std::tuple<at::Tensor, c10::optional<at::Tensor>>,
-          at::Tensor>(*op, packed_weight);
+          at::Tensor>(packed_weight);
     }
 
     // Permute weights

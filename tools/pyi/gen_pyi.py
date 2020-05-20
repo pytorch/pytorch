@@ -103,7 +103,6 @@ blacklist = [
     'div_out',
     'true_divide', 'true_divide_', 'true_divide_out',
     'floor_divide', 'floor_divide_', 'floor_divide_out',
-    'dequantize',
 ]
 
 
@@ -320,7 +319,7 @@ def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
         numargs = len(decl['arguments'])
         vararg_pos = int(is_tensor)
         have_vararg_version = (numargs > vararg_pos and
-                               decl['arguments'][vararg_pos]['dynamic_type'] in {'IntArrayRef', 'TensorList'} and
+                               decl['arguments'][vararg_pos]['dynamic_type'] in {'IntArrayRef'} and
                                (numargs == vararg_pos + 1 or python_args[vararg_pos + 1] == '*') and
                                (not is_tensor or decl['arguments'][0]['name'] == 'self'))
 
@@ -328,14 +327,11 @@ def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
 
         if have_vararg_version:
             # Two things come into play here: PyTorch has the "magic" that if the first and only positional argument
-            # is an IntArrayRef or TensorList, it will be used as a vararg variant.
+            # is an IntArrayRef, it will be used as a vararg variant.
             # The following outputs the vararg variant, the "pass a list variant" is output above.
             # The other thing is that in Python, the varargs are annotated with the element type, not the list type.
             typelist = decl['arguments'][vararg_pos]['dynamic_type']
-            if typelist == 'IntArrayRef':
-                vararg_type = '_int'
-            else:
-                vararg_type = 'Tensor'
+            vararg_type = '_int'
             # replace first argument and eliminate '*' if present
             python_args = ((['self'] if is_tensor else []) + ['*' + decl['arguments'][vararg_pos]['name'] +
                                                               ': ' + vararg_type] + python_args[vararg_pos + 2:])
@@ -419,6 +415,9 @@ def gen_nn_functional(out):
     }
     write(out, 'torch/nn/functional.pyi', stubs, env)
 
+    stubs = CodeTemplate.from_file(os.path.join('torch', '_C', '_nn.pyi.in'))
+    write(out, 'torch/_C/_nn.pyi', stubs, env)
+
 def gen_nn_pyi(out):
     gen_nn_functional(out)
     gen_nn_modules(out)
@@ -456,6 +455,7 @@ def gen_pyi(declarations_path, out):
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
         'get_num_threads': ['def get_num_threads() -> _int: ...'],
         'set_num_threads': ['def set_num_threads(num: _int) -> None: ...'],
+        'init_num_threads': ['def init_num_threads() -> None: ...'],
         'get_num_interop_threads': ['def get_num_interop_threads() -> _int: ...'],
         'set_num_interop_threads': ['def set_num_interop_threads(num: _int) -> None: ...'],
         # These functions are explicitly disabled by
@@ -485,7 +485,9 @@ def gen_pyi(declarations_path, out):
                  'def full(size: _size, fill_value: Number, *,'
                  ' names: List[Union[str, None]], {}) -> Tensor: ...'
                  .format(FACTORY_PARAMS)],
-        'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...']
+        'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...'],
+        'nonzero': ['def nonzero(input: Tensor, *, out: Optional[Tensor]=None) -> Tensor: ...',
+                    'def nonzero(input: Tensor, *, as_tuple: bool=...) -> Tensor: ...'],
     })
     for binop in ['mul', 'div', 'true_divide', 'floor_divide']:
         unsorted_function_hints[binop].append(
@@ -622,11 +624,14 @@ def gen_pyi(declarations_path, out):
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     # TODO: These are deprecated, maybe we shouldn't type hint them
-    legacy_class_hints = []
-    for c in ('DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
-              'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage'):
-        legacy_class_hints.append('class {}(Storage): ...'.format(c))
+    legacy_storage_base_hints = []
+    for c in ('Double', 'Float', 'Long', 'Int',
+              'Short', 'Char', 'Byte', 'Bool',
+              'Half', 'BFloat16', 'ComplexDouble',
+              'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32'):
+        legacy_storage_base_hints.append('class {}StorageBase(object): ...'.format(c))
 
+    legacy_class_hints = []
     for c in ('DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
               'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor'):
         legacy_class_hints.append('class {}(Tensor): ...'.format(c))
@@ -640,7 +645,8 @@ def gen_pyi(declarations_path, out):
                          for n in
                          ['float32', 'float', 'float64', 'double', 'float16', 'bfloat16', 'half',
                           'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
-                          'complex32', 'complex64', 'complex128', 'quint8', 'qint8', 'qint32', 'bool']]
+                          'complex32', 'complex64', 'cfloat', 'complex128', 'cdouble',
+                          'quint8', 'qint8', 'qint32', 'bool']]
 
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~
@@ -650,11 +656,15 @@ def gen_pyi(declarations_path, out):
         'function_hints': function_hints,
         'tensor_method_hints': tensor_method_hints,
         'legacy_class_hints': legacy_class_hints,
+        'legacy_storage_base_hints': legacy_storage_base_hints,
         'dtype_class_hints': dtype_class_hints,
     }
-    TORCH_TYPE_STUBS = CodeTemplate.from_file(os.path.join('torch', '__init__.pyi.in'))
+    TORCH_C_TYPE_STUBS = CodeTemplate.from_file(os.path.join('torch', '_C', '__init__.pyi.in'))
+    TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS = \
+        CodeTemplate.from_file(os.path.join('torch', '_C', '_VariableFunctions.pyi.in'))
 
-    write(out, 'torch/__init__.pyi', TORCH_TYPE_STUBS, env)
+    write(out, 'torch/_C/__init__.pyi', TORCH_C_TYPE_STUBS, env)
+    write(out, 'torch/_C/_VariableFunctions.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
     gen_nn_pyi(out)
 
 
