@@ -1,13 +1,11 @@
-#include <torch/csrc/jit/runtime/profiling_record.h>
+#include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <ostream>
-#include <torch/csrc/jit/passes/graph_fuser.h>
-#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include <ATen/core/interned_strings.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
 
 namespace torch {
 namespace jit {
@@ -149,8 +147,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
 }
 
 bool isProfilable(Node* n) {
-
-  if (IsFusibleOperation(n) || isSupported(n)) {
+  if (isSupported(n)) {
     return true;
   }
 
@@ -161,7 +158,7 @@ bool isProfilable(Node* n) {
     case aten::t:
       return true;
     default:
-    return false;
+      return false;
   }
 }
 
@@ -169,7 +166,8 @@ void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
     for (auto i : n->inputs()) {
-      if (i->type()->isSubtypeOf(TensorType::get()) && (isProfilable(n) || isProfilable(i->node()))) {
+      if (i->type()->isSubtypeOf(TensorType::get()) &&
+          (isProfilable(n) || isProfilable(i->node()))) {
         insertShapeProfile(n, i);
       }
     }
@@ -194,7 +192,7 @@ void ProfilingRecord::instrumentBlock(Block* block) {
 std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
     const std::shared_ptr<Graph>& graph) {
   auto new_g = graph->copy();
-  
+
   auto pr = std::unique_ptr<ProfilingRecord>(new ProfilingRecord(new_g));
   auto raw_pr = pr.get();
   unprofileGraphInputs(new_g);

@@ -1256,24 +1256,6 @@ void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
   PeepholeOptimizeShapeExpressions(graph->block(), &db);
 }
 
-bool isListOperation(Node* n) {
-
-  switch (n->kind()) {
-    case aten::cat:
-    case aten::chunk:
-    case aten::broadcast_tensors:
-    case prim::ConstantChunk:
-      return true;
-    default:
-      return false;
-  }
-
-}
-
-bool IsFusibleOperation(Node* n) {
-  return isSimpleMap(n) || isListOperation(n);
-}
-
 void CustomFuseGraph(
     std::shared_ptr<Graph>& graph,
     std::function<bool(Node*)> fn,
