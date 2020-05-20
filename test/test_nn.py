@@ -7856,10 +7856,60 @@ class TestNN(NNTestCase):
             torch.nn.BatchNorm1d(100),
             torch.nn.InstanceNorm1d(100)
         ).cuda()
+
+        # necessary to have an anchor point for comparison, in case the
+        # convert_sync_batchnorm updates in place
+        comp_module = torch.nn.Sequential(
+            torch.nn.BatchNorm1d(100),
+            torch.nn.InstanceNorm1d(100)
+        ).cuda()
+        comp_module.load_state_dict(module.state_dict())
+
         sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module)
         children = list(sync_bn_module.children())
         self.assertEqual(children[0].__class__, torch.nn.SyncBatchNorm)
         self.assertEqual(children[1].__class__, torch.nn.InstanceNorm1d)
+
+        for layer, converted_layer in zip(comp_module.children(), sync_bn_module.children()):
+            for key in layer.state_dict().keys():
+                self.assertEqual(layer.state_dict()[key].device, converted_layer.state_dict()[key].device)
+                self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
+
+    def test_functional_grad_conv(self):
+        # Conv 1D
+        input = torch.randn(1, 1, 5, requires_grad=True)
+        weight = torch.randn(1, 1, 3, requires_grad=True)
+        output = F.conv1d(input, weight, dilation=2)
+        grad_output = torch.randn(output.shape)
+
+        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        grad_input_functional = torch.nn.grad.conv1d_input(input.shape, weight, grad_output, dilation=2)
+        self.assertEqual(grad_input_functional, grad_input_autograd)
+
+        # Conv 2D
+        input = torch.randn(1, 1, 5, 5, requires_grad=True)
+        weight = torch.randn(1, 1, 3, 3, requires_grad=True)
+        output = F.conv2d(input, weight, dilation=2)
+        grad_output = torch.randn(output.shape)
+
+        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        grad_input_functional = torch.nn.grad.conv2d_input(input.shape, weight, grad_output, dilation=2)
+        self.assertEqual(grad_input_functional, grad_input_autograd)
+
+        # Conv 3D
+        input = torch.randn(1, 1, 5, 5, 5, requires_grad=True)
+        weight = torch.randn(1, 1, 3, 3, 3, requires_grad=True)
+        output = F.conv3d(input, weight, dilation=2)
+        grad_output = torch.randn(output.shape)
+
+        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        grad_input_functional = torch.nn.grad.conv3d_input(input.shape, weight, grad_output, dilation=2)
+        self.assertEqual(grad_input_functional, grad_input_autograd)
+
+        # Warning for _grad_input_padding
+        with warnings.catch_warnings(record=True) as w:
+            torch.nn.grad._grad_input_padding(torch.rand(1, 2, 3), [1, 2, 5], (1,), (0,), (3,))
+        self.assertEqual(len(w), 1)
 
 
 class TestNNInit(TestCase):
