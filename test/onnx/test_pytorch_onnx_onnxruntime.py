@@ -1712,19 +1712,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_reduced_prod(self):
         return self._test_reduced_ops(op=torch.prod)
 
-    @skipIfUnsupportedMinOpsetVersion(12)
-    def test_reduced_min_max_lp(self):
-        class ReducedMinMaxModule(torch.nn.Module):
-            def forward(self, input):
-                return torch.min(input, dim=-1)[0], torch.max(input, dim=0)[0]
-
-        x = torch.randint(10, (4, 4), dtype=torch.uint8)
-        self.run_test(ReducedMinMaxModule(), x)
-
-        x = torch.randint(10, (4, 4), dtype=torch.int8)
-        self.run_test(ReducedMinMaxModule(), x)
-
-    def test_reduced_min_max_hp(self):
+    def test_reduced_min_max(self):
         class ReducedMinMaxModule(torch.nn.Module):
             def forward(self, input):
                 return torch.min(input, dim=-1)[0], torch.max(input, dim=0)[0]
