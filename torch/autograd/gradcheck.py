@@ -266,7 +266,7 @@ def gradcheck(
                     'This check will likely fail if all the inputs are '
                     'not of double precision floating point or complex. ')
             content = inp._values() if inp.is_sparse else inp
-            if any([s == 0 for s in content.stride()]):
+            if content.layout is not torch._mkldnn and any([s == 0 for s in content.stride()]):
                 raise RuntimeError(
                     'The {}th input has a dimension with stride 0. gradcheck only '
                     'supports inputs that are non-overlapping to be able to '
