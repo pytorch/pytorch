@@ -1674,15 +1674,19 @@ if _enabled:
                 init_fn:  Lambda that initializes the RecursiveScriptModule passed to it.
             """
             script_module = RecursiveScriptModule(cpp_module)
-            init_fn(script_module)
+            script_module._reconstruct(init_fn)
+            return script_module
+
+        def _reconstruct(self, init_fn):
+            init_fn(self)
 
             # Finalize the ScriptModule: replace the nn.Module state with our
             # custom implementations and flip the _initializing bit.
-            script_module._parameters = OrderedDictWrapper(torch._C.ParameterDict(script_module._c))
-            script_module._buffers = OrderedDictWrapper(torch._C.BufferDict(script_module._c))
-            script_module._modules = OrderedModuleDict(script_module._c, script_module._modules)
-            script_module._initializing = False
-            return script_module
+            self._parameters = OrderedDictWrapper(torch._C.ParameterDict(script_module._c))
+            self._buffers = OrderedDictWrapper(torch._C.BufferDict(script_module._c))
+            self._modules = OrderedModuleDict(script_module._c, script_module._modules)
+            self._initializing = False
+            return self
 
         @property
         def graph(self):
