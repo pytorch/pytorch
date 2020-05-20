@@ -527,6 +527,10 @@ struct Vec256<c10::qint8> : public Vec256qi {
     // This is needed because the compiler emits awful code for the default
     // constructor for moving the enum
     Vec256(const Vec256<c10::qint8>& other) : Vec256qi(other.vals) { }
+    Vec256& operator=(const Vec256<c10::qint8>& other) {
+      vals = other.vals;
+      return *this;
+    }
 
     void store(void* ptr, int count = size()) const {
         if (count != size()) {
@@ -799,6 +803,10 @@ struct Vec256<c10::quint8> : public Vec256qi {
     }
 
     Vec256(const Vec256<c10::quint8>& other) : Vec256qi(other.vals) { }
+    Vec256& operator=(const Vec256<c10::quint8>& other) {
+      vals = other.vals;
+      return *this;
+    }
 
     void store(void* ptr, int count = size()) const {
         if (count != size()) {
