@@ -1135,3 +1135,203 @@ TEST(CONVOLUTION_OP, 3x3d2x1_per_channel) {
       .per_channel(true)
       .testQ8();
 }
+
+TEST(CONVOLUTION_OP, depthwise_3x3_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(1, 1)
+      .kernelSize(3, 3)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8();
+}
+
+TEST(CONVOLUTION_OP, depthwise_3x3_runtime_quant_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(1, 1)
+      .kernelSize(3, 3)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8(ConvolutionOperatorTester::Mode::Runtime);
+}
+
+TEST(CONVOLUTION_OP, depthwise_3x3s2_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(1, 1)
+      .kernelSize(3, 3)
+      .subsampling(2)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8();
+}
+
+TEST(CONVOLUTION_OP, depthwise_3x3s1x2_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(1, 1)
+      .kernelSize(3, 3)
+      .subsampling(1, 2)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8();
+}
+
+TEST(CONVOLUTION_OP, depthwise_3x3s2x1_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(1, 1)
+      .kernelSize(3, 3)
+      .subsampling(2, 1)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8();
+}
+
+TEST(CONVOLUTION_OP, depthwise_3x3d2_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(1, 1)
+      .kernelSize(3, 3)
+      .dilation(2)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8();
+}
+
+TEST(CONVOLUTION_OP, depthwise_3x3d1x2_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(1, 1)
+      .kernelSize(3, 3)
+      .dilation(1, 2)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8();
+}
+
+TEST(CONVOLUTION_OP, depthwise_3x3d2x1_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(1, 1)
+      .kernelSize(3, 3)
+      .dilation(2, 1)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8();
+}
+
+TEST(CONVOLUTION_OP, depthwise_3x3d2x1_runtime_quant_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(1, 1)
+      .kernelSize(3, 3)
+      .dilation(2, 1)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8(ConvolutionOperatorTester::Mode::Runtime);
+}
+
+TEST(CONVOLUTION_OP, depthwise_5x5_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(2, 2)
+      .kernelSize(5, 5)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8();
+}
+
+TEST(CONVOLUTION_OP, depthwise_5x5s2_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(2, 2)
+      .kernelSize(5, 5)
+      .subsampling(2)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8();
+}
+
+TEST(CONVOLUTION_OP, depthwise_5x5s1x2_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(2, 2)
+      .kernelSize(5, 5)
+      .subsampling(1, 2)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8();
+}
+
+TEST(CONVOLUTION_OP, depthwise_5x5s2x1_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(2, 2)
+      .kernelSize(5, 5)
+      .subsampling(2, 1)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8();
+}
+
+TEST(CONVOLUTION_OP, depthwise_5x5d2_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(2, 2)
+      .kernelSize(5, 5)
+      .dilation(2)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8();
+}
+
+TEST(CONVOLUTION_OP, depthwise_5x5d1x2_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(2, 2)
+      .kernelSize(5, 5)
+      .dilation(1, 2)
+      .groups(27)
+      .iterations(3)
+      .testQ8();
+}
+
+TEST(CONVOLUTION_OP, depthwise_5x5d2x1_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(2, 2)
+      .kernelSize(5, 5)
+      .dilation(2, 1)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8();
+}
+
+TEST(CONVOLUTION_OP, depthwise_5x5d2x1_runtime_quant_per_channel) {
+  ConvolutionOperatorTester()
+      .inputSize(15, 14)
+      .padding(2, 2)
+      .kernelSize(5, 5)
+      .dilation(2, 1)
+      .groups(27)
+      .iterations(3)
+      .per_channel(true)
+      .testQ8(ConvolutionOperatorTester::Mode::Runtime);
+}

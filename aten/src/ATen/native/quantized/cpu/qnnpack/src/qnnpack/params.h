@@ -507,11 +507,13 @@ struct pytorch_q8conv_xzp_parameters {
 
 struct pytorch_q8dwconv_up_parameters {
   pytorch_q8dwconv_up_ukernel_function updw;
+  pytorch_q8dwconv_up_ukernel_function updw_per_channel;
   uint8_t cr;
 };
 
 struct pytorch_q8dwconv_mp_parameters {
   pytorch_q8dwconv_mp_ukernel_function mpdw;
+  pytorch_q8dwconv_mp_ukernel_function mpdw_per_channel;
   uint8_t cr;
 };
 
