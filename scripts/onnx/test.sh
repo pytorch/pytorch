@@ -43,8 +43,8 @@ if [[ $PARALLEL == 1 ]]; then
   args+=("3")
 fi
 
-# Skipped tests	
-args+=("-k")	
+# Skipped tests
+args+=("-k")
 args+=('not (TestModels and test_vgg16) and not (TestModels and test_vgg16_bn) and not (TestModels and test_vgg19) and not (TestModels and test_vgg19_bn)')
 
 # These exclusions are for tests that take a long time / a lot of GPU
