@@ -221,11 +221,15 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
 
   deconvolution->kernel_zero_point = kernel_zero_point;
 
+  // Passing address of kernel_zero_scale and convolution_scale
+  // is not safe as they are stack variables. However for now just staging this change.
+  // Eventually, we will find a better way to handle this.
+  // TODO Kimish
   deconvolution->conv_quantization_params =
       pytorch_qnnp_compute_conv_quantization_params(
           input_zero_point,
-          kernel_zero_point,
-          deconvolution_scale,
+          &kernel_zero_point,
+          &deconvolution_scale,
           output_zero_point,
           output_min,
           output_max);

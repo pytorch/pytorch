@@ -228,8 +228,9 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
 
   auto packB = w.get();
   // Adjust weight zero point, similar to weight data.
-  auto kernel_zp = w_zp + 128;
-  auto kernel_scale = w_scale;
+  float* weight_scales_data = w_scales.data_ptr<float>();
+  auto kernel_zp = w_zero_points[0];
+  auto kernel_scale = weight_scales_data[0];
   size_t rows_w = bias_.size(0);
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
 
