@@ -943,6 +943,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     // unique to every frame with prim::profile across all threads
     c10::optional<size_t> id;
     static std::atomic<size_t> num_frames;
+
+    // RecordFunction object associated with this frame
+    std::unique_ptr<at::RecordFunction> record_function;
   };
 
   // saved-by-value stuff that can exist on the stack inside runInterpreter
@@ -1020,8 +1023,19 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
             .code;
     frames.back().pc = af->pc + 1;
-    RECORD_TORCHSCRIPT_FUNCTION(fn->name(), last(stack, code.num_inputs()));
     enterFrame(code, stack.size() - code.num_inputs());
+    if (at::hasCallbacks() && at::isRecordFunctionEnabled()) {
+      auto rec_fn = std::make_unique<at::RecordFunction>(
+          at::RecordScope::TORCHSCRIPT_FUNCTION);
+      if (rec_fn->active) {
+        if (rec_fn->needs_inputs) {
+          rec_fn->before(fn->name(), last(stack, code.num_inputs()));
+        } else {
+          rec_fn->before(fn->name());
+        }
+        frames.back().record_function = std::move(rec_fn);
+      }
+    }
     *af = ActiveFrame(frames.back());
   }
 
@@ -1185,13 +1199,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 }
                 void operator()() {
                   at::launch(InterpreterContinuation(
-                      state_, std::move(stack_), dist_autograd_context_id_));
+                      state_,
+                      std::move(stack_),
+                      dist_autograd_context_id_,
+                      std::move(tls_state_)));
                 }
 
                private:
                 InterpreterState state_;
                 Stack stack_;
                 int64_t dist_autograd_context_id_;
+                // preserve the original ThreadLocalState
+                at::ThreadLocalState tls_state_;
               };
 
               // we are suspending, so we need to reset the stack to where we
@@ -1512,7 +1531,12 @@ void InterpreterContinuation::operator()() {
   auto prev_dist_id = DistAutogradContainer::currentContextId();
   DistAutogradContainer::forceCurrentContextId(dist_autograd_context_id_);
 #endif
-  state.runAsync(stack);
+  if (tls_state_ != c10::nullopt) {
+    at::ThreadLocalStateGuard g(*tls_state_);
+    state.runAsync(stack);
+  } else {
+    state.runAsync(stack);
+  }
 #ifdef USE_DISTRIBUTED
   DistAutogradContainer::forceCurrentContextId(prev_dist_id);
 #endif
