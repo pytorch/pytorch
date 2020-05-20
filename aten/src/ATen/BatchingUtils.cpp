@@ -12,8 +12,8 @@ static bool areBdimsAtFrontInOrder(BatchDimsRef bdims) {
   return true;
 }
 
-// NB: There is an invariant that BatchDims are stored in increasing
-// `level` order.
+// NB: We rely on BatchDims being sorted by level.
+// See NOTE: [BatchDims sorted by level] for more details
 BatchDims moveBatchDimsToFront(BatchDimsRef bdims) {
   BatchDims result;
   result.reserve(bdims.size());

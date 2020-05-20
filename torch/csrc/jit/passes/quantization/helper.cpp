@@ -32,8 +32,6 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "matmul",
     "add_",
     "add",
-    "cat",
-    "lstm",
     "mul",
     "mul_",
     "hardswish",
@@ -182,6 +180,10 @@ CallFuncArgs _observe_inputs_call_func = {{"batch_norm", 1}};
 // Aten functions for getting tensor information
 std::vector<std::string> _tensor_info_funcs = {"size"};
 
+// Aten functions whose output will be quantized or not quantized depending
+// on input tensor
+std::vector<std::string> _propagate_quant_ops = {"cat"};
+
 // Check if `use` is an aten function of name `func_name` and if value
 // `v` is the nth argument (if provided) of the function.
 bool matchAtenFuncToUse(
@@ -230,11 +232,8 @@ bool matchArgPattern(
 bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv1d", 1},
-                    {"conv2d", 1},
-                    {"conv3d", 1},
-                    {"linear", 1},
-                    {"lstm", 2}}),
+      AtenFuncArgs(
+          {{"conv1d", 1}, {"conv2d", 1}, {"conv3d", 1}, {"linear", 1}}),
       CallFuncArgs({{"linear", 2}}));
   return result;
 }
@@ -354,6 +353,10 @@ bool isTensorInfoNode(Node* n) {
   return isAtenFunc(n, _tensor_info_funcs);
 }
 
+bool isPropagateQuantNode(Node* n) {
+  return isAtenFunc(n, _propagate_quant_ops);
+}
+
 c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
   static std::vector<NodeKind> fixed_qparam_funcs;
   std::transform(
@@ -403,10 +406,6 @@ bool useQuantizable(const Use& use, bool is_dynamic) {
     if (matchCallFuncToUse(use, func_input.func_name, c10::nullopt)) {
       return use.offset == func_input.arg_index;
     }
-  }
-  // Dynamic quantized ops that require special handling for inputs.
-  if (is_dynamic && matchAtenFuncToUse(use, "lstm", c10::nullopt)) {
-    return use.offset == 2;
   }
 
   return nodeQuantizable(use.user, is_dynamic);

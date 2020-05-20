@@ -23,11 +23,11 @@ void batchedTensorFallback(const c10::OperatorHandle& op, torch::jit::Stack* sta
   TORCH_CHECK(false, "NYI: Calling ", op.schema().name(), " inside of vmap");
 }
 
-TORCH_LIBRARY_IMPL(_, BatchedTensorKey, m) {
+TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorFallback>());
 }
 
-TORCH_LIBRARY_IMPL(aten, BatchedTensorKey, m) {
+TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl_UNBOXED("sum.dim_IntList", BatchedTensor_sum);
 }
 
