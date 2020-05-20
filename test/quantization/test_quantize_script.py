@@ -1713,7 +1713,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x *= y
                 return x
 
-        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float), torch.randn(1, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float),
+                 torch.randn(1, 3, 10, 10, dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m, quantized in [(QuantizedMul(), True),
                              (QuantizedInplaceMul(), True),
                              (NonQuantizedMul(), False),
