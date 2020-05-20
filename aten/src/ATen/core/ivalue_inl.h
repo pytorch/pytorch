@@ -310,12 +310,11 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return value_;
   }
 
+  // This accessor should only be used if we know that the future is
+  // completed() with no error.
   const IValue& constValue() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
-    if (error_) {
-      throw *error_;
-    }
     return value_;
   }
 

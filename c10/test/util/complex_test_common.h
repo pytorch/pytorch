@@ -389,6 +389,32 @@ MAYBE_GLOBAL void test_arithmetic() {
   test_arithmetic_<double>();
 }
 
+template<typename T, typename int_t>
+void test_binary_ops_for_int_type_(T real, T img, int_t num) {
+  c10::complex<T> c(real, img);
+  ASSERT_EQ(c + num, c10::complex<T>(real + num, img));
+  ASSERT_EQ(num + c, c10::complex<T>(num + real, img));
+  ASSERT_EQ(c - num, c10::complex<T>(real - num, img));
+  ASSERT_EQ(num - c, c10::complex<T>(num - real, -img));
+  ASSERT_EQ(c * num, c10::complex<T>(real * num, img * num));
+  ASSERT_EQ(num * c, c10::complex<T>(num * real, num * img));
+  ASSERT_EQ(c / num, c10::complex<T>(real / num, img / num));
+  ASSERT_EQ(num / c, c10::complex<T>(num * real / std::norm(c), -num * img / std::norm(c)));
+}
+
+template<typename T>
+void test_binary_ops_for_all_int_types_(T real, T img, int8_t i) {
+  test_binary_ops_for_int_type_<T, int8_t>(real, img, i);
+  test_binary_ops_for_int_type_<T, int16_t>(real, img, i);
+  test_binary_ops_for_int_type_<T, int32_t>(real, img, i);
+  test_binary_ops_for_int_type_<T, int64_t>(real, img, i);
+}
+
+TEST(TestArithmeticIntScalar, All) {
+  test_binary_ops_for_all_int_types_<float>(1.0, 0.1, 1);
+  test_binary_ops_for_all_int_types_<double>(-1.3, -0.2, -2);
+}
+
 } // namespace arithmetic
 
 namespace equality {
@@ -407,7 +433,7 @@ MAYBE_GLOBAL void test_equality() {
   test_equality_<float>();
   test_equality_<double>();
 }
-  
+
 } // namespace equality
 
 namespace io {
