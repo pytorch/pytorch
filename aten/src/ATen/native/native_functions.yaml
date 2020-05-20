@@ -4257,6 +4257,9 @@
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
+- func: scatter_add_src_backward(Tensor self, int dim, Tensor index, int[] src_sizes, *, bool sparse_grad=False) -> Tensor
+  use_c10_dispatcher: full
+
 - func: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
 

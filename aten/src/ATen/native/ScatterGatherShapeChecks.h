@@ -10,7 +10,7 @@ namespace {
 
 // Used for `gather`-like methods
 // Test:
-// 1. index.size(d) == self.size(d) for all d != dim
+// 1. index.size(d) <= self.size(d) for all d != dim
 // 2. index.size(d) <= src.size(d) for all d != dim
 static void gather_shape_check(const Tensor& self, int64_t dim,
   const Tensor& index, const Tensor& src
@@ -24,17 +24,18 @@ static void gather_shape_check(const Tensor& self, int64_t dim,
   for (int64_t i = 0; i < self_dims; ++i) {
     if (i != dim) {
       TORCH_CHECK(
-        ensure_nonempty_size(index, i) == ensure_nonempty_size(self, i),
+        ensure_nonempty_size(index, i) <= ensure_nonempty_size(self, i),
         "Size does not match at dimension ", i,
-        " get ", ensure_nonempty_size(self, i),
-        " vs ", ensure_nonempty_size(index, i)
+        " expected index ", index.sizes(),
+        " to be smaller or equal than self ", self.sizes(),
+        " apart from dimension ", dim
       );
 
       TORCH_CHECK(
         ensure_nonempty_size(index, i) <= ensure_nonempty_size(src, i),
         "Size does not match at dimension ", i,
         " expected index ", index.sizes(),
-        " to be smaller than src ", src.sizes(),
+        " to be smaller or equal than src ", src.sizes(),
         " apart from dimension ", dim
       );
     }

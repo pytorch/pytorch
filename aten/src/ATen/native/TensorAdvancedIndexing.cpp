@@ -565,6 +565,17 @@ Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const
   return self.clone(at::MemoryFormat::Preserve).scatter_add_(dim, index, source);
 }
 
+Tensor scatter_add_src_backward(
+  const Tensor& grad, int64_t dim, const Tensor& index,
+  IntArrayRef src_sizes, bool sparse_grad
+) {
+  auto grad_src = at::zeros(src_sizes, grad.options());
+  gather_stub(grad_src.device().type(), grad_src, grad, dim, index);
+
+  return grad_src;
+}
+
+
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);

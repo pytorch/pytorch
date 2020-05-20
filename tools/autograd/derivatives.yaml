@@ -789,7 +789,14 @@
 - name: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   self: grad
   index: non_differentiable
-  src: grad.gather(dim, index)
+# previously it used to be: grad.gather(dim, index),
+# but the result of gather is of shape index.shape, not src.shape
+  src: scatter_add_src_backward(grad, dim, index, src.sizes())
+
+- name: scatter_add_src_backward(Tensor self, int dim, Tensor index, int[] src_sizes, *, bool sparse_grad=False) -> Tensor
+  self: "sparse_grad ? at::_gather_sparse_backward(self, dim, index, grad) : at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad)"
+  index: non_differentiable
+
 
 - name: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
   self: select_backward(grad, self.sizes(), dim, index)
