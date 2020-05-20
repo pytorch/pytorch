@@ -2554,24 +2554,25 @@ class _TestTorchMixin(object):
         elems_per_row = random.randint(1, 10)
         dim = random.randrange(3)
 
-        src = torch.randn(m, n, o)
-        idx_size = [m, n, o]
-        idx_size[dim] = elems_per_row
-        idx = torch.LongTensor().resize_(*idx_size)
-        _TestTorchMixin._fill_indices(self, idx, dim, src.size(dim), elems_per_row, m, n, o)
+        for dtype in {torch.float32, torch.complex64, torch.complex128}:
+            src = torch.randn(m, n, o, dtype=dtype)
+            idx_size = [m, n, o]
+            idx_size[dim] = elems_per_row
+            idx = torch.LongTensor().resize_(*idx_size)
+            _TestTorchMixin._fill_indices(self, idx, dim, src.size(dim), elems_per_row, m, n, o)
 
-        src = cast(src)
-        idx = cast(idx)
+            src = cast(src)
+            idx = cast(idx)
 
-        actual = torch.gather(src, dim, idx)
-        expected = cast(torch.Tensor().resize_(*idx_size))
-        for i in range(idx_size[0]):
-            for j in range(idx_size[1]):
-                for k in range(idx_size[2]):
-                    ii = [i, j, k]
-                    ii[dim] = idx[i, j, k]
-                    expected[i, j, k] = src[tuple(ii)]
-        self.assertEqual(actual, expected, 0)
+            actual = torch.gather(src, dim, idx)
+            expected = cast(torch.zeros(idx_size, dtype=dtype))
+            for i in range(idx_size[0]):
+                for j in range(idx_size[1]):
+                    for k in range(idx_size[2]):
+                        ii = [i, j, k]
+                        ii[dim] = idx[i, j, k]
+                        expected[i, j, k] = src[tuple(ii)]
+            self.assertEqual(actual, expected, 0)
 
         bad_src = torch.randn(*[i - 1 for i in idx_size])
         self.assertRaises(RuntimeError, lambda: torch.gather(bad_src, dim, idx))

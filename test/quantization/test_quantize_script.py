@@ -1876,6 +1876,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                        .check_not("quantized::relu(") \
                        .run(m.graph)
 
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     def test_quantized_mul_scalar_relu(self):
         class MulScalarRelu(torch.nn.Module):
             def __init__(self, inplace):
