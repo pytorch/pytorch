@@ -225,12 +225,13 @@ C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T> &z) {
   // r-1 = (r-1)*(r+1)/(r+1) = (r^2-1) / (r+1)
   //     = ((x+1)^2 + y^2 - 1) / (r+1)
   //     = (x^2 + y^2 + 2x) / (r+1)
+  //     = (r^2 + 2x) / (r+1)
   T x = z.real();
   T y = z.imag();
   c10::complex<T> p1 = z + T(1);
   T r = std::abs(p1);
   T a = std::arg(p1);
-  T rm1 = (x * x + y * y + x * T(2)) / (r + 1);
+  T rm1 = (r * r + x * T(2)) / (r + 1);
   return {std::log1p(rm1), a};
 }
 
