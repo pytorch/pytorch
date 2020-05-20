@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import torch
 from .qconfig import QConfig
 from torch.jit._recursive import wrap_cpp_module

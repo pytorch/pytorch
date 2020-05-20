@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 from ....modules.linear import Linear as NNLinear
 import torch.nn.quantized as nnq

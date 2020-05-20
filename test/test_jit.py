@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import division
 import torch
 
 # This is how we include tests located in test/jit/...
