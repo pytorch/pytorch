@@ -8,6 +8,7 @@
 // Template argument <T> has to be registered with CAFFE_KNOWN_TYPE mechanism.
 
 #include <ATen/ATen.h>
+#include <ATen/TracerMode.h>
 
 namespace at {
 namespace cpp_custom_type_hack {
@@ -34,6 +35,7 @@ T& cast(const Tensor& packed) {
 template <typename T>
 Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
   // None of this should trace, so turn off Variable handling
+  at::tracer::impl::NoTracerDispatchMode tracer_guard;
   at::AutoNonVariableTypeMode guard;
 
   // We store this instance away in a Tensor and register a deleter function

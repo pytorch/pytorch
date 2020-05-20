@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/python_strings.h>
 
 #include <ATen/ATen.h>
+#include <ATen/TracerMode.h>
 
 #include <sstream>
 #include <stdexcept>
@@ -837,6 +838,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     throw TypeError("expected Tensor as argument %d, but got %s", i,
         Py_TYPE(obj)->tp_name);
   }
+  at::tracer::impl::NoTracerDispatchMode tracer_guard;
   at::AutoNonVariableTypeMode guard;
 
   at::Tensor tensor = scalar_to_tensor(scalar);

@@ -866,11 +866,9 @@ class TestDistributions(TestCase):
                     self.assertEqual(expanded.batch_shape, expanded_shape)
                     try:
                         self.assertEqual(expanded.mean,
-                                         d.mean.expand(expanded_shape + d.event_shape),
-                                         allow_inf=True)
+                                         d.mean.expand(expanded_shape + d.event_shape))
                         self.assertEqual(expanded.variance,
-                                         d.variance.expand(expanded_shape + d.event_shape),
-                                         allow_inf=True)
+                                         d.variance.expand(expanded_shape + d.event_shape))
                     except NotImplementedError:
                         pass
 
@@ -940,7 +938,7 @@ class TestDistributions(TestCase):
         s = 0.3
         self.assertEqual(Geometric(p).sample((8,)).size(), (8, 3))
         self.assertEqual(Geometric(1).sample(), 0)
-        self.assertEqual(Geometric(1).log_prob(torch.tensor(1.)), -inf, allow_inf=True)
+        self.assertEqual(Geometric(1).log_prob(torch.tensor(1.)), -inf)
         self.assertEqual(Geometric(1).log_prob(torch.tensor(0.)), 0)
         self.assertFalse(Geometric(p).sample().requires_grad)
         self.assertEqual(Geometric(r).sample((8,)).size(), (8,))
@@ -1040,11 +1038,11 @@ class TestDistributions(TestCase):
         bin0 = Binomial(total_count, 0)
         self.assertEqual(bin0.sample(), 0)
         self.assertAlmostEqual(bin0.log_prob(torch.tensor([0.]))[0], 0, places=3)
-        self.assertEqual(float(bin0.log_prob(torch.tensor([1.])).exp()), 0, allow_inf=True)
+        self.assertEqual(float(bin0.log_prob(torch.tensor([1.])).exp()), 0)
         bin1 = Binomial(total_count, 1)
         self.assertEqual(bin1.sample(), total_count)
         self.assertAlmostEqual(bin1.log_prob(torch.tensor([float(total_count)]))[0], 0, places=3)
-        self.assertEqual(float(bin1.log_prob(torch.tensor([float(total_count - 1)])).exp()), 0, allow_inf=True)
+        self.assertEqual(float(bin1.log_prob(torch.tensor([float(total_count - 1)])).exp()), 0)
         zero_counts = torch.zeros(torch.Size((2, 2)))
         bin2 = Binomial(zero_counts, 1)
         self.assertEqual(bin2.sample(), zero_counts)
@@ -1375,8 +1373,8 @@ class TestDistributions(TestCase):
         uniform = Uniform(low_1d, high_1d)
         above_high = torch.tensor([4.0])
         below_low = torch.tensor([-1.0])
-        self.assertEqual(uniform.log_prob(above_high).item(), -inf, allow_inf=True)
-        self.assertEqual(uniform.log_prob(below_low).item(), -inf, allow_inf=True)
+        self.assertEqual(uniform.log_prob(above_high).item(), -inf)
+        self.assertEqual(uniform.log_prob(below_low).item(), -inf)
 
         # check cdf computation when value outside range
         self.assertEqual(uniform.cdf(below_low).item(), 0)
@@ -1420,7 +1418,7 @@ class TestDistributions(TestCase):
         loc_1d = torch.zeros(1, requires_grad=True)
         scale_1d = torch.ones(1, requires_grad=True)
         self.assertTrue(is_all_nan(Cauchy(loc_1d, scale_1d).mean))
-        self.assertEqual(Cauchy(loc_1d, scale_1d).variance, inf, allow_inf=True)
+        self.assertEqual(Cauchy(loc_1d, scale_1d).variance, inf)
         self.assertEqual(Cauchy(loc, scale).sample().size(), (5, 5))
         self.assertEqual(Cauchy(loc, scale).sample((7,)).size(), (7, 5, 5))
         self.assertEqual(Cauchy(loc_1d, scale_1d).sample().size(), (1,))
@@ -1446,7 +1444,7 @@ class TestDistributions(TestCase):
         scale = torch.ones(5, 5, requires_grad=True)
         scale_1d = torch.ones(1, requires_grad=True)
         self.assertTrue(is_all_nan(HalfCauchy(scale_1d).mean))
-        self.assertEqual(HalfCauchy(scale_1d).variance, inf, allow_inf=True)
+        self.assertEqual(HalfCauchy(scale_1d).variance, inf)
         self.assertEqual(HalfCauchy(scale).sample().size(), (5, 5))
         self.assertEqual(HalfCauchy(scale).sample((7,)).size(), (7, 5, 5))
         self.assertEqual(HalfCauchy(scale_1d).sample().size(), (1,))
@@ -2176,8 +2174,8 @@ class TestDistributions(TestCase):
         alpha = torch.randn(2, 3).abs().requires_grad_()
         scale_1d = torch.randn(1).abs().requires_grad_()
         alpha_1d = torch.randn(1).abs().requires_grad_()
-        self.assertEqual(Pareto(scale_1d, 0.5).mean, inf, allow_inf=True)
-        self.assertEqual(Pareto(scale_1d, 0.5).variance, inf, allow_inf=True)
+        self.assertEqual(Pareto(scale_1d, 0.5).mean, inf)
+        self.assertEqual(Pareto(scale_1d, 0.5).variance, inf)
         self.assertEqual(Pareto(scale, alpha).sample().size(), (2, 3))
         self.assertEqual(Pareto(scale, alpha).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(Pareto(scale_1d, alpha_1d).sample((1,)).size(), (1, 1))
@@ -2294,7 +2292,7 @@ class TestDistributions(TestCase):
         df_1d = torch.randn(1).exp().requires_grad_()
         self.assertTrue(is_all_nan(StudentT(1).mean))
         self.assertTrue(is_all_nan(StudentT(1).variance))
-        self.assertEqual(StudentT(2).variance, inf, allow_inf=True)
+        self.assertEqual(StudentT(2).variance, inf)
         self.assertEqual(StudentT(df).sample().size(), (2, 3))
         self.assertEqual(StudentT(df).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(StudentT(df_1d).sample((1,)).size(), (1, 1))
@@ -2379,7 +2377,7 @@ class TestDistributions(TestCase):
             x = dist.sample()
             actual_log_prob = dist.log_prob(x).sum()
             expected_log_prob = scipy.stats.beta.logpdf(x, con1, con0)
-            self.assertAlmostEqual(float(actual_log_prob), float(expected_log_prob), places=3, allow_inf=True)
+            self.assertAlmostEqual(float(actual_log_prob), float(expected_log_prob), places=3)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_beta_sample(self):
@@ -3869,7 +3867,7 @@ class TestNumericalStability(TestCase):
             log_pdf_prob_1 = categorical.log_prob(torch.tensor([0, 1], dtype=dtype))
             self.assertEqual(log_pdf_prob_1.item(), 0)
             log_pdf_prob_0 = categorical.log_prob(torch.tensor([1, 0], dtype=dtype))
-            self.assertEqual(log_pdf_prob_0.item(), -inf, allow_inf=True)
+            self.assertEqual(log_pdf_prob_0.item(), -inf)
 
     def test_multinomial_log_prob(self):
         for dtype in ([torch.float, torch.double]):
@@ -3886,7 +3884,7 @@ class TestNumericalStability(TestCase):
             log_pdf_prob_1 = multinomial.log_prob(torch.tensor([0, 10], dtype=dtype))
             self.assertEqual(log_pdf_prob_1.item(), 0)
             log_pdf_prob_0 = multinomial.log_prob(torch.tensor([10, 0], dtype=dtype))
-            self.assertEqual(log_pdf_prob_0.item(), -inf, allow_inf=True)
+            self.assertEqual(log_pdf_prob_0.item(), -inf)
 
     def test_continuous_bernoulli_gradient(self):
 
@@ -4146,9 +4144,9 @@ class TestAgainstScipy(TestCase):
                 # Cauchy, HalfCauchy distributions' mean is nan, skipping check
                 continue
             elif isinstance(pytorch_dist, (LowRankMultivariateNormal, MultivariateNormal)):
-                self.assertEqual(pytorch_dist.mean, scipy_dist.mean, allow_inf=True, message=pytorch_dist)
+                self.assertEqual(pytorch_dist.mean, scipy_dist.mean, message=pytorch_dist)
             else:
-                self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
+                self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), message=pytorch_dist)
 
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
@@ -4163,7 +4161,7 @@ class TestAgainstScipy(TestCase):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov), message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov) ** 0.5, message=pytorch_dist)
             else:
-                self.assertEqual(pytorch_dist.variance, scipy_dist.var(), allow_inf=True, message=pytorch_dist)
+                self.assertEqual(pytorch_dist.variance, scipy_dist.var(), message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, scipy_dist.var() ** 0.5, message=pytorch_dist)
 
     def test_cdf(self):
@@ -4885,7 +4883,7 @@ class TestJit(TestCase):
             actual = traced_f(*values)
             expected[expected == float('inf')] = 0.
             actual[actual == float('inf')] = 0.
-            self.assertEqual(expected, actual, allow_inf=True,
+            self.assertEqual(expected, actual,
                              message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
     def test_variance(self):
@@ -4909,7 +4907,7 @@ class TestJit(TestCase):
             actual = traced_f(*values)
             expected[expected == float('inf')] = 0.
             actual[actual == float('inf')] = 0.
-            self.assertEqual(expected, actual, allow_inf=True,
+            self.assertEqual(expected, actual,
                              message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
     def test_entropy(self):
@@ -4933,7 +4931,7 @@ class TestJit(TestCase):
             values, sample = self._perturb(Dist, keys, values, sample)
             expected = f(*values)
             actual = traced_f(*values)
-            self.assertEqual(expected, actual, allow_inf=True,
+            self.assertEqual(expected, actual,
                              message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
     def test_cdf(self):
@@ -4954,7 +4952,7 @@ class TestJit(TestCase):
             values, sample = self._perturb(Dist, keys, values, sample)
             expected = f(sample, *values)
             actual = traced_f(sample, *values)
-            self.assertEqual(expected, actual, allow_inf=True,
+            self.assertEqual(expected, actual,
                              message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
 

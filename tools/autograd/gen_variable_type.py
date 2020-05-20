@@ -180,11 +180,11 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals}) ;
+${return_type} ${type_wrapper_name}(${formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${formals}) {
   ${type_definition_body}
 }
 """)
@@ -219,7 +219,7 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_DEFAULT = CodeTemplate("""\
-TypeDefault::${type_wrapper_name}(${type_method_args})""")
+TypeDefault::${type_wrapper_name}(${args})""")
 
 CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
 at::${api_name}(${unpacked_args})""")
@@ -339,7 +339,7 @@ ${statements}
 
 # Generate a file that lists all functions and their schema string. Used for XLA
 REGISTRATION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
+${return_type} ${api_name}(${formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
 """)
 
 # ProfiledType templates
@@ -651,16 +651,17 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 declaration, class_type='ProfiledType'))
 
         # Emit TraceType code
-        trace_body = emit_trace_body(declaration)
-        trace_method_definitions.append(METHOD_DEFINITION.substitute(
-            declaration, type_definition_body=trace_body))
+        if not declaration['manual_kernel_registration']:
+            trace_body = emit_trace_body(declaration)
+            trace_method_definitions.append(METHOD_DEFINITION.substitute(
+                declaration, type_definition_body=trace_body))
 
-        if declaration['use_c10_dispatcher'] == 'full':
-            trace_wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-                declaration, class_type='TraceType'))
-        else:
-            trace_wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-                declaration, class_type='TraceType'))
+            if declaration['use_c10_dispatcher'] == 'full':
+                trace_wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+                    declaration, class_type='TraceType'))
+            else:
+                trace_wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                    declaration, class_type='TraceType'))
 
     env = {
         'type_derived_method_declarations': type_declarations,

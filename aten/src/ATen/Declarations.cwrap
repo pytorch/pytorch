@@ -193,22 +193,6 @@
     - THTensor* src
 ]]
 [[
-  name: _th_gather
-  cname: gather
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long dim
-    - THIndexTensor* index
-]]
-[[
   name: _th_equal
   cname: equal
   cpu_bool: True
