@@ -7670,7 +7670,35 @@ Example::
             [100, 200]], dtype=torch.uint8)
 """)
 
-add_docstr(torch._C.Generator,
+add_docstr(torch.default_generator,
+           r"""
+default_generator -> Generator
+
+Returns the default CPU torch.Generator
+
+Example::
+
+    >>> g_cpu = torch.default_generator
+    >>> g_cpu.device
+    device(type='cpu')
+""")
+
+add_docstr(torch.cuda.default_generators,
+           r"""
+default_generator -> Generator
+
+If cuda is available, returns a tuple of default CUDA torch.Generator-s.
+The number of CUDA torch.Generator-s returned is equal to the number of
+GPUs available in the system.
+
+Example::
+
+    >>> torch.cuda.init()
+    >>> torch.cuda.default_generators[0].device
+    device(type='cuda', index=0)
+""")
+
+add_docstr(torch.Generator,
            r"""
 Generator(device='cpu') -> Generator
 
@@ -7691,7 +7719,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.set_state,
+add_docstr(torch.Generator.set_state,
            r"""
 Generator.set_state(new_state) -> void
 
@@ -7708,7 +7736,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.get_state,
+add_docstr(torch.Generator.get_state,
            r"""
 Generator.get_state() -> Tensor
 
@@ -7725,7 +7753,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.manual_seed,
+add_docstr(torch.Generator.manual_seed,
            r"""
 Generator.manual_seed(seed) -> Generator
 
@@ -7746,7 +7774,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.initial_seed,
+add_docstr(torch.Generator.initial_seed,
            r"""
 Generator.initial_seed() -> int
 
@@ -7760,7 +7788,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.seed,
+add_docstr(torch.Generator.seed,
            r"""
 Generator.seed() -> int
 
@@ -7775,7 +7803,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.device,
+add_docstr(torch.Generator.device,
            r"""
 Generator.device -> device
 
