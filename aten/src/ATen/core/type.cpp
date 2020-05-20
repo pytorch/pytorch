@@ -793,6 +793,10 @@ VaryingShape<Stride> TensorType::computeStrideProps(
 
 std::atomic<size_t> ShapeSymbol::num_symbols{1};
 
+size_t ShapeSymbol::hash() const {
+  return torch::get_hash(value_);
+}
+
 template struct VaryingShape<c10::ShapeSymbol>;
 template struct VaryingShape<bool>;
 template struct VaryingShape<size_t>;

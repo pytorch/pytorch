@@ -397,6 +397,8 @@ struct CAFFE2_API ShapeSymbol {
     return value_ < b.value_;
   }
 
+  size_t hash() const;
+
   static ShapeSymbol fromStaticSize(int64_t val) {
     return ShapeSymbol(val);
   }
@@ -2178,4 +2180,14 @@ inline std::shared_ptr<const NamedType> Type::cast<NamedType>() const {
   }
   return nullptr;
 }
+
 } // namespace c10
+namespace std {
+template <>
+class hash<c10::ShapeSymbol> {
+ public:
+  inline size_t operator()(const c10::ShapeSymbol& ss) const {
+    return ss.hash();
+  }
+};
+}; // namespace std

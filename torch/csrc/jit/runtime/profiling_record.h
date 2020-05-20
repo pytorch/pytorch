@@ -127,47 +127,6 @@ struct SetPartitioningHelper {
   }
 };
 
-// ShapeSymbolTable is used by Interpreter
-// to assign dimension values to ShapeSymbols
-// and fail a guard if the same symbol
-// is assigned more than one dimension value.
-struct ShapeSymbolTable {
-  // N.B. we treat static symbols as always assigned
-  // to themselves
-  bool isBound(c10::ShapeSymbol s) {
-    if (s.is_static()) {
-      return true;
-    }
-    return data_.count(s) != 0;
-  }
-
-  // N.B. we treat static symbols as always assigned
-  // to themselves
-  Dimension getValue(c10::ShapeSymbol s) {
-    if (s.is_static()) {
-      return s.static_size();
-    }
-    return data_[s];
-  }
-  void assign(c10::ShapeSymbol s, Dimension v) {
-    TORCH_INTERNAL_ASSERT(!s.is_static());
-    data_[s] = v;
-  }
-  std::map<c10::ShapeSymbol, Dimension> data_;
-  // Tries to assign dimension values from `new_sizes` to
-  // `ShapeSymbol`s `sym_shapes`.
-  // Returns `true` if every dimension value from `new_sizes`
-  // can be assigned to the corresponding `ShapeSymbol` from
-  // `sym_shapes`
-  // A dimension value can be assigned to a `ShapeSymbol`
-  // * if the symbol isn't assigned yet any dimension value
-  // * if the symbol is assigned and its value is equal to
-  // the dimension value from `new_sizes`
-  bool bindSymbolicShapes(
-      at::IntArrayRef new_sizes,
-      const c10::VaryingShape<c10::ShapeSymbol>& sym_shapes);
-};
-
 struct ProfilingRecord {
   // N.B. ProfilingRecord's copy and move c-tor are disabled, so we won't
   // end up accidentally copying or moving ProfilingRecords whose addresses

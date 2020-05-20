@@ -9,32 +9,6 @@
 namespace torch {
 namespace jit {
 
-bool ShapeSymbolTable::bindSymbolicShapes(
-    at::IntArrayRef new_sizes,
-    const c10::VaryingShape<c10::ShapeSymbol>& sym_shapes) {
-  if (!sym_shapes.size().has_value()) {
-    return true;
-  }
-  if (*sym_shapes.size() != new_sizes.size()) {
-    return false;
-  }
-  for (size_t i = 0; i < new_sizes.size(); i++) {
-    if (!sym_shapes[i].has_value()) {
-      continue;
-    }
-    auto symbol = *sym_shapes[i];
-    if (!isBound(symbol)) {
-      assign(symbol, new_sizes[i]);
-      continue;
-    }
-
-    if (getValue(symbol) != new_sizes[i]) {
-      return false;
-    }
-  }
-  return true;
-}
-
 ProfilingRecord::ProfilingRecord(std::shared_ptr<Graph> g)
     : profiled_graph_(std::move(g)), profiling_count_(getNumProfiledRuns()) {}
 
