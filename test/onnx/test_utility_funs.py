@@ -5,7 +5,7 @@ import torch
 import torch.onnx
 from torch.onnx import utils, OperatorExportTypes
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
-from test_pytorch_common import skipIfUnsupportedOpsetVersion, skipIfUnsupportedMinOpsetVersion
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
 
 import onnx
 import onnxruntime  # noqa
