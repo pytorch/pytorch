@@ -101,17 +101,24 @@ enum class TORCH_API ProfilerState {
 };
 
 struct TORCH_API ProfilerConfig {
-  ProfilerConfig(ProfilerState state, bool report_input_shapes)
-      : state(state), report_input_shapes(report_input_shapes) {}
+  ProfilerConfig(
+      ProfilerState state,
+      bool report_input_shapes,
+      bool profile_memory)
+      : state(state),
+        report_input_shapes(report_input_shapes),
+        profile_memory(profile_memory) {}
   ~ProfilerConfig();
   ProfilerState state;
   bool report_input_shapes;
+  bool profile_memory;
 };
 
 enum class TORCH_API EventKind : uint16_t {
   Mark,
   PushRange,
-  PopRange
+  PopRange,
+  MemoryAlloc,
 };
 #ifndef _MSC_VER
 #  pragma GCC diagnostic pop
@@ -123,10 +130,12 @@ struct TORCH_API Event final {
       at::StringView name,
       uint16_t thread_id,
       bool record_cuda,
+      at::RecordFunctionHandle handle = 0,
       std::vector<std::vector<int64_t>>&& shapes = {})
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
+        handle_(handle),
         shapes_(shapes) {
     record(record_cuda);
   }
@@ -137,6 +146,7 @@ struct TORCH_API Event final {
       case EventKind::Mark: return "mark";
       case EventKind::PushRange: return "push";
       case EventKind::PopRange: return "pop";
+      case EventKind::MemoryAlloc: return "memory_alloc";
     }
     throw std::runtime_error("unknown EventKind");
   }
@@ -154,20 +164,48 @@ struct TORCH_API Event final {
   }
   double cuda_elapsed_us(const Event & e);
   bool has_cuda() const {
-    return event != nullptr;
+    return cuda_event != nullptr;
   }
   int device() const {
     return device_;
   }
+
+  void updateMemoryStats(int64_t alloc_size, c10::Device device) {
+    if (device.type() == c10::DeviceType::CUDA) {
+      cuda_memory_usage_ = alloc_size;
+    } else if (device.type() == c10::DeviceType::CPU ||
+        device.type() == c10::DeviceType::MKLDNN ||
+        device.type() == c10::DeviceType::IDEEP) {
+      cpu_memory_usage_ = alloc_size;
+    } else {
+      LOG(WARNING) << "Unsupported memory profiling device: " << device;
+    }
+  }
+
+  int64_t cpu_memory_usage() const {
+    return cpu_memory_usage_;
+  }
+
+  int64_t cuda_memory_usage() const {
+    return cuda_memory_usage_;
+  }
+
+  at::RecordFunctionHandle handle() const {
+    return handle_;
+  }
+
 private:
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
   at::StringView name_;
   EventKind kind_;
   uint16_t thread_id_;
+  at::RecordFunctionHandle handle_ {0};
   std::vector<std::vector<int64_t>> shapes_;
+  int64_t cpu_memory_usage_ = 0;
+  int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
-  struct CUevent_st* event = nullptr;
+  struct CUevent_st* cuda_event = nullptr;
 };
 
 // a linked-list of fixed sized vectors, to avoid
@@ -215,7 +253,6 @@ using thread_event_lists = std::vector<std::vector<Event>>;
 TORCH_API void enableProfiler(const ProfilerConfig&);
 TORCH_API thread_event_lists disableProfiler();
 TORCH_API bool profilerEnabled();
-
 
 // Usage:
 //   {
