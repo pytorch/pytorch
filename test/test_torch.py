@@ -12641,6 +12641,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.ones((2, 1, 4), device=device, dtype=torch.uint8), xb.all(1, keepdim=True))
         self.assertEqual(torch.ones((), device=device, dtype=torch.uint8), xb.all())
 
+    @onlyOnCPUAndCUDA
     def test_addcdiv(self, device):
         def _test_addcdiv(a, alpha, b, c):
             actual = torch.addcdiv(a, b, c, value=alpha)
@@ -12648,7 +12649,7 @@ class TestTorchDeviceType(TestCase):
             if not actual.dtype.is_floating_point:
                 alpha = int(alpha)
             expected = a + (alpha * b) / c
-            self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
+            self.assertEqual(expected, actual)
 
             with self.maybeWarnsRegex(
                     UserWarning, "This overload of addcdiv is deprecated"):
@@ -12663,14 +12664,24 @@ class TestTorchDeviceType(TestCase):
                 a = torch.randint(-5, 5, size=size, dtype=dtype, device=device)
             return a + (a == 0).to(dtype)
 
+        def _helper():
+            _test_addcdiv(
+                non_zero_rand((2, 2), dtype=dtype, device=device),
+                0.5,
+                non_zero_rand((2, 2), dtype=dtype, device=device),
+                non_zero_rand((2, 2), dtype=dtype, device=device))
+
         for dtype in torch.testing.get_all_math_dtypes(device):
-            # TODO: update this after torch.allclose is added for complex
-            if not dtype.is_complex:
-                _test_addcdiv(
-                    non_zero_rand((2, 2), dtype=dtype, device=device),
-                    0.5,
-                    non_zero_rand((2, 2), dtype=dtype, device=device),
-                    non_zero_rand((2, 2), dtype=dtype, device=device))
+            # CPU complex addcdiv is wildly inaccurate
+            if dtype.is_complex and self.device_type == 'cpu':
+                with self.assertRaises(AssertionError):
+                    _helper()
+            # CUDA complex addcdiv is not implemented
+            elif dtype.is_complex and self.device_type == 'cuda':
+                with self.assertRaises(RuntimeError):
+                    _helper()
+            else:
+                _helper()
 
     # TODO: run on non-native device types
     @dtypes(torch.double)
@@ -13632,7 +13643,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to(devices[1]))    # __radd__
         self.assertEqual(2 - torch.tensor(3), 2 - torch.tensor(3).to(devices[1]))    # __rsub__
         self.assertEqual(2 * torch.tensor(3), 2 * torch.tensor(3).to(devices[1]))    # __rmul__
-        self.assertEqual(2 / torch.tensor(3), 2 / torch.tensor(3).to(devices[1]))    # __rtruediv__
+        self.assertEqual(2 / torch.tensor(3.), 2 / torch.tensor(3.).to(devices[1]))  # __rtruediv__
         self.assertEqual(2 // torch.tensor(3), 2 // torch.tensor(3).to(devices[1]))  # __rfloordiv__
 
         self.assertEqual(
@@ -13645,8 +13656,8 @@ class TestTorchDeviceType(TestCase):
             torch.tensor(2).to(devices[1]) * torch.tensor(3).to(devices[0]),
             torch.tensor(2) * torch.tensor(3))
         self.assertEqual(
-            torch.tensor(2).to(devices[1]) / torch.tensor(3).to(devices[0]),
-            torch.tensor(2) / torch.tensor(3))
+            torch.tensor(2.).to(devices[1]) / torch.tensor(3.).to(devices[0]),
+            torch.tensor(2.) / torch.tensor(3.))
         self.assertEqual(
             torch.tensor(2).to(devices[1]) // torch.tensor(3).to(devices[0]),
             torch.tensor(2) // torch.tensor(3))
@@ -16549,7 +16560,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = torch.tensor([0, 1], dtype=dtype, device=device)
         b = torch.tensor([0, 1], dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
-            a.div(b)
+            a // b
 
     @onlyCPU
     def test_cat_bad_input_sizes(self, device):
@@ -17840,19 +17851,21 @@ tensor_op_tests = [
     ('mul', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-2),
     ('mul', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d)], 1e-2),
     ('mul', 'scalar', _small_0d, lambda t, d: [_small_0d(torch.int32, d)], 1e-2),
-    ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1),
+    ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
+        1e-5, 1e-5, _float_types2),
     ('div', 'tensor', _small_3d,
-        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1),
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
+        1e-5, 1e-5, _float_types2),
     ('true_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
         1e-5, 1e-5, _types, _cpu_types, False),
     ('true_divide', 'with_inplace', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
-        1e-5, 1e-5, _float_types),
+        1e-5, 1e-5, _float_types2),
     ('true_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
         1e-5, 1e-5, _types, _cpu_types, False),
     ('true_divide', 'tensor_with_inplace', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
-        1e-5, 1e-5, _float_types),
+        1e-5, 1e-5, _float_types2),
     ('floor_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1, 1e-5, 1e-5, _types),
     ('floor_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1, 1e-5, 1e-5, _types),
@@ -17886,13 +17899,11 @@ tensor_op_tests = [
     ('addcdiv', '', _small_2d,
         lambda t, d: [_small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1, 1e-3,
-        _types2, _cpu_types, True,
-        [_wrap_maybe_warns("Integer division .+")]),
+        _float_types2, _cpu_types, True),
     ('addcdiv', 'scalar', _small_2d,
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
-        _types, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addcdiv_? is deprecated|Integer division .+")]),
+        _float_types2, _cpu_types, True),
     ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 1e-1, 1e-3, _types2),
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
