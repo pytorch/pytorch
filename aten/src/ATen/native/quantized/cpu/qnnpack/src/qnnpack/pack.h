@@ -385,17 +385,20 @@ static inline void pytorch_pack_q8dw_wdq(
     size_t c,
     size_t cr,
     uint8_t izp,
-    uint8_t kzp,
+    uint8_t* kzp,
     const uint8_t* k,
     const int32_t* b,
     void* packed_w) {
-  const int32_t boff = (int32_t)h * (int32_t)w * (int32_t)izp * (int32_t)kzp;
+  const int32_t boff = (int32_t)h * (int32_t)w * (int32_t)izp;
   for (size_t cr_block_start = 0; cr_block_start < c; cr_block_start += cr) {
     const size_t cr_block_size = min(c - cr_block_start, cr);
     int32_t* packed_b = (int32_t*)packed_w;
     for (size_t cr_block_offset = 0; cr_block_offset < cr_block_size;
          cr_block_offset++) {
-      *((int32_t*)packed_w) = b ? b[cr_block_start + cr_block_offset] + boff : 0.0f;
+      *((int32_t*)packed_w) =
+        b ?
+            b[cr_block_start + cr_block_offset] +
+            boff * kzp[cr_block_start + cr_block_offset] : 0.0f;
       packed_w = (void*)((uintptr_t)packed_w + sizeof(int32_t));
     }
     packed_w =

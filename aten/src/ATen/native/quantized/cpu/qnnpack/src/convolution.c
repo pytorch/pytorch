@@ -217,6 +217,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
   size_t zero_size = 0, zero_offset = 0;
 
   switch (ukernel_type) {
+    // This also covers the case of dwconv_per_channel
+    // since the weight packing is shared between the two.
     case pytorch_qnnp_ukernel_type_dwconv: {
       const uint32_t cr = pytorch_qnnp_params.q8dw9.cr;
       const uint32_t c_stride = (groups + (cr - 1)) & -cr;
