@@ -56,6 +56,14 @@ py::object getFunction(const py::object& module, const char* name) {
   return fn;
 }
 
+void cleanupPyObj(py::object& obj) {
+  obj.dec_ref();
+  // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
+  // decref on the PyObject again.
+  // See Note [Destructing py::object] in python_ivalue.h
+  obj.ptr() = nullptr;
+}
+
 } // namespace
 
 PythonRpcHandler::PythonRpcHandler() {
@@ -81,15 +89,15 @@ PythonRpcHandler::PythonRpcHandler() {
 
 void PythonRpcHandler::cleanup() {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  pyRunFunction_ = py::none();
-  pySerialize_ = py::none();
-  pyDeserialize_ = py::none();
-  pyHandleException_ = py::none();
+  cleanupPyObj(pyRunFunction_);
+  cleanupPyObj(pySerialize_);
+  cleanupPyObj(pyDeserialize_);
+  cleanupPyObj(pyHandleException_);
 
-  rrefProxyFunctions_.rpcSync_ = py::none();
-  rrefProxyFunctions_.rpcAsync_ = py::none();
-  rrefProxyFunctions_.remote_ = py::none();
-  rrefProxyFunctions_.rrefProxyCtor_ = py::none();
+  cleanupPyObj(rrefProxyFunctions_.rpcSync_);
+  cleanupPyObj(rrefProxyFunctions_.rpcAsync_);
+  cleanupPyObj(rrefProxyFunctions_.remote_);
+  cleanupPyObj(rrefProxyFunctions_.rrefProxyCtor_);
 
   jitCompilationUnit_ = nullptr;
   typeParser_ = nullptr;

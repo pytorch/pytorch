@@ -106,7 +106,7 @@ const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
-IValue UserRRef::toHere() {
+IValue UserRRef::toHere() const {
   // see Note [Best-Effort Check on Deleted UserRRefs]
   TORCH_CHECK(
       !deletedOnOwner_,
@@ -203,6 +203,9 @@ RRefForkData UserRRef::fork() const {
 
 const IValue& OwnerRRef::getValue() const {
   future_->wait();
+  if (future_->hasError()) {
+    (void)future_->value(); // Throws the error.
+  }
   return future_->constValue();
 }
 
