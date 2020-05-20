@@ -1,8 +1,9 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("//third_party:substitution.bzl", "template_rule")
-load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "jit_core_sources")
+load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_python_core_sources", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "jit_core_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops")
@@ -177,17 +178,7 @@ py_binary(
     ],
 )
 
-genrule(
-    name = "generated_code",
-    srcs = [
-        "aten/src/ATen/Declarations.yaml",
-    ],
-    outs = [
-        #"torch/csrc/autograd/generated/python_functions.h",
-        #"torch/csrc/autograd/generated/python_functions.cpp",
-        #"torch/csrc/autograd/generated/python_variable_methods.cpp",
-        #"torch/csrc/autograd/generated/python_torch_functions.cpp",
-        #"torch/csrc/autograd/generated/python_nn_functions.cpp",
+libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/VariableType.h",
         "torch/csrc/autograd/generated/VariableType_0.cpp",
         "torch/csrc/autograd/generated/VariableType_1.cpp",
@@ -208,9 +199,36 @@ genrule(
         "torch/csrc/jit/generated/generated_unboxing_wrappers_0.cpp",
         "torch/csrc/jit/generated/generated_unboxing_wrappers_1.cpp",
         "torch/csrc/jit/generated/generated_unboxing_wrappers_2.cpp",
+]
+
+libtorch_python_generated_sources = [
+        "torch/csrc/autograd/generated/python_functions.h",
+        "torch/csrc/autograd/generated/python_functions.cpp",
+        "torch/csrc/autograd/generated/python_variable_methods.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions.cpp",
+        "torch/csrc/autograd/generated/python_nn_functions.cpp",
+]
+
+genrule(
+    name = "all_generated_code",
+    srcs = [
+        "aten/src/ATen/Declarations.yaml",
     ],
+    outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
     cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --nn-path aten/src",
     tools = [":generate_code"],
+)
+
+filegroup(
+    name = "cpp_generated_code",
+    data = [":all_generated_code"],
+    srcs = libtorch_cpp_generated_sources,
+)
+
+filegroup(
+    name = "python_generated_code",
+    data = [":all_generated_code"],
+    srcs = libtorch_python_generated_sources,
 )
 
 exports_files(
@@ -1839,7 +1857,7 @@ cc_library(
             "torch/lib/c10d/ProcessGroupMPI.hpp",
             "torch/lib/c10d/ProcessGroupNCCL.hpp",
         ] + torch_cuda_headers,
-    ) + [":generated_code"],
+    ) + [":cpp_generated_code"],
     includes = [
         "torch/csrc",
         "torch/csrc/api/include",
@@ -1879,7 +1897,7 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
         ],
     )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + [
-        ":generated_code",
+        ":cpp_generated_code",
     ],
     copts = TORCH_COPTS + if_cuda(["-DUSE_CUDA=1"]),
     defines = [
@@ -1891,6 +1909,14 @@ cc_library(
         ":torch_headers",
     ],
     alwayslink = True,
+)
+
+cc_library(
+    name = "shm",
+    srcs = glob(["torch/lib/libshm/*.cpp"]),
+    deps = [
+        ":torch",
+    ],
 )
 
 cc_library(
@@ -1912,6 +1938,26 @@ cc_library(
         ":aten_headers",
         ":c10_headers",
         ":caffe2_headers",
+    ],
+)
+
+cc_library(
+    name = "torch_python",
+    srcs = libtorch_python_core_sources + [":python_generated_code"],
+    hdrs = glob([
+        "torch/csrc/generic/*.cpp",
+    ]),
+    deps = [
+        ":torch",
+        ":shm",
+    ],
+)
+
+pybind_extension(
+    name = "_C",
+    srcs = ["torch/csrc/stub.cpp"],
+    deps = [
+        ":torch_python"
     ],
 )
 
@@ -1945,7 +1991,6 @@ cpp_api_tests = glob(["test/cpp/api/*.cpp"])
       srcs = [filename],
       deps = [
           ":test_support",
-          ":torch",
           "@com_google_googletest//:gtest_main",
       ],
   ) for filename in cpp_api_tests
