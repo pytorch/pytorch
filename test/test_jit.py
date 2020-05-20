@@ -24,6 +24,7 @@ from jit.test_save_load import TestSaveLoad  # noqa: F401
 from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_torchbind import TestTorchbind  # noqa: F401
+from jit.test_op_normalization import TestOpNormalization  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -50,10 +51,10 @@ from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WIT
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
-    RUN_CUDA, RUN_CUDA_MULTI_GPU
+    RUN_CUDA, RUN_CUDA_MULTI_GPU, op_alias_mappings
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \
     get_call, script_template, EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
-    get_nn_module_name_from_kwargs, script_method_template
+    get_nn_module_name_from_kwargs, script_method_template, create_traced_fn
 
 from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
 from torch.testing._internal.common_methods_invocations import method_tests as autograd_method_tests
@@ -9092,20 +9093,6 @@ a")
         """
         FileCheck().run(graph_str, parse_ir(graph_str))
 
-    def test_norm_aliases(self):
-        def absolute(x):
-            return torch.absolute(x)
-
-        self.checkScript(absolute, (torch.tensor(-2),))
-        self.checkScript(absolute, (torch.tensor(2),))
-
-        g = torch.jit.script(absolute)
-        FileCheck().check("aten::abs(").check_not("absolute").run(g.graph)
-
-        self.checkTrace(absolute, (torch.rand(3, 4),))
-        out = torch.jit.trace(absolute, (torch.rand(3, 4),))
-        FileCheck().check("aten::abs(").check_not("absolute").run(out.graph)
-
     def test_canonicalize_control_outputs(self):
         def test_all_outputs(g):
             ifs = g.findAllNodes("prim::If")
@@ -17619,34 +17606,6 @@ EXCLUDE_PYTHON_PRINT = {
     'test_nn_max_pool1d_with_indices',
 }
 
-# make a new function where all non-tensor arguments in 'args' have been partially
-# applied, and all tensor arguments remain.
-# used to trace functions when some arguments are not tensors
-def partial_apply_nontensors(fn, args, **kwargs):
-    source = ['t' if isinstance(arg, torch.Tensor) else 's' for arg in args]
-
-    def new_fn(*tensors_):
-        tensors = iter(tensors_)
-        return fn(*(args[i] if s == 's' else next(tensors) for i, s in enumerate(source)), **kwargs)
-
-    return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor)]
-
-
-# create a trace function from input fn
-def create_traced_fn(self, fn):
-    def traced_fn(*inputs, **kwargs):
-        fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
-        # `check_trace` is set to False because check_trace is run with @no_grad
-        # Also, `check_against_reference` already does all the checks
-        # against python function
-        traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
-        self.assertExportImport(traced.graph, inputs_tensors)
-        output = traced(*inputs_tensors)
-        traced_fn.last_graph = traced.graph_for(*inputs_tensors)
-        return output
-    return traced_fn
-
-
 def check_alias_annotation(method_name, args, kwargs):
     formals, tensors, actuals = get_script_args(args)
     call = get_call(method_name, 'method', actuals, kwargs)
@@ -17801,7 +17760,6 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'grid_sample',
 ])
 
-
 def add_autograd_test(
         name,
         self_size,
@@ -17920,7 +17878,7 @@ def add_autograd_test(
 
                 # alias annotation testing
                 if is_inplace and test_name not in EXCLUDE_SCRIPT:
-                    check_alias_annotation(name, (self_variable,) + args_variable, kwargs_variable)
+                    check_alias_annotation(op_alias_mappings.get(name, name), (self_variable,) + args_variable, kwargs_variable)
 
             check(name)
             inplace_name = name + '_'

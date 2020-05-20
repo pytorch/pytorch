@@ -255,6 +255,8 @@ def method_tests():
         ('cosh', (), NO_ARGS, 'scalar', (True,)),
         ('abs', (S, S, S), NO_ARGS, '', (True,)),
         ('abs', (), NO_ARGS, 'scalar', (True,)),
+        ('absolute', (S, S, S), NO_ARGS, '', (True,)),
+        ('absolute_', (S, S, S), NO_ARGS, '', (True,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
         ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),
         ('clamp', (S, S, S), (0.5, None), 'max', (True,)),
