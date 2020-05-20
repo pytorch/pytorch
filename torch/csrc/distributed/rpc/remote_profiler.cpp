@@ -1,7 +1,3 @@
-// Copyright 2004-present Facebook. All Rights Reserved.
-
-#include <torch/csrc/distributed/rpc/remote_profiler.h>
-#include <tensorpipe/core/message.h>
 #include <torch/csrc/distributed/rpc/remote_profiler.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/jit/serialization/pickle.h>

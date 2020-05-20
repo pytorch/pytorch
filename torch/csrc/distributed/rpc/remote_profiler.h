@@ -1,11 +1,13 @@
 #pragma once
 #include <c10/util/Optional.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <mutex>
+#include <unordered_map>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
-class RemoteProfiler {
+class TORCH_API RemoteProfiler {
  public:
   // Retrieves the lazily-initialized RemoteProfiler singleton instance.
   static RemoteProfiler& getInstance();

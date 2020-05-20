@@ -118,7 +118,7 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
   int64_t msgId = message.id();
   auto payload = message.payload();
   auto tupleElements = rpc::readPayload(payload, message);
-  // We put 5 things so we should get 5 back
+  // Ensure that we have the expected number of elements
   TORCH_INTERNAL_ASSERT(tupleElements.size() == 5);
   rpc::MessageType wrappedMsgType =
       static_cast<rpc::MessageType>(tupleElements[0].toInt());
@@ -130,8 +130,9 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
   bool clientReportInputShapes = tupleElements[2].toBool();
   // Create a config to be enabled on this node that is a replica of the state
   // on the requesting node.
+  // TODO: set profile_memory properly.
   torch::autograd::profiler::ProfilerConfig cfg(
-      clientProfilerState, clientReportInputShapes);
+      clientProfilerState, clientReportInputShapes, false);
   const std::string clientProfilingKey = tupleElements[3].toStringRef();
   int fromWorkerId = tupleElements[4].toInt();
   // Create new message type and build wrapped RPC
