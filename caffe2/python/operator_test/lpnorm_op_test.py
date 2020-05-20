@@ -15,7 +15,7 @@ class LpnormTest(hu.HypothesisTestCase):
                              min_dim=1,
                              max_dim=3,
                              dtype=np.float32),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_Lp_Norm(self, inputs, gc, dc):
         X = inputs[0]
         # avoid kinks by moving away from 0

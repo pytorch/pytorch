@@ -22,9 +22,12 @@ def script_qconfig_dict(qconfig_dict):
 
 def _prepare_script(model, qconfig_dict, is_dynamic):
     _check_is_script_module(model)
-    if any(map(lambda x : not isinstance(x, str), qconfig_dict.keys())):
-        raise ValueError('qconfig_dict should contain names(str) as keys.')
+    _check_forward_method(model)
+    if not all(isinstance(x, str) for x in qconfig_dict.keys()):
+        raise ValueError('qconfig_dict should only contain names(str) as keys.')
     scripted_qconfig_dict = script_qconfig_dict(qconfig_dict)
+    torch._C._jit_pass_dedup_module_uses(model._c)
+    model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
     return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                'forward',
                                                                scripted_qconfig_dict,
@@ -56,10 +59,6 @@ def convert_dynamic_script(model, debug=False):
     return _convert_script(model, is_dynamic=True, debug=debug)
 
 def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, is_dynamic=False, debug=False):
-    _check_is_script_module(model)
-    _check_forward_method(model)
-    torch._C._jit_pass_dedup_module_uses(model._c)
-    model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
     if is_dynamic:
         model = prepare_dynamic_script(model, qconfig_dict)
         model(*run_args)

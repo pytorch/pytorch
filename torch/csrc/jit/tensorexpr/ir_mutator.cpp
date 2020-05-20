@@ -216,10 +216,6 @@ const Expr* IRMutator::mutate(const FunctionCall* v) {
   return this->mutate(base);
 }
 
-const Expr* IRMutator::mutate(const NoOp* v) {
-  return v;
-}
-
 const Expr* IRMutator::mutate(const Term* v) {
   const Expr* newScalar = v->scalar()->accept_mutator(this);
 
@@ -248,7 +244,6 @@ const Expr* IRMutator::mutate(const RoundOff* v) {
 const Expr* IRMutator::mutate(const ReduceOp* v) {
   const Expr* buf_new_expr = v->accumulator()->accept_mutator(this);
   const Buf* buf_new = dynamic_cast<const Buf*>(buf_new_expr);
-  const Expr* init = v->initializer()->accept_mutator(this);
   auto body = v->body().node()->accept_mutator(this);
 
   std::vector<const Expr*> new_output_args;
@@ -262,7 +257,6 @@ const Expr* IRMutator::mutate(const ReduceOp* v) {
 
   return new ReduceOp(
       buf_new,
-      init,
       ExprHandle(body),
       v->interaction(),
       new_output_args,
