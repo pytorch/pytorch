@@ -264,8 +264,19 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     // Original bias was float, so we requantize it here.
-    auto qbias = at::quantize_per_tensor(
-        bias_fp32, weight_scales_data[0] * input_scale, 0, c10::kQInt32);
+    const bool is_per_channel = orig_weight.qscheme() == at::kPerChannelAffine;
+    at::Tensor qbias;
+    // Original bias was float, so we requantize it here.
+    if (is_per_channel) {
+      at::Tensor bias_quant_scales =
+          weight_contig.q_per_channel_scales() * input_scale;
+      at::Tensor bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
+      qbias = at::native::quantize_per_channel_cpu(
+          bias_fp32, bias_quant_scales, bias_zp, 0, c10::kQInt32);
+    } else {
+      qbias = at::native::quantize_per_tensor(
+          bias_fp32, weight_contig.q_scale() * input_scale, 0, c10::kQInt32);
+    }
 
     // Update the input scale to not pack again.
     this->input_scale = input_scale;
@@ -273,8 +284,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     w = std::make_unique<qnnpack::PackBMatrix>(
         cols_w /* input_channels */,
         rows_w /* output_channels */,
-        w_zero_points[0],
-        requantization_scales.data()[0],
+        w_zero_points.data(),
+        requantization_scales.data(),
         reinterpret_cast<uint8_t*>(qnnp_w_data),
         reinterpret_cast<int32_t*>(qbias.data_ptr<c10::qint32>()));
     packB = w.get();

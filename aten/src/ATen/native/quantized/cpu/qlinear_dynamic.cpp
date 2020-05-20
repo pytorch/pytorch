@@ -278,6 +278,11 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
         (uint8_t*)qnnp_w_data,
         nullptr);
     packB = w.get();
+    // Need to move the check here since we are releasing the weights.
+    TORCH_CHECK(
+        orig_weight.qscheme() == at::kPerTensorAffine,
+        "quantized::linear_dynamic (qnnpack) only supports "
+        "Per Tensor Quantization Scheme");
     if (at::globalContext().releaseWeightsWhenPrepacking()) {
       // On mobile, we release the original weight by resetting the intrusive_ptr.
       // Calling unpack after this will throw an assertion.
