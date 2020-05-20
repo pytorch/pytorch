@@ -745,6 +745,45 @@ void testReduce3DRfactor3() {
   ASSERT_EQ(out[0], 499500);
 }
 
+void testReduce3DRfactorWithOuter() {
+  KernelScope kernel_scope;
+
+  const int L = 5;
+  const int M = 5;
+  const int N = 5;
+  const int K = 5;
+  VarHandle l("l", kInt);
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+  VarHandle k("k", kInt);
+
+  Buffer b(BufHandle("b", {l, m, n, k}, kFloat));
+  std::vector<float> in(L * M * N * K);
+  for (int j = 0; j < M * N * K; ++j) {
+    in[j] = j;
+  }
+
+  std::vector<float> intermediate(10, -2.f);
+  std::vector<float> out(L, -1.f);
+
+  Tensor* c =
+      Reduce("sum", {{l, "l"}}, Sum(), b, {{m, "m"}, {n, "n"}, {k, "k"}});
+  LoopNest loop({c});
+  std::vector<For*> loops = loop.getLoopStmtsFor(c);
+  auto v = loops.at(3)->var();
+  loop.rfactor(c->body(), v);
+  ReduceFinder rc;
+  loop.root_stmt()->accept(&rc);
+  ASSERT_EQ(rc.count(), 2);
+  loop.prepareForCodegen();
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  SimpleIREvaluator cg(s, {b, c, l, m, n, k});
+  cg.call({in, out, L, M, N, K});
+  ASSERT_EQ(out[0], 7750);
+}
+
 void testReduce3DRfactorRepeated() {
   KernelScope kernel_scope;
 
@@ -928,6 +967,41 @@ void testReduceSplitNoTail() {
   }
 }
 
+// Split a reduction axis with only a tail loop (the split loop will be size 0
+// and eliminated out).
+void testReduceOverSplitTail() {
+  KernelScope kernel_scope;
+
+  const int M = 10;
+  const int N = 10;
+  const int K = 10;
+
+  Buffer b(BufHandle("b", {M, N, K}, kFloat));
+  std::vector<float> in(M * N * K);
+  for (int j = 0; j < M * N * K; ++j) {
+    in[j] = j;
+  }
+
+  for (int i = 0; i < 3; ++i) {
+    std::vector<float> out(M, -1.f);
+
+    Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
+    LoopNest loop({c});
+    std::vector<For*> loops = loop.getLoopStmtsFor(c);
+    For *outer, *inner, *tail;
+    loop.splitWithTail(loops[i], 16, &outer, &inner, &tail);
+
+    loop.prepareForCodegen();
+    Stmt* s = loop.root_stmt();
+    s = IRSimplifier::simplify(s);
+
+    SimpleIREvaluator cg(s, {b, c});
+
+    cg.call({in, out});
+    ASSERT_EQ(out[0], 4950);
+  }
+}
+
 // Split a reduction axis with a mask.
 void testReduceSplitMask() {
   KernelScope kernel_scope;
@@ -985,6 +1059,40 @@ void testReduceSplitNoMask() {
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
     For *outer, *inner;
     loop.splitWithMask(loops[i], 5, &outer, &inner);
+
+    loop.prepareForCodegen();
+    Stmt* s = loop.root_stmt();
+    s = IRSimplifier::simplify(s);
+
+    SimpleIREvaluator cg(s, {b, c});
+
+    cg.call({in, out});
+    ASSERT_EQ(out[0], 4950);
+  }
+}
+
+// Split a reduction axis with all logic in the mask.
+void testReduceOverSplitMask() {
+  KernelScope kernel_scope;
+
+  const int M = 10;
+  const int N = 10;
+  const int K = 10;
+
+  Buffer b(BufHandle("b", {M, N, K}, kFloat));
+  std::vector<float> in(M * N * K);
+  for (int j = 0; j < M * N * K; ++j) {
+    in[j] = j;
+  }
+
+  for (int i = 0; i < 3; ++i) {
+    std::vector<float> out(M, -1.f);
+
+    Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
+    LoopNest loop({c});
+    std::vector<For*> loops = loop.getLoopStmtsFor(c);
+    For *outer, *inner;
+    loop.splitWithMask(loops[i], 16, &outer, &inner);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();

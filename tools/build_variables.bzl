@@ -418,6 +418,7 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_legacy_variable.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
+    "torch/csrc/jit/backends/backend_detail.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/backends/backend_resolver.cpp",
     "torch/csrc/jit/backends/test_backend.cpp",

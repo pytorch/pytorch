@@ -27,4 +27,3 @@
       - persist_to_workspace:
           root: .
           paths: .circleci/scripts
-
