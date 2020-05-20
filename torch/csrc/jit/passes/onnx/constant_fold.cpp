@@ -30,24 +30,6 @@ std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     {12, at::kLong},
 };
 
-void buildParamsMapFromValueToParamsMap(
-    const ValueToParamPairMap& valsToParamsMap,
-    ParamMap& paramsDict) {
-  paramsDict.clear();
-  for (const auto& nameTensorParamPair : valsToParamsMap) {
-    paramsDict.insert(nameTensorParamPair.second);
-  }
-}
-
-void eraseUnusedBlockInputs(Block* b) {
-  for (size_t i_1 = b->inputs().size(); i_1 > 0; --i_1) {
-    size_t i = i_1 - 1;
-    if (!b->inputs().at(i)->hasUses()) {
-      b->eraseInput(i);
-    }
-  }
-}
-
 void handleNegativeStartEndIndex(
     int64_t& start,
     int64_t& end,
@@ -453,8 +435,6 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
     }
     it.destroyCurrent();
   }
-  eraseUnusedValuesFromMap(valsToParamsMap);
-  eraseUnusedBlockInputs(b);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
   return;
 }

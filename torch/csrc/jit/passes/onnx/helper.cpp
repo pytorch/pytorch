@@ -30,5 +30,14 @@ void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap) {
     }
   }
 }
+
+void buildParamsMapFromValueToParamsMap(
+    const ValueToParamPairMap& valsToParamsMap,
+    ParamMap& paramsDict) {
+  paramsDict.clear();
+  for (const auto& nameTensorParamPair : valsToParamsMap) {
+    paramsDict.insert(nameTensorParamPair.second);
+  }
+}
 } // namespace jit
 } // namespace torch
