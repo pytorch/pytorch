@@ -417,6 +417,12 @@ void Event::record(bool record_cuda) {
   cpu_ns_ = getTime();
 }
 
+void Event::destroy(bool record_cuda) {
+  if (record_cuda) {
+    cuda_stubs->destroy(&cuda_event);
+  }
+}
+
 double Event::cuda_elapsed_us(const Event & e) {
   TORCH_CHECK(e.has_cuda() && has_cuda(), "Events were not recorded for CUDA");
   TORCH_CHECK(e.device() == device(), "Events are not on the same device");

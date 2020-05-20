@@ -32,6 +32,9 @@ struct TORCH_API CUDAStubs {
   virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) {
     fail();
   }
+  virtual void destroy(CUDAEventStub* event) {
+    fail();
+  }
   virtual float elapsed(CUDAEventStub event, CUDAEventStub event2) {
     fail();
     return 0.f;
@@ -138,9 +141,35 @@ struct TORCH_API Event final {
         handle_(handle),
         shapes_(shapes) {
     record(record_cuda);
+    p_cuda_event_counter = std::make_shared<unsigned>(1);
+  }
+
+  Event (const Event& that) {
+    cpu_ns_ = that.cpu_ns_;
+    name_ = that.name_;
+    kind_ = that.kind_;
+    thread_id_ = that.thread_id_;
+    handle_ = that.handle_;
+    shapes_ = that.shapes_;
+    cpu_memory_usage_ = that.cpu_memory_usage_;
+    cuda_memory_usage_ = that.cuda_memory_usage_;
+    device_ = that.device_;
+    cuda_event = that.cuda_event;
+    p_cuda_event_counter = that.p_cuda_event_counter;
+
+    ++(*p_cuda_event_counter);
+  }
+
+  ~Event() {
+    --(*p_cuda_event_counter);
+
+    if (*p_cuda_event_counter == 0) {
+      destroy(has_cuda());
+    }
   }
 
   void record(bool record_cuda);
+  void destroy(bool record_cuda);
   std::string kind() const {
     switch(kind_) {
       case EventKind::Mark: return "mark";
@@ -206,6 +235,7 @@ private:
   int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
   struct CUevent_st* cuda_event = nullptr;
+  std::shared_ptr<unsigned> p_cuda_event_counter;
 };
 
 // a linked-list of fixed sized vectors, to avoid

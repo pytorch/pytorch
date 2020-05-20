@@ -39,6 +39,9 @@ struct CUDAMethods : public CUDAStubs {
     *cpu_ns = getTime();
     TORCH_CUDA_CHECK(cudaEventRecord(*event, stream));
   }
+  void destroy(CUDAEventStub* event) override {
+    TORCH_CUDA_CHECK(cudaEventDestroy(*event));
+  }
   float elapsed(CUDAEventStub event, CUDAEventStub event2) override {
     TORCH_CUDA_CHECK(cudaEventSynchronize(event));
     TORCH_CUDA_CHECK(cudaEventSynchronize(event2));
