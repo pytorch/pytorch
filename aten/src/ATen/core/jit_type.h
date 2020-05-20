@@ -529,6 +529,8 @@ struct CAFFE2_API TensorType : public Type {
       c10::optional<bool> requires_grad,
       c10::optional<bool> undefined = false);
 
+  static TensorTypePtr create(bool is_inferred);
+
   static TensorTypePtr create(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
@@ -666,9 +668,7 @@ struct CAFFE2_API TensorType : public Type {
   }
 
   static TensorTypePtr getInferred() {
-    auto valueInferred = TensorType::create(
-      {}, {}, VaryingShape<ShapeSymbol>{}, VaryingShape<Stride>{}, {});
-    valueInferred->is_inferred_ = true;
+    static auto valueInferred = TensorType::create(true);
     return valueInferred;
   }
 

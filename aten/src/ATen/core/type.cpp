@@ -866,6 +866,13 @@ TensorTypePtr TensorType::create(
       scalar_type, device, sizes, strides, requires_grad, undefined));
 }
 
+TensorTypePtr TensorType::create(bool is_inferred){
+  auto pt = TensorType::create(
+      {}, {}, VaryingShape<ShapeSymbol>{}, VaryingShape<Stride>{}, {});
+  pt->is_inferred_ = is_inferred;
+  return pt;
+}
+
 TensorTypePtr TensorType::create(
     c10::optional<at::ScalarType> scalar_type,
     c10::optional<Device> device,
