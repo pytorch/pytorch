@@ -2874,6 +2874,7 @@ class TestAutograd(TestCase):
             with tempfile.NamedTemporaryFile() as trace_file:
                 prof.export_chrome_trace(trace_file.name)
 
+    @skipIfRocm
     def test_memory_profiler(self):
         def run_profiler(tensor_creation_fn, metric):
             # collecting allocs / deallocs
