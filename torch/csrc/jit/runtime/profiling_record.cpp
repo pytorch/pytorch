@@ -147,7 +147,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
 }
 
 bool isProfilable(Node* n) {
-  if (isSupported(n)) {
+  if (tensorexpr::isSupported(n)) {
     return true;
   }
 
