@@ -6,7 +6,7 @@ namespace jit {
 
 static const std::unordered_map<Symbol, Symbol> alias_map = {
     {aten::absolute, aten::abs},
-    {aten::absolute_, aten::abs},
+    {aten::absolute_, aten::abs_},
 };
 
 void replaceNodeWithNewSymbol(Node* node, Symbol new_symbol) {
