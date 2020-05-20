@@ -15,7 +15,7 @@ int main() {
   at::call_FF_op(input);
   const c10::OperatorHandle t_add = c10::Dispatcher::singleton().findSchema({"quantized::t_add", ""}).value();
   const c10::OperatorHandle t_add_relu = c10::Dispatcher::singleton().findSchema({"quantized::t_add_relu", ""}).value();
-  t_add.call<Tensor, Tensor, Tensor, double, int64_t>(input, input, 1.0, 0);
-  t_add_relu.call<Tensor, Tensor, Tensor, double, int64_t>(input, input, 1.0, 0);
+  t_add.call<at::Tensor, at::Tensor, at::Tensor, double, int64_t>(input, input, 1.0, 0);
+  t_add_relu.call<at::Tensor, at::Tensor, at::Tensor, double, int64_t>(input, input, 1.0, 0);
   return 0;
 }
