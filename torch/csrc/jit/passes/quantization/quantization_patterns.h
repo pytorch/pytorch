@@ -736,7 +736,10 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
       {"quantized::add_relu", add_relu, quantized_add_relu, add_filter},
       {"quantized::add_relu", add_inplace_relu, quantized_add_relu, add_filter},
       {"quantized::add_relu", inplace_add_relu, quantized_add_relu, add_filter},
-      {"quantized::add_relu", inplace_add_inplace_relu, quantized_add_relu, add_filter},
+      {"quantized::add_relu",
+       inplace_add_inplace_relu,
+       quantized_add_relu,
+       add_filter},
       // note that this must come before quantized::add_scalar
       {"quantized::add_scalar_relu",
        add_scalar_relu,
