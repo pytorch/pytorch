@@ -1318,7 +1318,7 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
       tensors_.emplace(
           input->unique(),
           Compute(
-              "input",
+              "input" + c10::to_string(tensors_.size() + 1),
               inputTensorDims,
               [&](const std::vector<VarHandle>& axes) {
                 ExprHandle idx = 0;
