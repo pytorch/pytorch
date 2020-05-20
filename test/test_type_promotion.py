@@ -705,17 +705,17 @@ class TestTypePromotion(TestCase):
         o = torch.empty(1, device=device, dtype=dtype)
 
         # Tests div (including /) deprecation
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is deprecated.+'):
             c = a / b
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is deprecated.+'):
             c = torch.div(a, b)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is deprecated.+'):
             torch.div(a, b, out=o)
 
         # Tests addcdiv deprecation
-        with self.assertRaises(RuntimeError):
+        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
             torch.addcdiv(a, b, b)
-        with self.assertRaises(RuntimeError):
+        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
             torch.addcdiv(a, b, b, out=o)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")

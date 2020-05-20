@@ -12648,7 +12648,14 @@ class TestTorchDeviceType(TestCase):
             # implementation of addcdiv downcasts alpha. arithmetic ops don't.
             if not actual.dtype.is_floating_point:
                 alpha = int(alpha)
-            expected = a + (alpha * b) / c
+
+            def hdiv(a, b):
+                if (a.is_floating_point() or a.is_complex() or
+                   b.is_floating_point() or b.is_complex()):
+                    return a / b
+                return a // b
+
+            expected = a + hdiv(alpha * b, c)
             self.assertEqual(expected, actual)
 
             with self.maybeWarnsRegex(
