@@ -123,6 +123,14 @@ class Reducer {
     // Flattened (1 dimensional) contents of bucket.
     at::Tensor contents;
 
+    // Views into contents for each grad.  Each view will be created with
+    // layout (sizes + strides) matching the grad's expected layout
+    // (see "Gradient Layout Contract" at the top of Reducer.cpp), so
+    // grad.copy_(bucket_views[i]) and
+    // bucket_views[i].copy_(grad)
+    // provide convenient ways to move grad data in/out of contents.
+    std::vector<at::Tensor> bucket_views;
+
     // Variables that contribute to this bucket replica. Use refcounted value
     // here so that we can easily unflatten the bucket contents into the
     // participating variables after reduction has completed.
