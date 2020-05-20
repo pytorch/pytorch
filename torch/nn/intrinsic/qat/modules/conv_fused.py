@@ -1,4 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+import math
 import torch
 import torch.nn as nn
 import torch.nn.intrinsic
@@ -29,34 +30,34 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                                          output_padding, groups, False, padding_mode)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
-        self.eps = eps
-        self.momentum = momentum
         self.freeze_bn = freeze_bn if self.training else True
-        self.num_features = out_channels
-        self.gamma = nn.Parameter(torch.Tensor(out_channels))
-        self.beta = nn.Parameter(torch.Tensor(out_channels))
-        self.affine = True
-        self.track_running_stats = True
-        self.register_buffer('running_mean', torch.zeros(out_channels))
-        self.register_buffer('running_var', torch.ones(out_channels))
-        self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
+        self.bn = nn.BatchNorm2d(out_channels, eps, momentum, True, True)
         self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
-        self.reset_bn_parameters()
         if bias:
             self.bias = Parameter(torch.Tensor(out_channels))
         else:
             self.register_parameter('bias', None)
+        self.reset_bn_parameters()
+
+        # this needs to be called after reset_bn_parameters,
+        # as they modify the same state
+        if self.training:
+            if freeze_bn:
+                self.freeze_bn_stats()
+            else:
+                self.update_bn_stats()
+        else:
+            self.freeze_bn_stats()
 
     def reset_running_stats(self):
-        self.running_mean.zero_()
-        self.running_var.fill_(1)
-        self.num_batches_tracked.zero_()
+        self.bn.reset_running_stats()
 
     def reset_bn_parameters(self):
-        self.reset_running_stats()
-        init.uniform_(self.gamma)
-        init.zeros_(self.beta)
+        self.bn.reset_running_stats()
+        init.uniform_(self.bn.weight)
+        init.zeros_(self.bn.bias)
+        # note: below is actully for conv, not BN
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_in)
@@ -64,68 +65,27 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
 
     def reset_parameters(self):
         super(_ConvBnNd, self).reset_parameters()
-        # A hack to avoid resetting on undefined parameters
-        if hasattr(self, 'gamma'):
-            self.reset_bn_parameters()
 
     def update_bn_stats(self):
         self.freeze_bn = False
+        self.bn.training = True
         return self
 
     def freeze_bn_stats(self):
         self.freeze_bn = True
+        self.bn.training = False
         return self
 
     def _forward(self, input):
-        # exponential_average_factor is self.momentum set to
-        # (when it is available) only so that if gets updated
-        # in ONNX graph when this node is exported to ONNX.
-        if self.momentum is None:
-            exponential_average_factor = 0.0
-        else:
-            exponential_average_factor = self.momentum
-
-        if self.training and not self.freeze_bn and self.track_running_stats:
-            # TODO: if statement only here to tell the jit to skip emitting this when it is None
-            if self.num_batches_tracked is not None:
-                self.num_batches_tracked += 1
-                if self.momentum is None:  # use cumulative moving average
-                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
-                else:  # use exponential moving average
-                    exponential_average_factor = self.momentum
-
-        # we use running statistics from the previous batch, so this is an
-        # approximation of the approach mentioned in the whitepaper, but we only
-        # need to do one convolution in this case instead of two
-        running_std = torch.sqrt(self.running_var + self.eps)
-        scale_factor = self.gamma / running_std
-        scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
-        conv = self._conv_forward(input, self.weight_fake_quant(scaled_weight))
-
-        if self.training and not self.freeze_bn:
-            # recovering original conv to get original batch_mean and batch_var
-            if self.bias is not None:
-                conv_orig = conv / scale_factor.reshape([1, -1, 1, 1]) + self.bias.reshape([1, -1, 1, 1])
-            else:
-                conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
-            batch_mean = torch.mean(conv_orig, dim=[0, 2, 3])
-            batch_var = torch.var(conv_orig, dim=[0, 2, 3], unbiased=False)
-            n = float(conv_orig.numel() / conv_orig.size()[1])
-            unbiased_batch_var = batch_var * (n / (n - 1))
-            batch_rstd = torch.ones_like(batch_var, memory_format=torch.contiguous_format) / torch.sqrt(batch_var + self.eps)
-
-            conv = (self.gamma * batch_rstd).reshape([1, -1, 1, 1]) * conv_orig + \
-                (self.beta - self.gamma * batch_rstd * batch_mean).reshape([1, -1, 1, 1])
-            self.running_mean = exponential_average_factor * batch_mean.detach() + \
-                (1 - exponential_average_factor) * self.running_mean
-            self.running_var = exponential_average_factor * unbiased_batch_var.detach() + \
-                (1 - exponential_average_factor) * self.running_var
-        else:
-            if self.bias is None:
-                conv = conv + (self.beta - self.gamma * self.running_mean /
-                               running_std).reshape([1, -1, 1, 1])
-            else:
-                conv = conv + (self.gamma * (self.bias - self.running_mean) / running_std + self.beta).reshape([1, -1, 1, 1])
+        running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
+        scale_factor = self.bn.weight / running_std
+        scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape([-1, 1, 1, 1]))
+        # this does not include the conv bias
+        conv = self._conv_forward(input, scaled_weight)
+        conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
+        if self.bias is not None:
+            conv_orig = conv_orig + self.bias.reshape([1, -1, 1, 1])
+        conv = self.bn(conv_orig)
         return conv
 
     def extra_repr(self):
@@ -134,6 +94,18 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
 
     def forward(self, input):
         return self.activation_post_process(self._forward(input))
+
+    def train(self, mode=True):
+        """
+        Batchnorm's training behavior is using the self.training flag. Prevent
+        changing it if BN is frozen. This makes sure that calling `model.train()`
+        on a model with a frozen BN will behave properly.
+        """
+        self.training = mode
+        if not self.freeze_bn:
+            for module in self.children():
+                module.train(mode)
+        return self
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
@@ -158,11 +130,11 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                          qconfig)
         qat_convbn.weight = conv.weight
         qat_convbn.bias = conv.bias
-        qat_convbn.gamma = bn.weight
-        qat_convbn.beta = bn.bias
-        qat_convbn.running_mean = bn.running_mean
-        qat_convbn.running_var = bn.running_var
-        qat_convbn.num_batches_tracked = bn.num_batches_tracked
+        qat_convbn.bn.weight = bn.weight
+        qat_convbn.bn.bias = bn.bias
+        qat_convbn.bn.running_mean = bn.running_mean
+        qat_convbn.bn.running_var = bn.running_var
+        qat_convbn.bn.num_batches_tracked = bn.num_batches_tracked
         return qat_convbn
 
 class ConvBn2d(_ConvBnNd, nn.Conv2d):
