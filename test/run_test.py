@@ -110,6 +110,7 @@ ROCM_BLACKLIST = [
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
+    'distributed/test_nccl',
     'test_determination',
     'test_multiprocessing',
     'test_jit_simple',

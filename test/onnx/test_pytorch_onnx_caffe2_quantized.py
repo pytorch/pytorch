@@ -16,7 +16,7 @@ class TestQuantizedOps(unittest.TestCase):
     def generic_test(self, model, sample_inputs, input_names=None, decimal=3, relaxed_check=False):
         torch.backends.quantized.engine = "qnnpack"
         pt_inputs = tuple(torch.from_numpy(x) for x in sample_inputs)
-        model.qconfig = torch.quantization.default_qconfig
+        model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
         q_model = torch.quantization.prepare(model, inplace=False)
         q_model = torch.quantization.convert(q_model, inplace=False)
 
@@ -285,18 +285,48 @@ class TestQuantizedOps(unittest.TestCase):
         self.generic_test(SimpleModel(), (x,), input_names=["x"], relaxed_check=True)
 
     def test_sequential(self):
-        model = nn.Sequential(
-            nn.Conv2d(1, 1, kernel_size=(1, 1), bias=False),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(1, 1, kernel_size=(1, 1), bias=False),
-        )
-        # quantize
-        model.eval()
-        torch.quantization.fuse_modules(model, ["0", "1"], inplace=True)
-        model = torch.quantization.QuantWrapper(model)
-        torch.backends.quantized.engine = "qnnpack"
-        model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
-        x = np.random.rand(1, 1, 1, 1).astype("float32")
+        class ConvBNReLUModule(nn.Sequential):
+            def __init__(self):
+                super().__init__(
+                    nn.Conv2d(3, 3, 1, 1, bias=False),
+                    nn.BatchNorm2d(3),
+                    nn.ReLU(inplace=False)
+                )
+
+        class ModelWithClassifierHead(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(3, 3, 1)
+                self.relu1 = nn.ReLU(inplace=False)
+                layers = []
+                for i in range(3):
+                    layers.append(ConvBNReLUModule())
+                self.features = nn.Sequential(*layers)
+                head = [nn.Linear(300, 10), nn.ReLU(inplace=False)]
+                self.classifier = nn.Sequential(*head)
+                self.seq = nn.Sequential()
+                self.quant = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv1(x)
+                x = self.relu1(x)
+                x = self.features(x)
+                x = torch.reshape(x, (-1, 3 * 10 * 10))
+                x = self.classifier(x)
+                x = self.seq(x)
+                x = self.dequant(x)
+                return x
+
+        model = ModelWithClassifierHead().eval()
+        torch.quantization.fuse_modules(model, [['conv1', 'relu1'] ,
+                                                ['features.0.0', 'features.0.1', 'features.0.2'],
+                                                ['features.1.0', 'features.1.1', 'features.1.2'],
+                                                ['features.2.0', 'features.2.1', 'features.2.2']], inplace=True)
+
+
+        x = np.random.rand(1, 3, 10, 10).astype("float32")
         self.generic_test(model, (x,), input_names=["x"], relaxed_check=True)
 
 if __name__ == '__main__':
