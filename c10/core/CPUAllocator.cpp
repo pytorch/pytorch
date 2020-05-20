@@ -94,54 +94,32 @@ void free_cpu(void* data) {
 #endif
 }
 
-// A virtual struct that is used to report C10's memory allocation and
-// deallocation status
-class C10_API MemoryAllocationReporter {
- public:
-  MemoryAllocationReporter() : allocated_(0) {}
-  void New(void* ptr, size_t nbytes);
-  void Delete(void* ptr);
-
- private:
-  std::mutex mutex_;
-  std::unordered_map<void*, size_t> size_table_;
-  size_t allocated_;
-};
-
 struct C10_API DefaultCPUAllocator final : at::Allocator {
   DefaultCPUAllocator() {}
   ~DefaultCPUAllocator() override {}
   at::DataPtr allocate(size_t nbytes) const override {
     void* data = alloc_cpu(nbytes);
-    if (FLAGS_caffe2_report_cpu_memory_usage && nbytes > 0) {
-      getMemoryAllocationReporter().New(data, nbytes);
-      return {data, data, &ReportAndDelete, at::Device(at::DeviceType::CPU)};
-    }
-    return {data, data, &free_cpu, at::Device(at::DeviceType::CPU)};
+    profiledCPUMemoryReporter().New(data, nbytes);
+    return {data, data, &ReportAndDelete, at::Device(at::DeviceType::CPU)};
   }
 
   static void ReportAndDelete(void* ptr) {
     if (!ptr) {
       return;
     }
-    getMemoryAllocationReporter().Delete(ptr);
+    profiledCPUMemoryReporter().Delete(ptr);
     free_cpu(ptr);
   }
 
   at::DeleterFnPtr raw_deleter() const override {
-    if (FLAGS_caffe2_report_cpu_memory_usage) {
-      return &ReportAndDelete;
-    }
-    return &free_cpu;
+    return &ReportAndDelete;
   }
-
- protected:
-  static MemoryAllocationReporter& getMemoryAllocationReporter() {
-    static MemoryAllocationReporter reporter_;
-    return reporter_;
-  }
-
 };
+
+ProfiledCPUMemoryReporter& profiledCPUMemoryReporter() {
+  static ProfiledCPUMemoryReporter reporter_;
+  return reporter_;
+}
 
 // QNNPACK AND XNNPACK may out-of-bound access the input and / or output
 // tensors. This is by-design, and chosen to make the implementation of
@@ -174,7 +152,8 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     if (C10_UNLIKELY(!pointer)) {
       return;
     }
-
+    // TODO: enable with better TLS support on mobile
+    // profiledCPUMemoryReporter().Delete(pointer);
     c10::free_cpu(pointer);
   }
 
@@ -188,8 +167,9 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
       };
     }
 
-    void* const data = c10::alloc_cpu(PreGuardBytes + nbytes + PostGuardBytes);
-
+    auto alloc_size = PreGuardBytes + nbytes + PostGuardBytes;
+    void* const data = c10::alloc_cpu(alloc_size);
+    //  profiledCPUMemoryReporter().New(data, alloc_size);
     return {
         reinterpret_cast<uint8_t*>(data) + PreGuardBytes,
         data,
@@ -248,22 +228,51 @@ REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc);
 
 #endif /* C10_Mobile */
 
-void MemoryAllocationReporter::New(void* ptr, size_t nbytes) {
-  std::lock_guard<std::mutex> guard(mutex_);
-  size_table_[ptr] = nbytes;
-  allocated_ += nbytes;
-  LOG(INFO) << "C10 alloc " << nbytes << " bytes, total alloc " << allocated_
-            << " bytes.";
+void ProfiledCPUMemoryReporter::New(void* ptr, size_t nbytes) {
+  if (nbytes == 0) {
+    return;
+  }
+  auto profile_memory = memoryProfilingEnabled();
+  size_t allocated = 0;
+  if (FLAGS_caffe2_report_cpu_memory_usage || profile_memory) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    size_table_[ptr] = nbytes;
+    allocated_ += nbytes;
+    allocated = allocated_;
+  }
+  if (FLAGS_caffe2_report_cpu_memory_usage) {
+    LOG(INFO) << "C10 alloc " << nbytes << " bytes, total alloc " << allocated
+              << " bytes.";
+  }
+  if (profile_memory) {
+    reportMemoryUsageToProfiler(ptr, nbytes, c10::Device(c10::DeviceType::CPU));
+  }
 }
 
-void MemoryAllocationReporter::Delete(void* ptr) {
-  std::lock_guard<std::mutex> guard(mutex_);
-  auto it = size_table_.find(ptr);
-  CHECK(it != size_table_.end());
-  allocated_ -= it->second;
-  LOG(INFO) << "C10 deleted " << it->second << " bytes, total alloc "
-            << allocated_ << " bytes.";
-  size_table_.erase(it);
+void ProfiledCPUMemoryReporter::Delete(void* ptr) {
+  size_t nbytes = 0;
+  auto profile_memory = memoryProfilingEnabled();
+  size_t allocated = 0;
+  if (FLAGS_caffe2_report_cpu_memory_usage || profile_memory) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    auto it = size_table_.find(ptr);
+    if (it != size_table_.end()) {
+      allocated_ -= it->second;
+      allocated = allocated_;
+      nbytes = it->second;
+      size_table_.erase(it);
+    }
+  }
+  if (nbytes == 0) {
+    return;
+  }
+  if (FLAGS_caffe2_report_cpu_memory_usage) {
+    LOG(INFO) << "C10 deleted " << nbytes << " bytes, total alloc "
+              << allocated << " bytes.";
+  }
+  if (profile_memory) {
+    reportMemoryUsageToProfiler(ptr, -nbytes, c10::Device(c10::DeviceType::CPU));
+  }
 }
 
 } // namespace c10

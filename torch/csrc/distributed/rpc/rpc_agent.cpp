@@ -148,6 +148,12 @@ void RpcAgent::retryExpiredRpcs() {
       it = earliestRpcList.erase(it);
     }
 
+    // If there are no more RPC's set to be retried at the current timepoint,
+    // we can remove the corresponsing unordered_set from the retry map.
+    if (earliestRpcList.empty()) {
+      rpcRetryMap_.erase(earliestTimeout);
+    }
+
     lock.unlock();
     // We attach callbacks to the futures outside of the lock to prevent
     // potential deadlocks.
@@ -178,15 +184,6 @@ void RpcAgent::retryExpiredRpcs() {
       errorFuture->setError(errorMsg);
     }
     errorFutures.clear();
-
-    // If there are no more RPC's set to be retried at the current timepoint,
-    // we can remove the corresponsing unordered_set from the retry map.
-    {
-      std::lock_guard<std::mutex> retryMapLock(rpcRetryMutex_);
-      if (earliestRpcList.empty()) {
-        rpcRetryMap_.erase(earliestTimeout);
-      }
-    }
   }
 }
 
