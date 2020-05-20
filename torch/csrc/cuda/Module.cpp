@@ -289,6 +289,8 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   const int device = (int) THPUtils_unpackLong(arg);
 
+  using c10::cuda::CUDACachingAllocator::AllocSource;
+  using c10::cuda::CUDACachingAllocator::AllocSourceArray;
   using c10::cuda::CUDACachingAllocator::StatType;
   using c10::cuda::CUDACachingAllocator::Stat;
   using c10::cuda::CUDACachingAllocator::StatArray;
@@ -301,6 +303,17 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
     dict["peak"] = stat.peak;
     dict["allocated"] = stat.allocated;
     dict["freed"] = stat.freed;
+    return dict;
+  };
+
+  const auto allocSourceArrayToDict = [](const AllocSourceArray& allocSourceArray) {
+    const std::array<const char*, static_cast<size_t>(AllocSource::NUM_ALLOC_SOURCES)> allocSourceNames = {
+        "cudafree", "cudamalloc", "cudamalloc_retry"
+    };
+    py::dict dict;
+    for (size_t i = 0; i < allocSourceNames.size(); ++i) {
+      dict[allocSourceNames[i]] = allocSourceArray[i];
+    }
     return dict;
   };
 
@@ -319,6 +332,7 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
 
   py::dict result;
   result["num_alloc_retries"] = stats.num_alloc_retries;
+  result["allocation_source"] = allocSourceArrayToDict(stats.allocation_source);
   result["num_ooms"] = stats.num_ooms;
   result["allocation"] = statArrayToDict(stats.allocation);
   result["segment"] = statArrayToDict(stats.segment);

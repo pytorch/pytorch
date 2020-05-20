@@ -176,6 +176,7 @@ struct AllocParams {
   Block* block;
   StatTypes stat_types;
   cudaError_t err;
+  AllocSource source;
 };
 
 } // namespace
@@ -320,6 +321,7 @@ class DeviceCachingAllocator {
     update_stat_array(stats.allocated_bytes, block->size, params.stat_types);
     update_stat_array(stats.active, 1, params.stat_types);
     update_stat_array(stats.active_bytes, block->size, params.stat_types);
+    ++ stats.allocation_source[static_cast<size_t>(params.source)];
 
     return block;
   }
@@ -413,6 +415,7 @@ class DeviceCachingAllocator {
       reset_accumulated_stat(stats.inactive_split_bytes[statType]);
     }
 
+    stats.allocation_source.fill(0);
     stats.num_alloc_retries = 0;
     stats.num_ooms = 0;
   }
@@ -610,6 +613,7 @@ class DeviceCachingAllocator {
     if (it == pool.end() || (*it)->stream != p.stream())
       return false;
     p.block = *it;
+    p.source = AllocSource::CUDAFREE;
     pool.erase(it);
     return true;
   }
@@ -629,6 +633,9 @@ class DeviceCachingAllocator {
 
     if (isRetry) {
       stats.num_alloc_retries += 1;
+      p.source = AllocSource::CUDAMALLOC_RETRY;
+    } else {
+      p.source = AllocSource::CUDAMALLOC;
     }
 
     p.err = cudaMalloc(&ptr, size);

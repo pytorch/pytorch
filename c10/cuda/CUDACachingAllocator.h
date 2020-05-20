@@ -58,12 +58,22 @@ enum struct StatType : uint64_t {
   NUM_TYPES = 3  // remember to update this whenever a new stat type is added
 };
 
+enum struct AllocSource : uint64_t {
+  CUDAFREE,  // cuda_free
+  CUDAMALLOC,  // cuda_malloc
+  CUDAMALLOC_RETRY,  // cuda_malloc during retries
+  NUM_ALLOC_SOURCES
+};
+
 typedef std::array<Stat, static_cast<size_t>(StatType::NUM_TYPES)> StatArray;
+typedef std::array<uint64_t, static_cast<size_t>(AllocSource::NUM_ALLOC_SOURCES)> AllocSourceArray;
 
 // Struct containing memory allocator summary statistics for a device.
 struct DeviceStats {
   // COUNT: allocations requested by client code
   StatArray allocation;
+  // COUNT: total number of allocation requests satisfied from each source (histogram)
+  AllocSourceArray allocation_source = {0};
   // COUNT: number of allocated segments from cudaMalloc().
   StatArray segment;
   // COUNT: number of active memory blocks (allocated or used by stream)

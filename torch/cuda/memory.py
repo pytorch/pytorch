@@ -461,6 +461,13 @@ def memory_summary(device=None, abbreviated=False):
             )
 
     lines.append("=" * 75)
+    lines.append("        Metric         | cudaFree   | cudaMalloc | cudaMalloc retries      ")
+    lines.append(" {:<21} | {} | {} | {}              ".format(
+        "Allocation Source",
+        _format_count(stats["allocation_source.cudafree"], stats["allocation_source.cudafree"]),
+        _format_count(stats["allocation_source.cudamalloc"], stats["allocation_source.cudamalloc"]),
+        _format_count(stats["allocation_source.cudamalloc_retry"], stats["allocation_source.cudamalloc_retry"])))
+    lines.append("=" * 75)
 
     fmt_dict = {"_": "", "device": device}
     for k, v in stats.items():
