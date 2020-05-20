@@ -41,7 +41,7 @@ class FuzzedParameter(object):
         if not isinstance(distribution, dict):
             assert distribution in _DISTRIBUTIONS
         else:
-            assert sum(distribution.values()) == 1, "Distribution is not normalized"
+            assert abs(sum(distribution.values()) - 1) <= 1e-5, "Distribution is not normalized"
             assert self._minval is None
             assert self._maxval is None
 

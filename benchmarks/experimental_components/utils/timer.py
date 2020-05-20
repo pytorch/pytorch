@@ -34,11 +34,11 @@ class Timer(object):
     ):
         if not isinstance(stmt, str):
             raise ValueError("Currently only a `str` stmt is supported.")
-        self._stmt = stmt
-        self._setup = setup
-        self._timer = timer
-        self._globals = globals
 
+        if isinstance(globals, dict):
+            globals.setdefault("torch", torch)
+
+        self._stmt = stmt
         self._label = label
         self._sub_label = sub_label
         self._description = description
@@ -81,7 +81,9 @@ class Timer(object):
             while True:
                 time_taken = self._timer.timeit(number)
                 relative_overhead = overhead / time_taken
-                if overhead <= 1e-5 and time_taken >= min_run_time / 1000:
+                if relative_overhead <= 1e-4 and time_taken >= min_run_time / 1000:
+                    break
+                if time_taken > min_run_time:
                     break
                 number *= 10
 

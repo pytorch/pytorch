@@ -159,6 +159,8 @@ class Measurement:
                        This suggests significant environmental influence.
         """
         repr = [super().__repr__(), "\n", self.title, "\n"]
+        if self.description:
+            repr.extend([self.description, "\n"])
         n = len(self._sorted_times)
 
         time_unit, time_scale = select_unit(self.median)
