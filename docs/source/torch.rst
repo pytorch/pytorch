@@ -98,31 +98,38 @@ Indexing, Slicing, Joining, Mutating Ops
     unsqueeze
     where
 
+.. _random-sampling:
+
+Random sampling
+----------------------------------
+
+
 .. _generators:
 
 Generators
-----------------------------------
+~~~~~~~~~~
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     Generator
     default_generator
-    cuda.default_generators
-
-.. _random-sampling:
-
-Random sampling
-----------------------------------
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
+    torch.cuda.default_generators
 
     seed
     manual_seed
     initial_seed
     get_rng_state
     set_rng_state
+
+.. _random-sampling-creation:
+
+Random sampling creation
+~~~~~~~~~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
     bernoulli
     multinomial
