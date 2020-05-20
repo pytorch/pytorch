@@ -83,7 +83,7 @@ __device__ __forceinline__ int64_t WARP_SHFL_DOWN<int64_t>(int64_t value, unsign
 template<>
 __device__ __forceinline__ c10::Half WARP_SHFL_DOWN<c10::Half>(c10::Half value, unsigned int delta, int width, unsigned int mask)
 {
-  return c10::Half(WARP_SHFL_DOWN<short>(value.x, delta, width, mask), c10::Half::from_bits());
+  return c10::Half(WARP_SHFL_DOWN<unsigned short>(value.x, delta, width, mask), c10::Half::from_bits());
 }
 
 template <typename T>
