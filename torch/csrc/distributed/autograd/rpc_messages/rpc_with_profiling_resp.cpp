@@ -102,6 +102,7 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
   int64_t msgId = message.id();
   auto payload = message.payload();
   auto tupleElements = rpc::readPayload(payload, message);
+  // Ensure that we have the expected number of elements
   TORCH_INTERNAL_ASSERT(tupleElements.size() == 4);
   rpc::MessageType wrappedMsgType =
       static_cast<rpc::MessageType>(tupleElements[0].toInt());

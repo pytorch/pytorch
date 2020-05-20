@@ -885,7 +885,7 @@ class RpcTest(RpcAgentTestFixture):
                 worker_name(dst),
                 torch.mul,
                 rpc_event,
-                RPCExecMode.SYNC,
+                RPCExecMode.ASYNC,
             )
 
 

@@ -125,7 +125,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           "set_current_profiling_key",
           [](const std::string key) {
-            LOG(INFO) << "setting profiling key: " << key;
             RemoteProfiler::getInstance().setCurrentKey(std::move(key));
           })
       .def("get_profiled_events", []() {

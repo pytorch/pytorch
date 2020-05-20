@@ -37,7 +37,7 @@ std::string RemoteProfiler::getCurrentProfilingKey() {
 
 std::unordered_map<std::string, std::string> RemoteProfiler::
     getProfiledEvents() {
-  std::lock_guard guard(profilerEventsMutex_);
+  std::lock_guard<std::mutex> guard(profilerEventsMutex_);
   return profilerEvents_;
 }
 
@@ -45,7 +45,7 @@ void RemoteProfiler::writeKey() {
   TORCH_CHECK(
       RemoteProfiler::currentThreadLocalKey_,
       "Must set current key with setCurrentKey.");
-  std::lock_guard guard(profilerEventsMutex_);
+  std::lock_guard<std::mutex> guard(profilerEventsMutex_);
   profilerEvents_.emplace(
       std::piecewise_construct,
       std::forward_as_tuple(std::string(*currentThreadLocalKey_)),
@@ -56,7 +56,7 @@ void RemoteProfiler::writeKey() {
 }
 
 void RemoteProfiler::setValue(const std::string& key, const std::string value) {
-  std::lock_guard guard(profilerEventsMutex_);
+  std::lock_guard<std::mutex> guard(profilerEventsMutex_);
   auto it = profilerEvents_.find(key);
   TORCH_CHECK(
       it != profilerEvents_.end(),

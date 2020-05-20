@@ -44,7 +44,7 @@ enum MessageType {
   CLEANUP_AUTOGRAD_CONTEXT_REQ = 19,
   CLEANUP_AUTOGRAD_CONTEXT_RESP = 20,
 
-  // Messages that tell workers to run Python UDFs with profiling enabled.
+  // Messages that tell workers to run requests with profiling enabled.
   RUN_WITH_PROFILING_REQ = 21,
   RUN_WITH_PROFILING_RESP = 22,
 
