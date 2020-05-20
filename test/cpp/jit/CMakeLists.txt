@@ -86,3 +86,13 @@ if(INSTALL_TEST)
     install(FILES $<TARGET_PDB_FILE:test_jit> DESTINATION bin OPTIONAL)
   endif()
 endif()
+
+set(JIT_TEST_PYTHON_SRCS
+  ${JIT_TEST_ROOT}/test_backend.cpp
+  ${JIT_TEST_ROOT}/test_python.cpp
+)
+
+add_library(test_jit_python SHARED ${JIT_TEST_PYTHON_SRCS})
+target_link_libraries(test_jit_python PRIVATE torch torch_python)
+
+install(TARGETS test_jit_python DESTINATION lib)

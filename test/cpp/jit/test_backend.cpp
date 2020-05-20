@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/backends/test_backend.h>
+#include "test_backend.h"
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend.h>
 
@@ -76,7 +76,7 @@ torch::jit::backend<TestBackend>& testBackend() {
 
 void initTestBackendBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
-  m.def("_jit_to_test_backend", testBackend().generateToBackendFn());
+  m.def("to_test_backend", testBackend().generateToBackendFn());
 }
 } // namespace jit
 } // namespace torch

@@ -3,7 +3,6 @@ import os
 import sys
 
 import torch
-import torch._C
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -14,13 +13,19 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+# Add the location of the test Python C extension to PYTHONPATH so that the _jit_to_test_backend
+# function can be imported and used.
+test_python_ext_dir = os.path.join(os.path.dirname(pytorch_test_dir), "build", "lib")
+sys.path.append(test_python_ext_dir)
+
+import libtest_jit_python
 
 def to_test_backend(module, method_compile_spec):
-    return torch._C._jit_to_test_backend(module, {"forward": method_compile_spec})
+    return libtest_jit_python.to_test_backend(module, {"forward": method_compile_spec})
 
 
 def to_test_backend_multi(module, method_compile_spec):
-    return torch._C._jit_to_test_backend(module, method_compile_spec)
+    return libtest_jit_python.to_test_backend(module, method_compile_spec)
 
 
 class MyModule(torch.nn.Module):
