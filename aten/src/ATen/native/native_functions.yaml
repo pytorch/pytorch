@@ -4671,7 +4671,6 @@
 - func: ne.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: ne
@@ -4688,7 +4687,6 @@
 - func: ne.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: ne
@@ -4705,7 +4703,6 @@
 - func: eq.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: eq
@@ -4722,7 +4719,6 @@
 - func: eq.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: eq
@@ -4739,7 +4735,6 @@
 - func: ge.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: ge
@@ -4756,7 +4751,6 @@
 - func: ge.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: ge
@@ -4773,7 +4767,6 @@
 - func: le.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: le
@@ -4790,7 +4783,6 @@
 - func: le.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: le
@@ -4807,7 +4799,6 @@
 - func: gt.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: gt
@@ -4824,7 +4815,6 @@
 - func: gt.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: gt
@@ -4841,7 +4831,6 @@
 - func: lt.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: lt
@@ -4858,7 +4847,6 @@
 - func: lt.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: lt
