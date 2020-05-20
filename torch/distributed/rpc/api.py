@@ -10,6 +10,7 @@ import torch.distributed as dist
 from torch.jit import Future  # noqa F401
 
 from . import (
+    RemoteProfiler,
     RpcBackendOptions,
     WorkerInfo,
     _cleanup_python_rpc_handler,
@@ -449,6 +450,7 @@ def remote(to, func, args=None, kwargs=None):
             get_worker_info().name,
             dst_worker_info.name,
         )
+        RemoteProfiler.set_current_profiling_key(rpc_profiling_key)
         ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)
 
     with ctx_manager as rf:
@@ -507,6 +509,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
             get_worker_info().name,
             dst_worker_info.name,
         )
+        RemoteProfiler.set_current_profiling_key(rpc_profiling_key)
         ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)
 
     with ctx_manager as rf:

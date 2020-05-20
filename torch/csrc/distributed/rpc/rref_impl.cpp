@@ -1,7 +1,10 @@
 #include <torch/csrc/distributed/rpc/rref_impl.h>
+#include <ATen/record_function.h>
 
+#include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/remote_profiler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
@@ -108,6 +111,14 @@ const ForkId& UserRRef::forkId() const {
 
 IValue UserRRef::toHere() const {
   // see Note [Best-Effort Check on Deleted UserRRefs]
+  RECORD_USER_SCOPE("to_here");
+  if (torch::autograd::profiler::profilerEnabled()) {
+    auto profilingKey = fmt::format(
+        "to_here({} -> {})",
+        ownerName(),
+        RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_);
+    rpc::RemoteProfiler::getInstance().setCurrentKey(profilingKey);
+  }
   TORCH_CHECK(
       !deletedOnOwner_,
       "User RRef with RRefId=",

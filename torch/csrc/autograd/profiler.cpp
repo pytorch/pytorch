@@ -326,6 +326,11 @@ void registerCUDAMethods(CUDAStubs* stubs) {
 
 ProfilerConfig::~ProfilerConfig() = default;
 
+ProfilerConfig getProfilerConfig() {
+  auto state_ptr = getProfilerTLSState();
+  return state_ptr->config();
+}
+
 bool profilerEnabled() {
   auto state_ptr = getProfilerTLSState();
   return state_ptr && state_ptr->config().state != ProfilerState::Disabled;
@@ -365,7 +370,7 @@ void enableProfiler(const ProfilerConfig& new_config) {
 }
 
 thread_event_lists disableProfiler() {
-  // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
+// all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
   auto state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
   auto state_ptr = static_cast<ProfilerThreadLocalState*>(state.get());
   TORCH_CHECK(state_ptr && state_ptr->config().state != ProfilerState::Disabled,
@@ -415,6 +420,40 @@ static jit::CodeTemplate event_template(R"(
   "args": {}
 })");
 
+void writeProfilerEventsToStream(std::ostream& out, const std::vector<Event*>& events) {
+  TORCH_CHECK(out, "could not open file");
+  Event* start = nullptr;
+  for (Event* e : events) {
+    if(0 == strcmp(e->name(), "__start_profile")) {
+      start = e;
+      break;
+    }
+  }
+  TORCH_CHECK(start, "could not find start?");
+  std::vector<Event*> stack;
+  out << "[\n";
+  bool first = true;
+  for(Event* e : events) {
+    if(e->kind() == "push") {
+      stack.push_back(e);
+    } else if(e->kind() == "pop") {
+      if(!first) {
+        out << ",\n";
+      }
+      first = false;
+      Event* e_start = stack.back();
+      stack.pop_back();
+      jit::TemplateEnv env;
+      env.s("name", e_start->name());
+      env.d("ts", start->cpu_elapsed_us(*e_start));
+      env.d("dur", e_start->cpu_elapsed_us(*e));
+      env.d("tid", e_start->thread_id());
+      out << event_template.format(env);
+    }
+  }
+  out << "]\n";
+}
+
 
 RecordProfile::RecordProfile(std::ostream& out)
 : out_(out) {
@@ -445,37 +484,7 @@ RecordProfile::~RecordProfile() {
 }
 
 void RecordProfile::processEvents(const std::vector<Event*>& events) {
-  TORCH_CHECK(out_, "could not open file");
-  Event* start = nullptr;
-  for (Event* e : events) {
-    if(0 == strcmp(e->name(), "__start_profile")) {
-      start = e;
-      break;
-    }
-  }
-  TORCH_CHECK(start, "could not find start?");
-  std::vector<Event*> stack;
-  out_ << "[\n";
-  bool first = true;
-  for(Event* e : events) {
-    if(e->kind() == "push") {
-      stack.push_back(e);
-    } else if(e->kind() == "pop") {
-      if(!first) {
-        out_ << ",\n";
-      }
-      first = false;
-      Event* e_start = stack.back();
-      stack.pop_back();
-      jit::TemplateEnv env;
-      env.s("name", e_start->name());
-      env.d("ts", start->cpu_elapsed_us(*e_start));
-      env.d("dur", e_start->cpu_elapsed_us(*e));
-      env.d("tid", e_start->thread_id());
-      out_ << event_template.format(env);
-    }
-  }
-  out_ << "]\n";
+  writeProfilerEventsToStream(out_, events);
 }
 
 }}}

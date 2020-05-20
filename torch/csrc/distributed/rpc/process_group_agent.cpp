@@ -2,6 +2,7 @@
 
 #include <c10/util/C++17.h>
 #include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 

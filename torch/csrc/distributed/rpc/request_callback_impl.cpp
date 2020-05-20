@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 
 #include <c10/util/C++17.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
@@ -9,6 +10,8 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
@@ -23,6 +26,7 @@
 #include <torch/csrc/distributed/rpc/unpickled_python_call.h>
 #include <torch/csrc/distributed/rpc/unpickled_python_remote_call.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
@@ -54,6 +58,17 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
           wrappedRpc, rwa.wrappedMessageType());
       if (pythonRpc) {
         rwa.setWrappedRpc(std::move(pythonRpc));
+      }
+      return nullptr;
+    }
+    case MessageType::RUN_WITH_PROFILING_REQ: {
+      // Deserialize wrapped RPC if irt contains python call
+      auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
+      auto& wrappedRpc = rpcWithProfilingReq.wrappedRpc();
+      auto pythonRpc = deserializePythonRpcCommandReference(
+          wrappedRpc, rpcWithProfilingReq.wrappedMessageType());
+      if (pythonRpc) {
+        rpcWithProfilingReq.setWrappedRpc(std::move(pythonRpc));
       }
       return nullptr;
     }
@@ -456,8 +471,8 @@ void RequestCallbackImpl::processRpc(
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
       // Make an overall future for the wrapped response.
       auto wrappedRpcResponseFuture = std::make_shared<FutureMessage>();
-      // Kick off processing for the nested future and get a Future<T> to the
-      // result.
+      // Kick off processing for the nested RPC command.
+      // wrappedRpcResponseFuture will be a Future<T> to the result.
       processRpc(
           rpcWithAutograd.wrappedRpc(),
           wrappedMessageType,
@@ -547,6 +562,63 @@ void RequestCallbackImpl::processRpc(
       DistAutogradContainer::getInstance().releaseContextIfPresent(
           cleanupContextId);
       markComplete(std::move(CleanupAutogradContextResp()).toMessage());
+      return;
+    }
+    case MessageType::RUN_WITH_PROFILING_REQ: {
+      auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
+      auto wrappedMsgType = rpcWithProfilingReq.wrappedMessageType();
+      const auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
+      const auto profilingKey = rpcWithProfilingReq.getProfilingKey();
+      auto wrappedRpcResponseFuture = std::make_shared<FutureMessage>();
+      auto fromWorkerId = rpcWithProfilingReq.fromWorkerId();
+      // Enable the profiler with the config from the sender.
+      std::stringstream out;
+      {
+        torch::autograd::profiler::TLSProfilerGuard g(
+            profilingConfig,
+            [&out](std::vector<std::vector<torch::autograd::profiler::Event>>
+                       event_lists) {
+              // Gather all events into a vector
+              std::vector<torch::autograd::profiler::Event*> events;
+              for (auto& l : event_lists) {
+                for (auto& e : l) {
+                  events.push_back(&e);
+                }
+              }
+              torch::autograd::profiler::writeProfilerEventsToStream(
+                  out, events);
+            });
+        TORCH_INTERNAL_ASSERT(
+            torch::autograd::profiler::profilerEnabled(),
+            "Expected profiler to be enabled!");
+        // Kick off processing for nested work and get Future<T> result in
+        // wrappedrpcresponsefuture
+        processRpc(
+            rpcWithProfilingReq.wrappedRpc(),
+            wrappedMsgType,
+            messageId,
+            wrappedRpcResponseFuture);
+      }
+      wrappedRpcResponseFuture->addCallback([wrappedRpcResponseFuture,
+                                             responseFuture,
+                                             fromWorkerId,
+                                             outStr = std::move(out.str()),
+                                             profilingKey =
+                                                 std::move(profilingKey)] {
+        if (wrappedRpcResponseFuture->hasError()) {
+          // Propagate error
+          responseFuture->setError(wrappedRpcResponseFuture->error()->what());
+        } else {
+          auto rpcWithProfilingResp = std::make_unique<RpcWithProfilingResp>(
+              fromWorkerId,
+              MessageType::RUN_WITH_PROFILING_RESP,
+              std::move(*wrappedRpcResponseFuture).moveValue(),
+              outStr,
+              profilingKey);
+          responseFuture->markCompleted(
+              std::move(*rpcWithProfilingResp).toMessage());
+        }
+      });
       return;
     }
     default: {

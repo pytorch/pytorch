@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 #include <sstream>
 
@@ -16,7 +17,9 @@ void confirmPendingUser(
     const FutureMessage& futureMessage,
     const ForkId& expectedForkId) {
   if (!futureMessage.hasError()) {
-    auto rr = RemoteRet::fromMessage(futureMessage.constValue());
+    auto msgType = futureMessage.constValue().type();
+    auto rr = dynamic_cast<RemoteRet*>(
+        deserializeResponse(futureMessage.constValue(), msgType).get());
     TORCH_INTERNAL_ASSERT(rr->forkId() == expectedForkId);
   }
   RRefContext::getInstance().delPendingUser(expectedForkId);

@@ -7,11 +7,17 @@ from functools import partial
 from unittest import mock
 
 import torch
+import json
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
+import torch.distributed.autograd as dist_autograd
 import torch.testing._internal.dist_utils as dist_utils
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
-from torch.distributed.rpc.api import _delete_all_user_rrefs, _use_rpc_pickler
+from torch.distributed.rpc.api import (
+    RemoteProfiler,
+    _delete_all_user_rrefs,
+    _use_rpc_pickler,
+)
 from torch.distributed.rpc.internal import (
     PythonUDF,
     RPCExecMode,
@@ -840,6 +846,49 @@ class RpcTest(RpcAgentTestFixture):
             self.assertIn("worker0", rpc_profiling_key)
             self.assertIn("worker1", rpc_profiling_key)
 
+    def check_profiling_info(self, self_worker_name, dst_worker_name, func, rpc_event, rpc_exec_mode):
+        self.assertTrue(self_worker_name in rpc_event.name)
+        self.assertTrue(dst_worker_name in rpc_event.name)
+        if isinstance(func, torch.jit.ScriptFunction):
+            self.assertTrue(torch.jit._qualified_name(func) in rpc_event.name)
+        else:
+            self.assertTrue(func.__name__ in rpc_event.name)
+        self.assertTrue(rpc_exec_mode.value in rpc_event.name)
+        self.assertEqual(rpc_event.count, 1)
+
+    @dist_init
+    def test_profiler_with_autograd_context(self):
+        dst = (self.rank + 1) % self.world_size
+        if self.rank == 1:
+            # Case where we can double wrap messages with profiling information and autograd info.
+            with torch.autograd.profiler.profile() as prof:
+                with dist_autograd.context() as context_id:
+                    fut = rpc.rpc_async(
+                        worker_name(dst),
+                        torch.mul,
+                        args=(torch.tensor(1), torch.tensor(1)),
+                    )
+                    fut.wait()
+            events = prof.function_events
+            remote_profiled_events = RemoteProfiler.get_profiled_events()
+            for k, v in remote_profiled_events.items():
+                obj = json.loads(v)
+                # We should find a torch.mul in the profiled events.
+                mul_events = [x for x in obj if 'name' in x.keys() and x['name'] == 'mul']
+                self.assertNotEqual(mul_events, [])
+
+            rpc_event = [
+                event for event in events if torch.jit._find_builtin(torch.mul) in event.name
+            ][0]
+            self.check_profiling_info(
+                worker_name(self.rank),
+                worker_name(dst),
+                torch.mul,
+                rpc_event,
+                RPCExecMode.SYNC,
+            )
+
+
     def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False):
         dst = (self.rank + 1) % self.world_size
         # only run profiler on rank 1.
@@ -877,14 +926,7 @@ class RpcTest(RpcAgentTestFixture):
             # be recorded.
             self_worker_name = worker_name(self.rank)
             dst_worker_name = worker_name(dst)
-            self.assertTrue(self_worker_name in rpc_event.name)
-            self.assertTrue(dst_worker_name in rpc_event.name)
-            if isinstance(func, torch.jit.ScriptFunction):
-                self.assertTrue(torch.jit._qualified_name(func) in rpc_event.name)
-            else:
-                self.assertTrue(func.__name__ in rpc_event.name)
-            self.assertTrue(rpc_exec_mode.value in rpc_event.name)
-            self.assertEqual(rpc_event.count, 1)
+            self.check_profiling_info(self_worker_name, dst_worker_name, func, rpc_event, rpc_exec_mode)
             if use_record_function:
                 # verify order by ensuring that the outer context comes
                 # before the rpc event.

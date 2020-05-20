@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
+#include <torch/csrc/distributed/rpc/remote_profiler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
@@ -114,6 +115,22 @@ PyObject* rpc_init(PyObject* /* unused */) {
               "get_metrics",
               &RpcAgent::getMetrics,
               py::call_guard<py::gil_scoped_release>());
+
+  py::class_<RemoteProfiler, std::unique_ptr<RemoteProfiler, py::nodelete>>(
+      module, "RemoteProfiler")
+      .def(py::init([]() {
+        return std::unique_ptr<RemoteProfiler, py::nodelete>(
+            &RemoteProfiler::getInstance());
+      }))
+      .def(
+          "set_current_profiling_key",
+          [](const std::string key) {
+            LOG(INFO) << "setting profiling key: " << key;
+            RemoteProfiler::getInstance().setCurrentKey(std::move(key));
+          })
+      .def("get_profiled_events", []() {
+        return RemoteProfiler::getInstance().getProfiledEvents();
+      });
 
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "RRef", R"(
