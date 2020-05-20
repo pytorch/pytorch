@@ -141,7 +141,7 @@ struct GuardElimination {
     for (auto it = b->nodes().rbegin(); it != b->nodes().rend();) {
       auto n = *it;
       if (n->kind() == prim::Guard && guardsOutput(n) &&
-          removableGuard(n->inputs().at(0)->node())) {
+          removableGuard(n->inputs().at(0)->node()) && !n->hasAttribute(attr::slot)) {
         auto pttp = n->output()->type();
         n->output()->replaceAllUsesWith(n->inputs().at(0));
         n->inputs().at(0)->setType(pttp);

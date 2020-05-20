@@ -216,12 +216,25 @@ struct BailOutGraphBuilderForNode {
 
 struct TensorTypeBailOutNodeCreator : public BailOutNodeCreator {
   bool supportsGuardNode(Node* guard) override {
-    return guard->kind() == prim::Guard;
+    return guard->kind() == prim::Guard && !guard->hasAttribute(attr::slot);
   };
 
   Node* createBailOutNode(Node* guard) override {
     auto bailout_node = guard->owningGraph()->create(prim::BailOut);
     bailout_node->output()->setType(guard->output()->type());
+    return bailout_node;
+  };
+};
+
+struct IfBailOutNodeCreator : public BailOutNodeCreator {
+  bool supportsGuardNode(Node* guard) override {
+    return guard->kind() == prim::Guard && guard->hasAttribute(attr::slot);
+  };
+
+  Node* createBailOutNode(Node* guard) override {
+    auto bailout_node = guard->owningGraph()->create(prim::BailOut);
+    bailout_node->output()->setType(guard->output()->type());
+    bailout_node->ival_(attr::slot, guard->ival(attr::slot));
     return bailout_node;
   };
 };

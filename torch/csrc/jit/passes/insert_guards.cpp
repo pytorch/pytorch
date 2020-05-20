@@ -37,6 +37,11 @@ struct GuardInserter {
           go->setType(pttp);
           guard->insertBefore(n);
           n->output()->replaceAllUsesWith(go);
+        } else if (n->hasAttribute(attr::slot)) {
+          auto guard = graph_->create(prim::Guard, {n->input()}, 1);
+          guard->ival_(attr::slot, n->ival(attr::slot));
+          guard->insertBefore(n);
+          guard->setType(n->type());
         } else {
           // we didn't go down this path i.e
           // no profiling information is available

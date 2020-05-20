@@ -96,6 +96,23 @@ void ProfilingRecord::instrumentBlock(Block *block) {
       insertShapeProfile(n, i);
     }
 
+    if (n->kind() == prim::If) {
+      auto pn = createProfileNode(nullptr, {n->input(0)});
+      std::function<void(Stack&)> if_handler = [this, pn](Stack&) {
+        std::lock_guard<std::mutex> lock(this->mutex_);
+        bool cond;
+        pop(stack, cond);
+        //always overwrite
+        pn->ival_(attr::slot, IValue{cond});
+        push(stack, cond);
+      };
+      pn->setCallback(if_handler);
+      auto pno = pop->addOutput();
+      pno->setType(BoolType::get());
+      pn->insertBefore(n);
+      n->replaceInputWith(0, pno);
+    }
+
     for (auto b : n->blocks()) {
       instrumentBlock(b);
     }
