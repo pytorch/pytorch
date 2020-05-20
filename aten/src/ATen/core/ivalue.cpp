@@ -131,9 +131,9 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       subValues.insert(*this);
       auto obj_type = type()->expect<ClassType>();
       auto obj_value = toObject();
-      auto attribute_names = obj_type->attributeNames();
-      for (const auto& name: attribute_names) {
-        auto attribute = obj_value->getAttr(name);
+      auto attributes = obj_type->getAttributes();
+      for (const auto& attr: attributes) {
+        auto attribute = obj_value->getAttr(attr.getName());
         attribute.getSubValues(subValues);
       }
       break;
