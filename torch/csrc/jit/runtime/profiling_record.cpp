@@ -4,9 +4,36 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <ostream>
 
 namespace torch {
 namespace jit {
+
+bool ShapeSymbolTable::bindSymbolicShapes(
+    at::IntArrayRef new_sizes,
+    const c10::VaryingShape<c10::ShapeSymbol>& sym_shapes) {
+  if (!sym_shapes.size().has_value()) {
+    return true;
+  }
+  if (*sym_shapes.size() != new_sizes.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < new_sizes.size(); i++) {
+    if (!sym_shapes[i].has_value()) {
+      continue;
+    }
+    auto symbol = *sym_shapes[i];
+    if (!isBound(symbol)) {
+      assign(symbol, new_sizes[i]);
+      continue;
+    }
+
+    if (getValue(symbol) != new_sizes[i]) {
+      return false;
+    }
+  }
+  return true;
+}
 
 ProfilingRecord::ProfilingRecord(std::shared_ptr<Graph> g)
     : profiled_graph_(std::move(g)), profiling_count_(getNumProfiledRuns()) {}
@@ -22,38 +49,95 @@ ProfileOp* ProfilingRecord::createProfileNode(
   return pn;
 }
 
+static void unprofileGraphInputs(const std::shared_ptr<Graph>& graph) {
+  for (auto i : graph->inputs()) {
+    if (i->type()->isSubtypeOf(TensorType::get())) {
+      i->setType(unshapedType(i->type()));
+    }
+  }
+}
+
+static void unprofileBlock(Block* start_block) {
+  std::vector<Block*> stack;
+  stack.push_back(start_block);
+
+  while (!stack.empty()) {
+    Block* block = stack.back();
+    stack.pop_back();
+
+    for (auto n : block->nodes()) {
+      for (auto o : n->outputs()) {
+        if (o->type()->isSubtypeOf(TensorType::get())) {
+          o->setType(unshapedType(o->type()));
+        }
+      }
+      stack.insert(stack.end(), n->blocks().begin(), n->blocks().end());
+    }
+  }
+}
+
+std::vector<c10::optional<c10::ShapeSymbol>> ProfilingRecord::
+    mergeSymbolicShapes(
+        const c10::VaryingShape<c10::ShapeSymbol>& new_sizes,
+        const c10::VaryingShape<c10::ShapeSymbol>& sym_shapes,
+        SetPartitioningHelper& partition_helper) {
+  std::vector<c10::optional<c10::ShapeSymbol>> new_symbols;
+  TORCH_INTERNAL_ASSERT(
+      new_sizes.size().has_value() && sym_shapes.size().has_value() &&
+      *new_sizes.size() == *sym_shapes.size());
+  for (size_t i = 0; i < new_sizes.size(); i++) {
+    if (!sym_shapes[i].has_value() || !new_sizes[i].has_value()) {
+      new_symbols.emplace_back(c10::nullopt);
+      continue;
+    }
+    auto symbol = *sym_shapes[i];
+    TORCH_INTERNAL_ASSERT(new_sizes[i]->is_static());
+    Dimension new_size = new_sizes[i]->static_size();
+    GRAPH_DEBUG("Merging symbol ", symbol);
+    auto new_sym = partition_helper.partitionSetByDimension(new_size, symbol);
+    new_symbols.emplace_back(new_sym);
+  }
+
+  return new_symbols;
+}
+
 void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
   auto pn = createProfileNode(nullptr, {i});
   auto pno = pn->addOutput();
   pno->setType(TensorType::get());
-  std::function<void(Stack&)> shape_profiler = [this,
-                                                pno](Stack& stack) mutable {
-    GRAPH_DEBUG("Profiling %", pno->debugName(), " addr = ", pno);
-    int64_t frame_id;
+  std::function<void(Stack&)> shape_profiler = [this, pno](Stack& stack) {
+    int64_t frame_id = 0;
     pop(stack, frame_id);
-    IValue t;
-    pop(stack, t);
-    if (t.isTensor()) {
-      if (t.toTensor().defined()) {
-        auto pttp = tensorTypeInCurrentExecutionContext(t.toTensor());
-        GRAPH_DEBUG("pttp = ", *pttp);
-        std::lock_guard<std::mutex> lock(this->mutex_);
-        if (auto type = pno->type()->cast<TensorType>()) {
-          auto result = this->seen_.insert(pno);
-          if (!result.second) {
-            GRAPH_DEBUG("Merging ", *pttp, " with ", *type);
-            pttp = pttp->merge(type);
-          }
-          pno->setType(pttp);
-          GRAPH_DEBUG("Setting a new type ", *pttp);
+    IValue v;
+    pop(stack, v);
+    if (v.isTensor()) {
+      std::lock_guard<std::mutex> lock(this->mutex_);
+      auto& profiled_types = profiled_types_per_frame_[frame_id];
+      auto t = v.toTensor();
+      if (t.defined()) {
+        auto pttp = tensorTypeInCurrentExecutionContext(t);
+        GRAPH_DEBUG(
+            "In run ",
+            frame_id,
+            " annotating %",
+            pno->debugName(),
+            " with ",
+            *pttp);
+        if (profiled_types.count(pno) == 0) {
+          profiled_types.insert({pno, pttp});
+        } else {
+          auto type = profiled_types.at(pno);
+          GRAPH_DEBUG("Existing type for %", pno->debugName(), " ", *type);
+          pttp = type->merge(pttp);
+          GRAPH_DEBUG("Result for %", pno->debugName(), " ", *pttp);
+          profiled_types[pno] = pttp;
         }
       } else {
-        pno->setType(TensorType::get()->withUndefined());
+        profiled_types[pno] = TensorType::get()->withUndefined();
       }
     }
-
     // passing t through
-    push(stack, t);
+    push(stack, v);
   };
 
   pn->setCallback(shape_profiler);
@@ -95,15 +179,80 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   auto new_g = graph->copy();
   auto pr = std::unique_ptr<ProfilingRecord>(new ProfilingRecord(new_g));
   auto raw_pr = pr.get();
-  ClearProfilingInformation(new_g);
+  unprofileGraphInputs(new_g);
+  unprofileBlock(new_g->block());
   pr->instrumentBlock(new_g->block());
 
   std::function<void(Stack&)> counter = [raw_pr](Stack& stack) {
-    int64_t frame_id;
+    int64_t frame_id = 0;
     pop(stack, frame_id);
+
     std::lock_guard<std::mutex> lock(raw_pr->mutex_);
+
     if (raw_pr->profiling_count_ > 0) {
       raw_pr->profiling_count_--;
+    }
+
+    // merge profiling information from all runs
+    if (raw_pr->profiling_count_ == 0) {
+      GRAPH_DEBUG(
+          "Collected ",
+          raw_pr->profiled_types_per_frame_.size(),
+          " records for run ",
+          frame_id);
+
+      if (raw_pr->profiled_types_per_frame_.size() == 0) {
+        return;
+      }
+
+      // the key is a frame id
+      // the value is a mapping from a Value in a graph
+      // to a profiled TensorType
+      // we make a copy of profiling information from the very first run
+      // and use it for building the symbol sets
+      auto profiled_types_iter = raw_pr->profiled_types_per_frame_.begin();
+      auto merged_profiled_types = profiled_types_iter->second;
+      profiled_types_iter++;
+
+      // merge profiling information from next runs into the first one
+      for (; profiled_types_iter != raw_pr->profiled_types_per_frame_.end();
+           profiled_types_iter++) {
+        SetPartitioningHelper partition_helper;
+        for (const auto& val_type_pair : profiled_types_iter->second) {
+          if (merged_profiled_types.count(val_type_pair.first) == 0) {
+            merged_profiled_types[val_type_pair.first] = val_type_pair.second;
+          } else {
+            auto type = merged_profiled_types[val_type_pair.first];
+            auto merged_type = type->merge(val_type_pair.second);
+            if (merged_type->sizes().size().has_value()) {
+              auto new_shape = raw_pr->mergeSymbolicShapes(
+                  val_type_pair.second->symbolic_sizes(),
+                  type->symbolic_sizes(),
+                  partition_helper);
+              GRAPH_DEBUG(
+                  "Merging ",
+                  *val_type_pair.second,
+                  " of run ",
+                  profiled_types_iter->first,
+                  " into ",
+                  *type);
+              merged_type = type->withSymbolicShapes(new_shape);
+              GRAPH_DEBUG("Result : ", *merged_type);
+              merged_profiled_types[val_type_pair.first] = merged_type;
+            } else {
+              // reset symbolic shapes when ranks are different
+              type = type->merge(val_type_pair.second);
+              // type = type->withSymbolicShapes(c10::nullopt);
+              merged_profiled_types[val_type_pair.first] = type;
+            }
+          }
+        }
+      }
+
+      // update types in the graph
+      for (auto val_type_pair : merged_profiled_types) {
+        val_type_pair.first->setType(val_type_pair.second);
+      }
     }
   };
 

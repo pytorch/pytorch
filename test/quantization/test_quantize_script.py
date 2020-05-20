@@ -468,7 +468,7 @@ graph(%input, %weight):
         m = torch.jit.script(AddReLUModule())
         qconfig_dict = {'': script_qconfig(default_qconfig)}
         m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
-        assert len(attrs_with_prefix(m, '_observer')) == 2
+        assert len(attrs_with_prefix(m, '_observer')) == 3
         assert len(attrs_with_prefix(m.relu, '_observer')) == 0
         FileCheck().check('aten::add_') \
                    .check_not('Observer = prim::GetAttr[name="_observer_') \
@@ -478,7 +478,7 @@ graph(%input, %weight):
         m = torch.jit.script(AddFunctionalReLU())
         qconfig_dict = {'': script_qconfig(default_qconfig)}
         m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
-        assert len(attrs_with_prefix(m, '_observer')) == 2
+        assert len(attrs_with_prefix(m, '_observer')) == 3
         FileCheck().check('aten::add_') \
                    .check_not('Observer = prim::GetAttr[name="_observer_') \
                    .check('CallFunction') \
@@ -1549,8 +1549,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x += 3
                 return F.relu(x, True)
 
-        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float),
-                 torch.randn(1, 3, 10, 10, dtype=torch.float),
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m in [AddScalarRelu(True), AddScalarRelu(False),
                   InplaceAddScalarRelu(True), InplaceAddScalarRelu(False),
