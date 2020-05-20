@@ -756,7 +756,7 @@ VaryingShape<int64_t> TensorType::strides() const {
 VaryingShape<Stride> TensorType::computeStrideProps(
     at::IntArrayRef sizes,
     at::IntArrayRef strides,
-    bool tensor_continuity) {
+    bool tensor_contiguity) {
   std::vector<size_t> stride_indices(sizes.size());
   std::iota(stride_indices.begin(), stride_indices.end(), 0);
 
@@ -774,7 +774,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
 
   std::vector<Stride> stride_properties;
   for (size_t i = 0; i < stride_indices.size(); i++) {
-    bool contiguous_ = tensor_continuity;
+    bool contiguous_ = tensor_contiguity;
     if (!contiguous_) {
       // innermost stride expected to be 1
       // TODO: turn contiguous_ into an enum CONTIGUOUS, NONCONTIGUOUS,
@@ -843,13 +843,13 @@ TensorTypePtr TensorType::create(
     const VaryingShape<int64_t>& sizes,
     const VaryingShape<int64_t>& strides,
     c10::optional<bool> requires_grad,
-    c10::optional<bool> undefined, bool tensor_continuity) {
+    c10::optional<bool> undefined, bool tensor_contiguity) {
   TORCH_INTERNAL_ASSERT(sizes.concrete_sizes().has_value());
   TORCH_INTERNAL_ASSERT(
       !strides.concrete_sizes().has_value() ||
       sizes.concrete_sizes()->size() == strides.concrete_sizes()->size());
   auto sprops = strides.concrete_sizes().has_value()
-      ? computeStrideProps(*sizes.concrete_sizes(), *strides.concrete_sizes(), tensor_continuity)
+      ? computeStrideProps(*sizes.concrete_sizes(), *strides.concrete_sizes(), tensor_contiguity)
       : VaryingShape<Stride>();
 
   auto symbol_sizes =
@@ -909,14 +909,6 @@ bool TensorType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const 
     return *merge(rhs_p) == *rhs_p;
   }
   return Type::isSubtypeOfExt(rhs, why_not);
-}
-
-bool TensorType::matchTensor(const at::Tensor& t) {
-  TensorTypePtr r = t.defined() ? TensorType::create(t) : TensorType::get()->withUndefined();
-  if (!at::GradMode::is_enabled()) {
-    r = r->withRequiresGrad(false);
-  }
-  return r->isSubtypeOf(shared_from_this());
 }
 
 InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_module) {
