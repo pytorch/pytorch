@@ -7,6 +7,7 @@
 
 // ${generated_comment}
 
+// See the `Tracer` section in `torch/csrc/jit/OVERVIEW.md`.
 // NOTE See [Sharded File] comment in VariableType
 
 using namespace at;
