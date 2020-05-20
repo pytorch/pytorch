@@ -9,7 +9,6 @@ from torch._C import parse_ir
 # torch.quantization
 from torch.quantization import QConfig
 from torch.quantization import default_dynamic_qconfig
-from torch.quantization import QConfigDynamic
 from torch.quantization import default_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
@@ -33,7 +32,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
 from torch.testing._internal.jit_utils import get_forward
 from torch.testing._internal.jit_utils import get_forward_graph
-from torch.testing._internal.jit_utils import get_module_method
 
 from torch.jit._recursive import wrap_cpp_module
 
@@ -1385,13 +1383,12 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                          " with instruction set support avx2 or newer.")
     def test_quantized_cat(self):
-        """ Note that we to support the case that torch.cat is quantized
-        indepdently, we need to have an observer that works
-        for list of Tensors.
+        """ quantization of the output of cat will be depend on the
+        input of cat. we only quantize the output of cat when its inputs are quantized.
         """
-        class M(torch.nn.Module):
+        class QuantizedCat(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super(QuantizedCat, self).__init__()
                 self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
                 self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
 
@@ -1400,7 +1397,15 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 y = self.conv2(y)
                 return torch.cat([x, y], 1)
 
-        m = torch.jit.script(M().eval())
+        class NonQuantizedCat(torch.nn.Module):
+            def __init__(self):
+                super(NonQuantizedCat, self).__init__()
+
+            def forward(self, x, y):
+                return torch.cat([x, y], 1)
+
+        # quantized cat
+        m = torch.jit.script(QuantizedCat()).eval()
         m = prepare_script(m, {'': default_qconfig}, True)
         # four for input and output of conv and one for output of cat
         # this also tests the ListConstruct can preserve the observed property so that
@@ -1412,7 +1417,20 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         FileCheck().check_not("aten::cat") \
                    .check("quantized::cat") \
-                   .run(m.graph_for(data, data))
+                   .run(m.graph)
+
+        # non quantized cat
+        m = torch.jit.script(NonQuantizedCat()).eval()
+        m = prepare_script(m, {'': default_qconfig}, True)
+        assert len(attrs_with_prefix(m, '_observer_')) == 0
+        data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+        m(data, data)
+        m = convert_script(m, True)
+
+        FileCheck().check_not("quantized::cat") \
+                   .check("aten::cat") \
+                   .run(m.graph)
+
 
     def test_qbatch_norm(self):
         class M(torch.nn.Module):
@@ -1906,22 +1924,3 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         FileCheck().check("quantized::linear_dynamic") \
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(model.graph)
-
-    def test_prepare_dynamic_lstm(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
-
-            def forward(self, x):
-                return self.lstm(x)
-        from torch.quantization.observer import default_dynamic_quant_observer, _MinMaxTensorListObserver
-        qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                 weight=_MinMaxTensorListObserver)
-        m = torch.jit.script(M())
-        m = prepare_dynamic_script(m, {'': qconfig})
-        assert len(attrs_with_prefix(m.lstm, '_observer_')) == 1
-        FileCheck().check('_MinMaxTensorListObserver = prim::GetAttr[name="_observer_0') \
-                   .check("aten::lstm") \
-                   .check("return") \
-                   .run(str(get_module_method(m, 'lstm', 'forward__0').graph))
