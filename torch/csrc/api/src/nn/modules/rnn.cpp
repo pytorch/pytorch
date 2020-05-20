@@ -822,8 +822,8 @@ std::tuple<Tensor, Tensor> GRUImpl::forward_helper(
         options.num_layers(),
         options.dropout(),
         this->is_training(),
-        options.concat(),
-        options.bidirectional());
+        options.bidirectional(),
+        options.concat());
   }
   auto output = std::get<0>(result);
   auto hidden = std::get<1>(result);
