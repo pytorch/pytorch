@@ -162,7 +162,7 @@ case "$image" in
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
-    VISION=tes
+    VISION=yes
     ;;
   pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9)
     CUDA_VERSION=10.2
@@ -180,7 +180,7 @@ case "$image" in
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
-    VISION=tes
+    VISION=yes
     ;;
   pytorch-linux-xenial-rocm-py3.6-clang7)
     ANACONDA_PYTHON_VERSION=3.6

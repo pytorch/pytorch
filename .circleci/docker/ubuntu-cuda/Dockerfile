@@ -15,10 +15,6 @@ ARG EC2
 ADD ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
-ARG CLANG_VERSION
-ADD ./common/install_clang.sh install_clang.sh
-RUN bash ./install_clang.sh && rm install_clang.sh
-
 # Install user
 ADD ./common/install_user.sh install_user.sh
 RUN bash ./install_user.sh && rm install_user.sh
@@ -38,6 +34,11 @@ RUN bash ./install_conda.sh && rm install_conda.sh
 ARG GCC_VERSION
 ADD ./common/install_gcc.sh install_gcc.sh
 RUN bash ./install_gcc.sh && rm install_gcc.sh
+
+# Install clang
+ARG CLANG_VERSION
+ADD ./common/install_clang.sh install_clang.sh
+RUN bash ./install_clang.sh && rm install_clang.sh
 
 # Install non-standard Python versions (via Travis binaries)
 ARG TRAVIS_PYTHON_VERSION
