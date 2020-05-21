@@ -83,7 +83,7 @@ class TestSerialization(TestCase):
         for i, qengine in enumerate(supported_qengines):
             with override_quantized_engine(qengine):
                 module_qint8 = nnqd.Linear(3, 1, bias_=True, dtype=torch.qint8)
-                self._test_op(module_qint8, "qint8", input_size=[1, 3], input_quantized=False, generate=True, iter=i)
+                self._test_op(module_qint8, "qint8", input_size=[1, 3], input_quantized=False, generate=False, iter=i)
                 if qengine == 'fbgemm':
                     module_float16 = nnqd.Linear(3, 1, bias_=True, dtype=torch.float16)
                     self._test_op(module_float16, "float16", input_size=[1, 3], input_quantized=False, generate=False)
@@ -131,4 +131,4 @@ class TestSerialization(TestCase):
                 return x
 
         mod = LSTMModule()
-        self._test_op(mod, input_size=[4, 4, 3], input_quantized=False, generate=False)
+        self._test_op(mod, input_size=[4, 4, 3], input_quantized=False, generate=True)

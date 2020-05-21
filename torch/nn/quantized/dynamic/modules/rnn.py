@@ -13,6 +13,11 @@ def apply_permutation(tensor, permutation, dim=1):
     # type: (Tensor, Tensor, int) -> Tensor
     return tensor.index_select(dim, permutation)
 
+class PackedParameter(torch.nn.Module):
+    def __init__(self, param):
+        super(PackedParameter, self).__init__()
+        self.param = param
+
 class RNNPackedParams(torch.nn.Module):
     _version = 1
 
@@ -97,10 +102,7 @@ class RNNPackedParams(torch.nn.Module):
     def __repr__(self):
         return self._weight_bias().__repr__()
 
-class PackedParameter(torch.nn.Module):
-    def __init__(self, param):
-        super(PackedParameter, self).__init__()
-        self.param = param
+
 
 class RNNBase(torch.nn.Module):
 
@@ -324,7 +326,6 @@ class RNNBase(torch.nn.Module):
 
         return qRNNBase
 
-
 class LSTM(RNNBase):
 
     _FLOAT_MODULE = nn.LSTM
@@ -350,14 +351,16 @@ class LSTM(RNNBase):
             # the user believes he/she is passing in.
             hx = self.permute_hidden(hx, sorted_indices)
         self.check_forward_args(input, hx, batch_sizes)
+        _all_param_values = []
         for m in self._packed_params:
             packed_ih = m._packed_params_ih
             packed_hh = m._packed_params_hh
             unpacked_ih, unpacked_hh = m._weight_bias()
             cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
                 packed_ih, packed_hh, unpacked_ih[1], unpacked_hh[1])
-            _all_params.append(cell_params)
+            _all_param_values.append(PackedParameter(cell_params))
 
+        _all_params = ([m.param for m in _all_param_values])
         if batch_sizes is None:
             result = torch.quantized_lstm(input, hx, _all_params, self.bias, self.num_layers,
                                           float(self.dropout), self.training, self.bidirectional,
