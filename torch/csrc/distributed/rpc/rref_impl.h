@@ -212,7 +212,7 @@ class TORCH_API RRef : public RRefInterface {
     return rrefId_;
   }
 
-  inline bool isPyObj() {
+  inline bool isPyObj() const {
     return type_ == PyObjectType::get();
   }
   inline const TypePtr type() const override {
@@ -287,7 +287,7 @@ class TORCH_API UserRRef final : public RRef {
 
   // Get of copy of the value from the ``OwnerRRef``. If the value is not ready
   // yet, this call will block.
-  IValue toHere();
+  IValue toHere() const;
 
   void tryDel() override;
 

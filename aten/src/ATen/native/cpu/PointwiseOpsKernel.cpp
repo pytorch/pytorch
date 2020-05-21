@@ -12,7 +12,7 @@ namespace {
 
 static void addcmul_cpu_kernel(TensorIterator& iter, Scalar value) {
   ScalarType dtype = iter.dtype(0);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcmul_cpu_out", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX(dtype, "addcmul_cpu_out", [&] {
     scalar_t scalar_val = value.to<scalar_t>();
     auto scalar_vec = Vec256<scalar_t>(scalar_val);
     cpu_kernel_vec(
@@ -30,7 +30,7 @@ static void addcmul_cpu_kernel(TensorIterator& iter, Scalar value) {
 
 static void addcdiv_cpu_kernel(TensorIterator& iter, Scalar value) {
   ScalarType dtype = iter.dtype(0);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcdiv_cpu_out", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX(dtype, "addcdiv_cpu_out", [&] {
     scalar_t scalar_val = value.to<scalar_t>();
     auto scalar_vec = Vec256<scalar_t>(scalar_val);
     cpu_kernel_vec(

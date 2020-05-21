@@ -122,7 +122,8 @@ class ModuleCloneHelper {
             type->getAttributeName(i),
             type->getAttribute(i),
             s,
-            type->is_parameter(i));
+            type->is_parameter(i),
+            type->is_buffer(i));
       }
     }
 
@@ -335,6 +336,12 @@ class InsertObserversHelper {
       Value* output,
       std::unordered_set<Value*>& block_observed_values);
 
+  bool shouldPropagateQuant(
+      Node* n, const std::unordered_set<Value*>& block_observed_values) {
+    return isObserved(n->input(0), block_observed_values);
+  }
+
+
   void delayObservingValuesInPattern(Graph& graph, const PatternInfo& pattern);
 
   void addValuesToDelayObservation(
@@ -384,28 +391,42 @@ class InsertObserversHelper {
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
-  const PatternInfo conv2d_functional_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv1d_f_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input, %inplace):
+    %relu = prim::Constant[name="relu"]()
+    %first_module = match::module[name="Conv1d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )");
+  const PatternInfo nn_conv1d_nn_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input):
+    %first_module = match::module[name="Conv1d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_module = match::module[name="ReLU"](%self)
+    %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+    return (%second_output) )");
+  const PatternInfo nn_conv2d_f_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input, %inplace):
     %relu = prim::Constant[name="relu"]()
     %first_module = match::module[name="Conv2d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
     return (%second_output) )");
-  const PatternInfo conv2d_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv2d_nn_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input):
     %first_module = match::module[name="Conv2d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
     %second_module = match::module[name="ReLU"](%self)
     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
     return (%second_output) )");
-  const PatternInfo conv3d_functional_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv3d_f_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input, %inplace):
     %relu = prim::Constant[name="relu"]()
     %first_module = match::module[name="Conv3d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
     return (%second_output) )");
-  const PatternInfo conv3d_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv3d_nn_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input):
     %first_module = match::module[name="Conv3d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
@@ -418,7 +439,7 @@ graph(%input, %weight, %bias, %4):
      %first_output = aten::matmul(%input, %weight_t)
      %second_output = aten::add_(%first_output, %bias, %4)
      return (%second_output) )");
-  const PatternInfo add_module_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo aten_add_nn_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %a, %b):
      %one = prim::Constant[value=1]()
      %first_output = aten::add_(%a, %b, %one)
@@ -426,7 +447,7 @@ graph(%self, %a, %b):
      %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
      return (%second_output) )");
 
-  const PatternInfo add_functional_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo aten_add_f_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %a, %b, %inplace):
      %one = prim::Constant[value=1]()
      %first_output = aten::add_(%a, %b, %one)
@@ -434,7 +455,7 @@ graph(%self, %a, %b, %inplace):
      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
      return (%second_output) )");
 
-  const PatternInfo bn_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_bn_nn_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input):
     %first_module = match::module[name="BatchNorm2d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
@@ -443,7 +464,7 @@ graph(%self, %input):
     return (%second_output) )");
 
   // TODO: Make fusion support BN+Functional Relu with inplace.
-  const PatternInfo bn_functional_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_bn_f_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input, %inplace):
     %relu = prim::Constant[name="relu"]()
     %first_module = match::module[name="BatchNorm2d"](%self)
@@ -451,29 +472,28 @@ graph(%self, %input, %inplace):
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
     return (%second_output) )");
 
-  const PatternInfo mul_module_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo aten_mul_nn_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %a, %b):
      %first_output = aten::mul(%a, %b)
      %second_module = match::module[name="ReLU"](%self)
      %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
      return (%second_output) )");
 
-  const PatternInfo inplace_mul_module_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo inplace_mul_nn_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %a, %b):
      %first_output = aten::mul_(%a, %b)
      %second_module = match::module[name="ReLU"](%self)
      %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
      return (%second_output) )");
 
-  const PatternInfo mul_functional_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo aten_mul_f_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %a, %b, %inplace):
      %first_output = aten::mul(%a, %b)
      %relu = prim::Constant[name="relu"]()
      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
      return (%second_output) )");
 
-  const PatternInfo inplace_mul_functional_relu =
-      PatternInfo::parse_from_str(R"(
+  const PatternInfo inplace_mul_f_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %a, %b, %inplace):
      %first_output = aten::mul_(%a, %b)
      %relu = prim::Constant[name="relu"]()
@@ -482,19 +502,21 @@ graph(%self, %a, %b, %inplace):
 
   const std::vector<std::reference_wrapper<const PatternInfo>> delay_patterns =
       {
-          conv2d_functional_relu,
-          conv2d_relu,
-          conv3d_functional_relu,
-          conv3d_relu,
+          nn_conv1d_f_relu,
+          nn_conv1d_nn_relu,
+          nn_conv2d_f_relu,
+          nn_conv2d_nn_relu,
+          nn_conv3d_f_relu,
+          nn_conv3d_nn_relu,
           matmul_add,
-          add_module_relu,
-          add_functional_relu,
-          bn_relu,
-          bn_functional_relu,
-          mul_module_relu,
-          inplace_mul_module_relu,
-          mul_functional_relu,
-          inplace_mul_functional_relu,
+          aten_add_nn_relu,
+          aten_add_f_relu,
+          nn_bn_nn_relu,
+          nn_bn_f_relu,
+          aten_mul_nn_relu,
+          inplace_mul_nn_relu,
+          aten_mul_f_relu,
+          inplace_mul_f_relu,
   };
 };
 
@@ -716,7 +738,8 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   // of the quantizable function.
   if (!is_dynamic_) {
     // Check whether producer is quantizable
-    if (mayRequireObservation(v) && nodeQuantizable(v->node())) {
+    if ((mayRequireObservation(v) && nodeQuantizable(v->node())) ||
+        isPropagateQuantNode(v->node())) {
       return true;
     }
   }
@@ -962,6 +985,9 @@ InsertObserversHelper::insertObserversFor(
         std::vector<size_t> aggregated_observed_outputs;
         std::vector<c10::optional<script::Module>> aggregated_output_observers;
         for (Block* subblock : n->blocks()) {
+          if (alwaysRaisesException(subblock)) {
+            continue;
+          }
           // subblock has access to all the values in the scope of prim::If,
           // so subblock_observed_values == block_observed_values
           auto info_from_subblock =
@@ -1007,7 +1033,13 @@ InsertObserversHelper::insertObserversFor(
           propagateObservedProperty(v, block_observed_values);
           if (!inputs_outputs.count(v) &&
               !isObserved(v, block_observed_values)) {
-            if (auto observer_opt = getObserverFor(v)) {
+            auto observer_opt = getObserverFor(v);
+            // If the node is one of the propagate quant node, e.g.
+            // aten::cat, we should observe its output only
+            // if the input of the node is observed
+            if (observer_opt &&
+                (!isPropagateQuantNode(n) ||
+                 shouldPropagateQuant(n, block_observed_values))) {
               recordObserved(
                   v, *observer_opt, values_to_observe, block_observed_values);
             }

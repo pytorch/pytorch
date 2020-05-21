@@ -38,6 +38,27 @@ class dtype:
     # TODO: is_floating_point, is_complex, is_Signed, __reduce__
     ...
 
+# Defined in torch/csrc/TypeInfo.cpp
+class iinfo:
+    bits: _int
+    min: _int
+    max: _int
+
+    def __init__(self, dtype: _dtype) -> None: ...
+
+class finfo:
+    bits: _float
+    min: _float
+    max: _float
+    eps: _float
+    tiny: _float
+
+    @overload
+    def __init__(self, dtype: _dtype) -> None: ...
+
+    @overload
+    def __init__(self) -> None: ...
+
 ${dtype_class_hints}
 
 # Defined in torch/csrc/Layout.cpp
