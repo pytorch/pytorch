@@ -2,7 +2,9 @@
 
 #include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 namespace {
 
@@ -96,4 +98,6 @@ std::shared_ptr<ProcessGlobalProfilerState> serverProcessGlobalProfilerState() {
   return ProcessGlobalProfilerStateStackEntry::current();
 }
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
