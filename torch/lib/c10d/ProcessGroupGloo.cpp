@@ -29,10 +29,10 @@
 #include <c10/cuda/CUDAStream.h>
 #endif
 
+#include <c10/util/StringUtil.h>
 #include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
-#include <c10/util/StringUtil.h>
 
 #define GENERATE_ALL_TYPES(type, func, args...)        \
   switch (type) {                                      \
