@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
-    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy
+    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -2554,24 +2554,25 @@ class _TestTorchMixin(object):
         elems_per_row = random.randint(1, 10)
         dim = random.randrange(3)
 
-        src = torch.randn(m, n, o)
-        idx_size = [m, n, o]
-        idx_size[dim] = elems_per_row
-        idx = torch.LongTensor().resize_(*idx_size)
-        _TestTorchMixin._fill_indices(self, idx, dim, src.size(dim), elems_per_row, m, n, o)
+        for dtype in {torch.float32, torch.complex64, torch.complex128}:
+            src = torch.randn(m, n, o, dtype=dtype)
+            idx_size = [m, n, o]
+            idx_size[dim] = elems_per_row
+            idx = torch.LongTensor().resize_(*idx_size)
+            _TestTorchMixin._fill_indices(self, idx, dim, src.size(dim), elems_per_row, m, n, o)
 
-        src = cast(src)
-        idx = cast(idx)
+            src = cast(src)
+            idx = cast(idx)
 
-        actual = torch.gather(src, dim, idx)
-        expected = cast(torch.Tensor().resize_(*idx_size))
-        for i in range(idx_size[0]):
-            for j in range(idx_size[1]):
-                for k in range(idx_size[2]):
-                    ii = [i, j, k]
-                    ii[dim] = idx[i, j, k]
-                    expected[i, j, k] = src[tuple(ii)]
-        self.assertEqual(actual, expected, 0)
+            actual = torch.gather(src, dim, idx)
+            expected = cast(torch.zeros(idx_size, dtype=dtype))
+            for i in range(idx_size[0]):
+                for j in range(idx_size[1]):
+                    for k in range(idx_size[2]):
+                        ii = [i, j, k]
+                        ii[dim] = idx[i, j, k]
+                        expected[i, j, k] = src[tuple(ii)]
+            self.assertEqual(actual, expected, 0)
 
         bad_src = torch.randn(*[i - 1 for i in idx_size])
         self.assertRaises(RuntimeError, lambda: torch.gather(bad_src, dim, idx))
@@ -2595,47 +2596,67 @@ class _TestTorchMixin(object):
         self._test_gather(self, lambda t: t)
 
     @staticmethod
-    def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True):
-        m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
-        elems_per_row = random.randint(1, 10)
-        dim = random.randrange(3)
+    def _test_scatter_add_mult_index_base(self, cast):
+        m, n = 30, 40
+        idx = torch.zeros(m, n).long()
+        src = torch.ones(m, n)
+        res0 = torch.zeros(m, n).scatter_add_(0, idx, src)
+        res1 = torch.zeros(m, n).scatter_add_(1, idx, src)
 
-        idx_size = [m, n, o]
-        idx_size[dim] = elems_per_row
-        idx = cast(torch.LongTensor().resize_(*idx_size))
-        _TestTorchMixin._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
+        self.assertEqual(res0[0, :], m * torch.ones(n), 0)
+        self.assertEqual(res1[:, 0], n * torch.ones(m), 0)
 
-        src_size = [random.randint(1, 5) + s for s in idx_size]
-        if is_scalar:
-            src = random.random()
+    def test_scatter_add_mult_index(self):
+        self._test_scatter_add_mult_index_base(self, lambda t: t)
+
+    @staticmethod
+    def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True, *, test_complex=False):
+        if test_complex:
+            dtypes = [torch.complex64, torch.complex128]
         else:
-            src = cast(torch.Tensor(*src_size).normal_())
+            dtypes = [torch.float16, torch.float32, torch.float64]
 
-        base = cast(torch.randn(m, n, o))
-        actual = getattr(base.clone(), method)(dim, idx, src)
-        expected = base.clone()
-        for i in range(idx_size[0]):
-            for j in range(idx_size[1]):
-                for k in range(idx_size[2]):
-                    ii = [i, j, k]
-                    ii[dim] = idx[i, j, k]
-                    if method == 'scatter_' and not is_scalar:
-                        expected[tuple(ii)] = src[i, j, k]
-                    elif method == 'scatter_add_':
-                        expected[tuple(ii)] += src[i, j, k]
-                    else:
-                        expected[tuple(ii)] = src
-        self.assertEqual(actual, expected, 0)
+        for dtype in dtypes:
+            m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
+            elems_per_row = random.randint(1, 10)
+            dim = random.randrange(3)
 
-        if test_bounds:
-            idx[0][0][0] = 34
-            with self.assertRaises(RuntimeError):
-                getattr(base.clone(), method)(dim, idx, src)
+            idx_size = [m, n, o]
+            idx_size[dim] = elems_per_row
+            idx = cast(torch.LongTensor().resize_(*idx_size))
+            _TestTorchMixin._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
 
-        # test for empty index, should be a no-op
-        idx = cast(torch.LongTensor())
-        actual = getattr(base.clone(), method)(dim, idx, src)
-        self.assertEqual(actual, base, 0)
+            src_size = [random.randint(1, 5) + s for s in idx_size]
+            if is_scalar:
+                src = random.random()
+            else:
+                src = cast(torch.randn(src_size, dtype=dtype))
+
+            base = cast(torch.randn(m, n, o, dtype=dtype))
+            actual = getattr(base.clone(), method)(dim, idx, src)
+            expected = base.clone()
+            for i in range(idx_size[0]):
+                for j in range(idx_size[1]):
+                    for k in range(idx_size[2]):
+                        ii = [i, j, k]
+                        ii[dim] = idx[i, j, k]
+                        if method == 'scatter_' and not is_scalar:
+                            expected[tuple(ii)] = src[i, j, k]
+                        elif method == 'scatter_add_':
+                            expected[tuple(ii)] += src[i, j, k]
+                        else:
+                            expected[tuple(ii)] = src
+            self.assertEqual(actual, expected, 0)
+
+            if test_bounds:
+                idx[0][0][0] = 34
+                with self.assertRaises(RuntimeError):
+                    getattr(base.clone(), method)(dim, idx, src)
+
+            # test for empty index, should be a no-op
+            idx = cast(torch.LongTensor())
+            actual = getattr(base.clone(), method)(dim, idx, src)
+            self.assertEqual(actual, base, 0)
 
     def test_scatter(self):
         self._test_scatter_base(self, lambda t: t, 'scatter_')
@@ -5279,6 +5300,7 @@ def add_neg_dim_tests():
         ('squeeze', (10, 1, 20, 1), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
         ('unbind', (2, 3, 4), lambda: [DIM_ARG], [FUNCTIONAL]),
         ('unsqueeze', (10, 20), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL], 1),
+        ('logcumsumexp', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cumprod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cumsum', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cummax', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
@@ -5992,6 +6014,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.clamp(one_d, max=1).shape)
 
         # cumsum, cumprod, cummax, cummin
+        self.assertEqual((), torch.logcumsumexp(zero_d, 0).shape)
         self.assertEqual((), torch.cumsum(zero_d, 0).shape)
         self.assertEqual((), torch.cumprod(zero_d, 0).shape)
         self.assertEqual((), torch.cummax(zero_d, 0)[0].shape)
@@ -11339,6 +11362,36 @@ class TestTorchDeviceType(TestCase):
                                                        [0, 0, 0],
                                                        [0, 0, 0]]), expected_out)
 
+    def test_logcumsumexp(self, device):
+        def logcumsumexp(a, axis):
+            return torch.cumsum(a.exp(), axis=axis).log_()
+
+        axis = 1
+        a = torch.randn(100, 100, device=device)
+
+        actual = a.logcumsumexp(1)
+        expected = logcumsumexp(a, axis)
+        self.assertEqual(a.dtype, actual.dtype)
+        self.assertEqual(expected.shape, actual.shape)
+        self.assertTrue(torch.allclose(expected, actual))
+
+        # Check that out is actually inplace
+        b = torch.randn(5, 2, device=device)
+        inplace_out = torch.zeros(5, 2, device=device)
+
+        expected = logcumsumexp(b, axis)
+        torch.logcumsumexp(b, axis=axis, out=inplace_out)
+
+        self.assertTrue(torch.allclose(inplace_out, expected))
+
+        # Check input and inplace_output type mismatch
+        b = torch.randn(5, 2, device=device, dtype=torch.float64)
+        inplace_out = torch.zeros(5, 2, device=device, dtype=torch.float32)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'expected scalar_type Double but found Float'):
+            torch.logcumsumexp(b, axis, out=inplace_out)
+
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
         for dim in range(x.dim()):
@@ -12146,7 +12199,7 @@ class TestTorchDeviceType(TestCase):
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
             mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
 
-            if (dtype.is_complex or dtype == torch.half) and torch.device(device).type == 'cpu':
+            if dtype == torch.half and torch.device(device).type == 'cpu':
                 self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                 continue
 
@@ -12294,6 +12347,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(shape, torch.cummax(x, 2)[0].shape)
         self.assertEqual(shape, torch.cummin(x, 0)[0].shape)
         self.assertEqual(shape, torch.cummin(x, 2)[0].shape)
+        self.assertEqual(shape, torch.logcumsumexp(x, 0).shape)
+        self.assertEqual(shape, torch.logcumsumexp(x, 2).shape)
 
         # flip
         self.assertEqual(x, x.flip(0))
@@ -12688,6 +12743,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.ones((2, 1, 4), device=device, dtype=torch.uint8), xb.all(1, keepdim=True))
         self.assertEqual(torch.ones((), device=device, dtype=torch.uint8), xb.all())
 
+    @onlyOnCPUAndCUDA
     def test_addcdiv(self, device):
         def _test_addcdiv(a, alpha, b, c):
             actual = torch.addcdiv(a, b, c, value=alpha)
@@ -12695,7 +12751,7 @@ class TestTorchDeviceType(TestCase):
             if not actual.dtype.is_floating_point:
                 alpha = int(alpha)
             expected = a + (alpha * b) / c
-            self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
+            self.assertEqual(expected, actual)
 
             with self.maybeWarnsRegex(
                     UserWarning, "This overload of addcdiv is deprecated"):
@@ -12710,14 +12766,24 @@ class TestTorchDeviceType(TestCase):
                 a = torch.randint(-5, 5, size=size, dtype=dtype, device=device)
             return a + (a == 0).to(dtype)
 
+        def _helper():
+            _test_addcdiv(
+                non_zero_rand((2, 2), dtype=dtype, device=device),
+                0.5,
+                non_zero_rand((2, 2), dtype=dtype, device=device),
+                non_zero_rand((2, 2), dtype=dtype, device=device))
+
         for dtype in torch.testing.get_all_math_dtypes(device):
-            # TODO: update this after torch.allclose is added for complex
-            if not dtype.is_complex:
-                _test_addcdiv(
-                    non_zero_rand((2, 2), dtype=dtype, device=device),
-                    0.5,
-                    non_zero_rand((2, 2), dtype=dtype, device=device),
-                    non_zero_rand((2, 2), dtype=dtype, device=device))
+            # CPU complex addcdiv is wildly inaccurate
+            if dtype.is_complex and self.device_type == 'cpu':
+                with self.assertRaises(AssertionError):
+                    _helper()
+            # CUDA complex addcdiv is not implemented
+            elif dtype.is_complex and self.device_type == 'cuda':
+                with self.assertRaises(RuntimeError):
+                    _helper()
+            else:
+                _helper()
 
     # TODO: run on non-native device types
     @dtypes(torch.double)
@@ -13679,7 +13745,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to(devices[1]))    # __radd__
         self.assertEqual(2 - torch.tensor(3), 2 - torch.tensor(3).to(devices[1]))    # __rsub__
         self.assertEqual(2 * torch.tensor(3), 2 * torch.tensor(3).to(devices[1]))    # __rmul__
-        self.assertEqual(2 / torch.tensor(3), 2 / torch.tensor(3).to(devices[1]))    # __rtruediv__
+        self.assertEqual(2 / torch.tensor(3.), 2 / torch.tensor(3.).to(devices[1]))  # __rtruediv__
         self.assertEqual(2 // torch.tensor(3), 2 // torch.tensor(3).to(devices[1]))  # __rfloordiv__
 
         self.assertEqual(
@@ -13692,8 +13758,8 @@ class TestTorchDeviceType(TestCase):
             torch.tensor(2).to(devices[1]) * torch.tensor(3).to(devices[0]),
             torch.tensor(2) * torch.tensor(3))
         self.assertEqual(
-            torch.tensor(2).to(devices[1]) / torch.tensor(3).to(devices[0]),
-            torch.tensor(2) / torch.tensor(3))
+            torch.tensor(2.).to(devices[1]) / torch.tensor(3.).to(devices[0]),
+            torch.tensor(2.) / torch.tensor(3.))
         self.assertEqual(
             torch.tensor(2).to(devices[1]) // torch.tensor(3).to(devices[0]),
             torch.tensor(2) // torch.tensor(3))
@@ -16596,7 +16662,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = torch.tensor([0, 1], dtype=dtype, device=device)
         b = torch.tensor([0, 1], dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
-            a.div(b)
+            a // b
 
     @onlyCPU
     def test_cat_bad_input_sizes(self, device):
@@ -16732,6 +16798,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy has the same behavior.
     @onlyOnCPUAndCUDA
+    @unittest.skipIf(IS_MACOS, "Test is broken on MacOS, see https://github.com/pytorch/pytorch/issues/38752")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):
@@ -17887,19 +17954,21 @@ tensor_op_tests = [
     ('mul', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-2),
     ('mul', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d)], 1e-2),
     ('mul', 'scalar', _small_0d, lambda t, d: [_small_0d(torch.int32, d)], 1e-2),
-    ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1),
+    ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
+        1e-1, 1e-5, _float_types2),
     ('div', 'tensor', _small_3d,
-        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1),
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
+        1e-1, 1e-5, _float_types2),
     ('true_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
         1e-5, 1e-5, _types, _cpu_types, False),
     ('true_divide', 'with_inplace', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
-        1e-5, 1e-5, _float_types),
+        1e-1, 1e-5, _float_types2),
     ('true_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
         1e-5, 1e-5, _types, _cpu_types, False),
     ('true_divide', 'tensor_with_inplace', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
-        1e-5, 1e-5, _float_types),
+        1e-1, 1e-5, _float_types2),
     ('floor_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1, 1e-5, 1e-5, _types),
     ('floor_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1, 1e-5, 1e-5, _types),
@@ -17933,13 +18002,11 @@ tensor_op_tests = [
     ('addcdiv', '', _small_2d,
         lambda t, d: [_small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1, 1e-3,
-        _types2, _cpu_types, True,
-        [_wrap_maybe_warns("Integer division .+")]),
+        _float_types2, _cpu_types, True),
     ('addcdiv', 'scalar', _small_2d,
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
-        _types, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addcdiv_? is deprecated|Integer division .+")]),
+        _float_types, _cpu_types, True),
     ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 1e-1, 1e-3, _types2),
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
@@ -17991,6 +18058,8 @@ tensor_op_tests = [
     ('conj', '', _small_3d, lambda t, d: [], 1e-5, 0, 1e-5, _types_no_half, [torch.bfloat16], False),
     ('cross', '', _new_t((_M, 3, _M)), lambda t, d: [_new_t((_M, 3, _M))(t, d)],
         1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('logcumsumexp', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _float_types, _cpu_types, False),
+    ('logcumsumexp', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('cummax', '', _small_3d_unique, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
     ('cummax', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
     ('cummin', '', _small_3d_unique, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -18196,7 +18265,7 @@ tensor_op_tests = [
     ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('sin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
-    ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
+    ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2 + _complex_types, [torch.bfloat16]),
     ('acos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('asin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('atan', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),

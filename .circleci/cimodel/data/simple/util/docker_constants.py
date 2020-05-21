@@ -2,7 +2,7 @@ AWS_DOCKER_HOST = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 
 # ARE YOU EDITING THIS NUMBER?  MAKE SURE YOU READ THE GUIDANCE AT THE
 # TOP OF .circleci/config.yml
-DOCKER_IMAGE_TAG = "9a3986fa-7ce7-4a36-a001-3c9bef9892e2"
+DOCKER_IMAGE_TAG = "1bc00f11-e0f3-4e5c-859f-15937dd938cd"
 
 
 def gen_docker_image_path(container_type):
