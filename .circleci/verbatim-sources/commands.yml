@@ -101,6 +101,10 @@ commands:
                 git config remote.origin.url https://github.com/pytorch/pytorch.git
                 git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
                 git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
+                # PRs generated from ghstack has format CIRCLE_PR_BASE_BRANCH=gh/xxx/1234/base
+                if [[ "${CIRCLE_PR_BASE_BRANCH}" == "gh/"* ]]; then
+                  CIRCLE_PR_BASE_BRANCH=master
+                fi
                 export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/$CIRCLE_PR_BASE_BRANCH`
                 echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
                 export GIT_COMMIT=${CIRCLE_SHA1}
