@@ -1,6 +1,8 @@
 #pragma once
 
+#include <c10/core/ScalarType.h>
 #include <ATen/detail/FunctionTraits.h>
+#include <ATen/native/TensorIterator.h>
 
 // This file includes utilties for dynamic_casting done by TensorIterator, see CUDALoops.cuh and Loops.h.
 
