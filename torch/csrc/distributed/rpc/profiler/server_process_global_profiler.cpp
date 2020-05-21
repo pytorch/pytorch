@@ -8,7 +8,14 @@ namespace {
 
 class ProcessGlobalProfilerStateStackEntry;
 
-std::shared_timed_mutex currentProcessGlobalProfilerStateStackEntryMutex;
+#if defined(__MACH__)
+// Compiler error: 'shared_timed_mutex' is unavailable: introduced in
+// macOS 10.12
+std::mutex
+#else
+std::shared_timed_mutex
+#endif
+    currentProcessGlobalProfilerStateStackEntryMutex;
 std::shared_ptr<ProcessGlobalProfilerStateStackEntry>
     currentProcessGlobalProfilerStateStackEntryPtr = nullptr;
 
@@ -38,7 +45,8 @@ class ProcessGlobalProfilerStateStackEntry {
         ->previousProcessGlobalProfilerStateStackEntryPtr_ =
         previousStateStackEntryPtr;
     currentProcessGlobalProfilerStateStackEntryPtr
-        ->profilerProcessGlobalStatePtr_ = profilerProcessGlobalStatePtr;
+        ->profilerProcessGlobalStatePtr_ =
+        std::move(profilerProcessGlobalStatePtr);
   }
 
   static std::shared_ptr<ProcessGlobalProfilerState> pop() {

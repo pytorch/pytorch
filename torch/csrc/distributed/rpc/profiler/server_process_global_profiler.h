@@ -2,11 +2,13 @@
 
 #include <torch/csrc/autograd/profiler.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 using namespace torch::autograd::profiler;
 
-// Profiler global state
+// Process global profiler state.
 class ProcessGlobalProfilerState {
  public:
   explicit ProcessGlobalProfilerState(const ProfilerConfig& config)
@@ -40,23 +42,25 @@ class ProcessGlobalProfilerState {
  private:
   // Name it profileRanges_ to emphesize on the fact that each element is the
   // results of a profile range. In each profile range, there is a
-  // __profiler_start mark event, so it's required to call
-  // parse_cpu_trace(thread_event_lists) for every profile range.
+  // "__profiler_start" mark event that all following events calculate time
+  // relative to it, so it's required to call
+  // parse_cpu_trace(profileRange) for every profile range.
   std::mutex profileRangesMutex_;
   std::vector<thread_event_lists> profileRanges_;
-  bool deactivated_;
-
   ProfilerConfig config_ =
       ProfilerConfig(ProfilerState::Disabled, false, false);
 };
 
 // User-facing API.
-void enableServerProcessGlobalProfiler(const ProfilerConfig& new_config);
-std::vector<thread_event_lists> disableServerProcessGlobalProfiler();
+TORCH_API void enableServerProcessGlobalProfiler(
+    const ProfilerConfig& new_config);
+TORCH_API std::vector<thread_event_lists> disableServerProcessGlobalProfiler();
 
 // Internal API.
 bool serverProcessGlobalProfilerEnabled();
 
 std::shared_ptr<ProcessGlobalProfilerState> serverProcessGlobalProfilerState();
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
