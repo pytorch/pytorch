@@ -26,13 +26,13 @@ gathering information about PyTorch workloads running in a given process or
 across the entire set of machines.
 
 New callbacks for any operator invocation can be added with
-``torch::autograd::profiler::pushCallback``. Hooks will be called with
-``torch::autograd::profiler::RecordFunction`` struct that describes invocation
+``torch::addGlobalCallback``. Hooks will be called with
+``torch::RecordFunction`` struct that describes invocation
 context (e.g. `name`). If enabled, ``RecordFunction::inputs()`` contains arguments
 of the function represented as ``torch::IValue`` variant type. Note, that inputs
 logging is relatively expensive and thus has to be enabled explicitly.
 
-The operator callbacks also have access to ``at::ThreadLocalDebugInfo::get()``
+The operator callbacks also have access to ``c10::ThreadLocalDebugInfo::get()``
 interface that returns a pointer to the struct holding the debug information.
 This debug information can be set earlier by using ``at::DebugInfoGuard`` object.
 Debug information is propagated through the forward (including async ``fork``
@@ -42,9 +42,9 @@ application down to the operator callbacks.
 
 Invoking callbacks adds some overhead, so usually it's useful to just randomly
 sample operator invocations. This can be enabled on per-callback basis with an
-optional sampling rate passed into ``torch::autograd::profiler::pushCallback``.
+optional sampling rate passed into ``torch::addGlobalCallback``.
 
-Note, that ``pushCallback`` is not thread-safe and can be called only when no
+Note, that ``addGlobalCallback`` is not thread-safe and can be called only when no
 PyTorch operator is running. Usually, it's a good idea to call them once during
 initialization.
 
@@ -55,22 +55,20 @@ Here's an example:
     // Called somewhere in the program beginning
     void init() {
         // Sample one in a hundred operator runs randomly
-        pushCallback(
+        addGlobalCallback(
+          RecordFunctionCallback(
             &onFunctionEnter,
-            &onFunctionExit,
-            /* needs_inputs */ true,
-            /* sampling_prob */ 0.01
+            &onFunctionExit)
+          .needsInputs(true)
+          .samplingProb(0.01)
         );
         // Note, to enable observers in the model calling thread,
-        // call enableObservers() in the thread before running a model
+        // call enableRecordFunction() in the thread before running a model
     }
 
-    bool onFunctionEnter(const RecordFunction& fn) {
+    void onFunctionEnter(const RecordFunction& fn) {
         std::cerr << "Before function " << fn.name()
                   << " with " << fn.inputs().size() << " inputs" << std::endl;
-        // Returning false would mean that the callback is not interested
-        // in this RecordFunction and onFunctionExit won't be called
-        return true;
     }
 
     void onFunctionExit(const RecordFunction& fn) {

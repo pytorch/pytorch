@@ -1,16 +1,6 @@
 #include "caffe2/opt/tvm_transformer.h"
 #include "caffe2/opt/backend_cutting.h"
 
-C10_DEFINE_bool(
-    caffe2_tvm_profiling_based_jit,
-    false,
-    "Use profiling based jit for TVM transform");
-
-C10_DEFINE_int32(
-    caffe2_tvm_min_ops,
-    8,
-    "Minimal number of supported ops for the subgraph to be lowered to TVM");
-
 namespace caffe2 {
 
 NetDef TvmTransformer::buildTvmOp(
@@ -199,15 +189,32 @@ void TvmTransformer::transform(
 
 const std::unordered_set<std::string>& TvmTransformer::getSupportedOps() {
   const static std::unordered_set<std::string> supported_ops{
-      "Add",        "BatchGather", "BatchMatMul",
-      "Cast",       "Clip",        "Concat",
-      "Copy",       "DotProduct",  "EnsureCPUOutput",
-      "ExpandDims", "FC",          "FCTransposed",
-      "Flatten",    "Logit",       "MatMul",
-      "Mul",        "Relu",        "Reshape",
-      "ReplaceNaN", "Sigmoid",     "Softmax",
-      "Split",      "Sum",         "Tanh",
+      "Add",
+      "BatchGather",
+      "BatchMatMul",
+      "Cast",
+      "Clip",
+      "Concat",
+      "Copy",
+      "DotProduct",
+      "EnsureCPUOutput",
+      "ExpandDims",
+      "FC",
+      "FCTransposed",
+      "Flatten",
+      "Logit",
+      "MatMul",
+      "Mul",
+      "Relu",
+      "Reshape",
+      "ReplaceNaN",
+      "Sigmoid",
+      "Softmax",
+      "Split",
+      "Sum",
+      "Tanh",
       "Transpose",
+      "UnPackRecords",
   };
   return supported_ops;
 }
@@ -281,15 +288,21 @@ void tvmTransform(
     const std::vector<std::string>& weight_names,
     const ShapeInfoMap& shape_hints,
     const std::unordered_set<int>& blacklisted_ops,
-    size_t max_batch_size,
-    size_t max_seq_size,
+    int32_t max_batch_size,
+    int32_t max_seq_size,
+    int32_t num_embeddings,
+    int32_t embedding_size,
+    int32_t tvm_min_ops,
+    bool tvm_profiling_based_jit,
     bool debug) {
   TvmTransformOptions opts;
   opts.bound_shape_spec.max_batch_size = max_batch_size;
   opts.bound_shape_spec.max_seq_size = max_seq_size;
+  opts.bound_shape_spec.num_embeddings = num_embeddings;
+  opts.bound_shape_spec.embedding_length = embedding_size;
+  opts.min_ops = tvm_min_ops;
+  opts.profiling_based_jit = tvm_profiling_based_jit;
   opts.debug = debug;
-  opts.profiling_based_jit = FLAGS_caffe2_tvm_profiling_based_jit;
-  opts.min_ops = FLAGS_caffe2_tvm_min_ops;
   TvmTransformer ts(opts);
 
   // Clean up the external input/output of the net

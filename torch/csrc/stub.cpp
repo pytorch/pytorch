@@ -5,14 +5,11 @@ __declspec(dllimport)
 #endif
 extern PyObject* initModule();
 
-#if PY_MAJOR_VERSION == 2
-PyMODINIT_FUNC init_C()
-{
-  initModule();
-}
-#else
+#ifndef _WIN32
+extern "C" __attribute__((visibility("default"))) PyObject* PyInit__C();
+#endif
+
 PyMODINIT_FUNC PyInit__C()
 {
   return initModule();
 }
-#endif

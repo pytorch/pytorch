@@ -216,22 +216,27 @@ struct MutationRemover {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
 
-  void run() {
-    RemoveAtenMutation(graph_->block());
+  void removeListMutation() {
     RemoveListMutation(graph_->block());
+  }
+
+  void removeTensorMutation() {
+    RemoveTensorMutation(graph_->block());
   }
 
  private:
   bool newMemoryLocation(Value* v) {
-    // bail on nodes with side effects, blocks, or graphs
+    // bail on nodes with side effects, blocks, or graph / graph inputs
     Node* n = v->node();
     bool unhandled_node = n->blocks().size() != 0 ||
-        n->hasAttribute(attr::Subgraph) || n->hasSideEffects();
+        n->hasAttribute(attr::Subgraph) || n->hasSideEffects() ||
+        (v->node()->kind() == prim::Param);
 
     // if the output isn't contained or alias by the inputs to its node, it's
     // unique
     return !unhandled_node &&
-        !aliasDb_->mayContainAlias(v->node()->inputs(), v);
+        !aliasDb_->mayContainAlias(v->node()->inputs(), v) &&
+        !(v->node()->kind() == prim::Param);
   }
 
   bool inplaceOpVariant(Node* n) {
@@ -291,6 +296,38 @@ struct MutationRemover {
         mutated_value->node(), mutating_op);
   }
 
+  bool tryMakeUnaliasedIfOutputAndMutationAtomic(
+      Value* mutated_value,
+      Node* mutating_op) {
+    // if cond:
+    //    x = op()
+    // else:
+    //    x = op()
+    // x = add_(1)
+    // if x in both blocks have no other uses and are unaliased in the graph,
+    // and we make the if node and the mutation atomic,
+    // then removing mutation add_ does not change observable semantics
+
+    if (mutated_value->node()->kind() != prim::If) {
+      return false;
+    }
+
+    auto if_node = mutated_value->node();
+    auto offset = mutated_value->offset();
+    auto true_value = if_node->blocks().at(0)->outputs().at(offset);
+    auto false_value = if_node->blocks().at(1)->outputs().at(offset);
+
+    if (true_value->uses().size() > 1 || false_value->uses().size() > 1) {
+      return false;
+    }
+
+    if (!newMemoryLocation(true_value) || !newMemoryLocation(false_value)) {
+      return false;
+    }
+
+    return aliasDb_->moveBeforeTopologicallyValid(if_node, mutating_op);
+  }
+
   void RemoveListMutation(Block* block) {
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       auto* node = *it;
@@ -319,21 +356,22 @@ struct MutationRemover {
       Node* list_construct = mutated_value->node();
       list_construct->addInput(node->inputs().at(1));
       node->output()->replaceAllUsesWith(mutated_value);
-      aliasDb_->writeIndex_.erase(node);
+      aliasDb_->writeIndex_->erase(node);
       node->destroy();
 
       // TODO: don't strictly need to reset write cache, evaluate on models
-      aliasDb_->isWriteCacheStale_ = true;
+      aliasDb_->writtenToLocationsIndex_ =
+          aliasDb_->buildWrittenToLocationsIndex();
     }
   }
 
-  void RemoveAtenMutation(Block* block) {
+  void RemoveTensorMutation(Block* block) {
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       auto* node = *it;
       it++;
 
       for (Block* sub_block : node->blocks()) {
-        RemoveAtenMutation(sub_block);
+        RemoveTensorMutation(sub_block);
       }
 
       // TODO: out op variants
@@ -342,7 +380,8 @@ struct MutationRemover {
       }
 
       Value* mutated_value = node->inputs().at(0);
-      if (!tryMakeCreationAndMutationAtomic(mutated_value, node)) {
+      if (!tryMakeCreationAndMutationAtomic(mutated_value, node) &&
+          !tryMakeUnaliasedIfOutputAndMutationAtomic(mutated_value, node)) {
         continue;
       }
 
@@ -374,20 +413,21 @@ struct MutationRemover {
       // same aliasing relationships as the original x.
       // To avoid rebuilding the entire alias db, we can replace
       // the memory dag element of x with x0.
-      aliasDb_->replaceMemoryLocation(mutated_value, new_node->output());
+      aliasDb_->replaceWithNewValue(mutated_value, new_node->output());
 
       // it is an invariant that all mutable types have an element in the memory
       // dag so we must regive x an alias db element. We have already verified
       // that the mutated value is a fresh alias with a single use.
-      aliasDb_->giveFreshAlias(mutated_value);
+      aliasDb_->createValue(mutated_value);
 
       // We must erase the destroyed node from the AliasDb lists of writes
-      aliasDb_->writeIndex_.erase(node);
+      aliasDb_->writeIndex_->erase(node);
       node->destroy();
 
       // now that we have removed a mutating op, the write cache is stale
       // TODO: don't strictly need to reset write cache, evaluate on models
-      aliasDb_->isWriteCacheStale_ = true;
+      aliasDb_->writtenToLocationsIndex_ =
+          aliasDb_->buildWrittenToLocationsIndex();
     }
   }
 
@@ -409,9 +449,14 @@ void InlineFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
   InlineFunctionalGraphs(graph->block());
 }
 
-void RemoveMutation(const std::shared_ptr<Graph>& graph) {
+void RemoveListMutation(const std::shared_ptr<Graph>& graph) {
   MutationRemover mr(graph);
-  mr.run();
+  mr.removeListMutation();
+}
+
+void RemoveTensorMutation(const std::shared_ptr<Graph>& graph) {
+  MutationRemover mr(graph);
+  mr.removeTensorMutation();
 }
 
 } // namespace jit

@@ -71,6 +71,7 @@ struct TORCH_CUDA_API GPULower : public OptOutMutator {
   // Remake operations with TensorIndex
   Statement* mutate(UnaryOp*) final;
   Statement* mutate(BinaryOp*) final;
+  Statement* mutate(TernaryOp*) final;
 
   // TensorViews are all based on symbolic sizes. When we first initialize them
   // we don't know if they're inputs or outputs which would mean that they have

@@ -107,20 +107,20 @@ public:
   // ------------------------------------------------------------------------
 
   template<class Return, class... Args>
-  Return callUnboxed(const OperatorHandle& op, Args... args) const;
+  Return call(const OperatorHandle& op, Args... args) const;
 
-  // Like callUnboxed, but override the default DispatchKey calculation code,
+  // Like call, but override the default DispatchKey calculation code,
   // instead dispatching straight to the provided DispatchKey
   template<class Return, class... Args>
-  Return callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const;
+  Return callWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const;
 
-  // Like callUnboxed, but intended for use in a redispatch: you are currently
+  // Like call, but intended for use in a redispatch: you are currently
   // in some currentDispatchKey, you have finished processing the key and
   // you now want to redispatch to the next dispatch key in the chain.
-  // This will mask out the current key and all previous keys from the
-  // eligible set, and redo the calculation.
+  // This will mask out the current key *and all previous keys* from the
+  // eligible set, and reinvoke the dispatcher.
   template<class Return, class... Args>
-  Return callUnboxedRedispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const;
+  Return redispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const;
 
   // Invoke an operator via the boxed calling convention using an IValue stack
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
@@ -149,6 +149,11 @@ public:
   // NB: steals the inferred function schema, as we may need to hold on to
   // it for a bit until the real schema turns up
   RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
+
+  /**
+   * Register a new operator by name.
+   */
+  RegistrationHandleRAII registerName(OperatorName op_name);
 
   /**
    * Register a fallback kernel for a backend.
@@ -199,6 +204,7 @@ private:
     const OperatorName& op_name,
     c10::optional<DispatchKey> dispatch_key,
     std::list<impl::OperatorEntry::KernelEntry>::iterator kernel_handle);
+  void deregisterName_(const OperatorHandle& op, const OperatorName& op_name);
   void deregisterFallback_(DispatchKey dispatchKey);
   void deregisterLibrary_(const std::string& ns);
   void cleanup(const OperatorHandle& op, const OperatorName& op_name);
@@ -258,13 +264,13 @@ public:
   }
 
   template<class Return, class... Args>
-  Return callUnboxed(Args... args) const {
-    return c10::Dispatcher::singleton().callUnboxed<Return, Args...>(*this, std::forward<Args>(args)...);
+  Return call(Args... args) const {
+    return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
   template<class Return, class... Args>
-  Return callUnboxedWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
-    return c10::Dispatcher::singleton().callUnboxedWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
+  Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
+    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
   }
 
   void callBoxed(Stack* stack) const {
@@ -284,23 +290,23 @@ template<class... Args> inline void unused_arg_(const Args&...) {}
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const {
+inline Return Dispatcher::callWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-  return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
+  return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
+inline Return Dispatcher::call(const OperatorHandle& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   auto dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(backendsWithoutFallthrough_, DispatchKeySet::FULL, args...);
-  return callUnboxedWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
+  return callWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::callUnboxedRedispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const {
+inline Return Dispatcher::redispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   auto dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(
@@ -308,7 +314,7 @@ inline Return Dispatcher::callUnboxedRedispatch(const OperatorHandle& op, Dispat
     DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey),
     args...);
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-  return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
+  return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
