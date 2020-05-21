@@ -28,8 +28,10 @@ Tensor qnnpack_tanh(Tensor input) {
   initQNNPACK();
 
   Tensor input_contig = input.contiguous();
-  size_t num_elems = input_contig.numel() / input_contig.size(0);
-
+  size_t num_elems = 1;
+  for (int i = 1; i < input_contig.ndimension(); ++i) {
+    num_elems *= input_contig.size(i);
+  }
   const auto zero_point = input_contig.q_zero_point();
   const auto scale = input_contig.q_scale();
 

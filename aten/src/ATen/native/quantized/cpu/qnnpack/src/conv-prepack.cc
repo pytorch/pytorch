@@ -7,6 +7,7 @@ namespace qnnpack {
 
 PrePackConvWeights::PrePackConvWeights(
     const conv_param_t& conv_p,
+    const uint8_t* kernel_zero_points,
     const uint8_t* kernel,
     const int32_t* bias) {
   output_channels_ = conv_p.output_channels;
@@ -142,9 +143,11 @@ PrePackConvWeights::PrePackConvWeights(
             packed_group_weights_size * groups);
         assert("QNNPACK Runtime Error.");
       }
+      // We likely won't needs this once packing functions are appropriately
+      // modified. Remove it then.
       memset(
           packed_weights_,
-          conv_p.kernel_zero_point,
+          kernel_zero_points[0],
           packed_group_weights_size * groups);
 
       switch (ukernel_type) {
@@ -160,6 +163,7 @@ PrePackConvWeights::PrePackConvWeights(
                     group * conv_p.group_output_channels *
                         conv_p.group_input_channels,
                 bias + group * conv_p.group_output_channels,
+                kernel_zero_points + group * conv_p.group_output_channels,
                 (void*)((uintptr_t)packed_weights_ + group * packed_group_weights_size));
           }
           break;
@@ -175,6 +179,7 @@ PrePackConvWeights::PrePackConvWeights(
                     group * conv_p.group_output_channels * kernel_size *
                         conv_p.group_input_channels,
                 bias + group * conv_p.group_output_channels,
+                kernel_zero_points + group * conv_p.group_output_channels,
                 (void*)((uintptr_t)packed_weights_ + group * packed_group_weights_size));
           }
           break;

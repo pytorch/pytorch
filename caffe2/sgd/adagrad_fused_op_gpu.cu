@@ -433,9 +433,9 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG(INFO) << "gradient optimization operator in use: "
-              << "CUDASparseAdagradFusedWithSparseLengthSumGradientOp"
-              << " weight_decay_=" << weight_decay_;
+    VLOG(1) << "gradient optimization operator in use: "
+            << "CUDASparseAdagradFusedWithSparseLengthSumGradientOp"
+            << " weight_decay_=" << weight_decay_;
 
     const T decay = this->template GetSingleArgument<T>("decay", 1.0f);
     CAFFE_ENFORCE_EQ(decay, 1.0, "Decay is not supported for SparseAdagradOp");
@@ -585,9 +585,9 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG(INFO) << "gradient optimization operator in use: "
-              << "CUDASparseAdagradFusedWithSparseLengthWeightedSumGradientOp"
-              << " weight_decay_=" << weight_decay_;
+    VLOG(1) << "gradient optimization operator in use: "
+            << "CUDASparseAdagradFusedWithSparseLengthWeightedSumGradientOp"
+            << " weight_decay_=" << weight_decay_;
 
     const T decay = this->template GetSingleArgument<T>("decay", 1.0f);
     CAFFE_ENFORCE_EQ(decay, 1.0, "Decay is not supported for SparseAdagradOp");
@@ -782,9 +782,9 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG(INFO) << "gradient optimization operator in use: "
-              << "CUDARowWiseSparseAdagradFusedWithSparseLengthSumGradientOp"
-              << " weight_decay_=" << weight_decay_;
+    VLOG(1) << "gradient optimization operator in use: "
+            << "CUDARowWiseSparseAdagradFusedWithSparseLengthSumGradientOp"
+            << " weight_decay_=" << weight_decay_;
 
     const T decay = this->template GetSingleArgument<T>("decay", 1.0f);
     CAFFE_ENFORCE_EQ(decay, 1.0, "Decay is not supported for SparseAdagradOp");
@@ -937,7 +937,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    LOG(INFO)
+    VLOG(1)
         << "gradient optimization operator in use: "
         << "CUDARowWiseSparseAdagradFusedWithSparseLengthWeightedSumGradientOp"
         << " weight_decay_=" << weight_decay_;
