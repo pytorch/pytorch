@@ -72,6 +72,12 @@ def _test_serialization_subcmul_0_2(self: Tensor, other:Tensor, alpha: number=2)
   return other - (self * alpha)
 )SCRIPT";
 
+// Tensor copy creation
+auto tensor_clone = R"SCRIPT(
+def tensor(other:Tensor) -> Tensor:
+  return other.clone().detach()
+)SCRIPT";
+
 struct BuiltinFunctionRegistry {
   const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
     const static std::vector<Function*> empty;
@@ -138,6 +144,8 @@ struct BuiltinFunctionRegistry {
     }
 
     loadSource(aten_ops, "aten");
+
+    loadSource(tensor_clone, "aten");
 
     // Loads functions implementing historic behavior, see note [Versioned
     // Symbols]
