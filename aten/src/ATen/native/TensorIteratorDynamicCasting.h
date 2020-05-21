@@ -1,8 +1,10 @@
 #pragma once
 
 #include <type_traits>
+#include <c10/core/ScalarType.h>
 #include <c10/util/C++17.h>
 #include <ATen/detail/FunctionTraits.h>
+#include <ATen/native/TensorIterator.h>
 
 // This file includes utilties for dynamic_casting done by TensorIterator, see CUDALoops.cuh and Loops.h.
 
@@ -35,7 +37,7 @@ struct needs_dynamic_casting<func_t, 0> {
     // we could assert output numbers are correct here, but checks
     // (including arity) are currently pushed outside of this struct.
     return c10::guts::if_constexpr<std::is_void<typename traits::result_type>::value>(
-      [&]() { return false; }
+      [&]() { return false; },
       [&]() { return iter.output_dtype(0) != c10::impl::CPPTypeToScalarType<typename traits::result_type>::value;}
     );
   }
