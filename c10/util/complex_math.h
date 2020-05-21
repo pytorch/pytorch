@@ -214,6 +214,12 @@ C10_HOST_DEVICE inline c10::complex<T> atanh(const c10::complex<T> &x) {
 
 // We also support some math functions that is not supported by standard library:
 
+#ifdef __HIP_PLATFORM_HCC__
+#define ROCm_Bug(x)
+#else
+#define ROCm_Bug(x) x
+#endif
+
 template<typename T>
 C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T> &z) {
   // log1p(z) = log(1+z)
@@ -227,6 +233,11 @@ C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T> &z) {
   //     = (x^2 + y^2 + 2x) / (r+1)
   T x = z.real();
   T y = z.imag();
+
+  if (ROCm_Bug(std)::abs(x) > 1e-4 || ROCm_Bug(std)::abs(y) > 1e-4) {
+    return std::log(T(1) + z);
+  }
+
   c10::complex<T> p1 = z + T(1);
   T r = std::abs(p1);
   T a = std::arg(p1);
@@ -235,5 +246,6 @@ C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T> &z) {
 }
 
 #undef CUDA92_BUG
+#undef ROCm_Bug
 
 } // namespace std
