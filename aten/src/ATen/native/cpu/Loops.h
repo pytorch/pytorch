@@ -31,6 +31,7 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec256/vec256.h>
 
 #ifndef _MSC_VER
@@ -236,7 +237,7 @@ void cpu_serial_kernel(TensorIterator& iter, func_t&& op, const Range& range) {
   using traits = function_traits<func_t>;
   constexpr bool result_void = std::is_void<typename traits::result_type>::value;
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity &&
-                        (result_void && iter.noutputs() == 0 || !result_void && iter.noutputs() == 1));
+                        ((result_void && iter.noutputs() == 0) || (!result_void && iter.noutputs() == 1)));
   // dynamic casting not currently supported on CPU
   TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
