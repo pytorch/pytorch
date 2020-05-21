@@ -268,12 +268,12 @@ void bernoulli_tensor_kernel(Tensor& self, const Tensor& p_, c10::optional<Gener
 }
 
 #if !AT_MKL_ENABLED()
-void bernoulli_scalar_kernel(Tensor& self, const double p, c10::optional<Generator> gen) {
+void bernoulli_scalar_kernel(Tensor& self, double p, c10::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::bernoulli_kernel(self, p, generator);
 }
 #else
-void bernoulli_scalar_kernel(Tensor &self, const double p, c10::optional<Generator> gen) {
+void bernoulli_scalar_kernel(Tensor &self, double p, c10::optional<Generator> gen) {
   if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     int64_t seed;

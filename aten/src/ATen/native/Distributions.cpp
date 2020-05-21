@@ -139,7 +139,7 @@ struct BernoulliStub {
 };
 
 Tensor bernoulli(const Tensor& self, c10::optional<Generator> gen) {
-  return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(self, gen);
+  return at::native::templates::bernoulli_impl<BernoulliStub, Generator>(self, gen);
 }
 
 Tensor bernoulli(const Tensor& self, double p, c10::optional<Generator> gen) {
@@ -147,19 +147,14 @@ Tensor bernoulli(const Tensor& self, double p, c10::optional<Generator> gen) {
 }
 
 Tensor& bernoulli_out(Tensor& result, const Tensor& self, c10::optional<Generator> gen) {
-  // result.resize_as_(self) requires self to have same dtype as result, so we
-  // use resize_ instead.
-  // TODO: Fix resize_as_. See pytorch/pytorch#11665.
-  result.resize_(self.sizes()).bernoulli_(self, gen);
-  namedinference::propagate_names(result, self);
-  return result;
+  return at::native::templates::bernoulli_out_impl<BernoulliStub, Generator>(result, self, gen);
 }
 
-Tensor& bernoulli_tensor(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+Tensor& bernoulli_(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
   return at::native::templates::bernoulli_impl_<BernoulliStub, Generator>(self, p_, gen);
 }
 
-Tensor& bernoulli_scalar(Tensor& self, double p, c10::optional<Generator> gen) {
+Tensor& bernoulli_(Tensor& self, double p, c10::optional<Generator> gen) {
   return at::native::templates::bernoulli_impl_<BernoulliStub, Generator>(self, p, gen);
 }
 

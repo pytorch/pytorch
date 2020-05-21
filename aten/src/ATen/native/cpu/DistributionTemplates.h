@@ -336,7 +336,7 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG generator) {
 }
 
 template<typename RNG>
-void bernoulli_kernel(Tensor& self, const double p, RNG generator) {
+void bernoulli_kernel(Tensor& self, double p, RNG generator) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -350,7 +350,7 @@ void bernoulli_kernel(Tensor& self, const double p, RNG generator) {
 
 template<typename RNG>
 struct BernoulliKernel {
-  void operator()(Tensor& self, const double p, c10::optional<Generator> gen) {
+  void operator()(Tensor& self, double p, c10::optional<Generator> gen) {
     bernoulli_kernel(self, p, check_generator<RNG>(gen));
   }
   void operator()(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {

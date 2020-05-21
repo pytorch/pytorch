@@ -260,50 +260,6 @@ void distribution_binary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64
   }
 }
 
-template<typename scalar_t, typename prob_t>
-void bernoulli_tensor_cuda_kernel(
-    at::Tensor& ret, const at::Tensor& p,
-    std::pair<uint64_t, uint64_t> seeds) {
-  // The template argument `4` below indicates that we want to operate on four
-  // element at each time. See NOTE [ CUDA_tensor_applyN helpers ] for details.
-  at::cuda::CUDA_tensor_apply2<scalar_t, prob_t, 4>(
-      ret, p,
-      [seeds] __device__(
-          int n, scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4,
-          const prob_t& p1, const prob_t& p2, const prob_t& p3, const prob_t& p4) {
-        curandStatePhilox4_32_10_t state;
-        curand_init(
-            seeds.first,
-            blockIdx.x * blockDim.x + threadIdx.x,
-            seeds.second,
-            &state);
-        // See Note [Register spilling in curand call for CUDA < 10]
-        float4 rand = curand_uniform4(&state);
-        switch (n) {
-          case 4: {
-            CUDA_KERNEL_ASSERT(0 <= p4 && p4 <= 1);
-            v4 = static_cast<scalar_t>(rand.w <= p4);
-            // fallthrough
-          }
-          case 3: {
-            CUDA_KERNEL_ASSERT(0 <= p3 && p3 <= 1);
-            v3 = static_cast<scalar_t>(rand.z <= p3);
-            // fallthrough
-          }
-          case 2: {
-            CUDA_KERNEL_ASSERT(0 <= p2 && p2 <= 1);
-            v2 = static_cast<scalar_t>(rand.y <= p2);
-            // fallthrough
-          }
-          case 1: {
-            CUDA_KERNEL_ASSERT(0 <= p1 && p1 <= 1);
-            v1 = static_cast<scalar_t>(rand.x <= p1);
-          }
-        }
-      }
-    );
-}
-
 } // namespace
 }} // namespace at::native
 
@@ -635,6 +591,50 @@ struct CauchyKernel {
 
 // ==================================================== Bernoulli =====================================================
 
+template<typename scalar_t, typename prob_t>
+void bernoulli_tensor_cuda_kernel(
+    at::Tensor& ret, const at::Tensor& p,
+    std::pair<uint64_t, uint64_t> seeds) {
+  // The template argument `4` below indicates that we want to operate on four
+  // element at each time. See NOTE [ CUDA_tensor_applyN helpers ] for details.
+  at::cuda::CUDA_tensor_apply2<scalar_t, prob_t, 4>(
+      ret, p,
+      [seeds] __device__(
+          int n, scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4,
+          const prob_t& p1, const prob_t& p2, const prob_t& p3, const prob_t& p4) {
+        curandStatePhilox4_32_10_t state;
+        curand_init(
+            seeds.first,
+            blockIdx.x * blockDim.x + threadIdx.x,
+            seeds.second,
+            &state);
+        // See Note [Register spilling in curand call for CUDA < 10]
+        float4 rand = curand_uniform4(&state);
+        switch (n) {
+          case 4: {
+            CUDA_KERNEL_ASSERT(0 <= p4 && p4 <= 1);
+            v4 = static_cast<scalar_t>(rand.w <= p4);
+            // fallthrough
+          }
+          case 3: {
+            CUDA_KERNEL_ASSERT(0 <= p3 && p3 <= 1);
+            v3 = static_cast<scalar_t>(rand.z <= p3);
+            // fallthrough
+          }
+          case 2: {
+            CUDA_KERNEL_ASSERT(0 <= p2 && p2 <= 1);
+            v2 = static_cast<scalar_t>(rand.y <= p2);
+            // fallthrough
+          }
+          case 1: {
+            CUDA_KERNEL_ASSERT(0 <= p1 && p1 <= 1);
+            v1 = static_cast<scalar_t>(rand.x <= p1);
+          }
+        }
+      }
+    );
+}
+
 template<typename RNG>
 void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG gen) {
   std::pair<uint64_t, uint64_t> rng_engine_inputs;
@@ -655,7 +655,7 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG gen) {
 }
 
 template<typename RNG>
-void bernoulli_kernel(TensorIterator& iter, const double p_, RNG gen) {
+void bernoulli_kernel(TensorIterator& iter, double p_, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, iter.dtype(), "bernoulli_scalar_cuda_", [&] {
       if (std::is_same<scalar_t, double>::value) {
@@ -682,7 +682,7 @@ void bernoulli_kernel(TensorIterator& iter, const double p_, RNG gen) {
 
 template<typename RNG>
 struct BernoulliKernel {
-  void operator()(TensorIterator& iter, const double p_, c10::optional<Generator> gen) {
+  void operator()(TensorIterator& iter, double p_, c10::optional<Generator> gen) {
     bernoulli_kernel(iter, p_, check_generator<RNG>(gen));
   }
   void operator()(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {

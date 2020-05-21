@@ -113,12 +113,20 @@ Tensor& exponential_(Tensor& self, double lambda, c10::optional<Generator> gen) 
 
 // ================================================== Bernoulli =======================================================
 
-Tensor& bernoulli_tensor(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+Tensor& bernoulli_Tensor(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
   return at::native::templates::bernoulli_impl_<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(self, p_, gen);
 }
 
-Tensor& bernoulli_scalar(Tensor& self, double p, c10::optional<Generator> gen) {
+Tensor& bernoulli_float(Tensor& self, double p, c10::optional<Generator> gen) {
   return at::native::templates::bernoulli_impl_<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(self, p, gen);
+}
+
+Tensor& bernoulli_out(Tensor& result, const Tensor& self, c10::optional<Generator> gen) {
+  return at::native::templates::bernoulli_out_impl<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(result, self, gen);
+}
+
+Tensor bernoulli(const Tensor& self, c10::optional<Generator> gen) {
+  return at::native::templates::bernoulli_impl<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(self, gen);
 }
 
 TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
@@ -144,8 +152,10 @@ TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   // Exponential
   m.impl_UNBOXED("exponential_",             exponential_);
   // Bernoulli
-  m.impl_UNBOXED("bernoulli_.Tensor",        bernoulli_tensor);
-  m.impl_UNBOXED("bernoulli_.float",         bernoulli_scalar);
+  m.impl_UNBOXED("bernoulli",                bernoulli);
+  m.impl_UNBOXED("bernoulli.out",            bernoulli_out);
+  m.impl_UNBOXED("bernoulli_.Tensor",        bernoulli_Tensor);
+  m.impl_UNBOXED("bernoulli_.float",         bernoulli_float);
 }
 
 class RNGTest : public ::testing::Test {
@@ -370,7 +380,7 @@ TEST_F(RNGTest, Exponential) {
 
 // ==================================================== Bernoulli =====================================================
 
-TEST_F(RNGTest, BernoulliTensor) {
+TEST_F(RNGTest, Bernoulli_Tensor) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
@@ -383,7 +393,7 @@ TEST_F(RNGTest, BernoulliTensor) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-TEST_F(RNGTest, BernoulliScalar) {
+TEST_F(RNGTest, Bernoulli_scalar) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
@@ -396,4 +406,28 @@ TEST_F(RNGTest, BernoulliScalar) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
+TEST_F(RNGTest, Bernoulli) {
+  const auto p = 0.42;
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
+
+  auto actual = at::bernoulli(torch::full({3,3}, p), gen);
+
+  auto expected = torch::empty_like(actual);
+  native::templates::cpu::bernoulli_kernel(expected, torch::full({3,3}, p), check_generator<TestCPUGenerator>(gen));
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
+
+TEST_F(RNGTest, Bernoulli_out) {
+  const auto p = 0.42;
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
+
+  auto actual = torch::empty({3, 3});
+  at::bernoulli_out(actual, torch::full({3,3}, p), gen);
+
+  auto expected = torch::empty_like(actual);
+  native::templates::cpu::bernoulli_kernel(expected, torch::full({3,3}, p), check_generator<TestCPUGenerator>(gen));
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
 }

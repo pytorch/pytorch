@@ -353,6 +353,24 @@ Tensor& bernoulli_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
   return self;
 }
 
+template<template<typename> class bernoulli_tensor_kernel, typename RNG>
+Tensor bernoulli_impl(const Tensor& self, c10::optional<Generator> gen) {
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+  bernoulli_impl_<bernoulli_tensor_kernel, RNG>(result, self, gen);
+  return result;
+}
+
+template<template<typename> class bernoulli_tensor_kernel, typename RNG>
+Tensor& bernoulli_out_impl(Tensor& result, const Tensor& self, c10::optional<Generator> gen) {
+  // result.resize_as_(self) requires self to have same dtype as result, so we
+  // use resize_ instead.
+  // TODO: Fix resize_as_. See pytorch/pytorch#11665.
+  result.resize_(self.sizes());
+  bernoulli_impl_<bernoulli_tensor_kernel, RNG>(result, self, gen);
+  namedinference::propagate_names(result, self);
+  return result;
+}
+
 #undef CHECK_OUT_OF_BOUNDS
 #undef WARN_OUT_OF_BOUNDS
 
