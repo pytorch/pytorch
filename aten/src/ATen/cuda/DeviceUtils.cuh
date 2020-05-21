@@ -78,20 +78,12 @@ __device__ __forceinline__ int64_t WARP_SHFL_DOWN<int64_t>(int64_t value, unsign
   a.y = __shfl_down(a.y, delta);
   return *reinterpret_cast<int64_t*>(&a);
 }
-template<>
-__device__ __forceinline__ __half WARP_SHFL_DOWN<__half>(__half value, unsigned int delta, int width, unsigned int mask)
-{
-  //(HIP doesn't support c10::Half). Trick from https://devblogs.nvidia.com/faster-parallel-reductions-kepler/
-  short a = *reinterpret_cast<short*>(&value);
-  a = __shfl_down(a, delta);
-  return *reinterpret_cast<__half*>(&a);
-}
 #endif
 
 template<>
 __device__ __forceinline__ c10::Half WARP_SHFL_DOWN<c10::Half>(c10::Half value, unsigned int delta, int width, unsigned int mask)
 {
-  return WARP_SHFL_DOWN<__half>(__half(value), delta, width, mask);
+  return c10::Half(WARP_SHFL_DOWN<unsigned short>(value.x, delta, width, mask), c10::Half::from_bits_t{});
 }
 
 template <typename T>
