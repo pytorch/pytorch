@@ -133,6 +133,10 @@ py::class_<ModuleType, Extra...> add_module_bindings(
             return module.named_buffers(recurse);
           },
           py::arg("recurse") = true)
+      .def("named_parameters", [](ModuleType& module, bool recurse) {
+            return module.named_parameters(recurse);
+          },
+          py::arg("recurse") = true)
       .def_property_readonly(
         "_modules", [](ModuleType& module) { return module.named_children(); })
       .def("modules", [](ModuleType& module) { return module.modules(); })

@@ -664,6 +664,7 @@ static py::dict _jit_debug_module_iterators(Module& module) {
 
   result["buffers"] = debugMakeList(module.buffers(false));
   result["named_buffers"] = debugMakeNamedList(module.named_buffers(false));
+  result["named_parameters"] = debugMakeNamedList(module.named_parameters(false));
   result["buffers_r"] = debugMakeList(module.buffers(true));
   result["named_buffers_r"] = debugMakeNamedList(module.named_buffers(true));
 
