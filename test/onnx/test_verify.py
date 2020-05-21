@@ -98,7 +98,6 @@ class TestVerify(TestCase):
         x = torch.tensor([1, 2])
         self.assertVerifyExpectFail(MyModel(), x, backend)
 
-    @unittest.skip("Indexing is broken by #3725")
     def test_embedded_constant_difference(self):
         class MyModel(Module):
             def __init__(self):
