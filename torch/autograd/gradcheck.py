@@ -256,30 +256,22 @@ def gradcheck(
     if any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)) and not check_sparse_nnz:
         return fail_test('gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False.')
 
-    # Make sure that gradients are saved for all inputs
+    # Make sure that gradients are saved for at least one input
     any_input_requiring_grad = False
-    some_input_not_requiring_grad = False
     for inp in tupled_inputs:
-        if isinstance(inp, torch.Tensor):
-            if inp.requires_grad:
-                if not (inp.dtype == torch.float64 or inp.dtype == torch.complex128):
-                    warnings.warn(
-                        'At least one of the inputs that requires gradient '
-                        'is not of double precision floating point or complex. '
-                        'This check will likely fail if all the inputs are '
-                        'not of double precision floating point or complex. ')
-                any_input_requiring_grad = True
-                inp.retain_grad()
-            else:
-                some_input_not_requiring_grad = True
+        if isinstance(inp, torch.Tensor) and inp.requires_grad:
+            if not (inp.dtype == torch.float64 or inp.dtype == torch.complex128):
+                warnings.warn(
+                    'At least one of the inputs that requires gradient '
+                    'is not of double precision floating point or complex. '
+                    'This check will likely fail if all the inputs are '
+                    'not of double precision floating point or complex. ')
+            any_input_requiring_grad = True
+            inp.retain_grad()
     if not any_input_requiring_grad:
         raise ValueError(
             'gradcheck expects at least one input tensor to require gradient, '
             'but none of the them have requires_grad=True.')
-        if some_input_not_requiring_grad:
-            raise ValueError(
-                'gradcheck expects if at least one input tensor is required gradient, '
-                'then all other inputs should have requires_grad=True.')
 
     func_out = func(*tupled_inputs)
     output = _differentiable_outputs(func_out)

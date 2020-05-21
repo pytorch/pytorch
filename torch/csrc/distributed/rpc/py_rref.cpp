@@ -100,7 +100,8 @@ TypePtr tryInferTypeWithTypeHint(
 
 ///////////////////////////  PyRRef  //////////////////////////////////
 
-PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {
+PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref)
+    : rref_(std::move(rref)), profilingFuture_(c10::nullopt) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
 
@@ -127,6 +128,15 @@ c10::intrusive_ptr<JitFuture> PyRRef::getFuture() const {
       rref_->getOwnerCreationFuture(), false /* hasValue */);
 }
 
+c10::intrusive_ptr<JitFuture> PyRRef::getProfilingFuture() const {
+  TORCH_INTERNAL_ASSERT(profilingFuture_, "Profiling future has not been set!");
+  return *profilingFuture_;
+}
+
+void PyRRef::setProfilingFuture(c10::intrusive_ptr<JitFuture> profilingFuture) {
+  profilingFuture_ = std::move(profilingFuture);
+}
+
 bool PyRRef::isOwner() const {
   return rref_->isOwner();
 }
@@ -143,7 +153,7 @@ std::string PyRRef::ownerName() const {
   return rref_->ownerName();
 }
 
-py::object PyRRef::toHere() {
+py::object PyRRef::toHere() const {
   if (rref_->isOwner()) {
     return localValue();
   } else {
@@ -168,7 +178,7 @@ py::object PyRRef::toHere() {
   }
 }
 
-py::object PyRRef::localValue() {
+py::object PyRRef::localValue() const {
   TORCH_CHECK(
       rref_->isOwner(),
       "Cannot call localValue() on a non-local reference. Call it on ",
@@ -238,7 +248,7 @@ PyRRef PyRRef::unpickle(const py::tuple& pyTuple) {
   return PyRRef(std::move(rref));
 }
 
-c10::IValue PyRRef::toIValue() {
+c10::IValue PyRRef::toIValue() const {
   // cast to RRefInterface to hold it into IValue
   auto rrefPtr = c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref_);
   return IValue(rrefPtr);
