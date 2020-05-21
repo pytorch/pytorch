@@ -269,8 +269,7 @@ def gradcheck(
             # TODO: To cover more problematic cases, replace stride = 0 check with
             # "any overlap in memory" once we have a proper function to check it.
             if content.layout is not torch._mkldnn and \
-               content.nelement() > 1 and \
-               any([s == 0 for s in content.stride()]):
+               not all(st > 0 or sz <= 1 for st, sz in zip(content.stride(), content.size())):
                 raise RuntimeError(
                     'The {}th input has a dimension with stride 0. gradcheck only '
                     'supports inputs that are non-overlapping to be able to '
