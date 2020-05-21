@@ -36,7 +36,7 @@ struct CPPTypeAndStdComplexToScalarType {
 #define SPECIALIZE_CPPTypeAndStdComplexToScalarType(cpp_type, scalar_type)                  \
   template <>                                                                               \
   struct CPPTypeAndStdComplexToScalarType<cpp_type> {                                       \
-    constexpr static c10::ScalarType value = c10::ScalarType::scalar_type;                  \
+    constexpr static c10::ScalarType value() { return c10::ScalarType::scalar_type; }       \
   };
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeAndStdComplexToScalarType)
@@ -45,23 +45,23 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeAndStdComplexToS
 
 template<>
 struct CPPTypeAndStdComplexToScalarType<std::complex<float>> {
-  constexpr static c10::ScalarType value = c10::ScalarType::ComplexFloat;
+    constexpr static c10::ScalarType value() { return c10::ScalarType::ComplexFloat; }
 };
 
 template<>
 struct CPPTypeAndStdComplexToScalarType<std::complex<double>> {
-  constexpr static c10::ScalarType value = c10::ScalarType::ComplexDouble;
+  constexpr static c10::ScalarType value() { return c10::ScalarType::ComplexDouble; }
 };
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template<>
 struct CPPTypeAndStdComplexToScalarType<thrust::complex<float>> {
-  constexpr static c10::ScalarType value = c10::ScalarType::ComplexFloat;
+  constexpr static c10::ScalarType value() { return c10::ScalarType::ComplexFloat; }
 };
 
 template<>
 struct CPPTypeAndStdComplexToScalarType<thrust::complex<double>> {
-  constexpr static c10::ScalarType value = c10::ScalarType::ComplexDouble;
+  constexpr static c10::ScalarType value() { return c10::ScalarType::ComplexDouble; }
 };
 #endif
 
@@ -75,7 +75,7 @@ struct needs_dynamic_casting {
   static bool check(TensorIterator& iter) {
     using traits = function_traits<func_t>;
 
-    if (iter.input_dtype(nargs-1) != cppmap::detail::CPPTypeAndStdComplexToScalarType<typename traits::template arg<nargs - 1>::type>::value) {
+    if (iter.input_dtype(nargs-1) != cppmap::detail::CPPTypeAndStdComplexToScalarType<typename traits::template arg<nargs - 1>::type>::value()) {
       return true;
     }
     return needs_dynamic_casting<func_t, nargs - 1>::check(iter);
@@ -91,7 +91,7 @@ struct needs_dynamic_casting<func_t, 0> {
     // (including arity) are currently pushed outside of this struct.
     return c10::guts::if_constexpr<std::is_void<typename traits::result_type>::value>(
       [&](auto _) { return false; },
-      [&](auto _) { return iter.dtype(0) != _(cppmap::detail::CPPTypeAndStdComplexToScalarType<typename traits::result_type>::value);}
+      [&](auto _) { return iter.dtype(0) != _(cppmap::detail::CPPTypeAndStdComplexToScalarType<typename traits::result_type>::value());}
     );
   }
 };
