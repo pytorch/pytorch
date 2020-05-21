@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_resp.h>
@@ -578,6 +579,27 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
          rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
          messageType = request.type(),
          id = request.id()]() {
+          // This cost of pre-request check is minimal thanks to
+          // std::shared_lock. The cost is in magnitude
+          // of 10us. If server global profiler is enabled, we futher pay the
+          // cost of thread local profiler state initialization .
+          // int64_t startTime = ::torch::autograd::profiler::getTime();
+          bool isServerProcessGlobalProfilerEnabled =
+              serverProcessGlobalProfilerEnabled();
+          // int64_t endTime = ::torch::autograd::profiler::getTime();
+          // LOG(ERROR) << "Test profiler enabled took: "
+          //            << (endTime - startTime) / 1000 << " us";
+          std::shared_ptr<ProcessGlobalProfilerState>
+              serverProcessGlobalProfilerStatePtr;
+          if (isServerProcessGlobalProfilerEnabled) {
+            // Initialize thread-local profiler state from process-global
+            // profiler state.
+            serverProcessGlobalProfilerStatePtr =
+                serverProcessGlobalProfilerState();
+            ::torch::autograd::profiler::enableProfiler(
+                serverProcessGlobalProfilerStatePtr->config());
+          }
+
           try {
             processRpc(*rpc, messageType, id, retFuture);
           } catch (py::error_already_set& e) {
@@ -592,6 +614,16 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
                            // recorded the exception in the response message.
           } catch (std::exception& e) {
             retFuture->markCompleted(handleError(e, messageType, id));
+          }
+
+          // Response message has been sent at this moment, this post-response
+          // work doesn't affect RPC latency.
+          if (isServerProcessGlobalProfilerEnabled) {
+            // Restore thread-local profiler state.
+            ::torch::autograd::profiler::thread_event_lists event_lists =
+                ::torch::autograd::profiler::disableProfiler();
+            // Put event_lists into the process-global profiler state.
+            serverProcessGlobalProfilerStatePtr->pushProfileRange(event_lists);
           }
         });
   } catch (std::exception& e) {

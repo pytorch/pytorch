@@ -316,6 +316,11 @@ def add_use_future_cb(to, x, y, z):
     return out.result()
 
 
+def enable_profiler():
+    profiler_config = torch.autograd.ProfilerConfig(torch.autograd.ProfilerState.CPU, False, False)
+    rpc.enable_server_process_global_profiler(profiler_config)
+
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -975,6 +980,35 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.tensor(1),),
             use_record_function=True,
         )
+
+    @dist_init
+    def test_server_process_global_profiler(self):
+        if self.rank != 0:
+            return
+
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker_name = worker_name(dst_rank)
+
+        x = torch.tensor(1)
+        y = torch.tensor(2)
+
+        rpc.rpc_sync(dst_worker_name, enable_profiler)
+        rpc.rpc_sync(dst_worker_name, torch.add, (x, y))
+        events = rpc.rpc_sync(dst_worker_name, rpc.disable_server_process_global_profiler)
+
+        last_end_time = 0
+        top_level_names_iter = iter(['add'])
+        for event in events:
+            event_name = event.name
+            cpu_interval = event.cpu_interval
+            if cpu_interval.start > last_end_time:
+                top_level_name_expected = next(top_level_names_iter)
+                self.assertEqual(event_name, top_level_name_expected)
+                last_end_time = cpu_interval.end
+
+        # Ensures the number of events matches expectation.
+        with self.assertRaisesRegex(StopIteration, ""):
+            next(top_level_names_iter)
 
     @dist_init
     def test_async_record_function_double_end_callbacks(self):
