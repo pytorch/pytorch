@@ -239,6 +239,7 @@ class EncoderBase {
   onnx::ModelProto model_proto_;
   size_t num_blocks_;
   size_t num_op_nodes_;
+  size_t num_external_data_;
   onnx_torch::OperatorExportTypes operator_export_type_;
   bool strip_doc_;
   std::set<std::string> domains_;
@@ -287,6 +288,7 @@ EncoderBase::EncoderBase(
     bool strip_doc)
     : num_blocks_(0),
       num_op_nodes_(0),
+      num_external_data_(0),
       operator_export_type_(operator_export_type),
       strip_doc_(strip_doc) {
   model_proto_.set_producer_name("pytorch");
@@ -530,6 +532,19 @@ void EncoderBase::AddAttribute(
     const jit::Symbol name,
     const bool use_external_data_format,
     const std::string& onnx_file_path) {
+  auto createAttributeTensorName = [](const onnx::NodeProto* node_proto, onnx::TensorProto* tensor_proto, const jit::Symbol attr_name, size_t& num_external_data) -> std::string {
+    if (tensor_proto->has_name()) {
+      return tensor_proto->name();
+    }
+    if (!node_proto->has_name()) {
+      auto name = node_proto->op_type() + "_" + attr_name.toDisplayString() + "_" + std::to_string(num_external_data);
+      num_external_data++;
+      return name;
+    } else {
+      return node_proto->name() + "_" + attr_name.toDisplayString();
+    }
+  };
+
   auto attr = node_proto->add_attribute();
   AT_ASSERT(name.is_attr());
   attr->set_name(name.toUnqualString());
@@ -564,13 +579,15 @@ void EncoderBase::AddAttribute(
     case AttributeKind::t: {
       attr->set_type(onnx::AttributeProto_AttributeType_TENSOR);
       auto t = attr->mutable_t();
-      TORCH_INTERNAL_ASSERT(node_proto->has_name());
-      auto tensor_name = node_proto->name() + "_" + name.toDisplayString();
-      t->set_name(tensor_name);
+      if (use_external_data_format) {
+        if (!t->has_name()) {
+          t->set_name(createAttributeTensorName(node_proto, t, name, num_external_data_));
+        }
+      }
       EncodeTensor(
           t,
           node->t(name),
-          tensor_name,
+          t->name(),
           use_external_data_format,
           onnx_file_path);
     } break;
@@ -578,6 +595,11 @@ void EncoderBase::AddAttribute(
       attr->set_type(onnx::AttributeProto_AttributeType_TENSORS);
       for (auto& v : node->ts(name)) {
         auto t = attr->add_tensors();
+        if (use_external_data_format) {
+          if (!t->has_name()) {
+            t->set_name(createAttributeTensorName(node_proto, t, name, num_external_data_));
+          }
+        }
         EncodeTensor(t, v, t->name(), use_external_data_format, onnx_file_path);
       }
       break;
