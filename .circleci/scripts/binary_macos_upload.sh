@@ -25,10 +25,9 @@ pushd "$workdir/final_pkgs"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   retry conda install -yq anaconda-client
   retry anaconda -t "${CONDA_PYTORCHBOT_TOKEN}" upload "$(ls)" -u "pytorch-${CONDA_UPLOAD_CHANNEL}" --label main --no-progress --force
-  # Grab index file because there's no actual conda command to read this
-  tar -xf ./*.bz2 info/index.json
-  # This should output our platform (eg. win-64, linux-64, etc.)
-  subdir=$(grep subdir info/index.json | cut -d ':' -f2 | sed -e 's/[[:space:]]//' -e 's/"//g' -e 's/,//')
+  # Fetch  platform (eg. win-64, linux-64, etc.) from index file
+  # Because there's no actual conda command to read this
+  subdir=$(tar -xOf ./*.bz2 info/index.json | grep subdir  | cut -d ':' -f2 | sed -e 's/[[:space:]]//' -e 's/"//g' -e 's/,//')
   BACKUP_DIR="conda/${subdir}"
 elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
   retry pip install -q awscli
