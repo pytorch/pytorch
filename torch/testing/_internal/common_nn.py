@@ -4882,12 +4882,14 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
             gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
             # dtype can be None, so set precision in this way instead of a precision map
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
+            test_case.assertEqualIgnoreType(cpu_output, gpu_output,
+                                            atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
 
             cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
             gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
+            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
+                                            atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
         except NotImplementedError:
             pass
 
