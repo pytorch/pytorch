@@ -146,16 +146,29 @@ void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
   n->replaceInputWith(i, pn->output());
 }
 
-bool isProfilable(Node* n) {
+bool needsProfiledInputs(Node* n) {
   if (tensorexpr::isSupported(n)) {
     return true;
   }
 
   switch (n->kind()) {
-    case prim::Return:
-    case prim::Param:
-    case prim::GetAttr:
-    case aten::t:
+    case prim::AutogradAdd:
+    case prim::AutogradAnyNonZero:
+    case prim::AutogradZero:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool needsProfiledOutput(Node* n) {
+  if (tensorexpr::isSupported(n)) {
+    return true;
+  }
+
+  switch (n->kind()) {
+    case prim::AutogradAdd:
+    case prim::AutogradZero:
       return true;
     default:
       return false;
@@ -166,8 +179,8 @@ void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
     for (auto i : n->inputs()) {
-      if (i->type()->isSubtypeOf(TensorType::get()) &&
-          (isProfilable(n) || isProfilable(i->node()))) {
+      if (i->type()->kind() == c10::TypeKind::TensorType &&
+          (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
         insertShapeProfile(n, i);
       }
     }
