@@ -688,8 +688,17 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors)
   std::vector<Stmt*> loops;
   for (Tensor* t : tensors_to_compute) {
     Stmt* loop = lowerToStmt(t);
-    loops.push_back(loop);
+    // Flatten initializers.
+    if (Block* block = dynamic_cast<Block*>(loop)) {
+      for (auto* s : block->stmts()) {
+        block->remove_stmt(s);
+        loops.push_back(s);
+      }
+    } else {
+      loops.push_back(loop);
+    }
   }
+
   root_stmt_ = new Block(loops);
 }
 
@@ -709,10 +718,21 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
     throw malformed_input("Tensor lowered to zero dimensions");
   }
 
+  const Expr* initializer = t->initializer();
+  if (initializer) {
+    buf_initializers_[t->func_var()] = initializer;
+  }
+  std::vector<const Expr*> indices(t->args().begin(), t->args().end());
+
   for (size_t i = 0; i < f->ndim(); i++) {
     // Going in reverse order: from innermost loop to the outermost
     size_t dim_index = f->ndim() - i - 1;
     body = new For(f->arg(dim_index), new IntImm(0), f->dim(dim_index), body);
+    indices.pop_back();
+    if (initializer && indices.size() == t->ndim()) {
+      Store* init = new Store(t->buf(), indices, initializer, new IntImm(1));
+      body = new Block({init, body});
+    }
   }
   return body;
 }
@@ -942,8 +962,6 @@ void LoopNest::splitWithTail(
 
     Stmt* body_tail =
         Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
-    ReductionInitCleaner cleaner;
-    body_tail = cleaner.clean(body_tail);
     *tail = new For(i_tail, new IntImm(0), tail_size, body_tail);
 
     p->insert_stmt_after(*tail, *outer);
@@ -1504,15 +1522,25 @@ void LoopNest::rfactor(
   For* target_for = nullptr;
   std::set<const Var*> reduce_args = {reduce_op->reduce_args().begin(),
                                       reduce_op->reduce_args().end()};
+
+  // Store loops below the target point.
+  std::vector<const For*> init_loops;
+
   while (st) {
-    auto f = dynamic_cast<For*>(st);
-    if (f) {
+    if (For* f = dynamic_cast<For*>(st)) {
       if (f->var() == reduction_var) {
         target_for = f;
+        init_loops.push_back(f);
       }
       if (reduce_args.count(f->var())) {
         reduce_args.erase(f->var());
+      } else {
+        init_loops.push_back(f);
+      }
+
+      if (reduce_args.empty()) {
         root_for = f;
+        break;
       }
     }
     st = st->get_parent();
@@ -1544,7 +1572,6 @@ void LoopNest::rfactor(
       new Buf(new Var("tmp_buf", kHandle), new_dims, reduce_op->body().dtype());
 
   auto old_acc = reduce_op->accumulator();
-  auto old_init_expr = reduce_op->initializer();
   auto new_inner = reduce_op->reduce_args();
   auto new_outer = reduce_op->output_args();
   bool found = false;
@@ -1572,7 +1599,6 @@ void LoopNest::rfactor(
 
   auto first_reduce = new ReduceOp(
       tmp_buf,
-      old_init_expr,
       reduce_op->body(),
       reduce_op->interaction(),
       new_outer,
@@ -1587,7 +1613,6 @@ void LoopNest::rfactor(
       new IntImm(1)));
   auto second_reduce = new ReduceOp(
       old_acc,
-      reduce_op->initializer(),
       second_reduce_load,
       reduce_op->interaction(),
       reduce_op->output_args(),
@@ -1608,7 +1633,7 @@ void LoopNest::rfactor(
     std::cerr << "Cannot rfactor a loop whose parent is not a block.\n";
     return;
   }
-  auto new_root_for = root_for->accept_mutator(&sr);
+  Stmt* new_root_for = root_for->accept_mutator(&sr);
   auto res = parent_block->replace_stmt(root_for, new_root_for);
   if (!res) {
     std::cerr << "Couldn't find target loop within parent block of loop nest\n";
@@ -1622,6 +1647,23 @@ void LoopNest::rfactor(
   }
 
   // From this point forward any errors cannot be handled silently.
+  auto init_it = buf_initializers_.find(reduce_op->accumulator());
+  if (init_it != buf_initializers_.end()) {
+    buf_initializers_[tmp_buf] = init_it->second;
+    Stmt* init_stmt =
+        new Store(tmp_buf, new_outer, init_it->second, new IntImm(1));
+
+    // Wrap it in any loops lower than the insertion point of the new reduction.
+    for (auto* il : init_loops) {
+      init_stmt = il->cloneWithNewBody(init_stmt);
+    }
+
+    parent_block->prepend_stmt(init_stmt);
+  } else {
+    // We may support this but not possible now.
+    throw std::runtime_error("can't rfactor reduction with no initializer\n");
+  }
+
   auto second_buf = dynamic_cast<const Buf*>(second_reduce->accumulator());
   std::vector<const Expr*> second_indices = {second_reduce->output_args()};
   if (insertion_point &&
