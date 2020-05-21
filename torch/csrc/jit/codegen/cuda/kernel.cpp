@@ -12,6 +12,7 @@
 
 #include <torch/csrc/jit/resource_guard.h>
 #include <iostream>
+#include <fstream>
 
 namespace torch {
 namespace jit {
