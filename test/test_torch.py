@@ -11868,6 +11868,38 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(t[steps - 1] == a[steps - 1])
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @precisionOverride({torch.cfloat: 1e-6, torch.cdouble: 1e-10})
+    @dtypes(torch.cfloat, torch.cdouble)
+    @onlyCPU
+    def test_linspace_vs_numpy_complex(self, device, dtype):
+        start = torch.randn(1, dtype=dtype).item()
+        end = (start + torch.randn(1, dtype=dtype) + random.randint(5, 15)).item()
+
+        def test_fn(torch_fn, numpy_fn, steps):
+            t = torch_fn(start, end, steps, device=device, dtype=dtype)
+            a = numpy_fn(start, end, steps, dtype=torch_to_numpy_dtype_dict[dtype])
+            t = t.cpu()
+            self.assertEqual(t, torch.from_numpy(a))
+
+        for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
+            test_fn(torch.linspace, np.linspace, steps)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @precisionOverride({torch.cfloat: 1e-6, torch.cdouble: 1e-10})
+    @dtypes(torch.cfloat, torch.cdouble)
+    @onlyCPU
+    def test_logspace_vs_numpy_complex(self, device, dtype):
+        start = torch.randn(1, dtype=dtype).item()
+        end = (start + torch.randn(1, dtype=dtype) + random.randint(5, 15)).item()
+
+        # Crashing for the step values: [2, 3, 5, 11, 256, 257, 2**22]
+        for steps in [1]:
+            t = torch.logspace(start, end, steps, device=device, dtype=dtype)
+            a = np.logspace(start, end, steps, dtype=torch_to_numpy_dtype_dict[dtype])
+            t = t.cpu()
+            self.assertEqual(t, torch.from_numpy(a))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @precisionOverride({torch.float: 1e-6, torch.double: 1e-10})
     @dtypes(torch.float, torch.double)
     def test_logspace_vs_numpy(self, device, dtype):
