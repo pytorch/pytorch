@@ -5300,6 +5300,7 @@ def add_neg_dim_tests():
         ('squeeze', (10, 1, 20, 1), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
         ('unbind', (2, 3, 4), lambda: [DIM_ARG], [FUNCTIONAL]),
         ('unsqueeze', (10, 20), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL], 1),
+        ('logcumsumexp', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cumprod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cumsum', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cummax', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
@@ -6013,6 +6014,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.clamp(one_d, max=1).shape)
 
         # cumsum, cumprod, cummax, cummin
+        self.assertEqual((), torch.logcumsumexp(zero_d, 0).shape)
         self.assertEqual((), torch.cumsum(zero_d, 0).shape)
         self.assertEqual((), torch.cumprod(zero_d, 0).shape)
         self.assertEqual((), torch.cummax(zero_d, 0)[0].shape)
@@ -11313,6 +11315,36 @@ class TestTorchDeviceType(TestCase):
                                                        [0, 0, 0],
                                                        [0, 0, 0]]), expected_out)
 
+    def test_logcumsumexp(self, device):
+        def logcumsumexp(a, axis):
+            return torch.cumsum(a.exp(), axis=axis).log_()
+
+        axis = 1
+        a = torch.randn(100, 100, device=device)
+
+        actual = a.logcumsumexp(1)
+        expected = logcumsumexp(a, axis)
+        self.assertEqual(a.dtype, actual.dtype)
+        self.assertEqual(expected.shape, actual.shape)
+        self.assertTrue(torch.allclose(expected, actual))
+
+        # Check that out is actually inplace
+        b = torch.randn(5, 2, device=device)
+        inplace_out = torch.zeros(5, 2, device=device)
+
+        expected = logcumsumexp(b, axis)
+        torch.logcumsumexp(b, axis=axis, out=inplace_out)
+
+        self.assertTrue(torch.allclose(inplace_out, expected))
+
+        # Check input and inplace_output type mismatch
+        b = torch.randn(5, 2, device=device, dtype=torch.float64)
+        inplace_out = torch.zeros(5, 2, device=device, dtype=torch.float32)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'expected scalar_type Double but found Float'):
+            torch.logcumsumexp(b, axis, out=inplace_out)
+
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
         for dim in range(x.dim()):
@@ -12268,6 +12300,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(shape, torch.cummax(x, 2)[0].shape)
         self.assertEqual(shape, torch.cummin(x, 0)[0].shape)
         self.assertEqual(shape, torch.cummin(x, 2)[0].shape)
+        self.assertEqual(shape, torch.logcumsumexp(x, 0).shape)
+        self.assertEqual(shape, torch.logcumsumexp(x, 2).shape)
 
         # flip
         self.assertEqual(x, x.flip(0))
@@ -17977,6 +18011,8 @@ tensor_op_tests = [
     ('conj', '', _small_3d, lambda t, d: [], 1e-5, 0, 1e-5, _types_no_half, [torch.bfloat16], False),
     ('cross', '', _new_t((_M, 3, _M)), lambda t, d: [_new_t((_M, 3, _M))(t, d)],
         1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('logcumsumexp', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _float_types, _cpu_types, False),
+    ('logcumsumexp', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('cummax', '', _small_3d_unique, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
     ('cummax', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
     ('cummin', '', _small_3d_unique, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
