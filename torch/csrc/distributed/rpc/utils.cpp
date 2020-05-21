@@ -257,7 +257,6 @@ std::string wireSerialize(
   };
   std::vector<Ent> entries;
   std::string metaEntry;
-  std::vector<jit::WriteableTensorData> tensorData;
 
   if (!payload.empty()) {
     entries.push_back({kPayload, payload.data(), payload.size()});
@@ -272,12 +271,13 @@ std::string wireSerialize(
     pickler.pushIValue(cloneSparseTensors(tensors));
     pickler.stop();
     // tensorData is in function scope so that the data() pointers stay valid.
-    tensorData = pickler.tensorData();
+    auto& tensorDataVec = pickler.tensorData();
     entries.push_back({kMeta, metaEntry.data(), metaEntry.size()});
-    for (size_t i = 0; i < tensorData.size(); i++) {
+    for (size_t i = 0; i < tensorDataVec.size(); i++) {
+      auto writeableTensorData = jit::getWriteableTensorData(tensorDataVec[i]);
       entries.push_back({c10::to_string(i),
-                         tensorData[i].data(),
-                         tensorData[i].sizeInBytes()});
+                         writeableTensorData.data(),
+                         writeableTensorData.sizeInBytes()});
     }
   }
 
@@ -394,7 +394,7 @@ TensorPipeEntry tensorpipeSerialize(const Message& rpcMessage) {
     const auto& tensorDataVec = pickler.tensorData();
     TORCH_INTERNAL_ASSERT(
         tensorDataVec.size() == 1, "There should be single pickled tensor");
-    const auto& tensorData = tensorDataVec.front();
+    const auto& tensorData = jit::getWriteableTensorData(tensorDataVec.front());
     // Enforce memory copy if tensor is created from torch::from_blob, means
     // that the tensor doesn't own the memory.
     if (!tensorData.storageHasDeleter()) {
