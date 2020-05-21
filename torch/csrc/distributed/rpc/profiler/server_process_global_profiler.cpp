@@ -24,8 +24,12 @@ std::shared_ptr<ProcessGlobalProfilerStateStackEntry>
 class ProcessGlobalProfilerStateStackEntry {
  public:
   static std::shared_ptr<ProcessGlobalProfilerState> current() {
-    std::shared_lock<std::shared_timed_mutex> rlock(
-        currentProcessGlobalProfilerStateStackEntryMutex);
+#if defined(__MACH__)
+    std::unique_lock<std::mutex>
+#else
+    std::shared_lock<std::shared_timed_mutex>
+#endif
+        rlock(currentProcessGlobalProfilerStateStackEntryMutex);
 
     if (!currentProcessGlobalProfilerStateStackEntryPtr) {
       return nullptr;
@@ -36,8 +40,12 @@ class ProcessGlobalProfilerStateStackEntry {
 
   static void push(std::shared_ptr<ProcessGlobalProfilerState>
                        profilerProcessGlobalStatePtr) {
-    std::unique_lock<std::shared_timed_mutex> wlock(
-        currentProcessGlobalProfilerStateStackEntryMutex);
+#if defined(__MACH__)
+    std::unique_lock<std::mutex>
+#else
+    std::unique_lock<std::shared_timed_mutex>
+#endif
+        wlock(currentProcessGlobalProfilerStateStackEntryMutex);
 
     auto previousStateStackEntryPtr =
         currentProcessGlobalProfilerStateStackEntryPtr;
@@ -52,8 +60,12 @@ class ProcessGlobalProfilerStateStackEntry {
   }
 
   static std::shared_ptr<ProcessGlobalProfilerState> pop() {
-    std::unique_lock<std::shared_timed_mutex> wlock(
-        currentProcessGlobalProfilerStateStackEntryMutex);
+#if defined(__MACH__)
+    std::unique_lock<std::mutex>
+#else
+    std::unique_lock<std::shared_timed_mutex>
+#endif
+        wlock(currentProcessGlobalProfilerStateStackEntryMutex);
 
     auto poppedStateStackEntryPtr =
         currentProcessGlobalProfilerStateStackEntryPtr;
