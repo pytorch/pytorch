@@ -11,8 +11,6 @@ from verify import verify
 
 from test_pytorch_common import TestCase, run_tests
 
-import unittest
-
 
 class TestVerify(TestCase):
     maxDiff = None
