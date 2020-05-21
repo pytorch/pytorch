@@ -393,7 +393,11 @@ void BuildGradientsForTensorExprGroups(Block* block) {
       auto diff_graph = std::move(diff_te->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
       packGradient(gradient, diff_te);
-      // we know this is now fully fusible
+      // TODO: while rerunning the fuser is the safest
+      // approach since autodiff introduces `aten::size`
+      // we might consider adding a simple helper that
+      // "emulates" fusion leaving out those extra ops
+      // autodiff added
       fuseTensorExprs_(diff_te->g(attr::Subgraph));
     } else {
       for (Block* ib : n->blocks()) {
