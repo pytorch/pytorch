@@ -1794,6 +1794,31 @@
     CPU: log_softmax_backward_cpu
     CUDA: log_softmax_backward_cuda
 
+- func: _logcumsumexp(Tensor self, int dim) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    CPU: _logcumsumexp_cpu
+    CUDA: _logcumsumexp_cuda
+
+- func: _logcumsumexp.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _logcumsumexp_out_cpu
+    CUDA: _logcumsumexp_out_cuda
+
+- func: logcumsumexp(Tensor self, int dim) -> Tensor
+  supports_named_tensor: True
+  variants: function, method
+
+- func: logcumsumexp.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
+- func: logcumsumexp.dimname(Tensor self, Dimname dim) -> Tensor
+  supports_named_tensor: True
+  variants: function, method
+
+- func: logcumsumexp.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
 - func: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
