@@ -72,26 +72,6 @@ Tensor prepare_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor) {
   return tensor_;
 }
 
-// Check https://github.com/pytorch/pytorch/issues/22078
-// for information about the bug. We don't know the exact conditions that trigger it,
-// but using Sgemm or Hgemm on Maxwell or Pascal seems to be a
-// necessary condition.
-static void checkCuda90Bug(int i_m, int i_n, int i_k)
-{
-#if CUDA_VERSION < 9200 && CUDA_VERSION >= 9000
-  static std::once_flag alreadyWarned;
-  const int LIMIT = 1 << 21;
-  if (i_m > LIMIT || i_n > LIMIT || i_k > LIMIT) {
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    if (prop->major == 5 || prop->major == 6) {
-      std::call_once(alreadyWarned, []() {
-        TORCH_WARN("Matrix multiplication for dimensions larger than 2^21 has known bugs on your combination of CUDA version and device type. Please consider upgrading to CUDA 9.2 or later.");
-      });
-    }
-  }
-#endif
-}
-
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
   TORCH_CHECK(
     (mat1.dim() == 2) && (mat2.dim() == 2) &&
@@ -143,9 +123,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   at::ScalarType scalar_type = self.scalar_type();
 
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
-    if (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::Float) {
-      checkCuda90Bug(static_cast<int>(m), static_cast<int>(n), static_cast<int>(k));
-    }
     scalar_t alpha_val = alpha.to<scalar_t>();
     scalar_t beta_val = beta.to<scalar_t>();
     scalar_t* mat1_ptr = mat1_.data_ptr<scalar_t>();

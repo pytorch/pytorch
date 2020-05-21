@@ -24,10 +24,10 @@ at::Tensor record_function_enter(const std::string& name) {
       // Since the currently active RecordFunction will only live for the lifetime
       // of this op we need to end it early so the new RecordFunction we create is
       // a direct child of the parent RecordFunction.
-      current->_end();
+      current->end();
     }
   }
-  rec->_before(name);
+  rec->before(name);
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
 }
 
@@ -43,10 +43,10 @@ void record_function_exit(const at::Tensor& handle) {
   auto& rec = getRecordFunctionFromTensor(handle);
   if (auto* current = rec.current()) {
     if (current->name().str() == std::string("profiler::_record_function_exit")) {
-      current->_end();
+      current->end();
     }
   }
-  rec._end();
+  rec.end();
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
@@ -65,7 +65,7 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
             "realized.");
         at::ThreadLocalStateGuard g(tls_state);
         auto& rec = getRecordFunctionFromTensor(handle);
-        rec._end();
+        rec.end();
         // Note: this future is returned to the user to ensure that a call to wait()
         // ensures that profiling callbacks have ran. To ensure that this is
         // transparent, we must make this future propagate the value of the RPC
