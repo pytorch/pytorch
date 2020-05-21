@@ -418,8 +418,18 @@ Tensor linspace(
     const TensorOptions& options) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
   auto result_options = options;
-  if (start.isComplex() || end.isComplex()){
-    result_options = result_options.dtype(c10::get_default_complex_dtype());
+  if (start.isComplex() || end.isComplex()) {
+    // Since result_options.has_dtype() returns true (dtype is default type),
+    // even if the user hasn't specified the dtype.
+    // We just check to see if either `start` or `end` is complex,
+    // and if the `result_dtype` is not complex (be it default float type or
+    // user provided), we cast it to default complex dtype with a Warning!.
+    auto result_dtype = c10::typeMetaToScalarType(options.dtype());
+    if (!at::isComplexType(result_dtype)){
+      TORCH_WARN(
+          "As either `start` or `stop` is complex, return type will be the default complex type.");
+      result_options = result_options.dtype(c10::get_default_complex_dtype());
+    }
   }
   Tensor result = at::empty({steps}, result_options);
   return at::linspace_out(result, start, end, steps);
@@ -435,8 +445,18 @@ Tensor logspace(
     const TensorOptions& options) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
   auto result_options = options;
-  if (start.isComplex() || end.isComplex()){
-    result_options = result_options.dtype(c10::get_default_complex_dtype());
+  if (start.isComplex() || end.isComplex()) {
+    // Since result_options.has_dtype() returns true (dtype is default type),
+    // even if the user hasn't specified the dtype.
+    // We just check to see if either `start` or `end` is complex,
+    // and if the `result_dtype` is not complex (be it default float type or user provided),
+    // we cast it to default complex dtype with a Warning!.
+    auto result_dtype = c10::typeMetaToScalarType(options.dtype());
+    if (!at::isComplexType(result_dtype)){
+      TORCH_WARN(
+          "As either `start` or `stop` is complex, return type will be the default complex type.");
+      result_options = result_options.dtype(c10::get_default_complex_dtype());
+    }
   }
   Tensor result = at::empty({steps}, result_options);
   return at::logspace_out(result, start, end, steps, base);
