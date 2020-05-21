@@ -936,7 +936,7 @@ struct ShapeSymbolTable {
   // * if the symbol isn't assigned yet any dimension value
   // * if the symbol is assigned and its value is equal to
   // the dimension value from `new_sizes`
-  bool ShapeSymbolTable::bindSymbolicShapes(
+  bool bindSymbolicShapes(
       at::IntArrayRef new_sizes,
       const c10::VaryingShape<c10::ShapeSymbol>& sym_shapes) {
     if (!sym_shapes.size().has_value()) {
