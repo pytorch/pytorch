@@ -11,8 +11,7 @@ import torch.nn.intrinsic.quantized as nniq
 
 # Testing utils
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_quantized import override_quantized_engine, supported_qengines, override_qengines
-
+from torch.testing._internal.common_quantized import override_qengines, qengine_is_fbgemm
 
 class TestSerialization(TestCase):
     """ Test backward compatiblity for serialization and numerics
@@ -83,7 +82,10 @@ class TestSerialization(TestCase):
     def test_linear_dynamic(self):
         module_qint8 = nnqd.Linear(3, 1, bias_=True, dtype=torch.qint8)
         self._test_op(module_qint8, "qint8", input_size=[1, 3], input_quantized=False, generate=False)
-        if torch.backends.quantized.engine == 'fbgemm':
+
+    @override_qengines
+    def test_linear_dynamic_float(self):
+        if qengine_is_fbgemm():
             module_float16 = nnqd.Linear(3, 1, bias_=True, dtype=torch.float16)
             self._test_op(module_float16, "float16", input_size=[1, 3], input_quantized=False, generate=False)
 
@@ -103,7 +105,7 @@ class TestSerialization(TestCase):
 
     @override_qengines
     def test_conv3d(self):
-        if torch.backends.quantized.engine == 'fbgemm':
+        if qengine_is_fbgemm():
             module = nnq.Conv3d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
                                 groups=1, bias=True, padding_mode="zeros")
             self._test_op(module, input_size=[1, 3, 6, 6, 6], generate=False)
@@ -111,8 +113,8 @@ class TestSerialization(TestCase):
 
     @override_qengines
     def test_conv3d_relu(self):
-        if torch.backends.quantized.engine == 'fbgemm':
+        if qengine_is_fbgemm():
             module = nniq.ConvReLU3d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
-                                        groups=1, bias=True, padding_mode="zeros")
+                                     groups=1, bias=True, padding_mode="zeros")
             self._test_op(module, input_size=[1, 3, 6, 6, 6], generate=False)
             # TODO: graph mode quantized conv3d module
