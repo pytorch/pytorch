@@ -75,7 +75,18 @@ def _test_serialization_subcmul_0_2(self: Tensor, other:Tensor, alpha: number=2)
 // Tensor copy creation
 auto tensor_clone = R"SCRIPT(
 def tensor(other:Tensor) -> Tensor:
-  return other.clone().detach()
+  # dtype=None, device=None, requires_grad: bool=False, pin_memory: bool=False
+
+  t = other.clone().detach()
+  # t.requires_grad_(requires_grad)
+  # if dtype is not None:
+  #   t = t.to(dtype)
+  # if device is not None:
+  #   t = t.to(device)
+  # if pin_memory:
+  #   t.pin_memory()
+
+  return t
 )SCRIPT";
 
 struct BuiltinFunctionRegistry {
