@@ -400,6 +400,7 @@ Other Operations
     rot90
     histc
     meshgrid
+    logcumsumexp
     renorm
     repeat_interleave
     roll
