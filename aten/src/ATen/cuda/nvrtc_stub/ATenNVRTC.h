@@ -91,8 +91,6 @@ namespace at { namespace cuda {
   _(cuModuleUnload)                              \
   _(cuDevicePrimaryCtxGetState)
 
-#undef HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR
-
 #endif
 
 extern "C" typedef struct NVRTC {
