@@ -1917,6 +1917,25 @@ class TestAutograd(TestCase):
         x = torch.randn(2, 2, requires_grad=True)
         self.assertRaisesRegex(RuntimeError, 'requires grad', lambda: x.numpy())
 
+        err_msg_outputs = "Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead."
+        with self.assertRaisesRegex(RuntimeError, err_msg_outputs):
+            x.numpy()
+
+        with torch.no_grad():
+            with torch.enable_grad():
+                with self.assertRaisesRegex(RuntimeError, err_msg_outputs):
+                    x.numpy()
+
+        with torch.no_grad():
+            y = x.numpy()
+        self.assertTrue(x.requires_grad)
+
+        a = torch.randn(2, 2)
+        b = a.numpy()
+
+        with torch.enable_grad():
+            a.numpy()
+
     def test_return_leaf(self):
         class Identity(Function):
             @staticmethod
