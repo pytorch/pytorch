@@ -82,7 +82,6 @@ class Header(object):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
-        cimodel.data.simple.setup_job.get_workflow_jobs,
         windows_build_definitions.get_windows_workflows,
         pytorch_build_definitions.get_workflow_jobs,
         cimodel.data.simple.macos_definitions.get_workflow_jobs,
@@ -99,13 +98,33 @@ def gen_build_workflows_tree():
         cimodel.data.simple.nightly_android.get_workflow_jobs,
     ]
 
+    nested_job_list = [f() for f in build_workflows_functions]
+
+    flattened_job_list = []
+    for inner_list_singleton in nested_job_list:
+        for list_item in inner_list_singleton:
+            flattened_job_list.append(list_item)
+
+    workflows_dict = {}
+    for i, job_thing in enumerate(flattened_job_list):
+        workflow_name = "build_workflow_{:03d}".format(i)
+
+        inner_job_list = cimodel.data.simple.setup_job.get_workflow_jobs() + [job_thing]
+        workflows_dict[workflow_name] = {"jobs": inner_job_list}
+
+    """
     return {
         "workflows": {
             "build": {
-                "jobs": [f() for f in build_workflows_functions],
+                "jobs": flattened_job_list,
             },
         },
     }
+    """
+    return {
+        "workflows": workflows_dict,
+    }
+
 
 
 # Order of this list matters to the generated config.yml.
