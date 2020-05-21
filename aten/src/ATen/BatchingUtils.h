@@ -17,7 +17,7 @@ namespace at {
 // this function returns the underlying Tensor and BatchDims.
 // If the input is a Tensor backed with regular TensorImpl, then
 // this function returns the tensor and empty BatchDims.
-TORCH_API std::pair<Tensor, BatchDimsRef> unpackBatched(const Tensor& self);
+TORCH_API std::pair<std::reference_wrapper<const Tensor>,BatchDimsRef> unpackBatched(const Tensor& self);
 
 // Moves the specified BatchDims to the front of `self`, ordered by their level.
 // Returns a view of the original tensor if any dims were moved; otherwise
@@ -33,7 +33,7 @@ TORCH_API Tensor moveBatchDimsToFront(const Tensor& self, BatchDimsRef bdims);
 // For example:
 //   moveBatchDimsToFront([(lvl=1, dim=2), (lvl=3, dim=1)])
 // returns:
-//   [(lvl=1, dim=0), (lvl=3, dim=0)]
+//   [(lvl=1, dim=0), (lvl=3, dim=1)]
 TORCH_API BatchDims moveBatchDimsToFront(BatchDimsRef bdims);
 
 }

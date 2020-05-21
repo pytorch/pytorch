@@ -24,6 +24,7 @@ BatchDims moveBatchDimsToFront(BatchDimsRef bdims) {
 }
 
 Tensor moveBatchDimsToFront(const Tensor& self, BatchDimsRef bdims) {
+  TORCH_INTERNAL_ASSERT(!isBatched(self));
   if (areBdimsAtFrontInOrder(bdims)) {
     return self;
   }
@@ -44,7 +45,7 @@ Tensor moveBatchDimsToFront(const Tensor& self, BatchDimsRef bdims) {
   return self.permute(permutation);
 }
 
-std::pair<Tensor, BatchDimsRef> unpackBatched(const Tensor& self) {
+std::pair<std::reference_wrapper<const Tensor>,BatchDimsRef> unpackBatched(const Tensor& self) {
   const auto* batched = maybeGetBatched(self);
   if (batched) {
     return { batched->value(), batched->bdims() };
