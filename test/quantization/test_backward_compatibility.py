@@ -48,7 +48,7 @@ class TestSerialization(TestCase):
         expected_file = base_name + ".expected.pt"
 
         # only generate once.
-        if generate and torch.backends.quantized.engine == 'fbgemm':
+        if generate and qengine_is_fbgemm():
             input_tensor = torch.rand(*input_size).float()
             if input_quantized:
                 input_tensor = torch.quantize_per_tensor(input_tensor, 0.5, 2, torch.quint8)
@@ -82,9 +82,6 @@ class TestSerialization(TestCase):
     def test_linear_dynamic(self):
         module_qint8 = nnqd.Linear(3, 1, bias_=True, dtype=torch.qint8)
         self._test_op(module_qint8, "qint8", input_size=[1, 3], input_quantized=False, generate=False)
-
-    @override_qengines
-    def test_linear_dynamic_float(self):
         if qengine_is_fbgemm():
             module_float16 = nnqd.Linear(3, 1, bias_=True, dtype=torch.float16)
             self._test_op(module_float16, "float16", input_size=[1, 3], input_quantized=False, generate=False)
