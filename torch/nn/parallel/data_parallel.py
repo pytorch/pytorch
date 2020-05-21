@@ -97,6 +97,10 @@ class DataParallel(Module):
         See :ref:`pack-rnn-unpack-with-data-parallelism` section in FAQ for
         details.
 
+    .. warning::
+        Parameters on replicated models are not populated to :attr:`_parameters`,
+        as these parameters are not leaves. This means that ``parameters()``
+        cannot be called on replicated models.
 
     Args:
         module (Module): module to be parallelized

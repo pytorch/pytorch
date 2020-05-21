@@ -111,6 +111,7 @@ def replicate(network, devices, detach=False):
         module_indices[module] = i
         for j in range(num_replicas):
             replica = module._replicate_for_data_parallel()
+            replica.is_replicated = True
             # This is a temporary fix for DDP. DDP needs to access the 
             # replicated model parameters. It used to do so through 
             # `mode.parameters()`. The fix added in #33907 for DP stops the

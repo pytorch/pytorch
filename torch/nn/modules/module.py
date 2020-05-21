@@ -91,6 +91,7 @@ class Module(object):
         self._state_dict_hooks = OrderedDict()
         self._load_state_dict_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
+        self.is_replicated = False
 
     def forward(self, *input):
         r"""Defines the computation performed at every call.
@@ -913,6 +914,10 @@ class Module(object):
             <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
+        # parameters replicated models are not populated to _parameters
+        if self.is_replicated:
+            raise RuntimeError("parameters() cannot be called on a replicated model")
+
         for name, param in self.named_parameters(recurse=recurse):
             yield param
 

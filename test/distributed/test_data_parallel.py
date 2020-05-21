@@ -618,8 +618,7 @@ class TestDataParallel(TestCase):
         for devices in [(0, 1), [0, 1]]:
             replicas = dp.replicate(module, devices)
             for i, replica in enumerate(replicas):
-                for p in replica.parameters():
-                    self.assertEqual(p.get_device(), i)
+                self.assertRaises(RuntimeError, lambda: print(replica.parameters()))
                 replica_input = input.cuda(i)
                 self.assertEqual(replica(replica_input), expected_output)
 
