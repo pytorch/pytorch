@@ -38,16 +38,13 @@ struct conv_param_t {
   const uint32_t groups;
   const size_t input_channels;
   const size_t output_channels;
-  const uint8_t kernel_zero_point;
-  const float kernel_scale;
-  const uint8_t output_min;
-  const uint8_t output_max;
   const bool transpose;
 
   // The following are derived parameters
   enum pytorch_qnnp_ukernel_type ukernel_type; // kernel type based on input params
   size_t group_input_channels;
   size_t group_output_channels;
+  bool per_channel;
 
   /**
    * @brief Constructor for initializing the convolution/deconvolution
@@ -61,11 +58,8 @@ struct conv_param_t {
                const uint32_t groups_,
                const size_t input_channels_,
                const size_t output_channels_,
-               const uint8_t kernel_zp_,
-               const float kernel_stride_,
-               const uint8_t out_min_,
-               const uint8_t out_max_,
-               const bool transpose_)
+               const bool transpose_,
+               const bool is_per_channel_)
       : kernel_dims(kernel_),
         stride_dims(stride_),
         dilation(dilation_),
@@ -74,11 +68,8 @@ struct conv_param_t {
         groups(groups_),
         input_channels(input_channels_),
         output_channels(output_channels_),
-        kernel_zero_point(kernel_zp_),
-        kernel_scale(kernel_stride_),
-        output_min(out_min_),
-        output_max(out_max_),
-        transpose(transpose_) {
+        transpose(transpose_),
+        per_channel(is_per_channel_) {
     const uint32_t kernel_width = kernel_dims[0];
     const uint32_t kernel_height = kernel_dims[1];
 
@@ -139,15 +130,6 @@ struct conv_param_t {
           _name,
           dilation[0],
           dilation[1]);
-      assert("Failed to initialize QNNPACK conv_param_t struct.");
-    }
-
-    if (kernel_scale <= 0.0f || !std::isnormal(kernel_scale)) {
-      pytorch_qnnp_log_error(
-          "failed to create %s with %.7g kernel scale: scale must be"
-          "finite and positive",
-          _name,
-          kernel_scale);
       assert("Failed to initialize QNNPACK conv_param_t struct.");
     }
 
@@ -243,6 +225,12 @@ struct conv_param_t {
       } else {
         ukernel_type = pytorch_qnnp_ukernel_type_conv;
       }
+    }
+
+    if (per_channel && ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
+      pytorch_qnnp_log_error(
+          "Per channel quantized weights are not supported for XZP kernels");
+      assert("Failed to initialize QNNPACK conv_param_t struct.");
     }
   }
 
