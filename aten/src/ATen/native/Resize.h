@@ -17,7 +17,9 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, int64_t new_size) 
   // (same comment is in Resize.cuh)
   if (new_size > 0) {
     if (!THTensor_getStoragePtr(self)) {
-      THTensor_stealAndSetStoragePtr(self, THStorage_new(self->dtype()));
+      caffe2::TypeMeta dtype = self->dtype();
+      THTensor_stealAndSetStoragePtr(self, THStorage_new());
+      TORCH_INTERNAL_ASSERT(dtype == self->dtype());
     }
     int64_t new_size_bytes =
         (new_size + self->storage_offset()) * self->dtype().itemsize();
@@ -108,16 +110,13 @@ static inline void checkSetStorage(Tensor& result, Storage storage, int64_t stor
     TORCH_INTERNAL_ASSERT(storage);
     TORCH_INTERNAL_ASSERT(result.storage());
 
-    // Caffe2 also has uninitialized dtype states, which we disallow here
-    TORCH_INTERNAL_ASSERT(result.storage().dtype() == storage.dtype());
-
     // We used to allow this, but this breaks device caching.
     // Let's put an actual error message for this one.
     TORCH_CHECK(result.storage().device() == storage.device(),
                 "Attempted to set the storage of a tensor on device \"", result.storage().device(),
                 "\" to a storage on different device \"", storage.device(),
                 "\".  This is no longer allowed; the devices must match.");
-    result.unsafeGetTensorImpl()->set_storage(storage);
+    result.unsafeGetTensorImpl()->set_storage_keep_dtype(storage);
   }
 
   // storageOffset
