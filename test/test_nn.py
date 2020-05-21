@@ -3901,12 +3901,12 @@ class TestNN(NNTestCase):
             conv2.weight.data.copy_(conv1.weight.data)
             out1 = conv1(inputs)
             out2 = conv2(inputs)
-            self.assertEqual(out1, out2, atol=0.0)
+            self.assertEqual(out1, out2, atol=0.0, rtol=0)
             y = torch.randn(out1.size(), device="cuda", dtype=dtype)
             out1.backward(y)
             out2.backward(y)
-            self.assertEqual(conv1.bias.grad.data, conv2.bias.grad.data, atol=0.0)
-            self.assertEqual(conv1.weight.grad.data, conv2.weight.grad.data, atol=0.0)
+            self.assertEqual(conv1.bias.grad.data, conv2.bias.grad.data, atol=0.0, rtol=0)
+            self.assertEqual(conv1.weight.grad.data, conv2.weight.grad.data, atol=0.0, rtol=0)
 
     def test_Conv2d_missing_argument(self):
         c = nn.Conv2d(3, 3, 3)
