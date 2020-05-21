@@ -755,7 +755,8 @@ VaryingShape<int64_t> TensorType::strides() const {
 
 VaryingShape<Stride> TensorType::computeStrideProps(
     at::IntArrayRef sizes,
-    at::IntArrayRef strides) {
+    at::IntArrayRef strides,
+    bool tensor_contiguity) {
   std::vector<size_t> stride_indices(sizes.size());
   std::iota(stride_indices.begin(), stride_indices.end(), 0);
 
@@ -773,19 +774,21 @@ VaryingShape<Stride> TensorType::computeStrideProps(
 
   std::vector<Stride> stride_properties;
   for (size_t i = 0; i < stride_indices.size(); i++) {
-    Stride s{stride_indices[i], false, strides[stride_indices[i]]};
-    // innermost stride expected to be 1
-    // TODO: turn contiguous_ into an enum CONTIGUOUS, NONCONTIGUOUS,
-    // BROADCASTED
-    if (i == 0) {
-      s.contiguous_ = strides[stride_indices[i]] == 1;
-    } else {
-      s.contiguous_ = strides[stride_indices[i]] == 1 ||
-          (strides[stride_indices[i]] != 0 &&
-           strides[stride_indices[i]] ==
-               strides[stride_indices[i - 1]] * sizes[stride_indices[i - 1]]);
+    bool contiguous_ = tensor_contiguity;
+    if (!contiguous_) {
+      // innermost stride expected to be 1
+      // TODO: turn contiguous_ into an enum CONTIGUOUS, NONCONTIGUOUS,
+      // BROADCASTED
+      if (i == 0) {
+        contiguous_ = strides[stride_indices[i]] == 1;
+      } else {
+        contiguous_ = strides[stride_indices[i]] == 1 ||
+            (strides[stride_indices[i]] != 0 &&
+             strides[stride_indices[i]] ==
+                 strides[stride_indices[i - 1]] * sizes[stride_indices[i - 1]]);
+      }
     }
-    stride_properties.push_back(s);
+    stride_properties.emplace_back(stride_indices[i], contiguous_, strides[stride_indices[i]]);
   }
 
   return VaryingShape<Stride>{stride_properties};
@@ -822,7 +825,7 @@ TensorTypePtr TensorType::create(const at::Tensor& t) {
     sizes = VaryingShape<int64_t>{t.sizes().vec()};
     strides = VaryingShape<int64_t>{t.strides().vec()};
     return TensorType::create(
-        t.scalar_type(), t.device(), sizes, strides, t.requires_grad(), false);
+        t.scalar_type(), t.device(), sizes, strides, t.requires_grad(), false, t.is_contiguous());
   }
 
   return TensorType::create(
@@ -840,13 +843,13 @@ TensorTypePtr TensorType::create(
     const VaryingShape<int64_t>& sizes,
     const VaryingShape<int64_t>& strides,
     c10::optional<bool> requires_grad,
-    c10::optional<bool> undefined) {
+    c10::optional<bool> undefined, bool tensor_contiguity) {
   TORCH_INTERNAL_ASSERT(sizes.concrete_sizes().has_value());
   TORCH_INTERNAL_ASSERT(
       !strides.concrete_sizes().has_value() ||
       sizes.concrete_sizes()->size() == strides.concrete_sizes()->size());
   auto sprops = strides.concrete_sizes().has_value()
-      ? computeStrideProps(*sizes.concrete_sizes(), *strides.concrete_sizes())
+      ? computeStrideProps(*sizes.concrete_sizes(), *strides.concrete_sizes(), tensor_contiguity)
       : VaryingShape<Stride>();
 
   auto symbol_sizes =
