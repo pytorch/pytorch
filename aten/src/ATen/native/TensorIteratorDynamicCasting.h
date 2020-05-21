@@ -21,7 +21,9 @@
 
 namespace at { namespace native {
 
-namespace {
+// this extra namespace (cppmap) is to avoid conflicting with at::detail when at:: is
+// left off in native functions.
+namespace cppmap { namespace detail {
 
 // Note: the complex (number) handling code is here while we transition to using c10::complex
 // universally; we currently have a mix of kernels that use std::complex, c10::complex, and thrust::complex.
@@ -63,7 +65,7 @@ struct CPPTypeAndStdComplexToScalarType<thrust::complex<double>> {
 };
 #endif
 
-}
+}} //namespace cppmap::detail
 
 // `needs_dynamic_casting` compares the types expected by iterator
 // (i.e. dtypes of the operands) with the actual type of the arguments
@@ -73,7 +75,7 @@ struct needs_dynamic_casting {
   static bool check(TensorIterator& iter) {
     using traits = function_traits<func_t>;
 
-    if (iter.input_dtype(nargs-1) != CPPTypeAndStdComplexToScalarType<typename traits::template arg<nargs - 1>::type>::value) {
+    if (iter.input_dtype(nargs-1) != cppmap::detail::CPPTypeAndStdComplexToScalarType<typename traits::template arg<nargs - 1>::type>::value) {
       return true;
     }
     return needs_dynamic_casting<func_t, nargs - 1>::check(iter);
@@ -89,7 +91,7 @@ struct needs_dynamic_casting<func_t, 0> {
     // (including arity) are currently pushed outside of this struct.
     return c10::guts::if_constexpr<std::is_void<typename traits::result_type>::value>(
       [&](auto _) { return false; },
-      [&](auto _) { return iter.dtype(0) != _(CPPTypeAndStdComplexToScalarType<typename traits::result_type>::value);}
+      [&](auto _) { return iter.dtype(0) != _(cppmap::detail::CPPTypeAndStdComplexToScalarType<typename traits::result_type>::value);}
     );
   }
 };
