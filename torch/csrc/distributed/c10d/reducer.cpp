@@ -247,8 +247,6 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
         bucket_view.toString(),
         ", got ",
         grad.toString());
-    TORCH_CHECK(grad.strides() == variable.strides(),
-                "grad strides do not match param strides")
     // Assert that the grad tensor and the bucket don't share storage.
     // If they did, we could avoid the copy altogether.
     // The reason for not doing this is that existing code calls

@@ -26,6 +26,36 @@ struct TORCH_API AccumulateGrad : public Node {
   // new_grad into variable_grad if in place accumulation is possible.
   // Otherwise, uses 'update_grad' to update the grad for the variable.
 
+  // "Gradient Layout Contract"
+  //
+  // AccumulateGrad tries to stash grads with memory layout (strides) such
+  // that variables and grads interact efficiently in later optimizer kernels,
+  // and grads interact efficiently with c10d::Reducer.cpp.
+  //
+  // Specifically, for strided (non-sparse) gradients, AccumulateGrad tries to
+  // ensure the following:
+  //   (1) if variable.is_non_overlapping_and_dense(), the stashed grad's
+  //       sizes and strides match variable.
+  //   (2) if variable's memory isn't dense, the stashed grad's sizes match
+  //       variable, but it falls back to the rowmajor-contiguous strides.
+  //
+  // If variable's grad already exists (variable_grad.defined() is true),
+  // AccumulateGrad assumes (hopes) variable_grad was created in the past
+  // according to (1) or (2), and stashes variable_grad + new_grad
+  // Therefore, AccumulateGrad does not enforce (1) and (2) with 100%
+  // certainty.  For example, if variable_grad was assigned by the user,
+  // such that AccumulateGrad never got the chance to create it, variable_grad
+  // enters operator+ with whatever layout the user gave it, and we are
+  // at the mercy of TensorIterator to decide what the layout of
+  // "variable_grad + new_grad" will be.
+  //
+  // Fortunately, if a given grad doesn't satisfy (1) or (2), the penalty is
+  // degraded performance in Reducer.cpp or optimizer kernels, not death by
+  // assert or silently bad numerics.
+  //
+  // We could add logic that is more aggressive about forcing
+  // "variable_grad + new_grad" to obey (1) or (2).
+
   // variable: the variable whose grad we're accumulating.
   // variable_grad: the current grad for the variable.
   // new_grad: new grad we want to acummulate for the variable.
@@ -44,19 +74,17 @@ struct TORCH_API AccumulateGrad : public Node {
       size_t num_expected_refs,
       const T& update_grad) {
     if (!variable_grad.defined()) {
-      // under following condition, we can avoid clone()
-      if (!GradMode::is_enabled() && !new_grad.is_sparse() &&
-          new_grad.is_contiguous() &&
-          // new_grad.is_contiguous(variable.suggest_memory_format()) &&
-          new_grad.use_count() <= num_expected_refs) {
-        // first check it is in first-order grad only mode
-        // then check not sparse before is_contiguous
-        // then check contiguous, otherwise later in place accumulation may fail
-        // and lastly, check if the use_count is less than or equal to the
-        // number of references we expect before grabbing it. The number of
-        // references we expect is basically internal structures that are
-        // holding references to the Tensor and that is fine since these are not
-        // exposed to the user.
+      // under following conditions, we can avoid deep copy (steal the gradient)
+      if (!GradMode::is_enabled() &&
+          !new_grad.is_sparse() &&
+          new_grad.use_count() <= num_expected_refs &&
+          (variable.is_non_overlapping_and_dense() ?
+           (new_grad.strides() == variable.strides()) :
+           new_grad.is_contiguous())) {
+        // first check we aren't setting up for double-backward
+        // then check not sparse
+        // then check if use_count <= number of references we expect
+        // then check if new_grad obeys the "Gradient Layout Contract"
         update_grad(new_grad.detach());
       } else if (
           !GradMode::is_enabled() && new_grad.is_sparse() &&
@@ -85,8 +113,18 @@ struct TORCH_API AccumulateGrad : public Node {
         if (new_grad.is_sparse()) {
           update_grad(new_grad.clone());
         } else {
-          update_grad(new_grad.clone(at::MemoryFormat::Contiguous));
-          // update_grad(new_grad.clone(variable.suggest_memory_format()));
+          // Deep copies new_grad according to the "Gradient Layout Contract."
+          if (variable.is_non_overlapping_and_dense()) {
+            if (variable.strides() == new_grad.strides()) {
+              update_grad(new_grad.clone());
+            } else {
+              update_grad(std::move(at::empty_strided(variable.sizes(), variable.strides(),
+                                    variable.options().memory_format(c10::nullopt))
+                                    .copy_(new_grad)));
+            }
+          } else {
+            update_grad(new_grad.clone(at::MemoryFormat::Contiguous));
+          }
         }
       }
     } else if (!GradMode::is_enabled()) {
