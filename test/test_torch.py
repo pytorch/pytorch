@@ -12689,6 +12689,10 @@ class TestTorchDeviceType(TestCase):
                                 device=device)
         inf_mask = torch.tensor([False, True, False, True, True, True, False, False, True, False],
                                 device=device)
+        print("Sampe: ", sample)
+        print("Asinh output: ", torch.asinh(sample))
+        print("isnan: ", torch.isnan(torch.asinh(sample)))
+        print("isinf: ", torch.isinf(torch.asinh(sample)))
         self.assertEqual(torch.isnan(torch.asinh(sample)), nan_mask)
         self.assertEqual(torch.isnan(sample.asinh()), nan_mask)
         self.assertEqual(torch.isinf(torch.asinh(sample)), inf_mask)
