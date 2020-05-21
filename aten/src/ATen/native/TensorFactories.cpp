@@ -417,7 +417,11 @@ Tensor linspace(
     int64_t steps,
     const TensorOptions& options) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
-  Tensor result = at::empty({steps}, options);
+  auto result_options = options;
+  if (start.isComplex() || end.isComplex()){
+    result_options = result_options.dtype(c10::get_default_complex_dtype());
+  }
+  Tensor result = at::empty({steps}, result_options);
   return at::linspace_out(result, start, end, steps);
 }
 
@@ -429,7 +433,12 @@ Tensor logspace(
     int64_t steps,
     double base,
     const TensorOptions& options) {
-  Tensor result = at::empty({steps}, options);
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+  auto result_options = options;
+  if (start.isComplex() || end.isComplex()){
+    result_options = result_options.dtype(c10::get_default_complex_dtype());
+  }
+  Tensor result = at::empty({steps}, result_options);
   return at::logspace_out(result, start, end, steps, base);
 }
 
