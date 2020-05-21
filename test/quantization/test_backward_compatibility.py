@@ -62,7 +62,6 @@ class TestSerialization(TestCase):
         qmodule.load_state_dict(torch.load(state_dict_file))
         qmodule_scripted = torch.jit.load(scripted_module_file)
         qmodule_traced = torch.jit.load(traced_module_file)
-
         expected = torch.load(expected_file)
         self.assertEqual(qmodule(input_tensor), expected, atol=prec)
         self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)
@@ -84,7 +83,7 @@ class TestSerialization(TestCase):
         for i, qengine in enumerate(supported_qengines):
             with override_quantized_engine(qengine):
                 module_qint8 = nnqd.Linear(3, 1, bias_=True, dtype=torch.qint8)
-                self._test_op(module_qint8, "qint8", input_size=[1, 3], input_quantized=False, generate=False, iter=i)
+                self._test_op(module_qint8, "qint8", input_size=[1, 3], input_quantized=False, generate=True, iter=i)
                 if qengine == 'fbgemm':
                     module_float16 = nnqd.Linear(3, 1, bias_=True, dtype=torch.float16)
                     self._test_op(module_float16, "float16", input_size=[1, 3], input_quantized=False, generate=False)
@@ -120,3 +119,16 @@ class TestSerialization(TestCase):
                                          groups=1, bias=True, padding_mode="zeros")
                 self._test_op(module, input_size=[1, 3, 6, 6, 6], generate=False)
                 # TODO: graph mode quantized conv3d module
+
+    def test_lstm(self):
+        class LSTMModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = nnqd.LSTM(input_size=3, hidden_size=7, num_layers=1).to(dtype=torch.float)
+
+            def forward(self, x):
+                x = self.lstm(x)
+                return x
+
+        mod = LSTMModule()
+        self._test_op(mod, input_size=[4, 4, 3], input_quantized=False, generate=False)

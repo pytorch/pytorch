@@ -9,10 +9,93 @@ from torch import Tensor  # noqa: F401
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
 
-
 def apply_permutation(tensor, permutation, dim=1):
     # type: (Tensor, Tensor, int) -> Tensor
     return tensor.index_select(dim, permutation)
+
+class RNNPackedParams(torch.nn.Module):
+    _version = 1
+
+    def __init__(self, dtype=torch.qint8):
+        super(RNNPackedParams, self).__init__()
+        self.dtype = dtype
+        bq = torch.empty([1], dtype=torch.float)
+        if self.dtype == torch.qint8:
+            wq = torch._empty_affine_quantized([1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
+        elif self.dtype == torch.float16:
+            wq = torch.zeros([1, 1], dtype=torch.float)
+        self.set_weight_bias(wq, wq, bq, bq)
+
+    @torch.jit.export
+    def set_weight_bias(self, weight_ih, weight_hh, bias_ih, bias_hh):
+        # type: (torch.Tensor, torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]) -> None
+        if self.dtype == torch.qint8:
+            self._packed_params_ih = torch.ops.quantized.linear_prepack(weight_ih, bias_ih)
+            self._packed_params_hh = torch.ops.quantized.linear_prepack(weight_hh, bias_hh)
+        elif self.dtype == torch.float16:
+            self._packed_params_ih = torch.ops.quantized.linear_prepack_fp16(weight_ih, bias_ih)
+            self._packed_params_hh = torch.ops.quantized.linear_prepack_fp16(weight_hh, bias_hh)
+        else:
+            raise RuntimeError('Unsupported dtype on dynamic quantized RNN!')
+
+
+    @torch.jit.export
+    def _weight_bias(self):
+        if self.dtype == torch.qint8:
+            return (torch.ops.quantized.linear_unpack(self._packed_params_ih),
+                    torch.ops.quantized.linear_unpack(self._packed_params_hh))
+        elif self.dtype == torch.float16:
+            return (torch.ops.quantized.linear_unpack_fp16(self._packed_params_ih),
+                    torch.ops.quantized.linear_unpack_fp16(self._packed_params_hh))
+        else:
+            raise RuntimeError('Unsupported dtype on dynamic quantized linear!')
+
+    def forward(self, x):
+        return x
+
+    # Version 1
+    #   self
+    #   |--- _packed_params_ih : (Tensor, Tensor) representing (weight, bias)
+    #                            of w_ih, b_ih
+    #   |--- _packed_params_hh : (Tensor, Tensor) representing (weight, bias)
+    #                            of w_hh, b_hh
+    #   |--- dtype : torch.dtype
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(RNNPackedParams, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'dtype'] = self.dtype
+        packed_ih, packed_hh = self._weight_bias()
+        destination[prefix + '_packed_params_ih'] = packed_ih
+        destination[prefix + '_packed_params_hh'] = packed_hh
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        weight_ih, bias_ih = state_dict[prefix + '_packed_params_ih']
+        state_dict.pop(prefix + '_packed_params_ih')
+        weight_hh, bias_hh = state_dict[prefix + '_packed_params_hh']
+        state_dict.pop(prefix + '_packed_params_hh')
+        self.set_weight_bias(weight_ih, weight_hh, bias_ih, bias_hh)
+
+        super(RNNPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                           missing_keys, unexpected_keys, error_msgs)
+
+    @torch.jit.export
+    def __getstate__(self):
+        if not torch.jit.is_scripting():
+            raise RuntimeError('torch.save() is not currently supported for quantized modules.'
+                               ' See https://github.com/pytorch/pytorch/issues/24045.'
+                               ' Please use state_dict or torch.jit serialization.')
+        packed_ih, packed_hh = self._weight_bias()
+        print("packed_ih", packed_ih)
+        return packed_ih[0], packed_ih[1], packed_hh[0], packed_hh[1], self.training, self.dtype
+
+    @torch.jit.export
+    def __setstate__(self, state):
+        self.dtype = state[5]
+        self.set_weight_bias(state[0], state[2], state[1], state[3])
+        self.training = state[4]
+
+    def __repr__(self):
+        return self._weight_bias().__repr__()
 
 class PackedParameter(torch.nn.Module):
     def __init__(self, param):
@@ -38,7 +121,7 @@ class RNNBase(torch.nn.Module):
         self.bidirectional = bidirectional
         self.dtype = dtype
         num_directions = 2 if bidirectional else 1
-
+        _packed_params = []
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
                 isinstance(dropout, bool):
             raise ValueError("dropout should be a number in range [0, 1] "
@@ -55,7 +138,6 @@ class RNNBase(torch.nn.Module):
         else:
             raise ValueError("Unrecognized RNN mode: " + mode)
 
-        _all_weight_values = []
         for layer in range(num_layers):
             for direction in range(num_directions):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
@@ -69,13 +151,8 @@ class RNNBase(torch.nn.Module):
                     # Second bias vector included for CuDNN compatibility. Only one
                     # bias vector is needed in standard definition.
                     b_hh = torch.empty([gate_size], dtype=torch.float)
-
-                    packed_ih = \
-                        torch.ops.quantized.linear_prepack(w_ih, b_ih)
-                    packed_hh = \
-                        torch.ops.quantized.linear_prepack(w_hh, b_hh)
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
-                        packed_ih, packed_hh, b_ih, b_hh)
+                    _packed_params.append(RNNPackedParams(self.dtype))
+                    _packed_params[-1].set_weight_bias(w_ih, w_hh, b_ih, b_hh)
                 else:
                     w_ih = torch.Tensor(gate_size, layer_input_size).float()
                     w_hh = torch.Tensor(gate_size, hidden_size).float()
@@ -84,13 +161,10 @@ class RNNBase(torch.nn.Module):
                     # bias vector is needed in standard definition.
                     b_hh = torch.Tensor(gate_size).float()
 
-                    packed_ih = torch.ops.quantized.linear_prepack_fp16(w_ih, b_ih)
-                    packed_hh = torch.ops.quantized.linear_prepack_fp16(w_hh, b_hh)
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
-                        packed_ih, packed_hh)
+                    _packed_params.append(RNNPackedParams(self.dtype))
+                    _packed_params[-1].set_weight_bias(w_ih, w_hh, b_ih, b_hh)
 
-                _all_weight_values.append(PackedParameter(cell_params))
-        self._all_weight_values = torch.nn.ModuleList(_all_weight_values)
+        self._packed_params = torch.nn.ModuleList(_packed_params)
 
     def _get_name(self):
         return 'DynamicQuantizedRNN'
@@ -184,6 +258,7 @@ class RNNBase(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod):
+        print("called from float")
         assert type(mod) == torch.nn.LSTM, 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM'
         assert hasattr(
             mod, 'qconfig'), 'Input float module must have qconfig defined'
@@ -212,7 +287,7 @@ class RNNBase(torch.nn.Module):
 
         assert mod.bias
 
-        _all_weight_values = []
+        _packed_params = []
         for layer in range(qRNNBase.num_layers):
             for direction in range(num_directions):
                 layer_input_size = qRNNBase.input_size if layer == 0 else qRNNBase.hidden_size * num_directions
@@ -230,31 +305,22 @@ class RNNBase(torch.nn.Module):
                 weight_hh, bias_hh = retrieve_weight_bias('hh')
 
                 if dtype == torch.qint8:
-                    def quantize_and_pack(w, b):
+                    def quantize_weight(w):
                         weight_observer = weight_observer_method()
                         weight_observer(w)
                         wt_scale, wt_zp = weight_observer.calculate_qparams()
                         qweight = torch.quantize_per_tensor(
                             w.float(), float(wt_scale), int(wt_zp), torch.qint8)
-                        packed_weight = \
-                            torch.ops.quantized.linear_prepack(qweight, b)
-                        return packed_weight
-                    packed_ih = quantize_and_pack(weight_ih, bias_ih)
-                    packed_hh = quantize_and_pack(weight_hh, bias_hh)
+                        return qweight
 
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
-                        packed_ih, packed_hh, bias_ih, bias_hh)
+                    _packed_params.append(RNNPackedParams(dtype))
+                    _packed_params[-1].set_weight_bias(weight_ih, weight_hh, bias_ih, bias_hh)
+
                 else:
-                    packed_ih = torch.ops.quantized.linear_prepack_fp16(
-                        weight_ih.float(), bias_ih)
-                    packed_hh = torch.ops.quantized.linear_prepack_fp16(
-                        weight_hh.float(), bias_hh)
+                    _packed_params.append(RNNPackedParams(dtype))
+                    _packed_params[-1].set_weight_bias(weight_ih, weight_hh, bias_ih, bias_hh)
 
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
-                        packed_ih, packed_hh)
-
-                _all_weight_values.append(PackedParameter(cell_params))
-        qRNNBase._all_weight_values = torch.nn.ModuleList(_all_weight_values)
+        qRNNBase._packed_params = torch.nn.ModuleList(_packed_params)
 
         return qRNNBase
 
@@ -283,10 +349,15 @@ class LSTM(RNNBase):
             # Each batch of the hidden state should match the input sequence that
             # the user believes he/she is passing in.
             hx = self.permute_hidden(hx, sorted_indices)
-
         self.check_forward_args(input, hx, batch_sizes)
+        for m in self._packed_params:
+            packed_ih = m._packed_params_ih
+            packed_hh = m._packed_params_hh
+            unpacked_ih, unpacked_hh = m._weight_bias()
+            cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                packed_ih, packed_hh, unpacked_ih[1], unpacked_hh[1])
+            _all_params.append(cell_params)
 
-        _all_params = ([m.param for m in self._all_weight_values])
         if batch_sizes is None:
             result = torch.quantized_lstm(input, hx, _all_params, self.bias, self.num_layers,
                                           float(self.dropout), self.training, self.bidirectional,
