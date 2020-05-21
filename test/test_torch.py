@@ -2596,47 +2596,67 @@ class _TestTorchMixin(object):
         self._test_gather(self, lambda t: t)
 
     @staticmethod
-    def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True):
-        m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
-        elems_per_row = random.randint(1, 10)
-        dim = random.randrange(3)
+    def _test_scatter_add_mult_index_base(self, cast):
+        m, n = 30, 40
+        idx = torch.zeros(m, n).long()
+        src = torch.ones(m, n)
+        res0 = torch.zeros(m, n).scatter_add_(0, idx, src)
+        res1 = torch.zeros(m, n).scatter_add_(1, idx, src)
 
-        idx_size = [m, n, o]
-        idx_size[dim] = elems_per_row
-        idx = cast(torch.LongTensor().resize_(*idx_size))
-        _TestTorchMixin._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
+        self.assertEqual(res0[0, :], m * torch.ones(n), 0)
+        self.assertEqual(res1[:, 0], n * torch.ones(m), 0)
 
-        src_size = [random.randint(1, 5) + s for s in idx_size]
-        if is_scalar:
-            src = random.random()
+    def test_scatter_add_mult_index(self):
+        self._test_scatter_add_mult_index_base(self, lambda t: t)
+
+    @staticmethod
+    def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True, *, test_complex=False):
+        if test_complex:
+            dtypes = [torch.complex64, torch.complex128]
         else:
-            src = cast(torch.Tensor(*src_size).normal_())
+            dtypes = [torch.float16, torch.float32, torch.float64]
 
-        base = cast(torch.randn(m, n, o))
-        actual = getattr(base.clone(), method)(dim, idx, src)
-        expected = base.clone()
-        for i in range(idx_size[0]):
-            for j in range(idx_size[1]):
-                for k in range(idx_size[2]):
-                    ii = [i, j, k]
-                    ii[dim] = idx[i, j, k]
-                    if method == 'scatter_' and not is_scalar:
-                        expected[tuple(ii)] = src[i, j, k]
-                    elif method == 'scatter_add_':
-                        expected[tuple(ii)] += src[i, j, k]
-                    else:
-                        expected[tuple(ii)] = src
-        self.assertEqual(actual, expected, 0)
+        for dtype in dtypes:
+            m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
+            elems_per_row = random.randint(1, 10)
+            dim = random.randrange(3)
 
-        if test_bounds:
-            idx[0][0][0] = 34
-            with self.assertRaises(RuntimeError):
-                getattr(base.clone(), method)(dim, idx, src)
+            idx_size = [m, n, o]
+            idx_size[dim] = elems_per_row
+            idx = cast(torch.LongTensor().resize_(*idx_size))
+            _TestTorchMixin._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
 
-        # test for empty index, should be a no-op
-        idx = cast(torch.LongTensor())
-        actual = getattr(base.clone(), method)(dim, idx, src)
-        self.assertEqual(actual, base, 0)
+            src_size = [random.randint(1, 5) + s for s in idx_size]
+            if is_scalar:
+                src = random.random()
+            else:
+                src = cast(torch.randn(src_size, dtype=dtype))
+
+            base = cast(torch.randn(m, n, o, dtype=dtype))
+            actual = getattr(base.clone(), method)(dim, idx, src)
+            expected = base.clone()
+            for i in range(idx_size[0]):
+                for j in range(idx_size[1]):
+                    for k in range(idx_size[2]):
+                        ii = [i, j, k]
+                        ii[dim] = idx[i, j, k]
+                        if method == 'scatter_' and not is_scalar:
+                            expected[tuple(ii)] = src[i, j, k]
+                        elif method == 'scatter_add_':
+                            expected[tuple(ii)] += src[i, j, k]
+                        else:
+                            expected[tuple(ii)] = src
+            self.assertEqual(actual, expected, 0)
+
+            if test_bounds:
+                idx[0][0][0] = 34
+                with self.assertRaises(RuntimeError):
+                    getattr(base.clone(), method)(dim, idx, src)
+
+            # test for empty index, should be a no-op
+            idx = cast(torch.LongTensor())
+            actual = getattr(base.clone(), method)(dim, idx, src)
+            self.assertEqual(actual, base, 0)
 
     def test_scatter(self):
         self._test_scatter_base(self, lambda t: t, 'scatter_')
