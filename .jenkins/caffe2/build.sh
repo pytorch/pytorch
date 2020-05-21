@@ -165,11 +165,13 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   build_args+=("USE_OPENCV=ON")
   # This is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   build_args+=("USE_LMDB=ON")
-  # When hcc runs out of memory, it silently exits without stopping
-  # the build process, leaving undefined symbols in the shared lib
-  # which will cause undefined symbol errors when later running
-  # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
-  export MAX_JOBS=4
+  # hcc used to run out of memory, silently exiting without stopping
+  # the build process, leaving undefined symbols in the shared lib,
+  # causing undefined symbol errors when later running tests.
+  # We used to set MAX_JOBS to 4 to avoid, but this is no longer an issue.
+  if [ -z "$MAX_JOBS" ]; then
+    export MAX_JOBS=$(($(nproc) - 1))
+  fi
 
   ########## HIPIFY Caffe2 operators
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_amd.py"

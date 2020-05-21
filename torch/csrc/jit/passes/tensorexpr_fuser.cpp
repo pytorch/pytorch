@@ -208,7 +208,7 @@ bool canMerge(Node* consumer, Node* producer, AliasDb& aliasDb) {
        consumer->kind() == getTensorExprSymbol()));
 
   // Alias checks
-  REQ(aliasDb.couldMoveAfterTopologically(consumer, producer));
+  REQ(aliasDb.couldMoveBeforeTopologically(producer, consumer));
 
   // Ops that return aliases can only be folded if this is the only use.
   if (producer->kind() == aten::slice || producer->kind() == aten::unsqueeze ||
@@ -274,17 +274,17 @@ c10::optional<Node*> tryMerge(
   if (producer->kind() == aten::cat) {
     Node* listconstruct = producer->inputs()[0]->node();
 
-    aliasDb.moveAfterTopologicallyValid(consumer, producer);
+    aliasDb.moveBeforeTopologicallyValid(producer, consumer);
     GRAPH_UPDATE(
         "Merging ", getHeader(producer), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
 
-    aliasDb.moveAfterTopologicallyValid(consumer, listconstruct);
+    aliasDb.moveBeforeTopologicallyValid(listconstruct, consumer);
     GRAPH_UPDATE(
         "Merging ", getHeader(listconstruct), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(listconstruct, consumer);
   } else {
-    aliasDb.moveAfterTopologicallyValid(consumer, producer);
+    aliasDb.moveBeforeTopologicallyValid(producer, consumer);
     GRAPH_UPDATE(
         "Merging ", getHeader(producer), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);

@@ -189,13 +189,13 @@ Basic activations are supported.
 
 * :meth:`~torch.nn.functional.relu` — Rectified linear unit (copy)
 * :meth:`~torch.nn.functional.relu_` — Rectified linear unit (inplace)
-* :meth:`~torch.nn.functional.max_pool2d` - Maximum pooling 
+* :meth:`~torch.nn.functional.max_pool2d` - Maximum pooling
 * :meth:`~torch.nn.functional.adaptive_avg_pool2d` - Adaptive average pooling
 * :meth:`~torch.nn.functional.avg_pool2d` - Average pooling
 * :meth:`~torch.nn.functional.interpolate` - Interpolation
 * :meth:`~torch.nn.functional.hardswish` - Hard Swish
 * :meth:`~torch.nn.functional.upsample` - Upsampling
-* :meth:`~torch.nn.functional.upsample_bilinear` - Bilinear Upsampling 
+* :meth:`~torch.nn.functional.upsample_bilinear` - Bilinear Upsampling
 * :meth:`~torch.nn.functional.upsample_nearest` - Upsampling Nearest
 
 ``torch.nn.intrinsic``
@@ -208,8 +208,11 @@ accuracy
 * ``torch.nn.intrinsic`` — float versions of the modules, can be swapped with
   quantized version 1 to 1:
 
+  * :class:`~torch.nn.intrinsic.ConvBn1d` — Conv1d + BatchNorm1d
   * :class:`~torch.nn.intrinsic.ConvBn2d` — Conv2d + BatchNorm
+  * :class:`~torch.nn.intrinsic.ConvBnReLU1d` — Conv1d + BatchNorm1d + ReLU
   * :class:`~torch.nn.intrinsic.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
+  * :class:`~torch.nn.intrinsic.ConvReLU1d` — Conv1d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU2d` — Conv2d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU3d` — Conv3d + ReLU
   * :class:`~torch.nn.intrinsic.LinearReLU` — Linear + ReLU
@@ -224,6 +227,7 @@ accuracy
   inference (no BatchNorm variants as it's usually folded into convolution for
   inference):
   * :class:`~torch.nn.intrinsic.quantized.LinearReLU` — Linear + ReLU
+  * :class:`~torch.nn.intrinsic.quantized.ConvReLU1d` — 1D Convolution + ReLU
   * :class:`~torch.nn.intrinsic.quantized.ConvReLU2d` — 2D Convolution + ReLU
   * :class:`~torch.nn.intrinsic.quantized.ConvReLU3d` — 3D Convolution + ReLU
 
@@ -336,6 +340,7 @@ Quantized version of standard NN layers.
   quantized versions
 * :class:`~torch.nn.quantized.QFunctional` — Wrapper class for quantized
   versions of stateless operations like ``torch.add``
+* :class:`~torch.nn.quantized.Conv1d` — 1D convolution
 * :class:`~torch.nn.quantized.Conv2d` — 2D convolution
 * :class:`~torch.nn.quantized.Conv3d` — 3D convolution
 * :class:`~torch.nn.quantized.Linear` — Linear (fully-connected) layer
@@ -360,6 +365,7 @@ quantization output parameters)
 
 * :func:`~torch.nn.quantized.functional.adaptive_avg_pool2d` — 2D adaptive average pooling
 * :func:`~torch.nn.quantized.functional.avg_pool2d` — 2D average pooling
+* :func:`~torch.nn.quantized.functional.conv1d` — 1D convolution
 * :func:`~torch.nn.quantized.functional.conv2d` — 2D convolution
 * :func:`~torch.nn.quantized.functional.conv3d` — 3D convolution
 * :func:`~torch.nn.quantized.functional.interpolate` — Down-/up- sampler
@@ -580,14 +586,29 @@ then quantized.
 
 .. automodule:: torch.nn.intrinsic
 
+ConvBn1d
+~~~~~~~~~~~~~~~
+.. autoclass:: ConvBn1d
+    :members:
+
 ConvBn2d
 ~~~~~~~~~~~~~~~
 .. autoclass:: ConvBn2d
     :members:
 
+ConvBnReLU1d
+~~~~~~~~~~~~~~~
+.. autoclass:: ConvBnReLU1d
+    :members:
+
 ConvBnReLU2d
 ~~~~~~~~~~~~~~~
 .. autoclass:: ConvBnReLU2d
+    :members:
+
+ConvReLU1d
+~~~~~~~~~~~~~~~
+.. autoclass:: ConvReLU1d
     :members:
 
 ConvReLU2d
@@ -687,6 +708,7 @@ Functional interface
 
 .. autofunction:: relu
 .. autofunction:: linear
+.. autofunction:: conv1d
 .. autofunction:: conv2d
 .. autofunction:: conv3d
 .. autofunction:: max_pool2d
@@ -709,6 +731,11 @@ ReLU
 ReLU6
 ~~~~~~~~~~~~~~~
 .. autoclass:: ReLU6
+    :members:
+
+Conv1d
+~~~~~~~~~~~~~~~
+.. autoclass:: Conv1d
     :members:
 
 Conv2d
