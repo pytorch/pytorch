@@ -597,7 +597,7 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
   if (!self_.is_leaf() && !requires_grad) {
     throw std::runtime_error(autograd::utils::requires_grad_leaf_error(requires_grad));
   }
-  if (requires_grad && !(self_.is_floating_point() || self_.is_complex())) {
+  if (requires_grad && ! isDifferentiableType(at::typeMetaToScalarType(self_.dtype()))) {
     throw std::runtime_error("only Tensors of floating point dtype can require gradients");
   }
   self_.set_requires_grad(requires_grad);

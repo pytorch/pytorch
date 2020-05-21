@@ -15,6 +15,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/Reduction.h>
+#include <ATen/Dispatch.h>
 
 #include <ciso646>
 #include <algorithm>
@@ -475,6 +476,35 @@ Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntAr
     result = unsqueeze_multiple(result, dim, self.sizes().size());
   }
   return grad * (self - result).exp();
+}
+
+Tensor logcumsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim) {
+  if (grad.dim() == 0 || grad.numel() == 0) {
+    return grad;
+  }
+
+  // Reference: https://github.com/tensorflow/tensorflow/blob/
+  // 2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
+  return AT_DISPATCH_FLOATING_TYPES(
+      at::typeMetaToScalarType(grad.dtype()),
+      "logcumsumexp_backward",
+      [grad, self, result, dim]() {
+        auto grad_min = at::empty_like(grad);
+        grad_min.fill_(std::numeric_limits<scalar_t>::lowest());
+        auto log_grad_positive = at::where(grad > 0, grad.log(), grad_min);
+        auto log_grad_negative = at::where(grad < 0, (-grad).log(), grad_min);
+
+        auto reverse_logcumsumexp = [dim](auto x) {
+          return at::flip(at::logcumsumexp(at::flip(x, {dim}), dim), {dim});
+        };
+
+        auto output_pos =
+            (reverse_logcumsumexp(log_grad_positive - result) + self).exp();
+        auto output_neg =
+            (reverse_logcumsumexp(log_grad_negative - result) + self).exp();
+
+        return output_pos - output_neg;
+      });
 }
 
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
