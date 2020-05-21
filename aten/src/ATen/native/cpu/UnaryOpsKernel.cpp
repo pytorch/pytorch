@@ -345,6 +345,16 @@ void normal_kernel(Tensor& self, double mean, double std, c10::optional<Generato
   templates::cpu::normal_kernel(self, mean, std, generator);
 }
 
+
+static void rad2deg_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+      kBFloat16, kHalf, iter.dtype(), "rad2deg_cpu", [&]() {
+        cpu_kernel(iter,
+                   [=](scalar_t a) -> scalar_t { return 180 * a / M_PI; },
+                   [=](Vec256<scalar_t> a) { return a.rad2deg(); });
+      });
+}
+
 static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, c10::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::random_from_to_kernel(iter, range, base, generator);
