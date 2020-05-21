@@ -554,7 +554,7 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar so
   return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, source);
 }
 
-Tensor & scatter_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
+Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter_add_(): Expected dtype int64 for index");
   scatter_add_stub(self.device().type(), self, dim, index, src);
   return self;
