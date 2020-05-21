@@ -483,7 +483,7 @@ int listSetItem(Stack& stack);
 
 #define DEFINE_STR_CMP_OP(aten_op, op)     \
   Operator(                                \
-      #aten_op "(str a, str b) -> bool",   \
+      #aten_op ".str(str a, str b) -> bool",   \
       [](Stack& stack) {                   \
         auto b = pop(stack).toStringRef(); \
         auto a = pop(stack).toStringRef(); \
