@@ -100,6 +100,30 @@ static void cumprod_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) 
   });
 }
 
+static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
+  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
+  int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
+
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "logcumsumexp_out_cpu", [&] {
+    cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
+      scalar_t* result_data, auto result_dim_stride,
+      const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
+        scalar_t cum_number = (at::acc_type<scalar_t, false>)init_val;
+        for (int64_t i = 0; i < self_dim_size; ++i) {
+          scalar_t x = self_data[i * self_dim_stride];
+
+          // Reference : https://www.tensorflow.org/api_docs/python/tf/math/cumulative_logsumexp
+          auto log_add_exp = [](scalar_t x, scalar_t y) -> scalar_t {
+            return std::log1p(std::exp(std::min(x, y) - std::max(x, y))) + std::max(x, y);
+          };
+          cum_number = log_add_exp(x, cum_number);
+          result_data[i * result_dim_stride] = static_cast<scalar_t>(cum_number);
+        }
+      }, /*init_val=*/ -std::numeric_limits<scalar_t>::infinity()
+    );
+  });
+}
+
 static void sum_kernel_impl(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::BFloat16, ScalarType::Half, ScalarType::Bool, iter.dtype(), "sum_cpu", [&] {
@@ -293,5 +317,6 @@ REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl);
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl);
 REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
 REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
+REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
 
 }}  // namespace at::native

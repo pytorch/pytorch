@@ -129,6 +129,9 @@ static void frac_kernel(TensorIterator& iter) {
 }
 
 static void logical_not_kernel(TensorIterator& iter) {
+  // NOTE: this implementation differs from the CUDA implementation which only does single dispatch
+  // (to avoid expensive compilation) because CPU kernels don't handle dynamic_casting
+  // (see needs_dynamic_casting).
   AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_not_cpu", [&]() {
     using self_t = scalar_t;
     AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_not_cpu", [&]() {
