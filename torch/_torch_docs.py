@@ -1412,6 +1412,27 @@ Example::
             [-1.2329,  1.9883,  1.0551]])
 """.format(**common_args))
 
+add_docstr(torch.logcumsumexp,
+           r"""
+logcumsumexp(input, dim, out=None) -> Tensor
+Returns the logarithm of the cumulative summation of the exponentiation of
+elements of :attr:`input` in the dimension :attr:`dim`. 
+
+For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
+
+.. math::
+    \text{{logcumsumexp}}(x)_{{i}} = \log \cumsum_j \exp(x_{{ij}})
+Args:
+    {input}
+    dim  (int): the dimension to do the operation over
+    {out}
+Example::
+    >>> a = torch.randn(10)
+    >>> torch.logcumsumexp(a, dim=0)
+    tensor([-0.42296738, -0.04462666,  0.86278635,  0.94622083,  1.05277811,
+             1.39202815,  1.83525007,  1.84492621,  2.06084887,  2.06844475]))
+""".format(**reduceops_common_args))
+
 add_docstr(torch.cummax,
            r"""
 cummax(input, dim, out=None) -> (Tensor, LongTensor)
@@ -2699,6 +2720,39 @@ one of ``torch.complex64``, and ``torch.complex128``.
 
 Args:
     input (Tensor): the PyTorch tensor to test
+""")
+
+add_docstr(torch.is_nonzero,
+           r"""
+is_nonzero(input) -> (bool)
+
+Returns True if the :attr:`input` is a single element tensor which is not equal to zero
+after type conversions.
+i.e. not equal to ``torch.tensor([0.])`` or ``torch.tensor([0])`` or
+``torch.tensor([False])``.
+Throws a ``RuntimeError`` if ``torch.numel() != 1`` (even in case
+of sparse tensors).
+
+Args:
+    input (Tensor): the PyTorch tensor to test
+Example::
+
+    >>> torch.is_nonzero(torch.tensor([0.]))
+    False
+    >>> torch.is_nonzero(torch.tensor([1.5]))
+    True
+    >>> torch.is_nonzero(torch.tensor([False]))
+    False
+    >>> torch.is_nonzero(torch.tensor([3]))
+    True
+    >>> torch.is_nonzero(torch.tensor([1, 3, 5]))
+    Traceback (most recent call last):
+    ...
+    RuntimeError: bool value of Tensor with more than one value is ambiguous
+    >>> torch.is_nonzero(torch.tensor([]))
+    Traceback (most recent call last):
+    ...
+    RuntimeError: bool value of Tensor with no values is ambiguous
 """)
 
 add_docstr(torch.kthvalue,

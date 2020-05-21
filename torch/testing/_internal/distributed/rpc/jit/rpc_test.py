@@ -1,5 +1,4 @@
 from typing import Dict, Tuple
-import unittest
 
 import torch
 import time
@@ -994,7 +993,6 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         with self.assertRaisesRegex(RuntimeError, "Another expected error"):
             future.wait()
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     @dist_init
     def test_call_rpc_with_profiling(self):
         # Ensures that we can call torch.ops.profiler._call_end_callbacks_on_jit_fut on a jit
@@ -1017,7 +1015,6 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
             function_event = get_function_event(events, prof_key)
             self.assertTrue(torch.jit._qualified_name(one_arg) in function_event.name)
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     def test_record_function_jit_end_callbacks_with_fork(self):
         # Ensures that we can call rf._call_end_callbacks_on_future on a jit
         # future in python eager mode with torch.jit.fork
@@ -1035,7 +1032,6 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         # profiling event cpu time
         self.assertGreaterEqual(sleep_event.cpu_time * 1e-6, sleep_interval)
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     def test_call_fork_in_jit_with_profiling(self):
         # Ensures that we can call torch.ops.profiler._call_end_callbacks_on_jit_fut on a jit
         # future from within a script function with torch.jit.fork

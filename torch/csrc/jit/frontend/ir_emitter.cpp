@@ -2032,6 +2032,28 @@ struct to_ir {
     }
   }
 
+  NamedValue emitValueToTensor(
+      const NamedValue& value,
+      const NamedValue& matchTypeOf) {
+    // Add implicit conversion of int/float/bool types to tensors
+    // Used in emitSubscriptAssign to convert:
+    //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
+    // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
+    const auto kind = value.type()->kind();
+    if (kind == c10::TypeKind::IntType || kind == c10::TypeKind::BoolType ||
+        kind == c10::TypeKind::FloatType) {
+      auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
+      auto device = graph->insert(prim::device, {matchTypeOf}, {});
+      auto converted = graph->insert(
+          aten::tensor,
+          {value},
+          {NamedValue("dtype", dtype), NamedValue("device", device)});
+      return NamedValue(value.loc(), converted);
+    }
+
+    return value;
+  }
+
   // Emit mutating assignments like `foo[0] = bar`
   void emitSubscriptAssign(
       const SourceRange& stmtRange,
@@ -2060,10 +2082,14 @@ struct to_ir {
           lhs.range(), sliceable, lhs.subscript_exprs());
 
       const auto slicedArg = NamedValue(lhs.range(), sliced);
+
+      // rhs must be a tensor, implicitly convert int/float/bool
+      const auto convertedRhs = emitValueToTensor(rhs, slicedArg);
+
       if (tensorIndices.size() == 0) {
         // Common case: we only tried to index with int and slices. Copy the
         // RHS into the resulting tensor.
-        graph->insert(aten::copy_, {slicedArg, rhs}, {}, stmtRange);
+        graph->insert(aten::copy_, {slicedArg, convertedRhs}, {}, stmtRange);
       } else {
         // Special case: we tried to do "advanced indexing" with a tensor.
         // Dispatch to `aten::index_put_` with tensorindices of Tensor?[]
@@ -2073,7 +2099,10 @@ struct to_ir {
                                  ->output();
 
         graph->insert(
-            aten::index_put_, {slicedArg, indices, rhs}, {}, stmtRange);
+            aten::index_put_,
+            {slicedArg, indices, convertedRhs},
+            {},
+            stmtRange);
       }
       // Otherwise, this is a list or a classtype.
       // Dispatch to aten::_set_item to both select and assign
@@ -2806,9 +2835,13 @@ struct to_ir {
     // through RPC in TorchScript,
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
-    if (apply.inputs().size() < 2 || apply.inputs().size() > 4) {
+    auto rpcMinInputs = 2;
+    auto rpcMaxInputs = 5; // NOLINT
+    if (apply.inputs().size() < rpcMinInputs ||
+        apply.inputs().size() > rpcMaxInputs) {
       throw ErrorReport(apply)
           << "Possible forms of call to rpc_async(..) are\n"
+          << "rpc_async(dst_worker_name, user_callable, args, kwargs, timeout)\n"
           << "rpc_async(dst_worker_name, user_callable, args, kwargs)\n"
           << "rpc_async(dst_worker_name, user_callable, args)\n"
           << "rpc_async(dst_worker_name, user_callable)\n"
@@ -2840,7 +2873,9 @@ struct to_ir {
     // If `kwargs` is an empty dict, users are allowed to not pass `kwargs`.
     // If `args` and `kwargs` are an empty tuple and an empty dict,
     // respectively, users are allowed to not pass `args` and `kwargs`.
-    TreeList args_kwargs_trees(input_trees.begin() + 2, input_trees.end());
+
+    TreeList args_kwargs_timeout_trees(
+        input_trees.begin() + 2, input_trees.end());
 
     // Get user callable.
     const auto& callablePtrs = user_callable_function_value->callees();
@@ -2859,9 +2894,9 @@ struct to_ir {
     std::vector<NamedValue> kwargs;
     // Get args and kwargs as `NamedValue`s.
     // Similar to getNamedValues(..) and emitAttributes(..).
-    if (args_kwargs_trees.size() >= 1) {
+    if (args_kwargs_timeout_trees.size() >= 1) {
       // Unroll args from a Var that is known to be a Tuple.
-      auto& args_tree = args_kwargs_trees[0];
+      auto& args_tree = args_kwargs_timeout_trees[0];
       auto entry_sugared_values = emitSugaredExpr(Expr(args_tree), 1)
                                       ->asTuple(args_tree->range(), method);
       args.reserve(entry_sugared_values.size());
@@ -2895,7 +2930,7 @@ struct to_ir {
       rpc_async_node->addInput(dst_worker_name_value);
       rpc_async_node->addInput(userCallableQualNameValue);
 
-      for (const auto& tree : args_kwargs_trees) {
+      for (const auto& tree : args_kwargs_timeout_trees) {
         rpc_async_node->addInput(emitExpr(Expr(tree)));
       }
     }
