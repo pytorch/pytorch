@@ -8063,7 +8063,8 @@ a")
         ''')
 
         lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]", "(1, 1)",
-                 "torch.jit.annotate(List[int], [])", "[2.5, 2.5]", "[[2], [2]]", "[[-.5], [2.2]]", "[[False], [True]]"]
+                 "torch.jit.annotate(List[int], [])", "[2.5, 2.5]", "[[2], [2]]", "[[-.5], [2.2]]", "[[False], [True]]",
+                 "torch.tensor([[1, 2], [3, 4]])", "torch.tensor([1., 2., 3., 4.])"]
 
         dtypes = ["", ", dtype=torch.float", ", dtype=torch.double", ", dtype=torch.half",
                   ", dtype=torch.uint8", ", dtype=torch.int8", ", dtype=torch.short",
@@ -8080,6 +8081,12 @@ a")
                 for option in option_pairs:
                     # tensor from empty list is type float in python and annotated type in torchscript
                     if "annotate" in li and "dtype" not in option:
+                        continue
+                    if "tensor" in li and len(option) and op == "tensor":
+                        # need to fix tensor() support for specifying additional options
+                        continue
+                    if "tensor" in li and op == "as_tensor":
+                        # as_tensor(tensor) not supported currently.
                         continue
                     code = tensor_template.format(list_create=li, tensor_op=op, options=option)
                     scope = {}
@@ -17195,12 +17202,6 @@ a")
 
         self.checkScript(fn, ((3, 4),))
         self.checkScript(fn, ())
-
-    def test_tensor_clone(self):
-        def fn(x):
-            return torch.tensor(x)
-
-        self.checkScript(fn, (torch.rand(3, 4),))
 
     def test_named_tuple_redefine(self):
         global _1, _2
