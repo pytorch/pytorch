@@ -682,7 +682,7 @@ class TestDistributed(QuantizationTestCase):
             self.assertEqual(
                 buffer_ids_before,
                 buffer_ids_after,
-                "{}: Buffers must be modified in place".format(str(observer)))
+                msg="{}: Buffers must be modified in place".format(str(observer)))
 
     def test_fake_quant_preserves_buffers(self):
         """
@@ -704,7 +704,7 @@ class TestDistributed(QuantizationTestCase):
         self.assertEqual(
             buffer_ids_before,
             buffer_ids_after,
-            "FakeQuant: Buffers must be modified in place")
+            msg="FakeQuant: Buffers must be modified in place")
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
