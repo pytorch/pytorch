@@ -472,13 +472,37 @@ def generate_tensor_like_override_tests(cls):
             func_args += [TensorLike(), TensorLike()]
 
         def test(self):
-            self.assertEqual(func(*func_args), -1)
+            try:
+                self.assertEqual(func(*func_args), -1)
+            except TypeError as e:
+                patterns = [
+                    "'torch._C._TensorBase'",
+                    "'Tensor'",
+                    "got TensorLike",
+                ]
+                found = (str(e).find(p) for p in patterns)
+                if all(f == -1 for f in found):
+                    raise
 
+                func_args2 = [SubTensor([1])] * len(func_args)
+                self.assertEqual(implements_sub(func)(override)(*func_args2), -1)
         return test
 
     for func, override in get_testing_overrides().items():
         test_method = test_generator(func, override)
-        module = func.__module__
+        if func.__name__ == "__get__":
+            if hasattr:
+                module = getattr(
+                    func.__self__,
+                    "__qualname__",
+                    None
+                )
+                if module is None:
+                    module = "Tensor." + func.__self__.fget.__name__
+        elif getattr(torch.Tensor, func.__name__, None) is func:
+            module = "Tensor"
+        else:
+            module = getattr(func, "__module__", "Tensor")
         if module:
             name = 'test_{}_{}'.format(module.replace('.', '_'), func.__name__)
         else:

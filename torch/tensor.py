@@ -431,7 +431,7 @@ class Tensor(torch._C._TensorBase):
         relevant_args = (self, tensor)
         from torch._overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and type(tensor) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.resize_as, relevant_args, self, *sizes)
+            return handle_torch_function(Tensor.resize_as, relevant_args, self, tensor)
         warnings.warn("non-inplace resize_as is deprecated")
         from torch.autograd._functions import Resize
         return Resize.apply(self, tensor.size())
