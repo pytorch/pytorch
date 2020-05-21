@@ -15,7 +15,7 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
-    default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
+    default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert
 from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
 import unittest
@@ -205,12 +205,13 @@ class QuantizationTestCase(TestCase):
         self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
 
         # Use first calib_data entry as trace input
-        traced = torch.jit.trace(orig_mod, calib_data[0][0])
+        traced = torch.jit.trace(orig_mod, (calib_data[0][0]))
         self._checkScriptable(orig_mod, traced, calib_data, check_save_load)
 
     # Call this twice: once for a scripted module and once for a traced module
     def _checkScriptable(self, orig_mod, script_mod, calib_data, check_save_load):
-        self._checkModuleCorrectnessAgainstOrig(orig_mod, script_mod, calib_data)
+
+        self._checkModuleCorrectnessAgainstOrig2(orig_mod, script_mod, calib_data)
 
         # Test save/load
         buffer = io.BytesIO()
@@ -218,13 +219,19 @@ class QuantizationTestCase(TestCase):
 
         buffer.seek(0)
         loaded_mod = torch.jit.load(buffer)
-
+        print(loaded_mod)
         # Pending __get_state_ and __set_state__ support
         # See tracking task https://github.com/pytorch/pytorch/issues/23984
         if check_save_load:
-            self._checkModuleCorrectnessAgainstOrig(orig_mod, loaded_mod, calib_data)
+            self._checkModuleCorrectnessAgainstOrig2(orig_mod, loaded_mod, calib_data)
 
     def _checkModuleCorrectnessAgainstOrig(self, orig_mod, test_mod, calib_data):
+        for (inp, hiddens) in calib_data:
+            ref_output = orig_mod(inp, hiddens)
+            scripted_output = test_mod(inp, hiddens)
+            self.assertEqual(scripted_output, ref_output)
+
+    def _checkModuleCorrectnessAgainstOrig2(self, orig_mod, test_mod, calib_data):
         for (inp, _) in calib_data:
             ref_output = orig_mod(inp)
             scripted_output = test_mod(inp)
@@ -264,8 +271,8 @@ class SingleLayerLinearDynamicModel(torch.nn.Module):
 class LSTMDynamicModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.qconfig = default_qconfig
-        self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
+        self.qconfig = default_dynamic_qconfig
+        self.lstm = torch.nn.LSTM(2, 2, 1).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.lstm(x)
