@@ -356,8 +356,13 @@ class LSTM(RNNBase):
             packed_ih = m._packed_params_ih
             packed_hh = m._packed_params_hh
             unpacked_ih, unpacked_hh = m._weight_bias()
-            cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
-                packed_ih, packed_hh, unpacked_ih[1], unpacked_hh[1])
+            if self.dtype == torch.qint8:
+                cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                    packed_ih, packed_hh, unpacked_ih[1], unpacked_hh[1])
+            else:
+                cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
+                    packed_ih, packed_hh)
+
             _all_param_values.append(PackedParameter(cell_params))
 
         _all_params = ([m.param for m in _all_param_values])
