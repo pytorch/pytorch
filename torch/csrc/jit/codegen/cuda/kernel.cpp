@@ -11,8 +11,8 @@
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 #include <torch/csrc/jit/resource_guard.h>
-#include <iostream>
 #include <fstream>
+#include <iostream>
 
 namespace torch {
 namespace jit {
