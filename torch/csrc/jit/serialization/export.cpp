@@ -532,12 +532,17 @@ void EncoderBase::AddAttribute(
     const jit::Symbol name,
     const bool use_external_data_format,
     const std::string& onnx_file_path) {
-  auto createAttributeTensorName = [](const onnx::NodeProto* node_proto, onnx::TensorProto* tensor_proto, const jit::Symbol attr_name, size_t& num_external_data) -> std::string {
+  auto createAttributeTensorName =
+      [](const onnx::NodeProto* node_proto,
+         onnx::TensorProto* tensor_proto,
+         const jit::Symbol attr_name,
+         size_t& num_external_data) -> std::string {
     if (tensor_proto->has_name()) {
       return tensor_proto->name();
     }
     if (!node_proto->has_name()) {
-      auto name = node_proto->op_type() + "_" + attr_name.toDisplayString() + "_" + std::to_string(num_external_data);
+      auto name = node_proto->op_type() + "_" + attr_name.toDisplayString() +
+          "_" + std::to_string(num_external_data);
       num_external_data++;
       return name;
     } else {
@@ -581,7 +586,8 @@ void EncoderBase::AddAttribute(
       auto t = attr->mutable_t();
       if (use_external_data_format) {
         if (!t->has_name()) {
-          t->set_name(createAttributeTensorName(node_proto, t, name, num_external_data_));
+          t->set_name(createAttributeTensorName(
+              node_proto, t, name, num_external_data_));
         }
       }
       EncodeTensor(
@@ -597,7 +603,8 @@ void EncoderBase::AddAttribute(
         auto t = attr->add_tensors();
         if (use_external_data_format) {
           if (!t->has_name()) {
-            t->set_name(createAttributeTensorName(node_proto, t, name, num_external_data_));
+            t->set_name(createAttributeTensorName(
+                node_proto, t, name, num_external_data_));
           }
         }
         EncodeTensor(t, v, t->name(), use_external_data_format, onnx_file_path);
