@@ -60,4 +60,6 @@ tests. You can regenerate the correct output via::
 CPP tests
 ~~~~~~~~~
 
-TBD
+C++ tests are automatically built as part of the `setup.py develop` build. There are several binaries under `./build/bin/test_*` and `./build/bin/*_test`, but since most PyTorch functionality is covered in Python tests, contributors may only need to interact with the C++ API tests in `./build/bin/test_api`. The source for C++ API tests is in `test/cpp/api/`.
+
+The C++ tests use the Google Test framework, so the binaries provide a standardized command line interface. Run `./build/bin/test_api --help` for more information. 
