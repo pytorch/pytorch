@@ -663,10 +663,10 @@ class BuildExtension(build_ext, object):
             compiler = os.environ.get('CXX', 'c++')
         check_compiler_abi_compatibility(compiler)
         # Warn user if VC env is activated but `DISTUILS_USE_SDK` is not set.
-        if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' in os.environ and 'DISTUILS_USE_SDK' not in os.environ:
-            msg = ('It seems that the VC environment is activated but DISTUILS_USE_SDK is not set.'
+        if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' in os.environ and 'DISTUTILS_USE_SDK' not in os.environ:
+            msg = ('It seems that the VC environment is activated but DISTUTILS_USE_SDK is not set.'
                    'This may lead to multiple activations of the VC env.'
-                   'Please set `DISTUILS_USE_SDK=1` and try again.')
+                   'Please set `DISTUTILS_USE_SDK=1` and try again.')
             raise UserWarning(msg)
 
     def _add_compile_flag(self, extension, flag):
