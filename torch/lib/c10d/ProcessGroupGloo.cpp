@@ -29,6 +29,7 @@
 #include <c10/cuda/CUDAStream.h>
 #endif
 
+#include <c10/util/StringUtil.h>
 #include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
@@ -732,7 +733,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
 #endif
       break;
     default:
-      invalidArgument("unsupported device type");
+      invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
   std::shared_ptr<AsyncBroadcastWork> work;
@@ -1255,7 +1256,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
 #endif
       break;
     default:
-      invalidArgument("unsupported device type");
+      invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
   const auto& layout = inputs[0].layout();
@@ -1331,7 +1332,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
     case c10::kCPU:
       break;
     default:
-      invalidArgument("unsupported device type");
+      invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
   switch (layout) {
@@ -1493,7 +1494,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
 #endif
       break;
     default:
-      invalidArgument("unsupported device type");
+      invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
   std::shared_ptr<AsyncReduceWork> work;
@@ -1700,7 +1701,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
 #endif
       break;
     default:
-      invalidArgument("unsupported device type");
+      invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
   std::shared_ptr<AsyncAllgatherWork> work;
@@ -2032,7 +2033,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
 #endif
       break;
     default:
-      invalidArgument("unsupported device type");
+      invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
   std::shared_ptr<AsyncGatherWork> work;
@@ -2218,7 +2219,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
 #endif
       break;
     default:
-      invalidArgument("unsupported device type");
+      invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
   std::shared_ptr<AsyncScatterWork> work;
