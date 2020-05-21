@@ -1412,6 +1412,27 @@ Example::
             [-1.2329,  1.9883,  1.0551]])
 """.format(**common_args))
 
+add_docstr(torch.logcumsumexp,
+           r"""
+logcumsumexp(input, dim, out=None) -> Tensor
+Returns the logarithm of the cumulative summation of the exponentiation of
+elements of :attr:`input` in the dimension :attr:`dim`. 
+
+For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
+
+.. math::
+    \text{{logcumsumexp}}(x)_{{i}} = \log \cumsum_j \exp(x_{{ij}})
+Args:
+    {input}
+    dim  (int): the dimension to do the operation over
+    {out}
+Example::
+    >>> a = torch.randn(10)
+    >>> torch.logcumsumexp(a, dim=0)
+    tensor([-0.42296738, -0.04462666,  0.86278635,  0.94622083,  1.05277811,
+             1.39202815,  1.83525007,  1.84492621,  2.06084887,  2.06844475]))
+""".format(**reduceops_common_args))
+
 add_docstr(torch.cummax,
            r"""
 cummax(input, dim, out=None) -> (Tensor, LongTensor)
