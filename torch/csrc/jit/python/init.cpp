@@ -673,12 +673,8 @@ void initJITBindings(PyObject* module) {
     }
 
     THPObjectPtr getMemview(void* buf, size_t n) const {
-#if PY_MAJOR_VERSION >= 3
       THPObjectPtr memview(PyMemoryView_FromMemory(
           reinterpret_cast<char*>(buf), n, PyBUF_WRITE));
-#else
-      THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, n));
-#endif
       if (!memview) {
         throw python_error();
       }
@@ -840,6 +836,7 @@ void initJITBindings(PyObject* module) {
       return op->schema();
     });
   });
+  m.def("_jit_get_custom_class_schemas", customClassSchemasForBCCheck);
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
     auto symbol = Symbol::fromQualString(qualified_name);
     auto operations = getAllOperatorsFor(symbol);
@@ -860,7 +857,7 @@ void initJITBindings(PyObject* module) {
           &PythonFutureWrapper::then,
           py::call_guard<py::gil_scoped_release>());
 
-  m.def("fork", [](py::args args) {
+  m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);
 
     py::function f = py::cast<py::function>(args[0]);
@@ -884,7 +881,7 @@ void initJITBindings(PyObject* module) {
         tracer::WithNestedTracingFrame env_guard;
 
         // Run the user-supplied function
-        py_func_output = f(*args_tup);
+        py_func_output = f(*args_tup, **kwargs);
 
         // Convert the output of the user-supplied function to IValue. The type
         // information of this IValue is used both to record the correct type in
@@ -907,7 +904,7 @@ void initJITBindings(PyObject* module) {
 
       return std::make_shared<PythonFutureWrapper>(retval);
     } else {
-      auto result = toTypeInferredIValue(f(*args_tup));
+      auto result = toTypeInferredIValue(f(*args_tup, **kwargs));
       auto retval = c10::make_intrusive<c10::ivalue::Future>(result.type());
       retval->markCompleted(std::move(result));
       return std::make_shared<PythonFutureWrapper>(retval);

@@ -31,6 +31,33 @@
 
 .syntax unified
 
+#  Args passed via stack.
+#  TOS
+#  |-----------|
+#  |a_stride   | 0
+#  |w          | 4
+#  |c          | 8
+#  |c_stride   | 12
+#  |out ch indx| 16
+#  |params     | 20
+#  |-----------|
+#  
+
+#  After loading w pointer in ip reg.
+#  And after pushing r4-r8 and d8-d15 on stack
+#  |-----------|
+#  |d8 - d15   | 0
+#  |r4 - r7    | 64
+#  |a_stride   | 80
+#  |w          | 84
+#  |b          | 88
+#  |c          | 92
+#  |c_stride   | 96
+#  |out ch indx| 100
+#  |params     | 104
+#  |-----------|
+#  
+
 # void pytorch_q8gemm_ukernel_4x8__aarch32_neon(
 #     size_t mr,
 #     size_t nr,
@@ -41,6 +68,7 @@
 #     const float* restrict b,
 #     uint8_t* restrict c,
 #     size_t c_stride,
+#     size_t output_channel_index,
 #     const union pytorch_qnnp_conv_dynamic_quantization_params quantization_params[restrict static 1])
 BEGIN_FUNCTION pytorch_q8gemm_dq_ukernel_4x8__aarch32_neon
     .arm
@@ -56,19 +84,38 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_ukernel_4x8__aarch32_neon
     PUSH {r4, r5, r6, r7}
     VPUSH {d8-d15}
 
+    # Load output channel index
+    LDR r5, [sp, 100]
+    # Load quantization params
+    # - r7 = quantization_params
+    LDR r7, [sp, 104]
+    # Load input_zero_point
+    VLD1.8 {d14[]}, [r7]
+    ADD r7, r7, 4
+    # Load pointer to per channel zero points array
+    # Post-index: After load increment r7 by 4
+    LDR r4, [r7], #4
+    # Byte offset of output channel index for requant scale.
+    LSL r6, r5, 2
+
+    VEOR q8,  q8,  q8
+    VEOR q9,  q9,  q9
+
+    # Load pointer to per channel requant scale
+    LDR r7, [r7]
+    # Add output_channel_index to the b_zero_point pointer
+    ADD r4, r4, r5
+    # Now r7 has the base_addr + offset for multipliers
+    ADD r7, r7, r6
+
     # Load a_stride
     # - r6 = a_stride
     LDR r6, [sp, 80]
 
-    # Load quantization params
-    # - r7 = quantization_params
-    LDR r7, [sp, 100]
+    VEOR q10, q10, q10
+    VEOR q11, q11, q11
 
-    VLD1.8 {d14[]}, [r7]
-    ADD r7, r7, 2
-    VLD1.8 {d15[]}, [r7]
-    ADD r7, r7, 2
-    VLD1.32 {d12[]}, [r7]
+    VLD1.8 {d15}, [r4]
 
     CMP r0, 2
     ADD r4, r3, r6
@@ -81,10 +128,6 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_ukernel_4x8__aarch32_neon
     ADD r6, r5, r6
     MOVNE r6, r5
 
-    VEOR q8,  q8,  q8
-    VEOR q9,  q9,  q9
-    VEOR q10, q10, q10
-    VEOR q11, q11, q11
     VEOR q12, q12, q12
     VEOR q13, q13, q13
     VEOR q14, q14, q14
@@ -650,25 +693,29 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_ukernel_4x8__aarch32_neon
     .p2align 4
 2:
     LDR r6, [sp, 88]
-    VLD1.32 {q0, q1}, [r6]
-
+    # Load q6: vmultiplier_c0123
+    VLD1.32 {d12, d13}, [r7]!
     VCVT.F32.S32 q8, q8
     VCVT.F32.S32 q9, q9
     VCVT.F32.S32 q10, q10
+    # Load q7: vmultiplier_c4567
+    VLD1.32 {d14, d15}, [r7]
+    VLD1.32 {q0, q1}, [r6]
+
     VCVT.F32.S32 q11, q11
     VCVT.F32.S32 q12, q12
     VCVT.F32.S32 q13, q13
     VCVT.F32.S32 q14, q14
     VCVT.F32.S32 q15, q15
 
-    VMUL.F32 q8, q8, d12[0]
-    VMUL.F32 q9, q9, d12[0]
-    VMUL.F32 q10, q10, d12[0]
-    VMUL.F32 q11, q11, d12[0]
-    VMUL.F32 q12, q12, d12[0]
-    VMUL.F32 q13, q13, d12[0]
-    VMUL.F32 q14, q14, d12[0]
-    VMUL.F32 q15, q15, d12[0]
+    VMUL.F32 q8, q8, q6
+    VMUL.F32 q9, q9, q7
+    VMUL.F32 q10, q10, q6
+    VMUL.F32 q11, q11, q7
+    VMUL.F32 q12, q12, q6
+    VMUL.F32 q13, q13, q7
+    VMUL.F32 q14, q14, q6
+    VMUL.F32 q15, q15, q7
 
     VADD.F32 q8, q8, q0
     VADD.F32 q9, q9, q1
