@@ -4296,14 +4296,14 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
 
-separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan', 'tanh']
+separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
 
 # white list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
                 '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add', 'roll',
-                '__radd__', 'repeat', 'expand', 'mul'] + separate_complex_tests
+                '__radd__', 'repeat', 'expand', 'mul', 'tanh'] + separate_complex_tests
 
 def add_test(
         name,
@@ -6259,13 +6259,15 @@ class TestAutogradDeviceType(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1], [1, 1]])
 
-    @unittest.skip("Wrong Gradient: https://github.com/pytorch/pytorch/issues/38586")
     def test_mv_grad_stride_0(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/38315
         mat = torch.randn(2, 2, device=device)
-        vec = torch.randn(1, device=device).expand(2).requires_grad_(True)
+        vec = torch.randn(1, device=device).requires_grad_(True)
 
         def fn(vec):
+            # Expand inside the function to make sure the input to
+            # gradcheck does not have overlapping memory
+            vec = vec.expand(2)
             return (mat @ vec).sum()
 
         gradcheck(fn, (vec))

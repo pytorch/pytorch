@@ -232,10 +232,6 @@ class TORCH_API RRef : public RRefInterface {
     return ownerCreationFuture_;
   }
 
-  // Indicate that the creation of this RRef on owner node has timed out.
-  inline void setTimedOut() {
-    timedOut_ = true;
-  }
   // Check if creation of this RRef on owner node has timed out.
   inline bool getTimedOut() const {
     return timedOut_.load();
@@ -253,6 +249,10 @@ class TORCH_API RRef : public RRefInterface {
   virtual void tryDel() {}
 
  protected:
+  // Indicates that the creation of this RRef on owner node has timed out.
+  inline void setTimedOut() {
+    timedOut_ = true;
+  }
   friend class RRefContext;
 
   RRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type);

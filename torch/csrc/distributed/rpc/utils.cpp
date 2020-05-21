@@ -30,12 +30,18 @@ RPCErrorType getRPCErrorType(const FutureMessage& fm) {
 
   // Attempt to parse for error string given by makeRPCError, otherwise return
   // unknown error.
+  // Note that this function expects errors formatted with makeRPCError().
   auto err = std::string(fm.error()->what());
-  size_t pos = err.find(torch::distributed::rpc::kRPCErrorPrefix);
+  size_t pos = err.find(kRPCErrorPrefix);
   if (pos != std::string::npos) {
     // Parse the RPCErrorType.
-    auto errIdx = pos + torch::distributed::rpc::kRPCErrorPrefix.size() + 1;
-    auto errStr = err.substr(errIdx, err.find(":", errIdx) - errIdx);
+    auto errStartIdx =
+        pos + torch::distributed::rpc::kRPCErrorPrefix.size() + 1;
+    auto errEndIdx = err.find(":", errStartIdx);
+    if (errEndIdx == std::string::npos) {
+      return RPCErrorType::UNKNOWN_ERROR;
+    }
+    auto errStr = err.substr(errStartIdx, errEndIdx - errStartIdx);
     auto errType = static_cast<RPCErrorType>(std::stoi(errStr));
     return errType;
   } else {

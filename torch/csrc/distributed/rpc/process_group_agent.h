@@ -7,7 +7,6 @@
 #include <atomic>
 #include <thread>
 
-#include <fmt/format.h>
 
 namespace torch {
 namespace distributed {

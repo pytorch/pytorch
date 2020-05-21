@@ -9,7 +9,12 @@ namespace distributed {
 namespace rpc {
 
 // An enum denoting common RPC errors to allow specific error handling for them.
-enum RPCErrorType { UNKNOWN_ERROR = 0, TIMEOUT = 1, INTENTIONAL_FAILURE = 2 };
+enum RPCErrorType {
+  UNKNOWN_ERROR = 0, /* Indicates that error type could not be parsed */
+  TIMEOUT = 1, /* Indicates that the RPC has timed out */
+  INTENTIONAL_FAILURE = 2 /* Deliberate failure, such as those injected by
+                             FaultyProcessGroupAgent for testing */
+};
 
 enum MessageType {
   // messages for dist.rpc on builtin operators

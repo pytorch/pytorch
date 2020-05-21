@@ -2751,6 +2751,20 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         args = (torch.tensor(1), )
         self._test_remote_message_delay_timeout(func, args)
 
+    @dist_init(faulty_messages=[], messages_to_delay={"SCRIPT_RREF_FETCH_CALL": 1})
+    def test_rref_to_here_timeout(self):
+        if self.rank != 0:
+            return
+
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker = "worker{}".format(dst_rank)
+        rref = rpc.remote(dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1)))
+        expected_error = get_timeout_error_regex(
+            dist_utils.TEST_CONFIG.rpc_backend_name
+        )
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            rref.to_here(0.01)
+
     @dist_init(faulty_messages=[])
     def test_rpc_builtin_timeout(self):
         next_rank = (self.rank + 1) % self.world_size

@@ -69,6 +69,11 @@ def rref_to_here(rref_var):
     return rref_var.to_here()
 
 @torch.jit.script
+def rref_to_here_with_timeout(rref_var, timeout):
+    # type: (RRef[Tensor], float) -> Tensor
+    return rref_var.to_here(timeout)
+
+@torch.jit.script
 def rpc_async_with_rref_arg(dst_worker_name, args):
     # type: (str, Tuple[RRef[Tensor]]) -> Tensor
     fut = rpc.rpc_async(dst_worker_name, rref_to_here, args)
@@ -168,6 +173,22 @@ class JitFaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         # Call to_here() within a ScriptFunction and ensure it raises
         with self.assertRaisesRegex(RuntimeError, "RRef creation"):
             rref_to_here(rref)
+
+    @dist_init(messages_to_delay={"SCRIPT_RREF_FETCH_CALL": 1})
+    def test_rref_to_here_timeout_in_jit(self):
+        if self.rank != 0:
+            return
+
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker = "worker{}".format(dst_rank)
+        rref = rpc.remote(
+            dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
+        )
+        expected_error = get_timeout_error_regex(
+            dist_utils.TEST_CONFIG.rpc_backend_name
+        )
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            rref_to_here_with_timeout(rref, 0.01)
 
     @dist_init(faulty_messages=["SCRIPT_REMOTE_CALL"])
     def test_rref_timeout_pickle_in_jit(self):
