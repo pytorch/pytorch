@@ -161,6 +161,11 @@ COMMON_HIPCC_FLAGS = [
 
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 
+PLAT_TO_VCVARS = {
+    'win32' : 'x86',
+    'win-amd64' : 'x86_amd64',
+}
+
 
 def _is_binary_build():
     return not BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__)
@@ -657,6 +662,12 @@ class BuildExtension(build_ext, object):
         else:
             compiler = os.environ.get('CXX', 'c++')
         check_compiler_abi_compatibility(compiler)
+        # Warn user if VC env is activated but `DISTUILS_USE_SDK` is not set.
+        if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' in os.environ and 'DISTUTILS_USE_SDK' not in os.environ:
+            msg = ('It seems that the VC environment is activated but DISTUTILS_USE_SDK is not set.'
+                   'This may lead to multiple activations of the VC env.'
+                   'Please set `DISTUTILS_USE_SDK=1` and try again.')
+            raise UserWarning(msg)
 
     def _add_compile_flag(self, extension, flag):
         extension.extra_compile_args = copy.deepcopy(extension.extra_compile_args)
@@ -1446,6 +1457,22 @@ def _run_ninja_build(build_directory, verbose, error_prefix):
     num_workers = _get_num_workers(verbose)
     if num_workers is not None:
         command.extend(['-j', str(num_workers)])
+    env = os.environ.copy()
+    # Try to activate the vc env for the users
+    if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' not in env:
+        from distutils.util import get_platform
+        from distutils._msvccompiler import _get_vc_env
+
+        plat_name = get_platform()
+        plat_spec = PLAT_TO_VCVARS[plat_name]
+
+        vc_env = _get_vc_env(plat_spec)
+        vc_env = {k.upper(): v for k, v in vc_env.items()}
+        for k, v in env.items():
+            uk = k.upper()
+            if uk not in vc_env:
+                vc_env[uk] = v
+        env = vc_env
     try:
         sys.stdout.flush()
         sys.stderr.flush()
@@ -1468,12 +1495,14 @@ def _run_ninja_build(build_directory, verbose, error_prefix):
                 stdout=stdout_fileno if verbose else subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 cwd=build_directory,
-                check=True)
+                check=True,
+                env=env)
         else:
             subprocess.check_output(
                 command,
                 stderr=subprocess.STDOUT,
-                cwd=build_directory)
+                cwd=build_directory,
+                env=env)
     except subprocess.CalledProcessError:
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
