@@ -78,7 +78,7 @@ class TestCppExtensionAOT(common.TestCase):
         root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "build")
         matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith("so")]
         self.assertEqual(len(matches), 1, str(matches))
-        self.assertEqual(matches[0], "no_python_abi_suffix_test.so", str(matches))
+        self.assertEqual(matches[0], "no_python_abi_suffix_test.so", msg=str(matches))
 
     def test_optional(self):
         has_value = cpp_extension.function_taking_optional(torch.ones(5))
