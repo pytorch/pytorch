@@ -74,6 +74,69 @@ static bool EmbeddingLookupGenericSlowIdx(
   return current == index_size;
 }
 
+//different from caffe2, pytorch quantized embedding bag get scales for "double" type
+template <
+    typename IndexType,
+    typename InType,
+    typename OutType,
+    bool IS_WEIGHT_POSITIONAL = false>
+static bool pt_EmbeddingLookupGenericSlowIdx(
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
+    const InType* input,
+    const IndexType* indices,
+    const int64_t* offsets,
+    const float* weights, // optional, can be null for sum reducer
+    const double* scales, // optional scale & bias params for uint8 input
+    bool normalize_by_lengths,
+    OutType* out) {
+  int64_t current = 0;
+  for (int m = 0; m < output_size; ++m) {
+    memset(out, 0, sizeof(OutType) * block_size);
+    if (current != offsets[m]) {
+      return false;
+    }
+    int64_t start_offset = offsets[m];
+    int64_t end_offset = (m == output_size - 1 ? index_size : offsets[m + 1]);
+    int64_t length = end_offset - start_offset;
+    for (int i = start_offset; i < end_offset; ++i) {
+      int64_t idx = indices[current];
+      if (idx < 0 || idx >= data_size) {
+        return false;
+      }
+#ifdef __GNUC__
+      if (current + 1 < index_size) {
+        __builtin_prefetch(input + block_size * indices[current + 1], 0, 1);
+      }
+#endif // __GNUC__
+
+      float w = 1.f, b = 0.f;
+      if (weights) {
+        w = weights[IS_WEIGHT_POSITIONAL ? i - start_offset : current];
+      }
+      if (scales) {
+        w = w * scales[indices[current]];
+      }
+
+      for (int j = 0; j < block_size; ++j) {
+        out[j] += w * input[block_size * indices[current] + j] + b;
+      }
+
+      ++current;
+    }
+    if (normalize_by_lengths && length) {
+      float scale = 1.f / length;
+      for (int j = 0; j < block_size; ++j) {
+        out[j] *= scale;
+      }
+    }
+    out += block_size;
+  }
+  return current == index_size;
+}
+
 // Proxy back to generic implementation
 #define EMBEDDING_IDX_SPECIALIZATION(                                                                 \
     IndexType, InTypeName, InType, OutType, IS_WEIGHT_POSITIONAL)                                     \
@@ -223,4 +286,146 @@ EMBEDDING_IDX_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, true);
 
 #undef EMBEDDING_IDX_SPECIALIZATION
 
+//different from caffe2, pytorch quantized embedding bag get scales for "double" type
+#define PT_EMBEDDING_SPECIALIZATION(                                                                     \
+    IndexType, InTypeName, InType, OutType, IS_WEIGHT_POSITIONAL)                                     \
+  bool                                                                                                \
+      pt_EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__base(     \
+          const int64_t block_size,                                                                   \
+          const int64_t output_size,                                                                  \
+          const int64_t index_size,                                                                   \
+          const int64_t data_size,                                                                    \
+          const InType* input,                                                                        \
+          const IndexType* indices,                                                                   \
+          const int64_t* offsets,                                                                     \
+          const float* weights,                                                                       \
+          const double* scales,                                                                    \
+          bool normalize_by_lengths,                                                                  \
+          OutType* out) {                                                                             \
+    return pt_EmbeddingLookupGenericSlowIdx<                                                             \
+        IndexType,                                                                                    \
+        InType,                                                                                       \
+        OutType,                                                                                      \
+        IS_WEIGHT_POSITIONAL>(                                                                        \
+        block_size,                                                                                   \
+        output_size,                                                                                  \
+        index_size,                                                                                   \
+        data_size,                                                                                    \
+        input,                                                                                        \
+        indices,                                                                                      \
+        offsets,                                                                                      \
+        weights,                                                                                      \
+        scales,                                                                                   \
+        normalize_by_lengths,                                                                         \
+        out);                                                                                         \
+  }                                                                                                   \
+  decltype(                                                                                           \
+      pt_EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__base)     \
+      pt_EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__avx2_fma; \
+  bool                                                                                                \
+      pt_EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL(             \
+          const int64_t block_size,                                                                   \
+          const int64_t output_size,                                                                  \
+          const int64_t index_size,                                                                   \
+          const int64_t data_size,                                                                    \
+          const InType* input,                                                                        \
+          const IndexType* indices,                                                                   \
+          const int64_t* offsets,                                                                     \
+          const float* weights,                                                                       \
+          const double* scales,                                                                    \
+          bool normalize_by_lengths,                                                                  \
+          OutType* out) {                                                                             \
+    if (std::is_same<InType, int8_t>::value) {                                                       \
+      CAFFE_ENFORCE(scales != nullptr, "scales must not be nullptr");                         \
+    } else {                                                                                          \
+      CAFFE_ENFORCE(scales == nullptr, "scales must be nullptr");                             \
+    }                                                                                                 \
+    AVX2_FMA_DO(                                                                                      \
+        pt_EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL,           \
+        block_size,                                                                                   \
+        output_size,                                                                                  \
+        index_size,                                                                                   \
+        data_size,                                                                                    \
+        input,                                                                                        \
+        indices,                                                                                      \
+        offsets,                                                                                      \
+        weights,                                                                                      \
+        scales,                                                                                   \
+        normalize_by_lengths,                                                                         \
+        out);                                                                                         \
+    BASE_DO(                                                                                          \
+        pt_EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL,           \
+        block_size,                                                                                   \
+        output_size,                                                                                  \
+        index_size,                                                                                   \
+        data_size,                                                                                    \
+        input,                                                                                        \
+        indices,                                                                                      \
+        offsets,                                                                                      \
+        weights,                                                                                      \
+        scales,                                                                                   \
+        normalize_by_lengths,                                                                         \
+        out);                                                                                         \
+  }                                                                                                   \
+  template <>                                                                                         \
+  void pt_EmbeddingLookupIdx<IndexType, InType, OutType, IS_WEIGHT_POSITIONAL>(                          \
+      const int64_t block_size,                                                                       \
+      const int64_t output_size,                                                                      \
+      const int64_t index_size,                                                                       \
+      const int64_t data_size,                                                                        \
+      const InType* input,                                                                            \
+      const IndexType* indices,                                                                       \
+      const int64_t* offsets,                                                                         \
+      const float* weights,                                                                           \
+      const double* scales,                                                                        \
+      bool normalize_by_lengths,                                                                      \
+      OutType* out) {                                                                                 \
+    bool success =                                                                                    \
+        pt_EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL(           \
+            block_size,                                                                               \
+            output_size,                                                                              \
+            index_size,                                                                               \
+            data_size,                                                                                \
+            input,                                                                                    \
+            indices,                                                                                  \
+            offsets,                                                                                  \
+            weights,                                                                                  \
+            scales,                                                                               \
+            normalize_by_lengths,                                                                     \
+            out);                                                                                     \
+    if (success) {                                                                                    \
+      return;                                                                                         \
+    }                                                                                                 \
+    int64_t current = 0;                                                                              \
+    for (int m = 0; m < output_size; ++m) {                                                           \
+      for (int64_t i = offsets[m];                                                                    \
+           i < (m == output_size - 1 ? index_size : offsets[m + 1]);                                  \
+           ++i) {                                                                                     \
+        CAFFE_ENFORCE_LT(current, index_size);                                                        \
+        IndexType idx = indices[current];                                                             \
+        CAFFE_ENFORCE(                                                                                \
+            0 <= idx && idx < data_size,                                                              \
+            "Index ",                                                                                 \
+            current,                                                                                  \
+            " is out of bounds: ",                                                                    \
+            idx,                                                                                      \
+            ", range 0 to ",                                                                          \
+            data_size);                                                                               \
+        ++current;                                                                                    \
+      }                                                                                               \
+    }                                                                                                 \
+    CAFFE_ENFORCE_EQ(                                                                                 \
+        current,                                                                                      \
+        index_size,                                                                                   \
+        "Your input seems to be incorrect: the sum of lengths values should be "                      \
+        "the size of the indices tensor, but it appears not.");                                       \
+  }
+
+
+PT_EMBEDDING_SPECIALIZATION(int64_t, int8_t, int8_t, float, false);
+
+
+PT_EMBEDDING_SPECIALIZATION(int64_t, int8_t, int8_t, float, true);
+
+#undef PT_EMBEDDING_SPECIALIZATION
 } // namespace caffe2

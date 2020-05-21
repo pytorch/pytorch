@@ -135,6 +135,54 @@ void index_select_add<float>(const Tensor &select_indices,
   }
 }
 
+template<>
+void index_select_add<int8_t>(const Tensor &select_indices,  //input
+                             const Tensor &add_indices,  //offset2bag
+                             const Tensor &src,  //weight
+                             Tensor &output,
+                             const Tensor& offsets,
+                             bool include_last_offset) {
+  int64_t ddim = src.size(1);
+  auto src_data = src.data_ptr<qint8>();
+  auto select_indices_data = select_indices.data_ptr<int64_t>();
+  auto output_data = output.data_ptr<float>();
+  auto scales = src.q_per_channel_scales();
+  auto scales_data = scales.data_ptr<double>();
+  int64_t output_size = offsets.numel() - 1;
+  auto* offsets_data = offsets.data_ptr<int64_t>();
+  std::vector<int64_t> offsets_include_last;
+  if (include_last_offset) {
+    output_size = offsets.numel() - 1;
+  } else {
+    output_size = offsets.numel();
+    offsets_include_last.resize(offsets.numel() + 1);
+    std::memcpy(
+        offsets_include_last.data(),
+        offsets.data_ptr<int64_t>(),
+        sizeof(int64_t) * offsets.numel());
+    offsets_include_last[offsets.numel()] = select_indices.numel();
+    offsets_data = offsets_include_last.data();
+  }
+  at::parallel_for(
+        0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+      caffe2::pt_EmbeddingLookupIdx(
+          /*block_size=*/src.size(1),
+          /*output_size=*/end_idx - start_idx,
+          /*index_size=*/offsets_data[end_idx] - offsets_data[start_idx],
+          /*data_size=*/src.size(0),
+          /*input=*/reinterpret_cast<int8_t*>(src_data),
+          /*indices=*/select_indices_data + offsets_data[start_idx],
+          /*offsets=*/offsets_data + start_idx,
+          /*weights=*/nullptr,
+          /*scales=*/scales_data,
+          /*normalize_by_lengths=*/false,
+          /*out=*/output_data + start_idx * ddim
+        );
+  });
+
+}
+
+
 // This function fuses the following three fns:
 // index_select (using select_indices as the index)
 // mul (scaling by per_sample_weights)
@@ -373,7 +421,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
   checkScalarType("embedding_bag", offsets_arg, kLong);
   auto weight_arg = TensorArg(weight, "weight", 1);
-  checkScalarTypes("embedding_bag", weight_arg, {kFloat, kDouble});
+  checkScalarTypes("embedding_bag", weight_arg, {kFloat, kDouble, at::kQInt8});
   int64_t offset_0 = offsets.data_ptr<int64_t>()[0];
   int64_t offset_n = offsets.data_ptr<int64_t>()[offsets.size(0)-1];
   TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
@@ -404,7 +452,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
   auto output = at::zeros(
       {include_last_offset ? offsets.size(0) - 1 : offsets.size(0),
        weight.size(1)},
-      weight.options());
+      weight.is_quantized() ? at::device(c10::kCPU).dtype(c10::kFloat) : weight.options());
 
   // To save compute, if we are going to go down the fast path case for the 'sum'
   // mode, we skip calculating offset2bag, since it is not going to be used.
@@ -434,15 +482,23 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
   }
 
   if (mode == MODE_MEAN || mode == MODE_SUM) {
-    AT_DISPATCH_FLOATING_TYPES(weight.scalar_type(), "embedding_bag_cpu", [&]() {
-      if (per_sample_weights.defined()) {
-        AT_ASSERT(mode == MODE_SUM);
-        index_select_scale_add<scalar_t>(
-            indices, offset2bag, per_sample_weights, weight, output, offsets, include_last_offset);
-      } else {
-        index_select_add<scalar_t>(indices, offset2bag, weight, output, offsets, include_last_offset);
-      }
+   if (weight.is_quantized()) {
+      AT_ASSERT(mode == MODE_SUM);
+      AT_ASSERT(!per_sample_weights.defined());
+      AT_ASSERT(weight.scalar_type() == at::kQInt8);
+      AT_ASSERT(weight.is_contiguous() && output.is_contiguous());
+      index_select_add<int8_t>(indices, offset2bag, weight, output, offsets, include_last_offset);
+    } else {
+      AT_DISPATCH_FLOATING_TYPES(weight.scalar_type(), "embedding_bag_cpu", [&]() {
+        if (per_sample_weights.defined()) {
+          AT_ASSERT(mode == MODE_SUM);
+          index_select_scale_add<scalar_t>(
+              indices, offset2bag, per_sample_weights, weight, output, offsets, include_last_offset);
+        } else {
+          index_select_add<scalar_t>(indices, offset2bag, weight, output, offsets, include_last_offset);
+        }
     });
+    }
     auto ret = apply_bag_size(offsets, indices, mode, output, bag_size);
     return std::tuple<Tensor, Tensor, Tensor, Tensor>(ret, offset2bag, bag_size, bag_size);
   } else { // MODE_MAX

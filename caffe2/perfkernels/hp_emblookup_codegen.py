@@ -4,7 +4,7 @@ import argparse
 import sys
 
 
-sizeof = {"float": 4, "at::Half": 2, "uint8_t": 1}
+sizeof = {"float": 4, "at::Half": 2, "uint8_t": 1, "int8_t": 1}
 
 
 def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
@@ -31,6 +31,14 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
                 "            _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(\n"
                 "                _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (%d))))),\n"  # noqa
                 "            _mm256_add_ps(vop%d, vbio));" % (regid, regid, regid)
+            )
+        elif InType == "int8_t":
+            code.append(
+                "        vop%d = _mm256_fmadd_ps(\n"
+                "            vwgt,\n"
+                "            _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(\n"
+                "                _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (%d))))),\n"  # noqa
+                "            vop%d);" % (regid, regid, regid)
             )
         else:
             assert False
@@ -121,6 +129,14 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
             code.append("        bio = wgt * scale_bias[2 * idx + 1];")
             code.append("        wgt = wgt * scale_bias[2 * idx];")
         code.append("        __m256 vbio = _mm256_set1_ps(bio);")
+    elif InType == "int8_t":
+        code.append("        " + OutType + " wgt = 1.f;")
+        code.append("        if (weights) {")
+        code.append(
+            "          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];"  # noqa
+        )
+        code.append("        }")
+        code.append("        wgt = wgt * static_cast<float>(scales[idx]);")
     else:
         code.append("        " + OutType + " wgt = 1.f;")
         code.append("        if (weights) {")
@@ -138,6 +154,11 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
         )
     )
     code.append("        const " + IndexType + " idx_pref_T0 = indices[next_T0];")
+    if InType == "int8_t":
+        code.append(
+            "          _mm_prefetch(\n"
+            "              reinterpret_cast<const char*>(&scales[idx_pref_T0]), _MM_HINT_T0);"
+        )
     code.append(
         "        if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {\n"
         + "          return false;\n"
@@ -215,6 +236,16 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
                 "                  _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadl_epi64(\n"  # noqa
                 "                      reinterpret_cast<const __m128i*>(&ip[j])))),\n"
                 "                  _mm256_add_ps(_mm256_loadu_ps(&op[j]), vbio)));"
+            )
+        elif InType == "int8_t":
+            code.append(
+                "          _mm256_storeu_ps(\n"
+                "              &op[j],\n"
+                "              _mm256_fmadd_ps(\n"
+                "                  vwgt,\n"
+                "                  _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_loadl_epi64(\n"  # noqa
+                "                      reinterpret_cast<const __m128i*>(&ip[j])))),\n"
+                "                  _mm256_loadu_ps(&op[j])));"
             )
         else:
             assert False
@@ -308,6 +339,14 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
             code.append("        bio = wgt * scale_bias[2 * idx + 1];")
             code.append("        wgt = wgt * scale_bias[2 * idx];")
         code.append("        __m256 vbio = _mm256_set1_ps(bio);")
+    elif InType == "int8_t":
+        code.append("        " + OutType + " wgt = 1.f;")
+        code.append("        if (weights) {")
+        code.append(
+            "          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];"  # noqa
+        )
+        code.append("        }")
+        code.append("        wgt = wgt * static_cast<float>(scales[idx]);")
     else:
         code.append("        " + OutType + " wgt = 1.f;")
         code.append("        if (weights) {")
@@ -325,6 +364,11 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
         )
     )
     code.append("        const " + IndexType + " idx_pref_T0 = indices[next_T0];")
+    if InType == "int8_t":
+        code.append(
+            "          _mm_prefetch(\n"
+            "              reinterpret_cast<const char*>(&scales[idx_pref_T0]), _MM_HINT_T0);"
+        )
     code.append(
         "        if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {\n"
         + "          return false;\n"
@@ -353,6 +397,8 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
         code.append("          op[j] = std::fma(wgt, ((float*)(&vtmp2))[0], op[j]);")
     elif InType == "uint8_t":
         code.append("          op[j] = std::fma(wgt, (float)ip[j], bio + op[j]);")
+    elif InType == "int8_t":
+        code.append("          op[j] = std::fma(wgt, (float)ip[j], op[j]);")
     else:
         assert False
 
@@ -412,6 +458,8 @@ options = [
     ["int64_t", "int64_t", "uint8_t", "uint8_t", "float", "float"],
 ]
 
+if filename == "embedding_lookup_idx_avx2.cc":
+    options.append(["int64_t", "int64_t", "int8_t", "int8_t", "float", "float"])
 code = []
 # includes
 code.append("//// --------------------------")
@@ -429,6 +477,8 @@ for o in options:
     [IndexTypeName, IndexType, InTypeName, InType, OutTypeName, OutType] = o
 
     prefix = "Fused8BitRowwise" if opts.fused else ""
+    if InType == "int8_t":
+        prefix = "pt_"
     code.append("template <bool IS_WEIGHT_POSITIONAL>")
     if opts.use_offsets:
         fn_base = "{}EmbeddingLookupIdx_{}_{}_{}".format(
@@ -455,7 +505,10 @@ for o in options:
         args.append("    const int* lengths,")
     args.append("    const float* weights,")
     if not opts.fused:
-        args.append("    const float* scale_bias,")
+        if InType == "int8_t":
+            args.append("    const double* scales,")
+        else:
+            args.append("    const float* scale_bias,")
     args.append("    bool normalize_by_lengths,")
     args.append("    " + OutType + "* out) {")
     code += args
@@ -512,7 +565,10 @@ for o in options:
             code.append("      lengths,")
         code.append("      weights,")
         if not opts.fused:
-            code.append("      scale_bias,")
+            if InType == "int8_t":
+                code.append("      scales,")
+            else:
+                code.append("      scale_bias,")
         code.append("      normalize_by_lengths,")
         code.append("      out);")
         code.append("}")

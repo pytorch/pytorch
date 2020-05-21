@@ -7,6 +7,7 @@ from .activation import ReLU, ReLU6
 from .batchnorm import BatchNorm2d, BatchNorm3d
 from .conv import Conv2d, Conv3d
 from .linear import Linear
+from .emb import EmbeddingBag
 
 from .functional_modules import FloatFunctional, QFunctional
 
@@ -86,6 +87,7 @@ __all__ = [
     'Linear',
     'MaxPool2d',
     'Quantize',
+    'EmbeddingBag',
     'ReLU',
     'ReLU6',
     # Wrapper modules
