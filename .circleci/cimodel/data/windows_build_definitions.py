@@ -1,8 +1,9 @@
 import cimodel.lib.miniutils as miniutils
-import cimodel.data.simple.branch_filters
+import cimodel.data.simple.util.branch_filters
+from cimodel.data.simple.util.versions import CudaVersion
 
 
-class WindowJob:
+class WindowsJob:
     def __init__(self,
                  test_index,
                  vscode_spec,
@@ -25,7 +26,7 @@ class WindowJob:
 
         cpu_forcing_name_parts = ["on", "cpu"] if self.force_on_cpu else []
 
-        target_arch = self.cuda_version.render() if self.cuda_version else "cpu"
+        target_arch = self.cuda_version.render_dots() if self.cuda_version else "cpu"
 
         base_name_parts = [
             "pytorch",
@@ -61,7 +62,7 @@ class WindowJob:
         }
 
         if self.run_on_prs_pred(self):
-            props_dict["filters"] = cimodel.data.simple.branch_filters.gen_branch_filter_dict()
+            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_branches_only_filter_dict()
 
         name_parts = base_name_parts + cpu_forcing_name_parts + [
             numbered_phase,
@@ -101,36 +102,27 @@ class VcSpec:
         return "_".join(filter(None, [self.prefixed_year(), self.dotted_version()]))
 
 
-class CudaVersion:
-    def __init__(self, major, minor):
-        self.major = major
-        self.minor = minor
-
-    def render(self):
-        return "cuda" + str(self.major) + "." + str(self.minor)
-
-
 WORKFLOW_DATA = [
-    WindowJob(None, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
-    WindowJob(1, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
-    WindowJob(2, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
-    WindowJob(None, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
-    WindowJob(1, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
-    WindowJob(2, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
-    WindowJob(None, VcSpec(2019), CudaVersion(10, 1)),
-    WindowJob(1, VcSpec(2019), CudaVersion(10, 1)),
-    WindowJob(2, VcSpec(2019), CudaVersion(10, 1)),
-    WindowJob(None, VcSpec(2017, ["14", "11"]), None),
-    WindowJob(1, VcSpec(2017, ["14", "11"]), None),
-    WindowJob(2, VcSpec(2017, ["14", "11"]), None),
-    WindowJob(None, VcSpec(2017, ["14", "16"]), None),
-    WindowJob(1, VcSpec(2017, ["14", "16"]), None),
-    WindowJob(2, VcSpec(2017, ["14", "16"]), None),
-    WindowJob(None, VcSpec(2019), None),
-    WindowJob(1, VcSpec(2019), None),
-    WindowJob(2, VcSpec(2019), None),
-    WindowJob(1, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True),
-    WindowJob(2, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True),
+    WindowsJob(None, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
+    WindowsJob(1, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
+    WindowsJob(2, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
+    WindowsJob(None, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
+    WindowsJob(1, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
+    WindowsJob(2, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
+    WindowsJob(None, VcSpec(2019), CudaVersion(10, 1)),
+    WindowsJob(1, VcSpec(2019), CudaVersion(10, 1)),
+    WindowsJob(2, VcSpec(2019), CudaVersion(10, 1)),
+    WindowsJob(None, VcSpec(2017, ["14", "11"]), None),
+    WindowsJob(1, VcSpec(2017, ["14", "11"]), None),
+    WindowsJob(2, VcSpec(2017, ["14", "11"]), None),
+    WindowsJob(None, VcSpec(2017, ["14", "16"]), None),
+    WindowsJob(1, VcSpec(2017, ["14", "16"]), None),
+    WindowsJob(2, VcSpec(2017, ["14", "16"]), None),
+    WindowsJob(None, VcSpec(2019), None),
+    WindowsJob(1, VcSpec(2019), None),
+    WindowsJob(2, VcSpec(2019), None),
+    WindowsJob(1, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True),
+    WindowsJob(2, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True),
 ]
 
 

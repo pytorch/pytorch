@@ -228,7 +228,7 @@ class TestTypePromotion(TestCase):
         # supported dtype
         dtypes1 = torch.testing.get_all_math_dtypes('cuda')
         dtypes2 = torch.testing.get_all_math_dtypes(device)
-        ops = [torch.add, torch.sub, torch.mul, torch.div, torch.rsub]
+        ops = [torch.add, torch.sub, torch.mul, torch.true_divide, torch.rsub]
         for dt1, dt2 in itertools.product(dtypes1, dtypes2):
             for op, non_contiguous in itertools.product(ops, [True, False]):
                 common_dtype = torch.promote_types(dt1, dt2)
@@ -661,27 +661,31 @@ class TestTypePromotion(TestCase):
             # "mul_cpu" / "div_cpu" not implemented for 'Half'
             self.assertRaises(RuntimeError, lambda: op(s1, d2.view(d2.numel())[0].item()))
 
-    def _run_all_tests_for_sparse_op(self, op_name, device):
-        dtypes = torch.testing.get_all_math_dtypes(device)
+    def _run_all_tests_for_sparse_op(self, op_name, device, dtypes):
         for dtype1, dtype2 in itertools.product(dtypes, dtypes):
             for inplace, coalesced in itertools.product([True, False], [True, False]):
                 self._test_sparse_op(op_name, inplace, dtype1, dtype2, device, coalesced)
 
     @onlyOnCPUAndCUDA
     def test_sparse_add(self, device):
-        self._run_all_tests_for_sparse_op('add', device)
+        self._run_all_tests_for_sparse_op('add', device,
+                                          dtypes=torch.testing.get_all_math_dtypes(device))
 
     @onlyOnCPUAndCUDA
     def test_sparse_mul(self, device):
-        self._run_all_tests_for_sparse_op('mul', device)
+        self._run_all_tests_for_sparse_op('mul', device,
+                                          dtypes=torch.testing.get_all_math_dtypes(device))
 
     @onlyOnCPUAndCUDA
     def test_sparse_div(self, device):
-        self._run_all_tests_for_sparse_op('div', device)
+        self._run_all_tests_for_sparse_op('div', device,
+                                          dtypes=(torch.float32, torch.float64,
+                                                  torch.complex64, torch.complex128))
 
     @onlyOnCPUAndCUDA
     def test_sparse_sub(self, device):
-        self._run_all_tests_for_sparse_op('sub', device)
+        self._run_all_tests_for_sparse_op('sub', device,
+                                          dtypes=torch.testing.get_all_math_dtypes(device))
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.bool, torch.short, torch.uint8, torch.int, torch.long)
