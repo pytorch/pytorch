@@ -981,15 +981,13 @@ void initJitScriptBindings(PyObject* module) {
             return std::make_tuple(pp.str(), consts);
           })
       .def("apply", &Module::apply)
-      .def("_clone", &Module::clone)
-      .def("_clone_instance", &Module::clone_instance)
-      .def("copy",
-           [](Module& module,
-              bool inplace) {
-             return module.copy(inplace);
+      .def("_clone",
+           [](Module& self, bool inplace) {
+             return self.clone(inplace);
            },
-           py::arg("module"),
            py::arg("inplace") = false)
+      .def("_clone_instance", &Module::clone_instance)
+      .def("copy", &Module::copy)
       .def("deepcopy", &Module::deepcopy)
       .def_property_readonly("qualified_name", [](const Module& self) {
         return self.type()->name()->qualifiedName();
