@@ -2874,7 +2874,6 @@ class TestAutograd(TestCase):
             with tempfile.NamedTemporaryFile() as trace_file:
                 prof.export_chrome_trace(trace_file.name)
 
-    @skipIfRocm
     def test_memory_profiler(self):
         def run_profiler(tensor_creation_fn, metric):
             # collecting allocs / deallocs
@@ -6260,13 +6259,15 @@ class TestAutogradDeviceType(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1], [1, 1]])
 
-    @unittest.skip("Wrong Gradient: https://github.com/pytorch/pytorch/issues/38586")
     def test_mv_grad_stride_0(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/38315
         mat = torch.randn(2, 2, device=device)
-        vec = torch.randn(1, device=device).expand(2).requires_grad_(True)
+        vec = torch.randn(1, device=device).requires_grad_(True)
 
         def fn(vec):
+            # Expand inside the function to make sure the input to
+            # gradcheck does not have overlapping memory
+            vec = vec.expand(2)
             return (mat @ vec).sum()
 
         gradcheck(fn, (vec))
