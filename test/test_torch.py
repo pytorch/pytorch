@@ -11869,7 +11869,7 @@ class TestTorchDeviceType(TestCase):
             torch.vander(torch.stack((x, x)))
 
         # This passes on the xla backend
-        if device != 'xla' and device != 'cpu':
+        if self.device_type != 'xla' and self.device_type != 'cpu':
             with self.assertRaises(RuntimeError):
                 torch.vander(x.to(torch.complex64))
 
