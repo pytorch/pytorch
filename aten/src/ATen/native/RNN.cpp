@@ -285,8 +285,8 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
 c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_dynamic(
     c10::intrusive_ptr<LinearPackedParamsBase> w_ih_packed,
     c10::intrusive_ptr<LinearPackedParamsBase> w_hh_packed,
-    c10::optional<at::Tensor> bias_ih,
-    c10::optional<at::Tensor> bias_hh);
+    at::Tensor bias_ih,
+    at::Tensor bias_hh);
 
 struct QuantizedCellParamsDynamic : public CellParamsBase {
   QuantizedCellParamsDynamic(
@@ -367,14 +367,13 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
 c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_dynamic(
     c10::intrusive_ptr<LinearPackedParamsBase> w_ih_packed,
     c10::intrusive_ptr<LinearPackedParamsBase> w_hh_packed,
-    c10::optional<at::Tensor> bias_ih,
-    c10::optional<at::Tensor> bias_hh) {
-  std::cout << "Called make_quantized_cell_params_dynamic.\n";
+    at::Tensor bias_ih,
+    at::Tensor bias_hh) {
   return c10::make_intrusive<QuantizedCellParamsDynamic>(
       /*_packed_w_ih=*/std::move(w_ih_packed),
       /*_packed_w_hh=*/std::move(w_hh_packed),
-      /*_b_ih=*/std::move(bias_ih.value()),
-      /*_b_hh=*/std::move(bias_hh.value()));
+      /*_b_ih=*/std::move(bias_ih),
+      /*_b_hh=*/std::move(bias_hh));
 }
 
 c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_fp16(
@@ -1834,7 +1833,7 @@ static auto registry =
                 .kernel<
                     decltype(quantized_lstm_data_legacy),
                     quantized_lstm_data_legacy>(DispatchKey::CPUTensorId))
-        .op("quantized::make_quantized_cell_params_dynamic(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor? bias_ih, Tensor? bias_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
+        .op("quantized::make_quantized_cell_params_dynamic(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor bias_ih, Tensor bias_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
             torch::RegisterOperators::options()
                 .kernel<
                     decltype(make_quantized_cell_params_dynamic),

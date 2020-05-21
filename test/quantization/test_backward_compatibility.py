@@ -131,4 +131,4 @@ class TestSerialization(TestCase):
                 return x
 
         mod = LSTMModule()
-        self._test_op(mod, input_size=[4, 4, 3], input_quantized=False, generate=True)
+        self._test_op(mod, input_size=[4, 4, 3], input_quantized=False, generate=False)
