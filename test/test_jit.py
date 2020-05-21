@@ -17169,7 +17169,6 @@ a")
         model = MyMod()
         x = torch.jit.script(model)
         z = self.getExportImportCopy(x)
-
         self.assertEqual(z.method(), x.method())
         self.assertEqual(z.method(), model.method())
         self.assertEqual(x.method(), model.method())
