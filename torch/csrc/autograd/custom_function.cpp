@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
+#include <torch/csrc/autograd/autograd.h>
 
 namespace torch { namespace autograd {
 
@@ -102,12 +103,13 @@ variable_list _wrap_outputs(const variable_list &input_vars,
 
 
   for (auto i = 0; i < num_outputs; ++i) {
+    Variable var = raw_outputs[i];
+
     auto out_tensor_impl = raw_outputs[i].unsafeGetTensorImpl();
     bool is_input = inputs.count(out_tensor_impl) > 0;
     bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
-    bool is_differentiable = cdata && non_differentiable.count(out_tensor_impl) == 0;
-
-    Variable var = raw_outputs[i];
+    bool is_differentiable = cdata && non_differentiable.count(out_tensor_impl) == 0
+                              && isDifferentiableType(var.scalar_type());
 
     if (cdata) {
       auto output_nr = cdata->add_input_metadata(var);
