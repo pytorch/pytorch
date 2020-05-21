@@ -6,7 +6,6 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
 
 #include <torch/library.h>
 
@@ -787,31 +786,6 @@ Tensor true_divide(const Tensor& self, Scalar divisor) {
 
 Tensor& true_divide_(Tensor& self, Scalar divisor) {
   return self.true_divide_(wrapped_scalar_tensor(divisor)); // redispatch!
-}
-
-bool equal_cpu(const Tensor& self, const Tensor& other) {
-  if (self.has_names() || other.has_names()) {
-    if (self.get_named_tensor_meta()->names() != other.get_named_tensor_meta()->names()) {
-      return false;
-    }
-  }
-  TORCH_CHECK(self.dtype() == other.dtype(),
-              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-              other.dtype(), " for argument 'other'");
-  if (!self.is_same_size(other)) {
-    return false;
-  }
-  std::atomic<bool> equal{true};
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBool, self.scalar_type(), "equal_cpu", [&]() {
-    Tensor result;
-    auto iter = TensorIterator::binary_op(result, self, other);
-    cpu_kernel(iter,[&](scalar_t x, scalar_t y) -> scalar_t {
-      if (x != y) {
-        equal = false;
-      }
-    });
-  });
-  return equal.load();
 }
 
 // Note: this function is only for testing.
