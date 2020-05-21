@@ -41,7 +41,7 @@
 // when using AVX/AVX2 code resolves this.
 #if defined(CPU_CAPABILITY_AVX) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
 #define DL_RUNTIME_BUG(op, type)                              \
-  using value_t = typename at::native::ztype<type>::value_t;  \
+  using value_t = typename c10::scalar_value_type<type>::type;\
   volatile value_t x = (value_t)(1);                          \
   x = std::op(x);                                             \
   _mm256_zeroall();
