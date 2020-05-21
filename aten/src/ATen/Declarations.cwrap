@@ -147,20 +147,6 @@
       - real value
 ]]
 [[
-  name: _th_scatter_add_
-  return: argument 0
-  cname: scatterAdd
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants: function
-  arguments:
-    - THTensor* self
-    - long dim
-    - THIndexTensor* index
-    - THTensor* src
-]]
-[[
   name: _th_equal
   cname: equal
   cpu_bool: True
