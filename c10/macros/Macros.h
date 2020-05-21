@@ -230,7 +230,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #if defined(NDEBUG)
 extern "C" {
 #if !defined(__CUDA_ARCH__)  || !defined(__clang__)
-  [[noreturn]]
+
 #endif
 #if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
     defined(__HIP_ARCH__) || defined(__HIP__)
