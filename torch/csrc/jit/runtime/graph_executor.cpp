@@ -778,6 +778,10 @@ void runNondiffOptimization(
   if (tensorExprFuserEnabled()) {
     FuseTensorExprs(graph);
   } else {
+    if (fuser::cuda::getFuserInterface()->fn_compile_n_ != nullptr) {
+      fuser::cuda::getFuserInterface()->fn_fuse_graph(graph);
+    }
+    // This should be a fallback to handle cpu fuser?
     FuseGraph(graph, strict_fuser_check);
   }
 

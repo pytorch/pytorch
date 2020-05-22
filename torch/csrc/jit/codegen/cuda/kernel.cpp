@@ -190,6 +190,7 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
     entry->outputs.push_back(out);
 
   static int32_t compiled_kernel_id = 0;
+  std::cout << code << std::endl;
 
   // vvv NVRTC COMPILATION vvv
 
