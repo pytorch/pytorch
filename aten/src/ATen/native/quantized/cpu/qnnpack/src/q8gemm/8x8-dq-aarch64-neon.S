@@ -12,6 +12,14 @@
 # params
 # c_stride
 
+#  Args passed via stack.
+#  TOS
+#  |-----------|
+#  |c_stride   | 0
+#  |out ch indx| 8
+#  |params     | 16
+#  |-----------|
+
 # void pytorch_q8gemm_dq_ukernel_8x8__aarch64_neon(
 #     size_t mr,
 #     size_t nr,
@@ -22,6 +30,7 @@
 #     const float*restrict b,
 #     uint8_t*restrict c,
 #     size_t c_stride,
+#     size_t output_channel_index,
 #     const union pytorch_qnnp_conv_quantization_params quantization_params[restrict static 1])
 BEGIN_FUNCTION pytorch_q8gemm_dq_ukernel_8x8__aarch64_neon
 
@@ -32,18 +41,20 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_ukernel_8x8__aarch64_neon
 
     # Skip over bias0123, bias4567
     ADD x5, x5, 32
-    MOV x9, 2
 
     # Load c_stride & params
     LDR x16, [sp]
-    LDR x8, [sp, 8]
+    # Load output channel index
+    LDR x10, [sp, 8]
+    # Load params
+    LDR x8, [sp, 16]
 
     # Load a_zero_point
-    LD1R {v24.8b}, [x8], x9
-    # Load b_zero_point
-    LD1R {v25.8b}, [x8], x9
-    # Load multiplier
-    LD1R {v26.4s}, [x8]
+    LD1R {v24.8b}, [x8]
+    ADD x8, x8, 8
+
+    # Load pointer to per channel zero points array
+    LDR x17, [x8], 8
 
     # v8 := zero
     EOR v8.16b, v8.16b, v8.16b
@@ -55,10 +66,27 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_ukernel_8x8__aarch64_neon
     # v11 := zero
     EOR v11.16b, v11.16b, v11.16b
 
+    # Load pointer to per channel multiplier
+    LDR x13, [x8]
+
     # v12 := zero
     EOR v12.16b, v12.16b, v12.16b
     # v13 := zero
     EOR v13.16b, v13.16b, v13.16b
+
+    # Add offset to the base pointer
+    ADD x17, x17, x10
+    # Mul by 4 to get byte offset for multiplier
+    LSL x10, x10, 2
+    # Add offset to the base pointer for multiplier
+    ADD x13, x13, x10
+
+    # Load b_zero_point
+    LD1 {v25.8b}, [x17]
+    # Load multiplier c0123
+    LD1 {v26.4s}, [x13], 16
+    # Load multiplier c4567
+    LD1 {v30.4s}, [x13]
 
     # v14 := zero
     EOR v14.16b, v14.16b, v14.16b
@@ -554,21 +582,21 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_ukernel_8x8__aarch64_neon
     SCVTF v23.4s, v23.4s
 
     FMUL v8.4s, v8.4s, v26.4s
-    FMUL v9.4s, v9.4s, v26.4s
+    FMUL v9.4s, v9.4s, v30.4s
     FMUL v10.4s, v10.4s, v26.4s
-    FMUL v11.4s, v11.4s, v26.4s
+    FMUL v11.4s, v11.4s, v30.4s
     FMUL v12.4s, v12.4s, v26.4s
-    FMUL v13.4s, v13.4s, v26.4s
+    FMUL v13.4s, v13.4s, v30.4s
     FMUL v14.4s, v14.4s, v26.4s
-    FMUL v15.4s, v15.4s, v26.4s
+    FMUL v15.4s, v15.4s, v30.4s
     FMUL v16.4s, v16.4s, v26.4s
-    FMUL v17.4s, v17.4s, v26.4s
+    FMUL v17.4s, v17.4s, v30.4s
     FMUL v18.4s, v18.4s, v26.4s
-    FMUL v19.4s, v19.4s, v26.4s
+    FMUL v19.4s, v19.4s, v30.4s
     FMUL v20.4s, v20.4s, v26.4s
-    FMUL v21.4s, v21.4s, v26.4s
+    FMUL v21.4s, v21.4s, v30.4s
     FMUL v22.4s, v22.4s, v26.4s
-    FMUL v23.4s, v23.4s, v26.4s
+    FMUL v23.4s, v23.4s, v30.4s
 
     FADD v8.4s, v8.4s, v24.4s
     FADD v9.4s, v9.4s, v25.4s
