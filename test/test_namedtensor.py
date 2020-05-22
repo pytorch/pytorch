@@ -6,7 +6,6 @@ import itertools
 import functools
 import torch
 from torch import Tensor
-from torch._six import PY2
 import torch.nn.functional as F
 from multiprocessing.reduction import ForkingPickler
 import pickle
@@ -162,14 +161,10 @@ class TestNamedTensor(TestCase):
         self.assertTrue(partially_named.has_names())
         self.assertTrue(fully_named.has_names())
 
-    @unittest.skipIf(PY2, "Ellipsis object not supported in python 2")
     def test_py3_ellipsis(self):
-        # Need to exec or else flake8 will complain about invalid python 2.
         tensor = torch.randn(2, 3, 5, 7)
-        scope = {'tensor': tensor}
-        code_str = "output = tensor.refine_names('N', ..., 'C')"
-        exec(code_str, globals(), scope)
-        self.assertEqual(scope['output'].names, ['N', None, None, 'C'])
+        output = tensor.refine_names('N', ..., 'C')
+        self.assertEqual(output.names, ['N', None, None, 'C'])
 
     def test_refine_names(self):
         # Unnamed tensor -> Unnamed tensor
@@ -988,6 +983,13 @@ class TestNamedTensor(TestCase):
                 self.assertEqual(result[1].names, names)
         test_ops(torch.cummax)
         test_ops(torch.cummin)
+
+    def test_logcumsumexp(self):
+        for device in torch.testing.get_all_device_types():
+            names = ('N', 'D')
+            tensor = torch.rand(2, 3, names=names)
+            result = torch.logcumsumexp(tensor, 'D')
+            self.assertEqual(result.names, names)
 
     def test_bitwise_not(self):
         for device in torch.testing.get_all_device_types():

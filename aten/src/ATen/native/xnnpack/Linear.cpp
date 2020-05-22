@@ -26,11 +26,13 @@ bool available(
           (2 == weight.ndimension()) &&
           (c10::DeviceType::CPU == weight.device().type()) &&
           (kFloat == weight.scalar_type()) &&
+          !weight.requires_grad() &&
           // Bias
           ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
                                        (c10::DeviceType::CPU == bias->device().type()) &&
                                        (kFloat == bias->scalar_type()) &&
-                                       (weight.size(Layout::Filter::output)) == bias->size(0))
+                                       (weight.size(Layout::Filter::output)) == bias->size(0) &&
+                                       !bias->requires_grad())
                                      : true) &&
           // Output Min / Max
           (output_max > output_min) &&
@@ -43,6 +45,7 @@ bool usable(const Tensor& input) {
   return (2 <= input.ndimension()) &&
          (c10::DeviceType::CPU == input.device().type()) &&
          (kFloat == input.scalar_type()) &&
+         !input.requires_grad() &&
          true;
 }
 
@@ -88,7 +91,9 @@ ContextLinear create(
       weight_contig.size(Layout::Filter::input),                        // input_pixel_stride
       weight_contig.size(Layout::Filter::output),                       // output_pixel_stride
       weight_contig.data_ptr<float>(),                                  // kernel
-      (bias && bias->defined()) ? bias->data_ptr<float>() : nullptr,  // bias
+      (bias && bias->defined()) ?
+          bias->contiguous().data_ptr<float>() :
+          nullptr,                                                      // bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
@@ -158,7 +163,7 @@ c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
       std::move(weight), std::move(bias), output_min, output_max);
 }
 
-Tensor LinearClampRun::operator()(
+Tensor linear_clamp_run(
     const Tensor& input,
     const c10::intrusive_ptr<xnnpack::LinearOpContext>& op_context) {
   return op_context->run(input);

@@ -320,27 +320,47 @@ void gemv<float>(CUDABLAS_GEMV_ARGTYPES(float)) {
 
 template <>
 void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half)) {
-  TORCH_CHECK(
-      incx == 1,
-      "at::cuda::blas::gemv<Half>: support for incx != 1 not implemented");
-  TORCH_CHECK(
-      incy == 1,
-      "at::cuda::blas::gemv<Half>: support for incy != 1 not implemented");
+  // In general, cublas regards matrices as column-major.
+  // The cublasS/Dgemv usages in cuda::blas::gemv<float>/<double> above
+  // require that external blas::gemv callers obey the following convention:
+  //
+  // If "a" is row-major with shape (output, summed) in blas::gemv's caller,
+  // caller interprets it as column-major with shape (summed, output), passes
+  // summed and output respectively to our local vars m, n, and requests that cublas
+  // internally transpose ("trans") the column-major interpretation of a.
+  //
+  // There's no such thing as "cublasHalfgemv", so here we hack gemv with a gemm.
+  // However, we must allow the same calling convention, because the caller shouldn't
+  // have to swap args based on whether it's calling blas::gemv<at::Half> or <float>.
+
+  bool trans_bool = (_cublasOpFromChar(trans) != CUBLAS_OP_N);
+  if (trans_bool) {
+    std::swap(m, n);
+  }
+  // After swap, local vars m, n contain the output and summed sizes respectively,
+  // regardless of whether "a" was row-major or column-major in gemv<>'s caller.
+
+  // To handle the possibility incy > 1, interprets vector y as column-major matrix with one row
+  // (shape (1, output)) and leading dim incy.
+  // trans(a)*x would compute a matrix with one column (shape (output, 1)) which wouldn't match y.
+  // So instead, we interpret x similarly to y, as a column-major matrix with one row
+  // (shape (1, summed)) and leading dim incx.  The gemm then carries out x*transpose(trans(a)) to
+  // produce a matrix with one row (shape (1, output)), matching y.
+  char trans_flipped = (trans_bool ? 'n' : 't');
   gemm<at::Half>(
-      trans, 'n', m, 1, n, alpha, a, n, x, n, beta, y, m);
+      'n', trans_flipped, 1, m, n, alpha, x, incx, a, lda, beta, y, incy);
 }
 
 #ifdef __HIP_PLATFORM_HCC__
 template <>
 void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16)) {
-  TORCH_CHECK(
-      incx == 1,
-      "at::cuda::blas::gemv<at::BFloat16>: support for incx != 1 not implemented");
-  TORCH_CHECK(
-      incy == 1,
-      "at::cuda::blas::gemv<at::BFloat16>: support for incy != 1 not implemented");
+  bool trans_bool = (_cublasOpFromChar(trans) != CUBLAS_OP_N);
+  if (trans_bool) {
+    std::swap(m, n);
+  }
+  char trans_flipped = (trans_bool ? 'n' : 't');
   gemm<at::BFloat16>(
-      trans, 'n', m, 1, n, alpha, a, n, x, n, beta, y, m);
+      'n', trans_flipped, 1, m, n, alpha, x, incx, a, lda, beta, y, incy);
 }
 #endif
 

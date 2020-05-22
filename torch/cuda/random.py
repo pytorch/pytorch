@@ -30,7 +30,7 @@ def get_rng_state(device='cuda'):
 
 
 def get_rng_state_all():
-    r"""Returns a tuple of ByteTensor representing the random number states of all devices."""
+    r"""Returns a list of ByteTensor representing the random number states of all devices."""
 
     results = []
     for i in range(device_count()):
@@ -66,7 +66,7 @@ def set_rng_state_all(new_states):
     r"""Sets the random number generator state of all devices.
 
     Args:
-        new_state (tuple of torch.ByteTensor): The desired state for each device"""
+        new_state (Iterable of torch.ByteTensor): The desired state for each device"""
     for i, state in enumerate(new_states):
         set_rng_state(state, i)
 
