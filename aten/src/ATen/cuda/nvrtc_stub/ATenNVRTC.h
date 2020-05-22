@@ -48,7 +48,10 @@ namespace at { namespace cuda {
   _(cuLaunchKernel)                              \
   _(cuCtxGetCurrent)                             \
   _(cuModuleUnload)                              \
-  _(cuDevicePrimaryCtxGetState)
+  _(cuDevicePrimaryCtxGetState)                  \
+  _(cuLinkCreate)                                \
+  _(cuLinkAddData)                               \
+  _(cuLinkComplete)
 
 #else
 
