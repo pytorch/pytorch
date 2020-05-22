@@ -4,10 +4,12 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import unittest
+import os
 
 import torch
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, skipIfRocm
+from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 
 from test_jit import JitTestCase, RUN_CUDA
 
@@ -51,6 +53,31 @@ class TestCudaFuser(JitTestCase):
             if n.kind() == 'prim::CudaFusionGroup':
                 has_cuda_fusion_group = True
         return has_cuda_fusion_group
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
+    @skipIfRocm
+    def test_half(self):
+        def t(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor, alpha : float):
+            o_16 = torch.add(x, y)
+            o_32_a = torch.add(y, z, alpha=alpha)
+            o_32_b = torch.add(o_16, z)
+            return (o_16, o_32_a, o_32_b)
+
+        t_jit = torch.jit.script(t)
+        alpha = 0.5
+        # stick to integers, this avoid the numerical difference due to our
+        # promotion
+        x = torch.randint(0, 256, (4, 8)).to(dtype=torch.float16, device="cuda")
+        y = torch.randint(0, 256, (4, 8)).to(dtype=torch.float16, device="cuda")
+        z = torch.randint(0, 256, (4, 8)).to(dtype=torch.float16, device="cuda")
+        jit_o = t_jit(x, y, z, alpha)
+        jit_o = t_jit(x, y, z, alpha)
+        o = t(x, y, z, alpha)
+        for oo, jit_oo in zip(o, jit_o):
+            self.assertEqual(oo.dtype, jit_oo.dtype)
+            self.assertEqual(oo, jit_oo)
+        self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, z, alpha)))
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
@@ -149,7 +176,6 @@ class TestCudaFuser(JitTestCase):
         # Currently cannot fuse this
         self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, z)))
 
-    @unittest.skipIf(True, "temporary disable for buggy codegen")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
     @skipIfRocm
@@ -298,6 +324,37 @@ class TestCudaFuser(JitTestCase):
             return o
         where_jit = torch.jit.script(where)
         self._run_helper(where_jit, where, True, x, y, cond)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Requires profiling node to run cuda fuser")
+    @skipIfRocm
+    def test_dynamic_size(self):
+        def t(x : torch.Tensor, y : torch.Tensor, z : float):
+            o = x + y
+            o = o + z
+            return o
+        t_jit = torch.jit.script(t)
+        x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        y = torch.randn(32, 32, dtype=torch.float, device="cuda")
+        jit_o = t_jit(x, y, 2.0)
+        jit_o = t_jit(x, y, 2.0)
+        o = t(x, y, 2.0)
+        self.assertEqual(o, jit_o)
+        self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, 2.0)))
+        x = torch.randn(8, 32, 16, 8, dtype=torch.float, device="cuda")
+        y = torch.randn(16, 8, dtype=torch.float, device="cuda")
+        jit_o = t_jit(x, y, 2.0)
+        o = t(x, y, 2.0)
+        self.assertEqual(o, jit_o)
+        x = torch.randn(8, 17, 8, dtype=torch.float, device="cuda")
+        y = torch.randn(8, 17, 1, dtype=torch.float, device="cuda")
+        jit_o = t_jit(x, y, 2.0)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @skipIfRocm
+    def test_random_topo(self):
+        os.environ["PYTORCH_CUDA_FUSER_DISABLE_FALLBACK"] = "1"
+        self.assertTrue(runDefaultTestWithSeed(28449))
 
 if __name__ == '__main__':
     run_tests()
