@@ -233,12 +233,19 @@ class TensorPipeAgent : public RpcAgent {
   // Mutex to guarg networkData_
   std::mutex networkDataMutex_;
 
+  // A mutex and a cv to guard access to the call counts and watch for changes.
+  std::mutex callCountMutex_;
+  std::condition_variable callCountCV_;
   // Running total of un-processed, un-errored RPC calls sent
-  std::atomic<int32_t> clientActiveCalls_{0};
+  int32_t clientActiveCalls_{0};
   // Running total of un-processed RPC requests received
-  std::atomic<int32_t> serverActiveCalls_{0};
+  int32_t serverActiveCalls_{0};
   // Running total of RPC requests that will be completed asynchronously
-  std::atomic<int32_t> serverActiveAsyncCalls_{0};
+  int32_t serverActiveAsyncCalls_{0};
+
+  // Helpers to modify the counts while correctly dealing with the mutex and cv.
+  void increaseCallCount(int32_t& count);
+  void decreaseCallCount(int32_t& count);
 };
 
 } // namespace rpc

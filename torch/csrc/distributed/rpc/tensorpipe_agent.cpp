@@ -259,7 +259,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
         respond(pipe);
 
         uint64_t messageId = requestMessage.id();
-        ++serverActiveCalls_;
+        increaseCallCount(serverActiveCalls_);
 
         // Defer user RPC UDF run to thread pool
         threadPool_.run([this,
@@ -276,16 +276,16 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           // Shortcut if immediately done
           if (futureResponseMessage->completed()) {
-            --serverActiveCalls_;
+            decreaseCallCount(serverActiveCalls_);
             sendCompletedResponseMessage(
                 pipe, futureResponseMessage, messageId);
           } else {
             // Not complete yet
-            ++serverActiveAsyncCalls_;
+            increaseCallCount(serverActiveAsyncCalls_);
             futureResponseMessage->addCallback(
                 [this, pipe, futureResponseMessage, messageId]() mutable {
-                  --serverActiveCalls_;
-                  --serverActiveAsyncCalls_;
+                  decreaseCallCount(serverActiveCalls_);
+                  decreaseCallCount(serverActiveAsyncCalls_);
                   sendCompletedResponseMessage(
                       pipe, futureResponseMessage, messageId);
                 });
@@ -337,7 +337,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
         "Future marked completed from outside the thread pool");
   });
 
-  ++clientActiveCalls_;
+  increaseCallCount(clientActiveCalls_);
   // Use the default RPC timeout if no timeout is specified for this send call
   auto timeout = rpcTimeoutSeconds == kUnsetRpcTimeout
       ? getRpcTimeout()
@@ -364,7 +364,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   futureResponseMessage->futMsg.addCallback([this]() {
     // Decrease the callcount through a callback so it is only decremented once
     // per future.
-    --clientActiveCalls_;
+    decreaseCallCount(clientActiveCalls_);
   });
 
   pipeWrite(
@@ -503,7 +503,16 @@ void TensorPipeAgent::sync() {}
 
 // TODO: Remove join()
 void TensorPipeAgent::join() {
-  shutdown();
+  std::unique_lock<std::mutex> lock(callCountMutex_);
+  // No need to wait for serverActiveCalls_ to reach zero, because after joining
+  // all workers will perform another barrier, thus waiting for all the requests
+  // from all the workers to complete.
+  // FIXME In fact, waiting for serverActiveCalls_ to reach zero would be wrong,
+  // because that count is decreased when the computation finishes, before the
+  // response is actually written back. Thus if we shutdown when it gets to zero
+  // we might abort some pending write operation. Should we decrease it in the
+  // write callback?
+  callCountCV_.wait(lock, [this] { return clientActiveCalls_ == 0; });
 }
 
 void TensorPipeAgent::shutdownImpl() {
@@ -568,10 +577,12 @@ std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
   metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
   metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
-  metrics[kClientActiveCalls] = c10::to_string(clientActiveCalls_.load());
-  metrics[kServerActiveCalls] = c10::to_string(serverActiveCalls_.load());
-  metrics[kServerActiveAsyncCalls] =
-      c10::to_string(serverActiveAsyncCalls_.load());
+  {
+    std::unique_lock<std::mutex> lock(callCountMutex_);
+    metrics[kClientActiveCalls] = c10::to_string(clientActiveCalls_);
+    metrics[kServerActiveCalls] = c10::to_string(serverActiveCalls_);
+    metrics[kServerActiveAsyncCalls] = c10::to_string(serverActiveAsyncCalls_);
+  }
   if (isGILProfilingEnabled()) {
     {
       std::unique_lock<std::mutex> lock(metricsMutex_);
@@ -682,6 +693,18 @@ std::string TensorPipeAgent::getDefaultIPAddress() {
   LOG(WARNING) << "TensorPipe agent didn't find associated IP address with "
                << hostname.data() << ". Using " << defaultIP << " to bind";
   return defaultIP;
+}
+
+void TensorPipeAgent::increaseCallCount(int32_t& count) {
+  std::unique_lock<std::mutex> lock(callCountMutex_);
+  ++count;
+  callCountCV_.notify_all();
+}
+
+void TensorPipeAgent::decreaseCallCount(int32_t& count) {
+  std::unique_lock<std::mutex> lock(callCountMutex_);
+  --count;
+  callCountCV_.notify_all();
 }
 
 } // namespace rpc
