@@ -567,6 +567,7 @@ SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
 
 Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
                                    Scalar value, const std::string reduce) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter_add_(): Expected dtype int64 for index");  
   SCATTER_GATHER_OP op = get_operator_enum(reduce);
   scatter_scalar_reduce_stub(self.device().type(), self, dim, index, value, op);
   return self;
@@ -574,9 +575,22 @@ Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor
 
 Tensor & scatter_cpu_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
                       const Tensor & src, const std::string reduce) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter_add_(): Expected dtype int64 for index");
   SCATTER_GATHER_OP op = get_operator_enum(reduce);
   scatter_reduce_stub(self.device().type(), self, dim, index, src, op);
   return self;
+}
+
+Tensor& scatter_cpu_scalar_reduce(Tensor& self, const int64_t dim, const Tensor& index,
+                                   Scalar value, const std::string reduce) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter_add_(): Expected dtype int64 for index");
+  return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, value, reduce);
+}
+
+Tensor & scatter_cpu_reduce(Tensor & self, const int64_t dim, const Tensor & index,
+                             const Tensor & src, const std::string reduce) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter(): Expected dtype int64 for index");
+  return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, src, reduce);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
