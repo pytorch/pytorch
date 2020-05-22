@@ -18,7 +18,6 @@ from torch.testing._internal.common_quantized import (
     override_qengines,
     supported_qengines,
 )
-
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
@@ -631,7 +630,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
-    #@skipIfNoFBGEMM
+    @skipIfNoFBGEMM
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
