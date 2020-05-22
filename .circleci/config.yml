@@ -25,7 +25,7 @@ executors:
     machine:
       # we will change to CPU host when it's ready
       resource_class: windows.xlarge
-      image: windows-server-2019-vs2019:201908-06
+      image: windows-server-2019-vs2019:temporary
       shell: bash.exe
 commands:
   # NB: This command must be run as the first command in a job. It
