@@ -10,9 +10,9 @@ template <typename T>
 struct CopyOp {
   __device__ __forceinline__ void operator()(T* dst, T* src) {
 #if __CUDA_ARCH__ >= 350
-    *dst = ScalarConvert<T, T>::to(__ldg(src));
+    *dst = c10::static_cast_with_inter_type<T, T>::apply(*src);
 #else
-    *dst = ScalarConvert<T, T>::to(*src);
+    *dst = c10::static_cast_with_inter_type<T, T>::apply(*src);
 #endif
   }
 };
@@ -33,6 +33,9 @@ struct CopyOp <at::BFloat16> {
 
 #include <THC/generic/THCTensorCopy.cu>
 #include <THC/THCGenerateAllTypes.h>
+
+#include <THC/generic/THCTensorCopy.cu>
+#include <THC/THCGenerateComplexTypes.h>
 
 #include <THC/generic/THCTensorCopy.cu>
 #include <THC/THCGenerateBoolType.h>

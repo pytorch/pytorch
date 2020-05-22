@@ -63,7 +63,7 @@ void BoundsInference::visit(const For* v) {
 
 void BoundsInference::visit(const Block* v) {
   BoundsInfo res;
-  for (auto s : v->stmts()) {
+  for (auto s : *v) {
     s->accept(this);
     res.insert(res.end(), accesses_.begin(), accesses_.end());
   }

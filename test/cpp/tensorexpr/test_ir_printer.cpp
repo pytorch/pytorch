@@ -34,46 +34,16 @@ void testIRPrinterBasicValueTest02() {
   ASSERT_EQ(ss.str(), "(2.f + 3.f) - (4.f + 5.f)");
 }
 
-void testIRPrinterLetTest01() {
-  KernelScope kernel_scope;
-  VarHandle x("x", kFloat);
-  ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
-  ExprHandle result = Let::make(x, ExprHandle(3.f), body);
-
-  std::stringstream ss;
-  ss << result;
-  ASSERT_EQ(ss.str(), "let x = 3.f in 2.f + (x * 3.f + 4.f)");
-}
-
-void testIRPrinterLetTest02() {
-  KernelScope kernel_scope;
-  VarHandle x("x", kFloat);
-  VarHandle y("y", kFloat);
-  ExprHandle body =
-      ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
-  ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
-  ExprHandle e2 = Let::make(y, ExprHandle(6.f), e1);
-
-  std::stringstream ss;
-  ss << e2;
-  ASSERT_EQ(
-      ss.str(), "let y = 6.f in (let x = 3.f in 2.f + (x * 3.f + 4.f * y))");
-}
-
 void testIRPrinterCastTest() {
   KernelScope kernel_scope;
-  VarHandle x("x", kFloat);
+  VarHandle x("x", kHalf);
   VarHandle y("y", kFloat);
-  ExprHandle body =
-      ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
-  ExprHandle e1 = Let::make(x, Cast::make(kInt, ExprHandle(3.f)), body);
-  ExprHandle e2 = Let::make(y, ExprHandle(6.f), e1);
+  ExprHandle body = ExprHandle(2.f) +
+      (Cast::make(kFloat, x) * ExprHandle(3.f) + ExprHandle(4.f) * y);
 
   std::stringstream ss;
-  ss << e2;
-  ASSERT_EQ(
-      ss.str(),
-      "let y = 6.f in (let x = int(3.f) in 2.f + (x * 3.f + 4.f * y))");
+  ss << body;
+  ASSERT_EQ(ss.str(), "2.f + (float(x) * 3.f + 4.f * y)");
 }
 } // namespace jit
 } // namespace torch

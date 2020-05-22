@@ -12,7 +12,9 @@ static void THCTensor_(copyArray1d)(THCState *state, THCTensor *self, scalar_t *
   int64_t stride[1] = { 1 };
   THCTensor_(resizeNd)(state, self, 1, size, stride);
   size_t len = k * sizeof(scalar_t);
-  THCudaCheck(cudaMemcpy(THCStorage_(data)(state, THTensor_getStoragePtr(self)) + self->storage_offset(), src, len, cudaMemcpyHostToDevice));
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, THTensor_getStoragePtr(self)) + self->storage_offset(), src, len, cudaMemcpyHostToDevice, stream));
+  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
 }
 
 static void THCTensor_(copyArray2d)(THCState *state, THCTensor *self, scalar_t *src, int m, int n)
@@ -21,7 +23,9 @@ static void THCTensor_(copyArray2d)(THCState *state, THCTensor *self, scalar_t *
   int64_t stride[2] = { 1, m };
   THCTensor_(resizeNd)(state, self, 2, size, stride);
   size_t len = m * n * sizeof(scalar_t);
-  THCudaCheck(cudaMemcpy(THCStorage_(data)(state, THTensor_getStoragePtr(self)) + self->storage_offset(), src, len, cudaMemcpyHostToDevice));
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, THTensor_getStoragePtr(self)) + self->storage_offset(), src, len, cudaMemcpyHostToDevice, stream));
+  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
 }
 
 static void THCTensor_(copyTensor2d)(THCState *state, scalar_t *dst, THCTensor *self)
@@ -30,7 +34,9 @@ static void THCTensor_(copyTensor2d)(THCState *state, scalar_t *dst, THCTensor *
   size_t len = THCTensor_(nElement)(state, self)*sizeof(scalar_t);
   THCTensor *temp = THCTensor_(newTranspose)(state, self, 0, 1);
   THCTensor *selfc = THCTensor_(newContiguous)(state, temp);
-  THCudaCheck(cudaMemcpy(dst, THCStorage_(data)(state, THTensor_getStoragePtr(selfc)) + selfc->storage_offset(), len, cudaMemcpyDeviceToHost));
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  THCudaCheck(cudaMemcpyAsync(dst, THCStorage_(data)(state, THTensor_getStoragePtr(selfc)) + selfc->storage_offset(), len, cudaMemcpyDeviceToHost, stream));
+  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
   THCTensor_(free)(state, temp);
   THCTensor_(free)(state, selfc);
 }
@@ -80,21 +86,24 @@ void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor
   scalar_t wkopt;
 
   int info;
+  {
+    at::native::MagmaStreamSyncGuard guard;
 #if defined(THC_REAL_IS_FLOAT)
-  magma_sgels_gpu(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, &wkopt, -1, &info);
+    magma_sgels_gpu(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, &wkopt, -1, &info);
 #else
-  magma_dgels_gpu(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, &wkopt, -1, &info);
+    magma_dgels_gpu(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, &wkopt, -1, &info);
 #endif
 
-  scalar_t *hwork = th_magma_malloc_pinned<scalar_t>((size_t)wkopt);
+    scalar_t *hwork = th_magma_malloc_pinned<scalar_t>((size_t)wkopt);
 
 #if defined(THC_REAL_IS_FLOAT)
-  magma_sgels_gpu(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, hwork, (int)wkopt, &info);
+    magma_sgels_gpu(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, hwork, (int)wkopt, &info);
 #else
-  magma_dgels_gpu(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, hwork, (int)wkopt, &info);
+    magma_dgels_gpu(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, hwork, (int)wkopt, &info);
 #endif
 
-  magma_free_pinned(hwork);
+    magma_free_pinned(hwork);
+  }
 
   if (info != 0)
     THError("MAGMA gels : Argument %d : illegal value", -info);
@@ -135,6 +144,8 @@ void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor
   if (n > 0) {
     int info;
     scalar_t wkopt;
+    at::native::MagmaStreamSyncGuard guard;
+
 #if defined(THC_REAL_IS_FLOAT)
     magma_sgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, &wkopt, -1, &info);
 #else
@@ -160,8 +171,10 @@ void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor
     THCTensor_(resize2d)(state, re_, 2, n);
     THCTensor *re = THCTensor_(newContiguous)(state, re_);
     if (n > 0) {
-      THCudaCheck(cudaMemcpy(THCStorage_(data)(state, THTensor_getStoragePtr(re)) + re->storage_offset(), wr, n*sizeof(scalar_t), cudaMemcpyHostToDevice));
-      THCudaCheck(cudaMemcpy(THCStorage_(data)(state, THTensor_getStoragePtr(re)) + re->storage_offset() + n, wi, n*sizeof(scalar_t), cudaMemcpyHostToDevice));
+      auto stream = c10::cuda::getCurrentCUDAStream();
+      THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, THTensor_getStoragePtr(re)) + re->storage_offset(), wr, n*sizeof(scalar_t), cudaMemcpyHostToDevice, stream));
+      THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, THTensor_getStoragePtr(re)) + re->storage_offset() + n, wi, n*sizeof(scalar_t), cudaMemcpyHostToDevice, stream));
+      AT_CUDA_CHECK(cudaStreamSynchronize(stream));
     }
     THCTensor_(freeCopyTo)(state, re, re_);
     THCTensor_(transpose)(state, re_, NULL, 0, 1);
@@ -217,11 +230,14 @@ void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, bool upper
   scalar_t *input_data = THCTensor_(data)(state, input);
 
   int info;
+  {
+    at::native::MagmaStreamSyncGuard guard;
 #if defined(THC_REAL_IS_FLOAT)
-  magma_spotri_gpu(ul, n, input_data, n, &info);
+    magma_spotri_gpu(ul, n, input_data, n, &info);
 #else
-  magma_dpotri_gpu(ul, n, input_data, n, &info);
+    magma_dpotri_gpu(ul, n, input_data, n, &info);
 #endif
+  }
 
   if (info > 0)
     THError("MAGMA potri : A(%d,%d) is 0, A cannot be factorized", info, info);
@@ -264,11 +280,14 @@ void THCTensor_(geqrf)(THCState *state, THCTensor *ra_, THCTensor *rtau_, THCTen
   scalar_t *a_data = THCTensor_(data)(state, a);
 
   int info;
+  {
+    at::native::MagmaStreamSyncGuard guard;
 #if defined(THC_REAL_IS_FLOAT)
-  magma_sgeqrf2_gpu(m, n, a_data, m, rtau_data, &info);
+    magma_sgeqrf2_gpu(m, n, a_data, m, rtau_data, &info);
 #else
-  magma_dgeqrf2_gpu(m, n, a_data, m, rtau_data, &info);
+    magma_dgeqrf2_gpu(m, n, a_data, m, rtau_data, &info);
 #endif
+  }
 
   if (info != 0)
     THError("MAGMA geqrf2 : Argument %d : illegal value.", -info);

@@ -51,7 +51,7 @@ SLEEF_PUBLIC_INCLUDES = [
 ]
 
 SLEEF_VISIBILITY = [
-    "@pytorch//:__subpackages__",
+    "//visibility:public",
 ]
 
 cc_binary(

@@ -176,6 +176,31 @@ void testFusion() {
   };
 }
 
+void testFusionAliasing() {
+  const auto graph_string = R"IR(
+    graph(%0 : Tensor,
+          %1 : Tensor):
+      %12 : int = prim::Constant[value=1]()
+      %2.1 : Tensor = aten::mul(%0, %1)
+      %2 : Tensor = aten::mul(%2.1, %1)
+      %3 : Tensor = aten::add_(%2, %1, %12)
+      %4 : Tensor = aten::mul(%2, %1)
+      %5 : Tensor = aten::add(%2, %4, %12)
+      return (%5))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseGraph(g);
+
+  // We should not be able to fuse across the in-place operation here.
+  testing::FileCheck()
+      .check("prim::FusionGroup_0")
+      ->check("aten::add_")
+      ->check("prim::FusionGroup_1")
+      ->run(*g);
+}
+
 void testRegisterFusionCachesKernel() {
   // Constructs two functionally equivalent graphs
   const auto graph0_string = R"IR(

@@ -56,10 +56,10 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
       wstart += dilation_w;
     accscalar_t maxval = at::numeric_limits<accscalar_t>::lower_bound(); // -Infinity
     int maxidx = hstart * width + wstart;
-    bottom_data += (n * channels + c) * height * width;
+    const scalar_t* btm_data = bottom_data + (n * channels + c) * height * width;
     for (int h = hstart; h < hend; h += dilation_h) {
       for (int w = wstart; w < wend; w += dilation_w) {
-        scalar_t val = bottom_data[h * width + w];
+        scalar_t val = btm_data[h * width + w];
         if ((ScalarConvert<scalar_t, accscalar_t>::to(val) > maxval) || THCNumerics<scalar_t>::isnan(val)) {
           maxidx = h * width + w;
           maxval = ScalarConvert<scalar_t, accscalar_t>::to(val);
