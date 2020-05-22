@@ -735,7 +735,6 @@ void initJITBindings(PyObject* module) {
              const std::string& key,
              size_t numel,
              py::object data_type_obj) {
-            at::DataPtr data(std::get<0>(self.getRecord(key)));
             auto scalar_type =
                 reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
 
@@ -743,7 +742,7 @@ void initJITBindings(PyObject* module) {
                 c10::Storage::use_byte_size_t(),
                 at::CPU(scalar_type).typeMeta(),
                 numel * elementSize(scalar_type),
-                std::move(data),
+                std::get<0>(self.getRecord(key)),
                 /*allocator=*/nullptr,
                 /*resizable=*/false);
             auto ptr =
