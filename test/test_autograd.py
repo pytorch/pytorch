@@ -3120,7 +3120,7 @@ class TestAutograd(TestCase):
         self._test_lerp_tensor_weights(lambda t: t)
 
     def test_reduce_dtype(self):
-        def test_reduction(op, has_no_dim):
+        def test_reduction(op, has_no_dim, takes_dtype=True):
             x = torch.randn(3, 3, dtype=torch.float, requires_grad=True)
 
             if has_no_dim:
@@ -3131,7 +3131,10 @@ class TestAutograd(TestCase):
 
             gi = torch.randn(op(x, dim=0).shape, dtype=torch.float)
             grad1, = torch.autograd.grad([op(x, dim=0)], [x], gi)
-            grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
+            if takes_dtype:
+                grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
+            else:
+                grad2, = torch.autograd.grad([op(x.double(), dim=0)], [x], gi.double())
             self.assertEqual(grad1, grad2)
             self.assertEqual(grad2.dtype, torch.float)
 
@@ -3139,6 +3142,7 @@ class TestAutograd(TestCase):
         test_reduction(torch.prod, True)
         test_reduction(torch.cumsum, False)
         test_reduction(torch.cumprod, False)
+        test_reduction(torch.logcumsumexp, False, takes_dtype=False)
 
     def test_inplace_view_saved_output(self):
         # Test an in-place operation on a view in which the in-place op saves
@@ -6272,6 +6276,21 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(fn, (vec))
         gradgradcheck(fn, (vec))
+
+    def test_logcumsumexp_large_value(self, device):
+        a = torch.rand(4, 4, 4, dtype=torch.double, requires_grad=True)
+        with torch.no_grad():
+            # Large Number
+            a[0] = 10000
+
+        gradcheck(lambda x: x.logcumsumexp(0), a)
+        gradgradcheck(lambda x: x.logcumsumexp(0), a)
+
+        gradcheck(lambda x: x.logcumsumexp(1), a)
+        gradgradcheck(lambda x: x.logcumsumexp(1), a)
+
+        gradcheck(lambda x: x.logcumsumexp(2), a)
+        gradgradcheck(lambda x: x.logcumsumexp(2), a)
 
 
 class TestMultithreadAutograd(TestCase):
