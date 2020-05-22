@@ -22,6 +22,7 @@ namespace cuda {
 constexpr auto NUM_UNARY_OPS = 31;
 constexpr auto NUM_BINARY_OPS = 24;
 constexpr auto NUM_BINARY_OPS_WITH_ALPHA = 4;
+constexpr auto NUM_LERP_OPS = 2;
 
 namespace {
 
@@ -415,6 +416,27 @@ class IrParser {
             auto out = where(condition, x, y);
             value_map.emplace(node->output()->unique(), out);
           });
+    }
+
+    {
+      std::array<const char*, NUM_LERP_OPS> LerpOp = {
+          "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
+          "aten::lerp(Tensor self, Tensor end, Tensor weight) -> Tensor"};
+      for (auto signature : LerpOp) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        registerParseRule(
+            ptr_op,
+            [](const Node* const node,
+               std::unordered_map<size_t, CgValue>& value_map) -> void {
+
+              auto self = value_map[node->inputs()[0]->unique()];
+              auto end = value_map[node->inputs()[1]->unique()];
+              auto weight = value_map[node->inputs()[2]->unique()];
+  
+              auto out = lerp(self, end, weight);
+              value_map.emplace(node->output()->unique(), out);
+            });
+      }
     }
   }
 
