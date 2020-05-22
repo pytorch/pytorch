@@ -25,5 +25,5 @@ executors:
     machine:
       # we will change to CPU host when it's ready
       resource_class: windows.xlarge
-      image: windows-server-2019-vs2019:stable
+      image: windows-server-2019-vs2019:201908-06
       shell: bash.exe
