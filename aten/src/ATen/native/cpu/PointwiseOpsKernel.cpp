@@ -30,20 +30,32 @@ static void addcmul_cpu_kernel(TensorIterator& iter, Scalar value) {
 
 static void addcdiv_cpu_kernel(TensorIterator& iter, Scalar value) {
   ScalarType dtype = iter.dtype(0);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcdiv_cpu_out", [&] {
-    scalar_t scalar_val = value.to<scalar_t>();
-    auto scalar_vec = Vec256<scalar_t>(scalar_val);
-    cpu_kernel_vec(
-        iter,
-        [=](scalar_t self_val, scalar_t t1_val, scalar_t t2_val) -> scalar_t {
-          return self_val + scalar_val * t1_val / t2_val;
-        },
-        [=](Vec256<scalar_t> self_vec,
-            Vec256<scalar_t> t1_vec,
-            Vec256<scalar_t> t2_vec) {
-          return self_vec + scalar_vec * t1_vec / t2_vec;
-        });
-  });
+  if (isIntegralType(iter.dtype(), false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "addcdiv_cpu_out", [&]() {
+      scalar_t scalar_val = value.to<scalar_t>();
+      cpu_kernel(
+          iter,
+          [=](scalar_t self_val, scalar_t t1_val, scalar_t t2_val) -> scalar_t {
+            TORCH_CHECK(t2_val != 0, "ZeroDivisionError");
+            return self_val + scalar_val * t1_val / t2_val;
+          });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcdiv_cpu_out", [&] {
+      scalar_t scalar_val = value.to<scalar_t>();
+      auto scalar_vec = Vec256<scalar_t>(scalar_val);
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t self_val, scalar_t t1_val, scalar_t t2_val) -> scalar_t {
+            return self_val + scalar_val * t1_val / t2_val;
+          },
+          [=](Vec256<scalar_t> self_vec,
+              Vec256<scalar_t> t1_vec,
+              Vec256<scalar_t> t2_vec) {
+            return self_vec + scalar_vec * t1_vec / t2_vec;
+          });
+    });
+  }
 }
 
 static void smooth_l1_backward_cpu_kernel(TensorIterator& iter, Scalar norm) {

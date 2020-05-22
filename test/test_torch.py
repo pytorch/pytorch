@@ -16618,6 +16618,20 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             a // b
 
     @onlyCPU
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_fmod_zero(self, device, dtype):
+        a = torch.tensor([1, 0], dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
+            a.fmod(a)
+
+    @onlyCPU
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_addcdiv_zero(self, device, dtype):
+       a = torch.tensor([1, 0], dtype=dtype, device=device)
+       with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
+           a.addcdiv(a, a)
+
+    @onlyCPU
     def test_cat_bad_input_sizes(self, device):
         x = torch.randn(2, 1, device=device)
         y = torch.randn(2, 1, 1, device=device)
