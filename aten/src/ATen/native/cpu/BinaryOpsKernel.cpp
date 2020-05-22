@@ -82,7 +82,7 @@ void div_kernel(TensorIterator& iter) {
         [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
            return a / b;
         },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) __ubsan_ignore_float_divide_by_zero__ {
           return a / b;
         });
     });
