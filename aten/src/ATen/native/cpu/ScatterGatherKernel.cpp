@@ -12,14 +12,14 @@ namespace {
 
 template <bool is_scatter_like = true>
 struct _cpu_scatter_gather_dim_loop {
-  template <typename scalar_t, typename func_t>
+  template <typename scalar_t>
   void operator()(
     scalar_t* self_data, int64_t self_dim_stride,
     int64_t* index_data, int64_t index_dim_stride,
     scalar_t* src_data, int64_t src_dim_stride,
     int64_t dim, int64_t index_dim_size,
     int64_t index_upper_bound,
-    const func_t& f
+    auto f
   ) {
 
     for (int64_t i = 0; i < index_dim_size; ++i) {
@@ -39,32 +39,32 @@ struct _cpu_scatter_gather_dim_loop {
     }
   }
 
-  template <typename scalar_t, typename func_t>
-  void operator()(
-    scalar_t* self_data, int64_t self_dim_stride,
-    int64_t* index_data, int64_t index_dim_stride,
-    Scalar value,
-    int64_t dim, int64_t index_dim_size,
-    int64_t index_upper_bound,
-    const func_t& f
-  ) {
+  // template <typename scalar_t, typename func_t>
+  // void operator()(
+  //   scalar_t* self_data, int64_t self_dim_stride,
+  //   int64_t* index_data, int64_t index_dim_stride,
+  //   Scalar value,
+  //   int64_t dim, int64_t index_dim_size,
+  //   int64_t index_upper_bound,
+  //   const func_t f
+  // ) {
 
-    for (int64_t i = 0; i < index_dim_size; ++i) {
-      int64_t idx_dim = index_data[i * index_dim_stride];
-      // we are not putting idx_dim in the error message because it disables
-      // loop optimization in clang-7
-      TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
-        "index ", index_data[i * index_dim_stride],
-        " is out of bounds for dimension ", dim,
-        " with size ", index_upper_bound
-      );
-      // using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
-      f(
-        self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-        value.to<scalar_t*>()
-      );
-    }
-  }
+  //   for (int64_t i = 0; i < index_dim_size; ++i) {
+  //     int64_t idx_dim = index_data[i * index_dim_stride];
+  //     // we are not putting idx_dim in the error message because it disables
+  //     // loop optimization in clang-7
+  //     TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
+  //       "index ", index_data[i * index_dim_stride],
+  //       " is out of bounds for dimension ", dim,
+  //       " with size ", index_upper_bound
+  //     );
+  //     // using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
+  //     f(
+  //       self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
+  //       value.to<scalar_t*>()
+  //     );
+  //   }
+  // }
 };
 
 // implement reduce_multiply as a class since the multiplication requires a type
@@ -85,18 +85,50 @@ public:
 };
 ReduceMultiply reduce_multiply;
 
-auto reduce_add = [](auto * self_data, auto * src_data) {
-                    *self_data += *src_data;
-                  };
-auto reduce_subtract = [](auto * self_data, auto * src_data) {
-                         *self_data -= *src_data;
-                       };
-auto reduce_divide = [](auto * self_data, auto * src_data) {
-                       *self_data /= *src_data;
-                     };
-auto tensor_assign = [](auto * self_data, auto * src_data) {
-                *self_data = *src_data;
-              };
+class ReduceAdd {
+public:
+  ReduceAdd() {};
+  // don't use auto due to complaints from clang.
+  template <typename scalar_t>
+  void operator()(scalar_t * self_data, scalar_t * src_data) {
+    *self_data += *src_data;
+  };
+};
+ReduceAdd reduce_add;
+
+class ReduceSubtract {
+public:
+  ReduceSubtract() {};
+  // don't use auto due to complaints from clang.
+  template <typename scalar_t>
+  void operator()(scalar_t * self_data, scalar_t * src_data) {
+    *self_data -= *src_data;
+  };  
+};
+ReduceSubtract reduce_subtract;
+  
+class ReduceDivide {
+public:
+  ReduceDivide() {};
+  // don't use auto due to complaints from clang.
+  template <typename scalar_t>
+  void operator()(scalar_t * self_data, scalar_t * src_data) {
+    *self_data /= *src_data;
+  };  
+};
+ReduceDivide reduce_divide;
+
+class TensorAssign {
+public:
+  TensorAssign() {};
+  // don't use auto due to complaints from clang.
+  template <typename scalar_t>
+  void operator()(scalar_t * self_data, scalar_t * src_data) {
+    *self_data = *src_data;
+  };    
+};
+TensorAssign tensor_assign;
+
 auto scalar_assign = [](auto * self_data, Scalar src_data) {
                        using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
                        *self_data = src_data.to<scalar_t>();
@@ -256,7 +288,7 @@ struct cpu_scatter_gather_base_kernel {
     const Tensor& index, const Tensor& src,
     const std::string& method_name,
     bool serial_exec,
-    const SCATTER_GATHER_OP& func_enum) {
+    auto kernel_func) {
     // no-op if index is empty
     if (index.numel() == 0) {
       return;
@@ -298,15 +330,15 @@ struct cpu_scatter_gather_base_kernel {
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
 
-        using binary_func_t = std::function<void(scalar_t*, scalar_t*)>;
-        std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
-        binary_funcs[SCATTER_GATHER_OP::REDUCE_ADD] = reduce_add;
-        binary_funcs[SCATTER_GATHER_OP::REDUCE_SUBTRACT] = reduce_subtract;
-        binary_funcs[SCATTER_GATHER_OP::REDUCE_MULTIPLY] = reduce_multiply;
-        binary_funcs[SCATTER_GATHER_OP::REDUCE_DIVIDE] = reduce_divide;
-        binary_funcs[SCATTER_GATHER_OP::TENSOR_ASSIGN] = tensor_assign;
+        // using binary_func_t = std::function<void(scalar_t*, scalar_t*)>;
+        // std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
+        // binary_funcs[SCATTER_GATHER_OP::REDUCE_ADD] = reduce_add;
+        // binary_funcs[SCATTER_GATHER_OP::REDUCE_SUBTRACT] = reduce_subtract;
+        // binary_funcs[SCATTER_GATHER_OP::REDUCE_MULTIPLY] = reduce_multiply;
+        // binary_funcs[SCATTER_GATHER_OP::REDUCE_DIVIDE] = reduce_divide;
+        // binary_funcs[SCATTER_GATHER_OP::TENSOR_ASSIGN] = tensor_assign;
 
-        auto run_loop = [&](const auto& kernel_func) {
+        // auto run_loop = [&](const auto& kernel_func) {
           auto loop = [&](char** data, const int64_t* strides, int64_t n) {
             auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
             auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
@@ -363,47 +395,57 @@ struct cpu_scatter_gather_base_kernel {
           else {
             iter.for_each(loop);
           }
-        };
+        // };
 
-        run_loop(binary_funcs[func_enum]);
+        // run_loop(binary_funcs[SCATTER_GATHER_OP::REDUCE_ADD]);
       }
     );
   }
 };
 
 void gather_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
-  cpu_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
-    result, dim, index, self,
-    "gather_out_cpu", /*serial_exec=*/false, SCATTER_GATHER_OP::TENSOR_ASSIGN);
+  // cpu_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
+  //   result, dim, index, self,
+  //   "gather_out_cpu", /*serial_exec=*/false, SCATTER_GATHER_OP::TENSOR_ASSIGN);
 }
 
 void scatter_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  cpu_scatter_gather_base_kernel<>()(
-    self, dim, index, src, "scatter_cpu_", false, SCATTER_GATHER_OP::TENSOR_ASSIGN);
+  // cpu_scatter_gather_base_kernel<>()(
+  //   self, dim, index, src, "scatter_cpu_", false, SCATTER_GATHER_OP::TENSOR_ASSIGN);
 }
 
 void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar value) {
-  cpu_scatter_gather_base_kernel<>()(
-    self, dim, index, value, "scatter_fill_cpu_", /*serial_exec=*/false,
-    SCATTER_GATHER_OP::SCALAR_ASSIGN);
+  // cpu_scatter_gather_base_kernel<>()(
+  //   self, dim, index, value, "scatter_fill_cpu_", /*serial_exec=*/false,
+  //   SCATTER_GATHER_OP::SCALAR_ASSIGN);
 }
 
 void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cpu_scatter_gather_base_kernel<>()(
     self, dim, index, src,
-    "scatter_add_", /*serial_exec=*/true, SCATTER_GATHER_OP::REDUCE_ADD);
+    "scatter_add_", /*serial_exec=*/false, reduce_add);
+
 }
+
+
 
 void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
                                const Tensor& src, const SCATTER_GATHER_OP& reduce) {
-  cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
-                                    "scatter_reduce_", true, reduce);
+  switch (reduce) {
+  case SCATTER_GATHER_OP::REDUCE_ADD :
+    cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
+                                       "scatter_reduce_", true, reduce_add);
+  case SCATTER_GATHER_OP::REDUCE_SUBTRACT :
+    cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
+                                       "scatter_reduce_", true, reduce_subtract);
+  }
+
 }
 
 void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
                                       Scalar& value, const SCATTER_GATHER_OP& reduce) {
-  cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
-                                     "scatter_scalar_reduce_", true, reduce);
+  // cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
+  //                                    "scatter_scalar_reduce_", true, reduce);
 }
 
 } // anonymous namespace
