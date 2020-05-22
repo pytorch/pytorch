@@ -129,6 +129,14 @@ def checkpoint(function, *args, **kwargs):
         checkpointed version won't be equivalent, and unfortunately it can't be
         detected.
 
+    .. warning::
+        If checkpointed segment contains tensors detached from the computational
+        graph by `detach()` or `torch.no_grad()`, the backward pass will raise an
+        error. This is because `checkpoint` makes all the outputs require 
+        gradients which causes issues when a tensor is defined to have no 
+        gradient in the model. To circumvent this, detach the tensors outside of 
+        the `checkpoint` function.
+
     .. warning:
         At least one of the inputs needs to have :code:`requires_grad=True` if
         grads are needed for model inputs, otherwise the checkpointed part of the

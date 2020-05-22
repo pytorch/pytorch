@@ -163,11 +163,90 @@ void masked_fill_kernel(TensorIterator& iter, Scalar value) {
     });
 }
 
-} // anonymous namespace
+template <typename scalar_t, typename mask_t, typename func_t>
+void cpu_masked_select_serial_kernel(TensorIterator& iter, const func_t& f) {
+  auto is_mask_bool = std::is_same<mask_t, bool>::value;
+  int64_t offset = 0;
+  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+    char* dst = data[0];
+    char* src = data[1];
+    char* mask = data[2];
+    for (int64_t i = 0; i < n; i++) {
+      mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
+      if (!is_mask_bool) {
+        TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
+      }
+      if (mask_value) {
+        int64_t offset_bytes = offset * sizeof(scalar_t);
+        f(dst, src + strides[1] * i, offset_bytes);
+        offset++;
+      }
+    }
+  };
+  iter.serial_for_each(loop, {0, iter.numel()});
+}
 
+void masked_select_serial_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16,
+    iter.dtype(), "masked_select", [&] {
+      auto mask_dtype = iter.input_dtype(1);
+      if (mask_dtype == at::ScalarType::Bool) {
+        cpu_masked_select_serial_kernel<scalar_t, bool>(iter, [](char* dst, char* src, int64_t offset) {
+          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+        });
+      } else {
+        cpu_masked_select_serial_kernel<scalar_t, unsigned char>(iter, [](char* dst, char* src, int64_t offset) {
+          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+        });
+      }
+    });
+}
+
+template <typename scalar_t, typename mask_t, typename func_t>
+void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
+  auto is_mask_bool = std::is_same<mask_t, bool>::value;
+  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+    char* dst = data[0];
+    char* src = data[1];
+    char* mask = data[2];
+    char* mask_prefix_sum = data[3];
+    for (int64_t i = 0; i < n; i++) {
+      mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
+      if (!is_mask_bool) {
+        TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
+      }
+      if (mask_value) {
+        int64_t offset = *(int64_t*)(mask_prefix_sum + strides[3] * i);
+        int64_t offset_bytes = (offset - 1) * sizeof(scalar_t);
+        f(dst, src + strides[1] * i, offset_bytes);
+      }
+    }
+  };
+  iter.for_each(loop);
+}
+
+void masked_select_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16,
+    iter.dtype(), "masked_select", [&] {
+      auto mask_dtype = iter.input_dtype(1);
+      if (mask_dtype == at::ScalarType::Bool) {
+        cpu_masked_select_kernel<scalar_t, bool>(iter, [](char* dst, char* src, int64_t offset) {
+          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+        });
+      } else {
+        cpu_masked_select_kernel<scalar_t, unsigned char>(iter, [](char* dst, char* src, int64_t offset) {
+          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+        });
+      }
+    });
+}
+
+} // anonymous namespace
 
 REGISTER_DISPATCH(index_stub, &index_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
 REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
+REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
+REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
 
 }} // namespace at::native

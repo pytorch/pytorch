@@ -8,7 +8,7 @@ import torch.nn.quantized.functional
 
 class LayerNorm(torch.nn.LayerNorm):
     r"""Applies Layer Normalization over a mini-batch of inputs as described in
-    the paper `Layer Normalization`_ .
+    the paper `Layer Normalization <https://arxiv.org/abs/1607.06450>`__
 
     .. math::
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
@@ -60,8 +60,6 @@ class LayerNorm(torch.nn.LayerNorm):
         >>> m = nn.LayerNorm(10)
         >>> # Activating the module
         >>> output = m(input)
-
-    .. _`Layer Normalization`: https://arxiv.org/abs/1607.06450
     """
 
     def __init__(self, normalized_shape, weight, bias, scale, zero_point, eps=1e-5,

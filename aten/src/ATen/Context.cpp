@@ -149,6 +149,14 @@ bool Context::isXNNPACKAvailable() const {
 #endif
 }
 
+bool Context::releaseWeightsWhenPrepacking() const {
+  return release_original_weights;
+}
+
+void Context::setReleaseWeightsWhenPrepacking(bool e) {
+  release_original_weights = e;
+}
+
 bool Context::setFlushDenormal(bool on) {
   return at::cpu::set_flush_denormal(on);
 }
@@ -156,19 +164,5 @@ bool Context::setFlushDenormal(bool on) {
 Allocator* getCPUAllocator() {
   return getTHDefaultAllocator();
 }
-
-struct LegacyDeviceTypeInit : public LegacyDeviceTypeInitInterface {
-  LegacyDeviceTypeInit(LegacyDeviceTypeInitArgs) {}
-  void initCPU() const override {
-    globalContext();
-  }
-  void initCUDA() const override {
-    globalContext().lazyInitCUDA();
-  }
-  void initHIP() const override {
-    globalContext().lazyInitHIP();
-  }
-};
-REGISTER_LEGACY_TYPE_INIT(LegacyDeviceTypeInit);
 
 } // namespace at

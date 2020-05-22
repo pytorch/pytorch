@@ -1,10 +1,10 @@
 #pragma once
-#include "module.h"
+#include <torch/csrc/jit/mobile/module.h>
 
 #include <istream>
 #include <memory>
 
-#include "caffe2/serialize/file_adapter.h"
+#include <caffe2/serialize/file_adapter.h>
 
 namespace torch {
 namespace jit {

@@ -129,7 +129,7 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   void callKernel_() {
     AT_ASSERT(stack_.size() == op_.schema().arguments().size());
-    c10::Dispatcher::singleton().callBoxed(op_, &stack_);
+    op_.callBoxed(&stack_);
   }
 
   void popOutputs_() {

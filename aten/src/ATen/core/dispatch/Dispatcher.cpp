@@ -227,6 +227,24 @@ void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& o
   cleanup(op, op_name);
 }
 
+RegistrationHandleRAII Dispatcher::registerName(OperatorName op_name) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto op = findOrRegisterName_(op_name);
+  ++op.operatorIterator_->def_and_impl_count;
+  return RegistrationHandleRAII(
+      [this, op, op_name] { deregisterName_(op, op_name); });
+}
+
+void Dispatcher::deregisterName_(
+    const OperatorHandle& op,
+    const OperatorName& op_name) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
+  TORCH_INTERNAL_ASSERT(op.operatorIterator_->def_and_impl_count > 0);
+  --op.operatorIterator_->def_and_impl_count;
+  cleanup(op, op_name);
+}
+
 // Test if the operator entry is completely dead, and if so remove it completely
 void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) {
   if (0 == op.operatorIterator_->def_and_impl_count) {
@@ -240,6 +258,8 @@ void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) 
 }
 
 RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel, std::string debug) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
   // TODO: fallbacks clobber each other completely unsafely, unlike regular
   // kernels
   backendFallbackKernels_.setKernel(dispatchKey, std::move(kernel));
@@ -253,6 +273,8 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
 }
 
 void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
   backendFallbackKernels_.removeKernelIfExists(dispatchKey);
   backendsWithoutFallthrough_ = backendsWithoutFallthrough_.add(dispatchKey);
 }

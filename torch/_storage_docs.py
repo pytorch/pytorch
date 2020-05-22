@@ -14,6 +14,8 @@ storage_classes = [
     'ByteStorageBase',
     'BoolStorageBase',
     'BFloat16StorageBase',
+    'ComplexDoubleStorageBase',
+    'ComplexFloatStorageBase',
 ]
 
 
