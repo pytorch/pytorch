@@ -439,6 +439,8 @@ class BuildExtension(build_ext, object):
                 post_cflags = extra_postargs['cxx']
             else:
                 post_cflags = list(extra_postargs)
+            if IS_HIP_EXTENSION:
+                post_cflags += COMMON_HIPCC_FLAGS
             append_std14_if_no_std_present(post_cflags)
 
             cuda_post_cflags = None
