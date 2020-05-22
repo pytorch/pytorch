@@ -374,6 +374,20 @@ class TestCudaFuser(JitTestCase):
         addcmul_const_alpha_jit = torch.jit.script(addcmul_const_alpha)
         self._run_helper(addcmul_const_alpha_jit, addcmul_const_alpha, x, y, z)
 
+        def lerp(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
+            o = torch.rand_like(x)
+            o = o * torch.lerp(x, y, z)
+            return o
+        lerp_jit = torch.jit.script(lerp)
+        self._run_helper(lerp_jit, lerp, True, x, y, z)
+
+        def lerp_scale(x : torch.Tensor, y : torch.Tensor, z: float):
+            o = torch.rand_like(x)
+            o = o * torch.lerp(x, y, z)
+            return o
+        lerp_scale_jit = torch.jit.script(lerp_scale)
+        self._run_helper(lerp_scale_jit, lerp_scale, True, x, y, 0.5)
+
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
                      ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")

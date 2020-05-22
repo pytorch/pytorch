@@ -431,31 +431,15 @@ class IrParser {
             ptr_op,
             [](const Node* const node,
                std::unordered_map<size_t, CgValue>& value_map) -> void {
+
               auto self = value_map[node->inputs()[0]->unique()];
               auto end = value_map[node->inputs()[1]->unique()];
               auto weight = value_map[node->inputs()[2]->unique()];
-
+  
               auto out = lerp(self, end, weight);
               value_map.emplace(node->output()->unique(), out);
             });
       }
-    }
-
-    {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor");
-      registerParseRule(
-          ptr_op,
-          [](const Node* const node,
-             std::unordered_map<size_t, CgValue>& value_map) -> void {
-            auto self = value_map[node->inputs()[0]->unique()];
-            auto tensor1 = value_map[node->inputs()[1]->unique()];
-            auto tensor2 = value_map[node->inputs()[2]->unique()];
-            auto value = value_map[node->inputs()[3]->unique()];
-
-            auto out = addcmul(self, tensor1, tensor2, value);
-            value_map.emplace(node->output()->unique(), out);
-          });
     }
   }
 
