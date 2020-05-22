@@ -327,12 +327,12 @@ class _TestTorchMixin(object):
         actual = a.logsumexp(1)
         expected = logsumexp(a.numpy(), 1)
         self.assertEqual(expected.shape, actual.shape)
-        self.assertTrue(np.allclose(expected, actual.numpy()))
+        self.assertEqual(expected, actual)
         # check that out is actually inplace
         b = torch.zeros(5, 2)
         c = b[:, 0]
         torch.logsumexp(a, 1, out=c)
-        self.assertTrue(np.allclose(expected, b[:, 0].numpy()))
+        self.assertEqual(expected, b[:, 0])
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_cpu_parallel(self):
@@ -513,10 +513,9 @@ class _TestTorchMixin(object):
     def _assert_matches_numpy(self, t, n):
         self.assertEqual(n.shape, t.shape)
         if t.dtype == torch.float:
-            self.assertTrue(np.allclose(n, t.numpy(), rtol=1e-03, atol=1e-05,
-                                        equal_nan=True))
+            self.assertEqual(n, t, rtol=1e-03, atol=1e-05, equal_nan=True)
         else:
-            self.assertTrue(np.allclose(n, t.numpy(), equal_nan=True))
+            self.assertEqual(n, t, equal_nan=True)
 
     def _test_dim_ops(self, pytorch_op, numpy_op,
                       use_floating=True, use_integral=True, use_complex=False):
@@ -4630,7 +4629,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                          ~torch.tensor([False, True]))
 
         # test exceptions
-        for dtype in(torch.half, torch.float, torch.double):
+        for dtype in (torch.half, torch.float, torch.double):
             a = torch.zeros(10, dtype=dtype)
             with self.assertRaises(TypeError):
                 b = ~a
@@ -5465,7 +5464,6 @@ class TestTorchDeviceType(TestCase):
                         "nan and the other isn't, or both are nan and equal_nan "
                         "is False")
         self.assertEqual(debug_msg, expected_msg)
-
 
     # Checks that compareTensors provides the correct debug info
     @onlyOnCPUAndCUDA
@@ -6359,13 +6357,13 @@ class TestTorchDeviceType(TestCase):
             result = torch.diagonal(x, *args)
             expected = xn.diagonal(*args)
             self.assertEqual(expected.shape, result.shape)
-            self.assertTrue(np.allclose(expected, result.numpy()))
+            self.assertEqual(expected, result)
         # test non-continguous
         xp = x.permute(1, 2, 3, 0)
         result = torch.diagonal(xp, 0, -2, -1)
         expected = xp.numpy().diagonal(0, -2, -1)
         self.assertEqual(expected.shape, result.shape)
-        self.assertTrue(np.allclose(expected, result.numpy()))
+        self.assertEqual(expected, result)
 
     @onlyCPU
     @dtypes(torch.float)
@@ -6592,7 +6590,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(expected_res, a)
 
         # test exceptions
-        for dtype in(torch.half, torch.float, torch.double):
+        for dtype in (torch.half, torch.float, torch.double):
             a = torch.zeros(10, dtype=dtype, device=device)
             # new tensor
             with self.assertRaises(RuntimeError):
@@ -9647,17 +9645,17 @@ class TestTorchDeviceType(TestCase):
         x = torch.randn(25, 25, device=device)
         xn = x.cpu().numpy()
         for p in [0, 1, 2, 3, 4, inf, -inf]:
-            res = x.norm(p, 1).cpu().numpy()
+            res = x.norm(p, 1).cpu()
             expected = np.linalg.norm(xn, p, 1)
             self.assertEqual(res.shape, expected.shape)
-            self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
+            self.assertEqual(res, expected, message="dim reduction failed for {}-norm".format(p))
 
         # matrix norm
         for p in ['fro', 'nuc']:
-            res = x.norm(p).cpu().numpy()
+            res = x.norm(p).cpu()
             expected = np.linalg.norm(xn, p)
             self.assertEqual(res.shape, expected.shape)
-            self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
+            self.assertEqual(res, expected, message="dim reduction failed for {}-norm".format(p))
 
         # larger tensor sanity check
         self.assertEqual(2 * torch.norm(torch.ones(10000)), torch.norm(torch.ones(40000)))
@@ -9675,14 +9673,14 @@ class TestTorchDeviceType(TestCase):
             ans = torch.norm(x, "nuc", dim=axes)
             self.assertTrue(ans.is_contiguous())
             self.assertEqual(ans.shape, expected.shape)
-            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03, equal_nan=True))
+            self.assertEqual(ans.cpu(), expected, rtol=1e-02, atol=1e-03, equal_nan=True)
 
             out = torch.zeros(expected.shape, dtype=x.dtype, device=x.device)
             ans = torch.norm(x, "nuc", dim=axes, out=out)
             self.assertIs(ans, out)
             self.assertTrue(ans.is_contiguous())
             self.assertEqual(ans.shape, expected.shape)
-            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03, equal_nan=True))
+            self.assertEqual(ans.cpu(), expected, rtol=1e-02, atol=1e-03, equal_nan=True)
 
         for n in range(1, 3):
             for m in range(1, 3):
@@ -12601,14 +12599,14 @@ class TestTorchDeviceType(TestCase):
             actual = torch.trapz(t, dx=dx, dim=dim)
             expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)
             self.assertEqual(expected.shape, actual.shape)
-            self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
+            self.assertEqual(expected, actual)
 
         def test_x(sizes, dim, x, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapz(t, x=torch.tensor(x, device=device), dim=dim)
             expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)
             self.assertEqual(expected.shape, actual.shape)
-            self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
+            self.assertEqual(expected, actual.cpu())
 
         test_dx((2, 3, 4), 1, 1, device)
         test_dx((10, 2), 0, 0.1, device)
@@ -14818,11 +14816,11 @@ class TestTorchDeviceType(TestCase):
             actual = torch.einsum(test[0], test[1:])
             expected = np.einsum(test[0], *[t.numpy() for t in test[1:]])
             self.assertEqual(expected.shape, actual.shape, test[0])
-            self.assertTrue(np.allclose(expected, actual.numpy()), test[0])
+            self.assertEqual(expected, actual, message=test[0])
             # test vararg
             actual2 = torch.einsum(test[0], *test[1:])
             self.assertEqual(expected.shape, actual2.shape, test[0])
-            self.assertTrue(np.allclose(expected, actual2.numpy()), test[0])
+            self.assertEqual(expected, actual2, message=test[0])
 
             def do_einsum(*args):
                 return torch.einsum(test[0], args)
