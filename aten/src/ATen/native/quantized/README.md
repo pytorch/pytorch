@@ -62,7 +62,7 @@ a `def` for your new operator:
 
 ```c++
 TORCH_LIBRARY(quantized, m) {
-  // ... the existing definitions ... 
+  // ... the existing definitions ...
   m.def("quantized::xand(Tensor qa, Tensor qb) -> Tensor");
 }
 ```
@@ -116,7 +116,7 @@ The final file `ATen/native/quantized/cpu/qxand.cpp` would look as follows
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h> // Need that for the `native_functions.yaml`
 #include <ATen/core/Type.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 
@@ -179,44 +179,8 @@ You should not need to use the registered kernels in C++.
 Although **officially not supported**, you can use the following
 
 ```c++
-namespace at {
-  namespace native {
-  namespace dispatch_tools {
-  /* Creates a stack of inputs consumable by the dispatcher.*/
-  template <class... Inputs>
-  inline std::vector<torch::IValue> makeStack(Inputs&&... inputs) {
-    return {std::forward<Inputs>(inputs)...};
-  }
-
-  /* Given an operator handle, calls it using some arguments.*/
-  template <class... Args>
-  inline std::vector<torch::IValue> callOp(
-      const torch::OperatorHandle& op,
-      Args... args) {
-    auto stack = makeStack(std::forward<Args>(args)...);
-    auto kernel = torch::Dispatcher::singleton().lookup(op, &stack);
-    kernel.call(&stack);
-    return stack;
-  }
-
-  /* Finds the op and calls the callOp on it.*/
-  template <class... Args>
-  inline std::vector<torch::IValue> callOp(
-      const char* func_name,
-      const char* overload_name,
-      Args... args) {
-    const torch::optional<torch::OperatorHandle> op_handle =
-        torch::Dispatcher::singleton().findSchema(func_name, overload_name);
-    assert(op_handle.has_value());
-    return callOp(op_handle.value(), args...);
-  }
-  } // dispatch_tools
-
-  // This is your new function
   Tensor quantized_xand(Tensor qa, Tensor qb) {
-    return dispatch_tools::callOp("quantized::xand", "", qa, qb);
+    static const c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"quantized::xand", ""}).value();
+    return op.call<Tensor, Tensor, Tensor>(qa, qb);
   }
-  }}  // namespace at::native
 ```
-
-The `dispatch_tools` is just a local namespace created for a sake of example.

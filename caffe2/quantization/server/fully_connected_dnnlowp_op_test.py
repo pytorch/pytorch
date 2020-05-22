@@ -7,7 +7,7 @@ import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
-from dnnlowp_test_utils import (
+from caffe2.quantization.server.dnnlowp_test_utils import (
     avoid_vpmaddubsw_overflow_fc,
     check_quantized_results_close,
     run_conv_or_fc,

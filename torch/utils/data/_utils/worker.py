@@ -44,7 +44,7 @@ if IS_WINDOWS:
                 self.manager_dead = self.kernel32.WaitForSingleObject(self.manager_handle, 0) == 0
             return not self.manager_dead
 else:
-    class ManagerWatchdog(object):
+    class ManagerWatchdog(object):  # type: ignore[no-redef]
         def __init__(self):
             self.manager_pid = os.getppid()
             self.manager_dead = False

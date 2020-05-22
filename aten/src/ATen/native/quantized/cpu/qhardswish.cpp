@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
@@ -65,7 +65,15 @@ Tensor qnnpack_hardswish(const Tensor& qx, Tensor& qy) {
 
 } // namespace
 
-Tensor& quantized_hardswish_out(Tensor& qy, const Tensor& qx) {
+Tensor quantized_hardswish(const Tensor& qx, double output_scale, int64_t output_zero_point) {
+  Tensor qy = at::_empty_affine_quantized(
+      qx.sizes(),
+      at::device(kCPU)
+        .dtype(qx.scalar_type()),
+        // .memory_format(MemoryFormat::ChannelsLast),
+      output_scale,
+      output_zero_point,
+      c10::nullopt);
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {
@@ -77,6 +85,10 @@ Tensor& quantized_hardswish_out(Tensor& qy, const Tensor& qx) {
 #endif  // USE_PYTORCH_QNNPACK
   qhardswish_stub(qx.device().type(), qx, qy);
   return qy;
+}
+
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("hardswish", quantized_hardswish);
 }
 
 }}  // namespace at::native

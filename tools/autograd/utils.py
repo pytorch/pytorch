@@ -70,3 +70,6 @@ def write(dirname, name, template, env):
             f.write(new_val)
     else:
         print("Skipped writing {}".format(path))
+
+def is_tensor_method(declaration):
+    return 'Tensor' in declaration['method_of']
