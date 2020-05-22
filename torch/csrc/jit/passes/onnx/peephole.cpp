@@ -830,6 +830,124 @@ void removeMaxPoolUnusedOutput(Block* b) {
   }
 }
 
+// This optimization fuses LogSoftmax and NegativeLogLikelihoodLoss operators
+// into one operator: SoftmaxCrossEntropyLoss, and depending on the dimensions
+// of the input and different attributes there will be different subgraphs of
+// LogSoftmax and NegativeLogLikelihoodLoss.
+static void fuseLogSoftmaxNllLoss(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      fuseLogSoftmaxNllLoss(child_block);
+    }
+    if (it->kind() == onnx::NegativeLogLikelihoodLoss) {
+      auto prev = it->input(0)->node();
+      Node* origNllLossNode = *it;
+      Node* origLogSoftmaxNode;
+      if (prev->kind() == onnx::LogSoftmax) {
+        // if the input is 2D
+        // graph(%input : Float(3, 5),
+        // %target : Long(3)):
+        // %4 : Float(3, 5) = onnx::LogSoftmaxaxis=1
+        // %8 : Float(3) = onnx::NegativeLogLikelihoodLoss[reduction="none"]
+        // return (%8)
+        origLogSoftmaxNode = it->input(0)->node();
+      } else if (
+          prev->kind() == onnx::Transpose &&
+          prev->input(0)->node()->kind() == onnx::LogSoftmax) {
+        // if the input is 4D
+        // graph(%input : Float(3, 5, 2, 7),
+        // %target : Long(3, 2, 7)):
+        // %4 : Tensor = onnx::Transpose[perm=[0, 3, 2, 1]] (%input)
+        // %5 : Tensor = onnx::LogSoftmax[axis=3] (%4)
+        // %6 : Float(3, 5, 2, 7) = onnx::Transpose[perm=[0, 3, 2, 1]] (%5)
+        // %10 : Float(3, 2, 7) =
+        // onnx::NegativeLogLikelihoodLoss[reduction="none"](%6, %target) return
+        // (%10)
+        origLogSoftmaxNode = prev->input(0)->node();
+        auto transpose = origLogSoftmaxNode->input(0)->node();
+        origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
+      } else if (
+          prev->kind() == onnx::Reshape &&
+          prev->input(0)->node()->kind() == onnx::Transpose &&
+          prev->input(0)->node()->input(0)->node()->kind() ==
+              onnx::LogSoftmax) {
+        // if the input is 3D or > 4D
+        // graph(%input : Float(3, 5, 2),
+        // %target.1 : Long(3, 2)):
+        // %4 : Tensor = onnx::Transpose[perm=[0, 2, 1]] (%input)
+        // %5 : Tensor = onnx::LogSoftmax[axis=2] (%4)
+        // %6 : Float(3, 5, 2) = onnx::Transpose[perm=[0, 2, 1]] (%5)
+        // %8 : Tensor = onnx::Shape(%6)
+        // %10 : Tensor = onnx::Constantvalue={0}
+        // %11 : Long() = onnx::Gather[axis=0] (%8, %10)
+        // %13 : Tensor = onnx::Shape(%6)
+        // %15 Tensor = onnx::Constantvalue={1}
+        // %16 : Long() = onnx::Gather[axis=0] (%13, %15)
+        // ...
+        // %22 : Float(3, 5, 1, 2) = onnx::Reshape(%6, %21)
+        // ...
+        // %26 : Long(3, 1, 2) = onnx::Reshape(%target.1, %25)
+        // %30 : Float() = onnx::NegativeLogLikelihoodLoss[reduction="sum"](%22,
+        // %26) return (%30)
+        TORCH_INTERNAL_ASSERT(
+            prev->input(1)->node()->input(0)->node()->kind() == onnx::Gather);
+        TORCH_INTERNAL_ASSERT(
+            prev->input(1)->node()->input(1)->node()->kind() == onnx::Gather);
+        origLogSoftmaxNode = prev->input(0)->node()->input(0)->node();
+        auto transpose = origLogSoftmaxNode->input(0)->node();
+        TORCH_INTERNAL_ASSERT(transpose->kind() == onnx::Transpose);
+        origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
+        auto reshape = origNllLossNode->input(1)->node();
+        TORCH_INTERNAL_ASSERT(reshape->kind() == onnx::Reshape);
+        origNllLossNode->replaceInput(1, reshape->inputs().at(0));
+        if (origNllLossNode->s(attr::reduction) == "none") {
+          // when reduction=none a different graph is created and the graph
+          // doesn't end with node NegativeLogLikelihoodLoss like in all other
+          // cases.
+          // graph(%input : Float(3, 5, 2), %target.1 : Long(3, 2)):
+          // %4 : Tensor = onnx::Transposeperm=[0, 2, 1]
+          // %5 : Tensor = onnx::LogSoftmaxaxis=2
+          // %6 : Float(3, 5, 2) = onnx::Transposeperm=[0, 2, 1]
+          // ...
+          // %27 : Float(3, 5, 1, 2) = onnx::Reshape(%6, %26)
+          // %31 : Long(3, 1, 2) = onnx::Reshape(%target.1, %30)
+          // %35 : Float(3, 1, 2) =
+          // onnx::NegativeLogLikelihoodLoss[reduction="none"](%27, %31) %36 :
+          // int[] = prim::ListConstruct(%11, %21) %37 : Float(3, 2) =
+          // onnx::Reshape(%35, %36) return (%37)
+          auto nllloss_output = origNllLossNode->output(0)->uses()[0].user;
+          TORCH_INTERNAL_ASSERT(nllloss_output->kind() == onnx::Reshape);
+          TORCH_INTERNAL_ASSERT(
+              nllloss_output->inputs()[1]->node()->kind() ==
+              prim::ListConstruct);
+          // make output of reshape the output of nllloss
+          nllloss_output->replaceAllUsesWith(origNllLossNode);
+        }
+      } else {
+        continue;
+      }
+
+      Node* softmaxCrossEntropyNode = b->owningGraph()->create(
+          onnx::SoftmaxCrossEntropyLoss, it->outputs().size());
+      for (size_t i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
+        softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
+      }
+      softmaxCrossEntropyNode->copyAttributes(*origNllLossNode);
+      softmaxCrossEntropyNode->insertBefore(origNllLossNode);
+      softmaxCrossEntropyNode->addInput(origLogSoftmaxNode->inputs().at(0));
+      softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(1));
+      // optional weight input is provided
+      if (origNllLossNode->inputs().size() == 3) {
+        softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(2));
+      }
+
+      it->replaceAllUsesWith(softmaxCrossEntropyNode);
+      it->removeAllInputs();
+      it.destroyCurrent();
+    }
+  }
+}
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -873,6 +991,7 @@ void PeepholeOptimizeONNX(
   fuseSplitListUnpack(graph->block());
   convertUnbindToSplit(graph->block(), opset_version);
   convertSplitToDynamic(graph->block(), opset_version);
+  fuseLogSoftmaxNllLoss(graph->block());
   eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
 }

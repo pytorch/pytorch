@@ -1241,8 +1241,8 @@ def all_gather_coalesced(output_tensor_lists,
         return
     _check_tensor_list(input_tensor_list, "tensor_list")
     if not isinstance(output_tensor_lists, list):
-        RuntimeError("Invalid function argument: "
-                     "output_tensor_lists should be a list")
+        raise RuntimeError("Invalid function argument: "
+                           "output_tensor_lists should be a list")
     for output_tensor_list in output_tensor_lists:
         _check_tensor_list(output_tensor_list, "output_tensor_lists")
 

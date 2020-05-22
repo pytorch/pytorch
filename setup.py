@@ -162,8 +162,6 @@
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
-from __future__ import print_function
-
 import sys
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -189,11 +187,6 @@ from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
-
-try:
-    FileNotFoundError
-except NameError:
-    FileNotFoundError = IOError  # Python 2.7 does not have FileNotFoundError
 
 ################################################################################
 # Parameters parsed from environment
@@ -292,6 +285,8 @@ def build_deps():
     report('-- Building version ' + version)
 
     def check_file(f):
+        if bool(os.getenv("USE_SYSTEM_LIBS", False)):
+            return
         if not os.path.exists(f):
             report("Could not find {}".format(f))
             report("Did you run 'git submodule update --init --recursive'?")
@@ -573,12 +568,11 @@ def configure_extension_build():
         # /MD links against DLL runtime
         # and matches the flags set for protobuf and ONNX
         # /Z7 turns on symbolic debugging information in .obj files
-        # /EHa is about native C++ catch support for asynchronous
-        # structured exception handling (SEH)
+        # /EHsc is about standard C++ exception handling
         # /DNOMINMAX removes builtin min/max functions
         # /wdXXXX disables warning no. XXXX
         extra_compile_args = ['/MD', '/Z7',
-                              '/EHa', '/DNOMINMAX',
+                              '/EHsc', '/DNOMINMAX',
                               '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
                               '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
                               '/wd4275']
@@ -757,7 +751,7 @@ if __name__ == '__main__':
                 'py.typed',
                 'bin/*',
                 'test/*',
-                '__init__.pyi',
+                '_C/*.pyi',
                 'cuda/*.pyi',
                 'optim/*.pyi',
                 'autograd/*.pyi',
@@ -835,8 +829,10 @@ if __name__ == '__main__':
                 'include/torch/csrc/autograd/utils/*.h',
                 'include/torch/csrc/cuda/*.h',
                 'include/torch/csrc/jit/*.h',
+                'include/torch/csrc/jit/backends/*.h',
                 'include/torch/csrc/jit/generated/*.h',
                 'include/torch/csrc/jit/passes/*.h',
+                'include/torch/csrc/jit/passes/quantization/*.h',
                 'include/torch/csrc/jit/passes/utils/*.h',
                 'include/torch/csrc/jit/runtime/*.h',
                 'include/torch/csrc/jit/ir/*.h',

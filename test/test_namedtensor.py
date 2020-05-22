@@ -162,12 +162,9 @@ class TestNamedTensor(TestCase):
         self.assertTrue(fully_named.has_names())
 
     def test_py3_ellipsis(self):
-        # Need to exec or else flake8 will complain about invalid python 2.
         tensor = torch.randn(2, 3, 5, 7)
-        scope = {'tensor': tensor}
-        code_str = "output = tensor.refine_names('N', ..., 'C')"
-        exec(code_str, globals(), scope)
-        self.assertEqual(scope['output'].names, ['N', None, None, 'C'])
+        output = tensor.refine_names('N', ..., 'C')
+        self.assertEqual(output.names, ['N', None, None, 'C'])
 
     def test_refine_names(self):
         # Unnamed tensor -> Unnamed tensor

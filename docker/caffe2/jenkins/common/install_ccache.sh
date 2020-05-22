@@ -14,17 +14,20 @@ if [ -z "${SCCACHE}" ]; then
   exit 1
 fi
 
-# If rocm build, add hcc to sccache.
+# If rocm build, if hcc file exists then use hcc else clang(hip-clang) for sccache
 if [[ "${BUILD_ENVIRONMENT}" == *-rocm* ]]; then
-  # HCC's symlink path: /opt/rocm/hcc/bin/hcc -> /opt/rocm/hcc/bin/clang -> /opt/rocm/hcc/bin/clang-7.0
-  HCC_DEST_PATH="$(readlink -f $(which hcc))"
-  HCC_REAL_BINARY="$(dirname $HCC_DEST_PATH)/clang-7.0_original"
-  mv "$HCC_DEST_PATH" "$HCC_REAL_BINARY"
+  if [[ -e "/opt/rocm/hcc/bin/hcc" ]]; then
+    HIPCOM_DEST_PATH="$(readlink -f /opt/rocm/hcc/bin/hcc )"
+  else
+    HIPCOM_DEST_PATH="$(readlink -f /opt/rocm/llvm/bin/clang )"
+  fi
+  HIPCOM_REAL_BINARY="$(dirname $HIPCOM_DEST_PATH)/hipcompiler_original"
+  mv "$HIPCOM_DEST_PATH" "$HIPCOM_REAL_BINARY"
 
   # Create sccache wrapper.
   (
     echo "#!/bin/sh"
-    echo "exec $SCCACHE $HCC_REAL_BINARY \"\$@\""
-  ) > "$HCC_DEST_PATH"
-  chmod +x "$HCC_DEST_PATH"
+    echo "exec $SCCACHE $HIPCOM_REAL_BINARY \"\$@\""
+  ) > "$HIPCOM_DEST_PATH"
+  chmod +x "$HIPCOM_DEST_PATH"
 fi

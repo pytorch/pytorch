@@ -7,9 +7,12 @@
 #include <ATen/native/xnnpack/Engine.h>
 
 #include <ATen/Config.h>
+#include <c10/macros/Macros.h>
+
 #if AT_NNPACK_ENABLED()
 #include <nnpack.h>
 #endif
+
 
 constexpr int MIOPEN_DIM_MAX = 5;
 
@@ -253,7 +256,9 @@ auto ConvParams::use_xnnpack(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias) const -> bool {
-#ifdef C10_MOBILE
+// Disable the xnnpack operators for both iOS and macOS temporarily due to the crash in pthreadpool
+// TODO:T66297472 remove `!defined(__APPLE__)` once we figure out the root cause of the crash.
+#if defined(C10_MOBILE) && !defined(__APPLE__)
   if (!transposed) {
     return (input.size(1) == groups) &&
             xnnpack::use_convolution2d(
@@ -627,7 +632,7 @@ at::Tensor _convolution(
     auto weight_view = at::_unsafe_view(weight, -1);
     auto out = input*weight_view[0];
     if (bias.defined())
-      out = out + bias[0];
+      out.add_(bias[0]);
     return out.view(o);
   }
 
@@ -657,7 +662,7 @@ at::Tensor _convolution(
             input.contiguous(cudnn_memory_format), weight,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
         if (bias.defined()) {
-          output = output + reshape_bias(input.dim(), bias);
+          output.add_(reshape_bias(input.dim(), bias));
         }
 
       } else if (params.use_miopen(input, weight, bias.defined())){
@@ -680,14 +685,14 @@ at::Tensor _convolution(
           input.contiguous(cudnn_memory_format), weight,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
       if (bias.defined()) {
-        output = output + reshape_bias(input.dim(), bias);
+        output.add_(reshape_bias(input.dim(), bias));
       }
     } else {
       output = at::cudnn_convolution(
           input.contiguous(cudnn_memory_format), weight,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
       if (bias.defined()) {
-        output = output + reshape_bias(input.dim(), bias);
+        output.add_(reshape_bias(input.dim(), bias));
       }
     }
   } else if (params.use_miopen(input, weight, bias.defined())) {

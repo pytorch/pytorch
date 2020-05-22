@@ -105,8 +105,8 @@ public:
     auto schema = parseSchema(schemaStr);
     schema.setAliasAnalysis(AliasAnalysisKind::FROM_SCHEMA);
     c10::OperatorName name = schema.operator_name();
-    RegistrationHandleRAII registration = dispatcher.registerDef(std::move(schema), "registered by JIT");
-    auto op = dispatcher.findSchema(name).value();
+    RegistrationHandleRAII registration = dispatcher.registerName(name);
+    auto op = dispatcher.findOp(name).value();
     registrationHandles_.push_back(std::move(registration));
     dispatcher.setManuallyBoxedKernelFor_(op, boxed_kernel_wrapper);
     return std::move(*this);
