@@ -3,12 +3,65 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/Parallel.h>
-#include <unordered_map>
-
 
 namespace at { namespace native {
 
 namespace {
+
+// Implement as functors since lambdas don't get optimized.
+class ReduceMultiply {
+public:
+  ReduceMultiply() {};
+  template <typename scalar_t>
+  void operator()(scalar_t * self_data, scalar_t * src_data) {
+    *self_data *= *src_data;
+  };
+
+  void operator()(bool * self_data, bool * src_data) {
+    *self_data = *self_data && *src_data;
+  };
+};
+ReduceMultiply reduce_multiply;
+
+class ReduceAdd {
+public:
+  ReduceAdd() {};
+  template <typename scalar_t>
+  void operator()(scalar_t * self_data, scalar_t * src_data) {
+    *self_data += *src_data;
+  };
+};
+ReduceAdd reduce_add;
+
+class ReduceSubtract {
+public:
+  ReduceSubtract() {};
+  template <typename scalar_t>
+  void operator()(scalar_t * self_data, scalar_t * src_data) {
+    *self_data -= *src_data;
+  };  
+};
+ReduceSubtract reduce_subtract;
+  
+class ReduceDivide {
+public:
+  ReduceDivide() {};
+  template <typename scalar_t>
+  void operator()(scalar_t * self_data, scalar_t * src_data) {
+    *self_data /= *src_data;
+  };  
+};
+ReduceDivide reduce_divide;
+
+class TensorAssign {
+public:
+  TensorAssign() {};
+  template <typename scalar_t>
+  void operator()(scalar_t * self_data, scalar_t * src_data) {
+    *self_data = *src_data;
+  };    
+};
+TensorAssign tensor_assign;
 
 template <bool is_scatter_like = true>
 struct _cpu_scatter_gather_dim_loop {
@@ -66,67 +119,6 @@ struct _cpu_scatter_gather_dim_loop {
   }
 };
 
-// implement reduce_multiply as a class since the multiplication requires a type
-// specialization for the boolean operation (which refuses to proceed the compilation
-// on clang).
-class ReduceMultiply {
-public:
-  ReduceMultiply() {};
-  // don't use auto due to complaints from clang.
-  template <typename scalar_t>
-  void operator()(scalar_t * self_data, scalar_t * src_data) {
-    *self_data *= *src_data;
-  };
-
-  void operator()(bool * self_data, bool * src_data) {
-    *self_data = *self_data && *src_data;
-  };
-};
-ReduceMultiply reduce_multiply;
-
-class ReduceAdd {
-public:
-  ReduceAdd() {};
-  // don't use auto due to complaints from clang.
-  template <typename scalar_t>
-  void operator()(scalar_t * self_data, scalar_t * src_data) {
-    *self_data += *src_data;
-  };
-};
-ReduceAdd reduce_add;
-
-class ReduceSubtract {
-public:
-  ReduceSubtract() {};
-  // don't use auto due to complaints from clang.
-  template <typename scalar_t>
-  void operator()(scalar_t * self_data, scalar_t * src_data) {
-    *self_data -= *src_data;
-  };  
-};
-ReduceSubtract reduce_subtract;
-  
-class ReduceDivide {
-public:
-  ReduceDivide() {};
-  // don't use auto due to complaints from clang.
-  template <typename scalar_t>
-  void operator()(scalar_t * self_data, scalar_t * src_data) {
-    *self_data /= *src_data;
-  };  
-};
-ReduceDivide reduce_divide;
-
-class TensorAssign {
-public:
-  TensorAssign() {};
-  // don't use auto due to complaints from clang.
-  template <typename scalar_t>
-  void operator()(scalar_t * self_data, scalar_t * src_data) {
-    *self_data = *src_data;
-  };    
-};
-TensorAssign tensor_assign;
 
 template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
