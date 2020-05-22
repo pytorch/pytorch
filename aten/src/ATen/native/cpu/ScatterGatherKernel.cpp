@@ -12,14 +12,14 @@ namespace {
 
 template <bool is_scatter_like = true>
 struct _cpu_scatter_gather_dim_loop {
-  template <typename scalar_t>
+  template <typename scalar_t, typename func_t>
   void operator()(
     scalar_t* self_data, int64_t self_dim_stride,
     int64_t* index_data, int64_t index_dim_stride,
     scalar_t* src_data, int64_t src_dim_stride,
     int64_t dim, int64_t index_dim_size,
     int64_t index_upper_bound,
-    auto f
+    func_t f
   ) {
 
     for (int64_t i = 0; i < index_dim_size; ++i) {
@@ -39,14 +39,14 @@ struct _cpu_scatter_gather_dim_loop {
     }
   }
 
-  template <typename scalar_t>
+  template <typename scalar_t, typename func_t>
   void operator()(
     scalar_t* self_data, int64_t self_dim_stride,
     int64_t* index_data, int64_t index_dim_stride,
     Scalar value,
     int64_t dim, int64_t index_dim_size,
     int64_t index_upper_bound,
-    auto f
+    func_t f
   ) {
 
     for (int64_t i = 0; i < index_dim_size; ++i) {
@@ -130,10 +130,11 @@ TensorAssign tensor_assign;
 
 template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
+  template <typename func_t>
   void operator()(Tensor& self, int64_t dim,
     const Tensor& index, Scalar& value,
     const std::string& method_name,
-    bool serial_exec, auto kernel_func) {
+    bool serial_exec, func_t kernel_func) {
     // no-op if index is empty
     if (index.numel() == 0) {
       return;
@@ -241,11 +242,12 @@ struct cpu_scatter_gather_base_kernel {
     );
   }
   
+  template <typename func_t>  
   void operator()(Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name,
     bool serial_exec,
-    auto kernel_func) {
+    func_t kernel_func) {
     // no-op if index is empty
     if (index.numel() == 0) {
       return;
