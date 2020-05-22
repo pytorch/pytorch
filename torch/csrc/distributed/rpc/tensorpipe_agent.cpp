@@ -523,10 +523,8 @@ void TensorPipeAgent::shutdownImpl() {
   if (timeoutThread_.joinable()) {
     timeoutThread_.join();
   }
-  // TODO: context_->join() is not absolutely ready yet.
-  // NOTE: context_->join() will wait for available RPC message to be
-  //       read or written, and wait for the remaining unavailable ones
-  //       to be called with error by invoking callbacks.
+
+  context_->join();
 }
 
 const WorkerInfo& TensorPipeAgent::getWorkerInfo(
