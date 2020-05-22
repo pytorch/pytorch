@@ -371,7 +371,8 @@ OnnxExporter::get_renamed_operators() const {
       {"MaxPool3D", "MaxPool"},
       {"AveragePool1D", "AveragePool"},
       {"AveragePool2D", "AveragePool"},
-      {"AveragePool3D", "AveragePool"}};
+      {"AveragePool3D", "AveragePool"},
+      {"Copy", "Identity"}};
   return kRenamedOperators;
 }
 

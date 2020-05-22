@@ -1,7 +1,8 @@
 import unittest
 import torch
 import torch.backends.xnnpack
-from torch.utils import mobile_optimizer
+import torch.utils.bundled_inputs
+from torch.utils.mobile_optimizer import *
 from torch.nn import functional as F
 
 FileCheck = torch._C.FileCheck
@@ -66,7 +67,7 @@ class TestOptimizer(unittest.TestCase):
         scripted_model.eval()
         initial_result = scripted_model(input_data)
 
-        optimized_scripted_model = mobile_optimizer.optimize_for_mobile(scripted_model)
+        optimized_scripted_model = optimize_for_mobile(scripted_model)
         optimized_result = optimized_scripted_model(input_data)
 
         FileCheck().check_not("Tensor = aten::conv2d") \
@@ -78,6 +79,57 @@ class TestOptimizer(unittest.TestCase):
                    .run(optimized_scripted_model.graph)
 
         torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
+
+    def test_generate_mobile_module_lints(self):
+        class MyTestModule(torch.nn.Module):
+            def __init__(self):
+                super(MyTestModule, self).__init__()
+                self.fc = torch.nn.Linear(4, 4)
+                self.dropout = torch.nn.Dropout(p=0.5)
+
+            def forward(self, inputs):
+                out = self.fc(inputs)
+                out = self.dropout(out)
+                return out
+
+        class MyBNModule(torch.nn.Module):
+            def __init__(self):
+                super(MyBNModule, self).__init__()
+                self.bn = torch.nn.BatchNorm2d(4, affine=True)
+
+            def forward(self, inputs):
+                bn = self.bn(inputs)
+                return bn
+
+        class MyBundledInputModule(torch.nn.Module):
+            def __init__(self):
+                super(MyBundledInputModule, self).__init__()
+
+            def forward(self, inputs):
+                return inputs
+
+        def get_lint_count_by_type(lint_type, module_lint_List):
+            return len([lint_dict for lint_dict in module_lint_List if lint_dict['name'] == lint_type.name])
+
+        test_module = torch.jit.script(MyTestModule())
+        test_module_lint_list = generate_mobile_module_lints(test_module)
+        self.assertEqual(len(test_module_lint_list), 4)
+        self.assertEqual(get_lint_count_by_type(LintCode.BUNDLED_INPUT, test_module_lint_list), 1)
+        self.assertEqual(get_lint_count_by_type(LintCode.DROPOUT, test_module_lint_list), 1)
+        self.assertEqual(get_lint_count_by_type(LintCode.REQUIRES_GRAD, test_module_lint_list), 2)
+
+        bn_module = torch.jit.script(MyBNModule())
+        bn_module_lint_list = generate_mobile_module_lints(bn_module)
+        self.assertEqual(len(bn_module_lint_list), 4)
+        self.assertEqual(get_lint_count_by_type(LintCode.BUNDLED_INPUT, bn_module_lint_list), 1)
+        self.assertEqual(get_lint_count_by_type(LintCode.BATCHNORM, bn_module_lint_list), 1)
+        self.assertEqual(get_lint_count_by_type(LintCode.REQUIRES_GRAD, bn_module_lint_list), 2)
+
+        bi_module = torch.jit.script(MyBundledInputModule())
+        torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
+            bi_module, [(torch.tensor([1]),)], [])
+        bi_module_lint_list = generate_mobile_module_lints(bi_module)
+        self.assertEqual(len(bi_module_lint_list), 0)
 
 if __name__ == '__main__':
     unittest.main()

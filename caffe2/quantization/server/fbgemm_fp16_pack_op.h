@@ -63,7 +63,7 @@ class FbGemmPackOp final : public Operator<Context> {
     }
 
     if (no_packing_) {
-      LOG_FIRST_N(WARNING, 10) << "no_packing will be deprecated soon";
+      C10_LOG_FIRST_N(WARNING, 10) << "no_packing will be deprecated soon";
 
       vector<fbgemm::float16> src_mat(resultPtr->matSize());
       fbgemm::float16* pmat = resultPtr->pmat();

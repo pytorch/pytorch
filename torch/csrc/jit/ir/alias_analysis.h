@@ -117,6 +117,24 @@ class AliasDb {
   static bool isMutableType(const Value* v);
   static bool isMutableType(const TypePtr& type);
 
+  /**
+   * Mutation API
+   *
+   * These methods allow you to update AliasDb in-place if you are performing
+   * graph mutation.
+   *
+   * WARNING: These methods should be considered INTERNAL. They do not perform
+   * very many correctness checks, the user is responsible for making sure they
+   * are updating AliasDb correctly. `Lint()`ing the AliasDb can help with
+   * this.
+   */
+  // Copy `existing`s aliasing info to `new_value`, and remove `existing`.
+  void replaceWithNewValue(Value* existing, Value* new_value);
+  // Copy `from`s aliasing info to `to`.
+  void copyValue(Value* from, Value* to);
+  // Create a new `value` that does not alias anything else.
+  void createValue(const Value* value);
+
   friend struct MutationRemover;
 
  private:
@@ -140,8 +158,7 @@ class AliasDb {
   MemoryLocations getWrites(Node* n) const;
   void getWritesImpl(Node* n, MemoryLocations& ret) const;
   // Register the fact that `n` writes to `v`.
-  void registerWrite(const Value* v, Node* n);
-  void registerWrite(const Element* e, Node* n);
+  void registerWrite(const Value* v, Node* n, bool writeToContained = false);
   // Get all the values that `n` reads from.
   // if `recurseBlocks` is true, gather reads on the nodes in `n`s sub-blocks
   MemoryLocations getReads(Node* n) const;
@@ -191,13 +208,6 @@ class AliasDb {
   void giveFreshAlias(const Value* value);
   Element* getOrCreateElement(const Value* value);
 
-  // In the Value * -> Element * map replaces the mapping
-  // of Value * existing -> Element * existing_elem with
-  // Value * new_value -> Element * existing_elem
-  // Callers are expected to maintain graph invariants & specify
-  // own correctness conditions
-  void replaceMemoryLocation(Value* existing, Value* new_value);
-
   c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) const;
 
   bool isContainerType(const TypePtr& type) const;
@@ -210,7 +220,9 @@ class AliasDb {
   bool isFrozen_;
 
   // The points-to graph that stores aliasing relationships
+  std::unique_ptr<MemoryDAGBuilder> memoryDAGBuilder_;
   std::unique_ptr<MemoryDAG> memoryDAG_;
+
   // Mapping of values to MemoryDAG elements
   ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard elements (one for each unique mutable type).
@@ -232,14 +244,30 @@ class AliasDb {
   /**
    * State for tracking write info.
    */
+  // Write registry where the analysis can record the writes as it sees them.
+  // This information is later denormalized into various caches to improve query
+  // efficiency.
+  struct WriteRegistry;
+  std::unique_ptr<WriteRegistry> writeRegistry_;
+
   // Map of nodes to the memory locations that they write to
-  ska::flat_hash_map<Node*, MemoryLocations> writeIndex_;
-  // Set of all memory locations that may have been written to.
-  mutable MemoryLocations writeCache_;
-  mutable bool isWriteCacheStale_ = true;
-  void rebuildWriteCache() const;
+  using TWriteIndex = ska::flat_hash_map<Node*, MemoryLocations>;
+  c10::optional<TWriteIndex> writeIndex_;
+  // Collection of all memory locations that are written to.
+  c10::optional<MemoryLocations> writtenToLocationsIndex_;
+  MemoryLocations buildWrittenToLocationsIndex() const;
+
+  std::unordered_set<const Value*> wildcards_;
+
   std::string getElementName(const Element* e) const;
+
+  friend void Lint(const AliasDb* db);
 };
+
+// Helper check that invariants over AliasDb are maintained.
+// Useful if you are using the AliasDb mutation API and want to check you did
+// the right thing.
+void Lint(const AliasDb* db);
 
 } // namespace jit
 } // namespace torch

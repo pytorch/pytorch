@@ -80,18 +80,14 @@ struct ExprSort : public IterVisitor {
       bool breadth_first);
 };
 
-// Expr sort will take a fusion and return a topologically sorted list of
-// expressions.
 struct InputsOf : public IterVisitor {
-  using IterVisitor::handle;
-
  private:
-  std::vector<TensorView*> inputs;
+  std::set<Val*> inputs;
 
-  void handle(TensorView* tv) override;
+  void handle(Val* v) final;
 
  public:
-  static std::vector<TensorView*> output(Fusion* fusion, Val* output_);
+  static std::set<Val*> output(Fusion* fusion, Val* output_);
 };
 
 /*
@@ -154,10 +150,18 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
       bool from_outputs_only = false,
       bool breadth_first = false);
 
-  std::vector<TensorView*> inputsOf(Val* val);
+  std::set<Val*> inputsOf(Val* val);
+
+  // Assert that all leaves found from outputs are registered as an input.
+  void validateInputs();
 
   // Print this fusion to cout.
   void print();
+
+  // Print Arith exprs used in outputs
+  void printMath();
+  // Print transformations used in fusion (can be very verbose)
+  void printTransforms();
 
   // Register the Val with this fusion
   StmtNameType registerVal(Val* val);
@@ -190,6 +194,12 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
 
   // Return the Expr that produces val (const version)
   const Expr* origin(const Val* val) const;
+
+  // Indicate to kernel to set itself up to generate random numbers
+  bool hasRNG();
+
+  // Indicate to kernel to set itself up to generate random numbers
+  bool hasReduction();
 
  private:
   // Sets of all Vals/Exprs registered with this fusion

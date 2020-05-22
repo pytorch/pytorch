@@ -17,6 +17,9 @@
 #include <THC/THCGenerateAllTypes.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/utils.h"
+#include <THC/THCGenerateComplexTypes.h>
+
+#define THC_GENERIC_FILE "torch/csrc/generic/utils.h"
 #include <THC/THCGenerateBoolType.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/utils.h"

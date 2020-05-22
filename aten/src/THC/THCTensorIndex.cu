@@ -391,7 +391,6 @@ void dispatchTakePut(THCState *state, TensorType *a, TensorType *b, THCudaLongTe
 #include <THC/generic/THCTensorIndex.cu>
 #include <THC/THCGenerateAllTypes.h>
 
-
 #include <THC/generic/THCTensorIndex.cu>
 #include <THC/THCGenerateBoolType.h>
 

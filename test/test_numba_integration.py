@@ -1,5 +1,4 @@
 import unittest
-import sys
 
 import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_utils import TEST_NUMBA, TEST_NUMPY
@@ -200,30 +199,11 @@ class TestNumbaIntegration(common.TestCase):
         # python2; it swallows all exceptions not just AttributeError.
         cuda_gradt = torch.zeros(100).requires_grad_(True).cuda()
 
-        if sys.version_info.major > 2:
-            # 3+, conversion raises RuntimeError
-            with self.assertRaises(RuntimeError):
-                numba.cuda.is_cuda_array(cuda_gradt)
-            with self.assertRaises(RuntimeError):
-                numba.cuda.as_cuda_array(cuda_gradt)
-        else:
-            # 2, allow either RuntimeError on access or non-implementing
-            # behavior to future-proof against potential changes in numba.
-            try:
-                was_cuda_array = numba.cuda.is_cuda_array(cuda_gradt)
-                was_runtime_error = False
-            except RuntimeError:
-                was_cuda_array = False
-                was_runtime_error = True
-
-            self.assertFalse(was_cuda_array)
-
-            if not was_runtime_error:
-                with self.assertRaises(TypeError):
-                    numba.cuda.as_cuda_array(cuda_gradt)
-            else:
-                with self.assertRaises(RuntimeError):
-                    numba.cuda.as_cuda_array(cuda_gradt)
+        # conversion raises RuntimeError
+        with self.assertRaises(RuntimeError):
+            numba.cuda.is_cuda_array(cuda_gradt)
+        with self.assertRaises(RuntimeError):
+            numba.cuda.as_cuda_array(cuda_gradt)
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
