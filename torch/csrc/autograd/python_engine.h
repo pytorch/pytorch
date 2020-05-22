@@ -25,8 +25,7 @@ struct PythonEngine : public Engine {
 
   std::shared_ptr<FutureVariableList> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
-      std::shared_ptr<Node> graph_root,
-      bool async_mode = false) override;
+      std::shared_ptr<Node> graph_root) override;
 
   std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() override;
   private:

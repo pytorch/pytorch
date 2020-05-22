@@ -371,24 +371,23 @@ size_t getMaxWorkspaceSize(
     const ConvolutionArgs& args,
     const algo_t *algo, int n_algo)
 {
-    THCState *state = globalContext().lazyInitCUDA();
+  size_t max_ws_size = 0;
+  size_t max_block_size = 0;
+  size_t tmp_bytes = 0;  // Only used for filling pointer parameters that aren't used later
 
-    size_t max_ws_size = 0;
-    size_t max_block_size = 0;
-    size_t total_gpu_mem = 0;
-    size_t free_gpu_mem = 0;
+  int device;
+  THCudaCheck(cudaGetDevice(&device));
+  c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
 
-    THCudaCheck(THCudaMemGetInfo(state, &free_gpu_mem, &total_gpu_mem, &max_block_size));
-
-    for (int i = 0; i < n_algo; i++) {
-        cudnnStatus_t err;
-        size_t sz;
-        err = getWorkspaceSize(args, algo[i], &sz);
-        if (CUDNN_STATUS_SUCCESS != err || sz == 0
-            || sz < max_ws_size || sz > max_block_size) continue;
-        max_ws_size = sz;
-    }
-    return max_ws_size;
+  for (int i = 0; i < n_algo; i++) {
+    cudnnStatus_t err;
+    size_t sz;
+    err = getWorkspaceSize(args, algo[i], &sz);
+    if (CUDNN_STATUS_SUCCESS != err || sz == 0 || sz < max_ws_size || sz > max_block_size)
+      continue;
+    max_ws_size = sz;
+  }
+  return max_ws_size;
 }
 
 template<typename perf_t>

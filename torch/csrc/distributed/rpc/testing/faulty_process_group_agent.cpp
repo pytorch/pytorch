@@ -4,6 +4,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace {
+constexpr auto kSecToMsConversion = 1000;
+}
+
 std::string fromVec(const std::vector<char>& vec) {
   return std::string(vec.begin(), vec.end());
 }
@@ -14,6 +18,7 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
     int numSendRecvThreads,
     std::chrono::milliseconds rpcTimeout,
     const std::vector<std::string>& messagesToFail,
+    const std::unordered_map<std::string, float>& messageTypesToDelay,
     int failNumSends)
     : ProcessGroupAgent(
           std::move(workerName),
@@ -21,7 +26,8 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
           numSendRecvThreads,
           rpcTimeout),
       failNumSends_(failNumSends),
-      messageTypesToFail_(parseMessagesToFailInput(messagesToFail)) {}
+      messageTypesToFail_(parseMessagesToFailInput(messagesToFail)),
+      messageTypesToDelay_(parseMessagesToDelay(messageTypesToDelay)) {}
 
 std::vector<MessageType> FaultyProcessGroupAgent::parseMessagesToFailInput(
     const std::vector<std::string>& messagesToFail) const {
@@ -30,28 +36,35 @@ std::vector<MessageType> FaultyProcessGroupAgent::parseMessagesToFailInput(
   // types. We will then check this list of types in the send function to
   // determine whether we should fail or not.
   std::vector<MessageType> messageTypesToFail;
+  messageTypesToFail.reserve(messagesToFail.size());
   for (const auto& msgString : messagesToFail) {
-    if (msgString == "RREF_FORK_REQUEST") {
-      messageTypesToFail.emplace_back(MessageType::RREF_FORK_REQUEST);
-    } else if (msgString == "RREF_CHILD_ACCEPT") {
-      messageTypesToFail.emplace_back(MessageType::RREF_CHILD_ACCEPT);
-    } else if (msgString == "RREF_USER_DELETE") {
-      messageTypesToFail.emplace_back(MessageType::RREF_USER_DELETE);
-    } else if (msgString == "CLEANUP_AUTOGRAD_CONTEXT_REQ") {
-      messageTypesToFail.emplace_back(
-          MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ);
-    }
+    messageTypesToFail.push_back(messageStringToType(msgString));
   }
   return messageTypesToFail;
 }
 
+std::unordered_map<MessageType, float, std::hash<int>> FaultyProcessGroupAgent::
+    parseMessagesToDelay(const std::unordered_map<std::string, float>&
+                             messageTypesToDelay) const {
+  std::unordered_map<MessageType, float, std::hash<int>> delayMessages;
+  for (const auto& messagePair : messageTypesToDelay) {
+    float delay = messagePair.second;
+    TORCH_CHECK(
+        delay >= 0,
+        "Delays passed to FaultyProcessGroupAgent must be non-negative.")
+    delayMessages.insert({messageStringToType(messagePair.first), delay});
+  }
+  return delayMessages;
+}
+
 std::shared_ptr<FutureMessage> FaultyProcessGroupAgent::send(
     const WorkerInfo& to,
-    Message&& message) {
+    Message&& message,
+    const float rpcTimeoutSeconds) {
   // We only fail control messages that have been specified by the test case.
   // For all other messages, we just send them without any failures.
   if (!shouldFailMessage(message.type())) {
-    return ProcessGroupAgent::send(to, std::move(message));
+    return ProcessGroupAgent::send(to, std::move(message), rpcTimeoutSeconds);
   }
   // This send function checks the failMessageCountMap_ to check whether
   // we must fail the next send. If the send must be failed, we set an error
@@ -71,8 +84,18 @@ std::shared_ptr<FutureMessage> FaultyProcessGroupAgent::send(
     return fm;
   } else {
     lock.unlock();
-    return ProcessGroupAgent::send(to, std::move(message));
+    return ProcessGroupAgent::send(to, std::move(message), rpcTimeoutSeconds);
   }
+}
+
+void FaultyProcessGroupAgent::enqueueSend(SendWork work) {
+  float msgDelay = getDelayForMessage(work.message_.type());
+  if (msgDelay != 0) {
+    // Sleep for the specified delay for the message.
+    std::this_thread::sleep_for(std::chrono::milliseconds(
+        static_cast<int>(msgDelay * kSecToMsConversion)));
+  }
+  ProcessGroupAgent::enqueueSend(std::move(work));
 }
 
 bool FaultyProcessGroupAgent::shouldFailMessage(MessageType type) const {
@@ -80,6 +103,32 @@ bool FaultyProcessGroupAgent::shouldFailMessage(MessageType type) const {
   return (
       std::find(messageTypesToFail_.begin(), messageTypesToFail_.end(), type) !=
       messageTypesToFail_.end());
+}
+
+float FaultyProcessGroupAgent::getDelayForMessage(MessageType type) const {
+  const auto& it = messageTypesToDelay_.find(type);
+  return it == messageTypesToDelay_.end() ? 0 : it->second;
+}
+
+MessageType FaultyProcessGroupAgent::messageStringToType(
+    const std::string& messageString) const {
+  // Lazily constructed map that returns string to message type mapping
+  static std::unordered_map<std::string, MessageType> msgMap = {
+      {"RREF_FORK_REQUEST", MessageType::RREF_FORK_REQUEST},
+      {"RREF_CHILD_ACCEPT", MessageType::RREF_CHILD_ACCEPT},
+      {"RREF_USER_DELETE", MessageType::RREF_USER_DELETE},
+      {"CLEANUP_AUTOGRAD_CONTEXT_REQ",
+       MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ},
+      {"PYTHON_REMOTE_CALL", MessageType::PYTHON_REMOTE_CALL},
+      {"PYTHON_CALL", MessageType::PYTHON_CALL},
+      {"SCRIPT_CALL", MessageType::SCRIPT_CALL},
+  };
+  const auto& it = msgMap.find(messageString);
+  TORCH_CHECK(
+      it != msgMap.end(),
+      "No mapping to rpc::MessageType exists for ",
+      messageString);
+  return it->second;
 }
 
 } // namespace rpc

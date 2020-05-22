@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/UpSample.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/native/quantized/cpu/quantized_ops.h>
 
 #include <algorithm>
 #include <cmath>
@@ -79,8 +79,8 @@ static void upsample_bilinear2d_out_frame(
                  w1lambda * pos1[h1p * input_width + w1p]) - input.q_zero_point();
         // requantization
         pos2[0] = at::native::quantize_val<scalar_t>(
-                              output_scale, output.q_zero_point(), result)
-                              .val_;
+                      output_scale, output.q_zero_point(), result)
+                      .val_;
         pos1 += input_width * input_height;
         pos2 += output_width * output_height;
       }
@@ -102,7 +102,7 @@ Tensor quantized_upsample_bilinear2d_cpu(
       output_size.size());
 
   TORCH_CHECK(
-      input.numel() != 0 && input.dim() == 4,
+      input.dim() == 4,
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
@@ -162,6 +162,20 @@ Tensor quantized_upsample_bilinear2d_cpu(
         });
     return output;
   }
+}
+
+using at::native::upsample::compute_output_size;
+using at::native::upsample::get_scale_value;
+
+Tensor quantized_upsample_bilinear2d_cpu(
+    const Tensor& input,
+    c10::optional<IntArrayRef> output_size,
+      bool align_corners,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto scale_h = get_scale_value(scale_factors, 0);
+  auto scale_w = get_scale_value(scale_factors, 1);
+  return quantized_upsample_bilinear2d_cpu(input, osize, align_corners, scale_h, scale_w);
 }
 
 DEFINE_DISPATCH(qupsample_bilinear2d_nhwc_stub);

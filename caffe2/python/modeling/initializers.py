@@ -50,7 +50,7 @@ class ExternalInitializer(object):
         elif isinstance(param_name, six.string_types):
             param = ScopedBlobReference(param_name, init_net)
         else:
-            raise "Unsupported type for param_name"
+            raise TypeError("Unsupported type for param_name")
         # TODO(amalevich): Add operator that will check param in the workspace
         return ParameterInfo(
             param_id=None,

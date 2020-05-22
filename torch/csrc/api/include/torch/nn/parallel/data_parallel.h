@@ -271,6 +271,10 @@ Tensor data_parallel(
 
   autograd::Scatter scatter(*devices, /*chunk_sizes=*/nullopt, dim);
   auto scattered_inputs = fmap<Tensor>(scatter.apply({std::move(input)}));
+  // Input tensor might not be big enough to scale across all available devices
+  if (scattered_inputs.size() < devices->size()) {
+    devices->resize(scattered_inputs.size(), Device(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES));
+  }
 
   auto replicas = replicate(module, *devices);
   auto outputs = parallel_apply(replicas, scattered_inputs, *devices);

@@ -41,7 +41,7 @@ static void import_libs(
       &tensor_table,
       [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
       /*version=*/2);
-  si.loadNamedType(QualifiedName(class_name));
+  si.loadType(QualifiedName(class_name));
 }
 
 void testModuleInterfaceSerialization() {
