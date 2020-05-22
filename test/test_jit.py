@@ -9136,6 +9136,20 @@ a")
         """
         FileCheck().run(graph_str, parse_ir(graph_str))
 
+    def test_norm_aliases(self):
+        def absolute(x):
+            return torch.absolute(x)
+
+        self.checkScript(absolute, (torch.tensor(-2),))
+        self.checkScript(absolute, (torch.tensor(2),))
+
+        g = torch.jit.script(absolute)
+        FileCheck().check("aten::abs(").check_not("absolute").run(g.graph)
+
+        self.checkTrace(absolute, (torch.rand(3, 4),))
+        out = torch.jit.trace(absolute, (torch.rand(3, 4),))
+        FileCheck().check("aten::abs(").check_not("absolute").run(out.graph)
+
     def test_canonicalize_control_outputs(self):
         def test_all_outputs(g):
             ifs = g.findAllNodes("prim::If")
@@ -15949,7 +15963,6 @@ a")
 
         graph = torch.jit.script(test_multiple).graph
         FileCheck().check_count("prim::If", 3, exactly=True).run(graph)
-        print(torch.jit.script(test_multiple).code)
 
     def test_is_scripting_metacompile(self):
         @torch.jit.script
