@@ -1794,6 +1794,31 @@
     CPU: log_softmax_backward_cpu
     CUDA: log_softmax_backward_cuda
 
+- func: _logcumsumexp(Tensor self, int dim) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    CPU: _logcumsumexp_cpu
+    CUDA: _logcumsumexp_cuda
+
+- func: _logcumsumexp.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _logcumsumexp_out_cpu
+    CUDA: _logcumsumexp_out_cuda
+
+- func: logcumsumexp(Tensor self, int dim) -> Tensor
+  supports_named_tensor: True
+  variants: function, method
+
+- func: logcumsumexp.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
+- func: logcumsumexp.dimname(Tensor self, Dimname dim) -> Tensor
+  supports_named_tensor: True
+  variants: function, method
+
+- func: logcumsumexp.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
 - func: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
@@ -4247,8 +4272,8 @@
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: scatter_add_cpu_
-    CUDA: legacy::cuda::_th_scatter_add_
+    CPU: scatter_add_
+    CUDA: scatter_add_
 
 - func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   use_c10_dispatcher: full
@@ -4671,7 +4696,6 @@
 - func: ne.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: ne
@@ -4688,7 +4712,6 @@
 - func: ne.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: ne
@@ -4705,7 +4728,6 @@
 - func: eq.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: eq
@@ -4722,7 +4744,6 @@
 - func: eq.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: eq
@@ -4739,7 +4760,6 @@
 - func: ge.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: ge
@@ -4756,7 +4776,6 @@
 - func: ge.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: ge
@@ -4773,7 +4792,6 @@
 - func: le.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: le
@@ -4790,7 +4808,6 @@
 - func: le.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: le
@@ -4807,7 +4824,6 @@
 - func: gt.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: gt
@@ -4824,7 +4840,6 @@
 - func: gt.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: gt
@@ -4841,7 +4856,6 @@
 - func: lt.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: lt
@@ -4858,7 +4872,6 @@
 - func: lt.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: lt
@@ -4928,15 +4941,15 @@
 
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: gather_out_cpu
-    CUDA: gather_out_cuda
+    CPU: gather_out_cpu_cuda
+    CUDA: gather_out_cpu_cuda
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: gather_cpu
-    CUDA: gather_cuda
+    CPU: gather
+    CUDA: gather
 
 - func: gather.dimname_out(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
 
