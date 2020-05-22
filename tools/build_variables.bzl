@@ -124,7 +124,7 @@ libtorch_core_sources = [
     "torch/csrc/jit/passes/bailout_graph.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
     "torch/csrc/jit/passes/canonicalize.cpp",
-    "torch/csrc/jit/passes/canonicalize_ops.cpp",
+    "torch/csrc/jit/passes/canonicalize_graph_fuser_ops.cpp",
     "torch/csrc/jit/passes/clear_profiling.cpp",
     "torch/csrc/jit/passes/clear_undefinedness.cpp",
     "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
