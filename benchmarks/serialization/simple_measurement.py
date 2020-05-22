@@ -1,7 +1,7 @@
 import torch
 from pyarkbench import Benchmark, Timer, default_args
 
-use_new = True
+use_new = False
 
 class Basic(Benchmark):
     def benchmark(self):
