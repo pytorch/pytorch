@@ -741,7 +741,6 @@ void initJITBindings(PyObject* module) {
 
             auto storage = c10::Storage(
                 c10::Storage::use_byte_size_t(),
-                at::CPU(scalar_type).typeMeta(),
                 numel * elementSize(scalar_type),
                 (std::get<0>(self.getRecord(key))),
                 /*allocator=*/nullptr,
