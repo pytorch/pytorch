@@ -724,7 +724,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       if (!global_unused) {
         if (!grad.defined()) {
           // Creates grad according to the "Gradient Layout Contract"
-          // (see torch/csrc/grad/AccumulateGrad.cpp
+          // (see torch/csrc/grad/AccumulateGrad.cpp)
           grad = variable.is_non_overlapping_and_dense() ?
                  at::empty_strided(variable.sizes(), variable.strides(),
                                    variable.options().memory_format(c10::nullopt)) :

@@ -131,7 +131,6 @@ struct TORCH_API AccumulateGrad : public Node {
           if (variable.is_non_overlapping_and_dense()) {
             // (1)
             if (variable.strides() == new_grad.strides()) {
-              // Stride-preserving clone
               update_grad(new_grad.clone(at::MemoryFormat::Preserve));
             } else {
               // Does this dicey-looking sequence attach updated grad to new_grad's
@@ -169,9 +168,10 @@ struct TORCH_API AccumulateGrad : public Node {
         // place. `variable_grad` is thus still referring to the same tensor
         // after the operation.
         variable_grad += new_grad;
-        // ^ We could force variable_grad += new_grad to obey the Grad Layout Contract
-        // (for non-sparse gradients) by changing it to:
-        // if (obeys_layout_contract(variable_grad, variable)) {
+        // ^ We could enforce the contract more aggressively here by writing:
+        // if (variable_grad.is_sparse() || new_grad.is_sparse()) {
+        //   variable_grad += new_grad;
+        // } else if (obeys_layout_contract(variable_grad, variable)) {
         //   variable_grad += new_grad;
         // } else {
         //   result = at::empty_strided(variable.sizes(), variable.strides(),
@@ -191,8 +191,10 @@ struct TORCH_API AccumulateGrad : public Node {
       // ^ We could enforce the contract more aggressively here by saying
       // auto result = variable_grad + new_grad (or vice versa), checking result's
       // layout, and copying to an obedient clone if necessary before update_grad.
-      // The copy would require another gmem pass (we can't use add_out here because
-      // out overloads are not differentiable).  Maybe more trouble than it's worth.
+      // The copy would require another gmem pass.  We can't create empty result with
+      // the right layout then add_out into it with a single kernel, because GradMode
+      // is enabled in this branch, and add_out isn't differentiable.
+      // Maybe more trouble than it's worth.
     }
   }
 
