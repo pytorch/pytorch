@@ -125,7 +125,7 @@ class Reducer {
 
     // Views into contents for each grad.  Each view will be created with
     // layout (sizes + strides) matching the grad's expected layout
-    // (see "Gradient Layout Contract" at the top of Reducer.cpp), so
+    // ("Gradient Layout Contract" in torch/csrc/autograd/AccumulateGrad.h).
     // grad.copy_(bucket_views[i]) and
     // bucket_views[i].copy_(grad)
     // provide convenient ways to move grad data in/out of contents.

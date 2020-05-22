@@ -21,34 +21,6 @@ inline int64_t current_time_in_nanos() {
 
 } // namespace
 
-// Note:  "Gradient Layout Contract"
-// To efficiently support gradients with dense memory but permuted strides
-// (e.g. channels_last or channels_last_3d) Reducer assumes the autograd
-// engine (specifically AccumulateGrad) behaves as follows for a param p:
-//   if p.is_non_overlapping_and_dense():
-//     AccumulateGrad stashes p.grad with sizes and strides matching p's.
-//   else:
-//     AccumulateGrad stashes p.grad with sizes matching p's, but falls back
-//     to rowmajor-contiguous strides.
-//
-// If AccumulateGrad breaks the contract, and produces a grad with an
-// unexpected layout, performance will degrade due to poor memory access
-// patterns when copy_ing grad data in and out of its bucket view.
-// However, numerics remain correct, because the bucket view is the same on
-// either end of the raw allreduce.  bucket_view.copy(grad) tranposes (+ densifies)
-// to the bucket view's layout, the data is allreduced, then grad.copy_(bucket_view)
-// transposes it back to grad's layout.
-//
-// The only way the numerics can go haywire is if the bucket views themselves have
-// different layouts across processes (or replicas).  Bucket views' sizes and strides are set
-// based on param layouts, using the same logic that (we expect) AccumulateGrad uses
-// for their grads.  Therefore, the only way a bucket view could have different layouts
-// in different processes is if its param has a different layout in different processes.
-// We can check that param layouts match across processes and replicas in Reducer's
-// constructor by allreducing some metadata.  Checking just once won't catch if someone
-// messes with param layouts over time, but not messing with params after DDP construction
-// is already a documented constraint.
-
 Reducer::Reducer(
     std::vector<std::vector<torch::autograd::Variable>> replicas,
     std::vector<std::vector<size_t>> bucket_indices,
@@ -254,10 +226,11 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
     TORCH_INTERNAL_ASSERT(!grad.is_alias_of(bucket_view));
     TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
     TORCH_INTERNAL_ASSERT(grad.sizes() == bucket_view.sizes());
+    // Checks below are too harsh.  AccumulateGrad doesn't HAVE to obey
+    // the grad layout contract.  The penalty for disobedience is reduced
+    // performance, not numerical death.
+    // What should I do here?  Warn?  Do nothing?
     TORCH_INTERNAL_ASSERT(grad.strides() == bucket_view.strides());
-    // Check below is too harsh.  AccumulateGrad doesn't HAVE to obey
-    // the contract.  The penalty for disobedience is reduced performance,
-    // not numerical death.
     TORCH_INTERNAL_ASSERT(variable.is_non_overlapping_and_dense() ?
                          (grad.strides() == variable.strides()) :
                          grad.is_contiguous());
@@ -536,6 +509,37 @@ void Reducer::initialize_buckets(
         replica.contents = at::empty({static_cast<long>(offset)}, options);
 
         // Create views into the contents tensor for each variable's grad.
+        // Views serve as entry points to copy_ each grad's data in/out of the
+        // flat contents tensor.
+        //
+        // Gradients may have dense memory but non-row-major-contiguous strides
+        // (e.g. channels_last or channels_last_3d). For coalesced accesses during
+        // copy_s, it's beneficial for each view's layout to match its grad's layout.
+        //
+        // Specifically, we expect torch/csrc/autograd/AccumulateGrad.h produces grads
+        // that obey its "Gradient Layout Contract":
+        //   (1) if variable.is_non_overlapping_and_dense(), the stashed grad's
+        //       strides match variable.
+        //   (2) else, stashed grad is rowmajor contiguous.
+        // and create views to match.
+        //
+        // If AccumulateGrad breaks the contract, and produces a grad with an
+        // unexpected layout, performance will degrade due to poor memory access
+        // patterns when copy_ing grad data in and out of its bucket view.
+        // However, numerics remain correct, because the bucket view is the same on
+        // either end of the raw allreduce.  bucket_view.copy(grad) tranposes (+ densifies)
+        // to the bucket view's layout, the data is allreduced, then grad.copy_(bucket_view)
+        // transposes it back to grad's layout.
+        //
+        // The only way the numerics can go haywire is if the bucket views themselves have
+        // different layouts across processes (or replicas).  Bucket views' sizes and strides are set
+        // based on param layouts, using the same logic that (we expect) AccumulateGrad uses
+        // for their grads.  Therefore, the only way a bucket view could have different layouts
+        // in different processes is if its param has a different layout in different processes.
+        // We can check that param layouts match across processes and replicas in Reducer's
+        // constructor by allreducing some metadata.  Checking just once won't catch if someone
+        // messes with param layouts over time, but not messing with params after DDP construction
+        // is already a documented constraint.
         for (size_t i = 0; i < replica.variables.size(); i++) {
           const auto& v = replica.variables[i];
           if (v.is_non_overlapping_and_dense()) {
@@ -719,11 +723,13 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       // If a parameter is globally unused, we keep its grad untouched.
       if (!global_unused) {
         if (!grad.defined()) {
-          // See "Gradient Layout Contract" at the top of this file.
+          // Creates grad according to the "Gradient Layout Contract"
+          // (see torch/csrc/grad/AccumulateGrad.cpp
           grad = variable.is_non_overlapping_and_dense() ?
                  at::empty_strided(variable.sizes(), variable.strides(),
                                    variable.options().memory_format(c10::nullopt)) :
-                 at::empty(variable.sizes());
+                 at::empty(variable.sizes(),
+                           variable.options().memory_format(at::MemoryFormat::Contiguous));
         }
         grad.copy_(replica.bucket_views[intra_bucket_index]);
       }

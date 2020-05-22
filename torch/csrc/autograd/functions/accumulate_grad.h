@@ -28,33 +28,49 @@ struct TORCH_API AccumulateGrad : public Node {
 
   // "Gradient Layout Contract"
   //
-  // AccumulateGrad tries to stash grads with memory layout (strides) such
-  // that variables and grads interact efficiently in later optimizer kernels,
-  // and grads interact efficiently with c10d::Reducer.cpp.
+  // AccumulateGrad tries to stash strided (non-sparse) grads with memory layout
+  // (strides) such that variables and grads interact efficiently in later
+  // optimizer kernels, and grads interact efficiently with c10d::Reducer.cpp.
   //
-  // Specifically, for strided (non-sparse) gradients, AccumulateGrad tries to
-  // ensure the following:
+  // Specifically, AccumulateGrad tries to ensure the following:
   //   (1) if variable.is_non_overlapping_and_dense(), the stashed grad's
-  //       sizes and strides match variable.
-  //   (2) if variable's memory isn't dense, the stashed grad's sizes match
-  //       variable, but it falls back to the rowmajor-contiguous strides.
+  //       strides match variable.
+  //   (2) else, stashed grad is rowmajor contiguous.
+  static bool obeys_layout_contract(const at::Tensor& grad, const at::Tensor& variable) {
+    TORCH_INTERNAL_ASSERT(!grad.is_sparse());
+    TORCH_INTERNAL_ASSERT(!variable.is_sparse());
+    return variable.is_non_overlapping_and_dense() ?
+           (grad.strides() == variable.strides()) :
+           grad.is_contiguous();
+  }
+  // If variable's grad does not exist (!variable_grad.defined())
+  // AccumulateGrad steals new_grad if it's stealable and obeys the contract
+  // already, otherwise it deep copies new_grad into an obedient clone.
   //
-  // If variable's grad already exists (variable_grad.defined() is true),
-  // AccumulateGrad assumes (hopes) variable_grad was created in the past
-  // according to (1) or (2), and stashes variable_grad + new_grad
-  // Therefore, AccumulateGrad does not enforce (1) and (2) with 100%
-  // certainty.  For example, if variable_grad was assigned by the user,
-  // such that AccumulateGrad never got the chance to create it, variable_grad
-  // enters operator+ with whatever layout the user gave it, and we are
-  // at the mercy of TensorIterator to decide what the layout of
-  // "variable_grad + new_grad" will be.
+  // If variable's grad already exists (variable_grad.defined()), new_grad must
+  // be added to variable_grad.  If we aren't setting up for double backward
+  // (!GradMode::is_enabled()), AccumulateGrad performs "variable_grad += new_grad"
+  // in-place, which keeps variable_grad's layout. We assume (hope) variable_grad
+  // was created obeying (1) or (2) at some point in the past.
+  //
+  // If we are setting up for double backward, AccumulateGrad adds new_grad to
+  // variable_grad out-of-place using operator+.  TensorIterator decides the
+  // result's layout, typically matching strides of the first arg.
+  // AccumulateGrad leverages this as best it can, stashing
+  // "new_grad + variable_grad" if new_grad obeys, and
+  // "variable_grad + new_grad" otherwise.
+  //
+  // AccumulateGrad does not enforce the contract with 100% certainty.  Examples:
+  //  - If a user manually permutes a param or its grad, then runs a fwd+bwd,
+  //    variable_grad += new_grad keeps variable_grad's layout without rechecking
+  //    the contract.
+  //  - If TensorIterator changes its corner cases about operator+'s result
+  //    (for example, giving more or less priority to channels_last inputs, see
+  //    https://github.com/pytorch/pytorch/pull/37968) the result may not obey.
   //
   // Fortunately, if a given grad doesn't satisfy (1) or (2), the penalty is
   // degraded performance in Reducer.cpp or optimizer kernels, not death by
   // assert or silently bad numerics.
-  //
-  // We could add logic that is more aggressive about forcing
-  // "variable_grad + new_grad" to obey (1) or (2).
 
   // variable: the variable whose grad we're accumulating.
   // variable_grad: the current grad for the variable.
@@ -74,17 +90,15 @@ struct TORCH_API AccumulateGrad : public Node {
       size_t num_expected_refs,
       const T& update_grad) {
     if (!variable_grad.defined()) {
-      // under following conditions, we can avoid deep copy (steal the gradient)
       if (!GradMode::is_enabled() &&
           !new_grad.is_sparse() &&
           new_grad.use_count() <= num_expected_refs &&
-          (variable.is_non_overlapping_and_dense() ?
-           (new_grad.strides() == variable.strides()) :
-           new_grad.is_contiguous())) {
-        // first check we aren't setting up for double-backward
-        // then check not sparse
-        // then check if use_count <= number of references we expect
-        // then check if new_grad obeys the "Gradient Layout Contract"
+          obeys_layout_contract(new_grad, variable)) {
+        // we aren't setting up for double-backward
+        // not sparse
+        // no other user-visible tensor references new_grad
+        // new_grad obeys the "Gradient Layout Contract"
+        // Under these conditions, we can steal new_grad without a deep copy.
         update_grad(new_grad.detach());
       } else if (
           !GradMode::is_enabled() && new_grad.is_sparse() &&
@@ -115,14 +129,19 @@ struct TORCH_API AccumulateGrad : public Node {
         } else {
           // Deep copies new_grad according to the "Gradient Layout Contract."
           if (variable.is_non_overlapping_and_dense()) {
+            // (1)
             if (variable.strides() == new_grad.strides()) {
-              update_grad(new_grad.clone());
+              // Stride-preserving clone
+              update_grad(new_grad.clone(at::MemoryFormat::Preserve));
             } else {
+              // Does this dicey-looking sequence attach updated grad to new_grad's
+              // history if GradMode::is_enabled()?  Yes, and @alband says it should.
               update_grad(std::move(at::empty_strided(variable.sizes(), variable.strides(),
                                     variable.options().memory_format(c10::nullopt))
                                     .copy_(new_grad)));
             }
           } else {
+            // (2)
             update_grad(new_grad.clone(at::MemoryFormat::Contiguous));
           }
         }
@@ -150,9 +169,30 @@ struct TORCH_API AccumulateGrad : public Node {
         // place. `variable_grad` is thus still referring to the same tensor
         // after the operation.
         variable_grad += new_grad;
+        // ^ We could force variable_grad += new_grad to obey the Grad Layout Contract
+        // (for non-sparse gradients) by changing it to:
+        // if (obeys_layout_contract(variable_grad, variable)) {
+        //   variable_grad += new_grad;
+        // } else {
+        //   result = at::empty_strided(variable.sizes(), variable.strides(),
+        //                              variable.options().memory_format(c10::nullopt));
+        //   update_grad(at::native::add_out(result, variable_grad, new_grad, 1.0);
+        // }
+        // However, that accumulation is sometimes in place and sometimes not,
+        // which may break user code.
       }
     } else {
-      update_grad(variable_grad + new_grad);
+      // Assumes operator+ result typically matches strides of first arg.
+      if (obeys_layout_contract(new_grad, variable)) {
+        update_grad(new_grad + variable_grad);
+      } else {
+        update_grad(variable_grad + new_grad);
+      }
+      // ^ We could enforce the contract more aggressively here by saying
+      // auto result = variable_grad + new_grad (or vice versa), checking result's
+      // layout, and copying to an obedient clone if necessary before update_grad.
+      // The copy would require another gmem pass (we can't use add_out here because
+      // out overloads are not differentiable).  Maybe more trouble than it's worth.
     }
   }
 
