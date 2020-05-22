@@ -277,6 +277,7 @@ struct TORCH_CUDA_API IterDomain : public Val {
     return start_;
   }
   Val* extent() const;
+  Val* rawExtent() const { return extent_; }
 
   IterDomain(const IterDomain& other) = delete;
   IterDomain& operator=(const IterDomain& other) = delete;
