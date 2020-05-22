@@ -233,7 +233,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
     TORCH_INTERNAL_ASSERT(grad.strides() == bucket_view.strides());
     TORCH_INTERNAL_ASSERT(variable.is_non_overlapping_and_dense() ?
                          (grad.strides() == variable.strides()) :
-                         grad.is_contiguous());
+                         grad.is_contiguous(at::MemoryFormat::Contiguous));
     bucket_view.copy_(grad, /* non_blocking */ true);
   } else {
     bucket_view.zero_();

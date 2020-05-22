@@ -39,9 +39,12 @@ struct TORCH_API AccumulateGrad : public Node {
   static bool obeys_layout_contract(const at::Tensor& grad, const at::Tensor& variable) {
     TORCH_INTERNAL_ASSERT(!grad.is_sparse());
     TORCH_INTERNAL_ASSERT(!variable.is_sparse());
+    // I want to discuss how this logic plays with broadcasted (stride-0) tensors.
+    // It's not uncommon grad is broadcasted, eg from sum() backward.
+    // I want to make sure it doesn't regress existing performance for any cases.
     return variable.is_non_overlapping_and_dense() ?
            (grad.strides() == variable.strides()) :
-           grad.is_contiguous();
+           grad.is_contiguous(at::MemoryFormat::Contiguous);
   }
   // If variable's grad does not exist (!variable_grad.defined())
   // AccumulateGrad steals new_grad if it's stealable and obeys the contract
