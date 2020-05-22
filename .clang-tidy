@@ -24,6 +24,7 @@ modernize-*,
 -modernize-use-auto,
 -modernize-use-default-member-init,
 -modernize-use-using,
+-modernize-use-trailing-return-type,
 performance-*,
 -performance-noexcept-move-constructor,
   '

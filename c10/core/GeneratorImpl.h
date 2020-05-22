@@ -86,7 +86,7 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
     return pyobj_;
   }
 
-  private:
+  protected:
     Device device_;
     DispatchKeySet key_set_;
     PyObject* pyobj_ = nullptr;

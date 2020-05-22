@@ -86,6 +86,9 @@ static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value
   if (PyFloat_Check(value)) {
     return at::indexing::scalarToTensor(Scalar(THPUtils_unpackDouble(value)), options, device);
   }
+  if (PyComplex_Check(value)) {
+    return at::indexing::scalarToTensor(Scalar(THPUtils_unpackComplexDouble(value)), options, device);
+  }
   throw TypeError(
     "can't assign a %s to a %s",
     Py_TYPE(value)->tp_name,

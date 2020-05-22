@@ -351,14 +351,12 @@ inline c10::OptionalArray<double> PythonArgs::doublelistOptional(int i) {
     return {};
   }
   PyObject* arg = args[i];
-  // XXX no auto-broadcast
   auto tuple = PyTuple_Check(arg);
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<double> res(size);
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
-      // XXX no variable check
       res[idx] = THPUtils_unpackDouble(obj);
     } catch (const std::exception &e) {
       throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
@@ -387,11 +385,7 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
   if (obj == (PyObject*)&PyBool_Type) {
     return at::ScalarType::Bool;
   }
-  if (obj == (PyObject*)&PyLong_Type
-#if PY_MAJOR_VERSION == 2
-      || obj == (PyObject*)&PyInt_Type
-#endif
-  ) {
+  if (obj == (PyObject*)&PyLong_Type) {
     return at::ScalarType::Long;
   }
   return reinterpret_cast<THPDtype*>(obj)->scalar_type;
@@ -429,7 +423,7 @@ inline at::Device PythonArgs::device(int i) {
   if (THPUtils_checkLong(args[i])) {
     const auto device_index = THPUtils_unpackLong(args[i]);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(at::DeviceType::CUDA, device_index);
+    return at::Device(DeviceType::CUDA, device_index);
   }
   const std::string &device_str = THPUtils_unpackString(args[i]);
   return at::Device(device_str);
@@ -655,10 +649,6 @@ static bool _is_basic_python_type(PyTypeObject *tp)
     tp == &PyFrozenSet_Type ||
     tp == &PyUnicode_Type ||
     tp == &PyBytes_Type ||
-
-#if PY_MAJOR_VERSION == 2
-    tp == &PyString_Type ||
-#endif
 
     /* other builtins */
     tp == &PySlice_Type ||

@@ -19,7 +19,7 @@ class Function : public KernelScopedObject {
       const Expr* body)
       // TODO: Function should not create buffers, they should be created
       // manually before constructing a function.
-      : func_vars_({new Buf(new Var(func_name, kHandle), dims)}),
+      : func_vars_({new Buf(func_name, dims, body->dtype())}),
         dims_(dims),
         args_(args),
         bodies_({body}) {}
@@ -33,7 +33,7 @@ class Function : public KernelScopedObject {
         args_(args),
         bodies_(bodies) {
     for (size_t i = 0; i < func_names.size(); i++) {
-      func_vars_[i] = new Buf(new Var(func_names[i], kHandle), dims);
+      func_vars_[i] = new Buf(func_names[i], dims, bodies[i]->dtype());
     }
   }
   Function(

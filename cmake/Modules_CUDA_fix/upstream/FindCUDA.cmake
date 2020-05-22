@@ -1657,12 +1657,6 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
         set(_verbatim "")
       endif()
 
-      if (CMAKE_GENERATOR MATCHES "Ninja")
-        set(Ninja_depfile DEPFILE "${NVCC_generated_dependency_file}")
-      else()
-        set(Ninja_depfile)
-      endif()
-
       # Build the generated file and dependency file ##########################
       add_custom_command(
         OUTPUT ${generated_file}
@@ -1670,7 +1664,6 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
         ${main_dep}
         DEPENDS ${CUDA_NVCC_DEPEND}
         DEPENDS ${custom_target_script}
-        ${Ninja_depfile}
         # Make sure the output directory exists before trying to write to it.
         COMMAND ${CMAKE_COMMAND} -E make_directory "${generated_file_path}"
         COMMAND ${CMAKE_COMMAND} ARGS

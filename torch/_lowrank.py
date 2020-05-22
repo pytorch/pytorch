@@ -3,8 +3,11 @@
 
 __all__ = ['svd_lowrank', 'pca_lowrank']
 
+from typing import Tuple, Optional
+
 import torch
-from . import _linalg_utils as _utils 
+from torch import Tensor
+from . import _linalg_utils as _utils
 from ._overrides import has_torch_function, handle_torch_function
 
 
@@ -81,7 +84,7 @@ def get_approximate_basis(A,        # type: Tensor
 
 def svd_lowrank(A, q=6, niter=2, M=None):
     # type: (Tensor, Optional[int], Optional[int], Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]
-    """Return the singular value decomposition ``(U, S, V)`` of a matrix,
+    r"""Return the singular value decomposition ``(U, S, V)`` of a matrix,
     batches of matrices, or a sparse matrix :math:`A` such that
     :math:`A \approx U diag(S) V^T`. In case :math:`M` is given, then
     SVD is computed for the matrix :math:`A - M`.

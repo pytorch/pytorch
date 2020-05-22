@@ -50,5 +50,7 @@ class FileBaton:
 
     def release(self):
         '''Releases the baton and removes its file.'''
-        os.close(self.fd)
+        if self.fd is not None:
+            os.close(self.fd)
+
         os.remove(self.lock_file_path)

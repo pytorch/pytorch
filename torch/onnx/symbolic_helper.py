@@ -46,7 +46,7 @@ from functools import wraps
 # Helper functions
 # ---------------------------------------------------------------------------------
 
-# Save some builtins as locals, because we'll shadown them below
+# Save some builtins as locals, because we'll shadow them below
 _sum = sum
 
 

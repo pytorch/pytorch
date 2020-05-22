@@ -60,7 +60,10 @@ test_python_all() {
     file_diff_from_base "$DETERMINE_FROM"
   fi
 
-  python test/run_test.py --verbose --determine-from="$DETERMINE_FROM"
+  # Increase default limit on open file handles from 256 to 1024
+  ulimit -n 1024
+
+  python test/run_test.py --verbose --exclude test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_profiling test_jit_fuser_te test_tensorexpr --determine-from="$DETERMINE_FROM"
 
   assert_git_not_dirty
 }
