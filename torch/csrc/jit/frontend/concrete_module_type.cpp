@@ -24,8 +24,8 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
     const auto& name = pr.key();
     const auto& type = pr.value().type_;
     const auto& isParameter = pr.value().isParam_;
-
-    cls->addAttribute(name, type, isParameter);
+    const auto& isBuffer = pr.value().isBuffer_;
+    cls->addAttribute(name, type, isParameter, false, isBuffer);
   }
 
   for (const auto& pr : constants_) {
@@ -176,9 +176,7 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
       [&](const ConcreteModuleTypeBuilder::ModuleInfo& info) {
         return info.name_ == name;
       });
-  if (it == data_.modules_.end()) {
-    return nullptr;
-  }
+  TORCH_INTERNAL_ASSERT(it != data_.modules_.end());
   return it->meta_;
 }
 
@@ -203,13 +201,15 @@ void ConcreteModuleTypeBuilder::addConstant(
 void ConcreteModuleTypeBuilder::addAttribute(
     std::string name,
     TypePtr type,
-    bool isParameter) {
+    bool isParameter,
+    bool isBuffer) {
   TORCH_INTERNAL_ASSERT(type);
   // Function attributes should be handled separately
   TORCH_INTERNAL_ASSERT(type->cast<FunctionType>() == nullptr);
   attributes_.insert(
       std::move(name),
-      ConcreteModuleTypeBuilder::Attribute(unshapedType(type), isParameter));
+      ConcreteModuleTypeBuilder::Attribute(
+          unshapedType(type), isParameter, isBuffer));
 }
 
 void ConcreteModuleTypeBuilder::addFunctionAttribute(

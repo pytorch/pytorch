@@ -42,6 +42,9 @@
 
 #define C10_MACRO_EXPAND(args) args
 
+#define C10_STRINGIZE_IMPL(x) #x
+#define C10_STRINGIZE(x) C10_STRINGIZE_IMPL(x)
+
 /**
  * C10_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
  * str and ending with a number that varies with the line.
@@ -260,9 +263,7 @@ __host__ __device__
     (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
 #define C10_IOS 1
 #define C10_MOBILE 1
-#elif (defined(__APPLE__) && TARGET_OS_MAC)
-#define C10_IOS 1
-#endif // ANDROID / IOS / MACOS
+#endif // ANDROID / IOS
 
 // Portably determine if a type T is trivially copyable or not.
 #if defined(__GNUG__) && __GNUC__ < 5

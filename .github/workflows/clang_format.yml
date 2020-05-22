@@ -1,9 +1,6 @@
 name: clang-format
 
 on:
-  push:
-    branches:
-    - master
   pull_request:
 
 jobs:
@@ -29,8 +26,28 @@ jobs:
         id: get_pr_tip
       - name: Run clang-format
         run: |
-          set -eux
-          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-          echo "| Run tools/clang_format.py to fix formatting errors |"
-          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-          tools/clang_format.py --verbose --diff
+          set -eu
+          # This is necessary to get the same results regardless of whether the
+          # PR was opened directly or from a forked repo. See: `9f890a92` for more info.
+          git remote add upstream https://github.com/pytorch/pytorch
+          git fetch upstream "$GITHUB_BASE_REF"
+          BASE_SHA=${{ github.event.pull_request.base.sha }}
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          MERGE_BASE=$(git merge-base $BASE_SHA $HEAD_SHA)
+
+          # only run clang-format on whitelisted files
+          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+          echo "| clang-format failures found! Run: "
+          echo "|    tools/clang_format_ci.sh ${MERGE_BASE} "
+          echo "| to fix this error. "
+          echo "| For more info, see: https://github.com/pytorch/pytorch/wiki/clang-format "
+          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+
+          tools/clang_format_ci.sh ${MERGE_BASE}
+
+          GIT_DIFF=$(git diff)
+          if [[ -z $GIT_DIFF ]]; then
+            exit 0
+          fi
+          echo $GIT_DIFF
+          exit 1

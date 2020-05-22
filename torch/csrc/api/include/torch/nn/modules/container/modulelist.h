@@ -74,7 +74,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
     for (const auto& module : modules_) {
       clone->push_back(module->clone(device));
     }
-    return std::move(clone);
+    return clone;
   }
 
   /// `reset()` is empty for `ModuleList`, since it does not have parameters of
