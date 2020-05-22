@@ -4274,18 +4274,10 @@
   dispatch:
     CPU: scatter_cpu_reduce_
 
-- func: scatter.reduce(Tensor self, int dim, Tensor index, Tensor src, *, str reduce) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
 - func: scatter_.value_reduce(Tensor(a!) self, int dim, Tensor index, Scalar value, *, str reduce) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: scatter_cpu_scalar_reduce_
-
-- func: scatter.value_reduce(Tensor self, int dim, Tensor index, Scalar value, *, str reduce) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
 
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
