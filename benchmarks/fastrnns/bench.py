@@ -44,7 +44,7 @@ def pretty_print(benchresult, colwidth=16, sep=' '):
 
 def trainbench(name, rnn_creator, nloops=100, warmup=10,
                seqLength=100, numLayers=1, inputSize=512, hiddenSize=512,
-               miniBatch=64, device='cuda', seed=None):
+               miniBatch=64, device='cuda', seed=None, skip_backward=False):
     def train_batch(modeldef):
         # CUDA events for timing
         fwd_start_event = torch.cuda.Event(enable_timing=True)
@@ -61,27 +61,31 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
         # XXX: Use if need to print something
         # print(modeldef.forward.graph_for(*modeldef.inputs))
 
-        if modeldef.backward_setup is not None:
-            backward_input = modeldef.backward_setup(forward_output)
+        if skip_backward:
+            bwd_time = 0.0
+            torch.cuda.synchronize()
         else:
-            backward_input = forward_output
+            if modeldef.backward_setup is not None:
+                backward_input = modeldef.backward_setup(forward_output)
+            else:
+                backward_input = forward_output
 
-        gc.collect()
+            gc.collect()
 
-        bwd_start_event.record()
-        if modeldef.backward is not None:
-            modeldef.backward(*backward_input)
-        bwd_end_event.record()
+            bwd_start_event.record()
+            if modeldef.backward is not None:
+                modeldef.backward(*backward_input)
+            bwd_end_event.record()
 
-        if modeldef.backward is not None:
-            for param in modeldef.params:
-                assert param.grad is not None
-                param.grad.data.zero_()
+            if modeldef.backward is not None:
+                for param in modeldef.params:
+                    assert param.grad is not None
+                    param.grad.data.zero_()
 
-        torch.cuda.synchronize()
+            torch.cuda.synchronize()
+            bwd_time = bwd_start_event.elapsed_time(bwd_end_event)
 
         fwd_time = fwd_start_event.elapsed_time(fwd_end_event)
-        bwd_time = bwd_start_event.elapsed_time(bwd_end_event)
         return fwd_time, bwd_time
 
     assert device == 'cuda'
@@ -111,7 +115,8 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
 
 def print_stderr(*args, **kwargs):
     kwargs['file'] = sys.stderr
-    return print(*args, **kwargs)
+    print(*args, **kwargs)
+    sys.stderr.flush()
 
 
 def print_json_oss_format(results):
@@ -206,6 +211,8 @@ if __name__ == '__main__':
     parser.add_argument('--cuda_pointwise_loop_level', default=None, type=int)
     parser.add_argument('--cuda_pointwise_block_count', default=None, type=int)
     parser.add_argument('--cuda_pointwise_block_size', default=None, type=int)
+    parser.add_argument('--skip_backward', action='store_true',
+                        help='Skip backward pass')
 
     args = parser.parse_args()
     assert args.fuser in ['te', 'old', 'none']

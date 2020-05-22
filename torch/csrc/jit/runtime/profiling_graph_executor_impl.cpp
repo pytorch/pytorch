@@ -60,7 +60,22 @@ std::atomic<size_t>& getBailoutDepth() {
   return bailout_depth;
 }
 
+bool shouldAlwaysRunCreateAutodiffGraphs() {
+  static const char* enable_c_str =
+      std::getenv("PYTORCH_ALWAYS_CREATE_AUTODIFF");
+  if (!enable_c_str) {
+    return false;
+  }
+  if (std::string(enable_c_str) == "0") {
+    return false;
+  }
+  return true;
+}
+
 static bool needsGradientInProfilingMode(Block* b) {
+  if (shouldAlwaysRunCreateAutodiffGraphs()) {
+    return true;
+  }
   for (auto n : b->nodes()) {
     if (n->kind() == prim::BailOut) {
       auto ptt = n->output()->type()->expect<TensorType>();
@@ -98,6 +113,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   ConstantPropagation(copy);
   runOptimization(copy);
 
+  GRAPH_DUMP("Before autodiff", copy);
   if (needsGradientInProfilingMode(copy->block())) {
     auto diff_nodes = CreateAutodiffSubgraphs(
         copy,

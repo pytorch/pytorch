@@ -613,6 +613,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     //          symbolically differentiable subgraphs for further optimizations.
     // Phase 5. Apply non-differentiable optimizations to the graphs we've found
     //          (or the whole graph if we know we won't need its derivative).
+    GRAPH_DUMP("Before autodiff", opt_graph);
     if (needsGradient(opt_graph)) {
       auto diff_nodes = CreateAutodiffSubgraphs(
           opt_graph,

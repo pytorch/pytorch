@@ -42,6 +42,22 @@ using torch::distributed::autograd::DistAutogradContainer;
 namespace torch {
 namespace jit {
 
+bool ignore_guards_ = true;
+
+bool init_ignore_guards() {
+  static const char* enable_c_str = std::getenv("PYTORCH_IGNORE_SHAPE_CHECKS");
+  if (!enable_c_str) {
+    ignore_guards_ = false;
+    return ignore_guards_;
+  }
+  if (std::string(enable_c_str) == "0") {
+    ignore_guards_ = false;
+    return ignore_guards_;
+  }
+  ignore_guards_ = true;
+  return ignore_guards_;
+}
+
 // Before we translate to intepreter instructions, we do
 // some preprocessing of the graph to turn it into a form that is closer
 // to what the instructions will look like.
@@ -1043,6 +1059,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   bool runImpl(Stack& stack) {
+    init_ignore_guards();
     // if we have never run before, then we might have to return the
     // stack when we suspend, record where it starts so we return the right
     // stack
@@ -1261,37 +1278,41 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             break;
           }
           case GUARD: {
-            if (!stack.back().isTensor()) {
-              // stack.back() is an Uninitialized IValue and this is a guard
-              // on a block output. Uninitialized IValues are never used
-              // so it's safe to pass this guard check
-              push(stack, true);
-            } else {
-              auto t = stack.back().toTensor();
-              auto pttp = tensorTypeInCurrentExecutionContext(t);
-              const TypePtr& expected = af.types[inst.X];
-              auto expected_type = expected->cast<TensorType>();
-              bool bound_successfully = true;
-              if (t.defined()) {
-                // check if symbols in the `expected_type` can bind to
-                // `t.sizes()`
-                bound_successfully =
-                    frames.back().symbols2dims.bindSymbolicShapes(
-                        t.sizes(), expected_type->symbolic_sizes());
+            if (!ignore_guards_) {
+              if (!stack.back().isTensor()) {
+                // stack.back() is an Uninitialized IValue and this is a guard
+                // on a block output. Uninitialized IValues are never used
+                // so it's safe to pass this guard check
+                push(stack, true);
+              } else {
+                auto t = stack.back().toTensor();
+                auto pttp = tensorTypeInCurrentExecutionContext(t);
+                const TypePtr& expected = af.types[inst.X];
+                auto expected_type = expected->cast<TensorType>();
+                bool bound_successfully = true;
+                if (t.defined()) {
+                  // check if symbols in the `expected_type` can bind to
+                  // `t.sizes()`
+                  bound_successfully =
+                      frames.back().symbols2dims.bindSymbolicShapes(
+                          t.sizes(), expected_type->symbolic_sizes());
 
-                // `merge(,false)` makes the merge result
-                // use the symbols from the `expected_type`
-                // since we already know that they bound
-                // successfully, so pttp should have
-                // the same symbolic type information
-                // as `expected_type`
-                if (bound_successfully) {
-                  pttp = expected_type->merge(pttp, false);
+                  // `merge(,false)` makes the merge result
+                  // use the symbols from the `expected_type`
+                  // since we already know that they bound
+                  // successfully, so pttp should have
+                  // the same symbolic type information
+                  // as `expected_type`
+                  if (bound_successfully) {
+                    pttp = expected_type->merge(pttp, false);
+                  }
                 }
+                push(
+                    stack,
+                    bound_successfully && pttp->isSubtypeOf(expected_type));
               }
-              push(
-                  stack,
-                  bound_successfully && pttp->isSubtypeOf(expected_type));
+            } else {
+              push(stack, true);
             }
             ++af.pc;
           } break;

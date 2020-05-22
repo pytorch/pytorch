@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/batch_mm.h>
 
+#include <torch/csrc/autograd/grad_mode.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
@@ -397,6 +398,13 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
   for (Use u : value->uses()) {
     if (u.user->owningBlock() == block &&
         u.user->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+      if (autograd::GradMode::is_enabled()) {
+        if (u.user->output()->type()->requires_grad() ||
+            u.user->input(0)->type()->requires_grad() ||
+            u.user->input(1)->type()->requires_grad()) {
+          continue;
+        }
+      }
       if (u.offset == 0 && u.user->inputs()[1] != value) {
         lhses.push_back(u.user);
       } else if (u.offset == 1 && u.user->inputs()[0] != value) {
@@ -467,7 +475,22 @@ bool hasMutableOperators(Block* block) {
   return false;
 }
 
+bool enableBatchMM() {
+  static const char* enable_c_str =
+      std::getenv("PYTORCH_ENABLE_BATCHMM");
+  if (!enable_c_str) {
+    return true;
+  }
+  if (std::string(enable_c_str) == "0") {
+    return false;
+  }
+  return true;
+}
+
 void BatchMM(std::shared_ptr<Graph>& graph) {
+  if (!enableBatchMM()) {
+    return;
+  }
   if (hasMutableOperators(graph->block())) {
     // TODO(suo): make BatchMM mutability-safe
     return;

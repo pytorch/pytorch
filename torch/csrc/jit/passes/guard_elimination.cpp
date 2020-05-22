@@ -206,6 +206,17 @@ struct GuardElimination {
     return true;
   }
 
+  bool shouldRemoveAllGuards() {
+    static const char* enable_c_str = std::getenv("PYTORCH_WIPE_ALL_SHAPE_CHECKS");
+    if (!enable_c_str) {
+      return false;
+    }
+    if (std::string(enable_c_str) == "0") {
+      return false;
+    }
+    return true;
+  }
+
   void eliminateRedundantGuards(Block* b) {
     // a very simple pass to eliminate redundant guards for ops
     // whose outputs are fully determined by their inputs
@@ -213,8 +224,9 @@ struct GuardElimination {
     // to remove a guard on ops' outputs
     for (auto it = b->nodes().rbegin(); it != b->nodes().rend();) {
       auto n = *it;
-      if (n->kind() == prim::Guard && guardsOutput(n) &&
-          removableGuard(n->inputs().at(0)->node())) {
+      if (n->kind() == prim::Guard &&
+          (shouldRemoveAllGuards() ||
+           (guardsOutput(n) && removableGuard(n->inputs().at(0)->node())))) {
         auto pttp = n->output()->type();
         n->output()->replaceAllUsesWith(n->inputs().at(0));
         n->inputs().at(0)->setType(pttp);
