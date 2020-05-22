@@ -75,6 +75,7 @@ DEFINE_DISPATCH(masked_select_serial_stub);
 DEFINE_DISPATCH(masked_select_stub);
 
 DEFINE_DISPATCH(gather_stub);
+DEFINE_DISPATCH(gather_add_stub);
 DEFINE_DISPATCH(scatter_stub);
 DEFINE_DISPATCH(scatter_fill_stub);
 DEFINE_DISPATCH(scatter_add_stub);
@@ -565,6 +566,15 @@ Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const
   return self.clone(at::MemoryFormat::Preserve).scatter_add_(dim, index, source);
 }
 
+Tensor & gather_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, bool sparse_grad) {
+  gather_add_stub(self.device().type(), self, dim, index, source);
+  return self;
+}
+
+Tensor gather_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, bool sparse_grad) {
+  return self.clone(at::MemoryFormat::Preserve).gather_add_(dim, index, source, sparse_grad);
+}
+
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
@@ -729,6 +739,11 @@ Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& in
         n_below *= grad.size(i);
     }
     return at::_sparse_coo_tensor_unsafe(sparse_ind, grad.reshape(-1), self.sizes());
+}
+
+Tensor _gather_add_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad) {
+  auto grad_restrided = grad.as_strided(index.sizes(), grad.strides());
+  return at::native::_gather_sparse_backward(self, dim, index, grad_restrided);
 }
 
 std::vector<Tensor> nonzero_numpy(const Tensor& self) {

@@ -1745,6 +1745,9 @@ class TestCuda(TestCase):
     def test_tensor_gather(self):
         _TestTorchMixin._test_gather(self, lambda t: t.cuda(), False)
 
+    def test_tensor_gather_add(self):
+        _TestTorchMixin._test_gather_add(self, lambda t: t.cuda(), False)
+
     def test_tensor_scatter(self):
         _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False)
 

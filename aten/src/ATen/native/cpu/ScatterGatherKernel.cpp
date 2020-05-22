@@ -37,7 +37,7 @@ struct _cpu_scatter_gather_dim_loop {
   }
 };
 
-template <bool is_scatter_like = true>
+template <bool is_scatter_like = true, bool is_external_self = false>
 struct cpu_scatter_gather_base_kernel {
   template <typename func_t>
   void operator()(
@@ -58,7 +58,7 @@ struct cpu_scatter_gather_base_kernel {
       scatter_shape_check(self, dim, index, src);
     }
     else {
-      gather_shape_check(self, dim, index, src);
+      gather_shape_check(self, dim, index, src, is_external_self);
     }
 
     auto iter = TensorIterator();
@@ -164,6 +164,15 @@ void gather_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim, const Te
   );
 }
 
+void gather_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  cpu_scatter_gather_base_kernel</*is_scatter_like=*/false, /*is_external_self=*/true>()(
+    self, dim, index, src,
+    "gather_add_cpu_", [] (auto* lhs, const auto* rhs) {
+      *lhs += *rhs;
+    }
+  );
+}
+
 void scatter_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cpu_scatter_gather_base_kernel<>()(
     self, dim, index, src,
@@ -198,6 +207,7 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
 } // anonymous namespace
 
 REGISTER_DISPATCH(gather_stub, &gather_cpu_kernel);
+REGISTER_DISPATCH(gather_add_stub, &gather_add_cpu_kernel);
 REGISTER_DISPATCH(scatter_stub, &scatter_cpu_kernel);
 REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cpu_kernel);
 REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cpu_kernel);

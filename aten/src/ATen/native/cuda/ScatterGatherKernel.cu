@@ -99,7 +99,11 @@ struct _cuda_scatter_gather_internal_kernel {
   }
 }; // struct _cuda_scatter_fill_internal_kernel
 
-template <bool is_scatter_like = true, bool cast_to_opaque = true>
+template <
+  bool is_scatter_like = true,
+  bool cast_to_opaque = true,
+  bool is_external_self = false
+>
 struct cuda_scatter_gather_base_kernel {
   template <typename func_t>
   void operator()(
@@ -119,7 +123,7 @@ struct cuda_scatter_gather_base_kernel {
       scatter_shape_check(self, dim, index, src);
     }
     else {
-      gather_shape_check(self, dim, index, src);
+      gather_shape_check(self, dim, index, src, is_external_self);
     }
 
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
@@ -306,7 +310,7 @@ template <
   typename scalar_t,
   typename std::enable_if<c10::is_complex_t<scalar_t>::value, int>::type = 0
 >
-inline C10_DEVICE void scatter_add_op(scalar_t* lhs, const scalar_t* rhs) {
+inline C10_DEVICE void cuda_kernel_add_op(scalar_t* lhs, const scalar_t* rhs) {
   gpuAtomicAdd(&lhs->storage[0], rhs->storage[0]);
   gpuAtomicAdd(&lhs->storage[1], rhs->storage[1]);
 }
@@ -315,20 +319,34 @@ template <
   typename scalar_t,
   typename std::enable_if<!c10::is_complex_t<scalar_t>::value, int>::type = 0
 >
-inline C10_DEVICE void scatter_add_op(scalar_t* lhs, const scalar_t* rhs) {
+inline C10_DEVICE void cuda_kernel_add_op(scalar_t* lhs, const scalar_t* rhs) {
   gpuAtomicAdd(lhs, *rhs);
+}
+
+void gather_add_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  cuda_scatter_gather_base_kernel<
+    /*is_scatter_like=*/false,
+    /*cast_to_opaque=*/false,
+    /*is_external_self=*/true
+  >()(
+    self, dim, index, src,
+    "gather_add_cuda_", []C10_DEVICE(auto* lhs, const auto* rhs) {
+      cuda_kernel_add_op(lhs, rhs);
+    }
+  );
 }
 
 void scatter_add_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/true, /*cast_to_opaque=*/false>()(
     self, dim, index, src,
     "scatter_add_cuda_", []C10_DEVICE(auto* lhs, const auto* rhs) {
-      scatter_add_op(lhs, rhs);
+      cuda_kernel_add_op(lhs, rhs);
     }
   );
 }
 
 REGISTER_DISPATCH(gather_stub, &gather_cuda_kernel);
+REGISTER_DISPATCH(gather_add_stub, &gather_add_cuda_kernel);
 REGISTER_DISPATCH(scatter_stub, &scatter_cuda_kernel);
 REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cuda_kernel);
 REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cuda_kernel);

@@ -2596,6 +2596,59 @@ class _TestTorchMixin(object):
         self._test_gather(self, lambda t: t)
 
     @staticmethod
+    def _test_gather_add(self, cast, test_bounds=True):
+        m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
+        elems_per_row = random.randint(1, 10)
+        dim = random.randrange(3)
+
+        for dtype in {torch.float32, torch.complex64, torch.complex128}:
+            src = torch.randn(m, n, o, dtype=dtype)
+            idx_size = [m, n, o]
+            idx_size[dim] = elems_per_row
+            idx = torch.LongTensor().resize_(*idx_size)
+            _TestTorchMixin._fill_indices(self, idx, dim, src.size(dim), elems_per_row, m, n, o)
+
+            lhs_size = [size + random.randint(1, 5) for size in idx_size]
+            lhs = torch.zeros(lhs_size, dtype=dtype)
+
+            lhs = cast(lhs)
+            src = cast(src)
+            idx = cast(idx)
+
+            actual = lhs.gather_add(dim, idx, src)
+            expected = cast(torch.zeros(lhs_size, dtype=dtype))
+            for i in range(idx_size[0]):
+                for j in range(idx_size[1]):
+                    for k in range(idx_size[2]):
+                        ii = [i, j, k]
+                        ii[dim] = idx[i, j, k]
+                        expected[i, j, k] += src[tuple(ii)]
+            self.assertEqual(actual, expected, 0)
+
+        bad_src = torch.randn(*[i - 1 for i in idx_size])
+        self.assertRaises(RuntimeError, lambda: lhs.gather_add(dim, idx, bad_src))
+
+        if test_bounds:
+            idx[0][0][0] = 23
+            self.assertRaises(RuntimeError, lambda: lhs.gather_add(dim, idx, src))
+
+        src = cast(torch.randn(3, 4, 5))
+        expected, idx = src.max(2, True)
+        expected = cast(expected)
+        idx = cast(idx)
+        lhs = cast(torch.zeros(idx.shape))
+        actual = lhs.gather_add(2, idx, src)
+        self.assertEqual(actual, expected, 0)
+
+        # Bool test case
+        lhs = torch.tensor([[False, False], [False, False]])
+        t = torch.tensor([[False, True], [True, True]])
+        self.assertEqual(lhs.gather_add(1, torch.tensor([[0, 0], [1, 0]]), t), torch.tensor([[False, False], [True, True]]))
+
+    def test_gather_add(self):
+        self._test_gather_add(self, lambda t: t)
+
+    @staticmethod
     def _test_scatter_add_mult_index_base(self, cast):
         m, n = 30, 40
         idx = torch.zeros(m, n).long()
@@ -5323,6 +5376,7 @@ def add_neg_dim_tests():
         ('index_copy', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10), torch.randn(10, 10)], [INPLACE_METHOD]),
         ('index_fill', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10), 12], [INPLACE_METHOD]),
         ('scatter', (10, 10), lambda: [DIM_ARG, idx_tensor((10, 10), 10), torch.randn(10, 10)], [INPLACE_METHOD]),
+        ('gather_add', (10, 10), lambda: [DIM_ARG, idx_tensor((10, 10), 10), torch.randn(10, 10)], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
         ('select', (10, 20), lambda: [DIM_ARG, 3], [METHOD]),
         ('unfold', (10, 20), lambda: [DIM_ARG, 5, 2], [METHOD]),
     ]

@@ -352,6 +352,12 @@ Tensor gather(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_
 Tensor& gather_out(Tensor& result, const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad) {
   reportNYIDimnameOverload("gather");
 }
+Tensor gather_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, bool sparse_grad) {
+  reportNYIDimnameOverload("gather_add");
+}
+Tensor& gather_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, bool sparse_grad) {
+  reportNYIDimnameOverload("gather_add");
+}
 Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("index_add");
 }

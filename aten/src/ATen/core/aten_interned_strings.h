@@ -340,6 +340,7 @@ _(aten, frobenius_norm) \
 _(aten, full) \
 _(aten, full_like) \
 _(aten, gather) \
+_(aten, gather_add) \
 _(aten, ge) \
 _(aten, gelu) \
 _(aten, geometric) \

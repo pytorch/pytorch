@@ -385,6 +385,11 @@
   self: "sparse_grad ? at::_gather_sparse_backward(self, dim, index, grad) : at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad)"
   index: non_differentiable
 
+- name: gather_add_(Tensor(a!) self, int dim, Tensor index, Tensor src, *, bool sparse_grad=False) -> Tensor(a!)
+  self: grad
+  index: non_differentiable
+  src: "sparse_grad ? at::_gather_add_sparse_backward(src, dim, index, grad) : at::zeros(src.sizes(), grad.options()).scatter_add_(dim, index, grad)"
+
 - name: ge_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
 

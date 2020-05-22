@@ -4282,6 +4282,19 @@
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
+- func: gather_add_(Tensor(a!) self, int dim, Tensor index, Tensor src, *, bool sparse_grad=False) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: gather_add_
+    CUDA: gather_add_
+
+- func: gather_add(Tensor self, int dim, Tensor index, Tensor src, *, bool sparse_grad=False) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: gather_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src, *, bool sparse_grad=False) -> Tensor
+  variants: function, method
+
 - func: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
 
@@ -4957,6 +4970,9 @@
   variants: method, function
 
 - func: _gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor
+  use_c10_dispatcher: full
+
+- func: _gather_add_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor
   use_c10_dispatcher: full
 
 - func: addcmul.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
