@@ -447,8 +447,6 @@ class TestPostTrainingStatic(QuantizationTestCase):
                                  self.calib_data)
         checkQuantized(model_oneline)
 
-
-#@skipIfNoFBGEMM
 class TestPostTrainingDynamic(QuantizationTestCase):
     def test_single_layer(self):
         r"""Dynamic Quantize SingleLayerLinearDynamicModel which has one Linear module,

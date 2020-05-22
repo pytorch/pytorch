@@ -630,7 +630,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
-    @skipIfNoFBGEMM
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),

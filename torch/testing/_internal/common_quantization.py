@@ -238,12 +238,6 @@ class QuantizationTestCase(TestCase):
             scripted_output = test_mod(inp)
             self.assertEqual(scripted_output, ref_output)
 
-    def _checkModuleCorrectnessAgainstOrig2(self, orig_mod, test_mod, calib_data):
-        for (inp, _) in calib_data:
-            ref_output = orig_mod(inp)
-            scripted_output = test_mod(inp)
-            self.assertEqual(scripted_output, ref_output)
-
 # Below are a series of neural net models to use in testing quantization
 # Single layer models
 class SingleLayerLinearModel(torch.nn.Module):
