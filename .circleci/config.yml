@@ -953,7 +953,7 @@ jobs:
               retry apt-get update
               retry apt-get -y install expect moreutils
               retry conda install -y -c eumetsat expect
-              retry conda install -y cmake
+              retry conda install -y cmake>=3.12
             fi
     - run:
         name: Update compiler to devtoolset7
@@ -1696,7 +1696,7 @@ jobs:
                 $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
             }
 
-            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests --yes
+            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake>=3.12 cffi typing requests --yes
 
             # sync submodules
             cd ${PROJ_ROOT}

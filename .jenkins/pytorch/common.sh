@@ -154,7 +154,7 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
     echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
     exit 1
   else
-    conda install -q -y cmake
+    conda install -q -y cmake>=3.12
   fi
 fi
 

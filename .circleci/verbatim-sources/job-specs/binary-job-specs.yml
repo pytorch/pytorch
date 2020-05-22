@@ -20,7 +20,7 @@
               retry apt-get update
               retry apt-get -y install expect moreutils
               retry conda install -y -c eumetsat expect
-              retry conda install -y cmake
+              retry conda install -y cmake>=3.12
             fi
     - run:
         name: Update compiler to devtoolset7

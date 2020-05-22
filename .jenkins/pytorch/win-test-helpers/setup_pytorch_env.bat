@@ -21,7 +21,7 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
     :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
     :: Numba is pinned to 0.44.0 to avoid https://github.com/numba/numba/issues/4352
     call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba==0.44.0
-    call conda install -y -q -c conda-forge cmake
+    call conda install -y -q -c conda-forge cmake>=3.12
 )
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 pip install ninja future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting

@@ -11,5 +11,5 @@ if "%REBUILD%"=="" (
 call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3
 if "%REBUILD%"=="" (
   call conda install -y -q python=%PYTHON_VERSION% numpy cffi pyyaml boto3
-  call conda install -y -q -c conda-forge cmake
+  call conda install -y -q -c conda-forge cmake>=3.12
 )

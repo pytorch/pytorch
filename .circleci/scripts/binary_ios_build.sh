@@ -15,7 +15,7 @@ export PATH="~/anaconda/bin:${PATH}"
 source ~/anaconda/bin/activate
 
 # Install dependencies
-conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests --yes
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake>=3.12 cffi typing requests --yes
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 
 # sync submodules

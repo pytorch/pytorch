@@ -168,7 +168,7 @@ If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xa
 
 Common
 ```
-conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake>=3.12 cffi
 ```
 
 On Linux
