@@ -103,7 +103,7 @@ class VcSpec:
 
 
 WORKFLOW_DATA = [
-    WindowsJob(None, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
+    WindowsJob(None, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1), run_on_prs_pred=lambda x: False),
     WindowsJob(1, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
     WindowsJob(2, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
     WindowsJob(None, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),

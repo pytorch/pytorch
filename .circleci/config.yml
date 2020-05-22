@@ -2096,12 +2096,6 @@ workflows:
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2017-14-11-cuda10-cudnn7-py3
           cuda_version: "10"
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           name: pytorch_windows_vs2017_14.11_py36_cuda10.1_build
           python_version: "3.6"
           requires:
