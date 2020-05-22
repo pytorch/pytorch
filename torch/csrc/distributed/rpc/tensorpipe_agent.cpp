@@ -327,12 +327,11 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   ClientPipe& clientPipe = it->second;
   auto& pendingResponseMessage = clientPipe.pendingResponseMessage_;
 
-  std::shared_ptr<FutureMessage> futureResponseMessage =
-      std::make_shared<FutureMessage>();
+  auto futureResponseMessage = std::make_shared<WrappedFutureMessage>();
   requestMessage.setId(nextMessageID_++);
   pendingResponseMessage[requestMessage.id()] = futureResponseMessage;
 
-  futureResponseMessage->addCallback([this]() {
+  futureResponseMessage->futMsg.addCallback([this]() {
     TORCH_INTERNAL_ASSERT(
         this->threadPool_.inThreadPool(),
         "Future marked completed from outside the thread pool");
@@ -362,7 +361,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   // Don't need to hold lock while calling tensorpipe API.
   lock.unlock();
 
-  futureResponseMessage->addCallback([this]() {
+  futureResponseMessage->futMsg.addCallback([this]() {
     // Decrease the callcount through a callback so it is only decremented once
     // per future.
     --clientActiveCalls_;
@@ -375,9 +374,11 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
           const tensorpipe::Error& error) {
         if (error) {
           LOG(WARNING) << "client write error: " << error.what();
-          threadPool_.run([futureResponseMessage, errorMsg{error.what()}]() {
-            futureResponseMessage->setError(errorMsg);
-          });
+          if (!futureResponseMessage->isComplete.test_and_set()) {
+            threadPool_.run([futureResponseMessage, errorMsg{error.what()}]() {
+              futureResponseMessage->futMsg.setError(errorMsg);
+            });
+          }
           return;
         }
 
@@ -397,17 +398,20 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                   clientPipe.readError_ = true;
                 }
                 for (auto& p : pendingMsgs) {
-                  std::shared_ptr<FutureMessage>& futureMessage = p.second;
-                  threadPool_.run([futureMessage, errorMsg{error.what()}]() {
-                    futureMessage->setError(errorMsg);
-                  });
+                  std::shared_ptr<WrappedFutureMessage>& futureMessage =
+                      p.second;
+                  if (!futureMessage->isComplete.test_and_set()) {
+                    threadPool_.run([futureMessage, errorMsg{error.what()}]() {
+                      futureMessage->futMsg.setError(errorMsg);
+                    });
+                  }
                 }
                 return;
               }
 
               // Identify future response message by message ID
               uint64_t messageId = responseMessage.id();
-              std::shared_ptr<FutureMessage> futureResponseMessage;
+              std::shared_ptr<WrappedFutureMessage> futureResponseMessage;
               {
                 std::lock_guard<std::mutex> lock(mutex_);
                 // A read error will lead all following callbacks to be
@@ -424,23 +428,26 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                 clientPipe.pendingResponseMessage_.erase(it);
               }
 
-              threadPool_.run(
-                  [this,
-                   futureResponseMessage,
-                   responseMessage{std::move(responseMessage)}]() mutable {
-                    if (responseMessage.type() == MessageType::EXCEPTION) {
-                      futureResponseMessage->setError(std::string(
-                          responseMessage.payload().begin(),
-                          responseMessage.payload().end()));
-                    } else {
-                      futureResponseMessage->markCompleted(
-                          std::move(responseMessage));
-                    }
-                  });
+              if (!futureResponseMessage->isComplete.test_and_set()) {
+                threadPool_.run(
+                    [this,
+                     futureResponseMessage,
+                     responseMessage{std::move(responseMessage)}]() mutable {
+                      if (responseMessage.type() == MessageType::EXCEPTION) {
+                        futureResponseMessage->futMsg.setError(std::string(
+                            responseMessage.payload().begin(),
+                            responseMessage.payload().end()));
+                      } else {
+                        futureResponseMessage->futMsg.markCompleted(
+                            std::move(responseMessage));
+                      }
+                    });
+              }
             });
       });
 
-  return futureResponseMessage;
+  return std::shared_ptr<FutureMessage>(
+      futureResponseMessage, &futureResponseMessage->futMsg);
 }
 
 void TensorPipeAgent::pollTimeoutRpcs() {
@@ -468,7 +475,7 @@ void TensorPipeAgent::pollTimeoutRpcs() {
 
     // Move all these futures to a separate vector so we can process them
     // outside the lock.
-    std::vector<std::shared_ptr<FutureMessage>> timedOutFutures =
+    std::vector<std::shared_ptr<WrappedFutureMessage>> timedOutFutures =
         std::move(timeoutMap_.begin()->second);
     // We can safely remove this key from the timeoutMap_ since all these
     // futures will be processed.
@@ -483,8 +490,10 @@ void TensorPipeAgent::pollTimeoutRpcs() {
       std::string errorMsg = c10::str(
           "RPC ran for more than set timeout and will now be marked with an error");
       // Using setErrorIfNeeded so completed futures are ignored.
-      threadPool_.run(
-          [future, errorMsg]() { future->setErrorIfNeeded(errorMsg); });
+      if (!future->isComplete.test_and_set()) {
+        threadPool_.run(
+            [future, errorMsg]() { future->futMsg.setError(errorMsg); });
+      }
     }
   }
 }
