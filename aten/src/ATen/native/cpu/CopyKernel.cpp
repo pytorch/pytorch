@@ -24,7 +24,7 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
             [=](scalar_t a) -> scalar_t { return a; },
             [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a; });
       });
-    } else if (isComplexType(dtype)) {
+    } else {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(
           ScalarType::Bool, dtype, "copy_kernel", [&] {
             cpu_kernel_vec(
