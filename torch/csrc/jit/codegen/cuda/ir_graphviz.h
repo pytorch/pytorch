@@ -19,7 +19,24 @@ void testGPU_IrGraphGenerator();
 namespace fuser {
 
 // Generates a DOT (https://www.graphviz.org) graph
-// representation of the Fusion IR
+// representation of a fuser IR
+//
+// Usage:
+// 1) Add calls to IrGraphGenerator::print(), for example:
+//  `IrGraphGenerator::print(&fusion, "ir.dot")`
+//
+// 2) Call IrGraphGenerator::print() from a debugger. Using gdb for example:
+//  `call IrGraphGenerator::print(&fusion, "ir.dot",
+//      IrGraphGenerator::DetailLevel::Explicit)`
+//
+// Notes:
+//  - When called from the debugger, the detail_level must be
+//    explicitly passed in (most debuggers don't support default arguments)
+//
+//  - The output dot file path can't include shell specific notations,
+//    for example you can't use "~/temp/ir.dot" ("/home/user/temp/ir.dot"
+//    must be used instead)
+//
 class TORCH_CUDA_API IrGraphGenerator : private OptInConstDispatch {
   friend void torch::jit::testGPU_IrGraphGenerator();
 
