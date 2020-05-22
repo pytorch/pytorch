@@ -84,8 +84,6 @@ from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
-import io
-import copy
 
 class TestPostTrainingStatic(QuantizationTestCase):
     def test_single_layer(self):
