@@ -311,17 +311,17 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                 '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(${ScalarName}), 0, allocator(), true),'
-                 'DispatchKey::${Backend}).release()',
+                 '(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),'
+                 'DispatchKey::${Backend}, scalarTypeToTypeMeta(${ScalarName})).release()',
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
-                     'DispatchKey::${Backend}).release()',
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),'
+                     'DispatchKey::${Backend}, scalarTypeToTypeMeta(ScalarType::Byte)).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
-                     'DispatchKey::${Backend}).release()',
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),'
+                     'DispatchKey::${Backend}, scalarTypeToTypeMeta(ScalarType::Bool)).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
-                     'DispatchKey::${Backend}).release()',
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),'
+                     'DispatchKey::${Backend}, scalarTypeToTypeMeta(ScalarType::Long)).release()',
 }
 
 # Replacements for constants when calling into TH
