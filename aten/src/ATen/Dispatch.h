@@ -433,22 +433,6 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     }                                                                       \
   }()
 
-#define AT_DISPATCH_COMPLEX_TYPES_AND(SCALARTYPE, TYPE, NAME, ...)          \
-  [&] {                                                                     \
-    switch (TYPE) {                                                         \
-      AT_PRIVATE_CASE_TYPE(                                                 \
-          at::ScalarType::ComplexFloat, std::complex<float>, __VA_ARGS__)   \
-      AT_PRIVATE_CASE_TYPE(                                                 \
-          at::ScalarType::ComplexDouble, std::complex<double>, __VA_ARGS__) \
-      AT_PRIVATE_CASE_TYPE(                                                 \
-          SCALARTYPE,                                                       \
-          decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE>::t),          \
-          __VA_ARGS__)                                                      \
-      default:                                                              \
-        AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");     \
-    }                                                                       \
-  }()
-
 #define AT_DISPATCH_ALL_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...) \
   [&] {                                                                       \
     switch (TYPE) {                                                           \
@@ -579,30 +563,6 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Long, int64_t, __VA_ARGS__)      \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Short, int16_t, __VA_ARGS__)     \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Half, at::Half, __VA_ARGS__)     \
-      default:                                                              \
-        AT_ERROR(#NAME, " not implemented for '", toString(_st), "'");      \
-    }                                                                       \
-  }()
-
-#define AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX(TYPE, NAME, ...)         \
-  [&] {                                                                     \
-    detail::deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX()         \
-        const auto& the_type = TYPE;                                        \
-    /* don't use TYPE again in case it is an expensive or side-effect op */ \
-    at::ScalarType _st = ::detail::scalar_type(the_type);                   \
-    switch (_st) {                                                          \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::Byte, uint8_t, __VA_ARGS__)      \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::Char, int8_t, __VA_ARGS__)       \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)     \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)       \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::Int, int32_t, __VA_ARGS__)       \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::Long, int64_t, __VA_ARGS__)      \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::Short, int16_t, __VA_ARGS__)     \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::Half, at::Half, __VA_ARGS__)     \
-      AT_PRIVATE_CASE_TYPE(                                                 \
-          at::ScalarType::ComplexFloat, std::complex<float>, __VA_ARGS__)   \
-      AT_PRIVATE_CASE_TYPE(                                                 \
-          at::ScalarType::ComplexDouble, std::complex<double>, __VA_ARGS__) \
       default:                                                              \
         AT_ERROR(#NAME, " not implemented for '", toString(_st), "'");      \
     }                                                                       \
