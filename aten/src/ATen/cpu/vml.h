@@ -38,7 +38,7 @@
 // There is a bug in Glibc2.23
 // https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280. Calling zeroall
 // when using AVX/AVX2 code resolves this.
-#if defined(__AVX__) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
+#if defined(CPU_CAPABILITY_AVX) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
 #define DL_RUNTIME_BUG(op, type)                              \
   using value_t = typename at::native::ztype<type>::value_t;  \
   volatile value_t x = (value_t)(1);                          \

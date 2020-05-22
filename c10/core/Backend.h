@@ -25,7 +25,21 @@ namespace c10 {
  * or "SparseCUDA"; backend in torch.backends is something like "MKL" or
  * "CUDNN".
  */
-enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, QuantizedCPU, QuantizedCUDA, Undefined, MkldnnCPU, NumOptions };
+enum class Backend {
+  CPU,
+  CUDA,
+  HIP,
+  SparseCPU,
+  SparseCUDA,
+  SparseHIP,
+  MSNPU,
+  XLA,
+  QuantizedCPU,
+  QuantizedCUDA,
+  Undefined,
+  MkldnnCPU,
+  NumOptions
+};
 
 static inline Backend toSparse(Backend b) {
   switch (b) {

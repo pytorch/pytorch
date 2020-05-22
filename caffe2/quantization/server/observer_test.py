@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import numpy as np
 from caffe2.python import core, workspace
-from caffe2.quantization.server import dnnlowp_pybind11
+from caffe2.quantization.server import dnnlowp_pybind11  # type: ignore[attr-defined]
 
 
 net = core.Net("test_net")

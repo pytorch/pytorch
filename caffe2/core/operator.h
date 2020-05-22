@@ -11,6 +11,7 @@
 #include <string>
 #include <typeinfo>
 #include <vector>
+#include <sstream>
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Registry.h>
@@ -154,9 +155,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return inputs_.at(idx)->template Get<T>();
     } catch (::caffe2::EnforceNotMet& enf) {
       if (has_debug_def()) {
-        enf.AppendMessage(".\nOffending Blob name: ");
-        enf.AppendMessage(debug_def().input(idx));
-        enf.AppendMessage(".\n");
+        TORCH_RETHROW(enf, "Offending Blob name: ", debug_def().input(idx), ".");
       }
       throw enf;
     }
@@ -180,9 +179,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         return tensor;
       } catch (::caffe2::EnforceNotMet& enf) {
         if (has_debug_def()) {
-          enf.AppendMessage(".\nOffending Blob name: ");
-          enf.AppendMessage(debug_def().input(idx));
-          enf.AppendMessage(".\n");
+          TORCH_RETHROW(enf, "Offending Blob name: ", debug_def().input(idx), ".");
         }
         throw enf;
       }
@@ -521,25 +518,29 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return;
     }
 
-    bool found_input;
+    bool found_input = false;
+    bool found_output = false;
     if (err->caller() != nullptr) {
+      std::ostringstream oss;
       for (size_t i = 0; i < inputs_.size(); i++) {
         if (inputs_[i]->GetRaw() == err->caller()) {
           found_input = true;
-          err->AppendMessage(
-              "\n** while accessing input: " + debug_def().input(i));
+          oss << "while accessing input: " << debug_def().input(i);
           break;
         }
       }
       for (size_t i = 0; i < outputs_.size(); i++) {
         if (outputs_[i]->GetRaw() == err->caller()) {
+          found_output = true;
           if (found_input) {
-            err->AppendMessage("\n OR ");
+            oss << " OR ";
           }
-          err->AppendMessage(
-              "\n** while accessing output: " + debug_def().output(i));
+          oss << "while accessing output: " << debug_def().output(i);
           break;
         }
+      }
+      if (found_input || found_output) {
+        err->add_context(oss.str());
       }
     }
   }
@@ -1071,7 +1072,7 @@ class Operator : public OperatorBase {
       return result;
     } catch (EnforceNotMet& err) {
       if (has_debug_def()) {
-        err.AppendMessage(
+        err.add_context(
             "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }
@@ -1109,7 +1110,7 @@ class Operator : public OperatorBase {
       return result;
     } catch (EnforceNotMet& err) {
       if (has_debug_def()) {
-        err.AppendMessage(
+        err.add_context(
             "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }

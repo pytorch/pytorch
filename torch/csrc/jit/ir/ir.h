@@ -32,6 +32,7 @@ using pyobj_list = std::vector<THPObjectPtr>;
 
 namespace torch {
 namespace jit {
+class AliasDb;
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -161,6 +162,8 @@ struct Value {
  public:
   Value* setType(TypePtr type);
   TORCH_API void inferTypeFrom(const at::Tensor& output);
+  TORCH_API void inferTypeFrom(
+      const c10::intrusive_ptr<c10::ivalue::Object>& output);
   const TypePtr& type() const {
     AT_ASSERT(type_ != nullptr);
     return type_;
@@ -1231,6 +1234,7 @@ struct Graph {
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
+  friend void Lint(const AliasDb* db);
   TORCH_API void freeNode(Node* n);
   TORCH_API void freeValue(Value* v);
   TORCH_API void freeBlock(Block* b);

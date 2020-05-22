@@ -27,6 +27,7 @@ DEFAULT_MODULE_MAPPING = {
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
+    nni.ConvReLU1d: nniq.ConvReLU1d,
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.ConvReLU3d: nniq.ConvReLU3d,
     nni.LinearReLU: nniq.LinearReLU,
@@ -75,3 +76,13 @@ DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST = (
      _INCLUDE_QCONFIG_PROPAGATE_LIST) -
     _EXCLUDE_QCONFIG_PROPAGATE_LIST
 )
+
+DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST = (
+    set(DEFAULT_MODULE_MAPPING.values())
+    | set(DEFAULT_QAT_MODULE_MAPPING.values())
+    | set(DEFAULT_DYNAMIC_MODULE_MAPPING.values())
+    | set(DEFAULT_MODULE_MAPPING.keys())
+    | set(DEFAULT_QAT_MODULE_MAPPING.keys())
+    | set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys())
+    | _INCLUDE_QCONFIG_PROPAGATE_LIST
+) - _EXCLUDE_QCONFIG_PROPAGATE_LIST

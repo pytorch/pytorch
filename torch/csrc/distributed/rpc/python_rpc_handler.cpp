@@ -56,15 +56,32 @@ py::object getFunction(const py::object& module, const char* name) {
   return fn;
 }
 
+void cleanupPyObj(py::object& obj) {
+  obj.dec_ref();
+  // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
+  // decref on the PyObject again.
+  // See Note [Destructing py::object] in python_ivalue.h
+  obj.ptr() = nullptr;
+}
+
 } // namespace
 
 PythonRpcHandler::PythonRpcHandler() {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  py::object module = py::module::import("torch.distributed.rpc.internal");
-  pyRunFunction_ = getFunction(module, "_run_function");
-  pySerialize_ = getFunction(module, "serialize");
-  pyDeserialize_ = getFunction(module, "deserialize");
-  pyHandleException_ = getFunction(module, "_handle_exception");
+  py::object rpcInternal = py::module::import("torch.distributed.rpc.internal");
+  py::object rpcApi = py::module::import("torch.distributed.rpc.api");
+  py::object rrefProxy = py::module::import("torch.distributed.rpc.rref_proxy");
+
+  pyRunFunction_ = getFunction(rpcInternal, "_run_function");
+  pySerialize_ = getFunction(rpcInternal, "serialize");
+  pyDeserialize_ = getFunction(rpcInternal, "deserialize");
+  pyHandleException_ = getFunction(rpcInternal, "_handle_exception");
+
+  rrefProxyFunctions_.rpcSync_ = getFunction(rpcApi, "rpc_sync");
+  rrefProxyFunctions_.rpcAsync_ = getFunction(rpcApi, "rpc_async");
+  rrefProxyFunctions_.remote_ = getFunction(rpcApi, "remote");
+  rrefProxyFunctions_.rrefProxyCtor_ = getFunction(rrefProxy, "RRefProxy");
+
   jitCompilationUnit_ = torch::jit::get_python_cu();
   typeParser_ = std::make_shared<jit::ScriptTypeParser>(
       std::make_shared<PythonTypeResolver>());
@@ -72,10 +89,16 @@ PythonRpcHandler::PythonRpcHandler() {
 
 void PythonRpcHandler::cleanup() {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  pyRunFunction_ = py::none();
-  pySerialize_ = py::none();
-  pyDeserialize_ = py::none();
-  pyHandleException_ = py::none();
+  cleanupPyObj(pyRunFunction_);
+  cleanupPyObj(pySerialize_);
+  cleanupPyObj(pyDeserialize_);
+  cleanupPyObj(pyHandleException_);
+
+  cleanupPyObj(rrefProxyFunctions_.rpcSync_);
+  cleanupPyObj(rrefProxyFunctions_.rpcAsync_);
+  cleanupPyObj(rrefProxyFunctions_.remote_);
+  cleanupPyObj(rrefProxyFunctions_.rrefProxyCtor_);
+
   jitCompilationUnit_ = nullptr;
   typeParser_ = nullptr;
 }
@@ -137,6 +160,11 @@ void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
 
 TypePtr PythonRpcHandler::parseTypeFromStr(const std::string& type_str) {
   return typeParser_->parseType(type_str);
+}
+
+const PythonRpcHandler::RRefProxyFunctions& PythonRpcHandler::
+    getRRefProxyFunctions() const {
+  return rrefProxyFunctions_;
 }
 
 } // namespace rpc
