@@ -73,51 +73,31 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 #undef IS_NONZERO
 }
 
+#if !defined(TH_REAL_IS_BOOL)
+
+accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
+{
+  at::NoNamesGuard guard;
+  if ( (THTensor_nDimension(tensor) != 1) || (THTensor_nDimension(src) != 1) ) {
+    THError("1D tensors expected, got %dD, %dD tensors",
+       THTensor_nDimension(tensor), THTensor_nDimension(src));
+  }
+  accreal sum = 0;
+  /* we use a trick here. careful with that. */
+  TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                   int64_t sz = (tensor_size-tensor_i < src_size-src_i ? tensor_size-tensor_i : src_size-src_i);
+                   sum += THBlas_(dot)(sz, src_data, src_stride, tensor_data, tensor_stride);
+                   tensor_i += sz;
+                   src_i += sz;
+                   tensor_data += sz*tensor_stride;
+                   src_data += sz*src_stride;
+                   break;);
+  return sum;
+}
+
+#endif
+
 #if !defined(TH_REAL_IS_HALF) /* non half part */
-
-void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
-{
-  at::NoNamesGuard guard;
-  ptrdiff_t numel = THByteTensor_sumall(mask);
-  scalar_t *tensor_data;
-
-#ifdef DEBUG
-  THAssert(numel <= LONG_MAX);
-#endif
-  THTensor_(resize1d)(tensor,numel);
-  tensor_data = tensor->data<scalar_t>();
-  TH_TENSOR_APPLY2(scalar_t, src, unsigned char, mask,
-                   if (*mask_data > 1)
-                   {
-                     THFree(mask_counter);
-                     THFree(src_counter);
-                     THError("Mask tensor can take 0 and 1 values only");
-                   }
-                   else if (*mask_data == 1)
-                   {
-                     *tensor_data = *src_data;
-                     tensor_data++;
-                   });
-}
-
-void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *mask)
-{
-  at::NoNamesGuard guard;
-  ptrdiff_t numel = THBoolTensor_sumall(mask);
-  scalar_t *tensor_data;
-
-#ifdef DEBUG
-  THAssert(numel <= LONG_MAX);
-#endif
-  THTensor_(resize1d)(tensor,numel);
-  tensor_data = tensor->data<scalar_t>();
-  TH_TENSOR_APPLY2(scalar_t, src, bool, mask,
-                   if (*mask_data)
-                   {
-                     *tensor_data = *src_data;
-                     tensor_data++;
-                   });
-}
 
 void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
 {
@@ -420,30 +400,6 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
   }
   THLongTensor_free(index);
 }
-
-#if !defined(TH_REAL_IS_BOOL)
-
-accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
-{
-  at::NoNamesGuard guard;
-  if ( (THTensor_nDimension(tensor) != 1) || (THTensor_nDimension(src) != 1) ) {
-    THError("1D tensors expected, got %dD, %dD tensors",
-       THTensor_nDimension(tensor), THTensor_nDimension(src));
-  }
-  accreal sum = 0;
-  /* we use a trick here. careful with that. */
-  TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                   int64_t sz = (tensor_size-tensor_i < src_size-src_i ? tensor_size-tensor_i : src_size-src_i);
-                   sum += THBlas_(dot)(sz, src_data, src_stride, tensor_data, tensor_stride);
-                   tensor_i += sz;
-                   src_i += sz;
-                   tensor_data += sz*tensor_stride;
-                   src_data += sz*src_stride;
-                   break;);
-  return sum;
-}
-
-#endif
 
 #endif
 

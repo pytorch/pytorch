@@ -14,14 +14,15 @@ Tensor make_per_tensor_quantized_tensor_cpu(
       scale,
       zero_point);
   Tensor self_contig = self.contiguous();
-  AT_DISPATCH_QINT_TYPES(dst.scalar_type(), "make_per_tensor_quantized_tensor", [&]() {
-    underlying_t* self_data = self_contig.data_ptr<underlying_t>();
-    underlying_t* dst_data =
-        reinterpret_cast<underlying_t*>(dst.data_ptr<scalar_t>());
-    if (self.numel() > 0) {
-      memcpy(dst_data, self_data, self.nbytes());
-    }
-  });
+  AT_DISPATCH_QINT_TYPES(
+      dst.scalar_type(), "make_per_tensor_quantized_tensor", [&]() {
+        underlying_t* self_data = self_contig.data_ptr<underlying_t>();
+        underlying_t* dst_data =
+            reinterpret_cast<underlying_t*>(dst.data_ptr<scalar_t>());
+        if (self.numel() > 0) {
+          memcpy(dst_data, self_data, self.nbytes());
+        }
+      });
   return dst;
 }
 

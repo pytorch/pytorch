@@ -185,12 +185,12 @@ class C10_API EnforceFailMessage {
   inline bool bad() const {
     return msg_ != nullptr;
   }
-  std::string get_message_and_free(std::string&& extra) const {
+  std::string get_message_and_free(const std::string& extra) const {
     std::string r;
     if (extra.empty()) {
       r = std::move(*msg_);
     } else {
-      r = ::c10::str(std::move(*msg_), ". ", std::move(extra));
+      r = ::c10::str(std::move(*msg_), ". ", extra);
     }
     delete msg_;
     return r;

@@ -106,7 +106,7 @@ Tensor quantized_upsample_nearest2d_cpu(
       output_size.size());
 
   TORCH_CHECK(
-      input.numel() != 0 && input.dim() == 4,
+      input.dim() == 4,
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
@@ -180,7 +180,7 @@ Tensor quantized_upsample_nearest2d_cpu(
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
-  return quantized_upsample_nearest2d_cpu( input, osize, scale_h, scale_w);
+  return quantized_upsample_nearest2d_cpu(input, osize, scale_h, scale_w);
 }
 
 } // namespace native

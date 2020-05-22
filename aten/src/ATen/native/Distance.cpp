@@ -25,7 +25,10 @@ Tensor pdist(const Tensor& self, const double p) {
   return at::_pdist_forward(self.contiguous(), p);
 }
 
-Tensor euclidean_dist_out(const Tensor& x1, const Tensor& x2) {
+Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
+  /** This function does the fist part of the euclidean distance calculation
+   * We divide it in two steps to simplify dealing with subgradients in the 
+   * backward step */
   Tensor x1_norm = x1.pow(2).sum(-1, true);
   Tensor x1_pad = at::ones_like(x1_norm, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor x2_norm = x2.pow(2).sum(-1, true);
@@ -87,8 +90,8 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   } else if (c1 == 0) {
     result = at::zeros(output_shape, x1.options());
   } else if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
-    Tensor dist = (expand_batch_product == 1) ? euclidean_dist_out(x1, x2) :
-                  euclidean_dist_out(tensor1_expanded, tensor2_expanded);
+    Tensor dist = (expand_batch_product == 1) ? at::_euclidean_dist(x1, x2) :
+                  at::_euclidean_dist(tensor1_expanded, tensor2_expanded);
     result = dist.view(output_shape);
   } else {
     result = at::empty(output_shape, x1.options());

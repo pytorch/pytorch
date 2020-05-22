@@ -1,8 +1,8 @@
 #pragma once
 
+#include <ATen/core/qualified_name.h>
 #include <string>
 #include <vector>
-#include "ATen/core/qualified_name.h"
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
@@ -97,8 +97,8 @@ struct WriteableTensorData {
   size_t sizeInBytes() const {
     return size_;
   }
-  size_t numel() const {
-    return tensor_.storage().numel();
+  size_t nbytes() const {
+    return tensor_.storage().nbytes();
   }
   bool storageHasDeleter() const {
     return tensor_.storage().data_ptr().get_context() != nullptr;
