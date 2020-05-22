@@ -1589,12 +1589,18 @@ except RuntimeError as e:
 
         iterable_loader = DataLoader(IterableDataset(), batch_size=1)
         self.assertEqual(len(iterable_loader), 10)
+        iterable_loader = DataLoader(IterableDataset(), batch_size=1, drop_last=True)
+        self.assertEqual(len(iterable_loader), 10)
 
         iterable_loader = DataLoader(IterableDataset(), batch_size=2)
+        self.assertEqual(len(iterable_loader), 5)
+        iterable_loader = DataLoader(IterableDataset(), batch_size=2, drop_last=True)
         self.assertEqual(len(iterable_loader), 5)
 
         iterable_loader = DataLoader(IterableDataset(), batch_size=3)
         self.assertEqual(len(iterable_loader), 4)
+        iterable_loader = DataLoader(IterableDataset(), batch_size=3, drop_last=True)
+        self.assertEqual(len(iterable_loader), 3)
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_numpy_scalars(self):
