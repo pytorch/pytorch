@@ -313,6 +313,8 @@ class DataLoader(object):
             # `DataLoader`, save the returned value in `self._len_called`, and warn
             # if the iterator ends up yielding more than this number of samples.
             length = self._IterableDataset_len_called = len(self.dataset)
+            if self.batch_size is not None:
+                length = length // self.batch_size
             return length
         else:
             return len(self._index_sampler)
