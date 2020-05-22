@@ -11156,7 +11156,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(conv.weight.grad, ref_conv.weight.grad, rtol=0.001, atol=0.001)
             self.assertEqual(conv.bias.grad, ref_conv.bias.grad, rtol=0.001, atol=0.001)
             self.assertEqual(input.grad, ref_input.grad, rtol=0.001, atol=0.001)
-        
+
         _helper(2, 8, 4, 4, out_channels=4, kernel_size=3, groups=1)
         _helper(2, 8, 4, 4, out_channels=8, kernel_size=3, groups=8)
         _helper(1, 24, 56, 56, out_channels=24, kernel_size=3, groups=1)
