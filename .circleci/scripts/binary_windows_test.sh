@@ -4,12 +4,7 @@ set -eux -o pipefail
 source "/c/w/env"
 
 export CUDA_VERSION="${DESIRED_CUDA/cu/}"
-
-if [[ "$CUDA_VERSION" == "92" || "$CUDA_VERSION" == "100" ]]; then
-  export VC_YEAR=2017
-else
-  export VC_YEAR=2019
-fi
+export VC_YEAR=2017
 
 pushd "$BUILDER_ROOT"
 
