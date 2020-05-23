@@ -542,16 +542,18 @@ void Reducer::initialize_buckets(
         // is already a documented constraint.
         for (size_t i = 0; i < replica.variables.size(); i++) {
           const auto& v = replica.variables[i];
+          const auto offset = replica.offsets[i];
+          const auto length = replica.lengths[i];
           if (v.is_non_overlapping_and_dense()) {
             // If the param's memory is dense, match its layout, anticipating the autograd engine
             // (AccumulateGrad) will also create gradients matching its layout.
             replica.bucket_views.push_back(replica.contents
-                                           .as_strided(v.sizes(), v.strides(), replica.offsets[i]));
+                                           .as_strided(v.sizes(), v.strides(), offset));
           } else {
             // Fall back to a C-style contiguous view, again anticipating AccumulateGrad will do
             // the same when stashing grads for non-dense params.
             replica.bucket_views.push_back(replica.contents
-                                           .as_strided({v.numel()}, {1}, replica.offsets[i])
+                                           .narrow(0, offset, length)
                                            .view(v.sizes()));
           }
         }

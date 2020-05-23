@@ -56,12 +56,11 @@ struct TORCH_API AccumulateGrad : public Node {
   // in-place, which keeps variable_grad's layout. We assume (hope) variable_grad
   // was created obeying (1) or (2) at some point in the past.
   //
-  // If we are setting up for double backward, AccumulateGrad adds new_grad to
-  // variable_grad out-of-place using operator+.  TensorIterator decides the
-  // result's layout, typically matching strides of the first arg.
-  // AccumulateGrad leverages this as best it can, stashing
-  // "new_grad + variable_grad" if new_grad obeys, and
-  // "variable_grad + new_grad" otherwise.
+  // If we are setting up for double backward, AccumulateGrad updates the grad
+  // out-of-place via "variable_grad + new_grad."  TensorIterator operator+ decides
+  // result's layout.  Typically TensorIterator matches strides of the first arg,
+  // so we once again assume (hope) variable_grad was originally created obeying
+  // (1) or (2).
   //
   // AccumulateGrad does not enforce the contract with 100% certainty.  Examples:
   //  - If a user manually permutes a param or its grad, then runs a fwd+bwd,
@@ -185,13 +184,18 @@ struct TORCH_API AccumulateGrad : public Node {
         // which may break user code.
       }
     } else {
-      // Assumes operator+ result typically matches strides of first arg.
-      if (obeys_layout_contract(new_grad, variable)) {
-        update_grad(new_grad + variable_grad);
-      } else {
-        update_grad(variable_grad + new_grad);
-      }
+      // Assumes operator+ result typically matches strides of first arg,
+      // and hopes variable_grad was originally created obeying layout contract.
+      update_grad(variable_grad + new_grad);
       // ^ We could enforce the contract more aggressively here by saying
+      // if (obeys_layout_contract(new_grad, variable)) {
+      //   update_grad(new_grad + variable_grad);
+      // } else {
+      //   update_grad(variable_grad + new_grad);
+      // }
+      // such that the stashed grad is likely to have the right strides if
+      // either variable_grad or new_grad already has the right strides.
+      // We could enforce the contract with certainty by saying
       // auto result = variable_grad + new_grad (or vice versa), checking result's
       // layout, and copying to an obedient clone if necessary before update_grad.
       // The copy would require another gmem pass.  We can't create empty result with
