@@ -372,6 +372,10 @@ void TensorIterator::propagate_names_to_outputs() {
 }
 
 void TensorIterator::coalesce_dimensions() {
+  if (!resize_outputs_) {
+    return;
+  }
+  
   if (ndim() <= 1) {
     return;
   }
