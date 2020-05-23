@@ -9604,38 +9604,39 @@ class TestTorchDeviceType(TestCase):
                 expected = start + weight * (end - start)
                 self.assertEqual(expected, actual)
 
-    def _test_logaddexp(self, device, dtype, base2=False):
+    def _test_logaddexp(self, device, dtype, base2):
         if base2:
-            gt_func = np.logaddexp2
+            ref_func = np.logaddexp2
             our_func = torch.logaddexp2
         else:
-            gt_func = np.logaddexp
+            ref_func = np.logaddexp
             our_func = torch.logaddexp
 
-        a = torch.randn(51, 2, dtype=dtype, device=device)
-        b = torch.randn(51, 2, dtype=dtype, device=device)
-        gt = torch.tensor(gt_func(a.cpu().numpy(), b.cpu().numpy()), device=device)
-        ours = our_func(a, b)
-        self.assertEqual(ours.shape, gt.shape)
-        self.assertTrue(torch.allclose(ours, gt))
+        def _test_helper(a, b):
+            ref = ref_func(a.cpu().numpy(), b.cpu().numpy())
+            v = our_func(a, b)
+            self.assertEqual(ref, v)
 
-        # numerical stability
+        # simple test
+        a = torch.randn(64, 2, dtype=dtype, device=device) - 0.5
+        b = torch.randn(64, 2, dtype=dtype, device=device) - 0.5
+        _test_helper(a, b)
+        _test_helper(a[:3], b[:3])
+
+        # large value test for numerical stability
         a *= 10000
         b *= 10000
-        a[0] = inf
-        b[0] = inf
-        a[1] = -inf
-        b[1] = -inf
-        a[2] = inf
-        b[2] = -inf
-        gt = torch.tensor(gt_func(a.cpu().numpy(), b.cpu().numpy()), device=device)
-        ours = our_func(a, b)
-        self.assertTrue(torch.allclose(ours, gt))
+        _test_helper(a, b)
+        _test_helper(a[:3], b[:3])
+
+        a = torch.tensor([float('inf'), float('-inf'), float('inf'), float("nan")], dtype=dtype, device=device)
+        b = torch.tensor([float('inf'), float('-inf'), float('-inf'), float("nan")], dtype=dtype, device=device)
+        _test_helper(a, b)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @dtypes(torch.float32, torch.float64)
     def test_logaddexp(self, device, dtype):
-        self._test_logaddexp(device, dtype)
+        self._test_logaddexp(device, dtype, base2=False)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @dtypes(torch.float32, torch.float64)
