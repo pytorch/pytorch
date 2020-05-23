@@ -5,6 +5,12 @@ source "/c/w/env"
 
 export CUDA_VERSION="${DESIRED_CUDA/cu/}"
 
+if [[ "$CUDA_VERSION" == "92" || "$CUDA_VERSION" == "100" ]]; then
+  export VC_YEAR=2017
+else
+  export VC_YEAR=2019
+fi
+
 pushd "$BUILDER_ROOT"
 
 ./windows/internal/smoke_test.bat
