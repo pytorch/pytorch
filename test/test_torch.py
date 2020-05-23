@@ -9541,9 +9541,10 @@ class TestTorchDeviceType(TestCase):
 
     def test_argminmax_axis_with_dim_one(self, device):
         # Regression test for gh-38922
-        x = torch.zeros(1, 32768)
-        self.assertEqual(x.argmax(dim=0), torch.zeros(32768, dtype=torch.int64))
-        self.assertEqual(x.argmin(dim=0), torch.zeros(32768, dtype=torch.int64))
+        n = 32768
+        x = torch.zeros(1, n)
+        self.assertEqual(x.argmax(dim=0), torch.zeros(n, dtype=torch.int64))
+        self.assertEqual(x.argmin(dim=0), torch.zeros(n, dtype=torch.int64))
 
     def test_remainder_overflow(self, device):
         # Check Integer Overflows
