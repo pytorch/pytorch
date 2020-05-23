@@ -20,6 +20,57 @@ def _free_mutex():
         torch._C._cuda_unlock_mutex()
 
 
+def caching_allocator_alloc(size, device=None, stream=None):
+    r"""Performs a memory allocation using the CUDA memory allocator.
+
+    Memory is allocated for a given device and a stream, this
+    function is intended to be used for interoperability with other
+    frameworks. Allocated memory is released through
+    :func:`~torch.cuda.caching_allocator_delete`.
+
+    Arguments:
+        size (int): number of bytes to be allocated.
+        device (torch.device or int, optional): selected device. If it is 
+            ``None`` the default CUDA device is used.
+        stream (torch.cuda.Stream or int, optional): selected stream. If is ``None`` then
+            the default stream for the selected device is used.
+
+    .. note::
+        See :ref:`cuda-memory-management` for more details about GPU memory
+        management.
+    """
+    if device is None:
+        device = torch.cuda.current_device()
+    device = _get_device_index(device)
+    if stream is None:
+        stream = torch.cuda.current_stream(device)
+    if isinstance(stream, torch.cuda.streams.Stream):
+        stream = stream.cuda_stream
+    if not isinstance(stream, int):
+        raise TypeError('Invalid type for stream argument, must be '
+                        '`torch.cuda.Stream` or `int` representing a pointer '
+                        'to a exisiting stream')
+    with torch.cuda.device(device):
+        return torch._C._cuda_cudaCachingAllocator_raw_alloc(size, stream)
+
+
+def caching_allocator_delete(mem_ptr):
+    r"""Deletes memory allocated using the CUDA memory allocator.
+
+    Memory allocated with :func:`~torch.cuda.caching_allocator_alloc`.
+    is freed here. The associated device and stream are tracked inside
+    the allocator.
+
+    Arguments:
+        mem_ptr (int): memory address to be freed by the allocator.
+
+    .. note::
+        See :ref:`cuda-memory-management` for more details about GPU memory
+        management.
+    """
+    torch._C._cuda_cudaCachingAllocator_raw_delete(mem_ptr)
+
+
 def empty_cache():
     r"""Releases all unoccupied cached memory currently held by the caching
     allocator so that those can be used in other GPU application and visible in
@@ -179,7 +230,7 @@ def reset_max_memory_allocated(device=None):
     warnings.warn(
         "torch.cuda.reset_max_memory_allocated now calls torch.cuda.reset_peak_memory_stats, "
         "which resets /all/ peak memory stats.",
-        DeprecationWarning)
+        FutureWarning)
     return reset_peak_memory_stats(device=device)
 
 
@@ -205,7 +256,7 @@ def reset_max_memory_cached(device=None):
     warnings.warn(
         "torch.cuda.reset_max_memory_cached now calls torch.cuda.reset_peak_memory_stats, "
         "which resets /all/ peak memory stats.",
-        DeprecationWarning)
+        FutureWarning)
     return reset_peak_memory_stats(device=device)
 
 
@@ -291,7 +342,7 @@ def memory_cached(device=None):
     r"""Deprecated; see :func:`~torch.cuda.memory_reserved`."""
     warnings.warn(
         "torch.cuda.memory_cached has been renamed to torch.cuda.memory_reserved",
-        DeprecationWarning)
+        FutureWarning)
     return memory_reserved(device=device)
 
 
@@ -299,7 +350,7 @@ def max_memory_cached(device=None):
     r"""Deprecated; see :func:`~torch.cuda.max_memory_reserved`."""
     warnings.warn(
         "torch.cuda.max_memory_cached has been renamed to torch.cuda.max_memory_reserved",
-        DeprecationWarning)
+        FutureWarning)
     return max_memory_reserved(device=device)
 
 

@@ -6,7 +6,7 @@ import caffe2.python.optimizer as optimizer
 from caffe2.python.optimizer import (
     build_sgd, build_multi_precision_sgd, build_ftrl, build_gftrl, build_wngrad,
     build_adagrad, build_adadelta, build_adam, build_yellowfin, build_rms_prop,
-    add_weight_decay, SgdOptimizer)
+    build_storm, add_weight_decay, SgdOptimizer)
 from caffe2.python.optimizer_context import UseOptimizer
 from caffe2.python.optimizer_test_util import (
     OptimizerTestBase, LRModificationTestBase
@@ -169,6 +169,18 @@ class TestWngrad(OptimizerTestBase, LRModificationTestBase, TestCase):
             workspace.FetchBlob(param)
 
 
+class TestStorm(OptimizerTestBase, LRModificationTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = True
+        return build_storm(model, base_learning_rate=2.0, **kwargs)
+
+    def check_optimizer(self, optimizer):
+        self.assertFalse(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+
 class TestAdadelta(OptimizerTestBase, LRModificationTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):
         self._skip_gpu = False
@@ -185,6 +197,25 @@ class TestAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):
         self._skip_gpu = False
         return build_adam(model, base_learning_rate=0.1, **kwargs)
+
+    def check_optimizer(self, optimizer):
+        self.assertTrue(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        self.assertTrue(workspace.HasBlob("optimizer_iteration"))
+        iteration_tensor = workspace.FetchBlob("optimizer_iteration")
+        np.testing.assert_allclose(np.array([2000]),
+                                   iteration_tensor,
+                                   atol=1e-5)
+        for param in optimizer.get_auxiliary_parameters().shared:
+            workspace.FetchBlob(param)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+
+class TestSparseRAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = True
+        return build_adam(model, base_learning_rate=0.1, enableRAdam=True, **kwargs)
 
     def check_optimizer(self, optimizer):
         self.assertTrue(optimizer.get_auxiliary_parameters().shared)

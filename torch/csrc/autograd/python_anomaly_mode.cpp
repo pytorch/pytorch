@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <c10/util/Exception.h>
+#include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/auto_gil.h>
@@ -11,7 +12,7 @@
 namespace torch { namespace autograd {
 
 void PyAnomalyMetadata::store_stack() {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   THPObjectPtr mod(PyImport_ImportModule("traceback"));
   if (!mod) {
     throw python_error();
@@ -27,8 +28,8 @@ void PyAnomalyMetadata::store_stack() {
   }
 }
 
-void PyAnomalyMetadata::print_stack() {
-  AutoGIL gil;
+void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
+  pybind11::gil_scoped_acquire gil;
   if (!PyDict_Check(dict())) {
     throw std::runtime_error("Anomaly metadata is not a python dictionary.");
   }
@@ -36,7 +37,8 @@ void PyAnomalyMetadata::print_stack() {
   // PyDict_GetItemString returns a borrowed reference
   PyObject* stack(PyDict_GetItemString(dict(), ANOMALY_TRACE_KEY));
   if (!stack) {
-    AT_WARN("No forward pass information available. Enable detect anomaly "
+    TORCH_WARN("Error detected in ", current_node_name, ". ",
+            "No forward pass information available. Enable detect anomaly "
             "during forward pass for more information.");
     return;
   }
@@ -53,7 +55,8 @@ void PyAnomalyMetadata::print_stack() {
     throw python_error();
   }
 
-  AT_WARN("Traceback of forward call that caused the error:\n",
+  TORCH_WARN("Error detected in ", current_node_name, ". ",
+          "Traceback of forward call that caused the error:\n",
           THPUtils_unpackString(msg.get()));
 }
 

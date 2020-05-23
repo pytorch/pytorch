@@ -3,14 +3,13 @@
 
 #include <sstream>
 
-#include <torch/csrc/jit/export.h>
-#include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/import_source.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/torch.h>
 
 namespace torch {
 namespace jit {
-using namespace script;
 
 void testSaveExtraFilesHook() {
   // no secrets
@@ -57,20 +56,37 @@ void testSaveExtraFilesHook() {
   }
 }
 
-static const auto pretty_printed = R"JIT(
-op_version_set = 1000
-def foo(x: Tensor,
-    y: Tensor) -> Tensor:
-  _0 = torch.add(torch.mul(x, 2), y, alpha=1)
-  return _0
-)JIT";
-
-void testImportTooNew() {
-  Module m("__torch__.m");
-  const std::vector<at::Tensor> constant_table;
-  auto src = std::make_shared<Source>(pretty_printed);
-  SourceImporter si(m.class_compilation_unit(), &constant_table, nullptr);
-  ASSERT_ANY_THROW(si.LEGACY_import_methods(m, src));
+void testTypeTags() {
+  auto list = c10::List<c10::List<int64_t>>();
+  list.push_back(c10::List<int64_t>({1, 2, 3}));
+  list.push_back(c10::List<int64_t>({4, 5, 6}));
+  auto dict = c10::Dict<std::string, at::Tensor>();
+  dict.insert("Hello", torch::ones({2, 2}));
+  auto dict_list = c10::List<c10::Dict<std::string, at::Tensor>>();
+  for (size_t i = 0; i < 5; i++) {
+    auto another_dict = c10::Dict<std::string, at::Tensor>();
+    another_dict.insert("Hello" + std::to_string(i), torch::ones({2, 2}));
+    dict_list.push_back(another_dict);
+  }
+  auto tuple = std::tuple<int, std::string>(2, "hi");
+  struct TestItem {
+    IValue value;
+    TypePtr expected_type;
+  };
+  std::vector<TestItem> items = {
+      {list, ListType::create(ListType::create(IntType::get()))},
+      {2, IntType::get()},
+      {dict, DictType::create(StringType::get(), TensorType::get())},
+      {dict_list,
+       ListType::create(
+           DictType::create(StringType::get(), TensorType::get()))},
+      {tuple, TupleType::create({IntType::get(), StringType::get()})}};
+  for (auto item : items) {
+    auto bytes = torch::pickle_save(item.value);
+    auto loaded = torch::pickle_load(bytes);
+    ASSERT_TRUE(loaded.type()->isSubtypeOf(item.expected_type));
+    ASSERT_TRUE(item.expected_type->isSubtypeOf(loaded.type()));
+  }
 }
 
 } // namespace jit

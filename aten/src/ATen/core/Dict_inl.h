@@ -1,33 +1,24 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
 
 namespace c10 {
+namespace detail {
+inline bool DictKeyEqualTo::operator()(const IValue& lhs, const IValue& rhs) const {
+  if (lhs.isTensor() && rhs.isTensor()) {
+    // for tensors, we compare only by identity (following how it's done in Python).
+    return lhs.is(rhs);
+  }
+  // Otherwise, we first compare by identity for efficiency, then by value (see:
+  // [container equality])
+  return _fastEqualsForContainer(lhs, rhs);
+}
+}
 
 template<class T> TypePtr getTypePtr();
 std::string toString(TypePtr typePtr);
 
 namespace impl {
-inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
-  if (lhs.isNone()) {
-    return rhs.isNone();
-  } else if (lhs.isInt()) {
-    return rhs.isInt() && lhs.toInt() == rhs.toInt();
-  } else if (lhs.isString()) {
-    return rhs.isString() && lhs.toStringRef() == rhs.toStringRef();
-  } else if (lhs.isDouble()) {
-    return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
-  } else if (lhs.isBool()) {
-    return rhs.isBool() && lhs.toBool() == rhs.toBool();
-  } else if (lhs.isIntList()) {
-    return rhs.isIntList() && lhs.toIntListRef() == rhs.toIntListRef();
-  } else if (lhs.isTensor()) {
-    return lhs.toTensor().is_same(rhs.toTensor());
-  } else {
-    AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
-  }
-}
 
 template<class Key, class Value>
 Dict<Key, Value> toTypedDict(GenericDict dict) {
@@ -57,7 +48,8 @@ inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
   } else if (ivalue.isTensor()) {
     return std::hash<TensorImpl*>()(ivalue.toTensor().unsafeGetTensorImpl());
   } else {
-    throw std::runtime_error("Can't hash IValues with this tag");
+    throw std::runtime_error(
+        "Can't hash IValues with tag '" + ivalue.tagKind() + "'");
   }
 }
 
@@ -201,4 +193,24 @@ void Dict<Key, Value>::unsafeSetValueType(TypePtr t) {
   impl_->elementTypes.valueType = std::move(t);
 }
 
+template <class Key_, class Value_>
+bool operator==(const Dict<Key_, Value_>& lhs, const Dict<Key_, Value_>& rhs) {
+  // Dicts with the same identity trivially compare equal.
+  if (lhs.impl_ == rhs.impl_) {
+    return true;
+  }
+
+  // Otherwise compare the values
+  return *lhs.impl_ == *rhs.impl_;
+}
+
+template <class Key_, class Value_>
+bool operator!=(const Dict<Key_, Value_>& lhs, const Dict<Key_, Value_>& rhs) {
+  return !(lhs == rhs);
+}
+
+template <class Key, class Value>
+bool Dict<Key, Value>::is(const Dict& rhs) const {
+  return this->impl_ == rhs.impl_;
+}
 }

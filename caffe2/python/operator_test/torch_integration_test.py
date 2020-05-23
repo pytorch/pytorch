@@ -511,6 +511,63 @@ class TorchIntegration(hu.HypothesisTestCase):
     def test_roi_align_cuda(self):
         self._test_roi_align(device="cuda")
 
+    @given(
+        N=st.integers(min_value=1, max_value=2),
+        C=st.integers(min_value=4, max_value=4),
+        H=st.integers(min_value=10, max_value=10),
+        W=st.integers(min_value=8, max_value=8),
+    )
+    def _test_roi_align_rotated(self, N, C, H, W, device):
+        def rand_rotated_roi():
+            return np.array(
+                [
+                    float(int(N * np.random.rand())),
+                    np.random.rand() * W,
+                    np.random.rand() * H,
+                    np.random.rand() * W,
+                    np.random.rand() * H,
+                    np.random.rand() * 360 - 180
+                ]
+            ).astype(np.float32)
+
+        feature = np.random.randn(N, C, H, W).astype(np.float32)
+        rois = np.array([rand_rotated_roi() for _ in range(10)])
+
+        def roi_align_ref(_feature, _rois):
+            ref_op = core.CreateOperator(
+                "RoIAlignRotated",
+                ["feature", "rois"],
+                ["roi_feature"],
+                spatial_scale=1.0,
+                pooled_h=3,
+                pooled_w=3,
+                sampling_ratio=0,
+            )
+            workspace.FeedBlob("feature", _feature)
+            workspace.FeedBlob("rois", _rois)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("roi_feature")
+
+        roi_feature_ref = roi_align_ref(feature, rois)
+        roi_feature = torch.ops._caffe2.RoIAlignRotated(
+            torch.Tensor(feature).to(device),
+            torch.Tensor(rois).to(device),
+            order="NCHW",
+            spatial_scale=1.0,
+            pooled_h=3,
+            pooled_w=3,
+            sampling_ratio=0,
+            aligned=False,
+        )
+        torch.testing.assert_allclose(roi_feature_ref, roi_feature.cpu())
+
+    def test_roi_align_rotated_cpu(self):
+        self._test_roi_align_rotated(device="cpu")
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_roi_align_rotated_cuda(self):
+        self._test_roi_align_rotated(device="cuda")
+
     @given(roi_counts=st.lists(st.integers(0, 5), min_size=1, max_size=10))
     def test_collect_and_distribute_fpn_rpn_proposals_op(self, roi_counts):
         batch_size = len(roi_counts)
@@ -709,6 +766,61 @@ class TorchIntegration(hu.HypothesisTestCase):
             torch.tensor(data), bounds.tolist(), slopes.tolist(), intercepts.tolist(), binary_input)
 
         torch.testing.assert_allclose(torch.tensor(expected_output), actual_output)
+
+    def test_alias_with_name_is_in_place(self):
+        device = "cuda" if workspace.has_cuda_support else "cpu"
+        x = torch.Tensor([3, 42]).to(device)
+        y = torch.ops._caffe2.AliasWithName(x, "new_name")
+        x[1] = 6
+        torch.testing.assert_allclose(x, torch.Tensor([3, 6]).to(device))
+        # y should also change because y is alias of x
+        torch.testing.assert_allclose(y, torch.Tensor([3, 6]).to(device))
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_copy_between_cpu_and_gpu(self):
+        x_cpu_ref = torch.Tensor([1, 2, 3])
+        x_gpu_ref = x_cpu_ref.to("cuda")
+
+        x_gpu = torch.ops._caffe2.CopyCPUToGPU(x_cpu_ref)
+        torch.testing.assert_allclose(x_gpu, x_gpu_ref)
+        x_cpu = torch.ops._caffe2.CopyGPUToCPU(x_gpu)
+        torch.testing.assert_allclose(x_cpu, x_cpu_ref)
+
+    def test_index_hash_op(self):
+        data = np.random.randint(low=0, high=1000, size=(4, 4, 4))
+
+        def _index_hash_ref(X):
+            ref_op = core.CreateOperator(
+                "IndexHash", ["X"], ["Y"], seed=0, modulo=100
+            )
+            workspace.FeedBlob("X", X)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+
+        expected_output = _index_hash_ref(data)
+        actual_output = torch.ops._caffe2.IndexHash(
+            torch.tensor(data), seed=0, modulo=100
+        )
+
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def test_bucketize_op(self):
+        data = np.random.rand(8, 10).astype(np.float32) * 1000
+        boundaries = np.array([1, 10, 100, 1000, 100000]).astype(np.float32)
+
+        def _bucketize_ref(X):
+            ref_op = core.CreateOperator(
+                "Bucketize", ["X"], ["Y"], boundaries=boundaries
+            )
+            workspace.FeedBlob("X", X)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+
+        expected_output = _bucketize_ref(data)
+        actual_output = torch.ops._caffe2.Bucketize(
+            torch.tensor(data), boundaries
+        )
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
 
 if __name__ == '__main__':

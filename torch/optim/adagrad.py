@@ -41,7 +41,7 @@ class Adagrad(Optimizer):
             for p in group['params']:
                 state = self.state[p]
                 state['step'] = 0
-                state['sum'] = torch.full_like(p.data, initial_accumulator_value)
+                state['sum'] = torch.full_like(p, initial_accumulator_value, memory_format=torch.preserve_format)
 
     def share_memory(self):
         for group in self.param_groups:
@@ -49,6 +49,7 @@ class Adagrad(Optimizer):
                 state = self.state[p]
                 state['sum'].share_memory_()
 
+    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -58,22 +59,23 @@ class Adagrad(Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
                     continue
 
-                grad = p.grad.data
+                grad = p.grad
                 state = self.state[p]
 
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
-                    if p.grad.data.is_sparse:
+                    if p.grad.is_sparse:
                         raise RuntimeError("weight_decay option is not compatible with sparse gradients")
-                    grad = grad.add(group['weight_decay'], p.data)
+                    grad = grad.add(p, alpha=group['weight_decay'])
 
                 clr = group['lr'] / (1 + (state['step'] - 1) * group['lr_decay'])
 
@@ -91,10 +93,10 @@ class Adagrad(Optimizer):
                     state['sum'].add_(make_sparse(grad_values.pow(2)))
                     std = state['sum'].sparse_mask(grad)
                     std_values = std._values().sqrt_().add_(group['eps'])
-                    p.data.add_(-clr, make_sparse(grad_values / std_values))
+                    p.add_(make_sparse(grad_values / std_values), alpha=-clr)
                 else:
-                    state['sum'].addcmul_(1, grad, grad)
+                    state['sum'].addcmul_(grad, grad, value=1)
                     std = state['sum'].sqrt().add_(group['eps'])
-                    p.data.addcdiv_(-clr, grad, std)
+                    p.addcdiv_(grad, std, value=-clr)
 
         return loss

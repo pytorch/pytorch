@@ -4,16 +4,6 @@ set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *centos7* ]]; then
-  # CentOS has gcc 4 but we need a newer compiler. Upgrade it.
-  sudo yum install -y centos-release-scl
-  sudo yum install -y devtoolset-4\*
-  sudo yum install -y scl-utils
-
-  source scl_source enable devtoolset-4 || yes
-  gcc --version
-fi
-
 # CMAKE_ARGS are only passed to 'cmake' and the -Dfoo=bar does not work with
 # setup.py, so we build a list of foo=bars and then either convert it to
 # -Dfoo=bars or export them before running setup.py
@@ -114,7 +104,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   build_args+=("BUILD_TEST=ON")
   build_args+=("USE_OBSERVERS=ON")
   build_args+=("USE_ZSTD=ON")
-  "${ROOT_DIR}/scripts/build_android.sh" $(build_to_cmake ${build_args[@]}) "$@"
+  BUILD_CAFFE2_MOBILE=1 "${ROOT_DIR}/scripts/build_android.sh" $(build_to_cmake ${build_args[@]}) "$@"
   exit 0
 fi
 
@@ -140,7 +130,7 @@ if [[ $BUILD_ENVIRONMENT == *py2-cuda9.0-cudnn7-ubuntu16.04* ]]; then
   # removing http:// duplicate in favor of nvidia-ml.list
   # which is https:// version of the same repo
   sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
-  curl -o ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+  curl --retry 3 -o ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
   sudo dpkg -i ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
   sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
   sudo apt-get -qq update
@@ -171,25 +161,20 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   export PATH="/usr/local/cuda/bin:$PATH"
 fi
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
-  build_args+=("USE_ROCM=ON")
   # This is needed to enable ImageInput operator in resnet50_trainer
   build_args+=("USE_OPENCV=ON")
   # This is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   build_args+=("USE_LMDB=ON")
-  # When hcc runs out of memory, it silently exits without stopping
-  # the build process, leaving undefined symbols in the shared lib
-  # which will cause undefined symbol errors when later running
-  # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
-  export MAX_JOBS=4
+  # hcc used to run out of memory, silently exiting without stopping
+  # the build process, leaving undefined symbols in the shared lib,
+  # causing undefined symbol errors when later running tests.
+  # We used to set MAX_JOBS to 4 to avoid, but this is no longer an issue.
+  if [ -z "$MAX_JOBS" ]; then
+    export MAX_JOBS=$(($(nproc) - 1))
+  fi
 
   ########## HIPIFY Caffe2 operators
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_amd.py"
-fi
-
-# building bundled nccl in this config triggers a bug in nvlink. For
-# more, see https://github.com/pytorch/pytorch/issues/14486
-if [[ "${BUILD_ENVIRONMENT}" == *-cuda8*-cudnn7* ]]; then
-    build_args+=("USE_SYSTEM_NCCL=ON")
 fi
 
 # Try to include Redis support for Linux builds
@@ -197,7 +182,7 @@ if [ "$(uname)" == "Linux" ]; then
   build_args+=("USE_REDIS=ON")
 fi
 
-# Use a speciallized onnx namespace in CI to catch hardcoded onnx namespace
+# Use a specialized onnx namespace in CI to catch hardcoded onnx namespace
 build_args+=("ONNX_NAMESPACE=ONNX_NAMESPACE_FOR_C2_CI")
 
 ###############################################################################

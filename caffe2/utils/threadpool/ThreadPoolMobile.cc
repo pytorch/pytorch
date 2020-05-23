@@ -17,4 +17,5 @@ caffe2::ThreadPool* mobile_threadpool() {
 pthreadpool_t mobile_pthreadpool() {
   return reinterpret_cast<pthreadpool_t>(mobile_threadpool());
 }
+
 } // namespace caffe2

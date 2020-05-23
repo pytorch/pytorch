@@ -1,16 +1,16 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/autodiff.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/fuser/interface.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 #include <queue>
 #include <unordered_map>
@@ -27,7 +27,7 @@ namespace {
 //      or all tensor inputs have the same scalar type and
 //         output is identified in PropagateInputShapes
 //    - Output and all tensor inputs should be on the same device
-//    - Produces contiguous outputs
+//    - Produces dense non-overlapping outputs
 // Some of these restrictions may be relaxable, but you should
 // carefully read the code first, as we rely on these assumptions.
 bool isSimpleMap(Node* node) {
@@ -66,7 +66,6 @@ bool isSimpleMap(Node* node) {
       "aten::pow(Tensor self, Tensor exponent) -> Tensor",
       "aten::pow(Tensor self, Scalar exponent) -> Tensor",
       "aten::pow(Scalar self, Tensor exponent) -> Tensor",
-      "aten::rand_like(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
@@ -79,6 +78,7 @@ bool isSimpleMap(Node* node) {
       "aten::sqrt(Tensor self) -> Tensor",
       "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
       "aten::tan(Tensor self) -> Tensor",
+      "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
       "aten::tanh(Tensor self) -> Tensor",
       "aten::trunc(Tensor self) -> Tensor",
       "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
@@ -104,7 +104,7 @@ bool isSimpleMap(Node* node) {
 
       "aten::type_as(Tensor self, Tensor other) -> Tensor",
   }};
-  if (!simple_mappable.find(node)) {
+  if (!node->isMemberOf(simple_mappable)) {
     return false;
   }
   for (Value* input : node->inputs()) {
@@ -119,12 +119,13 @@ bool isSimpleMap(Node* node) {
   return true;
 }
 
-Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
+Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
   AT_ASSERT(!sizes.empty());
   Graph* graph = sizes[0]->owningGraph();
   Node* broadcast_n =
       graph->insertNode(graph->create(prim::BroadcastSizes, sizes));
   broadcast_n->output()->setType(ListType::ofInts());
+  db->createValue(broadcast_n->output());
   return broadcast_n->output();
 }
 
@@ -132,10 +133,13 @@ struct GraphFuser {
   using FusionCallback = std::function<bool(Node*)>;
 
   Block* block_;
-  std::unique_ptr<AliasDb> aliasDb_;
+  AliasDb* aliasDb_;
   std::shared_ptr<Graph> graph_;
-  FusionCallback callback_ = [&](Node* n) { return isFusableDefault(n); };
+  FusionCallback callback_ = [&](Node* n) {
+    return isFusableDefault(n, this->strict_fuser_check_);
+  };
   Symbol kind_ = prim::FusionGroup;
+  bool strict_fuser_check_;
 
   // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
   // The specific limit is a function of constant memory size, amount available
@@ -145,18 +149,20 @@ struct GraphFuser {
   // Change with setInputArgLimit
   size_t subgraph_arg_limit_ = 128;
 
-  GraphFuser(Block* block, std::shared_ptr<Graph> graph)
-      : block_(block), graph_(std::move(graph)) {}
+  GraphFuser(AliasDb* aliasDb, Block* block, bool strict_fuser_check)
+      : block_(block),
+        aliasDb_(aliasDb),
+        strict_fuser_check_(strict_fuser_check) {}
 
   // Custom passes require kind to specified
   GraphFuser(
+      AliasDb* aliasDb,
       Block* block,
-      std::shared_ptr<Graph> graph,
       FusionCallback callback,
       Symbol kind)
       : block_(block),
-        graph_(std::move(graph)),
-        callback_(callback),
+        aliasDb_(aliasDb),
+        callback_(std::move(callback)),
         kind_(kind) {}
 
   void setInputArgLimit(size_t limit) {
@@ -173,13 +179,13 @@ struct GraphFuser {
     return callback_(node);
   }
 
-  bool isFusableDevice(Value *v) {
+  bool isFusableDevice(Value* v, bool strict_fuser_check) {
     if (!v->type()->isSubtypeOf(TensorType::get())) {
       return true;
     }
     auto device = v->type()->expect<TensorType>()->device();
     if (!device) {
-      return true;
+      return !strict_fuser_check;
     }
     if ((*device).is_cpu()) {
       return canFuseOnCPU();
@@ -189,14 +195,13 @@ struct GraphFuser {
     throw std::runtime_error("Unknown device");
   }
 
-
   // Default fusability check - used when the user doesn't pass in
   // a callback.
-  bool isFusableDefault(Node* node) {
+  bool isFusableDefault(Node* node, bool strict_fuser_check) {
     bool fusableDevice = true;
     for (const auto& output : node->outputs()) {
       if (output->uses().size() > 0) {
-        fusableDevice &= isFusableDevice(output);
+        fusableDevice &= isFusableDevice(output, strict_fuser_check);
       }
     }
     return fusableDevice && isFusableMap(node);
@@ -276,8 +281,9 @@ struct GraphFuser {
       temporary_nodes.emplace_back(outer);
       auto inner_outputs = inner->outputs();
       auto outer_outputs = outer->outputs();
-      for (size_t i = 0; i < inner_outputs.size(); ++i)
+      for (size_t i = 0; i < inner_outputs.size(); ++i) {
         inner_to_outer[inner_outputs[i]] = outer_outputs[i];
+      }
     }
 
     // Replace uses of producer_group outputs and destroy the producer
@@ -285,6 +291,8 @@ struct GraphFuser {
     for (size_t i = 0; i < subgraph_outputs.size(); ++i) {
       auto outer_output = inner_to_outer.at(subgraph_outputs[i]);
       producer_group->outputs()[i]->replaceAllUsesWith(outer_output);
+      // new producer outputs have same aliasing properties as outer_output
+      aliasDb_->replaceWithNewValue(producer_group->outputs()[i], outer_output);
     }
     producer_group->destroy();
     producer_group =
@@ -305,6 +313,7 @@ struct GraphFuser {
         consumer_subgraph->registerOutput(merged->outputs()[i]);
         auto new_output = consumer_group->addOutput();
         output->replaceAllUsesWith(new_output);
+        aliasDb_->replaceWithNewValue(output, new_output);
         new_output->setType(output->type());
       }
       node->destroy();
@@ -401,6 +410,7 @@ struct GraphFuser {
     getSubgraph(group).registerOutput(mergedNode->output());
     auto sel = group->addOutput();
     sel->copyMetadata(n->output());
+    aliasDb_->replaceWithNewValue(n->output(), sel);
     n->replaceAllUsesWith(group);
     n->destroy();
     return group;
@@ -450,6 +460,7 @@ struct GraphFuser {
       getSubgraph(group).registerOutput(merged->output());
       Value* new_producer = group->addOutput();
       new_producer->copyMetadata(producer);
+      aliasDb_->replaceWithNewValue(producer, new_producer);
       producer->replaceAllUsesWith(new_producer);
     }
     producer->node()->destroy();
@@ -580,9 +591,24 @@ struct GraphFuser {
     auto* g = inputs[0]->owningGraph();
     auto* input_list =
         g->insertNode(g->createList(TensorType::get(), inputs))->output();
+    aliasDb_->createValue(input_list);
     auto* output_list = g->insert(aten::broadcast_tensors, {input_list});
+    aliasDb_->createValue(output_list);
     auto* unpack_node = g->insertNode(
         g->create(prim::ListUnpack, {output_list}, inputs.size()));
+
+    // We are doing:
+    //   input_list = listConstruct(a, b, ...)
+    //   output_list = broadcast_tensors(input_list)
+    //   a_broadcasted, b_broadcasted = listUnpack(output_list)
+    // `a_broadcasted` should receive the same aliasing info as `a`
+    TORCH_INTERNAL_ASSERT(unpack_node->outputs().size() == inputs.size());
+    for (size_t i = 0; i < inputs.size(); i++) {
+      Value* original_input = inputs[i];
+      Value* broadcasted_output = unpack_node->outputs()[i];
+      aliasDb_->copyValue(original_input, broadcasted_output);
+    }
+
     return unpack_node->outputs();
   }
 
@@ -612,6 +638,7 @@ struct GraphFuser {
       auto* old_output = chunk->outputs().at(i);
       auto* new_output = bchunk->outputs().at(i);
       new_output->copyMetadata(old_output);
+      aliasDb_->replaceWithNewValue(old_output, new_output);
       old_output->replaceAllUsesWith(new_output);
     }
     bchunk->copyAttributes(*chunk);
@@ -770,6 +797,10 @@ struct GraphFuser {
       for (auto chunk_sel : producer_chunk_outputs) {
         Value* input_chunk_sel = bchunk->addOutput();
         input_chunk_sel->setType(chunk_sel->type());
+        // Add a fresh value for each output element of the broadcasting chunk
+        // node. This is safe because it will be consumed only by the chunked
+        // ops.
+        aliasDb_->createValue(input_chunk_sel);
         chunked_inputs.back().push_back(input_chunk_sel);
       }
     }
@@ -795,6 +826,7 @@ struct GraphFuser {
       }
       bchunk->owningGraph()->insertNode(chunked_op);
       chunk_sel->replaceAllUsesWith(chunked_op->output());
+      aliasDb_->replaceWithNewValue(chunk_sel, chunked_op->output());
     }
 
     bchunk->removeInput(producer_index);
@@ -814,13 +846,15 @@ struct GraphFuser {
       auto tensor_inputs = filter(
           producer_for_chunk_node->inputs(),
           [](Value* v) { return v->type()->isSubtypeOf(TensorType::get()); });
-      auto tensor_sizes = fmap(tensor_inputs, [](Value* v) {
-        return v->owningGraph()->insert(aten::size, {v});
+      auto tensor_sizes = fmap(tensor_inputs, [&](Value* v) {
+        Value* output = v->owningGraph()->insert(aten::size, {v});
+        aliasDb_->createValue(output);
+        return output;
       });
       AT_ASSERT(!tensor_sizes.empty());
       Value* output_size = tensor_sizes.size() == 1
           ? tensor_sizes[0]
-          : broadcastSizes(tensor_sizes);
+          : broadcastSizes(tensor_sizes, aliasDb_);
       for (Use u : size_calc_uses) {
         u.user->output()->replaceAllUsesWith(output_size);
         u.user->destroy();
@@ -882,6 +916,7 @@ struct GraphFuser {
           auto old_output =
               bchunk->outputs().at(input_offset * nchunks + output_offset);
           new_output->copyMetadata(old_output);
+          aliasDb_->replaceWithNewValue(old_output, new_output);
           old_output->replaceAllUsesWith(new_output);
         }
       }
@@ -911,7 +946,9 @@ struct GraphFuser {
     AT_ASSERT(inputs.size() == sinputs.size());
     for (size_t i = 0; i < inputs.size(); ++i) {
       if (inputs[i]->type()->isSubtypeOf(TensorType::get())) {
-        shape_of[sinputs[i]] = graph->insert(aten::size, {inputs[i]});
+        Value* soutput = graph->insert(aten::size, {inputs[i]});
+        aliasDb_->createValue(soutput);
+        shape_of[sinputs[i]] = soutput;
       }
     }
 
@@ -925,7 +962,9 @@ struct GraphFuser {
     for (size_t i = 0; i < outputs.size(); ++i) {
       if (usedOnlyInSize(outputs[i]))
         continue;
-      shape_of[soutputs[i]] = graph->insert(aten::size, {outputs[i]});
+      Value* soutput = graph->insert(aten::size, {outputs[i]});
+      aliasDb_->createValue(soutput);
+      shape_of[soutputs[i]] = soutput;
     }
 
     for (Node* n : subgraph->nodes()) {
@@ -946,6 +985,9 @@ struct GraphFuser {
             graph->create(prim::ChunkSizes, shape_of.at(n->input()), 2));
         sizes_node->i_(attr::dim, n->i(attr::dim));
         sizes_node->i_(attr::chunks, n->i(attr::chunks));
+        for (Value* output : sizes_node->outputs()) {
+          aliasDb_->createValue(output);
+        }
         Value* regular_size = sizes_node->outputs().at(0);
         Value* last_size = sizes_node->outputs().at(1);
         regular_size->setType(ListType::ofInts());
@@ -964,7 +1006,8 @@ struct GraphFuser {
           fmap(tensor_inputs, [&](Value* v) { return shape_of.at(v); });
       AT_ASSERT(!shapes.empty());
       shape_of.emplace(
-          n->output(), shapes.size() == 1 ? shapes[0] : broadcastSizes(shapes));
+          n->output(),
+          shapes.size() == 1 ? shapes[0] : broadcastSizes(shapes, aliasDb_));
     }
     return shape_of;
   }
@@ -994,10 +1037,6 @@ struct GraphFuser {
         subgraph->eraseOutput(i);
       }
     }
-  }
-
-  void refreshAliasDb() {
-    aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
 
   bool canFuseWithConcat(Value* producer, Node* before_check) {
@@ -1039,6 +1078,7 @@ struct GraphFuser {
                           ->i_(attr::dim, dim);
     fused_cat->insertBefore(list_construct);
     fused_cat->output()->copyMetadata(node->output());
+    aliasDb_->copyValue(node->output(), fused_cat->output());
 
     // NB: this deletes the fused_cat node from the original graph
     return createSingletonFusionGroup(fused_cat);
@@ -1098,7 +1138,7 @@ struct GraphFuser {
 
   void run() {
     // Run the pass until no changes are made.
-    // This is neccessary, because the algorithm can miss out on certain fusion
+    // This is necessary, because the algorithm can miss out on certain fusion
     // opportunities if ran only once. Consider this graph:
     //
     // %1 = f(...)
@@ -1116,14 +1156,12 @@ struct GraphFuser {
     bool any_changed = true;
     while (any_changed) {
       any_changed = false;
-      refreshAliasDb();
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
         bool changed;
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
       }
     }
-    refreshAliasDb();
 
     fuseConcats();
 
@@ -1145,18 +1183,18 @@ struct GraphFuser {
 
     for (Node* node : block_->nodes()) {
       for (Block* sub_block : node->blocks()) {
-        GraphFuser(sub_block, graph_, callback_, kind_).run();
+        GraphFuser(aliasDb_, sub_block, callback_, kind_).run();
       }
     }
   }
 };
 
-void PeepholeOptimizeShapeExpressions(Block* block) {
+void PeepholeOptimizeShapeExpressions(Block* block, AliasDb* db) {
   auto nodes = block->nodes();
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
     Node* node = *it;
     for (Block* subblock : node->blocks()) {
-      PeepholeOptimizeShapeExpressions(subblock);
+      PeepholeOptimizeShapeExpressions(subblock, db);
     }
     if (node->kind() == prim::BroadcastSizes) {
       // Remove no-op broadcasts.
@@ -1181,7 +1219,7 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
           node->output()->replaceAllUsesWith(inputs[0]);
         } else {
           WithInsertPoint insert_guard{node};
-          node->output()->replaceAllUsesWith(broadcastSizes(inputs));
+          node->output()->replaceAllUsesWith(broadcastSizes(inputs, db));
         }
         it.destroyCurrent();
         --it; // Revisit the node with deduplicated inputs
@@ -1205,15 +1243,17 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 
 } // anonymous namespace
 
-void FuseGraph(std::shared_ptr<Graph>& graph) {
-  GraphFuser(graph->block(), graph).run();
+void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
+  AliasDb db(graph);
+  GraphFuser(&db, graph->block(), strict_fuser_check).run();
+  Lint(&db);
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
   // We might have emitted a fair amount of useless shape propagating code, so
   // remove it
   EliminateDeadCode(graph);
   // Improve the quality of shape propagation code that was left
-  PeepholeOptimizeShapeExpressions(graph->block());
+  PeepholeOptimizeShapeExpressions(graph->block(), &db);
 }
 
 void CustomFuseGraph(
@@ -1221,13 +1261,15 @@ void CustomFuseGraph(
     std::function<bool(Node*)> fn,
     Symbol kind,
     size_t arg_limit) {
+  AliasDb db(graph);
   auto g = GraphFuser(
+      &db,
       graph->block(),
-      graph,
       [=](Node* n) { return fn(n) || n->kind() == kind; },
       kind);
   g.setInputArgLimit(arg_limit);
   g.run();
+  Lint(&db);
 }
 
 } // namespace jit

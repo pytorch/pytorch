@@ -13,7 +13,7 @@
 static PyObject * THPStorage_(size)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromLong(THWStorage_(size)(LIBRARY_STATE self->cdata));
+  return PyLong_FromLong(self->cdata->nbytes() / sizeof(scalar_t));
   END_HANDLE_TH_ERRORS
 }
 
@@ -65,7 +65,8 @@ static PyObject * THPStorage_(resize_)(THPStorage *self, PyObject *number_arg)
   THPUtils_assert(THPUtils_checkLong(number_arg), "resize_ expects an int, "
       "but got %s", THPUtils_typename(number_arg));
   int64_t newsize = THPUtils_unpackLong(number_arg);
-  THWStorage_(resize)(LIBRARY_STATE self->cdata, newsize);
+  THWStorage_(resizeBytes)(
+      LIBRARY_STATE self->cdata, newsize * sizeof(scalar_t));
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
@@ -182,6 +183,12 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 #elif defined(TH_REAL_IS_DOUBLE)
   torch::utils::THP_decodeDoubleBuffer(
       THWStorage_(data)(storage), src + offset, byte_order, count);
+#elif defined(TH_REAL_IS_COMPLEXFLOAT)
+  torch::utils::THP_decodeComplexFloatBuffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
+#elif defined(TH_REAL_IS_COMPLEXDOUBLE)
+  torch::utils::THP_decodeComplexDoubleBuffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #else
 #error "Unknown type"
 #endif
@@ -215,16 +222,17 @@ PyObject * THPStorage_(writeFile)(THPStorage *self, PyObject *args)
   HANDLE_TH_ERRORS
   PyObject *file = PyTuple_GET_ITEM(args, 0);
   bool is_real_file = PyTuple_GET_ITEM(args, 1) == Py_True;
+  bool save_size = PyTuple_GET_ITEM(args, 2) == Py_True;
 
   if (!is_real_file) {
-    THPStorage_(writeFileRaw<PyObject*>)(self->cdata, file);
+    THPStorage_(writeFileRaw<PyObject*>)(self->cdata, file, save_size);
     Py_RETURN_NONE;
   }
 
   int fd = PyObject_AsFileDescriptor(file);
   THPUtils_assert(fd != -1, "_write_file couldn't retrieve a file descriptor "
       "from given object");
-  THPStorage_(writeFileRaw)(self->cdata, fd);
+  THPStorage_(writeFileRaw)(self->cdata, fd, save_size);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -278,7 +286,7 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
 
   // the file descriptor is returned to original position and
   // the file handle at python call-site needs updating to the
-  // advanced postion
+  // advanced position
   const auto fd_current_pos = LSEEK(fd, 0, SEEK_CUR);
   LSEEK(fd, fd_original_pos, SEEK_SET);
   const auto seek_return = PyObject_CallMethod(file, "seek", "Li", (long long)fd_current_pos, 0);

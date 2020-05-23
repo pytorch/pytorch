@@ -158,7 +158,7 @@ namespace at { namespace native { namespace {
  *      `apply_fn` will be called multiple times, and together cover the entire
  *      output spatial space.
  *
- *  Now you should be able tp understand everything about the implementaion of
+ *  Now you should be able tp understand everything about the implementation of
  *  2D forward kernel shown at the beginning of this note.
  *
  **/
@@ -213,9 +213,11 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/true> {
     // Integral type equality comparison is very very fast because it just looks
     // at the bits. Casting is free too. So we use the following pattern instead
     // of comparison + blendv.
-    auto in_bound_lo = cast<scalar_t>(cast<int_t>(bounded_lo) == cast<int_t>(in));
+    // Note that it is important for the gradient calculation that borders
+    // are considered out of bounds.
+    auto in_bound_lo = cast<scalar_t>(cast<int_t>(bounded_lo) != cast<int_t>(Vec(0)));
     auto res = minimum(bounded_lo, Vec(max_val));
-    auto in_bound_hi = cast<scalar_t>(cast<int_t>(res) == cast<int_t>(in));
+    auto in_bound_hi = cast<scalar_t>(cast<int_t>(res) != cast<int_t>(Vec(max_val)));
     return std::make_pair(res, in_bound_lo & in_bound_hi);
   }
 
@@ -292,9 +294,11 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
     // Integral type equality comparison is very very fast because it just looks
     // at the bits. Casting is free too. So we use the following pattern instead
     // of comparison + blendv.
-    auto in_bound_lo = cast<scalar_t>(cast<int_t>(bounded_lo) == cast<int_t>(in));
+    // Note that it is important for the gradient calculation that borders
+    // are considered out of bounds.
+    auto in_bound_lo = cast<scalar_t>(cast<int_t>(bounded_lo) != cast<int_t>(Vec(0)));
     auto res = minimum(bounded_lo, Vec(max_val));
-    auto in_bound_hi = cast<scalar_t>(cast<int_t>(res) == cast<int_t>(in));
+    auto in_bound_hi = cast<scalar_t>(cast<int_t>(res) != cast<int_t>(Vec(max_val)));
     return std::make_pair(res, in_bound_lo & in_bound_hi);
   }
 
@@ -390,10 +394,7 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection, align_corners>
 
   inline Vec apply(const Vec &in) const {
     auto res = reflect_coordinates(unnormalize(in));
-    // when align_corners=False, reflection does not auto clip coords
-    if (!align_corners) {
-      res = clip_coordinates(res);
-    }
+    res = clip_coordinates(res);
     return res;
   }
 
@@ -401,10 +402,8 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection, align_corners>
     Vec res, grad_refl, grad_clip, grad(scaling_factor);
     std::tie(res, grad_refl) = reflect_coordinates_get_grad(unnormalize(in));
     grad = grad_refl * grad;
-    if (!align_corners) {
-      std::tie(res, grad_clip) = clip_coordinates_get_grad(res);
-      grad = grad_clip & grad;
-    }
+    std::tie(res, grad_clip) = clip_coordinates_get_grad(res);
+    grad = grad_clip & grad;
     return std::make_pair(res, grad);
   }
 };
@@ -735,8 +734,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
     auto x_nearest = x.round();
     auto y_nearest = y.round();
 
-    auto i_x_nearest = convert_to_int_of_same_size<scalar_t>(x_nearest);
-    auto i_y_nearest = convert_to_int_of_same_size<scalar_t>(y_nearest);
+    auto i_x_nearest = convert_to_int_of_same_size(x_nearest);
+    auto i_y_nearest = convert_to_int_of_same_size(y_nearest);
 
     auto i_mask = must_in_bound ? iVec(-1)
                                 : (i_x_nearest > iVec(-1)) & (i_x_nearest < iVec(inp_W)) &
@@ -963,8 +962,8 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
   // contiguous can greatly simplify this code.
   auto grad_output = grad_output_.contiguous();
 
-  auto grad_input = at::zeros_like(input);
-  auto grad_grid = at::empty_like(grid);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto N = input.size(0);
   auto spatial_size = grid.size(1) * grid.size(2);
   auto grain_size = spatial_size == 0 ? (N + 1)

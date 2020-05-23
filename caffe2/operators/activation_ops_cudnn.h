@@ -31,7 +31,7 @@ class CuDNNActivationOpBase : public Operator<CUDAContext> {
       const cudnnDataType_t data_type,
       const int data_size) {
     if (data_size != input_size_) {
-      // Since the best performance is obtained when the tesor is HW-packed, we
+      // Since the best performance is obtained when the tensor is HW-packed, we
       // put X.size() to W.
       input_size_ = data_size;
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(

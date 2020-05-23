@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/TypeProperties.h>
 #include <type_traits>
 
 namespace at { namespace native {
@@ -37,7 +38,7 @@ bool is_quantized(const Tensor& self) {
 // TensorImpl can be copied to `self`.
 bool _has_compatible_shallow_copy_type(const Tensor& self, const Tensor& from) {
   return self.unsafeGetTensorImpl()->has_compatible_shallow_copy_type(
-      from.type_set());
+      from.key_set());
 }
 
 Tensor type_as(const Tensor& self, const Tensor& other) {
@@ -56,10 +57,13 @@ static inline ScalarType promote_skip_undefined(ScalarType a, ScalarType b) {
 
 
 static inline ScalarType combine_categories(ScalarType higher, ScalarType lower) {
-  if (isFloatingType(higher)) {
+  if(isComplexType(higher)) {
     return higher;
   }
-  if (higher == ScalarType::Bool || isFloatingType(lower)) {
+  else if(!isComplexType(lower) && isFloatingType(higher)) {
+    return higher;
+  }
+  if (higher == ScalarType::Bool || isFloatingType(lower) || isComplexType(lower)) {
     return promote_skip_undefined(higher, lower);
   }
   if (higher != ScalarType::Undefined) {
@@ -68,27 +72,41 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
   return lower;
 }
 
-ScalarType result_type(const TensorList& tensors) {
-  auto dimResult = ScalarType::Undefined;
-  auto zeroResult = ScalarType::Undefined;
-  auto wrappedResult = ScalarType::Undefined;
-  for (const Tensor& tensor : tensors) {
-    if (!tensor.defined()) {
-      continue;
+ResultTypeState update_result_type_state(const Tensor& tensor, const ResultTypeState& in_state) {
+  if (!tensor.defined()) {
+    return in_state;
+  }
+  ResultTypeState new_state = in_state;
+  ScalarType current = tensor.scalar_type();
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+    auto current_default = typeMetaToScalarType(at::get_default_dtype());
+    if(isComplexType(current)) {
+      current = typeMetaToScalarType(at::get_default_complex_dtype());
     }
-    ScalarType current = tensor.scalar_type();
-    if (tensor.unsafeGetTensorImpl()->is_wrapped_number() && isFloatingType(current)) {
-      current = typeMetaToScalarType(at::get_default_dtype());
-    }
-    if ( tensor.dim() > 0 ) {
-      dimResult = promote_skip_undefined(dimResult, current);
-    } else if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-      wrappedResult = promote_skip_undefined(wrappedResult, current);
-    } else {
-      zeroResult = promote_skip_undefined(zeroResult, current);
+    else if(isFloatingType(current)) {
+      current = current_default;
     }
   }
-  return combine_categories(dimResult, combine_categories(zeroResult, wrappedResult));
+  if ( tensor.dim() > 0 ) {
+    new_state.dimResult = promote_skip_undefined(in_state.dimResult, current);
+  } else if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+    new_state.wrappedResult = promote_skip_undefined(in_state.wrappedResult, current);
+  } else {
+    new_state.zeroResult = promote_skip_undefined(in_state.zeroResult, current);
+  }
+  return new_state;
+}
+
+ScalarType result_type(const ResultTypeState& in_state) {
+  return combine_categories(in_state.dimResult, combine_categories(in_state.zeroResult, in_state.wrappedResult));
+}
+
+ScalarType result_type(TensorList tensors) {
+  ResultTypeState state = {};
+  for (const Tensor& tensor : tensors) {
+    state = update_result_type_state(tensor, state);
+  }
+  return result_type(state);
 }
 
 ScalarType result_type(const Tensor &tensor, const Tensor &other) {

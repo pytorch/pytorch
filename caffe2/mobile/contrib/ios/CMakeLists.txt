@@ -8,7 +8,7 @@ if(IOS)
     )
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${Caffe2_CONTRIB_IOS_SRC})
 
-  if (USE_METAL)
+  if(USE_METAL)
     # metal/mpscnn files
     add_subdirectory(mpscnn)
   endif()

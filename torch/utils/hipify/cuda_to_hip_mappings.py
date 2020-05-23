@@ -7954,6 +7954,11 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("gloo::CudaBroadcastOneToAll", ("gloo::HipBroadcastOneToAll", API_PYTORCH)),
         ("gloo::CudaHostWorkspace", ("gloo::HipHostWorkspace", API_PYTORCH)),
         ("gloo::CudaDeviceWorkspace", ("gloo::HipDeviceWorkspace", API_PYTORCH)),
+        ("CUDNN_RNN_RELU", ("miopenRNNRELU", API_PYTORCH)),
+        ("CUDNN_RNN_TANH", ("miopenRNNTANH", API_PYTORCH)),
+        ("CUDNN_LSTM", ("miopenLSTM", API_PYTORCH)),
+        ("CUDNN_GRU", ("miopenGRU", API_PYTORCH)),
+        ("cudnnRNNMode_t", ("miopenRNNMode_t", API_PYTORCH)),
     ]
 )
 
@@ -7966,6 +7971,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("/hip/", ("/hip/", API_CAFFE2)),
         ("/context_gpu", ("/hip/context_gpu", API_CAFFE2)),
         ("/common_gpu", ("/hip/common_gpu", API_CAFFE2)),
+        ("/cuda_nccl_gpu", ("/hip/hip_nccl_gpu", API_CAFFE2)),
         ("/mixed_utils", ("/hip/mixed_utils", API_CAFFE2)),
         ("/operator_fallback_gpu", ("/hip/operator_fallback_gpu", API_CAFFE2)),
         (

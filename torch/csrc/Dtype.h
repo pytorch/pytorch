@@ -21,9 +21,6 @@ inline bool THPDtype_Check(PyObject *obj) {
 inline bool THPPythonScalarType_Check(PyObject *obj) {
   return obj == (PyObject*)(&PyFloat_Type) ||
     obj == (PyObject*)(&PyBool_Type) ||
-#if PY_MAJOR_VERSION == 2
-    obj == (PyObject*)(&PyInt_Type) ||
-#endif
     obj == (PyObject*)(&PyLong_Type);
 }
 

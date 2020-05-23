@@ -57,7 +57,7 @@ class TestBatchBucketize(serial.SerializedTestCase):
         indices.sort()
         boundaries = []
         for i in range(d - 3):
-            # add [0, 0] as duplicated bounary for duplicated bucketization
+            # add [0, 0] as duplicated boundary for duplicated bucketization
             if lens[i] > 2:
                 cur_boundary = np.append(
                     np.random.randn(lens[i] - 2) * 5, [0, 0])

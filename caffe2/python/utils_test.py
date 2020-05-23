@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import utils, test_util
+from caffe2.python import core, utils, test_util
 
 import numpy as np
 
@@ -25,3 +25,16 @@ class TestUtils(test_util.TestCase):
                     "stringlist1" : [b"foo", b"bar"]}
         self.assertEqual(dict_, expected, "dictionary version of arguments "
                          "doesn't match original")
+
+    def testBuildUniqueMutexIter(self):
+        init_net = core.Net("init_net")
+        net = core.Net("net")
+        utils.BuildUniqueMutexIter(init_net, net)
+
+        for op in init_net.Proto().op:
+            self.assertEqual(op.device_option.extra_info[0],
+                             "device_type_override:cpu")
+
+        for op in net.Proto().op:
+            self.assertEqual(op.device_option.extra_info[0],
+                             "device_type_override:cpu")

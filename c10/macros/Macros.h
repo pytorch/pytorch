@@ -18,10 +18,18 @@
 // file.
 
 #ifndef C10_USING_CUSTOM_GENERATED_MACROS
-#include "c10/macros/cmake_macros.h"
+#include <c10/macros/cmake_macros.h>
 #endif // C10_USING_CUSTOM_GENERATED_MACROS
 
-#include "c10/macros/Export.h"
+#include <c10/macros/Export.h>
+
+#if defined(__clang__)
+  #define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
+  #define __ubsan_ignore_undefined__ __attribute__((no_sanitize("undefined")))
+#else
+  #define __ubsan_ignore_float_divide_by_zero__
+  #define __ubsan_ignore_undefined__
+#endif
 
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
@@ -33,6 +41,9 @@
 #define C10_CONCATENATE(s1, s2) C10_CONCATENATE_IMPL(s1, s2)
 
 #define C10_MACRO_EXPAND(args) args
+
+#define C10_STRINGIZE_IMPL(x) #x
+#define C10_STRINGIZE(x) C10_STRINGIZE_IMPL(x)
 
 /**
  * C10_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
@@ -84,8 +95,8 @@
 #endif
 
 // suppress an unused variable.
-#ifdef _MSC_VER
-#define C10_UNUSED
+#if defined(_MSC_VER) && !defined(__clang__)
+#define C10_UNUSED __pragma(warning(suppress: 4100 4101))
 #else
 #define C10_UNUSED __attribute__((__unused__))
 #endif //_MSC_VER
@@ -115,13 +126,6 @@ namespace at { namespace cuda { using namespace c10::cuda; }}
 // HIPIFY is no longer out-of-place, we can switch the cuda
 // here to hip and everyone is happy.
 namespace at { namespace cuda { using namespace c10::hip; }}
-
-// C10_NORETURN
-#if defined(_MSC_VER)
-#define C10_NORETURN __declspec(noreturn)
-#else
-#define C10_NORETURN __attribute__((noreturn))
-#endif
 
 // C10_LIKELY/C10_UNLIKELY
 //
@@ -199,6 +203,54 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_WARP_SIZE 32
 #endif
 
+#if defined(_MSC_VER) && _MSC_VER <= 1900
+#define __func__ __FUNCTION__
+#endif
+
+// CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
+// kernels. This is not supported by Apple platforms so we special case it.
+// See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
+#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
+#define CUDA_KERNEL_ASSERT(...)
+#else // __APPLE__
+#define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
+#endif // __APPLE__
+
+// CUDA_ALWAYS_ASSERT is similar to CUDA_KERNEL_ASSERT but checks the assertion
+// even when NDEBUG is defined. This is useful for important assertions in CUDA
+// code that when building Release.
+#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
+// Those platforms do not support assert()
+#define CUDA_ALWAYS_ASSERT(cond)
+#elif defined(_MSC_VER)
+// TODO: This should be defined but I don't have the environment to properly
+// test it. See e.g., https://github.com/pytorch/pytorch/pull/32719#discussion_r379918384
+#define CUDA_ALWAYS_ASSERT(cond)
+#else // __APPLE__, _MSC_VER
+#if defined(NDEBUG)
+extern "C" {
+#if !defined(__CUDA_ARCH__)  || !defined(__clang__)
+  [[noreturn]]
+#endif
+#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
+    defined(__HIP_ARCH__) || defined(__HIP__)
+__host__ __device__
+#endif // __CUDA_ARCH__
+    void
+    __assert_fail(
+        const char* assertion,
+        const char* file,
+        unsigned int line,
+        const char* function) throw();
+}
+#endif // NDEBUG
+#define CUDA_ALWAYS_ASSERT(cond)                                         \
+  if (C10_UNLIKELY(!(cond))) {                                           \
+    __assert_fail(#cond, __FILE__, static_cast<unsigned int>(__LINE__),  \
+                  __func__);                                             \
+  }
+#endif // __APPLE__
+
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #endif
@@ -211,32 +263,13 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
     (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
 #define C10_IOS 1
 #define C10_MOBILE 1
-#elif (defined(__APPLE__) && TARGET_OS_MAC)
-#define C10_IOS 1
-#endif // ANDROID / IOS / MACOS
+#endif // ANDROID / IOS
 
 // Portably determine if a type T is trivially copyable or not.
-#if __GNUG__ && __GNUC__ < 5
+#if defined(__GNUG__) && __GNUC__ < 5
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
-#endif
-
-// AT_CPP14_CONSTEXPR: Make it constexpr if we're in C++14 or later
-#if defined(_MSC_VER) && defined(__CUDACC__) && \
-    (__CUDACC_VER_MAJOR__ >= 10 ||              \
-     (__CUDACC_VER_MAJOR__ == 9 && __CUDACC_VER_MINOR__ >= 2))
-// workaround: CUDA >= v9.2 compiler cannot compile correctly on Windows.
-#define AT_CPP14_CONSTEXPR
-#define AT_IS_CPP14_CONSTEXPR 0
-#else
-#if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
-#define AT_CPP14_CONSTEXPR constexpr
-#define AT_IS_CPP14_CONSTEXPR 1
-#else
-#define AT_CPP14_CONSTEXPR
-#define AT_IS_CPP14_CONSTEXPR 0
-#endif
 #endif
 
 // We need --expt-relaxed-constexpr in CUDA because of Eigen. This flag allows
@@ -256,11 +289,36 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #if defined(__CUDA_ARCH__)
 #define C10_HOST_CONSTEXPR __host__
 #define C10_HOST_CONSTEXPR_VAR
-#define C10_CPP14_HOST_CONSTEXPR __host__
 #else
 #define C10_HOST_CONSTEXPR constexpr
 #define C10_HOST_CONSTEXPR_VAR constexpr
-#define C10_CPP14_HOST_CONSTEXPR AT_CPP14_CONSTEXPR
+#endif
+
+#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
+    __GNUC__ < 6
+#define CONSTEXPR_EXCEPT_GCC5
+#define IS_NOT_GCC5_CONSTEXPR 0
+#else
+#define CONSTEXPR_EXCEPT_GCC5 constexpr
+#define IS_NOT_GCC5_CONSTEXPR 1
+#endif
+
+#if defined(__CUDA_ARCH__)
+#if defined(_MSC_VER) && defined(__CUDACC__)
+#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+#else
+#define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+#endif
+#else
+#if defined(_MSC_VER) && defined(__CUDACC__)
+#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
+#else
+#define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#endif
 #endif
 
 #endif // C10_MACROS_MACROS_H_

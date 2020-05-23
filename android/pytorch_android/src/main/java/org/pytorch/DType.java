@@ -1,10 +1,8 @@
 package org.pytorch;
 
-/**
- * Codes representing tensor data types.
- */
+/** Codes representing tensor data types. */
 public enum DType {
-  // NOTE: "jniCode" must be kept in sync with pytorch_jni.cpp.
+  // NOTE: "jniCode" must be kept in sync with pytorch_jni_common.cpp.
   // NOTE: Never serialize "jniCode", because it can change between releases.
 
   /** Code for dtype torch.uint8. {@link Tensor#dtype()} */

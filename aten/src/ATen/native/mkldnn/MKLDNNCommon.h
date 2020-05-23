@@ -8,19 +8,6 @@
 
 namespace at { namespace native {
 
-// Custom allocator using c10 CPU allocator for `ideep::tensor`
-struct AllocForMKLDNN {
-  static char* malloc(size_t size) {
-    auto allocator = c10::GetAllocator(c10::DeviceType::CPU);
-    return (char*)allocator->raw_allocate(size);
-  }
-
-  static void free(void* p) {
-    auto allocator = c10::GetAllocator(c10::DeviceType::CPU);
-    allocator->raw_deallocate(p);
-  }
-};
-
 // Construct aten MKL-DNN tensor given an ideep tensor
 Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options);
 

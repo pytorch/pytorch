@@ -210,6 +210,48 @@ class LearningRateOp final : public Operator<Context> {
           cyclical_max_lr,
           cyclical_step_size,
           cyclical_decay);
+    } else if (policy == "cosine") {
+      T max_lr =
+          this->template GetSingleArgument<float>(arg_prefix + "max_lr", 0.5);
+      T min_lr =
+          this->template GetSingleArgument<float>(arg_prefix + "min_lr", 0.1);
+      int64_t period =
+          this->template GetSingleArgument<int>(arg_prefix + "period", 50);
+      T t_mult =
+          this->template GetSingleArgument<float>(arg_prefix + "t_mult", 1.0);
+      T lr_shrink = this->template GetSingleArgument<float>(
+          arg_prefix + "lr_shrink", 0.99);
+      DCHECK_GE(max_lr, min_lr);
+      return new CosineLearningRate<T>(
+          min_lr, max_lr, period, t_mult, lr_shrink);
+    } else if (policy == "compositeCosine") {
+      T start_warmup_multiplier = this->template GetSingleArgument<float>(
+          arg_prefix + "start_warmup_multiplier", 0.1);
+      int64_t constant_warmup_num_iter = this->template GetSingleArgument<int>(
+          arg_prefix + "constant_warmup_num_iter", 10000000);
+      int64_t linear_warmup_num_iter = this->template GetSingleArgument<int>(
+          arg_prefix + "linear_warmup_num_iter", 10000000);
+      T cosine_max_lr = this->template GetSingleArgument<float>(
+          arg_prefix + "cosine_max_lr", 0.5);
+      T cosine_min_lr = this->template GetSingleArgument<float>(
+          arg_prefix + "cosine_min_lr", 0.1);
+      int64_t cosine_period = this->template GetSingleArgument<int>(
+          arg_prefix + "cosine_period", 50);
+      T cosine_t_mult = this->template GetSingleArgument<float>(
+          arg_prefix + "cosine_t_mult", 1.0);
+      T cosine_lr_shrink = this->template GetSingleArgument<float>(
+          arg_prefix + "cosine_lr_shrink", 0.99);
+
+      DCHECK_GE(cosine_max_lr, cosine_min_lr);
+      return new CompositeCosineLearningRate<T>(
+          start_warmup_multiplier,
+          constant_warmup_num_iter,
+          linear_warmup_num_iter,
+          cosine_min_lr,
+          cosine_max_lr,
+          cosine_period,
+          cosine_t_mult,
+          cosine_lr_shrink);
     } else {
       CAFFE_THROW("Unknown learning rate policy: ", policy);
       return NULL;

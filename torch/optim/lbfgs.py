@@ -44,7 +44,7 @@ def _strong_wolfe(obj_func,
                   max_ls=25):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
     d_norm = d.abs().max()
-    g = g.clone()
+    g = g.clone(memory_format=torch.contiguous_format)
     # evaluate objective and gradient using initial step
     f_new, g_new = obj_func(x, t, d)
     ls_func_evals = 1
@@ -59,7 +59,7 @@ def _strong_wolfe(obj_func,
         if f_new > (f + c1 * t * gtd) or (ls_iter > 1 and f_new >= f_prev):
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
-            bracket_g = [g_prev, g_new.clone()]
+            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
             bracket_gtd = [gtd_prev, gtd_new]
             break
 
@@ -73,7 +73,7 @@ def _strong_wolfe(obj_func,
         if gtd_new >= 0:
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
-            bracket_g = [g_prev, g_new.clone()]
+            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
             bracket_gtd = [gtd_prev, gtd_new]
             break
 
@@ -93,7 +93,7 @@ def _strong_wolfe(obj_func,
         # next step
         t_prev = tmp
         f_prev = f_new
-        g_prev = g_new.clone()
+        g_prev = g_new.clone(memory_format=torch.contiguous_format)
         gtd_prev = gtd_new
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
@@ -149,7 +149,7 @@ def _strong_wolfe(obj_func,
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
-            bracket_g[high_pos] = g_new.clone()
+            bracket_g[high_pos] = g_new.clone(memory_format=torch.contiguous_format)
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
         else:
@@ -166,7 +166,7 @@ def _strong_wolfe(obj_func,
             # new point becomes new low
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
-            bracket_g[low_pos] = g_new.clone()
+            bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)
             bracket_gtd[low_pos] = gtd_new
 
         # line-search bracket is so small
@@ -261,16 +261,16 @@ class LBFGS(Optimizer):
         for p in self._params:
             numel = p.numel()
             # view as to avoid deprecated pointwise semantics
-            p.data.add_(step_size, update[offset:offset + numel].view_as(p.data))
+            p.add_(update[offset:offset + numel].view_as(p), alpha=step_size)
             offset += numel
         assert offset == self._numel()
 
     def _clone_param(self):
-        return [p.clone() for p in self._params]
+        return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 
     def _set_param(self, params_data):
         for p, pdata in zip(self._params, params_data):
-            p.data.copy_(pdata)
+            p.copy_(pdata)
 
     def _directional_evaluate(self, closure, x, t, d):
         self._add_grad(t, d)
@@ -279,6 +279,7 @@ class LBFGS(Optimizer):
         self._set_param(x)
         return loss, flat_grad
 
+    @torch.no_grad()
     def step(self, closure):
         """Performs a single optimization step.
 
@@ -287,6 +288,9 @@ class LBFGS(Optimizer):
                 and returns the loss.
         """
         assert len(self.param_groups) == 1
+
+        # Make sure the closure is always called with grad enabled
+        closure = torch.enable_grad()(closure)
 
         group = self.param_groups[0]
         lr = group['lr']
@@ -375,17 +379,17 @@ class LBFGS(Optimizer):
                 q = flat_grad.neg()
                 for i in range(num_old - 1, -1, -1):
                     al[i] = old_stps[i].dot(q) * ro[i]
-                    q.add_(-al[i], old_dirs[i])
+                    q.add_(old_dirs[i], alpha=-al[i])
 
                 # multiply by initial Hessian
                 # r/d is the final direction
                 d = r = torch.mul(q, H_diag)
                 for i in range(num_old):
                     be_i = old_dirs[i].dot(r) * ro[i]
-                    r.add_(al[i] - be_i, old_stps[i])
+                    r.add_(old_stps[i], alpha=al[i] - be_i)
 
             if prev_flat_grad is None:
-                prev_flat_grad = flat_grad.clone()
+                prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)
             else:
                 prev_flat_grad.copy_(flat_grad)
             prev_loss = loss
@@ -429,7 +433,8 @@ class LBFGS(Optimizer):
                     # re-evaluate function only if not in last iteration
                     # the reason we do this: in a stochastic setting,
                     # no use to re-evaluate that function here
-                    loss = float(closure())
+                    with torch.enable_grad():
+                        loss = float(closure())
                     flat_grad = self._gather_flat_grad()
                     opt_cond = flat_grad.abs().max() <= tolerance_grad
                     ls_func_evals = 1

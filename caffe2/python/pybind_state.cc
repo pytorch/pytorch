@@ -26,6 +26,7 @@
 #include "caffe2/opt/onnxifi_transformer.h"
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/passes.h"
+#include "caffe2/opt/shape_info.h"
 #include "caffe2/predictor/emulator/data_filler.h"
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/python/pybind_state_registry.h"
@@ -33,7 +34,7 @@
 #include "caffe2/utils/proto_convert.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/script/module_python.h"
+#include "torch/csrc/jit/python/module_python.h"
 
 // Because of CMake setup, we can't depend on script module here just yet -
 // it pulls in generated files from a different directory and it
@@ -93,12 +94,12 @@ REGISTER_BLOB_FETCHER((TypeMeta::Id<string>()), StringFetcher);
 class ScriptModuleFetcher : public BlobFetcherBase {
  public:
   pybind11::object Fetch(const Blob& blob) override {
-    return py::cast(blob.Get<torch::jit::script::Module>());
+    return py::cast(*blob.Get<std::unique_ptr<torch::jit::Module>>());
   }
 };
 
 REGISTER_BLOB_FETCHER(
-    (TypeMeta::Id<torch::jit::script::Module>()),
+    (TypeMeta::Id<std::unique_ptr<torch::jit::Module>>()),
     caffe2::python::ScriptModuleFetcher);
 #endif
 
@@ -112,6 +113,8 @@ int CaffeToNumpyType(const TypeMeta& meta) {
       {TypeMeta::Id<bool>(), NPY_BOOL},
       {TypeMeta::Id<double>(), NPY_DOUBLE},
       {TypeMeta::Id<float>(), NPY_FLOAT},
+      {TypeMeta::Id<std::complex<double>>(), NPY_COMPLEX128},
+      {TypeMeta::Id<std::complex<float>>(), NPY_COMPLEX64},
       {TypeMeta::Id<at::Half>(), NPY_FLOAT16},
       {TypeMeta::Id<int>(), NPY_INT},
       {TypeMeta::Id<int8_t>(), NPY_INT8},
@@ -246,8 +249,9 @@ bool feedBlob(
     return true;
   }
 #ifdef FBCODE_CAFFE2
-  if (auto module = torch::jit::script::as_module(arg)) {
-    *blob->GetMutable<torch::jit::script::Module>() = *module;
+  if (auto module = torch::jit::as_module(arg)) {
+    blob->GetMutable<std::unique_ptr<torch::jit::Module>>()->reset(
+        new torch::jit::Module(*module));
     return true;
   }
 #endif
@@ -1104,6 +1108,18 @@ void addGlobalMethods(py::module& m) {
       "switch_workspace",
       [](Workspace* ws, py::object /*create_if_missing*/) { gWorkspace = ws; });
   m.def(
+      "create_child_workspace",
+      [](const std::string& parent_ws_name, const std::string& child_ws_name) {
+        CAFFE_ENFORCE(
+            gWorkspaces.count(parent_ws_name), "Parent ws does not exist.");
+        auto parent_gws = gWorkspaces[parent_ws_name].get();
+        std::unique_ptr<Workspace> child_ws(new Workspace(parent_gws));
+        gWorkspaces.insert(std::make_pair(child_ws_name, std::move(child_ws)));
+      },
+      "Create and register child ws, sharing existing blobs in parent ws.",
+      py::arg("parent_ws_name"),
+      py::arg("child_ws_name"));
+  m.def(
       "switch_workspace",
       [](const std::string& name, const py::object create_if_missing) {
         if (create_if_missing.is(py::none())) {
@@ -1522,10 +1538,24 @@ void addGlobalMethods(py::module& m) {
         CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
         return py::bytes(protob);
       });
+  m.def("ssa_rewrite", [](const py::bytes& net_proto) {
+    auto net_def = std::make_unique<NetDef>();
+    CAFFE_ENFORCE(net_def->ParseFromString(net_proto));
+    onnx::SsaRewrite(nullptr, net_def.get());
+    std::string output_net_proto;
+    CAFFE_ENFORCE(net_def->SerializeToString(&output_net_proto));
+    return py::bytes(output_net_proto);
+  });
   m.def("create_blob", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
     CAFFE_ENFORCE(gWorkspace->CreateBlob(name));
     return true;
+  });
+  m.def("reset_blob", [](const std::string& name) {
+    CAFFE_ENFORCE(gWorkspace);
+    auto* b = gWorkspace->GetBlob(name);
+    CAFFE_ENFORCE(b);
+    b->Reset();
   });
   m.def("fetch_blob", [](const std::string& name) -> py::object {
     return python_detail::fetchBlob(gWorkspace, name);
@@ -1708,25 +1738,31 @@ void addGlobalMethods(py::module& m) {
          int max_seq_size,
          bool adjust_batch,
          bool debug_builder,
+         bool merge_fp32_inputs_into_fp16,
          bool use_onnx) -> py::bytes {
         caffe2::NetDef pred_net;
         CAFFE_ENFORCE(
             ParseProtoFromLargeString(
                 pred_net_str.cast<std::string>(), &pred_net),
             "broken pred_net protobuf");
-        std::unordered_map<std::string, TensorShape> tensor_shapes;
+        Workspace* curr_ws = GetCurrentWorkspace();
+        CAFFE_ENFORCE(curr_ws);
+        splitSparseLengthsSumSparse(&pred_net, *curr_ws);
+        ShapeInfoMap shape_map;
         for (const auto& it : shapes) {
-          tensor_shapes.emplace(
-              it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
+          shape_map.emplace(
+              it.first,
+              constructShapeInfoWithDefaultDimType(
+                  CreateTensorShape(it.second, TensorProto::FLOAT)));
         }
         OnnxifiTransformerOptions opts;
         opts.bound_shape_spec.max_batch_size = max_batch_size;
         opts.bound_shape_spec.max_seq_size = max_seq_size;
         opts.adjust_batch = adjust_batch;
         opts.debug = debug_builder;
+        opts.merge_fp32_inputs_into_fp16 = merge_fp32_inputs_into_fp16;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);
-        Workspace* curr_ws = GetCurrentWorkspace();
         std::unordered_set<int> blacklist_set(
             black_list.begin(), black_list.end());
         std::vector<std::string> weight_names_overwrite{};
@@ -1739,7 +1775,7 @@ void addGlobalMethods(py::module& m) {
             curr_ws,
             &pred_net,
             weight_names_overwrite,
-            tensor_shapes,
+            shape_map,
             blacklist_set);
         std::string pred_net_str2;
         pred_net.SerializeToString(&pred_net_str2);

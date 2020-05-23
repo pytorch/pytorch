@@ -1,7 +1,7 @@
 The C++ Frontend
 ================
 
-The PyTorch C++ frontend is a C++11 library for CPU and GPU
+The PyTorch C++ frontend is a C++14 library for CPU and GPU
 tensor computation, with automatic differentiation and high level building
 blocks for state of the art machine learning applications.
 

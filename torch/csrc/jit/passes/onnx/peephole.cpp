@@ -15,6 +15,8 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
+const int OPSET_VERSION_11 = 11;
+
 bool isRNN(const Node* node) {
   auto k = node->kind();
   return k == onnx::RNN || k == onnx::LSTM || k == onnx::GRU;
@@ -49,7 +51,7 @@ std::vector<int64_t> composeTransposes(
   return ret;
 }
 
-const std::vector<size_t>& getBroadcastPositions(Node* node) {
+std::vector<size_t> getBroadcastPositions(Node* node) {
   // Most of the element-wise ops in ONNX supports numpy broadcasting.
   // Only GEMM supports one-directional broadcasting, which broadcasts the bias
   // to the product.
@@ -66,17 +68,24 @@ const std::vector<size_t>& getBroadcastPositions(Node* node) {
           {onnx::Less, {0, 1}},
       };
   static std::vector<size_t> no_positions;
+  std::vector<size_t> positions;
 
   auto iter = broadcast_positions.find(node->kind());
   if (iter != broadcast_positions.end()) {
-    return iter->second;
+    // skip optional input if not provided
+    for (size_t position : iter->second) {
+      if (position < node->inputs().size()) {
+        positions.emplace_back(position);
+      }
+    }
+    return positions;
   }
   return no_positions;
 }
 
 // Determine whether `from` can broadcast to `to`, and if so at which
 // position. `from` must be a suffix of `to`, except that any
-// occurences of 1 in `from` are treated as wildcards.
+// occurrences of 1 in `from` are treated as wildcards.
 c10::optional<size_t> fusibleExpandTo(
     at::IntArrayRef from,
     at::IntArrayRef to) {
@@ -101,7 +110,7 @@ void fuseBroadcast(Block* b) {
       fuseBroadcast(child_block);
     }
 
-    auto& broadcast_positions = getBroadcastPositions(n);
+    auto broadcast_positions = getBroadcastPositions(n);
     if (!broadcast_positions.empty()) {
       AT_ASSERT(!n->hasAttribute(attr::axis));
     }
@@ -357,21 +366,28 @@ void hackFixupPadPackedShapes(Block* graph) {
   }
 }
 
-void fixDefaultRNNState(Graph* graph, Node* n, int input_index, int opset_version) {
+void fixDefaultRNNState(
+    Graph* graph,
+    Node* n,
+    int input_index,
+    int opset_version) {
   auto initial_state = n->inputs()[input_index];
 
   // The RNN code in pytorch accepts an optional hidden state.
   // 1- When it is provided as an input, everything works great.
-  // 2- When it is not provided, it is default-initialized by constructing a new Variable, which gets
+  // 2- When it is not provided, it is default-initialized by constructing a new
+  // Variable, which gets
   //    traced as a ConstantOfShape with the expected Shape.
   // 3- When the batch size is fixed, everything works great as well.
-  // 4- When h0 and c0 are specified but are not inputs of the model (they are Constants)
-  //    and the batch size is variable, the model should be saved with a batch size of 1
-  //    (or an error will occur), and we save the value of h0 and c0 with a batch size of 1.
-  //    When the model is then called with a different batch size value, h0 and c0 are broadcasted
-  //    to get the right shape.
+  // 4- When h0 and c0 are specified but are not inputs of the model (they are
+  // Constants)
+  //    and the batch size is variable, the model should be saved with a batch
+  //    size of 1 (or an error will occur), and we save the value of h0 and c0
+  //    with a batch size of 1. When the model is then called with a different
+  //    batch size value, h0 and c0 are broadcasted to get the right shape.
   // Recognize that last pattern here (4) and fix the shape.
-  // Note that for multi-layer RNNs there will be a Slice operation between the Constant and the RNN.
+  // Note that for multi-layer RNNs there will be a Slice operation between the
+  // Constant and the RNN.
   bool needsFixing = initial_state->node()->kind() == onnx::Constant ||
       (initial_state->node()->kind() == onnx::Slice &&
        initial_state->node()->inputs()[0]->node()->kind() == onnx::Constant);
@@ -386,9 +402,7 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index, int opset_versio
 
   Node* gather_indices = graph->create(onnx::Constant, 1);
   gather_indices->insertBefore(n);
-  gather_indices->t_(
-      attr::value,
-      autograd::make_variable(at::scalar_to_tensor(at::Scalar(1))));
+  gather_indices->t_(attr::value, at::scalar_to_tensor(at::Scalar(1)));
 
   Node* batch_size = graph->create(onnx::Gather, 1);
   batch_size->insertBefore(n);
@@ -404,20 +418,20 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index, int opset_versio
   hidden_size->insertBefore(n);
   hidden_size->t_(
       attr::value,
-      autograd::make_variable(at::full(
+      at::full(
           {1},
           n->i(attr::hidden_size),
-          at::kLong))); // at::Scalar(n->i(attr::hidden_size)).toTensor());
+          at::kLong)); // at::Scalar(n->i(attr::hidden_size)).toTensor());
 
   Node* num_directions = graph->create(onnx::Constant, 1);
   num_directions->insertBefore(n);
   num_directions->t_(
       attr::value,
-      autograd::make_variable(scalar_to_tensor(at::Scalar(
+      scalar_to_tensor(at::Scalar(
           n->hasAttribute(attr::direction) &&
                   n->s(attr::direction) == "bidirectional"
               ? 2
-              : 1))));
+              : 1)));
 
   Node* unsqueezed_num_directions = graph->create(onnx::Unsqueeze, 1);
   unsqueezed_num_directions->insertBefore(n);
@@ -518,14 +532,16 @@ static void replaceInputWithList(Node* node, size_t i, ArrayRef<Value*> to) {
   }
 }
 
-static void eraseListConstruct(Block* block) {
+static void eraseListConstruct(Block* block, int opset_version) {
+  // TODO: Fix this pass/maybe get rid of this part.
+  // Tensor lists might be used for meshgrid and such ops as well.
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* n = *it;
     ++it;
 
     for (auto b : n->blocks()) {
-      eraseListConstruct(b);
+      eraseListConstruct(b, opset_version);
     }
     std::vector<std::tuple<size_t, std::vector<Value*>>> replacements;
 
@@ -536,7 +552,7 @@ static void eraseListConstruct(Block* block) {
         TypePtr elem =
             lc_node->output()->type()->cast<ListType>()->getElementType();
         if (elem->cast<IntType>()) {
-          // ListConstruct Int[] output case, we need to transfrom to ONNX
+          // ListConstruct Int[] output case, we need to transform to ONNX
           // Concat to ensure the output is a single tensor(dynamic) type in
           // order to be consumed as inputs
           std::vector<Value*> unsqueezed;
@@ -561,13 +577,24 @@ static void eraseListConstruct(Block* block) {
               i, std::vector<Value*>({concat_node->output()}));
 
         } else {
-          // Tensor lists are used mostly for inputs to cat/stack. They are
-          // already handled in those symbolics, and should become dead
-          // afterwards.
-          replacements.emplace_back(
-              i,
-              std::vector<Value*>(
-                  lc_node->inputs().begin(), lc_node->inputs().end()));
+          if (opset_version < OPSET_VERSION_11) {
+            // Tensor lists are used mostly for inputs to cat/stack. They are
+            // already handled in those symbolics, and should become dead
+            // afterwards.
+            replacements.emplace_back(
+                i,
+                std::vector<Value*>(
+                    lc_node->inputs().begin(), lc_node->inputs().end()));
+          } else {
+            c10::Symbol seq_node_kind = lc_node->inputs().size() > 0
+                ? onnx::SequenceConstruct
+                : onnx::SequenceEmpty;
+            Node* seq_node = block->owningGraph()->create(
+                seq_node_kind, {lc_node->inputs()}, 1);
+            seq_node->insertBefore(lc_node);
+            seq_node->output()->copyMetadata(lc_node->output());
+            lc_node->replaceAllUsesWith(seq_node);
+          }
         }
       }
       i++;
@@ -596,7 +623,7 @@ static void fuseSplitListUnpack(Block* b) {
       }
       splitNode->copyAttributes(*origSplitNode);
       splitNode->insertBefore(origSplitNode);
-      splitNode->addInput(origSplitNode->input());
+      splitNode->addInput(origSplitNode->inputs().at(0));
       it->replaceAllUsesWith(splitNode);
       it->removeAllInputs();
       origSplitNode->destroy();
@@ -606,7 +633,7 @@ static void fuseSplitListUnpack(Block* b) {
   }
 }
 
-// Unbind is being converted to ONNX as Split + Squeeze.
+// Traced Unbind is being converted to ONNX as Split + Squeeze.
 // Example IR
 // graph(%0 : Float(3, 4, 5)):
 //   %7 : Long() = prim::Constant[value={0}]()
@@ -621,7 +648,7 @@ static void fuseSplitListUnpack(Block* b) {
 //   %5 : Float(4, 5) = onnx::Squeeze[axes=[0]](%2)
 //   %6 : Float(4, 5) = onnx::Squeeze[axes=[0]](%1)
 //   return (%6, %5, %4)
-static void fuseUnbindListUnpack(Block *b) {
+static void fuseUnbindListUnpack(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
       fuseUnbindListUnpack(child_block);
@@ -631,12 +658,13 @@ static void fuseUnbindListUnpack(Block *b) {
       Node* orig_unbind_node = it->input()->node();
       auto dim = orig_unbind_node->i(attr::axis);
 
-      Node* split_node =
-          b->owningGraph()->create(onnx::Split, {orig_unbind_node->input()}, it->outputs().size());
+      Node* split_node = b->owningGraph()->create(
+          onnx::Split, {orig_unbind_node->input()}, it->outputs().size());
       split_node->i_(attr::axis, dim);
       split_node->insertAfter(*it);
       for (size_t i = 0; i < split_node->outputs().size(); ++i) {
-        Node* unsqueeze_node =  b->owningGraph()->create(onnx::Squeeze, {split_node->output(i)});
+        Node* unsqueeze_node =
+            b->owningGraph()->create(onnx::Squeeze, {split_node->output(i)});
         unsqueeze_node->is_(attr::axes, {dim});
         unsqueeze_node->output()->copyMetadata(it->output(i));
         it->output(i)->replaceAllUsesWith(unsqueeze_node->output());
@@ -645,6 +673,145 @@ static void fuseUnbindListUnpack(Block *b) {
       it->removeAllInputs();
       orig_unbind_node->destroy();
       it.destroyCurrent();
+    }
+  }
+}
+
+// Traced Split with list of sizes is being converted to ONNX as SplitToSequence
+// + SequenceAt. Example IR
+//  %2 : Tensor[] = onnx::SplitToSequence[axis=0](%input, %split_list)
+//  %3 : Float(), %4 : Float() = prim::ListUnpack(%2)
+//
+// Translates to ONNX:
+//  %2 : Tensor[] = onnx::SplitToSequence[axis=0](%input, %split_list)
+//  %3 : Tensor = onnx::Constant[value={1}]()
+//  %4 : Float() = onnx::SequenceAt(%2, %3)
+//  %5 : Tensor = onnx::Constant[value={0}]()
+//  %6 : Float() = onnx::SequenceAt(%2, %5)
+static void fuseSplitToSequenceListUnpack(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      fuseSplitToSequenceListUnpack(child_block);
+    }
+    if (it->kind() == prim::ListUnpack &&
+        it->input()->node()->kind() == onnx::SplitToSequence) {
+      Node* orig_split_to_sequence_node = it->input()->node();
+      for (size_t i = 0; i < it->outputs().size(); ++i) {
+        Node* split_const_node = b->owningGraph()->create(onnx::Constant, 1);
+        auto tensor = at::empty(1, c10::kLong);
+        int64_t* data = tensor.data_ptr<int64_t>();
+        *data = i;
+        split_const_node->t_(attr::value, autograd::make_variable(tensor));
+        split_const_node->insertAfter(orig_split_to_sequence_node);
+        Node* seq_at_node = b->owningGraph()->create(
+            onnx::SequenceAt, {it->input(), split_const_node->output()});
+        seq_at_node->output()->copyMetadata(it->output(i));
+        it->output(i)->replaceAllUsesWith(seq_at_node->output());
+        seq_at_node->insertAfter(split_const_node);
+      }
+      it->removeAllInputs();
+      it.destroyCurrent();
+    }
+  }
+}
+
+// For ops such as meshgrid where output is a list of Tensors
+// (returns prim::ListConstruct), we need to unpack the list
+// before the pass which deletes ListConstruct.
+static void fuseListConstructListUnpack(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      fuseListConstructListUnpack(child_block);
+    }
+    if (it->kind() == prim::ListUnpack &&
+        it->input()->node()->kind() == prim::ListConstruct) {
+      for (size_t i = 0; i < it->outputs().size(); i++) {
+        auto output = it->outputs().at(i);
+        output->replaceAllUsesWith(it->input()->node()->inputs().at(i));
+      }
+    }
+  }
+}
+
+// Scripted Unbind is being converted to ONNX as SplitToSequence
+// Example IR
+// graph(%input.1 : Float(3, 4, 5)):
+//   %5 : Long() = prim::Constant[value={0}]()
+//   %6 : Long() = prim::Constant[value={1}]()
+//   %3 : Tensor[] = aten::unbind(%input.1, %5)
+//   %4 : Tensor = aten::__getitem__(%3, %6)
+//   return (%4)
+//
+// Translates to ONNX
+// graph(%input.1 : Float(3, 4, 5)):
+//   %1 : Long() = onnx::Constant[value={1}]()
+//   %2 : Tensor[] = onnx::SplitToSequence[axis=0, keepdims=0](%input.1)
+//   %3 : Tensor = onnx::SequenceAt(%2, %1)
+//   return (%3)
+static void convertDynamicUnbindToSplitToSequence(Block* b, int opset_version) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      convertDynamicUnbindToSplitToSequence(child_block, opset_version);
+    }
+
+    if (it->kind() == aten::unbind) {
+      if (opset_version < OPSET_VERSION_11) {
+        AT_ERROR(
+            "Dynamic unbind(dynamic number of outputs) is not exportable in opset version ",
+            opset_version,
+            ". Please try exporting with opset version >= 11.");
+      }
+      auto dim = it->i(attr::axis);
+
+      Node* seq_split_node = b->owningGraph()->create(
+          onnx::SplitToSequence, {it->input()}, it->outputs().size());
+      seq_split_node->i_(attr::axis, dim);
+      seq_split_node->i_(attr::keepdims, 0);
+      seq_split_node->output()->copyMetadata(it->output());
+      seq_split_node->insertAfter(*it);
+      it->replaceAllUsesWith(seq_split_node);
+      it->removeAllInputs();
+      it.destroyCurrent();
+    }
+  }
+}
+
+static void convertUnbindToSplit(Block* b, int opset_version) {
+  fuseUnbindListUnpack(b);
+  convertDynamicUnbindToSplitToSequence(b, opset_version);
+}
+
+static void convertSplitToDynamic(Block* b, int opset_version) {
+  if (opset_version < OPSET_VERSION_11) {
+    return;
+  }
+
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      convertSplitToDynamic(child_block, opset_version);
+    }
+    if (it->kind() == onnx::Split) {
+      if (it->outputs().size() == 1 &&
+          it->output()->type()->kind() == TypeKind::ListType) {
+        auto dim = it->i(attr::axis);
+        auto split = it->is(attr::split);
+        Node* split_const_node = b->owningGraph()->create(onnx::Constant, 1);
+        auto tensor = at::empty(split.size(), c10::kLong);
+        int64_t* data = tensor.data_ptr<int64_t>();
+        for (auto split_size : split) {
+          *data++ = split_size;
+        }
+        split_const_node->t_(attr::value, autograd::make_variable(tensor));
+        split_const_node->insertBefore(*it);
+        Node* seq_split_node = b->owningGraph()->create(
+            onnx::SplitToSequence, {it->input(), split_const_node->output()});
+        seq_split_node->i_(attr::axis, dim);
+        seq_split_node->output()->copyMetadata(it->output());
+        seq_split_node->insertAfter(*it);
+        it->replaceAllUsesWith(seq_split_node);
+        it->removeAllInputs();
+        it.destroyCurrent();
+      }
     }
   }
 }
@@ -659,6 +826,124 @@ void removeMaxPoolUnusedOutput(Block* b) {
       if (n->outputs().size() == 2 && n->outputs().at(1)->uses().empty()) {
         it->eraseOutput(1);
       }
+    }
+  }
+}
+
+// This optimization fuses LogSoftmax and NegativeLogLikelihoodLoss operators
+// into one operator: SoftmaxCrossEntropyLoss, and depending on the dimensions
+// of the input and different attributes there will be different subgraphs of
+// LogSoftmax and NegativeLogLikelihoodLoss.
+static void fuseLogSoftmaxNllLoss(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      fuseLogSoftmaxNllLoss(child_block);
+    }
+    if (it->kind() == onnx::NegativeLogLikelihoodLoss) {
+      auto prev = it->input(0)->node();
+      Node* origNllLossNode = *it;
+      Node* origLogSoftmaxNode;
+      if (prev->kind() == onnx::LogSoftmax) {
+        // if the input is 2D
+        // graph(%input : Float(3, 5),
+        // %target : Long(3)):
+        // %4 : Float(3, 5) = onnx::LogSoftmaxaxis=1
+        // %8 : Float(3) = onnx::NegativeLogLikelihoodLoss[reduction="none"]
+        // return (%8)
+        origLogSoftmaxNode = it->input(0)->node();
+      } else if (
+          prev->kind() == onnx::Transpose &&
+          prev->input(0)->node()->kind() == onnx::LogSoftmax) {
+        // if the input is 4D
+        // graph(%input : Float(3, 5, 2, 7),
+        // %target : Long(3, 2, 7)):
+        // %4 : Tensor = onnx::Transpose[perm=[0, 3, 2, 1]] (%input)
+        // %5 : Tensor = onnx::LogSoftmax[axis=3] (%4)
+        // %6 : Float(3, 5, 2, 7) = onnx::Transpose[perm=[0, 3, 2, 1]] (%5)
+        // %10 : Float(3, 2, 7) =
+        // onnx::NegativeLogLikelihoodLoss[reduction="none"](%6, %target) return
+        // (%10)
+        origLogSoftmaxNode = prev->input(0)->node();
+        auto transpose = origLogSoftmaxNode->input(0)->node();
+        origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
+      } else if (
+          prev->kind() == onnx::Reshape &&
+          prev->input(0)->node()->kind() == onnx::Transpose &&
+          prev->input(0)->node()->input(0)->node()->kind() ==
+              onnx::LogSoftmax) {
+        // if the input is 3D or > 4D
+        // graph(%input : Float(3, 5, 2),
+        // %target.1 : Long(3, 2)):
+        // %4 : Tensor = onnx::Transpose[perm=[0, 2, 1]] (%input)
+        // %5 : Tensor = onnx::LogSoftmax[axis=2] (%4)
+        // %6 : Float(3, 5, 2) = onnx::Transpose[perm=[0, 2, 1]] (%5)
+        // %8 : Tensor = onnx::Shape(%6)
+        // %10 : Tensor = onnx::Constantvalue={0}
+        // %11 : Long() = onnx::Gather[axis=0] (%8, %10)
+        // %13 : Tensor = onnx::Shape(%6)
+        // %15 Tensor = onnx::Constantvalue={1}
+        // %16 : Long() = onnx::Gather[axis=0] (%13, %15)
+        // ...
+        // %22 : Float(3, 5, 1, 2) = onnx::Reshape(%6, %21)
+        // ...
+        // %26 : Long(3, 1, 2) = onnx::Reshape(%target.1, %25)
+        // %30 : Float() = onnx::NegativeLogLikelihoodLoss[reduction="sum"](%22,
+        // %26) return (%30)
+        TORCH_INTERNAL_ASSERT(
+            prev->input(1)->node()->input(0)->node()->kind() == onnx::Gather);
+        TORCH_INTERNAL_ASSERT(
+            prev->input(1)->node()->input(1)->node()->kind() == onnx::Gather);
+        origLogSoftmaxNode = prev->input(0)->node()->input(0)->node();
+        auto transpose = origLogSoftmaxNode->input(0)->node();
+        TORCH_INTERNAL_ASSERT(transpose->kind() == onnx::Transpose);
+        origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
+        auto reshape = origNllLossNode->input(1)->node();
+        TORCH_INTERNAL_ASSERT(reshape->kind() == onnx::Reshape);
+        origNllLossNode->replaceInput(1, reshape->inputs().at(0));
+        if (origNllLossNode->s(attr::reduction) == "none") {
+          // when reduction=none a different graph is created and the graph
+          // doesn't end with node NegativeLogLikelihoodLoss like in all other
+          // cases.
+          // graph(%input : Float(3, 5, 2), %target.1 : Long(3, 2)):
+          // %4 : Tensor = onnx::Transposeperm=[0, 2, 1]
+          // %5 : Tensor = onnx::LogSoftmaxaxis=2
+          // %6 : Float(3, 5, 2) = onnx::Transposeperm=[0, 2, 1]
+          // ...
+          // %27 : Float(3, 5, 1, 2) = onnx::Reshape(%6, %26)
+          // %31 : Long(3, 1, 2) = onnx::Reshape(%target.1, %30)
+          // %35 : Float(3, 1, 2) =
+          // onnx::NegativeLogLikelihoodLoss[reduction="none"](%27, %31) %36 :
+          // int[] = prim::ListConstruct(%11, %21) %37 : Float(3, 2) =
+          // onnx::Reshape(%35, %36) return (%37)
+          auto nllloss_output = origNllLossNode->output(0)->uses()[0].user;
+          TORCH_INTERNAL_ASSERT(nllloss_output->kind() == onnx::Reshape);
+          TORCH_INTERNAL_ASSERT(
+              nllloss_output->inputs()[1]->node()->kind() ==
+              prim::ListConstruct);
+          // make output of reshape the output of nllloss
+          nllloss_output->replaceAllUsesWith(origNllLossNode);
+        }
+      } else {
+        continue;
+      }
+
+      Node* softmaxCrossEntropyNode = b->owningGraph()->create(
+          onnx::SoftmaxCrossEntropyLoss, it->outputs().size());
+      for (size_t i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
+        softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
+      }
+      softmaxCrossEntropyNode->copyAttributes(*origNllLossNode);
+      softmaxCrossEntropyNode->insertBefore(origNllLossNode);
+      softmaxCrossEntropyNode->addInput(origLogSoftmaxNode->inputs().at(0));
+      softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(1));
+      // optional weight input is provided
+      if (origNllLossNode->inputs().size() == 3) {
+        softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(2));
+      }
+
+      it->replaceAllUsesWith(softmaxCrossEntropyNode);
+      it->removeAllInputs();
+      it.destroyCurrent();
     }
   }
 }
@@ -680,16 +965,19 @@ void removeMaxPoolUnusedOutput(Block* b) {
 // writing your optimization in jit/passes/peephole.cpp rather than
 // here, as it will be generally applicable to the JIT as well.  The
 // optimizations here are ONLY applied on ONNX update
-void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version, bool fixed_batch_size) {
+void PeepholeOptimizeONNX(
+    std::shared_ptr<Graph>& graph,
+    int opset_version,
+    bool fixed_batch_size) {
   // TODO: decide on fixpoint strategy
   // TODO: make it easier not to do O(k) iterations over the graph, where
   // k is the number of distinct peephole optimizations
   hackFixupPadPackedShapes(graph->block());
   pushPackingPastRnn(graph->block());
   removeNopPacking(graph->block());
-  // we only need to fix the size of hidden state and cell state if the batch size is variable
-  if(!fixed_batch_size)
-  {
+  // we only need to fix the size of hidden state and cell state if the batch
+  // size is variable
+  if (!fixed_batch_size) {
     fixDefaultRnnHiddenState(graph->block(), opset_version);
     fixDefaultLstmCellState(graph->block(), opset_version);
   }
@@ -698,9 +986,13 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version, bool
   eliminateNopTranspose(graph->block());
   fuseTransposeIntoGemm(graph->block());
   speculateOps(graph->block());
-  eraseListConstruct(graph->block());
+  fuseListConstructListUnpack(graph->block());
+  fuseSplitToSequenceListUnpack(graph->block());
   fuseSplitListUnpack(graph->block());
-  fuseUnbindListUnpack(graph->block());
+  convertUnbindToSplit(graph->block(), opset_version);
+  convertSplitToDynamic(graph->block(), opset_version);
+  fuseLogSoftmaxNllLoss(graph->block());
+  eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
 }
 

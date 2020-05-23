@@ -90,6 +90,12 @@ else
   find "$install_path" -name "*.html" -print0 | xargs -0 perl -pi -w -e "s@master\s+\((\d\.\d\.[A-Fa-f0-9]+\+[A-Fa-f0-9]+)\s+\)@<a href='http://pytorch.org/docs/versions.html'>$version \&#x25BC</a>@g"
 fi
 
+# Prevent Google from indexing $install_path/_modules. This folder contains
+# generated source files.
+# NB: the following only works on gnu sed. The sed shipped with mac os is different.
+# One can `brew install gnu-sed` on a mac and then use "gsed" instead of "sed".
+find "$install_path/_modules" -name "*.html" -print0 | xargs -0 sed -i '/<head>/a \ \ <meta name="robots" content="noindex">'
+
 git add "$install_path" || true
 git status
 git config user.email "soumith+bot@pytorch.org"

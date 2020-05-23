@@ -1,16 +1,6 @@
 #include "caffe2/opt/tvm_transformer.h"
 #include "caffe2/opt/backend_cutting.h"
 
-C10_DEFINE_bool(
-    caffe2_tvm_profiling_based_jit,
-    true,
-    "Use profiling based jit for TVM transform");
-
-C10_DEFINE_int32(
-    caffe2_tvm_min_ops,
-    8,
-    "Minimal number of supported ops for the subgraph to be lowered to TVM");
-
 namespace caffe2 {
 
 NetDef TvmTransformer::buildTvmOp(
@@ -148,7 +138,7 @@ void TvmTransformer::transform(
     Workspace* ws,
     NetDef* pred_net,
     const std::vector<std::string>& weight_names,
-    const std::unordered_map<std::string, TensorShape>& input_shape_hints,
+    const ShapeInfoMap& input_shape_hints,
     const std::unordered_set<int>& blacklisted_ops) {
   CAFFE_ENFORCE(ws);
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
@@ -179,7 +169,7 @@ void TvmTransformer::transform(
   }
 
   if (opts_.debug) {
-    dumpNet(*pred_net, shape_hints, "debug_ssa_net.pb_txt");
+    dumpNet(*pred_net, shape_hints, "debug_ssa_net.pbtxt");
   }
 
   // We are ready to transform the net
@@ -193,8 +183,54 @@ void TvmTransformer::transform(
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
   pred_net->Swap(&net_opt);
   if (opts_.debug) {
-    dumpNet(*pred_net, shape_hints, "debug_full_opt_net.pb_txt");
+    dumpNet(*pred_net, shape_hints, "debug_full_opt_net.pbtxt");
   }
+}
+
+const std::unordered_set<std::string>& TvmTransformer::getSupportedOps() {
+  const static std::unordered_set<std::string> supported_ops{
+      "Add",
+      "BatchGather",
+      "BatchMatMul",
+      "Cast",
+      "Clip",
+      "Concat",
+      "Copy",
+      "DotProduct",
+      "EnsureCPUOutput",
+      "ExpandDims",
+      "FC",
+      "FCTransposed",
+      "Flatten",
+      "Logit",
+      "MatMul",
+      "Mul",
+      "Relu",
+      "Reshape",
+      "ReplaceNaN",
+      "Sigmoid",
+      "Softmax",
+      "Split",
+      "Sum",
+      "Tanh",
+      "Transpose",
+      "UnPackRecords",
+  };
+  return supported_ops;
+}
+
+bool TvmTransformer::canConvertFullGraph(
+    const caffe2::NetDef& net,
+    const std::unordered_set<int>& blacklisted_ops) {
+  const auto& supported_ops = getSupportedOps();
+  for (const auto& op : net.op()) {
+    int pos =
+        ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
+    if (blacklisted_ops.count(pos) || supported_ops.count(op.type()) == 0) {
+      return false;
+    }
+  }
+  return true;
 }
 
 NetDef TvmTransformer::applyTvmTransform(
@@ -202,23 +238,10 @@ NetDef TvmTransformer::applyTvmTransform(
     const std::unordered_set<std::string>& weights,
     const std::unordered_set<int>& blacklisted_ops,
     const ShapeInfoMap& shape_hints) {
-  auto profiling_based_jit = opts_.profiling_based_jit;
+  const auto profiling_based_jit = opts_.profiling_based_jit;
   auto tvm_supports = [&blacklisted_ops, &shape_hints, &profiling_based_jit](
                           const caffe2::OperatorDef& op) {
-    const static std::unordered_set<std::string> supported_ops{
-        "Add",        "Sum",
-        "FC",         "FCTransposed",
-        "Flatten",    "Relu",
-        "Sigmoid",    "Softmax",
-        "Split",      "EnsureCPUOutput",
-        "Reshape",    "ExpandDims",
-        "Concat",     "BatchMatMul",
-        "MatMul",     "BatchGather",
-        "DotProduct", "Transpose",
-        "Mul",        "Tanh",
-        "Logit",      "Cast",
-        "Copy"};
-
+    const auto& supported_ops = getSupportedOps();
     try {
       // If the op position is black listed, return false
       int pos =
@@ -263,20 +286,36 @@ void tvmTransform(
     const std::vector<std::string>& input_names,
     const std::vector<std::string>& output_names,
     const std::vector<std::string>& weight_names,
-    const std::unordered_map<std::string, TensorShape>& shape_hints,
+    const ShapeInfoMap& shape_hints,
     const std::unordered_set<int>& blacklisted_ops,
-    size_t max_batch_size,
-    size_t max_seq_size,
+    int32_t max_batch_size,
+    int32_t max_seq_size,
+    int32_t num_embeddings,
+    int32_t embedding_size,
+    int32_t tvm_min_ops,
+    bool tvm_profiling_based_jit,
     bool debug) {
   TvmTransformOptions opts;
   opts.bound_shape_spec.max_batch_size = max_batch_size;
   opts.bound_shape_spec.max_seq_size = max_seq_size;
+  opts.bound_shape_spec.num_embeddings = num_embeddings;
+  opts.bound_shape_spec.embedding_length = embedding_size;
+  opts.min_ops = tvm_min_ops;
+  opts.profiling_based_jit = tvm_profiling_based_jit;
   opts.debug = debug;
-  opts.profiling_based_jit = FLAGS_caffe2_tvm_profiling_based_jit;
-  opts.min_ops = FLAGS_caffe2_tvm_min_ops;
   TvmTransformer ts(opts);
 
   // Clean up the external input/output of the net
+  cleanUpPredictNet(net, input_names, output_names, weight_names);
+
+  ts.transform(ws, net, weight_names, shape_hints, blacklisted_ops);
+}
+
+void cleanUpPredictNet(
+    NetDef* net,
+    const std::vector<std::string>& input_names,
+    const std::vector<std::string>& output_names,
+    const std::vector<std::string>& weight_names) {
   net->mutable_external_input()->Clear();
   net->mutable_external_output()->Clear();
   for (const auto& i : input_names) {
@@ -288,7 +327,5 @@ void tvmTransform(
   for (const auto& o : output_names) {
     net->add_external_output(o);
   }
-
-  ts.transform(ws, net, weight_names, shape_hints, blacklisted_ops);
 }
 } // namespace caffe2

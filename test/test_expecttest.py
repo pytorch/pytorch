@@ -1,4 +1,4 @@
-import expecttest
+import torch.testing._internal.expecttest as expecttest
 
 import unittest
 import string
