@@ -469,6 +469,9 @@ void GroupNormKernelImplInternal(
   DCHECK_EQ(X.numel(), N * C * HxW);
   DCHECK(!gamma.defined() || gamma.numel() == C);
   DCHECK(!beta.defined() || beta.numel() == C);
+  if (N == 0) {
+    return;
+  }
   const int64_t G = group;
   const int64_t D = C / G;
   const T* X_data = X.data_ptr<T>();
@@ -480,8 +483,8 @@ void GroupNormKernelImplInternal(
   const auto kAccType = X.scalar_type() == kHalf ? kFloat : X.scalar_type();
   Tensor a = at::empty({N, C}, X.options().dtype(kAccType));
   Tensor b = at::empty({N, C}, X.options().dtype(kAccType));
-  T_ACC* a_data = a.template data_ptr<T_ACC>();
-  T_ACC* b_data = b.template data_ptr<T_ACC>();
+  T_ACC* a_data = a.data_ptr<T_ACC>();
+  T_ACC* b_data = b.data_ptr<T_ACC>();
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (D * HxW < cuda_utils::kCUDABlockReduceNumThreads) {
     constexpr int kThreadX = kReduceTileSize;
@@ -559,19 +562,33 @@ void GroupNormBackwardKernelImplInternal(
   DCHECK_EQ(mean.numel(), N * G);
   DCHECK_EQ(rstd.numel(), N * G);
   DCHECK(!gamma.defined() || gamma.numel() == C);
-  const T* dY_data = dY.template data_ptr<T>();
-  const T* X_data = X.template data_ptr<T>();
-  const T* mean_data = mean.template data_ptr<T>();
-  const T* rstd_data = rstd.template data_ptr<T>();
-  const T* gamma_data =
-      gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
-  T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
-  const auto kAccType = X.scalar_type() == kHalf ? kFloat : X.scalar_type();
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
+
+  if (N == 0) {
+    if (dgamma->defined()) {
+      T* dgamma_data = dgamma->data_ptr<T>();
+      AT_CUDA_CHECK(
+          cudaMemsetAsync(dgamma_data, 0, dgamma->numel(), cuda_stream));
+    }
+    if (dbeta->defined()) {
+      T* dbeta_data = dbeta->data_ptr<T>();
+      AT_CUDA_CHECK(
+          cudaMemsetAsync(dbeta_data, 0, dbeta->numel(), cuda_stream));
+    }
+    return;
+  }
+
+  const T* dY_data = dY.data_ptr<T>();
+  const T* X_data = X.data_ptr<T>();
+  const T* mean_data = mean.data_ptr<T>();
+  const T* rstd_data = rstd.data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
+  T* dX_data = dX->defined() ? dX->data_ptr<T>() : nullptr;
+  const auto kAccType = X.scalar_type() == kHalf ? kFloat : X.scalar_type();
   Tensor ds = at::empty({N, C}, X.options().dtype(kAccType));
   Tensor db = at::empty({N, C}, X.options().dtype(kAccType));
-  T_ACC* ds_data = ds.template data_ptr<T_ACC>();
-  T_ACC* db_data = db.template data_ptr<T_ACC>();
+  T_ACC* ds_data = ds.data_ptr<T_ACC>();
+  T_ACC* db_data = db.data_ptr<T_ACC>();
   if (HxW < cuda_utils::kCUDABlockReduceNumThreads) {
     constexpr int kThreadX = kReduceTileSize;
     constexpr int kThreadY = kReduceTileSize / 2;
@@ -588,9 +605,9 @@ void GroupNormBackwardKernelImplInternal(
     Tensor c1 = at::empty({N, C}, X.options().dtype(kAccType));
     Tensor c2 = at::empty({N, G}, X.options().dtype(kAccType));
     Tensor c3 = at::empty({N, G}, X.options().dtype(kAccType));
-    T_ACC* c1_data = c1.template data_ptr<T_ACC>();
-    T_ACC* c2_data = c2.template data_ptr<T_ACC>();
-    T_ACC* c3_data = c3.template data_ptr<T_ACC>();
+    T_ACC* c1_data = c1.data_ptr<T_ACC>();
+    T_ACC* c2_data = c2.data_ptr<T_ACC>();
+    T_ACC* c3_data = c3.data_ptr<T_ACC>();
     int64_t B = (N * C + kCUDANumThreads - 1) / kCUDANumThreads;
     ComputeGradOutputCoeffientCUDAKernel<T>
         <<<B, kCUDANumThreads, 0, cuda_stream>>>(
@@ -641,9 +658,8 @@ void GroupNormBackwardKernelImplInternal(
     }
   }
   if (dgamma->defined() || dbeta->defined()) {
-    T* dgamma_data =
-        dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
-    T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
+    T* dgamma_data = dgamma->defined() ? dgamma->data_ptr<T>() : nullptr;
+    T* dbeta_data = dbeta->defined() ? dbeta->data_ptr<T>() : nullptr;
     if (N < 512) {
       // For small batch size, do colwise reduce directly.
       const int64_t B = (C + kCUDANumThreads - 1) / kCUDANumThreads;
