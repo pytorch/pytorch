@@ -135,15 +135,14 @@ void GroupNormBackwardKernelImplInternal(
   DCHECK(!gamma.defined() || gamma.numel() == C);
   const int64_t G = group;
   const int64_t D = C / G;
-  const T* dY_data = dY.template data_ptr<T>();
-  const T* X_data = X.template data_ptr<T>();
-  const T* mean_data = mean.template data_ptr<T>();
-  const T* rstd_data = rstd.template data_ptr<T>();
-  const T* gamma_data =
-      gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
-  T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
-  T* dgamma_data = dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
-  T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
+  const T* dY_data = dY.data_ptr<T>();
+  const T* X_data = X.data_ptr<T>();
+  const T* mean_data = mean.data_ptr<T>();
+  const T* rstd_data = rstd.data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
+  T* dX_data = dX->defined() ? dX->data_ptr<T>() : nullptr;
+  T* dgamma_data = dgamma->defined() ? dgamma->data_ptr<T>() : nullptr;
+  T* dbeta_data = dbeta->defined() ? dbeta->data_ptr<T>() : nullptr;
   if (dgamma_data != nullptr) {
     std::memset(dgamma_data, 0, C * sizeof(T));
   }
@@ -154,8 +153,8 @@ void GroupNormBackwardKernelImplInternal(
   const bool gamma_null = gamma_data == nullptr;
   Tensor ds = at::empty({G, D}, X.options());
   Tensor db = at::empty({G, D}, X.options());
-  T* ds_data = ds.template data_ptr<T>();
-  T* db_data = db.template data_ptr<T>();
+  T* ds_data = ds.data_ptr<T>();
+  T* db_data = db.data_ptr<T>();
   constexpr int64_t K = vec256::Vec256<T>::size();
   const int64_t inner_size = HxW / K * K;
 
