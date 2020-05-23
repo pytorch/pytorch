@@ -158,7 +158,7 @@ struct alignas(sizeof(T) * 2) complex_common {
     return static_cast<complex<T> &>(*this);
   }
 
-  constexpr complex<T> &operator /=(T re) {
+  constexpr complex<T> &operator /=(T re) __ubsan_ignore_float_divide_by_zero__ {
     storage[0] /= re;
     storage[1] /= re;
     return static_cast<complex<T> &>(*this);
@@ -198,7 +198,7 @@ struct alignas(sizeof(T) * 2) complex_common {
   }
 
   template<typename U>
-  constexpr complex<T> &operator /=(const complex<U> &rhs) {
+  constexpr complex<T> &operator /=(const complex<U> &rhs) __ubsan_ignore_float_divide_by_zero__ {
     // (a + bi) / (c + di) = (ac + bd)/(c^2 + d^2) + (bc - ad)/(c^2 + d^2) i
     T a = storage[0];
     T b = storage[1];
