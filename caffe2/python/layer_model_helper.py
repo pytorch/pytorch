@@ -76,7 +76,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._breakdown_map = None
 
         # Connect Schema to self.net. That particular instance of schmea will be
-        # use for generation of the Layers accross the network and would be used
+        # use for generation of the Layers across the network and would be used
         # for connection with Readers.
         self._input_feature_schema = schema.NewRecord(
             self.net,
@@ -93,6 +93,8 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._init_global_constants()
         self.param_init_net = self.create_init_net('param_init_net')
         self._initialize_params = True
+
+        self._transfer_learning_blob_name_mappings = None
 
         # additional (hard-coded) diagnose_options to report based on the model
         # TODO(xlwang): it's hack!
@@ -489,6 +491,15 @@ class LayerModelHelper(model_helper.ModelHelper):
     def add_prediction(self, prediction, weight=1.0):
         assert prediction is not None, "Added prediction should not be None"
         self._prediction.append((prediction, weight))
+
+    @property
+    def transfer_learning_blob_name_mappings(self):
+        return self._transfer_learning_blob_name_mappings
+
+    @transfer_learning_blob_name_mappings.setter
+    def transfer_learning_blob_name_mappings(self, blob_name_mappings):
+        assert blob_name_mappings is not None, "Transfer learning blob name mappings should not be None"
+        self._transfer_learning_blob_name_mappings = blob_name_mappings
 
     @property
     def loss(self):

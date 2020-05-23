@@ -4,6 +4,8 @@
 #include <utility>
 #include <vector>
 #include <cstdarg>
+#include <exception>
+#include <sstream>
 
 #include <torch/csrc/THP.h>
 
@@ -18,6 +20,26 @@ bool THPException_init(PyObject *module)
 }
 
 namespace torch {
+
+static bool compute_cpp_stack_traces_enabled() {
+  auto envar = std::getenv("TORCH_SHOW_CPP_STACKTRACES");
+  if (envar) {
+    if (strcmp(envar, "0") == 0) {
+      return false;
+    }
+    if (strcmp(envar, "1") == 0) {
+      return true;
+    }
+    TORCH_WARN("ignoring invalid value for TORCH_SHOW_CPP_STACKTRACES: ", envar,
+               " valid values are 0 or 1.");
+  }
+  return false;
+}
+
+bool get_cpp_stacktraces_enabled() {
+  static bool enabled = compute_cpp_stack_traces_enabled();
+  return enabled;
+}
 
 void replaceAll(std::string & str,
     const std::string & old_str,
@@ -109,7 +131,7 @@ static std::string formatMessage(const char *format, va_list fmt_args) {
   static const size_t ERROR_BUF_SIZE = 1024;
   char error_buf[ERROR_BUF_SIZE];
   vsnprintf(error_buf, ERROR_BUF_SIZE, format, fmt_args);
-  
+
   // Ensure that the string is null terminated
   error_buf[sizeof(error_buf) / sizeof(*error_buf) - 1] = 0;
 
@@ -137,5 +159,76 @@ ValueError::ValueError(const char *format, ...) {
   va_end(fmt_args);
 }
 
-} // namespace torch
+void PyWarningHandler::process(
+    const c10::SourceLocation& source_location,
+    const std::string& msg,
+    const bool verbatim) {
+  warning_buffer_.push_back({source_location, msg, verbatim});
+};
 
+PyWarningHandler::PyWarningHandler() noexcept(true):
+      prev_handler_(c10::Warning::get_warning_handler()),
+      in_exception_(false) {
+  c10::Warning::set_warning_handler(this);
+}
+
+/// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
+/// NOLINTNEXTLINE(bugprone-exception-escape)
+PyWarningHandler::~PyWarningHandler() noexcept(false) {
+  c10::Warning::set_warning_handler(prev_handler_);
+
+  if(warning_buffer_.size() > 0) {
+    if(in_exception_) {
+      // An error happened after the warning
+      // Simply handle with the previous handler
+      for(const auto& warning: warning_buffer_) {
+        auto source_location = warning.source_location_;
+        const auto& msg = processErrorMsg(warning.msg_);
+        c10::Warning::warn(source_location, msg, warning.verbatim_);
+      }
+      warning_buffer_.clear();
+    } else {
+      pybind11::gil_scoped_acquire gil;
+      auto result = 0;
+      for (const auto& warning: warning_buffer_) {
+        auto source_location = warning.source_location_;
+        const auto& msg = processErrorMsg(warning.msg_);
+        if (source_location.file == nullptr) {
+          result = PyErr_WarnEx(PyExc_RuntimeWarning, msg.c_str(), 1);
+        } else if (warning.verbatim_) {
+          // Sets the source location from the warning
+          // Note: PyErr_WarnExplicit will disregard Python's warning filter
+          // and always appear. This is in contrast to PyErr_WarnEx,
+          // which respects the warning filter.
+          result = PyErr_WarnExplicit(
+              /*category=*/PyExc_UserWarning,
+              /*message=*/msg.c_str(),
+              /*filename=*/source_location.file,
+              /*lineno=*/source_location.line,
+              /*module=*/nullptr,
+              /*registry=*/nullptr);
+        } else {
+          // Lets Python set the source location and puts the C++ warning
+          // location into the message.
+          std::ostringstream os;
+          os << msg << " (Triggered internally at  " << source_location.file;
+          os << ":" << source_location.line << ".)";
+          result = PyErr_WarnEx(PyExc_UserWarning, os.str().c_str(), 1);
+        }
+        if (result < 0) {
+          break;
+        }
+      }
+      warning_buffer_.clear();
+      if (result < 0) {
+        /// A warning raised an error, we need to force the parent
+        /// function to return an error code.
+        throw python_error();
+      }
+    }
+  }
+}
+
+
+
+} // namespace torch

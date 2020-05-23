@@ -314,9 +314,9 @@ struct MaxRangeReducerDef {
       "elements in the input slices. Operation doesn't change the shape of "
       "individual blocks. This implementation imitates torch nn.Max operator. "
       "If the maximum value occurs more than once, the operator will return "
-      "the first occurence of value. When computing the gradient using the "
+      "the first occurrence of value. When computing the gradient using the "
       "backward propagation, the gradient input corresponding to the first "
-      "occurence of the maximum value will be used.";
+      "occurrence of the maximum value will be used.";
 };
 
 ////////////////////////////////////////////////////////////////////////////////

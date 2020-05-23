@@ -24,6 +24,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/Type.h>
+#include <c10/util/TypeTraits.h>
 #include <c10/util/TypeIndex.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
@@ -48,10 +49,12 @@
 // later.  So the namespace is not fixed at the moment.
 
 // Make at::Half a fundamental type.
-namespace std {
+namespace c10 {
+namespace guts {
 template <>
 struct is_fundamental<at::Half> : std::true_type {};
-} // namespace std
+} // namespace guts
+} // namespace c10
 
 namespace caffe2 {
 
@@ -65,7 +68,7 @@ class C10_API TypeIdentifier final
     : public at::IdWrapper<TypeIdentifier, c10::util::type_index> {
  public:
   friend std::ostream& operator<<(std::ostream& stream, TypeIdentifier typeId);
-  friend bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
+  friend constexpr bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
 
   /**
    * Returns the unique id for the given type T. The id is unique for the type T
@@ -80,8 +83,7 @@ class C10_API TypeIdentifier final
   }
 
   static constexpr TypeIdentifier uninitialized() {
-    return TypeIdentifier(
-        c10::util::type_index{11}); // 11 is Undefined from ScalarType
+    return TypeIdentifier(c10::util::type_index{0});
   }
 
  private:
@@ -91,7 +93,7 @@ class C10_API TypeIdentifier final
 
 // Allow usage in std::map / std::set
 // TODO Disallow this and rather use std::unordered_map/set everywhere
-inline bool operator<(TypeIdentifier lhs, TypeIdentifier rhs) {
+inline constexpr bool operator<(TypeIdentifier lhs, TypeIdentifier rhs) {
   return lhs.underlyingId() < rhs.underlyingId();
 }
 
@@ -132,7 +134,7 @@ struct TypeMetaData final {
       PlacementDelete* placementDelete,
       Delete* deleteFn,
       TypeIdentifier id,
-      const char* name) noexcept
+      c10::string_view name) noexcept
       : itemsize_(itemsize),
         new_(newFn),
         placementNew_(placementNew),
@@ -149,7 +151,7 @@ struct TypeMetaData final {
   PlacementDelete* placementDelete_;
   Delete* delete_;
   TypeIdentifier id_;
-  const char* name_;
+  c10::string_view name_;
 };
 
 // Mechanism for throwing errors which can't be prevented at compile time
@@ -172,25 +174,25 @@ inline void _PlacementNew(void* ptr, size_t n) {
 template <typename T>
 inline void _PlacementNewNotDefault(void* /*ptr*/, size_t /*n*/) {
   _ThrowRuntimeTypeLogicError(
-      "Type " + std::string(c10::demangle_type<T>()) +
+      "Type " + std::string(c10::util::get_fully_qualified_type_name<T>()) +
       " is not default-constructible.");
 }
 
 template <
     typename T,
-    c10::guts::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
+    std::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
-  return (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+  return (c10::guts::is_fundamental<T>::value || std::is_pointer<T>::value)
       ? nullptr
       : &_PlacementNew<T>;
 }
 
 template <
     typename T,
-    c10::guts::enable_if_t<!std::is_default_constructible<T>::value>* = nullptr>
+    std::enable_if_t<!std::is_default_constructible<T>::value>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
   static_assert(
-      !std::is_fundamental<T>::value && !std::is_pointer<T>::value,
+      !c10::guts::is_fundamental<T>::value && !std::is_pointer<T>::value,
       "this should have picked the other SFINAE case");
   return &_PlacementNewNotDefault<T>;
 }
@@ -203,20 +205,20 @@ inline void* _New() {
 template <typename T>
 inline void* _NewNotDefault() {
   _ThrowRuntimeTypeLogicError(
-      "Type " + std::string(c10::demangle_type<T>()) +
+      "Type " + std::string(c10::util::get_fully_qualified_type_name<T>()) +
       " is not default-constructible.");
 }
 
 template <
     typename T,
-    c10::guts::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
+    std::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
 inline constexpr TypeMetaData::New* _PickNew() {
   return &_New<T>;
 }
 
 template <
     typename T,
-    c10::guts::enable_if_t<!std::is_default_constructible<T>::value>* = nullptr>
+    std::enable_if_t<!std::is_default_constructible<T>::value>* = nullptr>
 inline constexpr TypeMetaData::New* _PickNew() {
   return &_NewNotDefault<T>;
 }
@@ -239,25 +241,25 @@ inline void _Copy(const void* src, void* dst, size_t n) {
 template <typename T>
 inline void _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
   _ThrowRuntimeTypeLogicError(
-      "Type " + std::string(c10::demangle_type<T>()) +
+      "Type " + std::string(c10::util::get_fully_qualified_type_name<T>()) +
       " does not allow assignment.");
 }
 
 template <
     typename T,
-    c10::guts::enable_if_t<std::is_copy_assignable<T>::value>* = nullptr>
+    std::enable_if_t<std::is_copy_assignable<T>::value>* = nullptr>
 inline constexpr TypeMetaData::Copy* _PickCopy() {
-  return (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+  return (c10::guts::is_fundamental<T>::value || std::is_pointer<T>::value)
       ? nullptr
       : &_Copy<T>;
 }
 
 template <
     typename T,
-    c10::guts::enable_if_t<!std::is_copy_assignable<T>::value>* = nullptr>
+    std::enable_if_t<!std::is_copy_assignable<T>::value>* = nullptr>
 inline constexpr TypeMetaData::Copy* _PickCopy() {
   static_assert(
-      !std::is_fundamental<T>::value && !std::is_pointer<T>::value,
+      !c10::guts::is_fundamental<T>::value && !std::is_pointer<T>::value,
       "this should have picked the other SFINAE case");
   return &_CopyNotAllowed<T>;
 }
@@ -275,7 +277,7 @@ inline void _PlacementDelete(void* ptr, size_t n) {
 
 template <typename T>
 inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
-  return (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+  return (c10::guts::is_fundamental<T>::value || std::is_pointer<T>::value)
       ? nullptr
       : &_PlacementDelete<T>;
 }
@@ -291,46 +293,11 @@ inline constexpr TypeMetaData::Delete* _PickDelete() noexcept {
   return &_Delete<T>;
 }
 
-#ifdef __GXX_RTTI
 template <class T>
-const char* _typeName(const char* literalName) noexcept {
-  std::ignore = literalName; // suppress unused warning
-  static const std::string name = c10::demangle(typeid(T).name());
-  return name.c_str();
-}
-#else
-template <class T>
-constexpr const char* _typeName(const char* literalName) noexcept {
-  return literalName;
-}
-#endif
-
-// CollisionChecker is a safeguard to make sure none of our types generate
-// the same type id. Since we use crc64 of the string type name, there's a
-// (very) slight possibility of collisions and we want to be sure that doesn't
-// happen.
-class CollisionChecker final {
-public:
-  // Check that there is no type registered with this id and a different name
-  void check(TypeIdentifier id, const std::string& name) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto find = typeids_.find(id);
-    if (find != typeids_.end()) {
-      AT_ASSERT(find->second == name, "Typeid collision detected for ", find->second, " and ", name, ".");
-    } else {
-      typeids_.emplace(id, name);
-    }
-  }
-private:
-  std::mutex mutex_;
-  ska::flat_hash_map<TypeIdentifier, std::string> typeids_;
-};
-C10_API CollisionChecker& collisionChecker_();
-
-template <class T>
-inline TypeMetaData _makeTypeMetaDataInstance(const char* typeName) {
+inline C10_TYPENAME_CONSTEXPR TypeMetaData _makeTypeMetaDataInstance() {
   C10_HOST_CONSTEXPR_VAR auto typeId = TypeIdentifier::Get<T>();
-  collisionChecker_().check(typeId, typeName);
+  C10_TYPENAME_CONSTEXPR auto typeName = c10::util::get_fully_qualified_type_name<T>();
+
   return {sizeof(T),
           _PickNew<T>(),
           _PickPlacementNew<T>(),
@@ -423,11 +390,13 @@ class C10_API TypeMeta final {
   /**
    * Returns a printable name for the type.
    */
-  const char* name() const noexcept {
+  c10::string_view name() const noexcept {
     return data_->name_;
   }
 
-  friend bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
+  friend bool operator==(
+      const TypeMeta& lhs,
+      const TypeMeta& rhs) noexcept;
 
   template <typename T>
   bool Match() const noexcept {
@@ -442,8 +411,8 @@ class C10_API TypeMeta final {
   }
 
   template <class T>
-  static const char* TypeName() noexcept {
-    return Make<T>().name();
+  static C10_TYPENAME_CONSTEXPR c10::string_view TypeName() noexcept {
+    return c10::util::get_fully_qualified_type_name<T>();
   }
 
   template <class T>
@@ -488,10 +457,14 @@ inline TypeMeta::TypeMeta() noexcept
     : data_(_typeMetaDataInstance<detail::_Uninitialized>()) {
 }
 
-inline bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+inline bool operator==(
+    const TypeMeta& lhs,
+    const TypeMeta& rhs) noexcept {
   return (lhs.data_ == rhs.data_);
 }
-inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+inline bool operator!=(
+    const TypeMeta& lhs,
+    const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 
@@ -526,85 +499,13 @@ inline std::ostream& operator<<(
 #define EXPORT_IF_NOT_GCC
 #endif
 
-#define _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, Counter)      \
-  namespace detail {                                                    \
-  const TypeMetaData C10_CONCATENATE(_typeMetaDataInstance_, Counter) = \
-      _makeTypeMetaDataInstance<T>(_typeName<T>(#T));                   \
-  }                                                                     \
-  template <>                                                           \
-  EXPORT_IF_NOT_GCC const detail::TypeMetaData*                         \
-  TypeMeta::_typeMetaDataInstance<T>() noexcept {                       \
-    return &C10_CONCATENATE(detail::_typeMetaDataInstance_, Counter);   \
+#define CAFFE_KNOWN_TYPE(T)                                        \
+  template <>                                                      \
+  EXPORT_IF_NOT_GCC const detail::TypeMetaData*                    \
+  TypeMeta::_typeMetaDataInstance<T>() noexcept {                  \
+    static C10_TYPENAME_CONSTEXPR detail::TypeMetaData singleton = \
+        detail::_makeTypeMetaDataInstance<T>();                    \
+    return &singleton;                                             \
   }
-#define CAFFE_KNOWN_TYPE(T) \
-  _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, __COUNTER__)
-
-/**
- * CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE is used
- * to preallocate numbers so they line up exactly
- * with at::ScalarType's numbering.  All other numbers do not matter.
- * Please use CAFFE_KNOWN_TYPE instead for your own types.
- */
-#define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)      \
-  template <>                                                         \
-  constexpr inline TypeIdentifier TypeIdentifier::Get<T>() noexcept { \
-    return TypeIdentifier(c10::util::type_index{PreallocatedId});     \
-  }
-
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(0, uint8_t)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(1, int8_t)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(2, int16_t)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(3, int)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(4, int64_t)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(5, at::Half)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(6, float)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(7, double)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(8, at::ComplexHalf)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(9, std::complex<float>)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(10, std::complex<double>)
-// 11 = undefined type id
-// 12 = Tensor (defined in tensor.h)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(13, std::string)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(14, bool)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(15, uint16_t)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(16, char)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(17, std::unique_ptr<std::mutex>)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(18, std::unique_ptr<std::atomic<bool>>)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(19, std::vector<int32_t>)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(20, std::vector<int64_t>)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(21, std::vector<unsigned long>)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(22, bool*)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(23, char*)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(24, int*)
-
-// For some of the compilers, long is definied separately from int32_t and
-// int64_t. As a result we will need to actually define them separately.
-// It is recommended that one does NOT use long - use int32_t and int64_t
-// explicitly. Explicit long type annotation may go away in the future.
-// details: This hack works by defining a _guard_long_unique type, which is
-// long iff the compiler has a separate long type and is a dummy type otherwise.
-// we then allocate a type id to that _guard_long_unique. If the compiler has a
-// separate long type, this allocates a type id for long. Otherwise, it
-// allocates a type id for the dummy type, which doesn't matter.
-namespace detail {
-template <class T>
-class _guard_long_unique_dummy final {};
-template <class T>
-using _guard_long_unique = c10::guts::conditional_t<
-    std::is_same<long, int32_t>::value || std::is_same<long, int64_t>::value,
-    _guard_long_unique_dummy<T>,
-    T>;
-} // namespace detail
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(25, detail::_guard_long_unique<long>)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(
-    26,
-    detail::_guard_long_unique<std::vector<long>>)
-
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(27, float*)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(28, at::Half*)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(29, c10::qint8)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(30, c10::quint8)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(31, c10::qint32)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(32, at::BFloat16)
 
 } // namespace caffe2

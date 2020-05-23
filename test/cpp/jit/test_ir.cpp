@@ -1,6 +1,6 @@
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/irparser.h"
+#include "torch/csrc/jit/ir/irparser.h"
 
 namespace torch {
 namespace jit {
@@ -55,7 +55,7 @@ void testBlocks() {
       %12 : int = prim::Constant[value=1]()
       %13 : Tensor = aten::add(%5, %3, %12)
       return (%13))IR";
-  torch::jit::script::parseIR(graph_string, g.get());
+  torch::jit::parseIR(graph_string, g.get());
 
   g->lint();
   testing::FileCheck()
@@ -90,6 +90,68 @@ void testBlocks() {
       ->check("block0")
       ->check_not("block")
       ->run(*g2);
+}
+
+void testCommonAncestor() {
+  std::string input_str = R"(
+graph(%x : Tensor,
+      %a.1 : bool,
+      %b.1 : bool,
+      %c.1 : bool):
+  %4 : int = prim::If(%a.1)
+    block0():
+      %5 : int = prim::If(%b.1)
+        block0():
+          %6 : int = prim::Constant[value=2]()
+          -> (%6)
+        block1():
+          %7 : int = prim::Constant[value=3]()
+          -> (%7)
+      -> (%5)
+    block1():
+      %8 : int = prim::If(%c.1)
+        block0():
+          %9 : int = prim::Constant[value=4]()
+          -> (%9)
+        block1():
+          %10 : int = prim::Constant[value=5]()
+          -> (%10)
+      -> (%8)
+  return (%4)
+)";
+
+  torch::jit::Graph g;
+  std::unordered_map<std::string, torch::jit::Value*> name_to_value;
+  torch::jit::parseIR(input_str, &g, name_to_value);
+
+  std::vector<std::string> value_names{"6", "7", "9", "10"};
+  std::unordered_set<std::string> value_names_set(
+      value_names.begin(), value_names.end());
+
+  /* clang-format off */
+  int ref_blocks_from_graph[4][4] = {
+    /* (6, 6), (6, 7), (6, 9), (6, 10) */
+    {   2,     1,      0,      0        },
+    /* (7, 6), (7, 7), (7, 9), (7, 10) */
+    {   1,     2,      0,      0        },
+    /* (9, 6), (9, 7), (9, 9), (9, 10) */
+    {   0,     0,      2,      1,       },
+    /* (10, 6),(10, 7),(10, 9),(10, 10) */
+    {   0,     0,      1,      2        }
+  };
+  /* clang-format on */
+
+  for (size_t i = 0; i < value_names.size(); ++i) {
+    Value* i_val = name_to_value[value_names[i]];
+    for (size_t j = 0; j < value_names.size(); ++j) {
+      Value* j_val = name_to_value[value_names[j]];
+      Block* common_ancestor =
+          i_val->node()->findCommonAncestorBlockWith(j_val->node());
+      int blocks_from_graph_block =
+          common_ancestor->param_node()->blocksFromGraphBlock();
+      ASSERT_EQ(blocks_from_graph_block, ref_blocks_from_graph[i][j]);
+    }
+  }
 }
 
 } // namespace jit

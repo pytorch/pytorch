@@ -179,7 +179,7 @@ static inline Tensor _run_cufft(
     IntArrayRef output_sizes, bool input_was_cloned
 ) {
   if (config.should_clone_input() && !input_was_cloned) {
-    input = input.clone();
+    input = input.clone(at::MemoryFormat::Contiguous);
   }
 
   auto& plan = config.plan();
@@ -261,9 +261,10 @@ static inline Tensor _run_cufft(
   return output;
 }
 
-// The cuFFT plan cache, defined in CuFFTUtils.h
-std::vector<optional<CuFFTParamsLRUCache>> plan_caches;
-std::mutex plan_caches_mutex;
+// The cuFFT plan cache
+// unique_ptr for nullability and to avoid reference invalidation on vector resize
+static std::vector<std::unique_ptr<CuFFTParamsLRUCache>> plan_caches;
+static std::mutex plan_caches_mutex;
 
 static inline
 CuFFTParamsLRUCache &cufft_get_plan_cache(int64_t device_index) {
@@ -276,7 +277,7 @@ CuFFTParamsLRUCache &cufft_get_plan_cache(int64_t device_index) {
   }
 
   if (!plan_caches[device_index]) {
-    plan_caches[device_index].emplace();
+    plan_caches[device_index] = std::make_unique<CuFFTParamsLRUCache>();
   }
 
   return *plan_caches[device_index];
@@ -349,13 +350,13 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   // from a slicing.
   auto complex_size_bytes = 2 * input.element_size();
   if (reinterpret_cast<std::uintptr_t>(input.data_ptr()) % complex_size_bytes != 0) {
-    input = input.clone();
+    input = input.clone(at::MemoryFormat::Contiguous);
     input_was_cloned = true;
   }
 
   // Now that we have done error check and data_ptr checks, we delegate all
-  // futher cuFFT parameter computation and plan creation to the helper class
-  // CuFFTConfig in CuFFTUtils.h.
+  // further cuFFT parameter computation and plan creation to the helper class
+  // CuFFTConfig in CuFFTPlanCache.h.
 
   // If plan caching is enabled, we check the cache. Note that this accesses
   // plan_cache.max_size() and thus makes this function less functional.

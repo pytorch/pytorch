@@ -23,15 +23,23 @@ inline at::Tensor ${name}(${formals}) {
 """)
 
 
+OPTIONAL_TYPE_PATTERN = re.compile(r"c10::optional<(.+)>")
 TYPE_PATTERN = re.compile(r"(?:const\s+)?([A-Z]\w+)")
 
 
 def fully_qualified_type(argument_type):
+    def maybe_optional_type(t, opt_match):
+        return 'c10::optional<{}>'.format(t) if opt_match else t
+
+    opt_match = OPTIONAL_TYPE_PATTERN.match(argument_type)
+    if opt_match:
+        argument_type = argument_type[opt_match.start(1):opt_match.end(1)]
     match = TYPE_PATTERN.match(argument_type)
     if match is None:
-        return argument_type
+        return maybe_optional_type(argument_type, opt_match)
     index = match.start(1)
-    return "{}at::{}".format(argument_type[:index], argument_type[index:])
+    qualified_type = "{}at::{}".format(argument_type[:index], argument_type[index:])
+    return maybe_optional_type(qualified_type, opt_match)
 
 
 def gen_variable_factories(out, declarations, template_path, disable_autograd=False):
@@ -41,7 +49,12 @@ def gen_variable_factories(out, declarations, template_path, disable_autograd=Fa
         is_namespace_fn = 'namespace' in decl['method_of']
         if (has_tensor_options or decl["name"].endswith("_like")) and is_namespace_fn:
             function_definitions.append(
-                process_function(decl, has_tensor_options, disable_autograd=disable_autograd))
+                process_function(
+                    decl,
+                    has_tensor_options,
+                    disable_autograd=disable_autograd,
+                )
+            )
     write(out,
           "variable_factories.h",
           CodeTemplate.from_file(template_path + "/variable_factories.h"),
@@ -57,14 +70,9 @@ def process_function(decl, has_tensor_options, disable_autograd):
         formals.append("{} {}{}".format(type, argument["name"], default))
         actual = argument["name"]
         if argument["simple_type"] == "TensorOptions":
-            # We want to make `at::{name}` always return a
-            # tensor and not a variable, since we create a variable right after.
-            actual = "at::TensorOptions({}).is_variable(false)".format(actual)
+            actual = "at::TensorOptions({})".format(actual)
         actuals.append(actual)
     requires_grad = "options.requires_grad()" if has_tensor_options else "false"
-    if decl['name'].endswith('_like') and not has_tensor_options:
-        # it's a tensor
-        actuals.append('{}.options().is_variable(false)'.format(actuals[0]))
 
     if not disable_autograd:
         pre_record_trace, post_record_trace = format_trace(decl)

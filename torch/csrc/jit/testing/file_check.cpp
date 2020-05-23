@@ -13,13 +13,13 @@
 #include <c10/util/Optional.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <algorithm>
 #include <iostream>
 #include <sstream>
 #include <string>
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
@@ -90,7 +90,8 @@ size_t assertFind(
     std::stringstream ss;
     ss << "Expected to find ";
     c10::printQuotedString(ss, sub);
-    ss << " but did not find it\n";
+    ss << " but did not find it" << std::endl;
+    ss << "Searched string:" << std::endl;
     found_range.highlight(ss);
     if (extra_msg) {
       extra_msg(ss);
@@ -218,7 +219,7 @@ struct FileCheckImpl {
         }
         size_t end =
             assertFind(SourceRange(source, end_check_string, end_line), ":");
-        count = std::stoll(
+        count = c10::stoll(
             source->text().substr(end_check_string, end - end_check_string));
         end_check_string = end + 2; // add ':' and the space
       }

@@ -45,7 +45,10 @@ class DataParallel(Module):
 
     The batch size should be larger than the number of GPUs used.
 
-    See also: :ref:`cuda-nn-dataparallel-instead`
+    .. warning::
+        It is recommended to use :class:`~torch.nn.parallel.DistributedDataParallel`,
+        instead of this class, to do multi-GPU training, even if there is only a single
+        node. See: :ref:`cuda-nn-ddp-instead` and :ref:`ddp`.
 
     Arbitrary positional and keyword inputs are allowed to be passed into
     DataParallel but some types are specially handled. tensors will be

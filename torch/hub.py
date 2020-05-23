@@ -10,12 +10,8 @@ import torch
 import warnings
 import zipfile
 
-if sys.version_info[0] == 2:
-    from urlparse import urlparse
-    from urllib2 import urlopen  # noqa f811
-else:
-    from urllib.request import urlopen
-    from urllib.parse import urlparse  # noqa: F401
+from urllib.request import urlopen
+from urllib.parse import urlparse  # noqa: F401
 
 try:
     from tqdm.auto import tqdm  # automatically select proper tqdm submodule if available
@@ -24,7 +20,7 @@ except ImportError:
         from tqdm import tqdm
     except ImportError:
         # fake tqdm if it's not installed
-        class tqdm(object):
+        class tqdm(object):  # type: ignore
 
             def __init__(self, total=None, disable=False,
                          unit=None, unit_scale=None, unit_divisor=None):
@@ -74,12 +70,9 @@ def import_module(name, path):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
-    elif sys.version_info >= (3, 0):
+    else:
         from importlib.machinery import SourceFileLoader
         return SourceFileLoader(name, path).load_module()
-    else:
-        import imp
-        return imp.load_source(name, path)
 
 
 def _remove_if_exists(path):
@@ -102,9 +95,12 @@ def _load_attr_from_module(module, func_name):
 
 
 def _get_torch_home():
-    torch_home = os.path.expanduser(
-        os.getenv(ENV_TORCH_HOME,
-                  os.path.join(os.getenv(ENV_XDG_CACHE_HOME, DEFAULT_CACHE_DIR), 'torch')))
+    torch_home = hub_dir
+    if torch_home is None:
+        torch_home = os.path.expanduser(
+            os.getenv(ENV_TORCH_HOME,
+                      os.path.join(os.getenv(ENV_XDG_CACHE_HOME,
+                                             DEFAULT_CACHE_DIR), 'torch')))
     return torch_home
 
 
@@ -135,12 +131,16 @@ def _parse_repo_info(github):
 def _get_cache_or_reload(github, force_reload, verbose=True):
     # Parse github repo information
     repo_owner, repo_name, branch = _parse_repo_info(github)
-
+    # Github allows branch name with slash '/',
+    # this causes confusion with path on both Linux and Windows.
+    # Backslash is not allowed in Github branch name so no need to
+    # to worry about it.
+    normalized_br = branch.replace('/', '_')
     # Github renames folder repo-v1.x.x to repo-1.x.x
     # We don't know the repo name before downloading the zip file
     # and inspect name from it.
     # To check if cached repo exists, we need to normalize folder names.
-    repo_dir = os.path.join(hub_dir, '_'.join([repo_owner, repo_name, branch]))
+    repo_dir = os.path.join(hub_dir, '_'.join([repo_owner, repo_name, normalized_br]))
 
     use_cache = (not force_reload) and os.path.exists(repo_dir)
 
@@ -148,7 +148,7 @@ def _get_cache_or_reload(github, force_reload, verbose=True):
         if verbose:
             sys.stderr.write('Using cache found in {}\n'.format(repo_dir))
     else:
-        cached_file = os.path.join(hub_dir, branch + '.zip')
+        cached_file = os.path.join(hub_dir, normalized_br + '.zip')
         _remove_if_exists(cached_file)
 
         url = _git_archive_link(repo_owner, repo_name, branch)
@@ -395,7 +395,7 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
 
     # We deliberately save it in a temp file and move it after
     # download is complete. This prevents a local working checkpoint
-    # being overriden by a broken download.
+    # being overridden by a broken download.
     dst = os.path.expanduser(dst)
     dst_dir = os.path.dirname(dst)
     f = tempfile.NamedTemporaryFile(delete=False, dir=dst_dir)

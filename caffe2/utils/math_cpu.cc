@@ -1434,7 +1434,7 @@ C10_EXPORT void CopyMatrix<CPUContext>(
     return;
   }
   if (lda == N && ldb == N) {
-    // can coalese to a single memcpy of size M * N
+    // can coalesce to a single memcpy of size M * N
     if (copy) {
       copy(static_cast<const char*>(A), static_cast<char*>(B), N * M);
     } else {

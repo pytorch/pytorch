@@ -14,9 +14,23 @@ namespace impl {
 
 // This is a private class used inside the Dispatcher to represent an operator
 // and its dispatch table. This is not part of the public API.
-class OperatorEntry final {
+class CAFFE2_API OperatorEntry final {
 public:
-  explicit OperatorEntry(FunctionSchema&& schema, OperatorOptions&& options);
+  struct KernelEntry final {
+    KernelEntry(KernelFunction k, std::unique_ptr<FunctionSchema> s, std::string d)
+      : kernel(std::move(k))
+      , inferred_function_schema(std::move(s))
+      , debug(std::move(d))
+      {}
+    KernelFunction kernel;
+    std::unique_ptr<FunctionSchema> inferred_function_schema;
+    // A little debug string to help us identify the kernel in question.
+    // Mostly used in testing but it might be possible to augment
+    // regular registrations with some more info here too
+    std::string debug;
+  };
+
+  explicit OperatorEntry(OperatorName&& operator_name);
 
   OperatorEntry(const OperatorEntry&) = delete;
   OperatorEntry(OperatorEntry&&) noexcept = delete;
@@ -24,74 +38,78 @@ public:
   OperatorEntry& operator=(OperatorEntry&&) noexcept = delete;
 
   const FunctionSchema& schema() const {
-    return schema_;
+    TORCH_INTERNAL_ASSERT(schema_.has_value(), "Tried to access the schema for ", name_, " which doesn't have a schema registered yet");
+    return *schema_;
+  }
+  const std::string& debug() const {
+    TORCH_INTERNAL_ASSERT(debug_.has_value());
+    return *debug_;
+  }
+  bool hasSchema() const {
+    return schema_.has_value();
   }
 
-  template<class Return, class... Args>
-  Return callUnboxed(TensorTypeId dispatchKey, Args... args) const {
-    // TODO Remove dispatchKey argument and instead infer dispatchKey from args...
-    #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 5
-      // GCC 4 has issues with parameter packs inside lambdas, let's instead
-      // return the KernelFunction from the lambda. Note: This copies the
-      // KernelFunction and is slow, but it's the only way to make it work for
-      // GCC 4.
-      KernelFunction func = dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> KernelFunction {
-          return dispatchTable.lookup(dispatchKey);
-      });
-      return func.callUnboxed<Return, Args...>(std::forward<Args>(args)...);
-    #else
-      // For all other compilers and newer GCC, let's do it right
-      return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
-          return dispatchTable.lookup(dispatchKey)
-              .callUnboxed<Return, Args...>(std::forward<Args>(args)...);
-      });
-    #endif
+  // An OperatorEntry may be initialized with only an OperatorName.
+  // If this is the case, we may post facto register a schema to it.
+  //
+  // Some rules:
+  //  - The following programs are equivalent:
+  //      OperatorEntry op(std::move(schema))
+  //    and
+  //      OperatorEntry op(schema.operator_name())
+  //      op.registerSchema(std::move(schema))
+  //  - The following programs are equivalent:
+  //      OperatorEntry op(schema.operator_name())
+  //    and
+  //      OperatorEntry op(std::move(schema))
+  //      op.deregisterSchema()
+  //
+  // NB: registerSchema/deregisterSchema are not idempotent; if you
+  // attempt to register a schema when one is already present or vice
+  // versa that is an error.  (Refcounting for the registrations is
+  // handled in the OperatorHandle in Dispatcher)
+  void registerSchema(FunctionSchema&&, std::string&& debug);
+  void deregisterSchema();
+
+  const OperatorName& operator_name() const {
+    return name_;
   }
 
-  template<class Return, class... Args>
-  Return callUnboxedOnly(TensorTypeId dispatchKey, Args... args) const {
-    // TODO Remove dispatchKey argument and instead infer dispatchKey from args...
-    #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 5
-      // GCC 4 has issues with parameter packs inside lambdas, let's instead
-      // return the KernelFunction from the lambda. Note: This copies the
-      // KernelFunction and is slow, but it's the only way to make it work for
-      // GCC 4.
-      KernelFunction func = dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> KernelFunction {
-          return dispatchTable.lookup(dispatchKey);
-      });
-      return func.callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
-    #else
-      // For all other compilers and newer GCC, let's do it right
-      return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
-          return dispatchTable.lookup(dispatchKey)
-              .callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
-      });
-    #endif
-  }
-
-  void callBoxed(Stack* stack) const {
-    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) {
-        dispatchTable.lookup(stack).callBoxed(stack);
-    });
+  const DispatchTable& dispatch_table() const {
+    return dispatchTable_;
   }
 
   void prepareForDeregistration();
 
-  RegistrationHandleRAII registerKernel(TensorTypeId dispatch_key, KernelFunction kernel);
-  RegistrationHandleRAII registerCatchallKernel(KernelFunction kernel);
+  // Postcondition: caller is responsible for disposing of the kernel
+  std::list<KernelEntry>::iterator registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
+  void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelEntry>::iterator kernel);
 
-  const OperatorOptions& options() {
-    return options_;
+  void updateSchemaAliasAnalysis(AliasAnalysisKind a) {
+    TORCH_INTERNAL_ASSERT(schema_.has_value());
+    schema_->setAliasAnalysis(a);
+  }
+
+  std::string dumpState() const;
+  void checkInvariants() const;
+
+  // This function is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
+  // unboxing wrapper for aten operators. We still need those for some operators because not all work
+  // with the templated unboxing logic yet.
+  // TODO Delete setManuallyBoxedKernel_ once all operators work with the templated boxing logic
+  void setManuallyBoxedKernel_(KernelFunction::InternalBoxedKernelFunction* func) {
+    dispatchTable_.setManuallyBoxedKernel_(func);
   }
 
 private:
-  void deregisterKernel_(TensorTypeId dispatch_key, std::list<KernelFunction>::iterator kernel);
-  void deregisterCatchallKernel_(std::list<KernelFunction>::iterator kernel);
 
-  FunctionSchema schema_;
+  OperatorName name_;
+  c10::optional<FunctionSchema> schema_;
+  c10::optional<std::string> debug_;
+  // INVARIANT: schema_.has_value() == debug_.has_value()
 
   // The dispatchTable stores the current kernel for each dispatch key
-  LeftRight<DispatchTable> dispatchTable_;
+  DispatchTable dispatchTable_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key
   // and catchAllKernels_ stores the catch-all kernels.
@@ -112,7 +130,6 @@ private:
   //    kernels_[dispatch_key] does not exist
   //  - If kernels_[dispatch_key] exists, then it has elements.
   //    It is never an empty list.
-  // Analogous invariants for catchAllKernels_.
   //
   // Why do we do that?
   // -----
@@ -125,18 +142,13 @@ private:
   // re-executed and then only allow one kernel here, i.e. error if a kernel
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
-  ska::flat_hash_map<TensorTypeId, std::list<KernelFunction>> kernels_;
-  std::list<KernelFunction> catchAllKernels_;
-
-  // Some metadata about the operator
-  OperatorOptions options_;
+  ska::flat_hash_map<c10::optional<DispatchKey>, std::list<KernelEntry>> kernels_;
 
   std::mutex kernelsMutex_; // protects kernels_
 
   // This function re-establishes the invariant that dispatchTable
   // contains the front element from the kernels list for a given dispatch key.
-  void updateDispatchTable_(TensorTypeId dispatch_key);
-  void updateCatchallDispatchTable_();
+  void updateDispatchTable_(c10::optional<DispatchKey> dispatch_key);
 };
 
 }

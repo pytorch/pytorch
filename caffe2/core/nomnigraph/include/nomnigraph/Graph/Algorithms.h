@@ -15,6 +15,7 @@
 #include <assert.h>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "nomnigraph/Graph/BinaryMatchImpl.h"
 #include "nomnigraph/Graph/Graph.h"
@@ -75,7 +76,6 @@ Graph<typename G::NodeRef> dominatorTree(
     }
   }
 
-  std::unordered_set<typename G::NodeRef> allNodes;
   Graph<typename G::NodeRef> tree;
   std::unordered_map<
       typename G::NodeRef,

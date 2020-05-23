@@ -142,7 +142,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
         boxes, scores = gen_multiple_boxes(in_centers, in_scores, 10, num_classes)
 
         if not input_boxes_include_bg_cls:
-            # remove backgound class
+            # remove background class
             boxes = boxes[:, 4:]
         if cls_agnostic_bbox_reg:
             # only leave one class
@@ -159,7 +159,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
             np.array(range(1, num_classes), dtype=np.float32),
             (gt_boxes.shape[0], 1)).T.flatten()
         if not output_classes_include_bg_cls:
-            # remove backgound class
+            # remove background class
             gt_classes -= 1
         gt_boxes = np.tile(gt_boxes, (num_classes - 1, 1))
         gt_scores = np.tile(gt_scores, (num_classes - 1, 1)).flatten()

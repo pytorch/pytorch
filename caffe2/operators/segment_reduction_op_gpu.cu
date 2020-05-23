@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <cub/block/block_reduce.cuh>
 #include <cub/device/device_reduce.cuh>
 #include <cub/device/device_scan.cuh>
@@ -1177,7 +1179,7 @@ class SortedSegmentRangeMeanOp : public Operator<Context> {
         K,
         context_.cuda_stream());
     sorted_segment_mean_kernel<T, SIndex, LOGEXP>
-        <<<min(K, CAFFE_MAXIMUM_NUM_BLOCKS),
+        <<<std::min(K, CAFFE_MAXIMUM_NUM_BLOCKS),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(

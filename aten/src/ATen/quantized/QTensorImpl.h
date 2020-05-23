@@ -17,7 +17,8 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
  public:
   QTensorImpl(
       Storage&& storage,
-      TensorTypeSet type_set,
+      DispatchKeySet key_set,
+      const caffe2::TypeMeta& data_type,
       QuantizerPtr quantizer);
 
   // TODO: Expose in PyTorch Frontend
@@ -39,7 +40,7 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<QTensorImpl>(
-        Storage(storage()), type_set(), quantizer_);
+        Storage(storage()), key_set(), data_type_, quantizer_);
     copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -57,7 +58,7 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
    * see NOTE [ TensorImpl Shallow-Copying ].
    */
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
-    AT_ASSERT(has_compatible_shallow_copy_type(impl->type_set()));
+    AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
     auto q_impl = static_cast<const QTensorImpl*>(impl.get());
     copy_tensor_metadata(
       /*src_impl=*/q_impl,

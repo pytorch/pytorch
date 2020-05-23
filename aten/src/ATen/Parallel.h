@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
+#include <c10/macros/Macros.h>
 
 namespace at {
 namespace internal {
@@ -22,7 +23,7 @@ CAFFE2_API void init_num_threads();
 // Sets the number of threads to be used in parallel region
 CAFFE2_API void set_num_threads(int);
 
-// Returns the number of threads used in parallel region
+// Returns the maximum number of threads that may be used in a parallel region
 CAFFE2_API int get_num_threads();
 
 // Returns the current thread number (starting from 0)
@@ -31,6 +32,19 @@ CAFFE2_API int get_thread_num();
 
 // Checks whether the code runs in parallel region
 CAFFE2_API bool in_parallel_region();
+
+namespace internal {
+
+// Initialise num_threads lazily at first parallel call
+inline CAFFE2_API void lazy_init_num_threads() {
+  thread_local bool init = false;
+  if (C10_UNLIKELY(!init)) {
+    at::init_num_threads();
+    init = true;
+  }
+}
+
+}
 
 /*
 parallel_for
@@ -43,6 +57,11 @@ grain_size: number of elements per chunk. impacts the degree of parallelization
 
 f: user function applied in parallel to the chunks, signature:
   void f(int64_t begin, int64_t end)
+
+Warning: parallel_for does NOT copy thread local
+states from the current thread to the worker threads.
+This means for example that Tensor operations CANNOT be used in the
+body of your function, only data pointers.
 */
 template <class F>
 inline void parallel_for(
@@ -82,6 +101,11 @@ would be "+" and 0 respectively. This is similar to tbb's approach [1], where
 you need to provide a function to accumulate a subrange, a function to combine
 two partial results and an identity.
 
+Warning: parallel_reduce does NOT copy thread local
+states from the current thread to the worker threads.
+This means for example that Tensor operations CANNOT be used in the
+body of your function, only data pointers.
+
 [1] https://software.intel.com/en-us/node/506154
 */
 template <class scalar_t, class F, class SF>
@@ -104,6 +128,9 @@ CAFFE2_API int get_num_interop_threads();
 
 // Launches inter-op parallel task
 CAFFE2_API void launch(std::function<void()> func);
+namespace internal {
+void launch_no_thread_state(std::function<void()> fn);
+} // namespace internal
 
 // Launches intra-op parallel task
 CAFFE2_API void intraop_launch(std::function<void()> func);

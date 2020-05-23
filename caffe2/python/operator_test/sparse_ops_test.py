@@ -76,7 +76,7 @@ class TestScatterOps(serial.SerializedTestCase):
         ind = np.random.choice(first_dim, index_dim,
                                replace=False).astype(ind_type)
         x = (rand_array(index_dim, *extra_dims) * 10).astype(data_type)
-        self.assertReferenceChecks(gc, op, [d, ind, x], ref, threshold=1e-3)
+        self.assertReferenceChecks(gc, op, [d, ind, x], ref, threshold=1e-3, ensure_outputs_are_inferred=True)
 
 if __name__ == "__main__":
     import unittest

@@ -305,6 +305,7 @@ void LayerNormKernelImplInternal(
           N, eps, X_data, mean_data, rstd_data);
   LayerNormForwardCUDAKernel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
       N, X_data, mean_data, rstd_data, gamma_data, beta_data, Y_data);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 void LayerNormKernelImpl(
@@ -317,10 +318,12 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       X.scalar_type(), "LayerNormKernelImpl", [&]() {
-        LayerNormKernelImplInternal<scalar_t>(
-            X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "LayerNormKernelImpl", [&] {
+          LayerNormKernelImplInternal<scalar_t>(
+              X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
+        });
       });
 }
 
@@ -351,7 +354,7 @@ void LayerNormBackwardKernelImplInternal(
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX_data != nullptr) {
-    const auto kAccType = X.scalar_type() == kHalf ? kFloat : X.scalar_type();
+    const auto kAccType = (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16) ? kFloat : X.scalar_type();
     Tensor ds = at::empty({M}, X.options().dtype(kAccType));
     Tensor db = at::empty({M}, X.options().dtype(kAccType));
     Tensor scale = at::empty({M}, X.options().dtype(kAccType));
@@ -431,14 +434,61 @@ void LayerNormBackwardKernelImpl(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       X.scalar_type(), "LayerNormBackwardKernelImpl", [&]() {
-        LayerNormBackwardKernelImplInternal<scalar_t>(
-            dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "LayerNormBackwardKernelImpl", [&] {
+          LayerNormBackwardKernelImplInternal<scalar_t>(
+              dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+        });
       });
 }
 
 } // namespace
+
+std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
+    const Tensor& X,
+    const Tensor& gamma /* optional */,
+    const Tensor& beta /* optional */,
+    int64_t M,
+    int64_t N,
+    double eps) {
+  Tensor Y = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor mean = at::empty({M}, X.options());
+  Tensor rstd = at::empty({M}, X.options());
+  if (M > 0) {
+    LayerNormKernelImpl(X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
+  }
+  return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
+}
+
+std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
+    const Tensor& dY,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const Tensor& gamma,
+    int64_t M,
+    int64_t N,
+    std::array<bool, 3> grad_input_mask) {
+  Tensor dX;
+  Tensor dgamma;
+  Tensor dbeta;
+  if (grad_input_mask[0]) {
+    dX = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  if (grad_input_mask[1]) {
+    dgamma = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  if (grad_input_mask[2]) {
+    dbeta = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  if (M > 0) {
+    LayerNormBackwardKernelImpl(
+        dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
+  }
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
+}
+
 
 REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
 REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);

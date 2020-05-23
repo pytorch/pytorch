@@ -42,8 +42,8 @@ struct PyTensorType {
     return static_cast<Backend>(backend);
   }
 
-  TensorTypeId get_type_id() const {
-    return backendToTensorTypeId(static_cast<Backend>(backend));
+  DispatchKey get_dispatch_key() const {
+    return backendToDispatchKey(static_cast<Backend>(backend));
   }
 
   ScalarType get_scalar_type() const {
@@ -68,7 +68,7 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
   if (tensor_type.is_cuda && !torch::utils::cuda_enabled()) {
     throw unavailable_type(tensor_type);
   }
-  return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(tensor_type.get_type_id(), tensor_type.get_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(tensor_type.get_dispatch_key(), tensor_type.get_scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -84,12 +84,12 @@ static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
     // against torch.cuda.FloatTensor, this will immediately initialize CUDA.
     // I originally thought that it would not be possible for aten_type_ to
     // be nullptr if you had a tensor of some type, in which case you can
-    // skip initializign aten_type(), but TestAutograd.test_type_conversions
+    // skip initializing aten_type(), but TestAutograd.test_type_conversions
     // seems to violate this property (for whatever reason.)
     //
-    // TODO: Stop using legacyExtractTypeId here (probably need to build
+    // TODO: Stop using legacyExtractDispatchKey here (probably need to build
     // in instanceof checking to Tensor class itself)
-    if (legacyExtractTypeId(var.type_set()) == self->get_type_id() &&
+    if (legacyExtractDispatchKey(var.key_set()) == self->get_dispatch_key() &&
         var.scalar_type() == static_cast<ScalarType>(self->scalar_type)) {
       Py_RETURN_TRUE;
     }
@@ -137,31 +137,34 @@ static struct PyGetSetDef metaclass_properties[] = {
   {nullptr}
 };
 
-static PyTypeObject metaclass;
+static PyTypeObject metaclass = {
+  PyVarObject_HEAD_INIT(nullptr, 0)
+  "torch.tensortype",                          /* tp_name */
+  sizeof(PyTypeObject)                         /* tp_basicsize */
+};
 
 static void py_initialize_metaclass(PyTypeObject& metaclass) {
-  ((PyObject*)&metaclass)->ob_refcnt = 1;
-  metaclass.tp_basicsize = sizeof(PyTypeObject);
   metaclass.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
   metaclass.tp_methods = metaclass_methods;
   metaclass.tp_getset = metaclass_properties;
-  metaclass.tp_name = "torch.tensortype";
   metaclass.tp_base = &PyType_Type;
   if (PyType_Ready(&metaclass) < 0) {
     throw python_error();
   }
 }
 
+static PyTypeObject tensor_type_prototype = {
+  PyVarObject_HEAD_INIT(&metaclass, 0)
+  nullptr,                                     /* tp_name */
+  sizeof(PyTensorType)                         /* tp_basicsize */
+};
+
 static void py_initialize_tensor_type(PyTypeObject& type, const char* name, PyObject* tp_dict) {
   // NOTE: we don't use the typical static declaration of PyTypeObject because
   // we need to initialize as many types as there are VariableType instances.
-  // The typical PyVarObject_HEAD_INIT(nullptr, 0) is described in the Python
-  // documentation: it initializes the refcnt to 1 and the other object header
-  // fields to zero.
-  memset(&type, 0, sizeof(PyTypeObject));
-  ((PyObject*)&type)->ob_refcnt = 1;
-  ((PyObject*)&type)->ob_type = &metaclass;
-  type.tp_basicsize = sizeof(PyTensorType);
+  // We copy the basic object fields from a prototype definition and initialize
+  // the remaining fields below.
+  memcpy(&type, &tensor_type_prototype, sizeof(PyTypeObject));
   // Subclassing from torch.<ScalarType>Tensor isn't supported.
   // (Py_TPFLAGS_BASETYPE omitted). Subclassing torch.Tensor still allowed.
   type.tp_flags = Py_TPFLAGS_DEFAULT;
@@ -208,8 +211,8 @@ static void set_type(PyTensorType& type_obj, Backend backend, ScalarType scalarT
   // This field is lazily initialized from backend and scalar_type
   type_obj.backend = static_cast<int>(backend);
   type_obj.scalar_type = static_cast<int>(scalarType);
-  type_obj.layout = torch::getLayout(backend);
-  type_obj.dtype = torch::getDtype(scalarType);
+  type_obj.layout = torch::getTHPLayout(layout_from_backend(backend));
+  type_obj.dtype = torch::getTHPDtype(scalarType);
   type_obj.is_cuda = (backend == at::Backend::CUDA || backend == at::Backend::SparseCUDA);
 }
 
@@ -377,9 +380,9 @@ void py_set_default_dtype(PyObject* obj) {
   }
 }
 
-c10::TensorTypeId get_default_tensor_type_id() {
+c10::DispatchKey get_default_dispatch_key() {
   AT_ASSERT(default_tensor_type);
-  return default_tensor_type->get_type_id();
+  return default_tensor_type->get_dispatch_key();
 }
 
 ScalarType get_default_scalar_type() {

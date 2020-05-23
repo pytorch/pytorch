@@ -1,3 +1,40 @@
+# Table of contents
+
+- [Contributing to PyTorch](#contributing-to-pytorch)
+- [Developing PyTorch](#developing-pytorch)
+- [Codebase structure](#codebase-structure)
+- [Unit testing](#unit-testing)
+  - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
+- [Writing documentation](#writing-documentation)
+  - [Building documentation](#building-documentation)
+    - [Tips](#tips)
+    - [Building C++ Documentation](#building-c-documentation)
+  - [Previewing changes](#previewing-changes)
+    - [Submitting changes for review](#submitting-changes-for-review)
+  - [Adding documentation tests](#adding-documentation-tests)
+- [Profiling with `py-spy`](#profiling-with-py-spy)
+- [Managing multiple build trees](#managing-multiple-build-trees)
+- [C++ development tips](#c-development-tips)
+  - [Build only what you need](#build-only-what-you-need)
+  - [Code completion and IDE support](#code-completion-and-ide-support)
+  - [Make no-op build fast](#make-no-op-build-fast)
+    - [Use Ninja](#use-ninja)
+    - [Use CCache](#use-ccache)
+    - [Use a faster linker](#use-a-faster-linker)
+  - [C++ frontend development tips](#c-frontend-development-tips)
+- [CUDA development tips](#cuda-development-tips)
+- [Windows development tips](#windows-development-tips)
+  - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
+- [Running clang-tidy](#running-clang-tidy)
+- [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
+- [Building PyTorch with ASAN](#building-pytorch-with-asan)
+  - [Getting `ccache` to work](#getting-ccache-to-work)
+  - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
+  - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
+  - [Why no leak detection?](#why-no-leak-detection)
+- [Caffe2 notes](#caffe2-notes)
+- [CI failure tips](#ci-failure-tips)
+
 ## Contributing to PyTorch
 
 If you are interested in contributing to PyTorch, your contributions will fall
@@ -92,10 +129,9 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
   you'll have a lot of missing functionality if you try to use it
   directly.)
 * [aten](aten) - C++ tensor library for PyTorch (no autograd support)
-  * [src](aten/src)
+  * [src](aten/src) - [README](aten/src/README.md)
     * [TH](aten/src/TH)
       [THC](aten/src/THC)
-      [THNN](aten/src/THNN)
       [THCUNN](aten/src/THCUNN) - Legacy library code from the original
       Torch. Try not to add things here; we're slowly porting these to
       [native](aten/src/ATen/native).
@@ -123,6 +159,7 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
           [miopen](aten/src/ATen/native/miopen) [cudnn](aten/src/ATen/native/cudnn)
           - implementations of operators which simply bind to some
             backend library.
+        * [quantized](aten/src/ATen/native/quantized/) - Quantized tensor (i.e. QTensor) operation implementations. [README](aten/src/ATen/native/quantized/README.md) contains details including how to implement native quantized operations.
 * [torch](torch) - The actual PyTorch library. Everything that is not
   in [csrc](torch/csrc) is a Python module, following the PyTorch Python
   frontend module structure.
@@ -130,11 +167,10 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
     in this directory tree are a mix of Python binding code, and C++
     heavy lifting. Consult `setup.py` for the canonical list of Python
     binding files; conventionally, they are often prefixed with
-    `python_`.
+    `python_`. [README](torch/csrc/README.md)
     * [jit](torch/csrc/jit) - Compiler and frontend for TorchScript JIT
-      frontend.
-    * [autograd](torch/csrc/autograd) - Implementation of reverse-mode automatic
-      differentiation.
+      frontend. [README](torch/csrc/jit/README.md)
+    * [autograd](torch/csrc/autograd) - Implementation of reverse-mode automatic differentiation. [README](torch/csrc/autograd/README.md)
     * [api](torch/csrc/api) - The PyTorch C++ frontend.
     * [distributed](torch/csrc/distributed) - Distributed training
       support for PyTorch.
@@ -151,6 +187,9 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
     and TorchScript.
   * ...
   * [cpp](test/cpp) - C++ unit tests for PyTorch C++ frontend.
+    * [api](test/cpp/api) - [README](test/cpp/api/README.md)
+    * [jit](test/cpp/jit) - [README](test/cpp/jit/README.md)
+    * [tensorexpr](test/cpp/tensorexpr) - [README](test/cpp/tensorexpr/README.md)
   * [expect](test/expect) - Automatically generated "expect" files
     which are used to compare against expected output.
   * [onnx](test/onnx) - Tests for ONNX export functionality,
@@ -161,6 +200,7 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
   * [operators](caffe2/operators) - Operators of Caffe2.
   * [python](caffe2/python) - Python bindings to Caffe2.
   * ...
+* [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
 
 ## Unit testing
 
@@ -185,26 +225,13 @@ pytest test/test_nn.py -k Loss -v
 The above is an example of testing a change to Loss functions: this command runs tests such as
 `TestNN.test_BCELoss` and `TestNN.test_MSELoss` and can be useful to save keystrokes.
 
-## Writing Documentation
+## Writing documentation
 
 PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
 for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
 fit into Jupyter documentation popups.
 
-For C++ documentation (https://pytorch.org/cppdocs), we use
-[Doxygen](http://www.doxygen.nl/) and then convert it to
-[Sphinx](http://www.sphinx-doc.org/) via
-[Breathe](https://github.com/michaeljones/breathe) and
-[Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
-reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
-information on the documentation syntax. To build the documentation locally,
-`cd` into `docs/cpp` and then `make html`.
-
-We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
-commands. To run this check locally, run `./check-doxygen.sh` from inside
-`docs/cpp`.
-
-### Building Documentation
+### Building documentation
 
 To build the documentation:
 
@@ -229,28 +256,6 @@ cd docs
 make html
 ```
 
-4. To view HTML files, you must start an HTTP server. For example
-
-```bash
-# Start a server from the current directory (Python 3 only)
-cd docs/build/html
-python -m http.server
-```
-
-If you are developing on a remote machine, you can set up an SSH tunnel so that
-you can access the HTTP server on the remote machine on your local machine. To map
-remote port 8086 to local port 8086, use either of the following commands.
-
-```bash
-# For SSH
-ssh my_machine -L 8086:my_machine:8086
-
-# For Eternal Terminal
-et my_machine -t="8086:8086"
-```
-
-Then navigate to `localhost:8086` in your web browser.
-
 #### Tips
 
 The `.rst` source files live in [docs/source](docs/source). Some of the `.rst`
@@ -267,12 +272,84 @@ ls | grep rst | grep -v index | grep -v jit | xargs rm
 # Make your changes, build the docs, etc.
 
 # Don't commit the deletions!
-git add index.rst jit.rst 
+git add index.rst jit.rst
 ...
 ```
 
+#### Building C++ Documentation
+For C++ documentation (https://pytorch.org/cppdocs), we use
+[Doxygen](http://www.doxygen.nl/) and then convert it to
+[Sphinx](http://www.sphinx-doc.org/) via
+[Breathe](https://github.com/michaeljones/breathe) and
+[Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
+reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
+information on the documentation syntax.
 
-### Adding Documentation Tests
+We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
+commands. To run this check locally, run `./check-doxygen.sh` from inside
+`docs/cpp`.
+
+To build the documentation, follow the same steps as above, but run them from
+`docs/cpp` instead of `docs`.
+
+### Previewing changes
+
+To view HTML files locally, you can open the files in your web browser. For example,
+navigate to `file:///your_pytorch_folder/docs/build/html/index.html` in a web
+browser.
+
+If you are developing on a remote machine, you can set up an SSH tunnel so that
+you can access the HTTP server on the remote machine from your local machine. To map
+remote port 8000 to local port 8000, use either of the following commands.
+
+```bash
+# For SSH
+ssh my_machine -L 8000:my_machine:8000
+
+# For Eternal Terminal
+et my_machine -t="8000:8000"
+```
+
+Then navigate to `localhost:8000` in your web browser.
+
+#### Submitting changes for review
+
+It is helpful when submitting a PR that changes the docs to provide a rendered
+version of the result. If your change is small, you can add a screenshot of the
+changed docs to your PR.
+
+If your change to the docs is large and affects multiple pages, you can host
+the docs yourself with the following steps, then add a link to the output in your
+PR. These instructions use GitHub pages to host the docs
+you have built. To do so, follow [these steps](https://guides.github.com/features/pages/)
+to make a repo to host your changed documentation.
+
+GitHub pages expects to be hosting a Jekyll generated website which does not work
+well with the static resource paths used in the PyTorch documentation. To get around
+this, you must add an empty file called `.nojekyll` to your repo.
+
+```bash
+cd your_github_pages_repo
+touch .nojekyll
+git add .
+git commit
+git push
+```
+
+Then, copy built documentation and push the changes:
+
+```bash
+cd your_github_pages_repo
+cp -r ~/my_pytorch_path/docs/build/html/* .
+git add .
+git commit
+git push
+```
+
+Then you should be able to see the changes at your_github_username.github.com/your_github_pages_repo.
+
+
+### Adding documentation tests
 
 It is easy for code snippets in docstrings and `.rst` files to get out of date. The docs
 build includes the [Sphinx Doctest Extension](https://www.sphinx-doc.org/en/master/usage/extensions/doctest.html),
@@ -286,7 +363,58 @@ cd docs
 make doctest
 ```
 
-## Managing Multiple Build Trees
+## Profiling with `py-spy`
+
+Evaluating the performance impact of code changes in PyTorch can be complicated,
+particularly if code changes happen in compiled code. One simple way to profile
+both Python and C++ code in PyTorch is to use
+[`py-spy`](https://github.com/benfred/py-spy), a sampling profiler for Python
+that has the ability to profile native code and Python code in the same session.
+
+`py-spy` can be installed via `pip`:
+
+```bash
+$ pip install py-spy
+```
+
+To use `py-spy`, first write a Python test script that exercises the
+functionality you would like to profile. For example, this script profiles
+`torch.add`:
+
+```python
+import torch
+
+t1 = torch.tensor([[1, 1], [1, 1.]])
+t2 = torch.tensor([[0, 0], [0, 0.]])
+
+for _ in range(1000000):
+    torch.add(t1, t2)
+```
+
+Since the `torch.add` operation happens in microseconds, we repeat it a large
+number of times to get good statistics. The most straightforward way to use
+`py-spy` with such a script is to generate a [flame
+graph](http://www.brendangregg.com/flamegraphs.html):
+
+```bash
+$ py-spy record -o profile.svg --native -- python test_tensor_tensor_add.py
+```
+
+This will output a file named `profile.svg` containing a flame graph you can
+view in a web browser or SVG viewer. Individual stack frame entries in the graph
+can be selected interactively with your mouse to zoom in on a particular part of
+the program execution timeline. The `--native` command-line option tells
+`py-spy` to record stack frame entries for PyTorch C++ code. To get line numbers
+for C++ code it may be necessary to compile PyTorch in debug mode by prepending
+your `setup.py develop` call to compile PyTorch with `DEBUG=1`. Depending on
+your operating system it may also be necessary to run `py-spy` with root
+privileges.
+
+`py-spy` can also work in an `htop`-like "live profiling" mode and can be
+tweaked to adjust the stack sampling rate, see the `py-spy` readme for more
+details.
+
+## Managing multiple build trees
 
 One downside to using `python setup.py develop` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
@@ -305,7 +433,7 @@ source activate pytorch-myfeature
 python setup.py develop
 ```
 
-## C++ Development tips
+## C++ development tips
 
 If you are working on the C++ code, there are a few important things that you
 will want to keep in mind:
@@ -313,7 +441,7 @@ will want to keep in mind:
 1. How to rebuild only the code you are working on.
 2. How to make rebuilds in the absence of changes go faster.
 
-### Build only what you need.
+### Build only what you need
 
 `python setup.py build` will build everything by default, but sometimes you are
 only interested in a specific component.
@@ -336,10 +464,11 @@ variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `BUILD_TEST`, `U
 - `USE_FBGEMM=0` will disable using FBGEMM (quantized 8-bit server operators).
 - `USE_NNPACK=0` will disable compiling with NNPACK.
 - `USE_QNNPACK=0` will disable QNNPACK build (quantized 8-bit operators).
+- `USE_XNNPACK=0` will disable compiling with XNNPACK.
 
 For example:
 ```bash
-DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 python setup.py develop
+DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python setup.py develop
 ```
 
 For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
@@ -356,7 +485,7 @@ C++ code. You need to `pip install ninja` to generate accurate
 information for the code in `torch/csrc`. More information at:
 - https://sarcasm.github.io/notes/dev/compilation-database.html
 
-### Make no-op build fast.
+### Make no-op build fast
 
 #### Use Ninja
 
@@ -483,7 +612,17 @@ The easiest way to use `lld` this is download the
 ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
 ```
 
-## CUDA Development tips
+### C++ frontend development tips
+
+We have very extensive tests in the [test/cpp/api](test/cpp/api) folder. The
+tests are a great way to see how certain components are intended to be used.
+When compiling PyTorch from source, the test runner binary will be written to
+`build/bin/test_api`. The tests use the [GoogleTest](https://github.com/google/googletest/blob/master/googletest)
+framework, which you can read up about to learn how to configure the test runner. When
+submitting a new feature, we care very much that you write appropriate tests.
+Please follow the lead of the other tests to see how to write a new test case.
+
+## CUDA development tips
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
 
@@ -492,7 +631,7 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
     slow down the build process for about 50% (compared to only `DEBUG=1`), so use wisely.
 2. `cuda-gdb` and `cuda-memcheck` are your best CUDA debugging friends. Unlike`gdb`,
    `cuda-gdb` can display actual values in a CUDA tensor (rather than all zeros).
-3. CUDA supports a lot of C++11 features such as, `std::numeric_limits`, `std::nextafter`,
+3. CUDA supports a lot of C++11/14 features such as, `std::numeric_limits`, `std::nextafter`,
    `std::tuple` etc. in device code. Many of such features are possible because of the
    [--expt-relaxed-constexpr](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#constexpr-functions)
    nvcc flag. There is a known [issue](https://github.com/ROCm-Developer-Tools/HIP/issues/374)
@@ -569,7 +708,7 @@ two dynamic libraries, one linking with the other:
 
 ```CMake
 project(myproject CXX)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 add_library(foo SHARED foo.cpp)
 add_library(bar SHARED bar.cpp)
 # NB: don't forget to __declspec(dllexport) at least one symbol from foo,
@@ -643,7 +782,7 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
   we have AliasAnalysisKind::PURE_FUNCTION and not AliasAnalysisKind::PURE.
   The same is likely true for other identifiers that we just didn't try to use yet.
 
-### Running Clang-Tidy
+## Running clang-tidy
 
 [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
 linter and static analysis tool based on the clang compiler. We run clang-tidy
@@ -674,7 +813,7 @@ root folder if you used `setup.py build`. You can use `-c <clang-tidy-binary>`
 to change the clang-tidy this script uses. Make sure you have PyYaml installed,
 which is in PyTorch's `requirements.txt`.
 
-### Pre-commit Tidy/Linting Hook
+## Pre-commit tidy/linting hook
 
 We use clang-tidy and flake8 (installed with flake8-bugbear,
 flake8-comprehensions, flake8-mypy, and flake8-pyi) to perform additional
@@ -689,7 +828,7 @@ You'll need to install an appropriately configured flake8; see
 [Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
 for documentation on how to do this.
 
-### Building PyTorch with ASAN
+## Building PyTorch with ASAN
 
 [ASAN](https://github.com/google/sanitizers/wiki/AddressSanitizer) is very
 useful for debugging memory errors in C++. We run it in CI, but here's how to
@@ -715,7 +854,7 @@ build_with_asan()
   LDFLAGS="-stdlib=libstdc++" \
   CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
-  NO_CUDA=1 USE_OPENMP=0 BUILD_CAFFE2_OPS=0 NO_DISTRIBUTED=1 DEBUG=1 \
+  USE_CUDA=0 USE_OPENMP=0 BUILD_CAFFE2_OPS=0 USE_DISTRIBUTED=0 DEBUG=1 \
   python setup.py develop
 }
 
@@ -737,7 +876,7 @@ suo-devfair ~/pytorch ❯ build_with_asan
 suo-devfair ~/pytorch ❯ run_with_asan python test/test_jit.py
 ```
 
-#### Getting `ccache` to work
+### Getting `ccache` to work
 
 The scripts above specify the `clang` and `clang++` binaries directly, which
 bypasses `ccache`. Here's how to get `ccache` to work:
@@ -748,7 +887,7 @@ bypasses `ccache`. Here's how to get `ccache` to work:
 3. Change the `CC` and `CXX` variables in `build_with_asan()` to point
    directly to `clang` and `clang++`.
 
-#### Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?
+### Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?
 
 The “standard” workflow for ASAN assumes you have a standalone binary:
 
@@ -769,7 +908,7 @@ workaround for cases like this:
 More information can be found
 [here](https://github.com/google/sanitizers/wiki/AddressSanitizerAsDso).
 
-#### Why LD_PRELOAD in the build function?
+### Why LD_PRELOAD in the build function?
 
 We need `LD_PRELOAD` because there is a cmake check that ensures that a
 simple program builds and runs. If we are building with ASAN as a shared
@@ -778,7 +917,7 @@ dynamic linker errors and the check will fail.
 
 We don’t actually need either of these if we fix the cmake checks.
 
-#### Why no Leak detection?
+### Why no leak detection?
 
 Python leaks a lot of memory. Possibly we could configure a suppression file,
 but we haven’t gotten around to it.
@@ -806,3 +945,38 @@ are Caffe2/PyTorch specific. Here they are:
 - `mypy*`, `requirements.txt`, `setup.py`, `test`, `tools` are
   PyTorch-specific. Don't put Caffe2 code in them without extra
   coordination.
+
+## CI failure tips
+
+Once you submit a PR or push a new commit to a branch that is in
+an active PR, CI jobs will be run automatically. Some of these may
+fail and you will need to find out why, by looking at the logs.
+
+Fairly often, a CI failure might be unrelated to your changes. In this
+case, you can usually ignore the failure.
+
+Some failures might be related to specific hardware or environment
+configurations. In this case, if the job is run by CircleCI, you can
+ssh into the job's session to perform manual debugging using the
+following steps:
+
+1. In the CircleCI page for the failed job, make sure you are logged in
+   and then click the `Rerun` actions dropdown button on the top right.
+   Click `Rerun Job with SSH`.
+
+2. When the job reruns, a new step will be added in the `STEPS` tab
+   labelled `Set up SSH`. Inside that tab will be an ssh command that
+   you can execute in a shell.
+
+3. Once you are connected through ssh, you may need to enter a docker
+   container. Run `docker ps` to check if there are any docker
+   containers running. Note that your CI job might be in the process
+   of initiating a docker container, which means it will not show up
+   yet. It is best to wait until the CI job reaches a step where it is
+   building pytorch or running pytorch tests. If the job does have a
+   docker container, run `docker exec -it IMAGE_ID /bin/bash` to
+   connect to it.
+
+4. Now you can find the pytorch working directory, which could be
+   `~/workspace` or `~/project`, and run commands locally to debug
+   the failure.

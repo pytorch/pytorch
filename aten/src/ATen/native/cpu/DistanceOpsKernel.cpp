@@ -26,7 +26,7 @@ struct Dist {
   //     map :      This tells how to modify (a - b) to form the component that
   //                gets summed.
   //     red :      This tells how to sum the result of map up. This is
-  //                separate because the inf norm actuall uses max instead of
+  //                separate because the inf norm actually uses max instead of
   //                sum.
   //     finish :   This tells what to do with the aggregated value to compute
   //                the norm. Generally this is the result of val ^ (1 / p).
@@ -126,7 +126,7 @@ struct Dist {
     static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return dist == 0.0 ? Vec(0) : diff * diff.abs().pow(p - Vec(2)) * Vec(grad) / Vec(dist).pow(p - Vec(1)); }
   };
 
-  // Info norm
+  // Inf norm
   template<typename data_t>
   struct idist_calc {
     static inline data_t map(const data_t& diff, const data_t& p) { return diff; }

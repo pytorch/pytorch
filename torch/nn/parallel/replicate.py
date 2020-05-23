@@ -1,7 +1,7 @@
-import torch
 import torch.cuda.comm as comm
 from torch.cuda._utils import _get_device_index
-from torch.nn import Parameter
+
+from collections import OrderedDict
 
 
 def _is_script_module(module):
@@ -61,16 +61,6 @@ def _replicatable_module(module, memo=None):
 
     return True
 
-
-def _copy_scriptmodule_methods(modules, module_copies, module_indices):
-    for i, module in enumerate(modules):
-        if not _is_script_module(module):
-            continue
-        replica = module_copies[i]
-        for method_name in module._c._method_names():
-            replica._c.clone_method(module._c, method_name)
-
-
 def _broadcast_coalesced_reshape(tensors, devices, detach=False):
     from ._functions import Broadcast
     if detach:
@@ -120,21 +110,13 @@ def replicate(network, devices, detach=False):
     for i, module in enumerate(modules):
         module_indices[module] = i
         for j in range(num_replicas):
-            if _is_script_module(module):
-                # we have to initialize ScriptModule properly so that
-                # it works with pybind11
-                cpp_replica = torch._C.ScriptModule(torch._jit_internal._qualified_name(type(module)), torch.jit._python_cu, True)
-                for name, the_type, value in module._c._get_attributes():
-                    if name in module._buffers.keys():
-                        continue
-                    cpp_replica._register_attribute(name, the_type, value)
-
-                def init_fn(script_module):
-                    # Don't do anything here, we'll initialize the ScriptModule below
-                    return
-                replica = torch.jit.RecursiveScriptModule._construct(cpp_replica, init_fn)
-            else:
-                replica = module._replicate_for_data_parallel()
+            replica = module._replicate_for_data_parallel()
+            # This is a temporary fix for DDP. DDP needs to access the 
+            # replicated model parameters. It used to do so through 
+            # `mode.parameters()`. The fix added in #33907 for DP stops the
+            # `parameters()` API from exposing the replicated parameters.
+            # Hence, we add a `_former_parameters` dict here to support DDP.
+            replica._former_parameters = OrderedDict()
 
             module_copies[j].append(replica)
 
@@ -148,10 +130,7 @@ def replicate(network, devices, detach=False):
                 module_idx = module_indices[child]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
-                    if _is_script_module(replica):
-                        replica._c._register_module(key, module_copies[j][module_idx]._c)
-                    else:
-                        setattr(replica, key, module_copies[j][module_idx])
+                    setattr(replica, key, module_copies[j][module_idx])
         for key, param in module._parameters.items():
             if param is None:
                 for j in range(num_replicas):
@@ -162,15 +141,11 @@ def replicate(network, devices, detach=False):
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
                     param = param_copies[j][param_idx]
-                    if _is_script_module(replica):
-                        replica._c._register_parameter(key, param, False)
-                    else:
-                        setattr(replica, key, Parameter(param))
-                        # TODO: We need to manually set _parameters with a bare
-                        # non-parameter Tensor, otherwise gradients don't
-                        # accumulate in the original parameters when you call
-                        # backwards() on the DataParallel module.
-                        replica._parameters[key] = param
+                    # parameters in replicas are no longer leaves,
+                    # so setattr them as non-parameter attributes
+                    setattr(replica, key, param)
+                    # expose the parameter for DDP
+                    replica._former_parameters[key] = param
         for key, buf in module._buffers.items():
             if buf is None:
                 for j in range(num_replicas):
@@ -185,12 +160,6 @@ def replicate(network, devices, detach=False):
                     buffer_idx = buffer_indices_not_rg[buf]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
-                    if _is_script_module(replica):
-                        replica._c._register_parameter(key, buffer_copies[j][buffer_idx], True)
-                    else:
-                        setattr(replica, key, buffer_copies[j][buffer_idx])
-
-    for j in range(num_replicas):
-        _copy_scriptmodule_methods(modules, module_copies[j], module_indices)
+                    setattr(replica, key, buffer_copies[j][buffer_idx])
 
     return [module_copies[j][0] for j in range(num_replicas)]

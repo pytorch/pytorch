@@ -10,13 +10,17 @@ import six
 import time
 import torch
 
+from tensorboard.compat import tf
 from tensorboard.compat.proto.event_pb2 import SessionLog
 from tensorboard.compat.proto.event_pb2 import Event
 from tensorboard.compat.proto import event_pb2
+from tensorboard.plugins.projector.projector_config_pb2 import ProjectorConfig
 from tensorboard.summary.writer.event_file_writer import EventFileWriter
 
 from ._convert_np import make_np
-from ._embedding import make_mat, make_sprite, make_tsv, append_pbtxt
+from ._embedding import (
+    make_mat, make_sprite, make_tsv, write_pbtxt, get_embedding_info,
+)
 from ._onnx_graph import load_onnx_graph
 from ._pytorch_graph import graph
 from ._utils import figure_to_image
@@ -264,12 +268,14 @@ class SummaryWriter(object):
         """Returns the directory where event files will be written."""
         return self.log_dir
 
-    def add_hparams(self, hparam_dict=None, metric_dict=None):
+    def add_hparams(self, hparam_dict, metric_dict):
         """Add a set of hyperparameters to be compared in TensorBoard.
 
         Args:
             hparam_dict (dict): Each key-value pair in the dictionary is the
               name of the hyper parameter and it's corresponding value.
+              The type of the value can be one of `bool`, `string`, `float`,
+              `int`, or `None`.
             metric_dict (dict): Each key-value pair in the dictionary is the
               name of the metric and it's corresponding value. Note that the key used
               here should be unique in the tensorboard record. Otherwise the value
@@ -295,7 +301,11 @@ class SummaryWriter(object):
             raise TypeError('hparam_dict and metric_dict should be dictionary.')
         exp, ssi, sei = hparams(hparam_dict, metric_dict)
 
-        with SummaryWriter(log_dir=os.path.join(self.file_writer.get_logdir(), str(time.time()))) as w_hp:
+        logdir = os.path.join(
+            self._get_file_writer().get_logdir(),
+            str(time.time())
+        )
+        with SummaryWriter(log_dir=logdir) as w_hp:
             w_hp.file_writer.add_summary(exp)
             w_hp.file_writer.add_summary(ssi)
             w_hp.file_writer.add_summary(sei)
@@ -335,8 +345,6 @@ class SummaryWriter(object):
 
     def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
         """Adds many scalar data to summary.
-
-        Note that this function also keeps logged scalars in memory. In extreme case it explodes your RAM.
 
         Args:
             main_tag (string): The parent name for the tags
@@ -497,8 +505,8 @@ class SummaryWriter(object):
         Shape:
             img_tensor: Default is :math:`(3, H, W)`. You can use ``torchvision.utils.make_grid()`` to
             convert a batch of tensor into 3xHxW format or call ``add_images`` and let us do the job.
-            Tensor with :math:`(1, H, W)`, :math:`(H, W)`, :math:`(H, W, 3)` is also suitible as long as
-            corresponding ``dataformats`` argument is passed. e.g. CHW, HWC, HW.
+            Tensor with :math:`(1, H, W)`, :math:`(H, W)`, :math:`(H, W, 3)` is also suitable as long as
+            corresponding ``dataformats`` argument is passed, e.g. ``CHW``, ``HWC``, ``HW``.
 
         Examples::
 
@@ -575,19 +583,21 @@ class SummaryWriter(object):
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime)
 
     def add_image_with_boxes(self, tag, img_tensor, box_tensor, global_step=None,
-                             walltime=None, rescale=1, dataformats='CHW'):
+                             walltime=None, rescale=1, dataformats='CHW', labels=None):
         """Add image and draw bounding boxes on the image.
 
         Args:
             tag (string): Data identifier
             img_tensor (torch.Tensor, numpy.array, or string/blobname): Image data
             box_tensor (torch.Tensor, numpy.array, or string/blobname): Box data (for detected objects)
+              box should be represented as [x1, y1, x2, y2].
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
             rescale (float): Optional scale override
             dataformats (string): Image data format specification of the form
               NCHW, NHWC, CHW, HWC, HW, WH, etc.
+            labels (list of string): The label to be shown for each bounding box.
         Shape:
             img_tensor: Default is :math:`(3, H, W)`. It can be specified with ``dataformats`` argument.
             e.g. CHW or HWC
@@ -600,8 +610,13 @@ class SummaryWriter(object):
             img_tensor = workspace.FetchBlob(img_tensor)
         if self._check_caffe2_blob(box_tensor):
             box_tensor = workspace.FetchBlob(box_tensor)
+        if labels is not None:
+            if isinstance(labels, str):
+                labels = [labels]
+            if len(labels) != box_tensor.shape[0]:
+                labels = None
         self._get_file_writer().add_summary(image_boxes(
-            tag, img_tensor, box_tensor, rescale=rescale, dataformats=dataformats), global_step, walltime)
+            tag, img_tensor, box_tensor, rescale=rescale, dataformats=dataformats, labels=labels), global_step, walltime)
 
     def add_figure(self, tag, figure, global_step=None, close=True, walltime=None):
         """Render matplotlib figure into an image and add it to summary.
@@ -685,7 +700,6 @@ class SummaryWriter(object):
     def add_graph(self, model, input_to_model=None, verbose=False):
         # prohibit second call?
         # no, let tensorboard handle it and show its warning message.
-        torch._C._log_api_usage_once("tensorboard.logging.add_graph")
         """Add graph data to summary.
 
         Args:
@@ -694,6 +708,7 @@ class SummaryWriter(object):
                 variables to be fed.
             verbose (bool): Whether to print graph structure in console.
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_graph")
         if hasattr(model, 'forward'):
             # A valid PyTorch model should have a 'forward' method
             self._get_file_writer().add_graph(graph(model, input_to_model, verbose))
@@ -764,27 +779,47 @@ class SummaryWriter(object):
         if global_step is None:
             global_step = 0
             # clear pbtxt?
+
         # Maybe we should encode the tag so slashes don't trip us up?
         # I don't think this will mess us up, but better safe than sorry.
         subdir = "%s/%s" % (str(global_step).zfill(5), self._encode(tag))
         save_path = os.path.join(self._get_file_writer().get_logdir(), subdir)
-        try:
-            os.makedirs(save_path)
-        except OSError:
-            print(
-                'warning: Embedding dir exists, did you set global_step for add_embedding()?')
+
+        fs = tf.io.gfile.get_filesystem(save_path)
+        if fs.exists(save_path):
+            if fs.isdir(save_path):
+                print(
+                    'warning: Embedding dir exists, did you set global_step for add_embedding()?')
+            else:
+                raise Exception("Path: `%s` exists, but is a file. Cannot proceed." % save_path)
+        else:
+            fs.makedirs(save_path)
+
         if metadata is not None:
             assert mat.shape[0] == len(
                 metadata), '#labels should equal with #data points'
             make_tsv(metadata, save_path, metadata_header=metadata_header)
+
         if label_img is not None:
             assert mat.shape[0] == label_img.shape[0], '#images should equal with #data points'
             make_sprite(label_img, save_path)
+
         assert mat.ndim == 2, 'mat should be 2D, where mat.size(0) is the number of data points'
         make_mat(mat, save_path)
-        # new funcion to append to the config file a new embedding
-        append_pbtxt(metadata, label_img,
-                     self._get_file_writer().get_logdir(), subdir, global_step, tag)
+
+        # Filesystem doesn't necessarily have append semantics, so we store an
+        # internal buffer to append to and re-write whole file after each
+        # embedding is added
+        if not hasattr(self, "_projector_config"):
+            self._projector_config = ProjectorConfig()
+        embedding_info = get_embedding_info(
+            metadata, label_img, fs, subdir, global_step, tag)
+        self._projector_config.embeddings.extend([embedding_info])
+
+        from google.protobuf import text_format
+        config_pbtxt = text_format.MessageToString(self._projector_config)
+        write_pbtxt(self._get_file_writer().get_logdir(), config_pbtxt)
+
 
     def add_pr_curve(self, tag, labels, predictions, global_step=None,
                      num_thresholds=127, weights=None, walltime=None):

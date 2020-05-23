@@ -20,6 +20,7 @@ import yaml
 import argparse
 import os
 from copy import deepcopy
+from typing import Dict, List
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--template_dir", default=".", help="where template.h is")
@@ -38,7 +39,7 @@ if args.aten_root:
     sys.path.append(os.path.join(args.aten_root, 'src', 'ATen'))
     from code_template import CodeTemplate as CT
 else:
-    from src.ATen.code_template import CodeTemplate as CT
+    from src.ATen.code_template import CodeTemplate as CT  # type: ignore[import,no-redef]
 
 OP_TEMPLATE = CT.from_file(
     os.path.join(args.template_dir, 'aten_op_template.h'))
@@ -48,7 +49,7 @@ try:
     # use faster C loader if available
     from yaml import CLoader as Loader
 except ImportError:
-    from yaml import Loader
+    from yaml import Loader  # type: ignore[misc]
 
 
 def write(filename, s):
@@ -73,7 +74,7 @@ def value_is_tensor_type(v):
 # for each aten type, how do we handle a return value of that type?
 RETURN_MAP = {
     'Tensor': 'assignTo(Output(${offset}),${output});',
-    'Scalar': 'assignTo(Output(${offset}),self.scalar_type(), ${output});',
+    'Scalar': 'assignTo(Output(${offset}),${output}.type(), ${output});',
     'bool': 'assignToValue<int64_t>(Output(${offset}),${output});',
     'int64_t': 'assignToValue<int64_t>(Output(${offset}),${output});',
     'std::vector<Tensor>': 'assignListStartingAt(${offset}, ${output});',
@@ -91,6 +92,12 @@ ARGUMENT_MAP = {
     'IntArrayRef': 'auto ${arg} = readIntArrayRef("${arg}");',
     'std::array<bool,2>': 'auto ${arg} = readBoolMask<2>("${arg}");',
     'std::array<bool,3>': 'auto ${arg} = readBoolMask<3>("${arg}");',
+}
+
+# for BC reasons we want to route some of the functions to different
+# implementations
+SPECIAL_IMPLEMENTATIONS = {
+    'index': 'internal::index_with_uint8_handling',
 }
 
 def expand(o):
@@ -124,6 +131,10 @@ def supports(o, factory_methods):
     if "_out" in o['name']:
         return False
 
+    # skip if no return, previously it is 'void'
+    if len(o['returns']) == 0:
+        return False
+
     # skip return types we cannot handle
     for ret in o['returns']:
         if not value_has_tensors(ret) and ret['type'] not in RETURN_MAP:
@@ -150,6 +161,7 @@ OPTION_TEMPLATE = CT("""\
 case ${key}: { // ${name}
     ${initialization}
     run_op = [=] {
+        at::AutoNonVariableTypeMode guard;
         ${statements}
         auto the_result = ${invocation};
         ${assignments}
@@ -217,7 +229,7 @@ if __name__ == '__main__':
     top_env = {
         'mappings': [],
         'implementations': [],
-    }
+    }  # type: Dict[str, List]
     seen = set()
     key = 0
     for o in filtered:
@@ -262,7 +274,7 @@ if __name__ == '__main__':
         real_inputs = 0
         for i, arg in enumerate(o['arguments']):
             env['arguments'].append(arg['name'])
-            # Emulate logic in gen_jit_dispatch.py. Pretend the flat argument
+            # Emulate logic in gen_unboxing_wrappers.py. Pretend the flat argument
             # list is a stack where the end is the top.
             view_length = 'InputSize()' if has_tensorlist and i < tensorlist_idx else static_tensor_inputs
             if arg['type'] == 'TensorList':
@@ -282,7 +294,9 @@ if __name__ == '__main__':
 
         emit_assignments(o, env)
 
-        if 'namespace' in o['method_of']:
+        if o['name'] in SPECIAL_IMPLEMENTATIONS:
+            env['invocation'] = "{}({})".format(SPECIAL_IMPLEMENTATIONS[o['name']], ','.join(env['arguments']))
+        elif 'namespace' in o['method_of']:
             env['invocation'] = CT("at::${name}(${arguments})").substitute(env)
         else:
             assert('Tensor' in o['method_of'])

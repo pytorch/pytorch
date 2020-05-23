@@ -10,20 +10,6 @@
 #include <THC/THCNumerics.cuh>
 #include <THC/THCReduce.cuh>
 
-
-template <typename T>
-struct TensorSigmoidOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) const {
-    T one = (T) 1.0;
-    *out = one / (one + THCNumerics<T>::exp(- *in));
-  }
-
-  __device__ __forceinline__ void operator()(T* v) const {
-    T one = (T) 1.0;
-    *v = one / (one + THCNumerics<T>::exp(- *v));
-  }
-};
-
 template <typename T>
 struct TensorCAddOp {
   TensorCAddOp(T v) : val(v) {}
@@ -47,72 +33,6 @@ struct TensorMulOp {
 
   __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
     *out = *in1 * *in2;
-  }
-};
-
-template<typename T>
-static __device__ __forceinline__
-typename std::enable_if<std::is_signed<T>::value, bool>::type
-modulo_wrap(T a, T b) {
-  return (a != 0) && (a < 0) != (b < 0);
-}
-
-template<typename T>
-static __device__ __forceinline__
-typename std::enable_if<std::is_unsigned<T>::value, bool>::type
-modulo_wrap(T a, T b) {
-  return false;
-}
-
-template <typename T>
-struct TensorCRemainderOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    T val =  *out % *in;
-    if (modulo_wrap(val, *in)) {
-      val += *in;
-    }
-    *out = val;
-  }
-
-  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    T val = *in1 % *in2;
-    if (modulo_wrap(val, *in2)) {
-      val += *in2;
-    }
-    *out = val;
-  }
-};
-
-template <>
-struct TensorCRemainderOp<float> {
-  __device__ __forceinline__ void operator()(float* out, float* in) {
-    *out = *in != 0.f ? *out - *in * floorf(*out / *in) : NAN;
-  }
-
-  __device__ __forceinline__ void operator()(float* out, float* in1, float* in2) {
-    *out = *in2 != 0.f ? *in1 - *in2 * floorf(*in1 / *in2) : NAN;
-  }
-};
-
-template <>
-struct TensorCRemainderOp<double> {
-  __device__ __forceinline__ void operator()(double* out, double* in) {
-    *out = *in != 0. ? *out - *in * floor(*out / *in) : NAN;
-  }
-
-  __device__ __forceinline__ void operator()(double* out, double* in1, double* in2) {
-    *out = *in2 != 0. ? *in1 - *in2 * floor(*in1 / *in2) : NAN;
-  }
-};
-
-template <>
-struct TensorCRemainderOp<at::Half> {
-  __device__ __forceinline__ void operator()(at::Half* out, at::Half* in) {
-    *out = *in != 0.f ? *out - *in * floorf(*out / *in) : NAN;
-  }
-
-  __device__ __forceinline__ void operator()(at::Half* out, at::Half* in1, at::Half* in2) {
-    *out = *in2 != 0.f ? *in1 - *in2 * floorf(*in1 / *in2) : NAN;
   }
 };
 
@@ -158,23 +78,6 @@ struct TensorCFmodOp<at::Half> {
   __device__ __forceinline__ void operator()(at::Half* out, at::Half* in1, at::Half* in2) {
     *out = fmodf(*in1, *in2);
   }
-};
-
-template <typename T>
-struct TensorClampOp {
-  TensorClampOp(T min, T max) : minValue(min), maxValue(max) {}
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    T val = THCNumerics<T>::lt(*in, minValue) ? minValue : *in;
-    *out = THCNumerics<T>::gt(val, maxValue) ? maxValue : val;
-  }
-
-  __device__ __forceinline__ void operator()(T* v) {
-    T val = THCNumerics<T>::lt(*v, minValue) ? minValue : *v;
-    *v = THCNumerics<T>::gt(val, maxValue) ? maxValue : val;
-  }
-
-  const T minValue;
-  const T maxValue;
 };
 
 template <typename T>
@@ -255,123 +158,6 @@ struct TensorMinValueOp {
   }
 
   T val;
-};
-
-template <typename T>
-struct TensorLShiftOp {
-  __device__ __forceinline__ void
-  operator()(T* out, T* in) {
-    *out <<= *in;
-  }
-
-  __device__ __forceinline__ void
-  operator()(T* out, T* in1, T* in2) {
-    *out = *in1 << *in2;
-  }
-};
-
-template <>
-struct TensorLShiftOp<float> {
-  __device__ __forceinline__ void
-  operator()(float* out, float* in) {
-    *out *= powf(2.0f, *in);
-  }
-
-  __device__ __forceinline__ void
-  operator()(float* out, float* in1, float* in2) {
-    *out = *in1 * powf(2.0f, *in2);
-  }
-};
-
-template <>
-struct TensorLShiftOp<double> {
-  __device__ __forceinline__ void
-  operator()(double* out, double* in) {
-    *out *= pow(2.0, *in);
-  }
-
-  __device__ __forceinline__ void
-  operator()(double* out, double* in1, double* in2) {
-    *out = *in1 * pow(2.0, *in2);
-  }
-};
-
-template <typename T>
-struct TensorRShiftOp {
-  __device__ __forceinline__ void
-  operator()(T* out, T* in) {
-    *out >>= *in;
-  }
-
-  __device__ __forceinline__ void
-  operator()(T* out, T* in1, T* in2) {
-    *out = *in1 >> *in2;
-  }
-};
-
-template <>
-struct TensorRShiftOp<float> {
-  __device__ __forceinline__ void
-  operator()(float* out, float* in) {
-    *out /= powf(2.0f, *in);
-  }
-
-  __device__ __forceinline__ void
-  operator()(float* out, float* in1, float* in2) {
-    *out = *in1 / powf(2.0f, *in2);
-  }
-};
-
-template <>
-struct TensorRShiftOp<double> {
-  __device__ __forceinline__ void
-  operator()(double* out, double* in) {
-    *out /= pow(2.0, *in);
-  }
-
-  __device__ __forceinline__ void
-  operator()(double* out, double* in1, double* in2) {
-    *out = *in1 / pow(2.0, *in2);
-  }
-};
-
-template <typename T>
-struct TensorBitAndOp {
-  __device__ __forceinline__ void
-  operator()(T* out, T* in) {
-    *out &= *in;
-  }
-
-  __device__ __forceinline__ void
-  operator()(T* out, T* in1, T* in2) {
-    *out = *in1 & *in2;
-  }
-};
-
-template <typename T>
-struct TensorBitOrOp {
-  __device__ __forceinline__ void
-  operator()(T* out, T* in) {
-    *out |= *in;
-  }
-
-  __device__ __forceinline__ void
-  operator()(T* out, T* in1, T* in2) {
-    *out = *in1 | *in2;
-  }
-};
-
-template <typename T>
-struct TensorBitXorOp {
-  __device__ __forceinline__ void
-  operator()(T* out, T* in) {
-    *out ^= *in;
-  }
-
-  __device__ __forceinline__ void
-  operator()(T* out, T* in1, T* in2) {
-    *out = *in1 ^ *in2;
-  }
 };
 
 #endif // THC_TENSORMATH_POINTWISE_CUH

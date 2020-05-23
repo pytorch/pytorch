@@ -1,8 +1,8 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <string>
 #include <memory>
+#include <string>
 
 namespace torch {
 namespace jit {

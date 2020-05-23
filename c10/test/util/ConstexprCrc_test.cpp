@@ -1,13 +1,7 @@
 #include <c10/util/ConstexprCrc.h>
 
+using c10::util::crc64;
 using c10::util::crc64_t;
-
-namespace {
-template <size_t N>
-constexpr crc64_t crc64(const char (&input)[N]) {
-  return c10::util::crc64(input, N - 1);
-}
-} // namespace
 
 // generic tests
 static_assert(

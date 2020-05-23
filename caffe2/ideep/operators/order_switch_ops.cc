@@ -13,7 +13,7 @@ class IDEEPNHWC2NCHWOp final : public IDEEPOperator {
   bool RunOnDevice() override {
     const auto& X = Input(0);
     CAFFE_ENFORCE_EQ(X.ndims(), 4);
-    CAFFE_ENFORCE(X.get_internal_format() == iformat::nhwc);
+    CAFFE_ENFORCE(X.get_desc().is_nhwc());
 
     auto *Y = Output(OUTPUT);
     CAFFE_ENFORCE(Y != &X);
@@ -39,7 +39,7 @@ class IDEEPNCHW2NHWCOp final : public IDEEPOperator {
   bool RunOnDevice() override {
     const auto& X = Input(0);
     CAFFE_ENFORCE_EQ(X.ndims(), 4);
-    CAFFE_ENFORCE(X.get_internal_format() == iformat::nchw);
+    CAFFE_ENFORCE(X.get_desc().is_nchw());
 
     auto *Y = Output(OUTPUT);
     CAFFE_ENFORCE(Y != &X);

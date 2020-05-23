@@ -9,12 +9,15 @@ namespace {
 void SetInputTensorDescriptorTypeAndBuffer(
     const Tensor& cpu_tensor,
     onnxTensorDescriptorV1* desc) {
-  if (cpu_tensor.template IsType<float>()) {
-    desc->dataType = ONNXIFI_DATATYPE_FLOAT32;
-    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<float>());
-  } else if (cpu_tensor.template IsType<int32_t>()) {
+  if (cpu_tensor.template IsType<int32_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_INT32;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int32_t>());
+  } else if (cpu_tensor.template IsType<c10::Half>()) {
+    desc->dataType = ONNXIFI_DATATYPE_FLOAT16;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<c10::Half>());
+  } else if (cpu_tensor.template IsType<float>()) {
+    desc->dataType = ONNXIFI_DATATYPE_FLOAT32;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<float>());
   } else if (cpu_tensor.template IsType<int8_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_INT8;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int8_t>());
@@ -27,9 +30,6 @@ void SetInputTensorDescriptorTypeAndBuffer(
   } else if (cpu_tensor.template IsType<int16_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_INT16;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int16_t>());
-  } else if (cpu_tensor.template IsType<c10::Half>()) {
-    desc->dataType = ONNXIFI_DATATYPE_FLOAT16;
-    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<c10::Half>());
   } else if (cpu_tensor.template IsType<uint16_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_UINT16;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<uint16_t>());
@@ -60,14 +60,15 @@ void SetInputTensorDescriptorTypeAndBuffer(
 }
 
 TypeMeta OnnxifiTypeToDataType(uint64_t onnxifi_type) {
-  static std::map<uint64_t, TypeMeta> data_type_map {
-    {ONNXIFI_DATATYPE_FLOAT32, TypeMeta::Make<float>()},
-    {ONNXIFI_DATATYPE_INT32, TypeMeta::Make<int>()},
-    {ONNXIFI_DATATYPE_INT8, TypeMeta::Make<int8_t>()},
-    {ONNXIFI_DATATYPE_UINT8, TypeMeta::Make<uint8_t>()},
-    {ONNXIFI_DATATYPE_INT64, TypeMeta::Make<int64_t>()},
-    {ONNXIFI_DATATYPE_INT16, TypeMeta::Make<int16_t>()},
-    {ONNXIFI_DATATYPE_UINT16, TypeMeta::Make<uint16_t>()},
+  static std::map<uint64_t, TypeMeta> data_type_map{
+      {ONNXIFI_DATATYPE_FLOAT32, TypeMeta::Make<float>()},
+      {ONNXIFI_DATATYPE_FLOAT16, TypeMeta::Make<c10::Half>()},
+      {ONNXIFI_DATATYPE_INT32, TypeMeta::Make<int>()},
+      {ONNXIFI_DATATYPE_INT8, TypeMeta::Make<int8_t>()},
+      {ONNXIFI_DATATYPE_UINT8, TypeMeta::Make<uint8_t>()},
+      {ONNXIFI_DATATYPE_INT64, TypeMeta::Make<int64_t>()},
+      {ONNXIFI_DATATYPE_INT16, TypeMeta::Make<int16_t>()},
+      {ONNXIFI_DATATYPE_UINT16, TypeMeta::Make<uint16_t>()},
   };
   const auto it = data_type_map.find(onnxifi_type);
   CAFFE_ENFORCE(
@@ -87,11 +88,12 @@ void SetOutputTensorDescriptorTypeAndBuffer(
 }
 
 #ifndef C10_MOBILE
-void CopyDescriptor(
+void copyDescriptor(
     const ExternalTensorDescriptor* from,
     onnxTensorDescriptorV1* to) {
   to->dataType = from->dataType;
   to->buffer = from->buffer;
+  to->isOffline = from->isOffline;
   to->quantizationParams = from->quantizationParams;
   to->quantizationAxis = from->quantizationAxis;
   to->scales = from->scales;
@@ -130,6 +132,7 @@ void BlobToTensorDescriptor(
       " needs to be TensorCPU or Int8TensorCPU or Int8FCDNNLowPPackedWeightBlob Based class");
   desc->tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
   desc->memoryType = ONNXIFI_MEMORY_TYPE_CPU;
+  desc->isOffline = false;
 
   if (is_int8tensor) {
     // Data type
@@ -146,7 +149,7 @@ void BlobToTensorDescriptor(
     ExternalTensorDescriptor ext_desc;
     function_ptr->SetupExternalTensorDescriptor(
         blob, shapes, all_scales, all_offsets, &ext_desc);
-    CopyDescriptor(&ext_desc, desc);
+    copyDescriptor(&ext_desc, desc);
 #endif
   } else {
     // Data type
@@ -197,11 +200,38 @@ OnnxifiOp<CPUContext>::buildInitializationList(
 }
 
 template <>
-void OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
-  output_reshape_info_.skip = false;
+details::OutputReshapeInfo OnnxifiOp<CPUContext>::initOutputReshapeInfo()
+    const {
+  details::OutputReshapeInfo output_reshape_info;
+  output_reshape_info.begins.reserve(output_names_.size());
+  output_reshape_info.ends.reserve(output_names_.size());
+  output_reshape_info.fast_path.reserve(output_names_.size());
+  for (int i = 0; i < output_names_.size(); ++i) {
+    const auto it = output_shape_hints_.find(i);
+    CAFFE_ENFORCE(
+        it != output_shape_hints_.end(),
+        "Cannot find output shape hints for ",
+        output_names_[i]);
+    int64_t num_dims = it->second.dims.size();
+    // Initialize the tensors used to slice the output
+    output_reshape_info.begins.emplace_back();
+    ReinitializeTensor(
+        &output_reshape_info.begins.back(),
+        {num_dims},
+        at::dtype<int32_t>().device(CPU));
+    output_reshape_info.ends.emplace_back();
+    ReinitializeTensor(
+        &output_reshape_info.ends.back(),
+        {num_dims},
+        at::dtype<int32_t>().device(CPU));
+  }
+  return output_reshape_info;
+}
+
+template <>
+int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
   if (use_onnx_ || !adjust_output_batch_) {
-    output_reshape_info_.skip = true;
-    return;
+    return max_batch_size_;
   }
 
   // Get the real batch size from nominal input. If it's equal to
@@ -210,13 +240,22 @@ void OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
   // outputs.
   const auto& t = Input(nominal_batch_idx_);
   const auto dims = t.sizes();
+  const int current_batch_size = dims[0];
   CAFFE_ENFORCE(
       !t.sizes().empty(), input_names_[nominal_batch_idx_], " cannot be empty");
-  if (dims[0] == max_batch_size_) {
-    output_reshape_info_.skip = true;
-    return;
+  if (current_batch_size == max_batch_size_) {
+    return max_batch_size_;
   }
 
+  // We still need to adjust output size but we can skip the shape inference as
+  // it was done before.
+  if (output_reshape_info_.count(current_batch_size)) {
+    return current_batch_size;
+  }
+
+  auto it =
+      output_reshape_info_.emplace(current_batch_size, initOutputReshapeInfo());
+  auto& output_reshape_info = it.first->second;
   BoundShapeSpec spec(dims[0], max_seq_size_);
   auto bound_shape_inferencer =
       BoundShapeInferencerRegistry()->Create("C10", spec);
@@ -227,8 +266,12 @@ void OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     for (const auto d : dim0) {
       shape.add_dims(d);
     }
-    input_shape_info_[input_names_[i]] =
-        ShapeInfo(ShapeInfo::DimType::BATCH, std::move(shape));
+    std::vector<TensorBoundShape::DimType> dim_type(
+        shape.dims_size(), TensorBoundShape_DimType_CONSTANT);
+    if (dim_type.size()) {
+      dim_type[0] = TensorBoundShape_DimType_BATCH;
+    }
+    input_shape_info_[input_names_[i]] = ShapeInfo(dim_type, std::move(shape));
   }
   bound_shape_inferencer->InferBoundShapeAndType(
       netdef_, input_shape_info_, nullptr);
@@ -240,10 +283,10 @@ void OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     const auto& max_shape = output_shapes_[i];
     CAFFE_ENFORCE_EQ(real_shape.dims_size(), max_shape.size());
     const auto dim_size = real_shape.dims_size();
-    auto& begin = output_reshape_info_.begins[i];
+    auto& begin = output_reshape_info.begins[i];
     begin.Resize(dim_size);
     int32_t* begin_ptr = begin.template mutable_data<int32_t>();
-    auto& end = output_reshape_info_.ends[i];
+    auto& end = output_reshape_info.ends[i];
     end.Resize(dim_size);
     int32_t* end_ptr = end.template mutable_data<int32_t>();
     int32_t mismatch = 0;
@@ -268,26 +311,25 @@ void OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
         end_ptr[j] = -1;
       }
     }
-    output_reshape_info_.fast_path[i] = !mismatch;
+    output_reshape_info.fast_path[i] = !mismatch;
   }
+  return current_batch_size;
 }
 
 template <>
-void OnnxifiOp<CPUContext>::maybeAdjustOutputBatchSizes() {
-  if (output_reshape_info_.skip) {
-    return;
-  }
+void OnnxifiOp<CPUContext>::adjustOutputBatchSizes(int current_batch_size) {
+  const auto& output_reshape_info = output_reshape_info_.at(current_batch_size);
   CPUContext context;
   Tensor tmp(CPU);
   for (int i = 0; i < OutputSize(); ++i) {
     auto* output_tensor = Output(i);
-    const auto& end = output_reshape_info_.ends[i];
-    if (output_reshape_info_.fast_path[i]) {
+    const auto& end = output_reshape_info.ends[i];
+    if (output_reshape_info.fast_path[i]) {
       output_tensor->ShrinkTo(end.data<int32_t>()[0]);
     } else {
       // We need to use generic Slice
       SliceImpl<int32_t, CPUContext>(
-          &tmp, *output_tensor, output_reshape_info_.begins[i], end, &context);
+          &tmp, *output_tensor, output_reshape_info.begins[i], end, &context);
       output_tensor->CopyFrom(tmp);
     }
   }
@@ -344,6 +386,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
   onnxMemoryFenceV1 input_fence;
   onnxMemoryFenceV1 output_fence;
   std::vector<int> output_batch_sizes;
+  int current_batch_size = max_batch_size_;
 #ifdef ONNXIFI_ENABLE_EXT
   /**
    * If onnxifi extension mode is enabled,
@@ -377,7 +420,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
             &output_fence,
             traces_.get()),
         ONNXIFI_STATUS_SUCCESS);
-    extractOutputBatchSizes();
+    current_batch_size = extractOutputBatchSizes();
     CAFFE_ENFORCE_EQ(
         lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
@@ -409,7 +452,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
-    extractOutputBatchSizes();
+    current_batch_size = extractOutputBatchSizes();
     CAFFE_ENFORCE_EQ(
         lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
 
@@ -420,8 +463,8 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
   }
 
-  if (adjust_output_batch_) {
-    maybeAdjustOutputBatchSizes();
+  if (adjust_output_batch_ && current_batch_size != max_batch_size_) {
+    adjustOutputBatchSizes(current_batch_size);
   }
   enable_tracing_ = false;
   return true;

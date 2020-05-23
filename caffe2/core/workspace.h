@@ -278,7 +278,7 @@ class CAFFE2_API Workspace {
                ShouldContinue should_continue = StopOnSignal{});
 
   /*
-   * Returns a CPU threadpool instace for parallel execution of
+   * Returns a CPU threadpool instance for parallel execution of
    * work. The threadpool is created lazily; if no operators use it,
    * then no threadpool will be created.
    */

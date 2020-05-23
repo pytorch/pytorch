@@ -2,6 +2,9 @@
 #define TH_GENERIC_FILE "TH/generic/THBlas.cpp"
 #else
 
+#ifdef USE_FBGEMM
+#include <fbgemm/FbgemmI64.h>
+#endif // USE_FBGEMM
 
 #ifdef BLAS_F2C
 # define ffloat double
@@ -11,8 +14,6 @@
 
 TH_EXTERNC void dswap_(int *n, double *x, int *incx, double *y, int *incy);
 TH_EXTERNC void sswap_(int *n, float *x, int *incx, float *y, int *incy);
-TH_EXTERNC void dscal_(int *n, double *a, double *x, int *incx);
-TH_EXTERNC void sscal_(int *n, float *a, float *x, int *incx);
 TH_EXTERNC void dcopy_(int *n, double *x, int *incx, double *y, int *incy);
 TH_EXTERNC void scopy_(int *n, float *x, int *incx, float *y, int *incy);
 TH_EXTERNC void daxpy_(int *n, double *a, double *x, int *incx, double *y, int *incy);
@@ -30,14 +31,10 @@ static inline ffloat sdot_(const int *n, const float *x, const int *incx, const 
 #else
 TH_EXTERNC ffloat sdot_(int *n, float *x, int *incx, float *y, int *incy);
 #endif
-TH_EXTERNC void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
-TH_EXTERNC void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
 TH_EXTERNC void dger_(int *m, int *n, double *alpha, double *x, int *incx, double *y, int *incy, double *a, int *lda);
 TH_EXTERNC void sger_(int *m, int *n, float *alpha, float *x, int *incx, float *y, int *incy, float *a, int *lda);
 TH_EXTERNC void dgemm_(char *transa, char *transb, int *m, int *n, int *k, double *alpha, double *a, int *lda, double *b, int *ldb, double *beta, double *c, int *ldc);
 TH_EXTERNC void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, float *a, int *lda, float *b, int *ldb, float *beta, float *c, int *ldc);
-
-
 
 void THBlas_(swap)(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy)
 {
@@ -69,37 +66,6 @@ void THBlas_(swap)(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t in
       scalar_t z = x[i*incx];
       x[i*incx] = y[i*incy];
       y[i*incy] = z;
-    }
-  }
-}
-
-void THBlas_(scal)(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
-{
-  if(n == 1)
-    incx = 1;
-
-#if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (n <= INT_MAX) && (incx <= INT_MAX) )
-  {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-
-#if defined(TH_REAL_IS_DOUBLE)
-    dscal_(&i_n, &a, x, &i_incx);
-#else
-    sscal_(&i_n, &a, x, &i_incx);
-#endif
-    return;
-  }
-#endif
-  {
-    int64_t i;
-    for(i = 0; i < n; i++) {
-      if (a == 0) {
-        x[i*incx] = 0;
-      } else {
-        x[i*incx] *= a;
-      }
     }
   }
 }
@@ -195,76 +161,6 @@ scalar_t THBlas_(dot)(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t
   }
 }
 
-void THBlas_(gemv)(
-  char trans,
-  int64_t m,
-  int64_t n,
-  scalar_t alpha,
-  scalar_t *a,
-  int64_t lda,
-  scalar_t *x,
-  int64_t incx,
-  scalar_t beta,
-  scalar_t *y,
-  int64_t incy)
-{
-  if(n == 1)
-    lda = m;
-
-#if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (m <= INT_MAX) && (n <= INT_MAX) && (lda <= INT_MAX) &&
-      (incx > 0) && (incx <= INT_MAX) &&
-      (incy > 0) && (incy <= INT_MAX) )
-  {
-    THArgCheck(lda >= THMax(1, m), 6,
-      "lda should be at least max(1, m=%d), but have %d", m, lda);
-    int i_m = (int)m;
-    int i_n = (int)n;
-    int i_lda = (int)lda;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
-
-#if defined(TH_REAL_IS_DOUBLE)
-    dgemv_(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
-#else
-    sgemv_(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
-#endif
-    return;
-  }
-#endif
-  {
-    int64_t i, j;
-
-    if( (trans == 'T') || (trans == 't') )
-    {
-      for(i = 0; i < n; i++)
-      {
-        scalar_t sum = 0;
-        scalar_t *row_ = a+lda*i;
-        for(j = 0; j < m; j++)
-          sum += x[j*incx]*row_[j];
-          if (beta == 0)
-            y[i*incy] = alpha*sum;
-          else
-            y[i*incy] = beta*y[i*incy] + alpha*sum;
-      }
-    }
-    else
-    {
-      if(beta != 1)
-        THBlas_(scal)(m, beta, y, incy);
-
-      for(j = 0; j < n; j++)
-      {
-        scalar_t *column_ = a+lda*j;
-        scalar_t z = alpha*x[j*incx];
-        for(i = 0; i < m; i++)
-          y[i*incy] += z*column_[i];
-      }
-    }
-  }
-}
-
 void THBlas_(ger)(
   int64_t m,
   int64_t n,
@@ -357,14 +253,10 @@ void THBlas_(gemm)(
 
 #if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
   if( (m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) &&
-      (lda <= INT_MAX) && (ldb <= INT_MAX) && (ldc <= INT_MAX) )
+      (lda <= INT_MAX) && (ldb <= INT_MAX) && (ldc <= INT_MAX) &&
+      (lda >= THMax(1, (transa_ ? k : m))) && (ldb >= THMax(1, (transb_ ? n : k))) &&
+      (ldc >= THMax(1, m)))
   {
-    THArgCheck(lda >= THMax(1, (transa_ ? k : m)), 8,
-      "lda should be at least max(1, %d), but have %d", (transa_ ? k : m), lda);
-    THArgCheck(ldb >= THMax(1, (transb_ ? n : k)), 10,
-      "ldb should be at least max(1, %d), but have %d", (transb_ ? n : k), ldb);
-    THArgCheck(ldc >= THMax(1, m), 13,
-      "ldc should be at least max(1, m=%d), but have %d", m, ldc);
     int i_m = (int)m;
     int i_n = (int)n;
     int i_k = (int)k;
@@ -380,6 +272,38 @@ void THBlas_(gemm)(
     return;
   }
 #endif
+
+#if defined(USE_FBGEMM) && defined(TH_REAL_IS_LONG)
+  if (alpha == 1 && (beta == 0 || beta == 1)) {
+    // In FBGEMM, we assume row-major ordering; However, here we assume the
+    // column-major ordering following the FORTRAN tradition in BLAS interface
+    // in this function: we can configure the layout (row/column-major ordering)
+    // of A and B by changing transa_ and transb_, but we cannot change the
+    // layout of C with this FORTRAN-style BLAS interface.
+    //
+    // The workaround is that we compute
+    // C^T (n x m) = B^T (n x k) * A^T (k x m) instead.
+    //
+    // In this way we view C^T as the row-major ordering when passing to FBGEMM.
+    fbgemm::cblas_gemm_i64_i64acc(
+        transb_ ? fbgemm::matrix_op_t::Transpose
+                : fbgemm::matrix_op_t::NoTranspose,
+        transa_ ? fbgemm::matrix_op_t::Transpose
+                : fbgemm::matrix_op_t::NoTranspose,
+        n,
+        m,
+        k,
+        b,
+        ldb,
+        a,
+        lda,
+        beta == 1,
+        c,
+        ldc);
+    return;
+  }
+#endif
+
   {
     if(!transa_ && !transb_)
     {

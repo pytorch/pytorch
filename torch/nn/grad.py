@@ -2,9 +2,15 @@
 
 import torch
 from .modules.utils import _single, _pair, _triple
+import warnings
 
 
-def _grad_input_padding(grad_output, input_size, stride, padding, kernel_size):
+def _grad_input_padding(grad_output, input_size, stride, padding, kernel_size, dilation=None):
+    if dilation is None:
+        # For backward compatibility
+        warnings.warn("_grad_input_padding 'dilation' argument not provided. Default of 1 is used.")
+        dilation = [1] * len(stride)
+
     input_size = list(input_size)
     k = grad_output.dim() - 2
 
@@ -15,8 +21,8 @@ def _grad_input_padding(grad_output, input_size, stride, padding, kernel_size):
                          .format(k + 2, len(input_size)))
 
     def dim_size(d):
-        return ((grad_output.size(d + 2) - 1) * stride[d] - 2 * padding[d] +
-                kernel_size[d])
+        return ((grad_output.size(d + 2) - 1) * stride[d] - 2 * padding[d] + 1
+                + dilation[d] * (kernel_size[d] - 1))
 
     min_sizes = [dim_size(d) for d in range(k)]
     max_sizes = [min_sizes[d] + stride[d] - 1 for d in range(k)]
@@ -65,7 +71,7 @@ def conv1d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
         raise ValueError("grad.conv1d_input requires specifying an input_size")
 
     grad_input_padding = _grad_input_padding(grad_output, input_size, stride,
-                                             padding, kernel_size)
+                                             padding, kernel_size, dilation)
 
     return torch.conv_transpose1d(
         grad_output, weight, None, stride, padding, grad_input_padding, groups,
@@ -154,7 +160,7 @@ def conv2d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
         raise ValueError("grad.conv2d_input requires specifying an input_size")
 
     grad_input_padding = _grad_input_padding(grad_output, input_size, stride,
-                                             padding, kernel_size)
+                                             padding, kernel_size, dilation)
 
     return torch.conv_transpose2d(
         grad_output, weight, None, stride, padding, grad_input_padding, groups,
@@ -247,7 +253,7 @@ def conv3d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
         raise ValueError("grad.conv3d_input requires specifying an input_size")
 
     grad_input_padding = _grad_input_padding(grad_output, input_size, stride,
-                                             padding, kernel_size)
+                                             padding, kernel_size, dilation)
 
     return torch.conv_transpose3d(
         grad_output, weight, None, stride, padding, grad_input_padding, groups,

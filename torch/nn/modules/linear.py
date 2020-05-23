@@ -63,7 +63,7 @@ class Linear(Module):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    __constants__ = ['bias', 'in_features', 'out_features']
+    __constants__ = ['in_features', 'out_features']
 
     def __init__(self, in_features, out_features, bias=True):
         super(Linear, self).__init__()
@@ -94,7 +94,7 @@ class Linear(Module):
 
 class Bilinear(Module):
     r"""Applies a bilinear transformation to the incoming data:
-    :math:`y = x_1 A x_2 + b`
+    :math:`y = x_1^T A x_2 + b`
 
     Args:
         in1_features: size of each first input sample
@@ -130,7 +130,7 @@ class Bilinear(Module):
         >>> print(output.size())
         torch.Size([128, 40])
     """
-    __constants__ = ['in1_features', 'in2_features', 'out_features', 'bias']
+    __constants__ = ['in1_features', 'in2_features', 'out_features']
 
     def __init__(self, in1_features, in2_features, out_features, bias=True):
         super(Bilinear, self).__init__()

@@ -4,6 +4,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/module.h>
 #include <torch/nn/modules/container/any.h>
+#include <torch/nn/modules/container/named_any.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
@@ -33,7 +34,7 @@ namespace nn {
 ///
 ///   torch::nn::Sequential seq(
 ///     torch::nn::Linear(3, 4),
-///     torch::nn::BatchNorm(4),
+///     torch::nn::BatchNorm1d(4),
 ///     torch::nn::Dropout(0.5)
 ///   );
 ///
@@ -68,7 +69,7 @@ namespace nn {
 ///
 ///   torch::nn::Sequential seq(
 ///     torch::nn::Linear(3, 4),
-///     torch::nn::BatchNorm(4),
+///     torch::nn::BatchNorm1d(4),
 ///     torch::nn::Dropout(0.5)
 ///   );
 ///
@@ -103,12 +104,20 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   }
 
   /// Constructs the `Sequential` from an `OrderedDict` of named `AnyModule`s.
-  /// Combining with `modules_ordered_dict()`, it enables the following use case:
-  /// `Sequential sequential(modules_ordered_dict({{"m1", M(1)}, {"m2", M(2)}}))`
   explicit SequentialImpl(torch::OrderedDict<std::string, AnyModule>&& ordered_dict) {
     modules_.reserve(ordered_dict.size());
     for (auto& item : ordered_dict) {
       push_back(std::move(item.key()), std::move(item.value()));
+    }
+  }
+
+  /// Constructs the `Sequential` from a braced-init-list of named `AnyModule`s.
+  /// It enables the following use case:
+  /// `Sequential sequential({{"m1", M(1)}, {"m2", M(2)}})`
+  explicit SequentialImpl(std::initializer_list<NamedAnyModule> named_modules) {
+    modules_.reserve(named_modules.size());
+    for (const auto& named_module : named_modules) {
+      push_back(std::move(named_module.name()), std::move(named_module.module()));
     }
   }
 
@@ -170,7 +179,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
       input = iterator->any_forward(std::move(input));
     }
 
-    // Check the return value and give a nice error message if the requsted
+    // Check the return value and give a nice error message if the requested
     // return type was incorrect.
     if (auto* return_value = input.template try_get<ReturnType>()) {
       return std::move(*return_value);
@@ -185,7 +194,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// Adds a new (boxed) `Module` to the `Sequential` container.
   template <typename ModuleType>
   void push_back(std::shared_ptr<ModuleType> module_ptr) {
-    push_back(std::to_string(modules_.size()), std::move(module_ptr));
+    push_back(c10::to_string(modules_.size()), std::move(module_ptr));
   }
 
   /// Adds a new named (boxed) `Module` to the `Sequential` container.
@@ -201,7 +210,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// `Sequential(std::make_shared<Module>(3, 4))`.
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   void push_back(M&& module) {
-    push_back(std::to_string(modules_.size()), std::forward<M>(module));
+    push_back(c10::to_string(modules_.size()), std::forward<M>(module));
   }
 
   /// Adds a new named `Module` to the `Sequential` container, moving or copying it
@@ -217,7 +226,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// `Sequential`.
   template <typename M>
   void push_back(const ModuleHolder<M>& module_holder) {
-    push_back(std::to_string(modules_.size()), module_holder);
+    push_back(c10::to_string(modules_.size()), module_holder);
   }
 
   /// Unwraps the contained named module of a `ModuleHolder` and adds it to the
@@ -233,6 +242,17 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     for (const auto& module : container) {
       push_back(module);
     }
+  }
+
+  /// Adds a type-erased `AnyModule` to the `Sequential`.
+  void push_back(AnyModule any_module) {
+    push_back(c10::to_string(modules_.size()), std::move(any_module));
+  }
+
+  void push_back(std::string name, AnyModule any_module) {
+    modules_.push_back(std::move(any_module));
+    const auto index = modules_.size() - 1;
+    register_module(std::move(name), modules_[index].ptr());
   }
 
   /// Returns an iterator to the start of the `Sequential`.
@@ -333,17 +353,6 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     push_back(std::forward<Second>(second), std::forward<Rest>(rest)...);
   }
 
-  /// Adds a type-erased `AnyModule` to the `Sequential`.
-  void push_back(AnyModule any_module) {
-    push_back(std::to_string(modules_.size()), std::move(any_module));
-  }
-
-  void push_back(std::string name, AnyModule any_module) {
-    modules_.push_back(std::move(any_module));
-    const auto index = modules_.size() - 1;
-    register_module(std::move(name), modules_[index].ptr());
-  }
-
   /// The base case, when the list of modules is empty.
   void push_back() {}
 
@@ -357,6 +366,16 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
 /// See the documentation for `SequentialImpl` class to learn what methods it
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
-TORCH_MODULE(Sequential);
+class Sequential : public torch::nn::ModuleHolder<SequentialImpl> {
+ public:
+  using torch::nn::ModuleHolder<SequentialImpl>::ModuleHolder;
+
+  Sequential() : ModuleHolder() {}
+
+  /// Constructs the `Sequential` from a braced-init-list of named `AnyModule`s.
+  /// It enables the following use case:
+  /// `Sequential sequential({{"m1", M(1)}, {"m2", M(2)}})`
+  Sequential(std::initializer_list<NamedAnyModule> named_modules) : ModuleHolder(std::make_shared<SequentialImpl>(std::move(named_modules))) {}
+};
 } // namespace nn
 } // namespace torch

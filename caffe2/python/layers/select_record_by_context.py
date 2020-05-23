@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class SelectRecordByContext(ModelLayer):
     """
-    Allowing model to follow different paths for each instatiation context and
+    Allowing model to follow different paths for each instantiation context and
     join later at some point. The implementation use `Alias` because schema
     sometimes clone fields internally so we need static blob name for output
     """

@@ -912,7 +912,7 @@ class MultiRNNCell(RNNCell):
     '''
     Multilayer RNN via the composition of RNNCell instance.
 
-    It is the resposibility of calling code to ensure the compatibility
+    It is the responsibility of calling code to ensure the compatibility
     of the successive layers in terms of input/output dimensiality, etc.,
     and to ensure that their blobs do not have name conflicts, typically by
     creating the cells with names that specify layer number.
@@ -1644,9 +1644,16 @@ class UnrolledCell(RNNCell):
                 axis=0)[0]
             for full_output in all_states
         ]
+        # Interleave the state values similar to
+        #
+        #   x = [1, 3, 5]
+        #   y = [2, 4, 6]
+        #   z = [val for pair in zip(x, y) for val in pair]
+        #   # z is [1, 2, 3, 4, 5, 6]
+        #
+        # and returns it as outputs
         outputs = tuple(
-            six.next(it) for it in
-            itertools.cycle([iter(all_states), iter(states)])
+            state for state_pair in zip(all_states, states) for state in state_pair
         )
         outputs_without_grad = set(range(len(outputs))) - set(
             outputs_with_grads)

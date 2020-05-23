@@ -1,8 +1,8 @@
-from .batchnorm import _BatchNorm
+from .batchnorm import _NormBase
 from .. import functional as F
 
 
-class _InstanceNorm(_BatchNorm):
+class _InstanceNorm(_NormBase):
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=False,
                  track_running_stats=False):
         super(_InstanceNorm, self).__init__(
@@ -52,7 +52,8 @@ class _InstanceNorm(_BatchNorm):
 class InstanceNorm1d(_InstanceNorm):
     r"""Applies Instance Normalization over a 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
-    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
+    `Instance Normalization: The Missing Ingredient for Fast Stylization
+    <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
 
@@ -83,7 +84,7 @@ class InstanceNorm1d(_InstanceNorm):
         have some subtle differences. :class:`InstanceNorm1d` is applied
         on each channel of channeled data like multidimensional time series, but
         :class:`LayerNorm` is usually applied on entire sample and often in NLP
-        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        tasks. Additionally, :class:`LayerNorm` applies elementwise affine
         transform, while :class:`InstanceNorm1d` usually don't apply affine
         transform.
 
@@ -112,9 +113,6 @@ class InstanceNorm1d(_InstanceNorm):
         >>> m = nn.InstanceNorm1d(100, affine=True)
         >>> input = torch.randn(20, 100, 40)
         >>> output = m(input)
-
-    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
-        https://arxiv.org/abs/1607.08022
     """
 
     def _check_input_dim(self, input):
@@ -133,7 +131,8 @@ class InstanceNorm1d(_InstanceNorm):
 class InstanceNorm2d(_InstanceNorm):
     r"""Applies Instance Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
-    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
+    `Instance Normalization: The Missing Ingredient for Fast Stylization
+    <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
 
@@ -164,7 +163,7 @@ class InstanceNorm2d(_InstanceNorm):
         have some subtle differences. :class:`InstanceNorm2d` is applied
         on each channel of channeled data like RGB images, but
         :class:`LayerNorm` is usually applied on entire sample and often in NLP
-        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        tasks. Additionally, :class:`LayerNorm` applies elementwise affine
         transform, while :class:`InstanceNorm2d` usually don't apply affine
         transform.
 
@@ -193,9 +192,6 @@ class InstanceNorm2d(_InstanceNorm):
         >>> m = nn.InstanceNorm2d(100, affine=True)
         >>> input = torch.randn(20, 100, 35, 45)
         >>> output = m(input)
-
-    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
-        https://arxiv.org/abs/1607.08022
     """
 
     def _check_input_dim(self, input):
@@ -207,7 +203,8 @@ class InstanceNorm2d(_InstanceNorm):
 class InstanceNorm3d(_InstanceNorm):
     r"""Applies Instance Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
-    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
+    `Instance Normalization: The Missing Ingredient for Fast Stylization
+    <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
 
@@ -238,7 +235,7 @@ class InstanceNorm3d(_InstanceNorm):
         have some subtle differences. :class:`InstanceNorm3d` is applied
         on each channel of channeled data like 3D models with RGB color, but
         :class:`LayerNorm` is usually applied on entire sample and often in NLP
-        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        tasks. Additionally, :class:`LayerNorm` applies elementwise affine
         transform, while :class:`InstanceNorm3d` usually don't apply affine
         transform.
 
@@ -267,9 +264,6 @@ class InstanceNorm3d(_InstanceNorm):
         >>> m = nn.InstanceNorm3d(100, affine=True)
         >>> input = torch.randn(20, 100, 35, 45, 10)
         >>> output = m(input)
-
-    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
-        https://arxiv.org/abs/1607.08022
     """
 
     def _check_input_dim(self, input):

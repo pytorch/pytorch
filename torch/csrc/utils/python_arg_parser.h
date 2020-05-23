@@ -49,16 +49,15 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/QScheme.h>
+#include <torch/csrc/Layout.h>
 #include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/jit/ir.h>
-#include <ATen/core/EnableNamedTensor.h>
-#ifdef BUILD_NAMEDTENSOR
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/python_dimname.h>
-#endif
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/six.h>
@@ -96,12 +95,17 @@ struct ParsedArgs {
 struct PythonArgParser {
   explicit PythonArgParser(std::vector<std::string> fmts, bool traceable=false);
 
+  // meant only for `torch` functions.
   template<int N>
   inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
+
+  // Formatted strings of non-hidden signatures
+  std::vector<std::string> get_signatures() const;
 
 private:
   [[noreturn]]
   void print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
+  void check_deprecated(const FunctionSignature & signature);
   PythonArgs raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
 
   std::vector<FunctionSignature> signatures_;
@@ -110,9 +114,27 @@ private:
   bool traceable;
 };
 
+struct PYBIND11_EXPORT FunctionSignature {
+  explicit FunctionSignature(const std::string& fmt, int index);
+
+  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
+
+  std::string toString() const;
+
+  std::string name;
+  std::vector<FunctionParameter> params;
+  std::vector<py::handle> overloaded_args;
+  ssize_t min_args;
+  ssize_t max_args;
+  ssize_t max_pos_args;
+  int index;
+  bool hidden;
+  bool deprecated;
+};
+
 struct PythonArgs {
-  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args)
-    : idx(idx)
+  PythonArgs(bool traceable, const FunctionSignature& signature, PyObject** args)
+    : idx(signature.index)
     , traceable(traceable)
     , signature(signature)
     , args(args) {}
@@ -122,6 +144,8 @@ struct PythonArgs {
   const FunctionSignature& signature;
   PyObject** args;
 
+  inline bool has_torch_function();
+  inline std::string get_func_name();
   inline at::Tensor tensor(int i);
   inline at::Scalar scalar(int i);
   inline at::Scalar scalarWithDefault(int i, at::Scalar default_scalar);
@@ -130,7 +154,7 @@ struct PythonArgs {
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
-  inline at::Generator* generator(int i);
+  inline c10::optional<at::Generator> generator(int i);
   inline at::Storage storage(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
@@ -138,16 +162,16 @@ struct PythonArgs {
   inline c10::optional<at::Scalar> scalarOptional(int i);
   inline c10::optional<int64_t> toInt64Optional(int i);
   inline c10::optional<bool> toBoolOptional(int i);
-  inline const THPLayout& layout(int i);
-  inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
+  inline c10::optional<double> toDoubleOptional(int i);
+  inline at::Layout layout(int i);
+  inline at::Layout layoutWithDefault(int i, at::Layout default_layout);
+  inline c10::optional<at::Layout> layoutOptional(int i);
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
-#ifdef BUILD_NAMEDTENSOR
   inline at::Dimname dimname(int i);
   inline std::vector<at::Dimname> dimnamelist(int i);
   inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
-#endif
   inline at::MemoryFormat memoryformat(int i);
   inline c10::optional<at::MemoryFormat> memoryformatOptional(int i);
   inline at::QScheme toQScheme(int i);
@@ -168,25 +192,11 @@ private:
   at::Scalar scalar_slow(int i);
 };
 
-struct FunctionSignature {
-  explicit FunctionSignature(const std::string& fmt);
-
-  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
-  std::string toString() const;
-
-  std::string name;
-  std::vector<FunctionParameter> params;
-  ssize_t min_args;
-  ssize_t max_args;
-  ssize_t max_pos_args;
-  bool hidden;
-  bool deprecated;
-};
-
 struct FunctionParameter {
   FunctionParameter(const std::string& fmt, bool keyword_only);
 
-  bool check(PyObject* obj);
+  bool check(PyObject* obj, std::vector<py::handle> &overloaded_args);
+
   void set_default_str(const std::string& str);
   std::string type_name() const;
 
@@ -209,7 +219,7 @@ struct FunctionParameter {
     double default_double;
     double default_complex[2]; // see Scalar
     at::ScalarType default_scalartype;
-    THPLayout* default_layout;
+    at::Layout default_layout;
   };
 };
 
@@ -220,6 +230,14 @@ inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, Parse
         (int)max_args, N);
   }
   return raw_parse(args, kwargs, dst.args);
+}
+
+inline bool PythonArgs::has_torch_function(){
+  return !this->signature.overloaded_args.empty();
+}
+
+inline std::string PythonArgs::get_func_name(){
+  return signature.name;
 }
 
 inline at::Tensor PythonArgs::tensor(int i) {
@@ -337,11 +355,7 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
   if (obj == (PyObject*)&PyBool_Type) {
     return at::ScalarType::Bool;
   }
-  if (obj == (PyObject*)&PyLong_Type
-#if PY_MAJOR_VERSION == 2
-      || obj == (PyObject*)&PyInt_Type
-#endif
-  ) {
+  if (obj == (PyObject*)&PyLong_Type) {
     return at::ScalarType::Long;
   }
   return reinterpret_cast<THPDtype*>(obj)->scalar_type;
@@ -353,19 +367,24 @@ inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
   return scalartype(i);
 }
 
-inline const THPLayout& PythonArgs::layout(int i) {
-  if (!args[i]) return *signature.params[i].default_layout;
-  return *reinterpret_cast<THPLayout*>(args[i]);
+inline at::Layout PythonArgs::layout(int i) {
+  if (!args[i]) return signature.params[i].default_layout;
+  return reinterpret_cast<THPLayout*>(args[i])->layout;
 }
 
-inline const THPLayout& PythonArgs::layoutWithDefault(int i, const THPLayout& default_layout) {
+inline at::Layout PythonArgs::layoutWithDefault(int i, at::Layout default_layout) {
   if (!args[i]) return default_layout;
+  return layout(i);
+}
+
+inline c10::optional<at::Layout> PythonArgs::layoutOptional(int i) {
+  if (!args[i]) return c10::nullopt;
   return layout(i);
 }
 
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
-    return at::Device(backendToDeviceType(tensorTypeIdToBackend(torch::tensors::get_default_tensor_type_id())));
+    return at::Device(backendToDeviceType(dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
   }
   if (THPDevice_Check(args[i])) {
     const auto device = reinterpret_cast<THPDevice*>(args[i]);
@@ -374,7 +393,7 @@ inline at::Device PythonArgs::device(int i) {
   if (THPUtils_checkLong(args[i])) {
     const auto device_index = THPUtils_unpackLong(args[i]);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(at::DeviceType::CUDA, device_index);
+    return at::Device(DeviceType::CUDA, device_index);
   }
   const std::string &device_str = THPUtils_unpackString(args[i]);
   return at::Device(device_str);
@@ -391,7 +410,6 @@ inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
   return device(i);
 }
 
-#ifdef BUILD_NAMEDTENSOR
 inline at::Dimname PythonArgs::dimname(int i) {
   TORCH_INTERNAL_ASSERT(args[i] != nullptr);
   return THPDimname_parse(args[i]);
@@ -424,7 +442,6 @@ inline std::vector<at::Dimname> PythonArgs::dimnamelist(int i) {
   }
   return parseDimnameList(arg);
 }
-#endif
 
 inline at::MemoryFormat PythonArgs::memoryformat(int i) {
   if (!args[i]) return at::MemoryFormat::Contiguous;
@@ -479,6 +496,13 @@ inline c10::optional<bool> PythonArgs::toBoolOptional(int i) {
   return toBool(i);
 }
 
+inline c10::optional<double> PythonArgs::toDoubleOptional(int i) {
+  if (!args[i]) {
+    return c10::nullopt;
+  }
+  return toDouble(i);
+}
+
 inline double PythonArgs::toDouble(int i) {
   if (!args[i]) return signature.params[i].default_double;
   return THPUtils_unpackDouble(args[i]);
@@ -515,8 +539,8 @@ inline bool PythonArgs::isNone(int i) {
   return args[i] == nullptr;
 }
 
-inline at::Generator* PythonArgs::generator(int i) {
-  if (!args[i]) return nullptr;
+inline c10::optional<at::Generator> PythonArgs::generator(int i) {
+  if (!args[i]) return c10::nullopt;
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
@@ -529,5 +553,169 @@ inline PyObject* PythonArgs::pyobject(int i) {
   if (!args[i]) return Py_None;
   return args[i];
 }
+
+/*
+ * Reference: https://github.com/numpy/numpy/blob/f4c497c768e0646df740b647782df463825bfd27/numpy/core/src/common/get_attr_string.h#L42
+ *
+ * Stripped down version of PyObject_GetAttrString,
+ * avoids lookups for None, tuple, and List objects,
+ * and doesn't create a PyErr since this code ignores it.
+ *
+ * This can be much faster then PyObject_GetAttrString where
+ * exceptions are not used by caller.
+ *
+ * 'obj' is the object to search for attribute.
+ *
+ * 'name' is the attribute to search for.
+ *
+ * Returns a py::object wrapping the return value. If the attribute lookup failed
+ * the value will be NULL.
+ *
+ */
+
+static py::object PyObject_FastGetAttrString(PyObject *obj, char *name)
+{
+    PyTypeObject *tp = Py_TYPE(obj);
+    PyObject *res = (PyObject *)NULL;
+
+    /* Attribute referenced by (char *)name */
+    if (tp->tp_getattr != NULL) {
+        res = (*tp->tp_getattr)(obj, name);
+        if (res == NULL) {
+          PyErr_Clear();
+        }
+    }
+    /* Attribute referenced by (PyObject *)name */
+    else if (tp->tp_getattro != NULL) {
+        PyObject *w = THPUtils_internString(name);
+        if (w == NULL) {
+          return py::object();
+        }
+        res = (*tp->tp_getattro)(obj, w);
+        Py_DECREF(w);
+        if (res == NULL) {
+            PyErr_Clear();
+        }
+    }
+    return py::reinterpret_steal<py::object>(res);
+}
+
+// Makes sure that we don't check for __torch_function__ on basic Python types
+static bool _is_basic_python_type(PyTypeObject *tp)
+{
+  return (
+    /* Basic number types */
+    tp == &PyBool_Type ||
+
+    tp == &PyLong_Type ||
+    tp == &PyFloat_Type ||
+    tp == &PyComplex_Type ||
+
+    /* Basic sequence types */
+    tp == &PyList_Type ||
+    tp == &PyTuple_Type ||
+    tp == &PyDict_Type ||
+    tp == &PySet_Type ||
+    tp == &PyFrozenSet_Type ||
+    tp == &PyUnicode_Type ||
+    tp == &PyBytes_Type ||
+
+    /* other builtins */
+    tp == &PySlice_Type ||
+    tp == Py_TYPE(Py_None) ||
+    tp == Py_TYPE(Py_Ellipsis) ||
+    tp == Py_TYPE(Py_NotImplemented) ||
+
+    PyModule_Check(tp) ||
+    /* sentinel to swallow trailing || */
+    false
+  );
+}
+
+/*
+ * Lookup a special method, following the python approach of looking up
+ * on the type object, rather than on the instance itself.
+ *
+ * Assumes that the special method is a torch-specific one, so does not
+ * look at builtin types, nor does it look at a base Tensor.
+ *
+ * If no special method is found, return NULL, otherwise returns a new
+ * reference to the function object
+ *
+ * In future, could be made more like _Py_LookupSpecial
+ */
+
+static py::object PyTorch_LookupSpecial(PyObject *obj, char* name)
+{
+  PyTypeObject *tp = Py_TYPE(obj);
+  if (THPVariable_CheckExact(obj)) {
+      return py::object();
+  }
+  if (_is_basic_python_type(tp)) {
+    return py::object();
+  }
+  if(PyObject_HasAttrString(obj, name) == 0){
+    return py::object();
+  }
+  return PyObject_FastGetAttrString((PyObject *)tp, name);
+}
+
+/*
+ * Checks if obj has a __torch_function__ implementation
+ *
+ * Returns true if an implementation is found and false otherwise
+ *
+ */
+static auto check_has_torch_function(PyObject* obj) -> bool
+{
+  py::object method = PyTorch_LookupSpecial(obj, "__torch_function__");
+  if(method.ptr() != nullptr){
+    return true;
+  }
+  return false;
+}
+
+/*
+ *
+ * Handle __torch_function__ overrides if we know that there are overloaded
+ * arguments.  All objects stored in r.overloaded_args must have a
+ * __torch_function__ implementation and the arguments must be ordered in order
+ * of precedence. Precedence goes from left to right in the order of the
+ * signature of the function the overloaded arguments were passed to, except
+ * subclasses are always considered before superclasses.
+ *
+ * If the result of calling __torch_function__ is NotImplemented, the
+ * next implementation in the precedence order is called. If all
+ * arguments return NotImplemented from their __torch_function__
+ * implementation, a TypeError is raised in Python.
+ *
+ * Assumes overloaded_args has at least one entry. All entries must have
+ * a __torch_function__ attribute that resolves to a callable that
+ * accepts a torch API function, a tuple of arguments, and a dict of
+ * keyword arguments for the torch API function.
+ *
+ * It is sufficient to call PythonArgs::has_torch_function before
+ * calling this function to verify that there are valid arguments
+ * present. If that is not done then special care must be taken to
+ * ensure there are arguments that are overloaded with
+ * __torch_function__.
+ *
+ * See torch._overrides.handle_torch_function for the equivalent
+ * code in the pure-python implementation.
+ *
+ * 'r' is a parsed PythonArgs instance, returned from
+ * PythonArgParser::parse.
+ *
+ * 'args' is a reference to the python tuple of arguments to the torch
+ * API function.
+ *
+ * 'kwargs' is a reference to the python dict of keyword arguments to
+ * the torch API function.
+ *
+ * 'torch_api' is a reference to a python torch API namespace.
+ *
+ */
+
+auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
 
 } // namespace torch

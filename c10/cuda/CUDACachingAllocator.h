@@ -11,6 +11,10 @@
 
 namespace c10 {
 
+class C10_CUDA_API CUDAOutOfMemoryError : public c10::Error {
+  using Error::Error;
+};
+
 // Caching allocator will execute every registered callback if it unable to find
 // block inside of already allocated area.
 class C10_CUDA_API FreeMemoryCallback {
@@ -102,13 +106,15 @@ struct SegmentInfo {
 };
 
 C10_CUDA_API void* raw_alloc(size_t nbytes);
+C10_CUDA_API void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream);
 C10_CUDA_API void raw_delete(void* ptr);
 
 C10_CUDA_API Allocator* get();
+C10_CUDA_API void init(int device_count);
 C10_CUDA_API void emptyCache();
 C10_CUDA_API void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock);
 C10_CUDA_API void* getBaseAllocation(void *ptr, size_t *size);
-C10_CUDA_API void recordStream(void *ptr, CUDAStream stream);
+C10_CUDA_API void recordStream(const DataPtr&, CUDAStream stream);
 C10_CUDA_API DeviceStats getDeviceStats(int device);
 C10_CUDA_API void resetAccumulatedStats(int device);
 C10_CUDA_API void resetPeakStats(int device);
@@ -117,7 +123,6 @@ C10_CUDA_API std::vector<SegmentInfo> snapshot();
 C10_CUDA_API std::mutex* getFreeMutex();
 
 C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
-
 } // namespace CUDACachingAllocator
 
 }} // namespace c10::cuda

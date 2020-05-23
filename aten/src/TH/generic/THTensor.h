@@ -20,6 +20,8 @@
 #define THLongTensor THTensor
 #define THBoolTensor THTensor
 #define THBFloat16Tensor THTensor
+#define THComplexFloatTensor THTensor
+#define THComplexDoubleTensor THTensor
 
 /**** access methods ****/
 TH_API THStorage* THTensor_(storage)(const THTensor *self);
@@ -39,24 +41,9 @@ TH_API THTensor *THTensor_(new)(void);
 TH_API THTensor *THTensor_(newWithTensor)(THTensor *tensor);
 TH_API THTensor *THTensor_(newWithStorage1d)(THStorage *storage_, ptrdiff_t storageOffset_,
                                 int64_t size0_, int64_t stride0_);
-TH_API THTensor *THTensor_(newWithStorage2d)(THStorage *storage_, ptrdiff_t storageOffset_,
-                                int64_t size0_, int64_t stride0_,
-                                int64_t size1_, int64_t stride1_);
-TH_API THTensor *THTensor_(newWithStorage3d)(THStorage *storage_, ptrdiff_t storageOffset_,
-                                int64_t size0_, int64_t stride0_,
-                                int64_t size1_, int64_t stride1_,
-                                int64_t size2_, int64_t stride2_);
-TH_API THTensor *THTensor_(newWithStorage4d)(THStorage *storage_, ptrdiff_t storageOffset_,
-                                int64_t size0_, int64_t stride0_,
-                                int64_t size1_, int64_t stride1_,
-                                int64_t size2_, int64_t stride2_,
-                                int64_t size3_, int64_t stride3_);
 
 /* stride might be NULL */
 TH_API THTensor *THTensor_(newWithSize1d)(int64_t size0_);
-TH_API THTensor *THTensor_(newWithSize2d)(int64_t size0_, int64_t size1_);
-TH_API THTensor *THTensor_(newWithSize3d)(int64_t size0_, int64_t size1_, int64_t size2_);
-TH_API THTensor *THTensor_(newWithSize4d)(int64_t size0_, int64_t size1_, int64_t size2_, int64_t size3_);
 
 TH_API THTensor *THTensor_(newClone)(THTensor *self);
 TH_API THTensor *THTensor_(newContiguous)(THTensor *tensor);
@@ -78,35 +65,17 @@ TH_API void THTensor_(resize5d)(THTensor *tensor, int64_t size0_, int64_t size1_
 // Note: these are legacy resize functions that treat sizes as size->size() == 0 and size->data<int64_t>() as being 0-terminated.
 
 TH_API void THTensor_(set)(THTensor *self, THTensor *src);
-TH_API void THTensor_(setStorageNd)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, int nDimension, const int64_t *size, const int64_t *stride);
-TH_API void THTensor_(setStorage1d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
-                                    int64_t size0_, int64_t stride0_);
-TH_API void THTensor_(setStorage2d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
-                                    int64_t size0_, int64_t stride0_,
-                                    int64_t size1_, int64_t stride1_);
-TH_API void THTensor_(setStorage3d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
-                                    int64_t size0_, int64_t stride0_,
-                                    int64_t size1_, int64_t stride1_,
-                                    int64_t size2_, int64_t stride2_);
-TH_API void THTensor_(setStorage4d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
-                                    int64_t size0_, int64_t stride0_,
-                                    int64_t size1_, int64_t stride1_,
-                                    int64_t size2_, int64_t stride2_,
-                                    int64_t size3_, int64_t stride3_);
 
 TH_API void THTensor_(narrow)(THTensor *self, THTensor *src, int dimension_, int64_t firstIndex_, int64_t size_);
 TH_API void THTensor_(select)(THTensor *self, THTensor *src, int dimension_, int64_t sliceIndex_);
 TH_API void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1_, int dimension2_);
 TH_API int THTensor_(isTransposed)(const THTensor *self);
-TH_API void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension_, int64_t size_, int64_t step_);
 
-TH_API void THTensor_(squeeze)(THTensor *self, THTensor *src);
 TH_API void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension_);
 TH_API void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension_);
 
 TH_API int THTensor_(isContiguous)(const THTensor *self);
 TH_API int THTensor_(isSameSizeAs)(const THTensor *self, const THTensor *src);
-TH_API int THTensor_(isSetTo)(const THTensor *self, const THTensor *src);
 TH_API ptrdiff_t THTensor_(nElement)(const THTensor *self);
 
 TH_API void THTensor_(retain)(THTensor *self);
@@ -125,10 +94,6 @@ TH_API scalar_t THTensor_(get1d)(const THTensor *tensor, int64_t x0);
 TH_API scalar_t THTensor_(get2d)(const THTensor *tensor, int64_t x0, int64_t x1);
 TH_API scalar_t THTensor_(get3d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_t x2);
 TH_API scalar_t THTensor_(get4d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3);
-
-/* Shape manipulation methods */
-TH_API void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension);
-TH_API void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int dimension);
 
 /* Debug methods */
 TH_API THDescBuff THTensor_(desc)(const THTensor *tensor);

@@ -1,4 +1,6 @@
 #include <test/cpp/jit/test_utils.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/clear_undefinedness.h>
 
 namespace torch {
 namespace jit {
@@ -25,7 +27,7 @@ std::vector<at::Tensor> run(
   return fmap(stack, [](const IValue& i) { return i.toTensor(); });
 }
 
-static void unpackReturnTuple(Stack &stack) {
+static void unpackReturnTuple(Stack& stack) {
   auto tuple = pop(stack).toTuple();
   stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
 }
@@ -37,8 +39,8 @@ std::pair<tensor_list, tensor_list> runGradient(
   static const auto as_tensorlist = [](const Stack& stack) {
     return fmap(stack, [](const IValue& i) { return i.toTensor(); });
   };
-
-  Code f_code{grad_spec.f}, df_code{grad_spec.df};
+  ClearUndefinedness(grad_spec.df);
+  Code f_code{grad_spec.f, ""}, df_code{grad_spec.df, ""};
   InterpreterState f_interpreter{f_code}, df_interpreter{df_code};
 
   auto f_stack = fmap<IValue>(tensors_in);
@@ -82,7 +84,7 @@ std::shared_ptr<Graph> build_lstm() {
       %22 : Tensor = aten::mul(%14, %21)
       return (%22, %20))IR";
   auto g = std::make_shared<Graph>();
-  torch::jit::script::parseIR(graph_string, g.get());
+  torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
   return g;

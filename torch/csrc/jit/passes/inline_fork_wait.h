@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
@@ -11,7 +11,6 @@ namespace jit {
 // callsite and replaces uses of the result of wait() calls with the values
 // produced from the (now-inlined) forked section.
 TORCH_API void InlineForkWait(const std::shared_ptr<Graph>& graph);
-
 
 } // namespace jit
 } // namespace torch

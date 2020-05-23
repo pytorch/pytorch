@@ -1,42 +1,26 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+import math
 import torch
 import torch.nn as nn
 import torch.nn.intrinsic
 import torch.nn.qat as nnqat
 import torch.nn.functional as F
 from torch.nn import init
+from torch.nn.modules.utils import _pair
+from torch.nn.parameter import Parameter
 
+class _ConvBnNd(nn.modules.conv._ConvNd):
 
-class ConvBn2d(nn.Conv2d):
-    r"""
-    A ConvBn2d module is a module fused from Conv2d and BatchNorm2d,
-    attached with FakeQuantize modules for both output activation and weight,
-    used in quantization aware training.
-
-    We combined the interface of :class:`torch.nn.Conv2d` and
-    :class:`torch.nn.BatchNorm2d`.
-
-    Implementation details: https://arxiv.org/pdf/1806.08342.pdf section 3.2.2
-
-    Similar to :class:`torch.nn.Conv2d`, with FakeQuantize modules initialized
-    to default.
-
-    Attributes:
-        freeze_bn:
-        observer: fake quant module for output activation, it's called observer
-            to align with post training flow
-        weight_fake_quant: fake quant module for weight
-
-    """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvBn2d
+    _version = 2
 
     def __init__(self,
-                 # Conv2d args
-                 in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1,
-                 # bias: None, only support Conv with no bias
-                 padding_mode='zeros',
-                 # BatchNorm2d args
+                 # ConvNd args
+                 in_channels, out_channels, kernel_size, stride,
+                 padding, dilation, transposed, output_padding,
+                 groups,
+                 bias,
+                 padding_mode,
+                 # BatchNormNd args
                  # num_features: out_channels
                  eps=1e-05, momentum=0.1,
                  # affine: True
@@ -44,103 +28,127 @@ class ConvBn2d(nn.Conv2d):
                  # Args for this module
                  freeze_bn=False,
                  qconfig=None):
-        super(ConvBn2d, self).__init__(in_channels, out_channels, kernel_size,
-                                       stride, padding, dilation, groups, False, padding_mode)
+        nn.modules.conv._ConvNd.__init__(self, in_channels, out_channels, kernel_size,
+                                         stride, padding, dilation, transposed,
+                                         output_padding, groups, False, padding_mode)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
-        self.eps = eps
-        self.momentum = momentum
         self.freeze_bn = freeze_bn if self.training else True
-        self.num_features = out_channels
-        self.gamma = nn.Parameter(torch.Tensor(out_channels))
-        self.beta = nn.Parameter(torch.Tensor(out_channels))
-        self.affine = True
-        self.track_running_stats = True
-        self.register_buffer('running_mean', torch.zeros(out_channels))
-        self.register_buffer('running_var', torch.ones(out_channels))
-        self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
-        self.observer = self.qconfig.activation()
+        self.bn = nn.BatchNorm2d(out_channels, eps, momentum, True, True)
+        self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
+        if bias:
+            self.bias = Parameter(torch.Tensor(out_channels))
+        else:
+            self.register_parameter('bias', None)
         self.reset_bn_parameters()
 
+        # this needs to be called after reset_bn_parameters,
+        # as they modify the same state
+        if self.training:
+            if freeze_bn:
+                self.freeze_bn_stats()
+            else:
+                self.update_bn_stats()
+        else:
+            self.freeze_bn_stats()
+
     def reset_running_stats(self):
-        self.running_mean.zero_()
-        self.running_var.fill_(1)
-        self.num_batches_tracked.zero_()
+        self.bn.reset_running_stats()
 
     def reset_bn_parameters(self):
-        self.reset_running_stats()
-        init.uniform_(self.gamma)
-        init.zeros_(self.beta)
+        self.bn.reset_running_stats()
+        init.uniform_(self.bn.weight)
+        init.zeros_(self.bn.bias)
+        # note: below is actully for conv, not BN
+        if self.bias is not None:
+            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            init.uniform_(self.bias, -bound, bound)
 
     def reset_parameters(self):
-        super(ConvBn2d, self).reset_parameters()
-        # A hack to avoid resetting on undefined parameters
-        if hasattr(self, 'gamma'):
-            self.reset_bn_parameters()
+        super(_ConvBnNd, self).reset_parameters()
 
     def update_bn_stats(self):
         self.freeze_bn = False
+        self.bn.training = True
         return self
 
     def freeze_bn_stats(self):
         self.freeze_bn = True
+        self.bn.training = False
         return self
 
     def _forward(self, input):
-        # exponential_average_factor is self.momentum set to
-        # (when it is available) only so that if gets updated
-        # in ONNX graph when this node is exported to ONNX.
-        if self.momentum is None:
-            exponential_average_factor = 0.0
-        else:
-            exponential_average_factor = self.momentum
-
-        if self.training and not self.freeze_bn and self.track_running_stats:
-            # TODO: if statement only here to tell the jit to skip emitting this when it is None
-            if self.num_batches_tracked is not None:
-                self.num_batches_tracked += 1
-                if self.momentum is None:  # use cumulative moving average
-                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
-                else:  # use exponential moving average
-                    exponential_average_factor = self.momentum
-
-        # we use running statistics from the previous batch, so this is an
-        # approximation of the approach mentioned in the whitepaper, but we only
-        # need to do one convolution in this case instead of two
-        running_std = torch.sqrt(self.running_var + self.eps)
-        scale_factor = self.gamma / running_std
-        scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
-        conv = self.conv2d_forward(input, self.weight_fake_quant(scaled_weight))
-
-        if self.training and not self.freeze_bn:
-            # recovering original conv to get original batch_mean and batch_var
-            conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
-            batch_mean = torch.mean(conv_orig, dim=[0, 2, 3])
-            batch_var = torch.var(conv_orig, dim=[0, 2, 3], unbiased=False)
-            n = float(conv_orig.numel() / conv_orig.size()[1])
-            unbiased_batch_var = batch_var * (n / (n - 1))
-            batch_rstd = torch.ones_like(batch_var) / torch.sqrt(batch_var + self.eps)
-
-            rescale_factor = running_std * batch_rstd
-            conv = conv * rescale_factor.reshape([1, -1, 1, 1])
-            conv = conv + (self.beta - self.gamma * batch_mean * batch_rstd).reshape([1, -1, 1, 1])
-
-            self.running_mean = exponential_average_factor * batch_mean.detach() + \
-                (1 - exponential_average_factor) * self.running_mean
-            self.running_var = exponential_average_factor * unbiased_batch_var.detach() + \
-                (1 - exponential_average_factor) * self.running_var
-        else:
-            conv = conv + (self.beta - self.gamma * self.running_mean /
-                           running_std).reshape([1, -1, 1, 1])
+        running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
+        scale_factor = self.bn.weight / running_std
+        scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape([-1, 1, 1, 1]))
+        # this does not include the conv bias
+        conv = self._conv_forward(input, scaled_weight)
+        conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
+        if self.bias is not None:
+            conv_orig = conv_orig + self.bias.reshape([1, -1, 1, 1])
+        conv = self.bn(conv_orig)
         return conv
 
     def extra_repr(self):
         # TODO(jerryzh): extend
-        return super(ConvBn2d, self).extra_repr()
+        return super(_ConvBnNd, self).extra_repr()
 
     def forward(self, input):
-        return self.observer(self._forward(input))
+        return self.activation_post_process(self._forward(input))
+
+    def train(self, mode=True):
+        """
+        Batchnorm's training behavior is using the self.training flag. Prevent
+        changing it if BN is frozen. This makes sure that calling `model.train()`
+        on a model with a frozen BN will behave properly.
+        """
+        self.training = mode
+        if not self.freeze_bn:
+            for module in self.children():
+                module.train(mode)
+        return self
+
+    # ===== Serialization version history =====
+    #
+    # Version 1/None
+    #   self
+    #   |--- weight : Tensor
+    #   |--- bias : Tensor
+    #   |--- gamma : Tensor
+    #   |--- beta : Tensor
+    #   |--- running_mean : Tensor
+    #   |--- running_var : Tensor
+    #   |--- num_batches_tracked : Tensor
+    #
+    # Version 2
+    #   self
+    #   |--- weight : Tensor
+    #   |--- bias : Tensor
+    #   |--- bn : Module
+    #        |--- weight : Tensor (moved from v1.self.gamma)
+    #        |--- bias : Tensor (moved from v1.self.beta)
+    #        |--- running_mean : Tensor (moved from v1.self.running_mean)
+    #        |--- running_var : Tensor (moved from v1.self.running_var)
+    #        |--- num_batches_tracked : Tensor (moved from v1.self.num_batches_tracked)
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+        version = local_metadata.get('version', None)
+        if version is None or version == 1:
+            # BN related parameters and buffers were moved into the BN module for v2
+            state_dict[prefix + 'bn.weight'] = state_dict[prefix + 'gamma']
+            state_dict.pop(prefix + 'gamma')
+            state_dict[prefix + 'bn.bias'] = state_dict[prefix + 'beta']
+            state_dict.pop(prefix + 'beta')
+            state_dict[prefix + 'bn.running_mean'] = state_dict[prefix + 'running_mean']
+            state_dict.pop(prefix + 'running_mean')
+            state_dict[prefix + 'bn.running_var'] = state_dict[prefix + 'running_var']
+            state_dict.pop(prefix + 'running_var')
+            state_dict[prefix + 'bn.num_batches_tracked'] = state_dict[prefix + 'num_batches_tracked']
+            state_dict.pop(prefix + 'num_batches_tracked')
+
+        super(_ConvBnNd, self)._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
@@ -158,19 +166,63 @@ class ConvBn2d(nn.Conv2d):
         conv, bn = mod[0], mod[1]
         qat_convbn = cls(conv.in_channels, conv.out_channels, conv.kernel_size,
                          conv.stride, conv.padding, conv.dilation,
-                         conv.groups,
+                         conv.groups, conv.bias is not None,
                          conv.padding_mode,
                          bn.eps, bn.momentum,
                          False,
                          qconfig)
-        assert qat_convbn.bias is None, 'QAT ConvBn should not have bias'
         qat_convbn.weight = conv.weight
-        qat_convbn.gamma = bn.weight
-        qat_convbn.beta = bn.bias
-        qat_convbn.running_mean = bn.running_mean
-        qat_convbn.running_var = bn.running_var
-        qat_convbn.num_batches_tracked = bn.num_batches_tracked
+        qat_convbn.bias = conv.bias
+        qat_convbn.bn.weight = bn.weight
+        qat_convbn.bn.bias = bn.bias
+        qat_convbn.bn.running_mean = bn.running_mean
+        qat_convbn.bn.running_var = bn.running_var
+        qat_convbn.bn.num_batches_tracked = bn.num_batches_tracked
         return qat_convbn
+
+class ConvBn2d(_ConvBnNd, nn.Conv2d):
+    r"""
+    A ConvBn2d module is a module fused from Conv2d and BatchNorm2d,
+    attached with FakeQuantize modules for both output activation and weight,
+    used in quantization aware training.
+
+    We combined the interface of :class:`torch.nn.Conv2d` and
+    :class:`torch.nn.BatchNorm2d`.
+
+    Implementation details: https://arxiv.org/pdf/1806.08342.pdf section 3.2.2
+
+    Similar to :class:`torch.nn.Conv2d`, with FakeQuantize modules initialized
+    to default.
+
+    Attributes:
+        freeze_bn:
+        activation_post_process: fake quant module for output activation
+        weight_fake_quant: fake quant module for weight
+
+    """
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvBn2d
+
+    def __init__(self,
+                 # ConvNd args
+                 in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1,
+                 bias=None,
+                 padding_mode='zeros',
+                 # BatchNorm2d args
+                 # num_features: out_channels
+                 eps=1e-05, momentum=0.1,
+                 # affine: True
+                 # track_running_stats: True
+                 # Args for this module
+                 freeze_bn=False,
+                 qconfig=None):
+        kernel_size = _pair(kernel_size)
+        stride = _pair(stride)
+        padding = _pair(padding)
+        dilation = _pair(dilation)
+        _ConvBnNd.__init__(self, in_channels, out_channels, kernel_size, stride,
+                           padding, dilation, False, _pair(0), groups, bias, padding_mode,
+                           eps, momentum, freeze_bn, qconfig)
 
 class ConvBnReLU2d(ConvBn2d):
     r"""
@@ -198,7 +250,7 @@ class ConvBnReLU2d(ConvBn2d):
                  # Conv2d args
                  in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
-                 # bias: None, only support Conv with no bias
+                 bias=None,
                  padding_mode='zeros',
                  # BatchNorm2d args
                  # num_features: out_channels
@@ -209,13 +261,13 @@ class ConvBnReLU2d(ConvBn2d):
                  freeze_bn=False,
                  qconfig=None):
         super(ConvBnReLU2d, self).__init__(in_channels, out_channels, kernel_size, stride,
-                                           padding, dilation, groups,
+                                           padding, dilation, groups, bias,
                                            padding_mode, eps, momentum,
                                            freeze_bn,
                                            qconfig)
 
     def forward(self, input):
-        return self.observer(F.relu(super(ConvBnReLU2d, self)._forward(input)))
+        return self.activation_post_process(F.relu(ConvBn2d._forward(self, input)))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
@@ -231,8 +283,7 @@ class ConvReLU2d(nnqat.Conv2d):
     :class:`~torch.nn.BatchNorm2d`.
 
     Attributes:
-        observer: fake quant module for output activation, it's called observer
-            to align with post training flow
+        activation_post_process: fake quant module for output activation
         weight_fake_quant: fake quant module for weight
 
     """
@@ -248,12 +299,12 @@ class ConvReLU2d(nnqat.Conv2d):
                                          qconfig=qconfig)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
-        self.observer = self.qconfig.activation()
+        self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
 
     def forward(self, input):
-        return self.observer(F.relu(super(ConvReLU2d, self).conv2d_forward(input,
-                             self.weight_fake_quant(self.weight))))
+        return self.activation_post_process(F.relu(
+            self._conv_forward(input, self.weight_fake_quant(self.weight))))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):

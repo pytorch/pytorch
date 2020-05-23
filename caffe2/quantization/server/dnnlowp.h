@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <limits>
 
-#include <x86intrin.h>
+#include <immintrin.h>
 
 #include <fbgemm/QuantUtils.h>
 
@@ -146,6 +146,13 @@ class QuantizationFactory {
   }
   QuantizationKind GetWeightKind() const {
     return weight_kind_;
+  }
+
+  void SetWeightP99Threshold(float threshold) {
+    weight_p99_threshold_ = threshold;
+  }
+  void SetActivationP99Threshold(float threshold) {
+    activation_p99_threshold_ = threshold;
   }
 
   explicit QuantizationFactory(

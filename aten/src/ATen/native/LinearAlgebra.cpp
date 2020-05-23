@@ -12,7 +12,6 @@
 #include <vector>
 #include <limits>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 namespace native {
@@ -29,17 +28,13 @@ static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
   auto n = self.size(-1);
   auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs).sum(-1, /*keepdim=*/false, /*dtype=*/self.scalar_type()).fmod_(2);
   auto u_diagonal = lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
-
-  // We have to manually set the diagonal to 0 due to an issue with MAGMA's getrf_batched routine
-  if (self.dim() > 2 && self.is_cuda()) {
-    u_diagonal.index_put_(infos.nonzero_numpy(), at::zeros({}, self.options()));
-  }
   return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1), u_diagonal);
 }
 
 Tensor det(const Tensor& self) {
   squareCheckInputs(self);
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Expected a floating point tensor as input");
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
+              "Expected a floating point tensor as input");
 
   Tensor det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
@@ -51,7 +46,8 @@ Tensor det(const Tensor& self) {
 
 Tensor logdet(const Tensor& self) {
   squareCheckInputs(self);
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Expected a floating point tensor as input");
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
+              "Expected a floating point tensor as input");
 
   Tensor det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
@@ -71,7 +67,8 @@ Tensor logdet(const Tensor& self) {
 
 std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   squareCheckInputs(self);
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Expected a floating point tensor as input");
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
+              "Expected a floating point tensor as input");
 
   Tensor det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
@@ -84,9 +81,9 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 }
 
 Tensor pinverse(const Tensor& self, double rcond) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() >= 2,
-           "pinverse(", self.type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
-           "of floating types");
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() >= 2,
+              "pinverse(", self.scalar_type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
+              "of floating types");
   if (self.numel() == 0) {
     // Match NumPy
     auto self_sizes = self.sizes().vec();
@@ -114,18 +111,18 @@ static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
 }
 
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
-           "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
-           "of floating types");
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
+              "matrix_rank(", self.scalar_type(), "{", self.sizes(), "}): expected a 2D tensor "
+              "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
   return (S > tol).sum();
 }
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
-           "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
-           "of floating types");
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
+              "matrix_rank(", self.scalar_type(), "{", self.sizes(), "}): expected a 2D tensor "
+              "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
   double tol = _get_epsilon(self.scalar_type()) * std::max(self.size(0), self.size(1));
@@ -139,7 +136,9 @@ static void check_1d(const Tensor& t, const char* arg, const char* fn) {
 Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::_addr(self, vec1, vec2, beta, alpha);
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr");
+  return at::_addr(b_self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
@@ -151,7 +150,49 @@ Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta,
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::_addr_out(result, self, vec1, vec2, beta, alpha);
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr_out");
+  return at::_addr_out(result, b_self, vec1, vec2, beta, alpha);
+}
+
+Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
+  check_1d(self, "self", "ger");
+  check_1d(vec2, "vec2", "ger");
+  if (result.dim() != 2 || result.size(0) != self.size(0) || result.size(1) != vec2.size(0)) {
+    result.resize_({ self.size(0), vec2.size(0) });
+  }
+  // resize_ does the "broadcasting", don't need to broadcast again.
+  return at::_addr_out(result, result, self, vec2, Scalar(0), Scalar(1));
+}
+
+Tensor ger(const Tensor& self, const Tensor& vec2) {
+  Tensor result = at::empty({0}, self.options());
+  at::ger_out(result, self, vec2);
+  return result;
+}
+
+Tensor addbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm");
+  return legacy::cpu::_th_addbmm(b_self, batch1, batch2, beta, alpha);
+}
+
+Tensor& addbmm_cpu_out(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out");
+  return legacy::cpu::_th_addbmm_out(result, b_self, batch1, batch2, beta, alpha);
+}
+
+Tensor addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+  return legacy::cpu::_th_addmm(b_self, mat1, mat2, beta, alpha);
+}
+
+Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return legacy::cpu::_th_addmm_out(result, b_self, mat1, mat2, beta, alpha);
 }
 
 template <typename scalar_t, bool is_bmm>
@@ -235,7 +276,11 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   if (self_or_result.numel() == 0) {
     return self_or_result;
   } else if (contraction_size == 0) {
-    return self_or_result.zero_();
+    if (is_bmm_out) {
+      return self_or_result.zero_();
+    } else {
+      return self_or_result.mul_(beta);
+    }
   }
 
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
@@ -262,7 +307,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
     if (is_bmm_out) {
       for (int64_t b = 0; b < bs; b++) {
         auto r = self_or_result.select(0, b);
-        legacy::cpu::_th_mm_out(r, batch1.select(0, b), batch2.select(0, b));
+        native::mm_cpu_out(r, batch1.select(0, b), batch2.select(0, b));
       }
     } else {
       for (int64_t b = 0; b < bs; b++) {
@@ -299,18 +344,13 @@ Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
 Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
   Scalar beta(0.0);
   Scalar alpha(1.0);
-#ifdef BUILD_NAMEDTENSOR
   {
   NoNamesGuard guard;
-#endif
   bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
-#ifdef BUILD_NAMEDTENSOR
   }
-  namedinference::propagate_names(
+  namedinference::propagate_names_if_nonempty(
       result,
-      namedinference::compute_bmm_outnames(result, batch1, batch2),
-      /*validate_names=*/false);
-#endif
+      namedinference::compute_bmm_outnames(result, batch1, batch2));
   return result;
 }
 
@@ -344,9 +384,7 @@ Tensor matmul(
     c10::optional<Tensor> out_opt,
     const Tensor& tensor1,
     const Tensor& tensor2) {
-#ifdef BUILD_NAMEDTENSOR
   NoNamesGuard guard;
-#endif
   auto dim_tensor1 = tensor1.dim();
   auto dim_tensor2 = tensor2.dim();
   auto has_out = out_opt.has_value();
@@ -454,39 +492,31 @@ Tensor matmul(
 }
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
-#ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-#endif
+  auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
   auto result = at::native::matmul(c10::nullopt, tensor1, tensor2);
-#ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
-#endif
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
 Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor2) {
-#ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-#endif
+  auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
   at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
-#ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
-#endif
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
 Tensor matrix_power(const Tensor& a, int64_t n) {
-  TORCH_CHECK(a.dim() >= 2 && at::isFloatingType(a.scalar_type()),
-           "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
-           "of floating types with dim at least 2");
+  TORCH_CHECK(a.dim() >= 2 && (at::isFloatingType(a.scalar_type()) || at::isComplexType(a.scalar_type())),
+              "matrix_power(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
+              "of floating types with dim at least 2");
   if (n == 0) {
-    return a.clone().copy_(at::eye(a.size(-2), a.options()).expand_as(a));
+    return a.clone(at::MemoryFormat::Contiguous).copy_(at::eye(a.size(-2), a.options()).expand_as(a));
   } else if (n < 0) {
     Tensor a_ = at::inverse(a);
     n *= -1;
     return at::native::matrix_power(a_, n);
   } else if (n == 1) {
-    return a.clone();
+    return a.clone(at::MemoryFormat::Contiguous);
   } else if (n == 2) {
     return at::native::matmul(a, a);
   } else if (n == 3) {
@@ -503,11 +533,11 @@ Tensor matrix_power(const Tensor& a, int64_t n) {
   Tensor result, z;
   int64_t r;
   while (n > 0) {
-    z = (!z.defined()) ? a.clone() : at::native::matmul(z, z);
+    z = (!z.defined()) ? a.clone(at::MemoryFormat::Contiguous) : at::native::matmul(z, z);
     r = n % 2;
     n = n / 2;
     if (r == 1) {
-      result = (!result.defined()) ? z.clone() : at::native::matmul(result, z);
+      result = (!result.defined()) ? z.clone(at::MemoryFormat::Contiguous) : at::native::matmul(result, z);
     }
   }
   return result;
@@ -526,7 +556,11 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   if (dim.size() == 1) {
     return at::norm(self, 2, dim, keepdim, self.scalar_type());
   }
-  return at::sqrt(at::sum(self * self, dim, keepdim));
+  if (self.is_complex()){
+    return at::sqrt(at::sum((self.conj() * self).copy_real(), dim, keepdim));
+  } else {
+    return at::sqrt(at::sum((self * self), dim, keepdim));
+  }
 }
 
 Tensor &frobenius_norm_out(
@@ -542,7 +576,11 @@ Tensor &frobenius_norm_out(
   if (dim.size() == 1) {
     return at::norm_out(result, self, 2, dim, keepdim, self.scalar_type());
   }
-  return at::sqrt_out(result, at::sum(self * self, dim, keepdim));
+  if (self.is_complex()){
+    return at::sqrt_out(result, at::sum((self.conj() * self).copy_real(), dim, keepdim));
+  } else {
+    return at::sqrt_out(result, at::sum((self * self), dim, keepdim));
+  }
 }
 
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {
@@ -554,7 +592,7 @@ Tensor nuclear_norm(const Tensor& self, bool keepdim) {
   // would end up throwing an error as a result if U and V aren't computed.
   // Due to this, we have to compute U and V conditionally.
   return at::sum(std::get<1>(at::svd(self, /*some=*/true,
-                 /*compute_uv=*/at::GradMode::is_enabled() && self.is_variable() && self.requires_grad())), 0, keepdim);
+                 /*compute_uv=*/at::GradMode::is_enabled() && self.requires_grad())), 0, keepdim);
 }
 
 Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
@@ -574,7 +612,7 @@ Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   // would end up throwing an error as a result if U and V aren't computed.
   // Due to this, we have to compute U and V conditionally.
   return at::sum(std::get<1>(at::svd(p, /*some=*/true,
-                 /*compute_uv=*/at::GradMode::is_enabled() && self.is_variable() && self.requires_grad())), -1, keepdim);
+                 /*compute_uv=*/at::GradMode::is_enabled() && self.requires_grad())), -1, keepdim);
 }
 
 Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {

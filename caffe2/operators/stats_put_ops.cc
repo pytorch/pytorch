@@ -30,7 +30,7 @@ OPERATOR_SCHEMA(AveragePut)
         "(*boolean*): whether or not to clamp inputs to the max inputs allowed")
     .Arg(
         "default_value",
-        "(*float*): Optionally provide a default value for recieving empty tensors")
+        "(*float*): Optionally provide a default value for receiving empty tensors")
     .SetDoc(R"DOC(
     Consume a value and pushes it to the global stat registry as an average.
 
@@ -62,7 +62,7 @@ OPERATOR_SCHEMA(IncrementPut)
         "(*boolean*): whether or not to clamp inputs to the max inputs allowed")
     .Arg(
         "default_value",
-        "(*float*): Optionally provide a default value for recieving empty tensors")
+        "(*float*): Optionally provide a default value for receiving empty tensors")
     .SetDoc(R"DOC(
     Consume a value and pushes it to the global stat registry as an sum.
 
@@ -94,7 +94,7 @@ OPERATOR_SCHEMA(StdDevPut)
         "(*boolean*): whether or not to clamp inputs to the max inputs allowed")
     .Arg(
         "default_value",
-        "(*float*): Optionally provide a default value for recieving empty tensors")
+        "(*float*): Optionally provide a default value for receiving empty tensors")
     .SetDoc(R"DOC(
       Consume a value and pushes it to the global stat registry as an standard deviation.
 

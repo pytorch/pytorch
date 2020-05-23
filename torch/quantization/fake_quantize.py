@@ -25,12 +25,12 @@ class FakeQuantize(Module):
     * :attr:`observer_enable` controls statistics collection on tensors
 
     * :attr:`dtype` specifies the quantized dtype that is being emulated with fake-quantization,
-                    allowable values are torch.qint8 and torch.quint8. The values of quant_min and 
+                    allowable values are torch.qint8 and torch.quint8. The values of quant_min and
                     quant_max should be chosen to be consistent with the dtype
 
 
     Args:
-        observer (module): Module for observing statistics on input tensors and calculating scale 
+        observer (module): Module for observing statistics on input tensors and calculating scale
                            and zero-point.
         quant_min (int): The minimum allowable quantized value.
         quant_max (int): The maximum allowable quantized value.
@@ -47,39 +47,48 @@ class FakeQuantize(Module):
             'quant_min must be less than or equal to quant_max'
         self.quant_min = quant_min
         self.quant_max = quant_max
-        self.fake_quant_enabled = True
-        self.observer_enabled = True
-        self.observer = observer(**observer_kwargs)
-        assert torch.iinfo(self.observer.dtype).min <= quant_min, 'quant_min out of bound'
-        assert quant_max <= torch.iinfo(self.observer.dtype).max, 'quant_max out of bound'
-        self.scale = None
-        self.zero_point = None
-        self.dtype = self.observer.dtype
-        self.qscheme = self.observer.qscheme
-        self.ch_axis = self.observer.ch_axis if hasattr(self.observer, 'ch_axis') else 0
+        # fake_quant_enabled and observer_enabled are buffers to support their
+        # replication in DDP. Data type is uint8 because NCCL does not support
+        # bool tensors.
+        self.register_buffer('fake_quant_enabled', torch.tensor([1], dtype=torch.uint8))
+        self.register_buffer('observer_enabled', torch.tensor([1], dtype=torch.uint8))
+        self.activation_post_process = observer(**observer_kwargs)
+        assert torch.iinfo(self.activation_post_process.dtype).min <= quant_min, 'quant_min out of bound'
+        assert quant_max <= torch.iinfo(self.activation_post_process.dtype).max, 'quant_max out of bound'
+        self.register_buffer('scale', torch.tensor([1.0]))
+        self.register_buffer('zero_point', torch.tensor([0]))
+        self.dtype = self.activation_post_process.dtype
+        self.qscheme = self.activation_post_process.qscheme
+        self.ch_axis = self.activation_post_process.ch_axis if hasattr(self.activation_post_process, 'ch_axis') else None
 
     def enable_fake_quant(self, enabled=True):
-        self.fake_quant_enabled = enabled
+        self.fake_quant_enabled[0] = 1 if enabled else 0
         return self
 
     def disable_fake_quant(self):
         return self.enable_fake_quant(False)
 
     def enable_observer(self, enabled=True):
-        self.observer_enabled = enabled
+        self.observer_enabled[0] = 1 if enabled else 0
         return self
 
     def disable_observer(self):
         return self.enable_observer(False)
 
     def calculate_qparams(self):
-        return self.observer.calculate_qparams()
+        return self.activation_post_process.calculate_qparams()
 
     def forward(self, X):
-        if self.observer_enabled:
-            self.observer(X.detach())
-            self.scale, self.zero_point = self.calculate_qparams()
-        if self.fake_quant_enabled:
+        if self.observer_enabled[0] == 1:
+            self.activation_post_process(X.detach())
+            _scale, _zero_point = self.calculate_qparams()
+            _scale, _zero_point = _scale.to(self.scale.device), _zero_point.to(self.zero_point.device)
+            self.scale.resize_(_scale.shape)
+            self.scale.copy_(_scale)
+            self.zero_point.resize_(_zero_point.shape)
+            self.zero_point.copy_(_zero_point)
+
+        if self.fake_quant_enabled[0] == 1:
             if self.qscheme == torch.per_channel_symmetric or self.qscheme == torch.per_channel_affine:
                 X = torch.fake_quantize_per_channel_affine(X, self.scale, self.zero_point,
                                                            self.ch_axis, self.quant_min, self.quant_max)
@@ -106,10 +115,17 @@ class FakeQuantize(Module):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-
-        self.scale = state_dict.pop(prefix + 'scale')
-        self.zero_point = state_dict.pop(prefix + 'zero_point')
-        super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+        # Removing this function throws an error that the the size of the loaded tensor does not match the original size
+        # i.e., These buffers start out with numel 0 and become numel 1 once they have their first forward pass.
+        local_state = ['scale', 'zero_point']
+        for name in local_state:
+            key = prefix + name
+            if key in state_dict:
+                val = state_dict[key]
+                setattr(self, name, val)
+            elif strict:
+                missing_keys.append(key)
+        super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                         missing_keys, unexpected_keys, error_msgs)
 
 default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,

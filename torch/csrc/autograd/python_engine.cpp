@@ -8,8 +8,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
-#include <torch/csrc/utils/auto_gil.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <pybind11/pybind11.h>
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -24,29 +23,47 @@ struct THPEngine {
     PyObject_HEAD
 };
 
-static torch::autograd::python::PythonEngine engine;
-
-static Engine& get_python_engine() {
-  return engine;
-}
+static bool _reinitialize_engine = false;
 
 namespace torch { namespace autograd { namespace python {
 
-void PythonEngine::thread_init(int device) {
-  // Create a PyThreadState, but release the GIL. This lets AutoGIL calls
-  // inside thread_main acquire the GIL without having to create a new
-  // PyThreadState each time.
-  AutoGIL gil;
-  AutoNoGIL no_gil;
-  Engine::thread_init(device);
+PythonEngine::PythonEngine() = default;
+
+Engine& PythonEngine::get_python_engine() {
+  static PythonEngine engine;
+  // This is "probably" thread-safe because the flag is set in a fork handler
+  // before any threads are created, and this function is only called with the
+  // GIL held. However, using fork + threads is playing with fire so this is
+  // more of a "best effort" thing. For example, if the fork occurs while the
+  // backwards threads hold a lock, we'll probably deadlock in the engine
+  // destructor.
+  if (_reinitialize_engine) {
+    engine.release_workers();
+    engine.~PythonEngine();
+    new (&engine) torch::autograd::python::PythonEngine();
+    _reinitialize_engine = false;
+  }
+  return engine;
 }
 
-void PythonEngine::thread_on_exception(NodeTask& task, std::exception& e) {
+void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue) {
+  // Create a PyThreadState, but release the GIL. This lets pybind11::gil_scoped_acquire calls
+  // inside thread_main acquire the GIL without having to create a new
+  // PyThreadState each time.
+  pybind11::gil_scoped_acquire gil;
+  pybind11::gil_scoped_release no_gil;
+  Engine::thread_init(device, ready_queue);
+}
+
+void PythonEngine::thread_on_exception(
+    std::shared_ptr<GraphTask> graph_task,
+    const std::shared_ptr<Node>& fn,
+    std::exception& e) {
   auto python_err = dynamic_cast<python_error*>(&e);
   if (python_err) {
     python_err->persist();
   }
-  Engine::thread_on_exception(task, e);
+  Engine::thread_on_exception(graph_task, fn, e);
 }
 
 std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
@@ -59,6 +76,10 @@ variable_list PythonEngine::execute(
     bool keep_graph,
     bool create_graph,
     const edge_list& outputs) {
+  TORCH_CHECK(!PyGILState_Check(), "The autograd engine was called while holding the GIL. If you are using the C++ "
+                                   "API, the autograd engine is an expensive operation that does not require the "
+                                   "GIL to be held so you should release it with 'pybind11::gil_scoped_release no_gil;'"
+                                   ". If you are not using the C++ API, please report a bug to the pytorch team.")
   try {
     return Engine::execute(roots, inputs, keep_graph, create_graph, outputs);
   } catch (python_error& e) {
@@ -67,31 +88,28 @@ variable_list PythonEngine::execute(
   }
 }
 
+std::shared_ptr<FutureVariableList> PythonEngine::execute_with_graph_task(
+    const std::shared_ptr<GraphTask>& graph_task,
+    std::shared_ptr<Node> graph_root) {
+  try {
+    return Engine::execute_with_graph_task(graph_task, graph_root);
+  } catch (python_error& e) {
+    pybind11::gil_scoped_acquire gil;
+    if (!PyErr_Occurred()) {
+      // Set the error indicator only if it is not set already.
+      e.restore();
+    }
+    throw;
+  }
+}
 }}} // namespace torch::autograd::python
 
 PyObject *THPEngineClass = nullptr;
-
-static bool _reinitialize_engine = false;
-
-static void _maybe_reinitialize_engine_after_fork() {
-  // This is "probably" thread-safe because the flag is set in a fork handler
-  // before any threads are created, and this function is only called with the
-  // GIL held. However, using fork + threads is playing with fire so this is
-  // more of a "best effort" thing. For example, if the fork occurs while the
-  // backwards threads hold a lock, we'll probably deadlock in the engine
-  // destructor.
-  if (_reinitialize_engine) {
-    engine.~PythonEngine();
-    new (&engine) torch::autograd::python::PythonEngine();
-    _reinitialize_engine = false;
-  }
-}
 
 // Implementation of torch._C._EngineBase.run_backward
 PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  _maybe_reinitialize_engine_after_fork();
   PyObject *tensors = nullptr;
   PyObject *grad_tensors = nullptr;
   unsigned char keep_graph = 0;
@@ -125,7 +143,11 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
         "tuple is not a Tensor", i);
     auto& variable = ((THPVariable*)_tensor)->cdata;
-    auto gradient_edge = variable.gradient_edge();
+    if(variable.is_complex()) {
+      TORCH_WARN_ONCE("Complex backward is not fully supported yet and could lead to wrong ",
+                      "gradients for functions we have not fixed yet");
+    }
+    auto gradient_edge = torch::autograd::impl::gradient_edge(variable);
     THPUtils_assert(gradient_edge.function,
         "element %d of tensors does not require grad and does not have a grad_fn", i);
     roots.push_back(std::move(gradient_edge));
@@ -133,7 +155,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     PyObject *grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
       const Variable& grad_var = ((THPVariable*)grad)->cdata;
-#ifdef BUILD_NAMEDTENSOR
       if (grad_var.has_names()) {
         TORCH_WARN(
             "Autograd was passed a named grad tensor with dims ", grad_var.names(),
@@ -141,7 +162,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
             "will be ignored. In practice all computed gradients will still be correct "
             "according to regular tensor semantics.");
       }
-#endif
       grads.push_back(grad_var);
     } else {
       THPUtils_assert(grad == Py_None,
@@ -163,7 +183,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       const auto output_nr = input_var->cdata.output_nr();
       auto grad_fn = input_var->cdata.grad_fn();
       if (!grad_fn) {
-          grad_fn = input_var->cdata.try_get_grad_accumulator();
+          grad_fn = torch::autograd::impl::try_get_grad_accumulator(input_var->cdata);
       }
       THPUtils_assert(input_var->cdata.requires_grad(),
           "One of the differentiated Tensors does not require grad");
@@ -177,7 +197,8 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 
   variable_list outputs;
   {
-    AutoNoGIL no_gil;
+    pybind11::gil_scoped_release no_gil;
+    auto& engine = python::PythonEngine::get_python_engine();
     outputs = engine.execute(roots, grads, keep_graph, create_graph, output_edges);
   }
 
@@ -201,11 +222,11 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 
 PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
   HANDLE_TH_ERRORS
-  _maybe_reinitialize_engine_after_fork();
-  std::shared_ptr<PyObject> callback(_callback, [](PyObject *obj) { AutoGIL gil; Py_DECREF(obj); });
+  auto& engine = python::PythonEngine::get_python_engine();
+  std::shared_ptr<PyObject> callback(_callback, [](PyObject *obj) { pybind11::gil_scoped_acquire gil; Py_DECREF(obj); });
   Py_INCREF(_callback);
   engine.queue_callback([callback]() {
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
     THPObjectPtr result {PyObject_CallFunctionObjArgs(callback.get(), nullptr)};
     if (!result) throw python_error();
   });
@@ -215,6 +236,7 @@ PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
 
 PyObject* THPEngine_is_checkpoint_valid(PyObject *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
+  auto& engine = python::PythonEngine::get_python_engine();
   if(engine.is_checkpoint_valid()) {
     Py_RETURN_TRUE;
   } else {
@@ -238,11 +260,11 @@ static struct PyMethodDef THPEngine_methods[] = {
 
 PyTypeObject THPEngineType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C._EngineBase",                /* tp_name */
-  sizeof(THPEngine),                     /* tp_basicsize */
-  0,                                     /* tp_itemsize */
+  "torch._C._EngineBase",                      /* tp_name */
+  sizeof(THPEngine),                           /* tp_basicsize */
+  0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
-  nullptr,                                     /* tp_print */
+  0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
   nullptr,                                     /* tp_reserved */
@@ -256,25 +278,25 @@ PyTypeObject THPEngineType = {
   nullptr,                                     /* tp_getattro */
   nullptr,                                     /* tp_setattro */
   nullptr,                                     /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-  nullptr,                               /* tp_doc */
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,    /* tp_flags */
+  nullptr,                                     /* tp_doc */
   nullptr,                                     /* tp_traverse */
   nullptr,                                     /* tp_clear */
   nullptr,                                     /* tp_richcompare */
-  0,                                     /* tp_weaklistoffset */
+  0,                                           /* tp_weaklistoffset */
   nullptr,                                     /* tp_iter */
   nullptr,                                     /* tp_iternext */
-  THPEngine_methods,                     /* tp_methods */
+  THPEngine_methods,                           /* tp_methods */
   nullptr,                                     /* tp_members */
   nullptr,                                     /* tp_getset */
   nullptr,                                     /* tp_base */
   nullptr,                                     /* tp_dict */
   nullptr,                                     /* tp_descr_get */
   nullptr,                                     /* tp_descr_set */
-  0,                                     /* tp_dictoffset */
+  0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPEngine_new                          /* tp_new */
+  THPEngine_new                                /* tp_new */
 };
 
 static void child_atfork() {
@@ -292,6 +314,6 @@ bool THPEngine_initModule(PyObject *module)
     return false;
   Py_INCREF(&THPEngineType);
   PyModule_AddObject(module, "_ImperativeEngine", (PyObject *)&THPEngineType);
-  set_default_engine_stub(get_python_engine);
+  set_default_engine_stub(python::PythonEngine::get_python_engine);
   return true;
 }

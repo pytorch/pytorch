@@ -161,7 +161,6 @@ Contents
 
    installing
    frontend
-   contributing
    api/library_root
 
 .. toctree::

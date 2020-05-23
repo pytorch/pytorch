@@ -109,7 +109,10 @@ Tensor group_norm(
   }
 
   // Apply group norm
-  auto input_reshaped = input.contiguous().view({1, N * num_groups, -1});
+  const int64_t b = input.size(0);
+  const int64_t c = input.size(1);
+  auto input_reshaped =
+      input.contiguous().view({1, b * num_groups, b ? -1 : 1});
   auto out = at::batch_norm(
       input_reshaped, {}, {}, {}, {}, true, 0, eps, cudnn_enabled);
   out = out.view(input_shape);

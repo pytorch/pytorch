@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/UpSample.h>
+#include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <ATen/quantized/Quantizer.h>
 
 #include <algorithm>
 #include <cmath>
@@ -23,7 +23,9 @@ static void upsample_bilinear2d_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   auto* idata = static_cast<scalar_t*>(input.data_ptr());
   auto* odata = static_cast<scalar_t*>(output.data_ptr());
 
@@ -42,10 +44,10 @@ static void upsample_bilinear2d_out_frame(
   }
 
   const auto rheight = area_pixel_compute_scale<float>(
-      input_height, output_height, align_corners);
+      input_height, output_height, align_corners, scales_h);
 
   const auto rwidth =
-      area_pixel_compute_scale<float>(input_width, output_width, align_corners);
+      area_pixel_compute_scale<float>(input_width, output_width, align_corners, scales_w);
   float output_scale = output.q_scale() / input.q_scale();
 
   for (int64_t h2 = 0; h2 < output_height; ++h2) {
@@ -76,7 +78,7 @@ static void upsample_bilinear2d_out_frame(
                 (w0lambda * pos1[h1p * input_width] +
                  w1lambda * pos1[h1p * input_width + w1p]) - input.q_zero_point();
         // requantization
-        pos2[0] = at::quantize_val<scalar_t>(
+        pos2[0] = at::native::quantize_val<scalar_t>(
                       output_scale, output.q_zero_point(), result)
                       .val_;
         pos1 += input_width * input_height;
@@ -91,14 +93,16 @@ static void upsample_bilinear2d_out_frame(
 Tensor quantized_upsample_bilinear2d_cpu(
     const Tensor& input,
     IntArrayRef output_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
       output_size.size());
 
   TORCH_CHECK(
-      input.numel() != 0 && input.dim() == 4,
+      input.dim() == 4,
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
@@ -114,10 +118,10 @@ Tensor quantized_upsample_bilinear2d_cpu(
   if (input.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
     Tensor output = at::_empty_affine_quantized(
         {nbatch, channels, output_height, output_width},
-        input.options(),
+        input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        input.suggest_memory_format());
+        c10::nullopt);
 
     qupsample_bilinear2d_nhwc_stub(
         input.device().type(),
@@ -129,7 +133,9 @@ Tensor quantized_upsample_bilinear2d_cpu(
         output_width,
         nbatch,
         channels,
-        align_corners);
+        align_corners,
+        scales_h,
+        scales_w);
     return output;
   } else {
     Tensor output = at::_empty_affine_quantized(
@@ -150,7 +156,9 @@ Tensor quantized_upsample_bilinear2d_cpu(
               output_width,
               nbatch,
               channels,
-              align_corners);
+              align_corners,
+              scales_h,
+              scales_w);
         });
     return output;
   }

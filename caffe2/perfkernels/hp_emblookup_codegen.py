@@ -50,11 +50,20 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
 
     code = []
     code.append("    // unrolling " + str(uf) + " times")
-    code.append(
-        "    for ("
-        + IndexType
-        + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
-    )
+
+    if use_offsets:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        )
+    else:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        )
+
     code.append("      " + OutType + "* op = &out[rangeIndex * block_size];")
     for i in range(0, uf):
         j = 8 * i
@@ -63,19 +72,17 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
     # inner loop
     if use_offsets:
         code.append(
-            "      if (dataInd != offsets[rangeIndex]) {\n"
+            "      if (dataInd != offsets[rangeIndex] - offsets[0]) {\n"
             + "        return false;\n"
             + "      }"
         )
         code.append("""\
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];""")
         code.append(
             "      for ("
             + "int64_t"
-            + " start = dataInd; dataInd < end_offset; ++dataInd) {"  # noqa
+            + " start = dataInd; dataInd < end_offset - offsets[0];\n           ++dataInd) {"  # noqa
         )
     else:
         code.append(
@@ -222,11 +229,22 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
     code = []
     if InType == "at::Half":
         code.append("    alignas(64) at::Half vtmp1[8] = {0};")
-    code.append(
-        "    for ("
-        + IndexType
-        + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
-    )
+
+
+
+    if use_offsets:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        )
+    else:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        )
+
     code.append("      " + OutType + "* op = &out[rangeIndex * block_size];")
 
     # initialize to 0
@@ -241,19 +259,17 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
     # inner loop
     if use_offsets:
         code.append(
-            "      if (dataInd != offsets[rangeIndex]) {\n"
+            "      if (dataInd != offsets[rangeIndex] - offsets[0]) {\n"
             + "        return false;\n"
             + "      }"
         )
         code.append("""\
-      int end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
-      int length = end_offset - offsets[rangeIndex];""")
+      int64_t end_offset = offsets[rangeIndex + 1];
+      int64_t length = end_offset - offsets[rangeIndex];""")
         code.append(
             "      for ("
             + "int64_t"
-            + " start = dataInd; dataInd < end_offset; ++dataInd) {"  # noqa
+            + " start = dataInd; dataInd < end_offset - offsets[0];\n           ++dataInd) {"  # noqa
         )
     else:
         code.append(
@@ -477,7 +493,13 @@ for o in options:
     for is_weight_positional in ["false", "true"]:
         code.append("bool " + fn_base + "_" + is_weight_positional + suffix + "(")
         code += args
-        code.append("  return " + fn_base + suffix + "<" + is_weight_positional + ">(")
+        # Resolve the Lint warnings: Limit of 80 characters in one line.
+        extra_space = "\n      "
+        ret_string = "  return " + fn_base + suffix + "<" + is_weight_positional + ">("
+        if len(ret_string) <= 80:
+            code.append(ret_string)
+        else:
+            code.append("  return " + fn_base + suffix + "<" + extra_space + is_weight_positional + ">(")
         code.append("      block_size,")
         code.append("      output_size,")
         code.append("      index_size,")
