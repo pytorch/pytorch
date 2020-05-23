@@ -3017,12 +3017,12 @@ exceed the range of normal floating point numbers. In such cases the logarithm
 of the calculated probability is stored. This function allows adding
 probabilities stored in such a fashion.
 
-This op should be disambiguated with :func:`torch.logsumexp` which do a
-reduction with a tensor over a specific axis.
+This op should be disambiguated with :func:`torch.logsumexp` which performs a
+reduction on a single tensor.
 
 Args:
     {input}
-    other (Tensor): the tensor to compute logaddexp with
+    other (Tensor): the second input tensor
 
 Keyword arguments:
     {out}
@@ -3048,7 +3048,7 @@ Calculates pointwise :math:`\log_2\left(2^x + 2^y\right)`. See
 
 Args:
     {input}
-    other (Tensor): the tensor to compute logaddexp2 with
+    other (Tensor): the second input tensor
 
 Keyword arguments:
     {out}
