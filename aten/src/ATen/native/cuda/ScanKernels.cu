@@ -433,6 +433,11 @@ Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
 }
 
 Tensor& _cumsum_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
+  TensorArg output_arg{result, "output", 1};
+  TensorArg input_arg{self, "input", 2};
+  checkAllSameGPU("cumsum", {output_arg, input_arg});
+  checkSameType("cumsum", output_arg, input_arg);
+
   result.resize_(self.sizes());
   if (self.dim() == 0) {
     result.fill_(self);
@@ -443,10 +448,6 @@ Tensor& _cumsum_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
     return result;
   }
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-
-  TensorArg output_arg{result, "output", 1};
-  TensorArg input_arg{self, "input", 2};
-  checkAllSameGPU("cumsum", {output_arg, input_arg});
 
   AT_DISPATCH_ALL_TYPES_AND(
       at::ScalarType::Half, self.scalar_type(), "cumsum_cuda", [&]() {
@@ -468,6 +469,11 @@ Tensor _cumsum_cuda(const Tensor& self, int64_t dim) {
 }
 
 Tensor& _cumprod_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
+  TensorArg output_arg{result, "output", 1};
+  TensorArg input_arg{self, "input", 2};
+  checkAllSameGPU("cumprod", {output_arg, input_arg});
+  checkSameType("cumprod", output_arg, input_arg);
+
   result.resize_(self.sizes());
   if (self.dim() == 0) {
     result.fill_(self);
@@ -478,10 +484,6 @@ Tensor& _cumprod_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
     return result;
   }
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-
-  TensorArg output_arg{result, "output", 1};
-  TensorArg input_arg{self, "input", 2};
-  checkAllSameGPU("cumprod", {output_arg, input_arg});
 
   AT_DISPATCH_ALL_TYPES_AND(
       at::ScalarType::Half, self.scalar_type(), "cumprod_cuda", [&]() {
