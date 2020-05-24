@@ -54,7 +54,7 @@
 #define C10_IMPORT
 #endif
 #else // _WIN32
-#if defined(__GNUC__)
+#if defined(__GNUC__) && !defined(__NVCC__)
 #define C10_EXPORT __attribute__((__visibility__("default")))
 #define C10_HIDDEN __attribute__((__visibility__("hidden")))
 #else // defined(__GNUC__)
