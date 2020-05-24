@@ -25,7 +25,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     int64_t HxW,
     int64_t group,
     double eps) {
-  Tensor Y = at::native::empty_like(X);
+  Tensor Y = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor mean = at::empty({N, group}, X.options());
   Tensor rstd = at::empty({N, group}, X.options());
   GroupNormKernel(
@@ -59,13 +59,13 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   Tensor dgamma;
   Tensor dbeta;
   if (grad_input_mask[0]) {
-    dX = at::native::empty_like(X);
+    dX = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[1]) {
-    dgamma = at::native::empty_like(gamma);
+    dgamma = at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[2]) {
-    dbeta = at::native::empty_like(gamma);
+    dbeta = at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   GroupNormBackwardKernel(
       X.device().type(),
