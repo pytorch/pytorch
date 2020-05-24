@@ -524,20 +524,26 @@ void GroupNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      X.scalar_type(), "GroupNormKernelImpl", [&]() {
-        GroupNormKernelImplInternal<scalar_t>(
-            X,
-            gamma,
-            beta,
-            N,
-            C,
-            HxW,
-            group,
-            static_cast<scalar_t>(eps),
-            Y,
-            mean,
-            rstd);
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      X.scalar_type(),
+      "GroupNormKernelImpl",
+      [&]() {
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "GroupNormKernelImpl", [&]() {
+          GroupNormKernelImplInternal<scalar_t>(
+              X,
+              gamma,
+              beta,
+              N,
+              C,
+              HxW,
+              group,
+              static_cast<scalar_t>(eps),
+              Y,
+              mean,
+              rstd);
+        });
       });
 }
 
@@ -708,10 +714,28 @@ void GroupNormBackwardKernelImpl(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      X.scalar_type(), "GroupNormBackwardKernelImpl", [&]() {
-        GroupNormBackwardKernelImplInternal<scalar_t>(
-            dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      X.scalar_type(),
+      "GroupNormBackwardKernelImpl",
+      [&]() {
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(
+            scalar_t, "GroupNormBackwardKernelImpl", [&]() {
+              GroupNormBackwardKernelImplInternal<scalar_t>(
+                  dY,
+                  X,
+                  mean,
+                  rstd,
+                  gamma,
+                  N,
+                  C,
+                  HxW,
+                  group,
+                  dX,
+                  dgamma,
+                  dbeta);
+            });
       });
 }
 
