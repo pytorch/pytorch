@@ -5920,11 +5920,13 @@ class TestTorchDeviceType(TestCase):
             if isinstance(base, torch.Tensor):
                 actual = base.pow(exponent)
                 self.assertEqual(actual, expected.to(actual))
-
                 actual = base.clone()
-                actual2 = actual.pow_(exponent)
-                self.assertEqual(actual, expected.to(actual))
-                self.assertEqual(actual2, expected.to(actual))
+                if torch.can_cast(torch.result_type(base, exponent), base.dtype):
+                    actual2 = actual.pow_(exponent)
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(actual2, expected)
+                else:
+                    self.assertRaisesRegex(RuntimeError, "can't be cast", lambda: actual.pow_(exponent))
 
             actual = torch.pow(base, exponent)
             self.assertEqual(actual, expected.to(actual))
@@ -6403,6 +6405,13 @@ class TestTorchDeviceType(TestCase):
                     res2[i] = pow_fn(m1[i, 4], num)
                 self.assertEqual(res1, res2, {'atol': atol})
 
+                # scalar ** tensor to enforce correct handling of dtypes for __rpow__().
+                expected_dtype = torch.result_type(num, m1)
+                res1 = num ** m1[4]
+                res2 = torch.tensor(num, dtype=expected_dtype, device=m1.device) ** m1[4]
+                self.assertEqual(res1, res2)
+                self.assertEqual(res1.dtype, expected_dtype)
+
     def test_pow(self, device):
         # [res] torch.pow([res,] x)
 
@@ -6453,6 +6462,7 @@ class TestTorchDeviceType(TestCase):
             out = torch.zeros(1, dtype=dtype, device=device)
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
+
 
     def test_neg(self, device):
         int_types = [torch.int, torch.short, torch.int8, torch.uint8]
