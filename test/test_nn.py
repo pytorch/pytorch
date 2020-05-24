@@ -44,8 +44,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, NewCrit
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, largeCUDATensorTest, onlyOnCPUAndCUDA, \
-    deviceCountAtLeast, dtypesIfCPU
-
+    deviceCountAtLeast
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
