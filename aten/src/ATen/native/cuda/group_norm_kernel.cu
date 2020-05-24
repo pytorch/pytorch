@@ -509,6 +509,7 @@ void GroupNormKernelImplInternal(
     GroupNormForwardCUDAKernel<T><<<N * C, kCUDANumThreads, 0, cuda_stream>>>(
         HxW, X_data, a_data, b_data, Y_data);
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 void GroupNormKernelImpl(
@@ -691,6 +692,7 @@ void GroupNormBackwardKernelImplInternal(
               dbeta_data);
     }
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 void GroupNormBackwardKernelImpl(
