@@ -39,12 +39,12 @@ void GroupNormKernelImplInternal(
   T* mean_data = mean->data_ptr<T>();
   T* rstd_data = rstd->data_ptr<T>();
   const T s = T(1) / static_cast<T>(D * HxW);
-  constexpr int64_t K = vec256::Vec256<T>::size();
-  const int64_t inner_size = D * HxW / K * K;
   const bool gamma_null = gamma_data == nullptr;
   const bool beta_null = beta_data == nullptr;
 
   at::parallel_for(0, N * G, 1, [&](int64_t start, int64_t end) {
+    constexpr int64_t K = vec256::Vec256<T>::size();
+    const int64_t inner_size = D * HxW / K * K;
     std::array<T, K> mean_arr;
     std::array<T, K> rstd_arr;
     for (int64_t i = start; i < end; ++i) {
@@ -155,10 +155,10 @@ void GroupNormBackwardKernelImplInternal(
   Tensor db = at::empty({G, D}, X.options());
   T* ds_data = ds.data_ptr<T>();
   T* db_data = db.data_ptr<T>();
-  constexpr int64_t K = vec256::Vec256<T>::size();
-  const int64_t inner_size = HxW / K * K;
 
   at::parallel_for(0, N, 1, [&](int64_t start, int64_t end) {
+    constexpr int64_t K = vec256::Vec256<T>::size();
+    const int64_t inner_size = HxW / K * K;
     std::array<T, K> ds_arr;
     std::array<T, K> db_arr;
     for (int64_t i = start; i < end; ++i) {
