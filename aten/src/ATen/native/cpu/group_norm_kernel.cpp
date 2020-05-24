@@ -156,90 +156,88 @@ void GroupNormBackwardKernelImplInternal(
   T* ds_data = ds.data_ptr<T>();
   T* db_data = db.data_ptr<T>();
 
-  at::parallel_for(0, N, 1, [&](int64_t start, int64_t end) {
-    constexpr int64_t K = vec256::Vec256<T>::size();
-    const int64_t inner_size = HxW / K * K;
-    std::array<T, K> ds_arr;
-    std::array<T, K> db_arr;
-    for (int64_t i = start; i < end; ++i) {
-      for (int64_t j = 0; j < C; ++j) {
-        const T* dY_ptr = dY_data + (i * C + j) * HxW;
-        const T* X_ptr = X_data + (i * C + j) * HxW;
+  constexpr int64_t K = vec256::Vec256<T>::size();
+  const int64_t inner_size = HxW / K * K;
+  std::array<T, K> ds_arr;
+  std::array<T, K> db_arr;
+  for (int64_t i = 0; i < N; ++i) {
+    for (int64_t j = 0; j < C; ++j) {
+      const T* dY_ptr = dY_data + (i * C + j) * HxW;
+      const T* X_ptr = X_data + (i * C + j) * HxW;
+      vec256::Vec256<T> ds_vec(0);
+      vec256::Vec256<T> db_vec(0);
+      for (int64_t k = 0; k < inner_size; k += K) {
+        const vec256::Vec256<T> dy_vec = vec256::Vec256<T>::loadu(dY_ptr + k);
+        const vec256::Vec256<T> x_vec = vec256::Vec256<T>::loadu(X_ptr + k);
+        ds_vec = ds_vec + dy_vec * x_vec;
+        db_vec = db_vec + dy_vec;
+      }
+      ds_vec.store(ds_arr.data());
+      db_vec.store(db_arr.data());
+      T ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), T(0));
+      T db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), T(0));
+      for (int64_t k = inner_size; k < HxW; ++k) {
+        ds_val += dY_ptr[k] * X_ptr[k];
+        db_val += dY_ptr[k];
+      }
+      ds_data[j] = ds_val;
+      db_data[j] = db_val;
+    }
+    if (dX_data != nullptr) {
+      const int64_t d = D / K * K;
+      for (int64_t j = 0; j < G; ++j) {
+        const T* ds_ptr = ds_data + j * D;
+        const T* db_ptr = db_data + j * D;
         vec256::Vec256<T> ds_vec(0);
         vec256::Vec256<T> db_vec(0);
-        for (int64_t k = 0; k < inner_size; k += K) {
-          const vec256::Vec256<T> dy_vec = vec256::Vec256<T>::loadu(dY_ptr + k);
-          const vec256::Vec256<T> x_vec = vec256::Vec256<T>::loadu(X_ptr + k);
-          ds_vec = ds_vec + dy_vec * x_vec;
-          db_vec = db_vec + dy_vec;
+        for (int64_t k = 0; k < d; k += K) {
+          const vec256::Vec256<T> gamma_vec = gamma_null
+              ? vec256::Vec256<T>(1)
+              : vec256::Vec256<T>::loadu(gamma_data + j * D + k);
+          ds_vec = ds_vec + vec256::Vec256<T>::loadu(ds_ptr + k) * gamma_vec;
+          db_vec = db_vec + vec256::Vec256<T>::loadu(db_ptr + k) * gamma_vec;
         }
         ds_vec.store(ds_arr.data());
         db_vec.store(db_arr.data());
         T ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), T(0));
         T db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), T(0));
-        for (int64_t k = inner_size; k < HxW; ++k) {
-          ds_val += dY_ptr[k] * X_ptr[k];
-          db_val += dY_ptr[k];
+        for (int64_t k = d; k < D; ++k) {
+          const T gamma_v = gamma_null ? T(1) : gamma_data[j * D + k];
+          ds_val += ds_ptr[k] * gamma_v;
+          db_val += db_ptr[k] * gamma_v;
         }
-        ds_data[j] = ds_val;
-        db_data[j] = db_val;
-      }
-      if (dX_data != nullptr) {
-        const int64_t d = D / K * K;
-        for (int64_t j = 0; j < G; ++j) {
-          const T* ds_ptr = ds_data + j * D;
-          const T* db_ptr = db_data + j * D;
-          vec256::Vec256<T> ds_vec(0);
-          vec256::Vec256<T> db_vec(0);
-          for (int64_t k = 0; k < d; k += K) {
-            const vec256::Vec256<T> gamma_vec = gamma_null
-                ? vec256::Vec256<T>(1)
-                : vec256::Vec256<T>::loadu(gamma_data + j * D + k);
-            ds_vec = ds_vec + vec256::Vec256<T>::loadu(ds_ptr + k) * gamma_vec;
-            db_vec = db_vec + vec256::Vec256<T>::loadu(db_ptr + k) * gamma_vec;
+        const int64_t ng = i * G + j;
+        const T c2 = (db_val * mean_data[ng] - ds_val) * rstd_data[ng] *
+            rstd_data[ng] * rstd_data[ng] * s;
+        const T c3 = -c2 * mean_data[ng] - db_val * rstd_data[ng] * s;
+        for (int64_t k = 0; k < D; ++k) {
+          const int64_t c = j * D + k;
+          const T* dY_ptr = dY_data + (i * C + c) * HxW;
+          const T* X_ptr = X_data + (i * C + c) * HxW;
+          T* dX_ptr = dX_data + (i * C + c) * HxW;
+          const T c1 = rstd_data[ng] * (gamma_null ? T(1) : gamma_data[c]);
+          for (int64_t x = 0; x < HxW; ++x) {
+            dX_ptr[x] = c1 * dY_ptr[x] + c2 * X_ptr[x] + c3;
           }
-          ds_vec.store(ds_arr.data());
-          db_vec.store(db_arr.data());
-          T ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), T(0));
-          T db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), T(0));
-          for (int64_t k = d; k < D; ++k) {
-            const T gamma_v = gamma_null ? T(1) : gamma_data[j * D + k];
-            ds_val += ds_ptr[k] * gamma_v;
-            db_val += db_ptr[k] * gamma_v;
-          }
-          const int64_t ng = i * G + j;
-          const T c2 = (db_val * mean_data[ng] - ds_val) * rstd_data[ng] *
-              rstd_data[ng] * rstd_data[ng] * s;
-          const T c3 = -c2 * mean_data[ng] - db_val * rstd_data[ng] * s;
-          for (int64_t k = 0; k < D; ++k) {
-            const int64_t c = j * D + k;
-            const T* dY_ptr = dY_data + (i * C + c) * HxW;
-            const T* X_ptr = X_data + (i * C + c) * HxW;
-            T* dX_ptr = dX_data + (i * C + c) * HxW;
-            const T c1 = rstd_data[ng] * (gamma_null ? T(1) : gamma_data[c]);
-            for (int64_t x = 0; x < HxW; ++x) {
-              dX_ptr[x] = c1 * dY_ptr[x] + c2 * X_ptr[x] + c3;
-            }
-          }
-        }
-      }
-      if (dgamma_data != nullptr) {
-        for (int64_t j = 0; j < G; ++j) {
-          const int64_t ng = i * G + j;
-          for (int64_t k = 0; k < D; ++k) {
-            const int64_t c = j * D + k;
-            dgamma_data[c] +=
-                (ds_data[c] - db_data[c] * mean_data[ng]) * rstd_data[ng];
-          }
-        }
-      }
-      if (dbeta_data != nullptr) {
-        for (int64_t j = 0; j < C; ++j) {
-          dbeta_data[j] += db_data[j];
         }
       }
     }
-  });
+    if (dgamma_data != nullptr) {
+      for (int64_t j = 0; j < G; ++j) {
+        const int64_t ng = i * G + j;
+        for (int64_t k = 0; k < D; ++k) {
+          const int64_t c = j * D + k;
+          dgamma_data[c] +=
+              (ds_data[c] - db_data[c] * mean_data[ng]) * rstd_data[ng];
+        }
+      }
+    }
+    if (dbeta_data != nullptr) {
+      for (int64_t j = 0; j < C; ++j) {
+        dbeta_data[j] += db_data[j];
+      }
+    }
+  }
 }
 
 void GroupNormBackwardKernelImpl(
