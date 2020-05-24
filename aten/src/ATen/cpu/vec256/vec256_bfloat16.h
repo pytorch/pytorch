@@ -338,6 +338,24 @@ public:
     auto o2 = _mm256_sqrt_ps(hi);
     return cvtfp32_bf16(o1, o2);
   }
+  Vec256<BFloat16> rad2deg() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto t_180s = _mm256_set1_ps(180);
+    auto pis = _mm256_set1_ps(M_PI);
+    auto o1 = _mm256_mul_ps(t_180s, _mm256_div_ps(lo, pis));
+    auto o2 = _mm256_mul_ps(t_180s, _mm256_div_ps(hi, pis));
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> deg2rad() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto t_180s = _mm256_set1_ps(180);
+    auto pis = _mm256_set1_ps(M_PI);
+    auto o1 = _mm256_mul_ps(pis, _mm256_div_ps(lo, t_180s));
+    auto o2 = _mm256_mul_ps(pis, _mm256_div_ps(hi, t_180s));
+    return cvtfp32_bf16(o1, o2);
+  }
   Vec256<BFloat16> reciprocal() const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);

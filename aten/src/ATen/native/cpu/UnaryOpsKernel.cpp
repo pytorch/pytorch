@@ -347,13 +347,25 @@ void normal_kernel(Tensor& self, double mean, double std, c10::optional<Generato
 
 
 static void rad2deg_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rad2deg_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "rad2deg_cpu", [&] {
         cpu_kernel_vec(
           iter,
           [=](scalar_t a) -> scalar_t {
             return static_cast<scalar_t>(180) * a / static_cast<scalar_t>(M_PI);
           },
           [=](Vec256<scalar_t> a) { return a.rad2deg(); }
+        );
+  });
+}
+
+static void deg2rad_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "deg2rad_cpu", [&] {
+        cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t {
+            return static_cast<scalar_t>(M_PI) * a / static_cast<scalar_t>(180);
+          },
+          [=](Vec256<scalar_t> a) { return a.deg2rad(); }
         );
   });
 }
@@ -454,6 +466,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
 } // anonymous namespace
 
 REGISTER_DISPATCH(rad2deg_stub, &rad2deg_kernel);
+REGISTER_DISPATCH(deg2rad_stub, &deg2rad_kernel);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);

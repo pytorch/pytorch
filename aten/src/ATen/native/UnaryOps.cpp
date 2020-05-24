@@ -114,6 +114,13 @@ Tensor& rad2deg_out(Tensor& result, const Tensor& self) {
 Tensor rad2deg(const Tensor& self) { return unary_op_impl(self, at::rad2deg_out); }
 Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
 
+Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "deg2rad is not supported for complex tensors.");
+  return unary_op_impl_out(result, self, deg2rad_stub);
+}
+Tensor deg2rad(const Tensor& self) { return unary_op_impl(self, at::deg2rad_out); }
+Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
+
 Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
@@ -469,7 +476,6 @@ DEFINE_DISPATCH(real_stub);
 DEFINE_DISPATCH(imag_stub);
 DEFINE_DISPATCH(conj_stub);
 DEFINE_DISPATCH(acos_stub);
-DEFINE_DISPATCH(rad2deg_stub);
 DEFINE_DISPATCH(asin_stub);
 DEFINE_DISPATCH(atan_stub);
 DEFINE_DISPATCH(bitwise_not_stub);
@@ -494,6 +500,8 @@ DEFINE_DISPATCH(log2_stub);
 DEFINE_DISPATCH(logical_not_stub);
 DEFINE_DISPATCH(neg_stub);
 DEFINE_DISPATCH(polygamma_stub);
+DEFINE_DISPATCH(rad2deg_stub);
+DEFINE_DISPATCH(deg2rad_stub);
 DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);
 DEFINE_DISPATCH(rsqrt_stub);

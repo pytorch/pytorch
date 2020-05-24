@@ -211,6 +211,9 @@ public:
   Vec256<float> rad2deg() const {
     return _mm256_mul_ps(_mm256_set1_ps(180), _mm256_div_ps(values, _mm256_set1_ps(M_PI)));
   }
+  Vec256<float> deg2rad() const {
+    return _mm256_mul_ps(_mm256_set1_ps(M_PI), _mm256_div_ps(values, _mm256_set1_ps(180)));
+  }
   Vec256<float> reciprocal() const {
     return _mm256_div_ps(_mm256_set1_ps(1), values);
   }

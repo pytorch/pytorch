@@ -41,6 +41,7 @@ DECLARE_DISPATCH(unary_fn, log1p_stub);
 DECLARE_DISPATCH(unary_fn, log2_stub);
 DECLARE_DISPATCH(unary_fn, neg_stub);
 DECLARE_DISPATCH(unary_fn, rad2deg_stub);
+DECLARE_DISPATCH(unary_fn, deg2rad_stub);
 DECLARE_DISPATCH(unary_fn, reciprocal_stub);
 DECLARE_DISPATCH(unary_fn, round_stub);
 DECLARE_DISPATCH(unary_fn, rsqrt_stub);
