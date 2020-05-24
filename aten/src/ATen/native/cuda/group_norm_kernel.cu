@@ -567,13 +567,13 @@ void GroupNormBackwardKernelImplInternal(
   if (N == 0) {
     if (dgamma->defined()) {
       T* dgamma_data = dgamma->data_ptr<T>();
-      AT_CUDA_CHECK(
-          cudaMemsetAsync(dgamma_data, 0, dgamma->numel(), cuda_stream));
+      AT_CUDA_CHECK(cudaMemsetAsync(
+          dgamma_data, 0, dgamma->numel() * sizeof(T), cuda_stream));
     }
     if (dbeta->defined()) {
       T* dbeta_data = dbeta->data_ptr<T>();
-      AT_CUDA_CHECK(
-          cudaMemsetAsync(dbeta_data, 0, dbeta->numel(), cuda_stream));
+      AT_CUDA_CHECK(cudaMemsetAsync(
+          dbeta_data, 0, dbeta->numel() * sizeof(T), cuda_stream));
     }
     return;
   }
