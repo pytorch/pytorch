@@ -1864,83 +1864,126 @@ class TestQuantizedOps(TestCase):
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch.quint8)
         # relu
+        print("relu")
         qY = torch.nn.functional.relu(qX)
+        print("1")
         np.testing.assert_equal(qY.size(), qX.size(),
                                 "Quantized relu with batch size 0 failed.")
 
         # tanh
+        print("tanh")
+        print("1")
         qY = torch.tanh(qX)
         np.testing.assert_equal(qY.size(), qX.size(),
                                 "Quantized tanh with batch size 0 failed.")
         # sigmoid
+        print("sigmoid")
+        print("1")
         qY = torch.sigmoid(qX)
         np.testing.assert_equal(qY.size(), qX.size(),
                                 "Quantized sigmoid with batch size 0 failed.")
 
         # interpolate
+        print("interpolate")
         op = torch.nn.quantized.functional.interpolate
+        print("1")
         for mode in ["nearest", "bilinear"]:
+            print("2")
             qY = op(qX, scale_factor=2, mode=mode)
+            print("3")
             np.testing.assert_equal(qY.size(), (0, 2, 8, 8),
                                     "Quantized interpolate with batch size 0 failed.")
 
         # avg_pool
+        print("avg_pool")
         kernel = (2, 2)
         stride = (1, 1)
         padding = (0, 0)
         op = torch.nn.quantized.functional.avg_pool2d
+        print("1")
         qY = op(qX, kernel, stride, padding)
+        print("2")
         np.testing.assert_equal(qY.size(), (0, 2, 3, 3),
                                 "Quantized avg_pool2d with batch size 0 failed.")
 
         # adaptive_avg_pool
+        print("adaptive_avg_pool")
         op = torch.nn.quantized.functional.adaptive_avg_pool2d
+        print("1")
         qY = op(qX, (3, 3))
+        print("2")
         np.testing.assert_equal(qY.size(), (0, 2, 3, 3),
                                 "Quantized adaptive_avg_pool2d with batch size 0 failed.")
 
         # max_pool
+        print("max_pool")
         dilation = (1, 1)
+        print("1")
         qY = torch.ops.quantized.max_pool2d(qX, kernel, stride, padding, dilation, ceil_mode=False)
+        print("2")
         oH = pool_output_shape(4, 2, 0, 1, 1)
+        print("3")
         oW = pool_output_shape(4, 2, 0, 1, 1)
+        print("4")
         np.testing.assert_equal(qY.size(), (0, 2, oH, oW),
                                 "Quantized maxpool2d with batch size 0 failed.")
 
         # hardtanh
+        print("hardtanh")
         qY = torch.nn.quantized.functional.hardtanh(qX, -1, 6)
+        print("1")
         np.testing.assert_equal(qY.size(), qX.size(),
                                 "Quantized hardtanh with batch size 0 failed.")
 
         # mul
+        print("mul")
         qY = torch.ops.quantized.mul(qX, qX, 1.0, 0)
+        print("1")
         np.testing.assert_equal(qY.size(), qX.size(),
                                 "Quantized mul with batch size 0 failed.")
         # add
+        print("add")
         qY = torch.ops.quantized.add(qX, qX, 1.0, 0)
+        print("1")
         np.testing.assert_equal(qY.size(), qX.size(),
                                 "Quantized addition with batch size 0 failed.")
 
         # conv
+        print("conv")
         w = torch.randn((2, 2, 2, 2), dtype=torch.float)
+        print("1")
         qw = torch.quantize_per_tensor(w, scale=1.0, zero_point=0, dtype=torch.qint8)
+        print("2")
         bias_float = torch.ones(2, dtype=torch.float)
+        print("3")
         strides = [1, 1]
+        print("4")
         pads = [0, 0]
+        print("5")
         dilations = [1, 1]
+        print("6")
 
         w_packed = torch.ops.quantized.conv2d_prepack(qw, bias_float, strides, pads, dilations, 1)
+        print("7")
         result = torch.ops.quantized.conv2d(qX, w_packed, 1.0, 0)
+        print("8")
         self.assertEqual(result.shape, (0, 2, 3, 3))
 
         # linear
+        print("linear")
         X = torch.ones((0, 2), dtype=torch.float32)
+        print("1")
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch.quint8)
+        print("2")
         w = torch.randn((2, 2), dtype=torch.float)
+        print("3")
         qw = torch.quantize_per_tensor(w, scale=1.0, zero_point=0, dtype=torch.qint8)
+        print("4")
         w_packed = torch.ops.quantized.linear_prepack(qw, bias_float)
+        print("5")
         result = torch.ops.quantized.linear(qX, w_packed, 1.0, 0)
+        print("6")
         self.assertEqual(result.shape, (0, 2))
 
 class TestDynamicQuantizedLinear(TestCase):
