@@ -280,8 +280,6 @@ if(NOT USE_SYSTEM_PTHREADPOOL)
   # using right now does not suppor it.  Should unify later after updating pthreadpool.
   if(MSVC)
     set(USE_INTERNAL_PTHREADPOOL_IMPL ON CACHE BOOL "" FORCE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
-
     # XNNPACK cannot link against a custom implementation of pthreadpool
     caffe2_update_option(USE_XNNPACK OFF)
   else()
@@ -305,6 +303,10 @@ if(NOT USE_SYSTEM_PTHREADPOOL)
     endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
+  endif()
+
+  if(USE_INTERNAL_PTHREADPOOL_IMPL)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
   endif()
 endif()
 

@@ -134,6 +134,9 @@ namespace c10 {
   _(prim, TracedFork)                \
   _(prim, TracedAttr)                \
   _(prim, rpc_async)                 \
+  _(aten, abs_)                      \
+  _(aten, absolute)                  \
+  _(aten, absolute_)                 \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -209,7 +212,9 @@ namespace c10 {
   _(onnx, Expand)                    \
   _(onnx, Equal)                     \
   _(onnx, Greater)                   \
+  _(onnx, GreaterOrEqual)            \
   _(onnx, Less)                      \
+  _(onnx, LessOrEqual)               \
   _(onnx, Not)                       \
   _(onnx, ATen)                      \
   _(onnx, Split)                     \

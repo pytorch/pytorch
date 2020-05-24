@@ -14,13 +14,11 @@ struct C10_API Storage {
   // Allocates memory buffer using given allocator and creates a storage with it
   Storage(
       use_byte_size_t use_byte_size,
-      caffe2::TypeMeta data_type,
       size_t size_bytes,
       Allocator* allocator,
       bool resizable)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
             StorageImpl::use_byte_size_t(),
-            data_type,
             size_bytes,
             allocator,
             resizable)) {}
@@ -30,14 +28,12 @@ struct C10_API Storage {
   // is non-resizable
   Storage(
       use_byte_size_t use_byte_size,
-      caffe2::TypeMeta data_type,
       size_t size_bytes,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
       bool resizable)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
             StorageImpl::use_byte_size_t(),
-            data_type,
             size_bytes,
             std::move(data_ptr),
             allocator,
@@ -46,20 +42,14 @@ struct C10_API Storage {
   // Legacy constructor for partially initialized (dtype or memory) storages
   // that can be temporarily created with Caffe2 APIs. See the note on top of
   // TensorImpl.h for details.
-  static Storage create_legacy(at::Device device, caffe2::TypeMeta data_type) {
+  static Storage create_legacy(at::Device device) {
     auto allocator = GetAllocator(device.type());
     return Storage(c10::make_intrusive<StorageImpl>(
         StorageImpl::use_byte_size_t(),
-        data_type,
         0,
         allocator->allocate(0), // materialize a non-default Device.
         allocator,
         true));
-  }
-
-  template <typename T>
-  inline bool IsType() const {
-    return storage_impl_->IsType<T>();
   }
 
   template <typename T>
@@ -86,10 +76,6 @@ struct C10_API Storage {
     return storage_impl_.get()->data();
   }
 
-  const caffe2::TypeMeta& dtype() const {
-    return storage_impl_->dtype();
-  }
-
   at::DataPtr& data_ptr() {
     return storage_impl_->data_ptr();
   }
@@ -102,10 +88,6 @@ struct C10_API Storage {
   at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) const {
     return storage_impl_.get()->set_data_ptr(std::move(data_ptr));
   };
-
-  void set_dtype(const caffe2::TypeMeta& data_type) const {
-    storage_impl_.get()->set_dtype(data_type);
-  }
 
   DeviceType device_type() const {
     return storage_impl_->device_type();
@@ -145,27 +127,24 @@ struct C10_API Storage {
 
   void UniqueStorageShareExternalPointer(
       void* src,
-      const caffe2::TypeMeta& data_type,
       size_t capacity,
       DeleterFnPtr d = nullptr) {
     if (!storage_impl_.unique()) {
       AT_ERROR(
           "UniqueStorageShareExternalPointer can only be called when use_count == 1");
     }
-    storage_impl_->UniqueStorageShareExternalPointer(
-        src, data_type, capacity, d);
+    storage_impl_->UniqueStorageShareExternalPointer(src, capacity, d);
   }
 
   void UniqueStorageShareExternalPointer(
       at::DataPtr&& data_ptr,
-      const caffe2::TypeMeta& data_type,
       size_t capacity) {
     if (!storage_impl_.unique()) {
       AT_ERROR(
           "UniqueStorageShareExternalPointer can only be called when use_count == 1");
     }
     storage_impl_->UniqueStorageShareExternalPointer(
-        std::move(data_ptr), data_type, capacity);
+        std::move(data_ptr), capacity);
   }
 
  protected:

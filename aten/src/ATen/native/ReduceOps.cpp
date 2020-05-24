@@ -37,6 +37,7 @@ DEFINE_DISPATCH(argmax_stub);
 DEFINE_DISPATCH(argmin_stub);
 DEFINE_DISPATCH(cumsum_stub);
 DEFINE_DISPATCH(cumprod_stub);
+DEFINE_DISPATCH(logcumsumexp_stub);
 
 #define OPTION_TYPE_EQUALITY_CHECK(option, out, self) \
 { \
@@ -184,6 +185,35 @@ static TensorIterator make_reduction(
     return TensorIterator::reduce_op(viewed_result1, viewed_result2, self);
   }
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype));
+}
+
+Tensor _logcumsumexp_cpu(const Tensor& self, int64_t dim) {
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+  return _logcumsumexp_out_cpu(result, self, dim);
+}
+
+Tensor& _logcumsumexp_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
+  logcumsumexp_stub(self.device().type(), result, self, dim);
+  return result;
+}
+
+Tensor logcumsumexp(const Tensor& self, int64_t dim) {
+  auto result = [&]() {
+    NoNamesGuard guard;
+    return at::_logcumsumexp(self, dim);
+  }();
+  namedinference::propagate_names(result, self);
+  return result;
+}
+
+Tensor& logcumsumexp_out(Tensor& result, const Tensor& self, int64_t dim) {
+  check_scalar_type_device_layout_equal(result, self);
+  {
+    NoNamesGuard guard;
+    at::_logcumsumexp_out(result, self.toType(result.scalar_type()), dim);
+  }
+  namedinference::propagate_names(result, self);
+  return result;
 }
 
 Tensor _cumsum_cpu(const Tensor& self, int64_t dim) {
@@ -1012,6 +1042,12 @@ Tensor all(const Tensor& self, Dimname dim, bool keepdim) {
 }
 Tensor& all_out(Tensor& result, const Tensor &self, Dimname dim, bool keepdim) {
   reportNYIDimnameOverload("all");
+}
+Tensor logcumsumexp(const Tensor& self, Dimname dim) {
+  return at::logcumsumexp(self, dimname_to_position(self, dim));
+}
+Tensor& logcumsumexp_out(Tensor& result, const Tensor& self, Dimname dim) {
+  return at::logcumsumexp_out(result, self, dimname_to_position(self, dim));
 }
 Tensor cumsum(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
   return at::cumsum(self, dimname_to_position(self, dim), dtype);
