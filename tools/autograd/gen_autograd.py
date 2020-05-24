@@ -45,10 +45,11 @@ VIEW_FUNCTIONS = {
     'as_strided': 'self',
     'diagonal': 'self',
     'expand': 'self',
-    'narrow': 'self',
     'permute': 'self',
     'select': 'self',
     'slice': 'self',
+    'split': 'self',
+    'split_with_sizes': 'self',
     'squeeze': 'self',
     't': 'self',
     'transpose': 'self',
@@ -70,6 +71,14 @@ VIEW_FUNCTIONS = {
 
 for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
     VIEW_FUNCTIONS[key] = 'self'
+
+# Functions for which we use CreationMeta::MULTI_OUTPUT_SAFE. I.e., the ones for
+# which inplace modification of otputs is being gradually deprecated.
+MULTI_OUTPUT_SAFE_FUNCTIONS = {
+    'split',
+    'split_with_sizes',
+    'chunk',
+}
 
 # note: some VIEW_FUNCTIONS are just compositions of the view functions above
 # this list contains both the root view functions and any that are purely composed

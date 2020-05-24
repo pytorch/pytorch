@@ -210,6 +210,7 @@ class AbstractTestCases:
                            'smm',
                            'softmax',
                            'split_with_sizes',
+                           'unsafe_split_with_sizes',
                            'sspaddmm',
                            'to_dense',
                            'sparse_resize_',
