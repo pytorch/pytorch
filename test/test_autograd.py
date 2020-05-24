@@ -5792,8 +5792,7 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(where, [cond, x, y], raise_exception=True)
         gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, 5, device=device)])
 
-    @skipCUDAIfRocm
-    @unittest.skipIf(IS_WINDOWS, """Test is flaky on Windows:
+    @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
             https://github.com/pytorch/pytorch/issues/34870""")
     def test_ctc_loss(self, device):
         batch_size = 64
