@@ -16,7 +16,7 @@
 namespace at {
 namespace native {
 
-std::tuple<Tensor, Tensor, Tensor> group_norm_cpu(
+std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     const Tensor& X,
     const Tensor& gamma /* optional */,
     const Tensor& beta /* optional */,
@@ -29,28 +29,22 @@ std::tuple<Tensor, Tensor, Tensor> group_norm_cpu(
   Tensor mean = at::empty({N, group}, X.options());
   Tensor rstd = at::empty({N, group}, X.options());
   GroupNormKernel(
-      kCPU, X, gamma, beta, N, C, HxW, group, eps, &Y, &mean, &rstd);
+      X.device().type(),
+      X,
+      gamma,
+      beta,
+      N,
+      C,
+      HxW,
+      group,
+      eps,
+      &Y,
+      &mean,
+      &rstd);
   return std::make_tuple(Y, mean, rstd);
 }
 
-std::tuple<Tensor, Tensor, Tensor> group_norm_cuda(
-    const Tensor& X,
-    const Tensor& gamma /* optional */,
-    const Tensor& beta /* optional */,
-    int64_t N,
-    int64_t C,
-    int64_t HxW,
-    int64_t group,
-    double eps) {
-  Tensor Y = at::native::empty_like(X);
-  Tensor mean = at::empty({N, group}, X.options());
-  Tensor rstd = at::empty({N, group}, X.options());
-  GroupNormKernel(
-      kCUDA, X, gamma, beta, N, C, HxW, group, eps, &Y, &mean, &rstd);
-  return std::make_tuple(Y, mean, rstd);
-}
-
-std::tuple<Tensor, Tensor, Tensor> group_norm_backward_cpu(
+std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
     const Tensor& dY,
     const Tensor& X,
     const Tensor& mean,
@@ -74,35 +68,19 @@ std::tuple<Tensor, Tensor, Tensor> group_norm_backward_cpu(
     dbeta = at::native::empty_like(gamma);
   }
   GroupNormBackwardKernel(
-      kCPU, dY, X, mean, rstd, gamma, N, C, HxW, group, &dX, &dgamma, &dbeta);
-  return std::make_tuple(dX, dgamma, dbeta);
-}
-
-std::tuple<Tensor, Tensor, Tensor> group_norm_backward_cuda(
-    const Tensor& dY,
-    const Tensor& X,
-    const Tensor& mean,
-    const Tensor& rstd,
-    const Tensor& gamma,
-    int64_t N,
-    int64_t C,
-    int64_t HxW,
-    int64_t group,
-    std::array<bool, 3> grad_input_mask) {
-  Tensor dX;
-  Tensor dgamma;
-  Tensor dbeta;
-  if (grad_input_mask[0]) {
-    dX = at::native::empty_like(X);
-  }
-  if (grad_input_mask[1]) {
-    dgamma = at::native::empty_like(gamma);
-  }
-  if (grad_input_mask[2]) {
-    dbeta = at::native::empty_like(gamma);
-  }
-  GroupNormBackwardKernel(
-      kCUDA, dY, X, mean, rstd, gamma, N, C, HxW, group, &dX, &dgamma, &dbeta);
+      X.device().type(),
+      dY,
+      X,
+      mean,
+      rstd,
+      gamma,
+      N,
+      C,
+      HxW,
+      group,
+      &dX,
+      &dgamma,
+      &dbeta);
   return std::make_tuple(dX, dgamma, dbeta);
 }
 
