@@ -201,6 +201,9 @@ public:
   Vec256<double> sqrt() const {
     return _mm256_sqrt_pd(values);
   }
+  Vec256<double> rad2deg() const {
+    return _mm256_mul_pd(_mm256_set1_pd(180), _mm256_div_pd(values, _mm256_set1_pd(M_PI)));
+  }
   Vec256<double> reciprocal() const {
     return _mm256_div_pd(_mm256_set1_pd(1), values);
   }

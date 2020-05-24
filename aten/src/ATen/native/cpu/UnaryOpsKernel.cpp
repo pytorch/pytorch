@@ -348,11 +348,14 @@ void normal_kernel(Tensor& self, double mean, double std, c10::optional<Generato
 
 static void rad2deg_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rad2deg_cpu", [&] {
-        cpu_kernel(iter,
-                   [=](scalar_t a) -> scalar_t { 
-                     return static_cast<scalar_t>(180) * a / static_cast<scalar_t>(M_PI); 
-                  });
-      });
+        cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t {
+            return static_cast<scalar_t>(180) * a / static_cast<scalar_t>(M_PI);
+          },
+          [=](Vec256<scalar_t> a) { return a.rad2deg(); }
+        );
+  });
 }
 
 static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, c10::optional<Generator> gen) {

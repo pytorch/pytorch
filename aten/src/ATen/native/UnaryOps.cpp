@@ -107,7 +107,10 @@ Tensor& acos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor acos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
 Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
 
-Tensor& rad2deg_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, rad2deg_stub); }
+Tensor& rad2deg_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "rad2deg is not supported for complex tensors.");
+  return unary_op_impl_out(result, self, rad2deg_stub);
+}
 Tensor rad2deg(const Tensor& self) { return unary_op_impl(self, at::rad2deg_out); }
 Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
 
