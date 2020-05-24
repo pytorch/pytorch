@@ -16,7 +16,7 @@
 namespace at {
 namespace native {
 
-std::tuple<Tensor, Tensor, Tensor> group_norm_cpu(
+std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     const Tensor& X,
     const Tensor& gamma /* optional */,
     const Tensor& beta /* optional */,
@@ -29,11 +29,22 @@ std::tuple<Tensor, Tensor, Tensor> group_norm_cpu(
   Tensor mean = at::empty({N, group}, X.options());
   Tensor rstd = at::empty({N, group}, X.options());
   GroupNormKernel(
-      kCPU, X, gamma, beta, N, C, HxW, group, eps, &Y, &mean, &rstd);
+      X.device().type(),
+      X,
+      gamma,
+      beta,
+      N,
+      C,
+      HxW,
+      group,
+      eps,
+      &Y,
+      &mean,
+      &rstd);
   return std::make_tuple(Y, mean, rstd);
 }
 
-std::tuple<Tensor, Tensor, Tensor> group_norm_backward_cpu(
+std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
     const Tensor& dY,
     const Tensor& X,
     const Tensor& mean,
@@ -57,7 +68,19 @@ std::tuple<Tensor, Tensor, Tensor> group_norm_backward_cpu(
     dbeta = at::native::empty_like(gamma);
   }
   GroupNormBackwardKernel(
-      kCPU, dY, X, mean, rstd, gamma, N, C, HxW, group, &dX, &dgamma, &dbeta);
+      X.device().type(),
+      dY,
+      X,
+      mean,
+      rstd,
+      gamma,
+      N,
+      C,
+      HxW,
+      group,
+      &dX,
+      &dgamma,
+      &dbeta);
   return std::make_tuple(dX, dgamma, dbeta);
 }
 
