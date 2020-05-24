@@ -3977,12 +3977,15 @@
 
 - func: result_type.Tensor(Tensor tensor, Tensor other) -> ScalarType
   variants: function
+  supports_named_tensor: True
 
 - func: result_type.Scalar(Tensor tensor, Scalar other) -> ScalarType
   variants: function
+  supports_named_tensor: True
 
 - func: result_type.Scalar_Tensor(Scalar scalar, Tensor tensor) -> ScalarType
   variants: function
+  supports_named_tensor: True
 
 - func: result_type.Scalar_Scalar(Scalar scalar1, Scalar scalar2) -> ScalarType
 
