@@ -187,7 +187,7 @@ __global__ void vol2im_kernel(
             h_k /= dilation_h;
             w_k /= dilation_w;
             const int64_t idx_k =
-                ((c_im * kernel_t + t_k) * kernel_h + h_k * kernel_w + w_k);
+                ((c_im * kernel_t + t_k) * kernel_h + h_k) * kernel_w + w_k;
             const int64_t data_col_index =
                 ((idx_k * depth_col + t_col) *
                     height_col + h_col) *
