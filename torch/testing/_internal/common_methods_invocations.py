@@ -104,7 +104,7 @@ def ident(x):
 #   input size/constructing fn,
 #   args (tuple represents shape of a tensor arg),
 #   test variant name (will be used at test name suffix),    // optional
-#   (True, nonfusible_nodes, fusible_nodes) for autodiff,    // optional
+#   (should_check_autodiff[bool], nonfusible_nodes, fusible_nodes) for autodiff, // optional
 #   indices for possible dim arg,                            // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
 #   kwargs                                                   // optional
@@ -254,6 +254,8 @@ def method_tests():
         ('cosh', (), NO_ARGS, 'scalar', (True,)),
         ('abs', (S, S, S), NO_ARGS, '', (True,)),
         ('abs', (), NO_ARGS, 'scalar', (True,)),
+        ('absolute', (S, S, S), NO_ARGS, '', (False,)),
+        ('absolute_', (S, S, S), NO_ARGS, '', (False,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
         ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),
         ('clamp', (S, S, S), (0.5, None), 'max', (True,)),
@@ -430,6 +432,9 @@ def method_tests():
         ('repeat', (), (2, 3), 'scalar'),
         ('repeat', (2, 2), (3, 2)),
         ('repeat', (2, 2), (1, 3, 1, 2), 'unsqueeze'),
+        ('logcumsumexp', (S, S, S), (0,), 'dim0', (), [0]),
+        ('logcumsumexp', (S, S, S), (1,), 'dim1', (), [0]),
+        ('logcumsumexp', (), (0,), 'dim0_scalar', (), [0]),
         ('cummax', (S, S, S), (0,), 'dim0', (), [0]),
         ('cummax', (S, S, S), (1,), 'dim1', (), [0]),
         ('cummax', (), (0,), 'dim0_scalar', (), [0]),
