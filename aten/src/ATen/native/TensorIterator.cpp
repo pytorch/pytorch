@@ -375,10 +375,6 @@ void TensorIterator::propagate_names_to_outputs() {
 }
 
 void TensorIterator::coalesce_dimensions() {
-  if (is_reduction_) {
-    return;
-  }
-  
   if (ndim() <= 1) {
     return;
   }
@@ -643,7 +639,7 @@ void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
   for (auto& op : operands_) {
     op.data = ((char*)op.data) + op.stride_bytes[dim] * start;
   }
-  if (size == 1) {
+  if (size == 1 && !is_reduction_) {
     coalesce_dimensions();
   }
 }

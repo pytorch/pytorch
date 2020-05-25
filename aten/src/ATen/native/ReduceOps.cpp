@@ -782,6 +782,12 @@ Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
       "tensor with no elements because the operation does not have an identity");
   Tensor in;
   if (dim) {
+    if (self.sizes()[dim.value()] == 1) {
+      auto sizes = self.sizes().vec();
+      sizes.erase(sizes.begin() + dim.value());
+      result = at::zeros(sizes, self.options());
+      return result;
+    }
     in = self;
   } else {
     in = self.reshape({-1});
@@ -803,6 +809,12 @@ Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
       "tensor with no elements because the operation does not have an identity");
   Tensor in;
   if (dim) {
+    if (self.sizes()[dim.value()] == 1) {
+      auto sizes = self.sizes().vec();
+      sizes.erase(sizes.begin() + dim.value());
+      result = at::zeros(sizes, self.options());
+      return result;
+    }
     in = self;
   } else {
     in = self.reshape({-1});
