@@ -9,11 +9,10 @@
 
 namespace c10 {
 
-#ifndef _MSC_VER
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wattributes"
+#ifdef _MSC_VER
+  C10_API
 #endif
-enum class C10_API DebugInfoKind : uint8_t {
+enum class DebugInfoKind : uint8_t {
   PRODUCER_INFO = 0,
   MOBILE_RUNTIME_INFO,
   PROFILER_STATE,
@@ -21,9 +20,6 @@ enum class C10_API DebugInfoKind : uint8_t {
   TEST_INFO, // used only in tests
   TEST_INFO_2, // used only in tests
 };
-#ifndef _MSC_VER
-#  pragma GCC diagnostic pop
-#endif
 
 class C10_API DebugInfoBase {
  public:
