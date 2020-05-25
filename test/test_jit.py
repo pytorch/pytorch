@@ -17142,6 +17142,13 @@ a")
             self.assertNotEqual('z', name)
         
     def test_named_parameters_are_iterable(self):
+        class MyModNested(torch.nn.Module):
+            def __init__(self):
+                super(MyModNested, self).__init__()
+                self.mod = (torch.nn.ReLU())
+                self.mod2 = (torch.nn.ReLU())
+                self.register_buffer('x', torch.zeros(8))
+
         class MyMod(torch.nn.Module):
             def __init__(self):
                 super(MyMod, self).__init__()
@@ -17149,6 +17156,7 @@ a")
                 self.mod2 = (torch.nn.ReLU())
                 self.register_buffer('y', torch.zeros(3))
                 self.z = torch.zeros(3)
+                self.nested = MyModNested()
 
             def bleh(self):
                 return self.z + 4
@@ -17157,7 +17165,7 @@ a")
             def method(self):
                 names = [""]
                 vals = []
-                for name, buffer in self.named_buffers(True):
+                for name, buffer in self.named_buffers(False):
                     print("name: " + str(name))
                     names.append(name)
                     vals.append(buffer + 2)
@@ -17169,14 +17177,14 @@ a")
 
         model = MyMod()
         x = torch.jit.script(model)
-        # z = self.getExportImportCopy(x)
-        # self.assertEqual(z.method(), x.method())
-        # self.assertEqual(z.method(), model.method())
-        # self.assertEqual(x.method(), model.method())
+        z = self.getExportImportCopy(x)
+        self.assertEqual(z.method(), x.method())
+        self.assertEqual(z.method(), model.method())
+        self.assertEqual(x.method(), model.method())
         names = x.method()
         print(names)
-        # for name in names:
-        #     self.assertNotEqual('y', name)
+        for name in names:
+            self.assertNotEqual('y', name)
 
 
     def test_static_if_prop(self):

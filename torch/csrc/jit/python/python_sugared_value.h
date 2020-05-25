@@ -354,10 +354,10 @@ struct VISIBILITY_HIDDEN ModuleDictMethodRecursive : public SugaredValue {
 
               recurseThroughNestedModules(loc, f, moduleKeys, moduleValues, module_, "", name_, lambda);
             } else if (name_ == "named_buffers") {
-              std::cout << "In named buffers" << std::endl;
-             std::vector<std::string> bufferNames;
+             std::cout << "In named buffers" << std::endl;
              auto lambda = [&](std::shared_ptr<ModuleValue> m) -> void { 
-               std::cout << "In named buffers for module" << std::endl;
+                std::vector<std::string> bufferNames;
+                std::cout << "In named buffers for module" << std::endl;
                 const auto& selfType = m->getConcreteType()->getJitType()->expect<ClassType>();
                 for (size_t i = 0; i < selfType->numAttributes(); ++i) {
                   if (selfType->is_buffer(i)) {
