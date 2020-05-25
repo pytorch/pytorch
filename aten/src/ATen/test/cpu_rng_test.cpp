@@ -418,6 +418,18 @@ TEST_F(RNGTest, Bernoulli) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
+TEST_F(RNGTest, Bernoulli_p) {
+  const auto p = 0.42;
+  auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
+
+  auto actual = at::bernoulli(torch::empty({3, 3}), p, gen);
+
+  auto expected = torch::empty_like(actual);
+  native::templates::cpu::bernoulli_kernel(expected, p, check_generator<TestCPUGenerator>(gen));
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
+
 TEST_F(RNGTest, Bernoulli_out) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
