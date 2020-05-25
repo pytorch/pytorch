@@ -9652,7 +9652,7 @@ class TestNNDeviceType(NNTestCase):
             ref_y, ref_idx = pool(ref_x)
 
             self.assertEqual(y, ref_y)
-            self.assertEqual(idx, ref_idx) # assertEqual implicitly compares shape for tensors
+            self.assertEqual(idx, ref_idx)  # assertEqual implicitly compares shape for tensors
 
         helper(2, 8, 4, 4, ks=2)
         helper(None, 3, 50, 50, ks=5)
