@@ -210,6 +210,15 @@ class SubTensor(torch.Tensor):
             return NotImplemented
         return HANDLED_FUNCTIONS_SUB[func](*args, **kwargs)
 
+class SubTensor2(torch.Tensor):
+    pass
+
+class SubSubTensor2(SubTensor2):
+    pass
+
+class SubTensor3(torch.Tensor):
+    pass
+
 @implements_sub(torch.mean)
 def sub_mean(mat):
     return 0
@@ -479,6 +488,43 @@ class TestTorchFunctionOverride(TestCase):
         with self.assertRaises(ValueError):
             quux(t1)
 
+    def test_tensor_subclass_propagation(self):
+        t1 = torch.tensor([5])
+        t2 = torch.tensor([6])
+
+        s1 = SubTensor2([5])
+        s2 = SubTensor2([6])
+
+        ss1 = SubSubTensor2([5])
+        ss2 = SubSubTensor2([6])
+
+        sn1 = SubTensor3([5])
+        sn2 = SubTensor3([6])
+
+        # Check that leaf subclass is kept regardless of order
+        self.assertTrue(isinstance(s1 + t2, SubTensor2))
+        self.assertTrue(isinstance(t1 + s2, SubTensor2))
+        self.assertTrue(isinstance(s1 + s2, SubTensor2))
+
+        # Check indexing subclass is kept
+        self.assertTrue(isinstance(s1[0], SubTensor2))
+
+        # Check case for subclass of subclass.
+        self.assertTrue(isinstance(ss1 + ss2, SubSubTensor2))
+        self.assertTrue(isinstance(ss1 + s2, SubSubTensor2))
+        self.assertTrue(isinstance(s1 + ss2, SubSubTensor2))
+        self.assertTrue(isinstance(ss1 + ss2, SubSubTensor2))
+        self.assertTrue(isinstance(ss1 + t2, SubSubTensor2))
+        self.assertTrue(isinstance(t1 + ss2, SubSubTensor2))
+        self.assertTrue(isinstance(ss1[0], SubSubTensor2))
+
+        # Make sure unrelated class trees are not merged.
+        with self.assertRaises(TypeError):
+            s1 + sn2
+        with self.assertRaises(TypeError):
+            sn1 + s2
+
+
 def generate_tensor_like_override_tests(cls):
     def test_generator(func, override):
         # If func corresponds to a torch.Tensor method or property.
@@ -499,6 +545,8 @@ def generate_tensor_like_override_tests(cls):
         def test(self):
             ret = func(*func_args)
             # ret is None for certain protocols, e.g., `__weakref__` and `__setitem__`
+            # This is currently the best check but doesn't work for, for example,
+            # Tensor.__add__ because it redirects to Tensor.add.
             if ret is None:
                 self.assertTrue(HANDLED_FUNCTIONS_WRAPPERS[func]._triggered)
                 return

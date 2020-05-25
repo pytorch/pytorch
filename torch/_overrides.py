@@ -840,15 +840,18 @@ def get_testing_overrides():
     ignored = get_ignored_functions()
 
     for k, v in ret.items():
+        # Generate methods like __add__ and add_ by default from add
         names = [
-            k.__name__,
-            k.__name__ + "_",
-            "__" + k.__name__ + "__",
-            "__i" + k.__name__ + "__",
-            "__r" + k.__name__ + "__"
+            k.__name__, # Default method
+            k.__name__ + "_", # Inplace variant
+            "__" + k.__name__ + "__", # Dunder method
+            "__i" + k.__name__ + "__", # Inplace dunder method
+            "__r" + k.__name__ + "__" # Reverse dunder method
         ]
 
         if k.__name__.startswith("bitwise_"):
+            # bitwise_<op> have dunder methods of the form __<op>__
+            # And so on.
             subname = k.__name__[len("bitwise_"):]
             names.extend([
                 "__" + subname + "__",

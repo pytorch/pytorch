@@ -65,7 +65,8 @@ static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "apply_");
+    auto args = py::make_tuple(py::handle(arg));
+    return handle_torch_function(self, "apply_", args.ptr());
   }
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (self_.requires_grad()) {
@@ -701,10 +702,11 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
 static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
-#ifdef USE_CUDA
   if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "record_stream");
+    auto args = py::make_tuple(py::handle(arg));
+    return handle_torch_function(self, "record_stream", args.ptr());
   }
+#ifdef USE_CUDA
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (!THCPStream_Check(arg)) {
     return PyErr_Format(PyExc_TypeError, "expected Stream object");
