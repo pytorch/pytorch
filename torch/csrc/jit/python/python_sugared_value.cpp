@@ -249,12 +249,16 @@ void recurseThroughNestedModules(
     std::vector<SugaredValuePtr>& values,
     std::shared_ptr<ModuleValue> self,
     const std::string& prefix,
-    const std::string& field) {
+    const std::string& field,
+    std::function<void(std::shared_ptr<ModuleValue>)> const& onModuleCallback) {
   auto prefix_value =
       std::make_shared<SimpleValue>(insertConstant(*m.graph(), prefix));
 
   keys.push_back(prefix_value);
   values.push_back(self);
+  if (onModuleCallback) {
+    onModuleCallback(self);
+  }
 
   checkInterface(loc, m, self, field);
   auto module_dict = self->getSugaredDict(loc, m);
@@ -274,7 +278,7 @@ void recurseThroughNestedModules(
     }
     submodule_prefix = submodule_prefix + key_string;
     recurseThroughNestedModules(
-        loc, m, keys, values, module_value, submodule_prefix, field);
+        loc, m, keys, values, module_value, submodule_prefix, field, onModuleCallback);
   };
 }
 
@@ -378,12 +382,13 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
   } else if (field == "values" || field == "children") {
     return std::make_shared<ModuleDictMethod>(modules_, field);
   } else if (
-      field == "items" || field == "named_children" ||
-      field == "named_buffers" || field == "named_parameters") {
+      field == "items" || field == "named_children") {
     auto iterator = std::make_shared<IterableTree>();
     iterator->addChild(loc, m, keys_);
     iterator->addChild(loc, m, modules_);
     return std::make_shared<ModuleDictMethod>(iterator, field);
+  } else if (field == "named_buffers" || field == "named_parameters") {
+    return std::make_shared<ModuleDictMethodRecursive>(self_, keys_, modules_, field);
   } else if (field == "named_modules" || field == "modules") {
     std::vector<SugaredValuePtr> keys;
     std::vector<SugaredValuePtr> values;
@@ -458,12 +463,8 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
   }
 
   if (field == "named_modules" || field == "modules" || field == "children" ||
-      field == "named_children") {
+      field == "named_children" || field == "named_buffers") {
     return getSugaredDict(loc, m)->attr(loc, m, field);
-  }
-
-  if (field == "named_buffers") {
-    return getSugaredNamedBufferDict(loc, m)->attr(loc, m, field);
   }
 
   if (field == "named_parameters") {
