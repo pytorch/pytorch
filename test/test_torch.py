@@ -9540,7 +9540,7 @@ class TestTorchDeviceType(TestCase):
             raise
 
     def test_argminmax_axis_with_dim_one(self, device):
-        # Regression test for gh-38922
+        # See: https://github.com/pytorch/pytorch/issues/38922
         n = 32768
         x = torch.zeros(1, n)
         self.assertEqual(x.argmax(dim=0), torch.zeros(n, dtype=torch.int64))
