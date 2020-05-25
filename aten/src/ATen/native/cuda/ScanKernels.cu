@@ -370,7 +370,7 @@ __host__ void scan_outer_dim(const Tensor& self, Tensor& result,
   dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int64_t{threads.x})));
 
   check_fits_in_unsigned(num_irows, "num_irows");
-  check_fits_in_unsigned(num_irows, "num_orows");
+  check_fits_in_unsigned(num_orows, "num_orows");
 
   tensor_kernel_scan_outer_dim<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(),
