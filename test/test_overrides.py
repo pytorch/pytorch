@@ -275,6 +275,17 @@ def sub_diagonal_foo(a, b, c=None):
 
 # The dispatch table for SubDiagonalTensor's __torch_function__ implementation.
 HANDLED_FUNCTIONS_TENSOR_LIKE = {}
+HANDLED_FUNCTIONS_NAMESPACES = {}
+HANDLED_FUNCTIONS_WRAPPERS = {}
+
+def triggered_wrapper(f):
+    @functools.wraps(f)
+    def wrapped(*args, **kwargs):
+        wrapped._triggered = True
+        return f(*args, **kwargs)
+
+    wrapped._triggered = False
+    return wrapped
 
 def implements_tensor_like(torch_function):
     "Register a torch function override for TensorLike"
@@ -290,6 +301,7 @@ def generate_tensor_like_torch_implementations():
     testing_overrides = get_testing_overrides()
     for namespace, funcs in get_overridable_functions().items():
         for func in funcs:
+            HANDLED_FUNCTIONS_NAMESPACES[func] = namespace
             if func not in testing_overrides:
                 untested_funcs.append("{}.{}".format(namespace, func.__name__))
     msg = (
@@ -301,8 +313,14 @@ def generate_tensor_like_torch_implementations():
     )
     assert len(untested_funcs) == 0, msg.format(pprint.pformat(untested_funcs))
     for func, override in testing_overrides.items():
-        # decorate the overrides with implements_tensor_like
-        implements_tensor_like(func)(override)
+        # decorate the overrides with implements_tensor_like if it's not a
+        # torch.Tensor method
+        wrapped = triggered_wrapper(override)
+        HANDLED_FUNCTIONS_WRAPPERS[func] = wrapped
+        if HANDLED_FUNCTIONS_NAMESPACES[func] is torch.Tensor or func.__name__ == "__get__":
+            implements_sub(func)(wrapped)
+        else:
+            implements_tensor_like(func)(HANDLED_FUNCTIONS_WRAPPERS[func])
 
 generate_tensor_like_torch_implementations()
 
@@ -463,46 +481,55 @@ class TestTorchFunctionOverride(TestCase):
 
 def generate_tensor_like_override_tests(cls):
     def test_generator(func, override):
+        if HANDLED_FUNCTIONS_NAMESPACES[func] is torch.Tensor or func.__name__ == "__get__":
+            instance_gen = lambda: SubTensor([5])
+        else:
+            instance_gen = lambda: TensorLike()
         args = inspect.getfullargspec(override)
         nargs = len(args.args)
         if args.defaults is not None:
             nargs -= len(args.defaults)
-        func_args = [TensorLike() for _ in range(nargs)]
+        func_args = [instance_gen() for _ in range(nargs)]
         if args.varargs is not None:
-            func_args += [TensorLike(), TensorLike()]
+            func_args += [instance_gen(), instance_gen()]
 
         def test(self):
-            try:
-                self.assertEqual(func(*func_args), -1)
-            except TypeError as e:
-                patterns = [
-                    "'torch._C._TensorBase'",
-                    "'Tensor'",
-                    "got TensorLike",
-                ]
-                found = (str(e).find(p) for p in patterns)
-                if all(f == -1 for f in found):
-                    raise
-
-                func_args2 = [SubTensor([1])] * len(func_args)
-                self.assertEqual(implements_sub(func)(override)(*func_args2), -1)
+            ret = func(*func_args)
+            # ret is None for certain protocols, e.g., `__weakref__` and `__setitem__`
+            if ret is None:
+                self.assertTrue(HANDLED_FUNCTIONS_WRAPPERS[func]._triggered)
+                return
+            
+            self.assertEqual(ret, -1)
+            
         return test
 
     for func, override in get_testing_overrides().items():
         test_method = test_generator(func, override)
         if func.__name__ == "__get__":
-            if hasattr:
-                module = getattr(
-                    func.__self__,
-                    "__qualname__",
-                    None
-                )
-                if module is None:
-                    module = "Tensor." + func.__self__.fget.__name__
-        elif getattr(torch.Tensor, func.__name__, None) is func:
+            # __get__ is part of the descriptor protocol.
+            # https://docs.python.org/3/howto/descriptor.html
+            # This is used for properties of the form
+            # torch.Tensor.<property>, with the method __get__
+            # In this case we get the property name in two ways:
+
+            # This case for properties defined in C.
+            module = getattr(
+                func.__self__,
+                "__qualname__",
+                None
+            )
+
+            # This one for properties defined in Python.
+            if module is None:
+                module = "Tensor." + func.__self__.fget.__name__
+
+            # Unfortunately I couldn't find a way to unify these two cases
+            # and there is no way for general descriptors.
+        elif HANDLED_FUNCTIONS_NAMESPACES[func] is torch.Tensor:
             module = "Tensor"
         else:
-            module = getattr(func, "__module__", "Tensor")
+            module = func.__module__
         if module:
             name = 'test_{}_{}'.format(module.replace('.', '_'), func.__name__)
         else:

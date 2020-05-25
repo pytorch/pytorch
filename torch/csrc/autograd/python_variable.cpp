@@ -151,7 +151,10 @@ static PyObject* THPVariable_as_subclass(THPVariable* self, PyObject* args, PyOb
     "as_subclass(PyObject* cls)",
   });
   ParsedArgs<1> parsed_args{};
-  auto r = parser.parse(args, kwargs, parsed_args);
+  auto r = parser.parse((PyObject *) self, args, kwargs, parsed_args);
+  if (r.has_torch_function()) {
+    return handle_torch_function(r, (PyObject *)self, args, kwargs, THPVariableClass, "torch.Tensor");
+  }
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
@@ -335,7 +338,12 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
 PyObject *THPVariable_get_volatile(THPVariable *self, void *unused)
 {
   if (check_has_torch_function((PyObject *)self)) {
-    return handle_torch_function_getter(self, "volatile");
+    try {
+      return handle_torch_function_getter(self, "volatile");
+    }
+    catch (python_error) {
+      return nullptr;
+    }
   }
   const char* msg = "volatile was removed (Variable.volatile is always False)";
   PyErr_WarnEx(PyExc_UserWarning, msg, 1);
@@ -345,7 +353,12 @@ PyObject *THPVariable_get_volatile(THPVariable *self, void *unused)
 int THPVariable_set_volatile(THPVariable *self, PyObject *obj, void *unused)
 {
   if (check_has_torch_function((PyObject *)self)) {
-    return handle_torch_function_setter(self, "volatile", obj);
+    try {
+      return handle_torch_function_setter(self, "volatile", obj);
+    }
+    catch (python_error) {
+      return -1;
+    }
   }
   return PyErr_WarnEx(PyExc_UserWarning, VOLATILE_WARNING, 1);
 }
@@ -459,7 +472,12 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj, void *unused
 PyObject *THPVariable_get_name(THPVariable* self, void *unused)
 {
   if (check_has_torch_function((PyObject *)self)) {
-    return handle_torch_function_getter(self, "name");
+    try {
+      return handle_torch_function_getter(self, "name");
+    }
+    catch (python_error) {
+      return nullptr;
+    }
   }
   if (self->cdata.name() == "")
     Py_RETURN_NONE;

@@ -153,6 +153,13 @@ def get_ignored_functions():
         Tensor.__class__,
         Tensor.__subclasshook__,
         Tensor.reinforce,
+        Tensor.new,
+        Tensor.new_tensor,
+        Tensor.new_empty,
+        Tensor.new_zeros,
+        Tensor.new_ones,
+        Tensor.new_full,
+        Tensor._make_subclass,
     }
 
 def get_testing_overrides():
@@ -724,21 +731,20 @@ def get_testing_overrides():
         Tensor.shape.__get__: lambda self: -1,
         Tensor.volatile.__get__: lambda self: -1,
         Tensor.__cuda_array_interface__.__get__: lambda self: -1,
-        Tensor.__weakref__.__get__: lambda self: -1,
-        Tensor.type: lambda dtype=None, non_blocking=False, **kwargs: -1,
+        Tensor.type: lambda self, dtype=None, non_blocking=False, **kwargs: -1,
         Tensor._coalesced_: lambda self: -1,
         Tensor._dimI: lambda self: -1,
         Tensor._dimV: lambda self: -1,
         Tensor._indices: lambda self: -1,
         Tensor._is_view: lambda self: -1,
-        Tensor._make_subclass: lambda cls, data: -1,
         Tensor._nnz: lambda self: -1,
         Tensor._update_names: lambda self, names, inplace: -1,
         Tensor._values: lambda self: -1,
         Tensor.align_as: lambda self, other: -1,
         Tensor.align_to: lambda self: -1,
         Tensor.apply_: lambda self, callable: -1,
-        Tensor.as_strided: lambda self: -1,
+        Tensor.as_strided: lambda self, size, stride: -1,
+        Tensor.as_strided_: lambda self, size, stride: -1,
         Tensor.as_subclass: lambda self, cls: -1,
         Tensor.backward: lambda self, gradient=None, retain_graph=None, create_graph=False: -1,
         Tensor.bfloat16: lambda self, memory_format=torch.preserve_format: -1,
@@ -747,6 +753,7 @@ def get_testing_overrides():
         Tensor.char: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.cauchy_: lambda self, median=0, sigma=1, *, generator=None: -1,
         Tensor.coalesce: lambda self: -1,
+        Tensor._coalesced_: lambda self, coalesced: -1,
         Tensor.contiguous: lambda self, memory_format=torch.contiguous_format: -1,
         Tensor.copy_: lambda self, src, non_blocking=False: -1,
         Tensor.cpu: lambda self, memory_format=torch.preserve_format: -1,
@@ -756,7 +763,7 @@ def get_testing_overrides():
         Tensor.dim: lambda self: -1,
         Tensor.double: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.element_size: lambda self: -1,
-        Tensor.expand: lambda self, size1, size2: -1,
+        Tensor.expand: lambda self, size: -1,
         Tensor.expand_as: lambda self, other: -1,
         Tensor.exponential_: lambda self, lambd=1, *, generator=None: -1,
         Tensor.fill_: lambda self, value: -1,
@@ -775,19 +782,14 @@ def get_testing_overrides():
         Tensor.is_shared: lambda self: -1,
         Tensor.item: lambda self: -1,
         Tensor.log_normal_: lambda self, mean=1, std=2, *, generator=None: -1,
+        Tensor.log_softmax: lambda self, dim: -1,
         Tensor.long: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.map_: lambda self, tensor, callable: -1,
-        Tensor.map2_: lambda self, tensor, callable: -1,
+        Tensor.map2_: lambda self, x, y, callable: -1,
         Tensor.mm: lambda self, mat2: -1,
         Tensor.narrow_copy: lambda self, dimension, start, length: -1,
         Tensor.ndimension: lambda self: -1,
         Tensor.nelement: lambda self: -1,
-        Tensor.new: lambda self, data, dtype=None, device=None, requires_grad=False: -1,
-        Tensor.new_tensor: lambda self, data, dtype=None, device=None, requires_grad=False: -1,
-        Tensor.new_empty: lambda self, size, dtype=None, device=None, requires_grad=False: -1,
-        Tensor.new_zeros: lambda self, size, dtype=None, device=None, requires_grad=False: -1,
-        Tensor.new_ones: lambda self, size, dtype=None, device=None, requires_grad=False: -1,
-        Tensor.new_full: lambda self, size, fill_value, dtype=None, device=None, requires_grad=False: -1,
         Tensor.numpy: lambda self: -1,
         Tensor.permute: lambda self, dim1, dim2: -1,
         Tensor.pin_memory: lambda self: -1,
@@ -798,10 +800,11 @@ def get_testing_overrides():
         Tensor.refine_names: lambda self: -1,
         Tensor.register_hook: lambda self, hook: -1,
         Tensor.rename: lambda self, name: -1,
-        Tensor.repeat: lambda self, size1, size2: -1,
+        Tensor.repeat: lambda self, *size: -1,
         Tensor.requires_grad_: lambda self, requires_grad=True: -1,
         Tensor.reshape_as: lambda self, other: -1,
-        Tensor.resize: lambda self, size1, size2: -1,
+        Tensor.resize: lambda self, *size: -1,
+        Tensor.resize_: lambda self, size: -1,
         Tensor.resize_as: lambda self, other: -1,
         Tensor.retain_grad: lambda self: -1,
         Tensor.set_: lambda self, source=None, storage_offset=0, size=None, stride=None: -1,
@@ -809,9 +812,9 @@ def get_testing_overrides():
         Tensor.short: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.size: lambda self: -1,
         Tensor.sparse_dim: lambda self: -1,
-        Tensor.sparse_mask: lambda self: -1,
-        Tensor.sparse_resize_: lambda self, size1, size2: -1,
-        Tensor.sparse_resize_and_clear_: lambda self, size1, size2: -1,
+        Tensor.sparse_mask: lambda self, mask: -1,
+        Tensor.sparse_resize_: lambda self, size1, size2, dense_dim: -1,
+        Tensor.sparse_resize_and_clear_: lambda self, size1, size2, dense_dim: -1,
         Tensor.sspaddmm: lambda self, mat1, mat2, beta=1, alpha=1, out=None: -1,
         Tensor.storage: lambda self: -1,
         Tensor.storage_offset: lambda self: -1,
@@ -824,6 +827,7 @@ def get_testing_overrides():
         Tensor.tolist: lambda self: -1,
         Tensor.to_mkldnn: lambda self: -1,
         Tensor.type_as: lambda self, other: -1,
+        Tensor.unfold: lambda self, dimension, size, step: -1,
         Tensor.unflatten: lambda self, dim, namedshape: -1,
         Tensor.uniform_: lambda self, from_=0, to=1: -1,
         Tensor.values: lambda self: -1,
@@ -1009,7 +1013,7 @@ def get_overridable_functions():
     for namespace, ns_funcs in tested_namespaces:
         for func_name in ns_funcs:
             # ignore private functions or functions that are deleted in torch.__init__
-            if namespace is not torch.Tensor and func_name.startswith('_') or func_name == 'unique_dim':
+            if namespace is not torch.Tensor and func_name.startswith('_') or func_name in {'unique_dim', '__weakref__'}:
                 continue
             # ignore in-place operators
             if namespace is not torch.Tensor and func_name.endswith('_'):
@@ -1019,7 +1023,7 @@ def get_overridable_functions():
                 continue
             func = getattr(namespace, func_name)
 
-            if namespace is torch.Tensor and getattr(object, func_name, None) is func:
+            if namespace is torch.Tensor and getattr(object, func_name, None) == func:
                 continue
             # ignore re-exported modules
             if isinstance(func, types.ModuleType):
