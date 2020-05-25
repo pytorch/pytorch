@@ -637,7 +637,7 @@ Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
     if (self.sizes()[dim.value()] == 1) {
       auto sizes = self.sizes().vec();
       sizes.erase(sizes.begin() + dim.value());
-      result = at::zeros(sizes, self.options());
+      result = at::zeros(sizes, self.options().dtype(at::kLong));
       return result;
     }
     in = self;
@@ -664,7 +664,7 @@ Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
     if (self.sizes()[dim.value()] == 1) {
       auto sizes = self.sizes().vec();
       sizes.erase(sizes.begin() + dim.value());
-      result = at::zeros(sizes, self.options());
+      result = at::zeros(sizes, self.options().dtype(at::kLong));
       return result;
     }
     in = self;
