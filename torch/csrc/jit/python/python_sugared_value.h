@@ -101,7 +101,6 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   Value* the_list_;
 };
 
-
 struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
   explicit ModuleDictMethod(SugaredValuePtr iterable, const std::string& name)
       : iterable_(iterable), name_(name){};
@@ -222,7 +221,8 @@ void recurseThroughNestedModules(
     std::shared_ptr<ModuleValue> self,
     const std::string& prefix,
     const std::string& field,
-    std::function<void(std::shared_ptr<ModuleValue>)> const& onModuleCallback = {});
+    std::function<void(std::shared_ptr<ModuleValue>)> const& onModuleCallback =
+        {});
 
 // Used to support named_modules()
 struct VISIBILITY_HIDDEN SugaredDict : public SugaredValue {
@@ -301,10 +301,11 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
 };
 
 struct VISIBILITY_HIDDEN ModuleDictMethodRecursive : public SugaredValue {
-  explicit ModuleDictMethodRecursive(std::shared_ptr<ModuleValue> module,
-  std::shared_ptr<SugaredTupleValue> keys,
-  std::shared_ptr<SugaredTupleValue> values, 
-  const std::string& name)
+  explicit ModuleDictMethodRecursive(
+      std::shared_ptr<ModuleValue> module,
+      std::shared_ptr<SugaredTupleValue> keys,
+      std::shared_ptr<SugaredTupleValue> values,
+      const std::string& name)
       : module_(module), keys_(keys), values_(values), name_(name){};
 
   std::string kind() const override {
@@ -317,90 +318,97 @@ struct VISIBILITY_HIDDEN ModuleDictMethodRecursive : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-      auto iterator = std::make_shared<IterableTree>();
+    auto iterator = std::make_shared<IterableTree>();
 
-      std::map<std::string, NamedValue> inputMap;
-      for (const auto& input : inputs) {
-        if (input.hasName()) {
-          inputMap.insert({input.name(), input});
-        } else {
-          throw ErrorReport(loc)
-              << "Please explicitly name all parameters passed to: " << name_ << "()";
-        }
-      }
-
-      if (inputMap.find("prefix") != inputMap.end()) {
-          throw ErrorReport(loc)
-            << "Prefix is not currently supported yet for: " << name_ << "()";
-      }
-      
-      if (inputMap.find("recurse") != inputMap.end()) {
-        auto recurseInputValue = inputMap.find("recurse")->second.value(*f.graph());
-        if (recurseInputValue->type()->kind() == TypeKind::BoolType) {
-          bool shouldRecurse = constant_as<bool>(recurseInputValue).value();
-          if (shouldRecurse) {
-            std::vector<SugaredValuePtr> moduleKeys;
-            std::vector<SugaredValuePtr> moduleValues;
-
-             std::vector<SugaredValuePtr> iterValues;
-             std::vector<SugaredValuePtr> iterKeys;  
-            
-              auto lambda = [&](std::shared_ptr<ModuleValue> m) -> void { 
-                std::vector<std::string> names;
-                const auto& selfType = m->getConcreteType()->getJitType()->expect<ClassType>();
-                for (size_t i = 0; i < selfType->numAttributes(); ++i) {
-                  if (name_ == "named_parameters") {
-                    if (selfType->is_parameter(i)) {
-                      names.push_back(selfType->getAttributeName(i));
-                    }
-                  } else if (name_ == "named_buffers") { 
-                    if (selfType->is_buffer(i)) {
-                      names.push_back(selfType->getAttributeName(i));
-                    }
-                  } else {
-                    throw ErrorReport(loc)
-                    << " Recursive iteration attempted on an unsupported member " << name_;
-                  }
-                } 
-
-                for (const auto& item_name : names) {
-                  auto name_v =
-                      std::make_shared<SimpleValue>(insertConstant(*f.graph(), item_name));
-                  Value* tensor_v = f.graph()->insertGetAttr(m->getSelf(), item_name);
-                  iterValues.push_back(m->tryGetAttr(loc, f, item_name));
-                  iterKeys.push_back(name_v);
-                } 
-             }; 
-            recurseThroughNestedModules(loc, f, moduleKeys, moduleValues, module_, "", name_, lambda);
-            auto iterator = std::make_shared<IterableTree>();
-            iterator->addChild(loc, f, std::make_shared<SugaredTupleValue>(iterKeys));
-            iterator->addChild(loc, f, std::make_shared<SugaredTupleValue>(iterValues));
-            return iterator;
-          }
-        } else {
-          throw ErrorReport(loc)
-            << name_ << " method expects no argument, or boolean argument.";
-        }
-      }
-      // No args, means not recursive
-      if (name_ == "named_parameters") {
-        auto iterator = std::make_shared<IterableTree>();
-        auto kvNamedBufferDict =  module_->getSugaredNamedParametersDict(loc, f);
-        iterator->addChild(loc, f, kvNamedBufferDict->getKeys());
-        iterator->addChild(loc, f, kvNamedBufferDict->getModules());
-        return iterator;
-      } else if (name_ == "named_buffers") {
-        auto iterator = std::make_shared<IterableTree>();
-        auto kvNamedBufferDict =  module_->getSugaredNamedBufferDict(loc, f);
-        iterator->addChild(loc, f, kvNamedBufferDict->getKeys());
-        iterator->addChild(loc, f, kvNamedBufferDict->getModules());
-        return iterator;
+    std::map<std::string, NamedValue> inputMap;
+    for (const auto& input : inputs) {
+      if (input.hasName()) {
+        inputMap.insert({input.name(), input});
       } else {
         throw ErrorReport(loc)
-            << "Iteration attempted on an unsupported member " << name_;
+            << "Please explicitly name all parameters passed to: " << name_
+            << "()";
       }
-      
     }
+
+    if (inputMap.find("prefix") != inputMap.end()) {
+      throw ErrorReport(loc)
+          << "Prefix is not currently supported yet for: " << name_ << "()";
+    }
+
+    if (inputMap.find("recurse") != inputMap.end()) {
+      auto recurseInputValue =
+          inputMap.find("recurse")->second.value(*f.graph());
+      if (recurseInputValue->type()->kind() == TypeKind::BoolType) {
+        bool shouldRecurse = constant_as<bool>(recurseInputValue).value();
+        if (shouldRecurse) {
+          std::vector<SugaredValuePtr> moduleKeys;
+          std::vector<SugaredValuePtr> moduleValues;
+
+          std::vector<SugaredValuePtr> iterValues;
+          std::vector<SugaredValuePtr> iterKeys;
+
+          auto lambda = [&](std::shared_ptr<ModuleValue> m) -> void {
+            std::vector<std::string> names;
+            const auto& selfType =
+                m->getConcreteType()->getJitType()->expect<ClassType>();
+            for (size_t i = 0; i < selfType->numAttributes(); ++i) {
+              if (name_ == "named_parameters") {
+                if (selfType->is_parameter(i)) {
+                  names.push_back(selfType->getAttributeName(i));
+                }
+              } else if (name_ == "named_buffers") {
+                if (selfType->is_buffer(i)) {
+                  names.push_back(selfType->getAttributeName(i));
+                }
+              } else {
+                throw ErrorReport(loc)
+                    << " Recursive iteration attempted on an unsupported member "
+                    << name_;
+              }
+            }
+
+            for (const auto& item_name : names) {
+              auto name_v = std::make_shared<SimpleValue>(
+                  insertConstant(*f.graph(), item_name));
+              Value* tensor_v =
+                  f.graph()->insertGetAttr(m->getSelf(), item_name);
+              iterValues.push_back(m->tryGetAttr(loc, f, item_name));
+              iterKeys.push_back(name_v);
+            }
+          };
+          recurseThroughNestedModules(
+              loc, f, moduleKeys, moduleValues, module_, "", name_, lambda);
+          auto iterator = std::make_shared<IterableTree>();
+          iterator->addChild(
+              loc, f, std::make_shared<SugaredTupleValue>(iterKeys));
+          iterator->addChild(
+              loc, f, std::make_shared<SugaredTupleValue>(iterValues));
+          return iterator;
+        }
+      } else {
+        throw ErrorReport(loc)
+            << name_ << " method expects no argument, or boolean argument.";
+      }
+    }
+    // No args, means not recursive
+    if (name_ == "named_parameters") {
+      auto iterator = std::make_shared<IterableTree>();
+      auto kvNamedBufferDict = module_->getSugaredNamedParametersDict(loc, f);
+      iterator->addChild(loc, f, kvNamedBufferDict->getKeys());
+      iterator->addChild(loc, f, kvNamedBufferDict->getModules());
+      return iterator;
+    } else if (name_ == "named_buffers") {
+      auto iterator = std::make_shared<IterableTree>();
+      auto kvNamedBufferDict = module_->getSugaredNamedBufferDict(loc, f);
+      iterator->addChild(loc, f, kvNamedBufferDict->getKeys());
+      iterator->addChild(loc, f, kvNamedBufferDict->getModules());
+      return iterator;
+    } else {
+      throw ErrorReport(loc)
+          << "Iteration attempted on an unsupported member " << name_;
+    }
+  }
 
   std::shared_ptr<ModuleValue> module_;
   std::shared_ptr<SugaredTupleValue> keys_;

@@ -278,7 +278,14 @@ void recurseThroughNestedModules(
     }
     submodule_prefix = submodule_prefix + key_string;
     recurseThroughNestedModules(
-        loc, m, keys, values, module_value, submodule_prefix, field, onModuleCallback);
+        loc,
+        m,
+        keys,
+        values,
+        module_value,
+        submodule_prefix,
+        field,
+        onModuleCallback);
   };
 }
 
@@ -381,14 +388,14 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
     return std::make_shared<ModuleDictMethod>(keys_, "keys");
   } else if (field == "values" || field == "children") {
     return std::make_shared<ModuleDictMethod>(modules_, field);
-  } else if (
-      field == "items" || field == "named_children") {
+  } else if (field == "items" || field == "named_children") {
     auto iterator = std::make_shared<IterableTree>();
     iterator->addChild(loc, m, keys_);
     iterator->addChild(loc, m, modules_);
     return std::make_shared<ModuleDictMethod>(iterator, field);
   } else if (field == "named_buffers" || field == "named_parameters") {
-    return std::make_shared<ModuleDictMethodRecursive>(self_, keys_, modules_, field);
+    return std::make_shared<ModuleDictMethodRecursive>(
+        self_, keys_, modules_, field);
   } else if (field == "named_modules" || field == "modules") {
     std::vector<SugaredValuePtr> keys;
     std::vector<SugaredValuePtr> values;
@@ -463,7 +470,8 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
   }
 
   if (field == "named_modules" || field == "modules" || field == "children" ||
-      field == "named_children" || field == "named_buffers" || field == "named_parameters") {
+      field == "named_children" || field == "named_buffers" ||
+      field == "named_parameters") {
     return getSugaredDict(loc, m)->attr(loc, m, field);
   }
   // 3. Check if this is the name of an overloaded method.
