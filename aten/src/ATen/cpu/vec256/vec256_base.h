@@ -413,10 +413,10 @@ public:
     return map([](T x) { return (T)(1) / x; });
   }
   Vec256<T> rad2deg() const {
-    return map([](T x) { return (T)(180) * x / (T)(M_PI); });
+    return map([](T x) { return (T)(180.0) * x / (T)(M_PI); });
   }
   Vec256<T> deg2rad() const {
-    return map([](T x) { return (T)(M_PI) * x / (T)(180); });
+    return map([](T x) { return (T)(M_PI) * x / (T)(180.0); });
   }
   Vec256<T> rsqrt() const {
     return map([](T x) { return (T)1 / std::sqrt(x); });
