@@ -341,7 +341,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       packB->getPackedWeights(),
       (uint8_t*)output.data_ptr<c10::quint8>(),
       rows_w /* output_stride */,
-      caffe2::pthreadpool_() /* threadpool */);
+      nullptr);
+      // caffe2::pthreadpool_() /* threadpool */);
 
   TORCH_INTERNAL_ASSERT(
       runStatus == pytorch_qnnp_status_success,
