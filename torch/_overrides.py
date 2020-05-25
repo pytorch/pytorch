@@ -851,8 +851,6 @@ def get_testing_overrides():
         if k.__name__.startswith("bitwise_"):
             subname = k.__name__[len("bitwise_"):]
             names.extend([
-                subname,
-                subname + "_",
                 "__" + subname + "__",
                 "__i" + subname + "__",
                 "__r" + subname + "__"
