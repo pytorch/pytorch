@@ -347,21 +347,30 @@ __global__ void tensor_kernel_scan_innermost_dim(T *tgt_, T *src_,
   }
 }
 
+void check_fits_in_unsigned(int64_t val, const char* name) {
+  constexpr auto umax = std::numeric_limits<unsigned>::max();
+  TORCH_CHECK(
+      val >= 0 && val <= umax, name, " must fit in a 32-bit unsigned value");
+}
+
 template<typename scalar_t, class BinaryFunction>
 __host__ void scan_outer_dim(const Tensor& self, Tensor& result,
                                        int dim, scalar_t init, BinaryFunction binary_op) {
-  int row_size = self.size(dim);
+  int64_t row_size = self.size(dim);
   auto sizes = self.sizes();
 
   // Treat all outer dimensions (i.e. dim_ < dim) as one.
-  int num_orows = std::accumulate(sizes.begin(), sizes.begin() + dim, 1, std::multiplies<int>());
+  int64_t num_orows = std::accumulate(sizes.begin(), sizes.begin() + dim, 1, std::multiplies<int64_t>());
 
   // Treat all inner dimensions (i.e. dim > dimension) as one.
-  int num_irows = std::accumulate(sizes.begin() + dim + 1, sizes.end(), 1, std::multiplies<int>());
+  int64_t num_irows = std::accumulate(sizes.begin() + dim + 1, sizes.end(), 1, std::multiplies<int64_t>());
 
   dim3 threads(std::min(512, int(num_irows)));
-  int maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
-  dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int(threads.x))));
+  int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
+  dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int64_t{threads.x})));
+
+  check_fits_in_unsigned(num_irows, "num_irows");
+  check_fits_in_unsigned(num_irows, "num_orows");
 
   tensor_kernel_scan_outer_dim<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(),
@@ -371,13 +380,16 @@ __host__ void scan_outer_dim(const Tensor& self, Tensor& result,
 
 template <typename scalar_t, class BinaryFunction>
 void scan_innermost_dim(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
-  int ndim = self.dim();
+  int64_t ndim = self.dim();
   // Treat all outer dimensions as a single dimension.
-  int row_size = self.size(ndim - 1);
-  int num_rows = self.numel() / row_size;
+  int64_t row_size = self.size(ndim - 1);
+  int64_t num_rows = self.numel() / row_size;
 
   dim3 threads(16, 32);
-  dim3 grid(std::min(at::cuda::getCurrentDeviceProperties()->maxGridSize[0], ceil_div(num_rows, int(threads.y))));
+  int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
+  dim3 grid(std::min(maxGridDim, ceil_div(num_rows, int64_t{threads.y})));
+
+  check_fits_in_unsigned(num_rows, "Number of rows (self.numel()/self.size(self.dim()-1))");
 
   tensor_kernel_scan_innermost_dim<scalar_t, 16, 32><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(),
