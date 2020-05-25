@@ -20,36 +20,6 @@ constexpr int kCUDANumThreads = 256;
 constexpr int kReduceTileSize = 32;
 
 template <typename T>
-__global__ void RowwiseMomentsSimpleCUDAKernel(
-    int64_t M,
-    int64_t N,
-    T eps,
-    const T* X,
-    T* mean,
-    T* rstd) {
-  using T_ACC = acc_type<T, true>;
-  const int64_t i = blockIdx.x * blockDim.y + threadIdx.y;
-  if (i < M) {
-    T_ACC sum1 = 0;
-    T_ACC sum2 = 0;
-    for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
-      const int64_t index = i * N + j;
-      sum1 += static_cast<T_ACC>(X[index]);
-      sum2 += static_cast<T_ACC>(X[index]) * static_cast<T_ACC>(X[index]);
-    }
-    sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
-    sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
-    if (threadIdx.x == 0) {
-      const T_ACC scale = T_ACC(1) / static_cast<T_ACC>(N);
-      sum1 *= scale;
-      sum2 = c10::cuda::compat::max(sum2 * scale - sum1 * sum1, T_ACC(0));
-      mean[i] = sum1;
-      rstd[i] = c10::cuda::compat::rsqrt(sum2 + static_cast<T_ACC>(eps));
-    }
-  }
-}
-
-template <typename T>
 __global__ void RowwiseMomentsCUDAKernel(
     int64_t N,
     T eps,
@@ -137,34 +107,6 @@ __global__ void GroupNormForwardCUDAKernel(
 }
 
 template <typename T>
-__global__ void ComputeInternalGradientsSimpleCUDAKernel(
-    int64_t N,
-    int64_t C,
-    int64_t HxW,
-    const T* dY,
-    const T* X,
-    acc_type<T, true>* ds,
-    acc_type<T, true>* db) {
-  using T_ACC = acc_type<T, true>;
-  const int64_t nc = blockIdx.x * blockDim.y + threadIdx.y;
-  if (nc < N * C) {
-    T_ACC sum1 = 0;
-    T_ACC sum2 = 0;
-    for (int64_t hw = threadIdx.x; hw < HxW; hw += blockDim.x) {
-      const int64_t index = nc * HxW + hw;
-      sum1 += static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]);
-      sum2 += static_cast<T_ACC>(dY[index]);
-    }
-    sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
-    sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
-    if (threadIdx.x == 0) {
-      ds[nc] = sum1;
-      db[nc] = sum2;
-    }
-  }
-}
-
-template <typename T>
 __global__ void ComputeInternalGradientsCUDAKernel(
     int64_t HxW,
     const T* dY,
@@ -205,47 +147,6 @@ __global__ void ComputeGradOutputCoeffientCUDAKernel(
     const int64_t c = nc % C;
     c1[nc] = static_cast<T_ACC>(rstd[ng]) *
         (gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[c]));
-  }
-}
-
-template <typename T>
-__global__ void ComputeBackwardFusedParamsSimpleCUDAKernel(
-    int64_t N,
-    int64_t C,
-    int64_t HxW,
-    int64_t group,
-    const T* mean,
-    const T* rstd,
-    const T* gamma,
-    const acc_type<T, true>* ds,
-    const acc_type<T, true>* db,
-    acc_type<T, true>* c2,
-    acc_type<T, true>* c3) {
-  using T_ACC = acc_type<T, true>;
-  const int64_t G = group;
-  const int64_t D = C / G;
-  const int64_t ng = blockIdx.x * blockDim.y + threadIdx.y;
-  const int64_t g = ng % G;
-  T_ACC sum1 = 0;
-  T_ACC sum2 = 0;
-  for (int64_t i = threadIdx.x; i < D; i += blockDim.x) {
-    const int64_t index = ng * D + i;
-    const int64_t c = g * D + i;
-    const T_ACC gamma_v =
-        gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[c]);
-    sum1 += ds[index] * gamma_v;
-    sum2 += db[index] * gamma_v;
-  }
-  sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
-  sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
-  if (threadIdx.x == 0) {
-    const T_ACC s = T_ACC(1) / static_cast<T_ACC>(D * HxW);
-    const T_ACC x = (sum2 * static_cast<T_ACC>(mean[ng]) - sum1) *
-        static_cast<T_ACC>(rstd[ng]) * static_cast<T_ACC>(rstd[ng]) *
-        static_cast<T_ACC>(rstd[ng]) * s;
-    c2[ng] = x;
-    c3[ng] = -x * static_cast<T_ACC>(mean[ng]) -
-        sum2 * static_cast<T_ACC>(rstd[ng]) * s;
   }
 }
 
@@ -486,18 +387,9 @@ void GroupNormKernelImplInternal(
   T_ACC* a_data = a.data_ptr<T_ACC>();
   T_ACC* b_data = b.data_ptr<T_ACC>();
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
-  // if (D * HxW < cuda_utils::kCUDABlockReduceNumThreads) {
-  //   constexpr int kThreadX = kReduceTileSize;
-  //   constexpr int kThreadY = kReduceTileSize / 2;
-  //   const int64_t B = (N * G + kThreadY - 1) / kThreadY;
-  //   RowwiseMomentsSimpleCUDAKernel<T>
-  //       <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
-  //           N * G, D * HxW, eps, X_data, mean_data, rstd_data);
-  // } else {
   RowwiseMomentsCUDAKernel<T>
       <<<N * G, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
           D * HxW, eps, X_data, mean_data, rstd_data);
-  // }
   int64_t B = (N * C + kCUDANumThreads - 1) / kCUDANumThreads;
   ComputeFusedParamsCUDAKernel<T><<<B, kCUDANumThreads, 0, cuda_stream>>>(
       N, C, G, mean_data, rstd_data, gamma_data, beta_data, a_data, b_data);
@@ -596,18 +488,9 @@ void GroupNormBackwardKernelImplInternal(
   Tensor db = at::empty({N, C}, X.options().dtype(kAccType));
   T_ACC* ds_data = ds.data_ptr<T_ACC>();
   T_ACC* db_data = db.data_ptr<T_ACC>();
-  // if (HxW < cuda_utils::kCUDABlockReduceNumThreads) {
-  //   constexpr int kThreadX = kReduceTileSize;
-  //   constexpr int kThreadY = kReduceTileSize / 2;
-  //   const int64_t B = (N * C + kThreadY - 1) / kThreadY;
-  //   ComputeInternalGradientsSimpleCUDAKernel<T>
-  //       <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
-  //           N, C, HxW, dY_data, X_data, ds_data, db_data);
-  // } else {
   ComputeInternalGradientsCUDAKernel<T>
       <<<N * C, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
           HxW, dY_data, X_data, ds_data, db_data);
-  // }
   if (dX != nullptr) {
     Tensor c1 = at::empty({N, C}, X.options().dtype(kAccType));
     Tensor c2 = at::empty({N, G}, X.options().dtype(kAccType));
@@ -619,24 +502,6 @@ void GroupNormBackwardKernelImplInternal(
     ComputeGradOutputCoeffientCUDAKernel<T>
         <<<B, kCUDANumThreads, 0, cuda_stream>>>(
             N, C, G, rstd_data, gamma_data, c1_data);
-    // if (D < cuda_utils::kCUDABlockReduceNumThreads) {
-    //   constexpr int kThreadX = kReduceTileSize;
-    //   constexpr int kThreadY = kReduceTileSize / 2;
-    //   int64_t B = (N * G + kThreadY - 1) / kThreadY;
-    //   ComputeBackwardFusedParamsSimpleCUDAKernel<T>
-    //       <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
-    //           N,
-    //           C,
-    //           HxW,
-    //           G,
-    //           mean_data,
-    //           rstd_data,
-    //           gamma_data,
-    //           ds_data,
-    //           db_data,
-    //           c2_data,
-    //           c3_data);
-    // } else {
     ComputeBackwardFusedParamsCUDAKernel<T>
         <<<dim3(N, G),
            cuda_utils::kCUDABlockReduceNumThreads,
@@ -652,7 +517,6 @@ void GroupNormBackwardKernelImplInternal(
             db_data,
             c2_data,
             c3_data);
-    // }
     if (HxW < kCUDANumThreads) {
       B = (N * C * HxW + kCUDANumThreads - 1) / kCUDANumThreads;
       GroupNormBackwardSimpleCUDAKernel<
