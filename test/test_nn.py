@@ -9639,8 +9639,8 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     def test_max_pool2d_indices(self, device):
         def helper(n, c, h, w, ks):
-            if n is None:
-                x = torch.randn(c, h, w, device='cuda', dtype=torch.float)
+            if h is None:
+                x = torch.randn(n, c, w, device='cuda', dtype=torch.float)
             else:
                 x = torch.randn(n, c, h, w, device='cuda', dtype=torch.float)
 
@@ -9655,7 +9655,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(idx, ref_idx)  # assertEqual implicitly compares shape for tensors
 
         helper(2, 8, 4, 4, ks=2)
-        helper(None, 3, 50, 50, ks=5)
+        helper(3, 50, None, 50, ks=5)
 
     def test_embedding_dense_grad(self, device):
         embd = nn.Embedding(20, 20).to(device)
