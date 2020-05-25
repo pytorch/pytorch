@@ -33,6 +33,7 @@ class TransformedDistribution(Distribution):
     :class:`~torch.distributions.half_cauchy.HalfCauchy`,
     :class:`~torch.distributions.half_normal.HalfNormal`,
     :class:`~torch.distributions.log_normal.LogNormal`,
+    :class:`~torch.distributions.moyal.Moyal`,
     :class:`~torch.distributions.pareto.Pareto`,
     :class:`~torch.distributions.weibull.Weibull`,
     :class:`~torch.distributions.relaxed_bernoulli.RelaxedBernoulli` and

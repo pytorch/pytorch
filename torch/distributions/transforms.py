@@ -15,6 +15,7 @@ __all__ = [
     'AffineTransform',
     'CatTransform',
     'ComposeTransform',
+    'ErfTransform',
     'ExpTransform',
     'LowerCholeskyTransform',
     'PowerTransform',
@@ -313,6 +314,28 @@ class ComposeTransform(Transform):
 
 
 identity_transform = ComposeTransform([])
+
+
+class ErfTransform(Transform):
+    r"""
+    Transform via the mapping :math:`y = \erf(x)`.
+    """
+    domain = constraints.real
+    codomain = constraints.positive
+    bijective = True
+    sign = +1
+
+    def __eq__(self, other):
+        return isinstance(other, ErfTransform)
+
+    def _call(self, x):
+        return x.erf()
+
+    def _inverse(self, y):
+        return y.erfinv()
+
+    def log_abs_det_jacobian(self, x, y):
+        return math.log(2.) - 0.5 * math.log(math.pi) - x.pow(2.)
 
 
 class ExpTransform(Transform):

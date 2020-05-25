@@ -23,6 +23,7 @@ from .independent import Independent
 from .laplace import Laplace
 from .lowrank_multivariate_normal import (LowRankMultivariateNormal, _batch_lowrank_logdet,
                                           _batch_lowrank_mahalanobis)
+from .moyal import Moyal
 from .multivariate_normal import (MultivariateNormal, _batch_mahalanobis)
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
@@ -382,6 +383,18 @@ def _kl_lowrankmultivariatenormal_multivariatenormal(p, q):
     return 0.5 * (term1 + term2 + term3 - p.event_shape[0])
 
 
+@register_kl(Moyal, Moyal)
+def _kl_moyal_moyal(p, q):
+    ct1 = p.scale / q.scale
+    ct2 = q.loc / q.scale
+    ct3 = p.loc / q.scale
+    t1 = ct3 - ct2 - 1 + (ct1 - 1) * (math.log(2.) + _euler_gamma)
+    t2 = -2 * ct1.log()
+    t3 = torch.exp(ct1 * math.log(2.) + ct2 - ct3 +
+                   (0.5 + ct1).lgamma() - 0.5 * math.log(math.pi))
+    return 0.5 * (t1 + t2 + t3)
+
+
 @register_kl(MultivariateNormal, MultivariateNormal)
 def _kl_multivariatenormal_multivariatenormal(p, q):
     # From https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Kullback%E2%80%93Leibler_divergence
@@ -558,6 +571,15 @@ def _kl_exponential_gumbel(p, q):
 # TODO: Add Exponential-Laplace KL Divergence
 
 
+@register_kl(Exponential, Moyal)
+def _kl_exponential_moyal(p, q):
+    scale_rate_prod = p.rate * q.scale
+    loc_scale_ratio = q.loc / q.scale
+    t1 = scale_rate_prod.log() - 1
+    t2 = torch.exp(loc_scale_ratio) * scale_rate_prod / (scale_rate_prod + 1)
+    t3 = scale_rate_prod.reciprocal() + math.log(2.) + math.log(math.pi)
+    return t1 + 0.5 * (-loc_scale_ratio + t2 + t3)
+
 @register_kl(Exponential, Normal)
 def _kl_exponential_normal(p, q):
     var_normal = q.scale.pow(2)
@@ -592,6 +614,19 @@ def _kl_gamma_gumbel(p, q):
     return t1 + t2 + t3
 
 # TODO: Add Gamma-Laplace KL Divergence
+
+
+@register_kl(Gamma, Moyal)
+def _kl_gamma_moyal(p, q):
+    beta_scale_prod = p.rate * q.scale
+    loc_scale_ratio = q.loc / q.scale
+    t1 = ((p.concentration - 1) * p.concentration.digamma() -
+          p.concentration.lgamma() - p.concentration + beta_scale_prod.log())
+    t2 = (p.concentration / beta_scale_prod - loc_scale_ratio +
+          math.log(2.) + math.log(math.pi))
+    t3 = (torch.exp(loc_scale_ratio) *
+          (1 + beta_scale_prod.reciprocal()).pow(-p.concentration))
+    return t1 + 0.5 * (t2 + t3)
 
 
 @register_kl(Gamma, Normal)
@@ -647,6 +682,26 @@ def _kl_laplace_normal(p, q):
     return -t1 + scale_sqr_var_ratio + (t2 - t3 + t4) / var_normal - 1
 
 
+@register_kl(Moyal, Beta)
+@register_kl(Moyal, ContinuousBernoulli)
+@register_kl(Moyal, Exponential)
+@register_kl(Moyal, Gamma)
+@register_kl(Moyal, Pareto)
+@register_kl(Moyal, Uniform)
+def _kl_moyal_infinity(p, q):
+    return _infinite_like(p.loc)
+
+
+@register_kl(Moyal, Normal)
+def _kl_moyal_normal(p, q):
+    param_ratio = p.scale / q.scale
+    t1 = param_ratio.log()
+    t2 = (math.pi * param_ratio * 0.5).pow(2)
+    t3 = (((p.loc + p.scale * (_euler_gamma + math.log(2.)) - q.loc) /
+           q.scale).pow(2) * 0.5)
+    return -t1 + t2 + t3 - 0.5 * (1 + _euler_gamma + math.log(2.))
+
+
 @register_kl(Normal, Beta)
 @register_kl(Normal, ContinuousBernoulli)
 @register_kl(Normal, Exponential)
@@ -666,6 +721,17 @@ def _kl_normal_gumbel(p, q):
     t2 = mean_scale_ratio - loc_scale_ratio
     t3 = torch.exp(-mean_scale_ratio + 0.5 * var_scale_sqr_ratio + loc_scale_ratio)
     return -t1 + t2 + t3 - (0.5 * (1 + math.log(2 * math.pi)))
+
+
+@register_kl(Normal, Moyal)
+def _kl_normal_moyal(p, q):
+    ct1 = p.scale / q.scale
+    ct2 = q.loc / q.scale
+    ct3 = p.loc / q.scale
+    t1 = ct3 - ct2 - 1
+    t2 = -2 * ct1.log()
+    t3 = torch.exp(0.5 * ct1.pow(2) + ct2 - ct3)
+    return 0.5 * (t1 + t2 + t3)
 
 # TODO: Add Normal-Laplace KL Divergence
 
@@ -770,6 +836,17 @@ def _kl_uniform_gumbel(p, q):
     return t1 - t2
 
 # TODO: Uniform-Laplace KL Divergence
+
+
+@register_kl(Uniform, Moyal)
+def _kl_uniform_moyal(p, q):
+    common_term = q.scale / (p.high - p.low)
+    high_loc_diff = (p.high - q.loc) / q.scale
+    low_loc_diff = (p.low - q.loc) / q.scale
+    t1 = common_term.log() + 0.5 * (math.log(2.) + math.log(math.pi) +
+                                    0.5 * (high_loc_diff + low_loc_diff))
+    t2 = 0.5 * common_term * (torch.exp(-high_loc_diff) - torch.exp(-low_loc_diff))
+    return t1 - t2
 
 
 @register_kl(Uniform, Normal)

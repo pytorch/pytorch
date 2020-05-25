@@ -46,8 +46,9 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  HalfCauchy, HalfNormal,
                                  Independent, Laplace, LogisticNormal,
                                  LogNormal, LowRankMultivariateNormal,
-                                 MixtureSameFamily, Multinomial, MultivariateNormal,
-                                 NegativeBinomial, Normal, OneHotCategorical, Pareto,
+                                 MixtureSameFamily, Moyal, Multinomial,
+                                 MultivariateNormal, NegativeBinomial,
+                                 Normal, OneHotCategorical, Pareto,
                                  Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
                                  VonMises, Weibull, constraints, kl_divergence)
@@ -293,6 +294,16 @@ EXAMPLES = [
             'cov_factor': torch.randn(3, 2, requires_grad=True),
             'cov_diag': torch.tensor([5.0, 1.5, 3.], requires_grad=True),
         }
+    ]),
+    Example(Moyal, [
+        {
+            'loc': torch.randn(5, 5, requires_grad=True),
+            'scale': torch.randn(5, 5).abs().requires_grad_(),
+        },
+        {
+            'loc': torch.randn(1, requires_grad=True),
+            'scale': torch.randn(1).abs().requires_grad_(),
+        },
     ]),
     Example(MultivariateNormal, [
         {
@@ -571,6 +582,16 @@ BAD_EXAMPLES = [
         },
     ]),
     Example(LogNormal, [
+        {
+            'loc': torch.tensor([1., 1.], requires_grad=True),
+            'scale': torch.tensor([0., 1.], requires_grad=True),
+        },
+        {
+            'loc': torch.tensor([1., 1.], requires_grad=True),
+            'scale': torch.tensor([1., -1.], requires_grad=True),
+        },
+    ]),
+    Example(Moyal, [
         {
             'loc': torch.tensor([1., 1.], requires_grad=True),
             'scale': torch.tensor([0., 1.], requires_grad=True),
@@ -2229,6 +2250,36 @@ class TestDistributions(TestCase):
                                         'Gumbel(loc={}, scale={})'.format(loc, scale))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_moyal(self):
+        loc = torch.randn(2, 3, requires_grad=True)
+        scale = torch.randn(2, 3).abs().requires_grad_()
+        loc_1d = torch.randn(1, requires_grad=True)
+        scale_1d = torch.randn(1).abs().requires_grad_()
+        self.assertEqual(Moyal(loc, scale).sample().size(), (2, 3))
+        self.assertEqual(Moyal(loc, scale).sample((5,)).size(), (5, 2, 3))
+        self.assertEqual(Moyal(loc_1d, scale_1d).sample().size(), (1,))
+        self.assertEqual(Moyal(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
+        self.assertEqual(Moyal(1.0, 1.0).sample().size(), ())
+        self.assertEqual(Moyal(1.0, 1.0).sample((1,)).size(), (1,))
+
+        def ref_log_prob(idx, x, log_prob):
+            l = loc.view(-1)[idx].detach()
+            s = scale.view(-1)[idx].detach()
+            expected = scipy.stats.moyal.logpdf(x, loc=l, scale=s)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(Moyal(loc, scale), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_moyal_sample(self):
+        set_rng_seed(1)  # see note [Randomized statistical tests]
+        for loc, scale in product([-5.0, -1.0, -0.1, 0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(Moyal(loc, scale),
+                                        scipy.stats.moyal(loc=loc, scale=scale),
+                                        'Moyal(loc={}, scale={})'.format(loc, scale),
+                                        failure_rate=1e-4)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_fishersnedecor(self):
         df1 = torch.randn(2, 3).abs().requires_grad_()
         df2 = torch.randn(2, 3).abs().requires_grad_()
@@ -2613,6 +2664,18 @@ class TestDistributions(TestCase):
              (1, 2)),
             (Laplace(loc=torch.tensor([0.]), scale=torch.tensor([[1.]])),
              (1, 1)),
+            (Moyal(loc=torch.tensor([0., 0.]), scale=1),
+             (2,)),
+            (Moyal(loc=0, scale=torch.tensor([1., 1.])),
+             (2,)),
+            (Moyal(loc=torch.tensor([0., 0.]), scale=torch.tensor([1.])),
+             (2,)),
+            (Moyal(loc=torch.tensor([0., 0.]), scale=torch.tensor([[1.], [1.]])),
+             (2, 2)),
+            (Moyal(loc=torch.tensor([0., 0.]), scale=torch.tensor([[1.]])),
+             (1, 2)),
+            (Moyal(loc=torch.tensor([0.]), scale=torch.tensor([[1.]])),
+             (1, 1)),
             (Pareto(scale=torch.tensor([1., 1.]), alpha=1),
              (2,)),
             (Pareto(scale=1, alpha=torch.tensor([1., 1.])),
@@ -2683,6 +2746,14 @@ class TestDistributions(TestCase):
             (Laplace, {
                 'loc': torch.tensor([0, 0]),
                 'scale': torch.tensor([1, 1, 1])
+            }),
+            (Moyal, {
+                'loc': torch.tensor([[0, 0]]),
+                'scale': torch.tensor([1, 1, 1, 1])
+            }),
+            (Moyal, {
+                'loc': torch.tensor([[[0, 0, 0], [0, 0, 0]]]),
+                'scale': torch.tensor([1, 1])
             }),
             (Pareto, {
                 'scale': torch.tensor([1, 1]),
@@ -3221,6 +3292,15 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gumbel.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(gumbel.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
+    def test_moyal_shape_scalar_params(self):
+        moyal = Moyal(1, 1)
+        self.assertEqual(moyal._batch_shape, torch.Size())
+        self.assertEqual(moyal._event_shape, torch.Size())
+        self.assertEqual(moyal.sample().size(), torch.Size())
+        self.assertEqual(moyal.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertEqual(moyal.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(moyal.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
     def test_vonmises_shape_tensor_params(self):
         von_mises = VonMises(torch.tensor([0., 0.]), torch.tensor([1., 1.]))
         self.assertEqual(von_mises._batch_shape, torch.Size((2,)))
@@ -3385,6 +3465,7 @@ class TestKL(TestCase):
         halfnormal = pairwise(HalfNormal, [1.0, 2.0, 1.0, 2.0])
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
+        moyal = pairwise(Moyal, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         independent = (Independent(normal[0], 1), Independent(normal[1], 1))
         onehotcategorical = pairwise(OneHotCategorical, [[0.4, 0.3, 0.3],
@@ -3429,11 +3510,13 @@ class TestKL(TestCase):
             (exponential, exponential),
             (exponential, gamma),
             (exponential, gumbel),
+            (exponential, moyal),
             (exponential, normal),
             (gamma, chi2),
             (gamma, exponential),
             (gamma, gamma),
             (gamma, gumbel),
+            (gamma, moyal),
             (gamma, normal),
             (gumbel, gumbel),
             (gumbel, normal),
@@ -3442,7 +3525,10 @@ class TestKL(TestCase):
             (laplace, laplace),
             (lognormal, lognormal),
             (laplace, normal),
+            (moyal, moyal),
+            (moyal, normal),
             (normal, gumbel),
+            (normal, moyal),
             (normal, normal),
             (onehotcategorical, onehotcategorical),
             (pareto, chi2),
@@ -3455,6 +3541,7 @@ class TestKL(TestCase):
             (uniform_positive, exponential),
             (uniform_positive, gamma),
             (uniform_real, gumbel),
+            (uniform_real, moyal),
             (uniform_real, normal),
             (uniform_pareto, pareto),
             (continuous_bernoulli, continuous_bernoulli),
@@ -3496,6 +3583,12 @@ class TestKL(TestCase):
             (Laplace(-1, 2), Gamma(3, 4)),
             (Laplace(-1, 2), Pareto(3, 4)),
             (Laplace(-1, 2), Uniform(-3, 4)),
+            (Moyal(-1, 2), Beta(3, 4)),
+            (Moyal(-1, 2), Chi2(3)),
+            (Moyal(-1, 2), Exponential(3)),
+            (Moyal(-1, 2), Gamma(3, 4)),
+            (Moyal(-1, 2), Pareto(3, 4)),
+            (Moyal(-1, 2), Uniform(-3, 4)),
             (Normal(-1, 2), Beta(3, 4)),
             (Normal(-1, 2), Chi2(3)),
             (Normal(-1, 2), Exponential(3)),
@@ -3524,6 +3617,7 @@ class TestKL(TestCase):
             (Gamma(1, 2), ContinuousBernoulli(0.75)),
             (Gumbel(-1, 2), ContinuousBernoulli(0.75)),
             (Laplace(-1, 2), ContinuousBernoulli(0.75)),
+            (Moyal(-1, 2), ContinuousBernoulli(0.75)),
             (Normal(-1, 2), ContinuousBernoulli(0.75)),
             (Uniform(-1, 1), ContinuousBernoulli(0.75)),
             (Uniform(0, 2), ContinuousBernoulli(0.75)),
@@ -4095,6 +4189,10 @@ class TestAgainstScipy(TestCase):
             (
                 LowRankMultivariateNormal(random_var, torch.zeros(20, 1), positive_var2),
                 scipy.stats.multivariate_normal(random_var, torch.diag(positive_var2))
+            ),
+            (
+                Moyal(random_var, positive_var2),
+                scipy.stats.moyal(random_var, positive_var2)
             ),
             (
                 Multinomial(10, simplex_tensor),

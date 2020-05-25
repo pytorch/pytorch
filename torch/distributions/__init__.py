@@ -96,6 +96,7 @@ from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import LowRankMultivariateNormal
 from .mixture_same_family import MixtureSameFamily
+from .moyal import Moyal
 from .multinomial import Multinomial
 from .multivariate_normal import MultivariateNormal
 from .negative_binomial import NegativeBinomial
@@ -136,6 +137,7 @@ __all__ = [
     'LogisticNormal',
     'LowRankMultivariateNormal',
     'MixtureSameFamily',
+    'Moyal',
     'Multinomial',
     'MultivariateNormal',
     'NegativeBinomial',
