@@ -360,6 +360,13 @@ Tensor bernoulli_impl(const Tensor& self, c10::optional<Generator> gen) {
   return result;
 }
 
+template<template<typename> class bernoulli_scalar_kernel, typename RNG>
+Tensor bernoulli_p_impl(const Tensor& self, double p, c10::optional<Generator> gen) {
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+  bernoulli_impl_<bernoulli_scalar_kernel, RNG>(result, p, gen);
+  return result;
+}
+
 template<template<typename> class bernoulli_tensor_kernel, typename RNG>
 Tensor& bernoulli_out_impl(Tensor& result, const Tensor& self, c10::optional<Generator> gen) {
   // result.resize_as_(self) requires self to have same dtype as result, so we

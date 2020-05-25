@@ -133,6 +133,7 @@ struct BernoulliStub {
   void operator()(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
     bernoulli_tensor_stub(self.device().type(), self, p_, gen);
   }
+
   void operator()(Tensor& self, double p, c10::optional<Generator> gen) {
     bernoulli_scalar_stub(self.device().type(), self, p, gen);
   }
@@ -143,7 +144,7 @@ Tensor bernoulli(const Tensor& self, c10::optional<Generator> gen) {
 }
 
 Tensor bernoulli(const Tensor& self, double p, c10::optional<Generator> gen) {
-  return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(p, gen);
+  return at::native::templates::bernoulli_p_impl<BernoulliStub, Generator>(self, p, gen);
 }
 
 Tensor& bernoulli_out(Tensor& result, const Tensor& self, c10::optional<Generator> gen) {

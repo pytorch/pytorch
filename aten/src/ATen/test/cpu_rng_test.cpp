@@ -129,6 +129,10 @@ Tensor bernoulli(const Tensor& self, c10::optional<Generator> gen) {
   return at::native::templates::bernoulli_impl<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(self, gen);
 }
 
+Tensor bernoulli_p(const Tensor& self, double p, c10::optional<Generator> gen) {
+  return at::native::templates::bernoulli_p_impl<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(self, p, gen);
+}
+
 TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   // Random
   m.impl_UNBOXED("random_.from",             random_from_to);
@@ -156,6 +160,7 @@ TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   m.impl_UNBOXED("bernoulli.out",            bernoulli_out);
   m.impl_UNBOXED("bernoulli_.Tensor",        bernoulli_Tensor);
   m.impl_UNBOXED("bernoulli_.float",         bernoulli_float);
+  m.impl_UNBOXED("bernoulli.p",              bernoulli_p);
 }
 
 class RNGTest : public ::testing::Test {
