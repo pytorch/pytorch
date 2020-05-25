@@ -560,10 +560,10 @@ class TestFakeQuantizePerTensor(TestCase):
         zero_point_shape_after = m.linear.activation_post_process.zero_point.shape
         self.assertEqual(
             scale_shape_before, scale_shape_after,
-            "FakeQuant scale shape must stay consistent")
+            msg="FakeQuant scale shape must stay consistent")
         self.assertEqual(
             zero_point_shape_before, zero_point_shape_after,
-            "FakeQuant zero_point shape must stay consistent")
+            msg="FakeQuant zero_point shape must stay consistent")
 
 
 class TestFakeQuantizePerChannel(TestCase):
