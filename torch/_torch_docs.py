@@ -4690,7 +4690,7 @@ Example::
 """)
 
 add_docstr(torch.rad2deg,
-            r"""
+           r"""
 rad2deg(input, out=None) -> Tensor
 
 Returns a new tensor with each of the elements of :attr:`input`
@@ -4711,7 +4711,7 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.deg2rad,
-            r"""
+           r"""
 deg2rad(input, out=None) -> Tensor
 
 Returns a new tensor with each of the elements of :attr:`input`
