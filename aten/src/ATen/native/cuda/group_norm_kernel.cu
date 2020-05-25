@@ -486,18 +486,18 @@ void GroupNormKernelImplInternal(
   T_ACC* a_data = a.data_ptr<T_ACC>();
   T_ACC* b_data = b.data_ptr<T_ACC>();
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
-  if (D * HxW < cuda_utils::kCUDABlockReduceNumThreads) {
-    constexpr int kThreadX = kReduceTileSize;
-    constexpr int kThreadY = kReduceTileSize / 2;
-    const int64_t B = (N * G + kThreadY - 1) / kThreadY;
-    RowwiseMomentsSimpleCUDAKernel<T>
-        <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
-            N * G, D * HxW, eps, X_data, mean_data, rstd_data);
-  } else {
+  // if (D * HxW < cuda_utils::kCUDABlockReduceNumThreads) {
+  //   constexpr int kThreadX = kReduceTileSize;
+  //   constexpr int kThreadY = kReduceTileSize / 2;
+  //   const int64_t B = (N * G + kThreadY - 1) / kThreadY;
+  //   RowwiseMomentsSimpleCUDAKernel<T>
+  //       <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
+  //           N * G, D * HxW, eps, X_data, mean_data, rstd_data);
+  // } else {
     RowwiseMomentsCUDAKernel<T>
         <<<N * G, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
             D * HxW, eps, X_data, mean_data, rstd_data);
-  }
+  // }
   int64_t B = (N * C + kCUDANumThreads - 1) / kCUDANumThreads;
   ComputeFusedParamsCUDAKernel<T><<<B, kCUDANumThreads, 0, cuda_stream>>>(
       N, C, G, mean_data, rstd_data, gamma_data, beta_data, a_data, b_data);
@@ -596,18 +596,18 @@ void GroupNormBackwardKernelImplInternal(
   Tensor db = at::empty({N, C}, X.options().dtype(kAccType));
   T_ACC* ds_data = ds.data_ptr<T_ACC>();
   T_ACC* db_data = db.data_ptr<T_ACC>();
-  if (HxW < cuda_utils::kCUDABlockReduceNumThreads) {
-    constexpr int kThreadX = kReduceTileSize;
-    constexpr int kThreadY = kReduceTileSize / 2;
-    const int64_t B = (N * C + kThreadY - 1) / kThreadY;
-    ComputeInternalGradientsSimpleCUDAKernel<T>
-        <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
-            N, C, HxW, dY_data, X_data, ds_data, db_data);
-  } else {
+  // if (HxW < cuda_utils::kCUDABlockReduceNumThreads) {
+  //   constexpr int kThreadX = kReduceTileSize;
+  //   constexpr int kThreadY = kReduceTileSize / 2;
+  //   const int64_t B = (N * C + kThreadY - 1) / kThreadY;
+  //   ComputeInternalGradientsSimpleCUDAKernel<T>
+  //       <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
+  //           N, C, HxW, dY_data, X_data, ds_data, db_data);
+  // } else {
     ComputeInternalGradientsCUDAKernel<T>
         <<<N * C, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
             HxW, dY_data, X_data, ds_data, db_data);
-  }
+  // }
   if (dX != nullptr) {
     Tensor c1 = at::empty({N, C}, X.options().dtype(kAccType));
     Tensor c2 = at::empty({N, G}, X.options().dtype(kAccType));
