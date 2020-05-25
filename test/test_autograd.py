@@ -45,7 +45,8 @@ from torch.testing._internal.common_methods_invocations import (method_tests,
                                                                 S)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
-                                                        deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
+                                                        deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
+                                                        skipCUDAIf)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
