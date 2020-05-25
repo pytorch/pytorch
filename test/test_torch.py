@@ -6346,7 +6346,9 @@ class TestTorchDeviceType(TestCase):
         input_ = layer_norm(input_.transpose(1, 2).contiguous()).contiguous()
         input_.sum().backward()
 
+    @skipIfRocm
     def test_conv_transposed_large(self, device):
+        # ConvTranspose3d works for large input tensors (gh-32866)
         in_channels = 64
         out_channels = 128
         kernel_size = 5
