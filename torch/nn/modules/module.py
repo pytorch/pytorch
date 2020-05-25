@@ -1080,7 +1080,11 @@ class Module(object):
             for name, module in self._modules.items():
                 if module is None:
                     continue
-                submodule_prefix = prefix + ('.' if prefix else '') + name
+                
+                print("Prefix: ")
+                print(prefix)
+                submodule_prefix = prefix + ('.' if prefix else '')
+                submodule_prefix = submodule_prefix + name
                 for m in module.named_modules(memo, submodule_prefix):
                     yield m
 

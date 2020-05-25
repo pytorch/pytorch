@@ -65,6 +65,10 @@ struct NamedValue {
     return *name_;
   }
 
+  bool hasName() const {
+    return name_.has_value();
+  }
+
   const SourceRange& loc() const {
     AT_ASSERT(loc_);
     return *loc_;

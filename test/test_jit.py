@@ -17165,7 +17165,54 @@ a")
             def method(self):
                 names = [""]
                 vals = []
-                for name, buffer in self.named_buffers(False):
+                for name, buffer in self.named_parameters(recurse=False):
+                    print("name: " + str(name))
+                    names.append(name)
+                    vals.append(buffer + 2)
+
+                return names, vals
+
+            def forward(self, x):
+                return x
+
+        model = MyMod()
+        model.method()
+        x = torch.jit.script(model)
+        z = self.getExportImportCopy(x)
+        self.assertEqual(z.method(), x.method())
+        self.assertEqual(z.method(), model.method())
+        self.assertEqual(x.method(), model.method())
+        names = x.method()
+        print(names)
+        for name in names:
+            self.assertNotEqual('y', name)
+
+
+    def test_named_buffers_are_iterable_recursive(self):
+        class MyModNested(torch.nn.Module):
+            def __init__(self):
+                super(MyModNested, self).__init__()
+                self.mod = (torch.nn.ReLU())
+                self.mod2 = (torch.nn.ReLU())
+                self.register_buffer('x', torch.zeros(8))
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+                self.mod = (torch.nn.ReLU())
+                self.mod2 = (torch.nn.ReLU())
+                self.register_buffer('y', torch.zeros(3))
+                self.z = torch.zeros(3)
+                self.nested = MyModNested()
+
+            def bleh(self):
+                return self.z + 4
+
+            @torch.jit.export
+            def method(self):
+                names = [""]
+                vals = []
+                for name, buffer in self.named_buffers(recurse=True):
                     print("name: " + str(name))
                     names.append(name)
                     vals.append(buffer + 2)
@@ -17178,14 +17225,10 @@ a")
         model = MyMod()
         x = torch.jit.script(model)
         z = self.getExportImportCopy(x)
+        print(z.method())
         self.assertEqual(z.method(), x.method())
         self.assertEqual(z.method(), model.method())
         self.assertEqual(x.method(), model.method())
-        names = x.method()
-        print(names)
-        for name in names:
-            self.assertNotEqual('y', name)
-
 
     def test_static_if_prop(self):
         class MaybeHasAttr(torch.nn.Module):

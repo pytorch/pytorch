@@ -463,14 +463,9 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
   }
 
   if (field == "named_modules" || field == "modules" || field == "children" ||
-      field == "named_children" || field == "named_buffers") {
+      field == "named_children" || field == "named_buffers" || field == "named_parameters") {
     return getSugaredDict(loc, m)->attr(loc, m, field);
   }
-
-  if (field == "named_parameters") {
-    return getSugaredNamedParametersDict(loc, m)->attr(loc, m, field);
-  }
-
   // 3. Check if this is the name of an overloaded method.
 
   // This can also be a call to a non-script module, or a plain
