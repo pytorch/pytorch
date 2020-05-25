@@ -84,6 +84,21 @@ def optimized_execution(should_optimize):
     finally:
         torch._C._set_graph_executor_optimize(stored_flag)
 
+@contextlib.contextmanager
+def nvFuser():
+    old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
+    old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
+    torch._C._jit_override_can_fuse_on_cpu(False)
+    torch._C._jit_override_can_fuse_on_gpu(False)
+    old_nv_fuser = torch._C._jit_register_cuda_fuser()
+    try:
+        yield
+    finally:
+        # recover the previous values
+        if not old_nv_fuser:
+            torch._C._jit_clear_cuda_fuser()
+        torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuse)
+        torch._C._jit_override_can_fuse_on_gpu(old_gpu_fuse)
 
 DEFAULT_EXTRA_FILES_MAP = torch._C.ExtraFilesMap()
 

@@ -11,11 +11,11 @@ namespace jit {
 // Register CudaFuseGraph in custom passes
 struct C10_EXPORT RegisterCudaFuseGraph
     : public PassManager<RegisterCudaFuseGraph> {
-  static void registerPass() {
+  static bool registerPass() {
     TORCH_CHECK(
         at::globalContext().hasCUDA() && !at::globalContext().hasHIP(),
         "Running CUDA fuser is only supported on CUDA builds.");
-    PassManager::registerPass(fuser::cuda::fuseGraph);
+    return PassManager::registerPass(fuser::cuda::fuseGraph);
   }
 };
 
