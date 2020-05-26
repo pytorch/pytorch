@@ -1228,6 +1228,7 @@
   dispatch:
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
+    Vulkan: empty_strided_vulkan
 
 - func: erf(Tensor self) -> Tensor
   use_c10_dispatcher: full
