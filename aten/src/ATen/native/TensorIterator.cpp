@@ -236,15 +236,14 @@ void TensorIterator::compute_types() {
       }
     }
 
+    // Checks for tensors on the wrong device
     if (op.tensor.defined() && op.device != op.tensor.device()) {
       if (op.is_output) {
         TORCH_CHECK(false, "output with device ", op.tensor.device(),
-                  " doesn't match the desired device ", op.device);
-      } else if (op.tensor.dim() == 0) {
-        op.tensor = op.tensor.to(op.options());
+                    " doesn't match the desired device ", op.device);
       } else {
         TORCH_CHECK(false, "expected device ", op.device,
-                  " but got device ", op.tensor.device());
+                    " but got device ", op.tensor.device());
       }
     }
   }
