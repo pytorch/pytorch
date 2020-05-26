@@ -32,6 +32,15 @@ TORCH_CUDA_API Val* unaryOp(UnaryOpType type, Val* v1);
 // Mod, CeilDiv, and LT are considered Int only output operations for now.
 TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2);
 
+// Perform a reduction operation on v1, initial value for reduction is init,
+// reduces across axes, and reduction operation defined by BinaryOp.
+TORCH_CUDA_API Val* reductionOp(
+    BinaryOpType reduction_op_type,
+    const std::vector<int>& axes,
+    Val* init,
+    Val* v1);
+
+// BINARY OPAERATIONS
 TORCH_CUDA_API Val* add(Val* v1, Val* v2);
 TORCH_CUDA_API Val* sub(Val* v1, Val* v2);
 TORCH_CUDA_API Val* mul(Val* v1, Val* v2);
@@ -41,12 +50,17 @@ TORCH_CUDA_API Val* lt(Val* v1, Val* v2);
 TORCH_CUDA_API Val* ceilDiv(Val* v1, Val* v2);
 TORCH_CUDA_API Val* andOp(Val* v1, Val* v2);
 
+// REDUCTION OPERATIONS
+TORCH_CUDA_API Val* sum(Val* v1, const std::vector<int>& reduction_axes);
+
+// COMPOUND OPERATIONS
 TORCH_CUDA_API Val* add_alpha(Val* v1, Val* v2, Val* s);
 TORCH_CUDA_API Val* sub_alpha(Val* v1, Val* v2, Val* s);
 TORCH_CUDA_API Val* lerp(Val* start, Val* end, Val* weight);
 TORCH_CUDA_API Val* addcmul(Val* v1, Val* v2, Val* v3, Val* s);
-
 TORCH_CUDA_API Val* where(Val* c, Val* v1, Val* v2);
+
+// TERNARY OPERATIONS
 TORCH_CUDA_API Val* threshold(Val* in, Val* thresh, Val* value);
 TORCH_CUDA_API Val* clamp(Val* in, Val* min_val, Val* max_val);
 

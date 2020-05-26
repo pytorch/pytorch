@@ -26,9 +26,11 @@
 #if defined(__clang__)
   #define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
   #define __ubsan_ignore_undefined__ __attribute__((no_sanitize("undefined")))
+  #define __ubsan_ignore_signed_int_overflow__ __attribute__((no_sanitize("signed-integer-overflow")))
 #else
   #define __ubsan_ignore_float_divide_by_zero__
   #define __ubsan_ignore_undefined__
+  #define __ubsan_ignore_signed_int_overflow__
 #endif
 
 // Disable the copy and assignment operator for a class. Note that this will
