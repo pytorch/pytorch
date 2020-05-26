@@ -161,19 +161,18 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
     auto self_stride_1 = self.stride(1);
 
     int sz;
-    if (dimension >= 0) {
+    if (dimension > 0) {
       sz = std::min(self.size(0), self.size(1) - dimension);
     } else {
       sz = std::min(self.size(0) + dimension, self.size(1));
     }
 
     result.resize_({sz});
-    result.zero_();
     if (sz > 0) {
       auto result_stride = result.stride(0);
       const dim3 threads(std::min(
           int(sz),
-          int(at::cuda::getCurrentDeviceProperties()->maxGridSize[0])));
+          int(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock)));
       const dim3 grid(
           std::min(int(1024), cuda::ATenCeilDiv(int(sz), int(threads.x))));
       auto start =
