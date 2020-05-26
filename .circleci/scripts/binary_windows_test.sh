@@ -4,6 +4,7 @@ set -eux -o pipefail
 source "/c/w/env"
 
 export CUDA_VERSION="${DESIRED_CUDA/cu/}"
+export VC_YEAR=2017
 
 pushd "$BUILDER_ROOT"
 

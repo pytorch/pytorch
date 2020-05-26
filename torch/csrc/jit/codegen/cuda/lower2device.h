@@ -18,7 +18,6 @@ namespace fuser {
 
 struct TORCH_CUDA_API GPULower : public OptOutMutator {
  private:
-  bool lowered = false;
   Fusion* const fusion_;
   std::vector<Expr*> lowered_exprs;
   Expr* active_scope = nullptr;
@@ -31,29 +30,6 @@ struct TORCH_CUDA_API GPULower : public OptOutMutator {
   void clearActiveView();
   // Set active views from computeAtView
   void setActiveView(const TensorView* const);
-
-  // Indexing functions
-  // Consumer = Producer
-  // i.e. T0 = T1... -> T0 is the consumer, T1 is the producer
-  // Producer indexing dispatch
-  TensorIndex* getProducerIndex(TensorView* producer, TensorView* consumer);
-  // Producer if it's in global memory
-  TensorIndex* getGlobalProducerIndex(
-      TensorView* producer,
-      TensorView* consumer);
-  // Producer indexing if it's in registers
-  TensorIndex* getLocalProducerIndex(
-      TensorView* producer,
-      TensorView* consumer);
-  // Consumer index dispatch
-  TensorIndex* getConsumerIndex(TensorView* consumer);
-  // Consumer indexing if it's in global memory
-  TensorIndex* getGlobalConsumerIndex(TensorView* consumer);
-  // Consumer indexing if it's in local memory
-  TensorIndex* getLocalConsumerIndex(TensorView* consumer);
-
-  // Get a predicate based on a particular tensorview
-  IfThenElse* getPredicate(const TensorView* const);
 
   // Wrap pushBack in lower_utils if active_scope is null we want it to go
   // straight to lower_exprs
@@ -72,6 +48,7 @@ struct TORCH_CUDA_API GPULower : public OptOutMutator {
   Statement* mutate(UnaryOp*) final;
   Statement* mutate(BinaryOp*) final;
   Statement* mutate(TernaryOp*) final;
+  Statement* mutate(ReductionOp*) final;
 
   // TensorViews are all based on symbolic sizes. When we first initialize them
   // we don't know if they're inputs or outputs which would mean that they have
@@ -80,6 +57,7 @@ struct TORCH_CUDA_API GPULower : public OptOutMutator {
   // the kernel being fetched for shapes, we want to replace input and output
   // tensors to reference the runtime structure containing sizes.
   void replaceSizes();
+  void fixComputeAt(Fusion* fusion);
 
  public:
   // Init printer on ostream

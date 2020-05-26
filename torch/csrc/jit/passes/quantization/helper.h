@@ -43,6 +43,12 @@ TORCH_API bool isSingleInputGeneralAtenFunction(Node* n);
 // the input tensor is quantized or not, example: aten::size
 TORCH_API bool isTensorInfoNode(Node* n);
 
+// Check if this the the propaagate op that has single input, e.g. aten::cat
+TORCH_API bool isPropagateQuantSingleInputOp(Node* n);
+
+// Check if this is the propagate op that has two inputs, e.g. aten::add
+TORCH_API bool isPropagateQuantBinaryOp(Node* n);
+
 // Check if this is the node that we'll quantize or not quantize depending on
 // whether the input of the node is quantized, example: aten::cat
 TORCH_API bool isPropagateQuantNode(Node* n);

@@ -221,8 +221,8 @@ void TensorPipeAgent::sendCompletedResponseMessage(
   if (!rpcAgentRunning_.load()) {
     auto err = c10::str(
         "Node ",
-        RpcAgent::getWorkerInfo().id_,
-        "tried to respond to message with id ",
+        RpcAgent::getWorkerInfo().name_,
+        " tried to respond to message with id ",
         messageId,
         " but RPC is no longer running on this node.");
     LOG(WARNING) << err;
