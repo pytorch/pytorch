@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 
 #include <iostream>
 
@@ -504,10 +504,12 @@ void IRPrinter::handle(const Allocate* const a) {
 void IRPrinter::handle(const Split* const s) {
   os << "Split: ";
   handle(s->in());
-  os << " by factor " << s->factor() << " -> ";
-  handle(s->outer());
-  os << ", ";
-  handle(s->inner());
+  os << " axis " << s->axis() << " by factor " << s->factor() << "\n";
+  ++indent_size;
+  indent();
+  os << "-> ";
+  handle(s->out());
+  --indent_size;
   os << "\n";
 }
 

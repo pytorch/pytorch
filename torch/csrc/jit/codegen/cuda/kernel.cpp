@@ -41,7 +41,6 @@ struct ExtractSizeStride {
       const at::Tensor& val,
       c10::optional<at::IntArrayRef> broadcasted_size = c10::nullopt) {
     if (broadcasted_size) {
-      // [Note - broadcast support in integration]
       // PyTorch follows numpy broadcasting rule.
       // (https://numpy.org/doc/stable/user/basics.broadcasting.html)
       //
@@ -91,7 +90,7 @@ struct KernelArgumentHolder {
       const at::Tensor& val,
       c10::optional<at::IntArrayRef> broadcasted_size = c10::nullopt) {
     changed = true;
-    ExtractSizeStride ess(val, std::move(broadcasted_size));
+    ExtractSizeStride ess(val, broadcasted_size);
     int nDims = ess.sizes.size();
 
     c10::ScalarType dtype = val.scalar_type();
