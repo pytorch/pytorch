@@ -33,7 +33,7 @@ void batch_permutation_loop(
     }
   } else {
     std::vector<int> backward_indices(N);
-    for (size_t i = 0; i < N; ++i) {
+    for (int i = 0; i < N; ++i) {
       backward_indices[indices[i]] = i;
     }
     for (int n = 0; n < N; n++) {

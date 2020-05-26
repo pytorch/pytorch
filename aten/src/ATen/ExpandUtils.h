@@ -16,6 +16,22 @@ inferExpandGeometry(
     IntArrayRef tensor_strides,
     IntArrayRef sizes);
 
+// True if input shapes are expandable
+// NOTE: infer_size did a similar check, please keep them sync if change is needed
+inline bool are_expandable(IntArrayRef shape1, IntArrayRef shape2) {
+  size_t ndim1 = shape1.size();
+  size_t ndim2 = shape2.size();
+  size_t ndim = ndim1 < ndim2 ? ndim1 : ndim2;
+
+  for (int64_t i = ndim - 1; i >= 0; --i) {
+    if (shape1[--ndim1] == shape2[--ndim2] || shape1[ndim1] == 1 || shape2[ndim2] == 1) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
 // avoid copy-construction of Tensor by using a reference_wrapper.
 inline void check_defined(std::initializer_list<std::reference_wrapper<const Tensor>> tensors, const char *api_name) {
   for (auto& t : tensors) {

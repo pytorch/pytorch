@@ -30,6 +30,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|
   shopt -s expand_aliases
   export PYTORCH_TEST_WITH_ROCM=1
   alias python="$PYTHON"
+  # temporary to locate some kernel issues on the CI nodes
+  export HSAKMT_DEBUG_LEVEL=4
 fi
 
 # This token is used by a parser on Jenkins logs for determining
@@ -89,34 +91,36 @@ function assert_git_not_dirty() {
     fi
 }
 
-if which sccache > /dev/null; then
-  # Save sccache logs to file
-  sccache --stop-server || true
-  rm ~/sccache_error.log || true
-  # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
-  # https://github.com/pytorch/pytorch/pull/16645
-  SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
-
-  # Report sccache stats for easier debugging
-  sccache --zero-stats
-  function sccache_epilogue() {
-    echo '=================== sccache compilation log ==================='
-    python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
-    echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
-    sccache --show-stats
+if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
+  if which sccache > /dev/null; then
+    # Save sccache logs to file
     sccache --stop-server || true
-  }
-  trap_add sccache_epilogue EXIT
-fi
+    rm ~/sccache_error.log || true
+    # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
+    # https://github.com/pytorch/pytorch/pull/16645
+    SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
 
-if which ccache > /dev/null; then
-  # Report ccache stats for easier debugging
-  ccache --zero-stats
-  ccache --show-stats
-  function ccache_epilogue() {
+    # Report sccache stats for easier debugging
+    sccache --zero-stats
+    function sccache_epilogue() {
+      echo '=================== sccache compilation log ==================='
+      python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
+      echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
+      sccache --show-stats
+      sccache --stop-server || true
+    }
+    trap_add sccache_epilogue EXIT
+  fi
+
+  if which ccache > /dev/null; then
+    # Report ccache stats for easier debugging
+    ccache --zero-stats
     ccache --show-stats
-  }
-  trap_add ccache_epilogue EXIT
+    function ccache_epilogue() {
+      ccache --show-stats
+    }
+    trap_add ccache_epilogue EXIT
+  fi
 fi
 
 # It's called a COMPACT_JOB_NAME because it's distinct from the
@@ -137,22 +141,20 @@ else
 fi
 
 # Use conda cmake in some CI build. Conda cmake will be newer than our supported
-# min version 3.5, so we only do it in two builds that we know should use conda.
-if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py2* ]] || \
-     [[ "$BUILD_ENVIRONMENT" == *cuda10.1-cudnn7-py3* ]]; then
-    if ! which conda; then
-      echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
-      exit 1
-    else
-      conda install -q -y cmake
-    fi
+# min version (3.5 for xenial and 3.10 for bionic),
+# so we only do it in four builds that we know should use conda.
+# Linux bionic cannot find conda mkl with cmake 3.10, so we need a cmake from conda.
+# Alternatively we could point cmake to the right place
+# export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py2* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-bionic* ]]; then
+  if ! which conda; then
+    echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
+    exit 1
   else
-    if ! cmake --version | grep 'cmake version 3\.5'; then
-      echo "Expected ${BUILD_ENVIRONMENT} to have cmake version 3.5.* (min support version), but 'cmake --version' returns:"
-      cmake --version
-      exit 1
-    fi
+    conda install -q -y cmake
   fi
 fi
 
@@ -178,4 +180,21 @@ function get_exit_code() {
   retcode=$?
   set -e
   return $retcode
+}
+
+function file_diff_from_base() {
+  # The fetch may fail on Docker hosts, but it's not always necessary.
+  set +e
+  git fetch origin master --quiet
+  set -e
+  git diff --name-only "$(git merge-base origin/master HEAD)" > "$1"
+}
+
+function get_bazel() {
+  # download bazel version
+  wget https://github.com/bazelbuild/bazel/releases/download/3.1.0/bazel-3.1.0-linux-x86_64 -O tools/bazel
+  # verify content
+  echo '753434f4fa730266cf5ce21d1fdd425e1e167dd9347ad3e8adc19e8c0d54edca  tools/bazel' | sha256sum --quiet -c
+
+  chmod +x tools/bazel
 }

@@ -14,8 +14,9 @@ _ASMoutput = namedtuple('ASMoutput', ['output', 'loss'])
 
 class AdaptiveLogSoftmaxWithLoss(Module):
     r"""Efficient softmax approximation as described in
-    `Efficient softmax approximation for GPUs`_ by Edouard Grave, Armand Joulin,
-    Moustapha Cissé, David Grangier, and Hervé Jégou.
+    `Efficient softmax approximation for GPUs by Edouard Grave, Armand Joulin,
+    Moustapha Cissé, David Grangier, and Hervé Jégou
+    <https://arxiv.org/abs/1609.04309>`__.
 
     Adaptive softmax is an approximate strategy for training models with large
     output spaces. It is most effective when the label distribution is highly
@@ -49,7 +50,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
     * :attr:`div_value` is used to compute the size of each additional cluster,
       which is given as
-      :math:`\left\lfloor\frac{in\_features}{div\_value^{idx}}\right\rfloor`,
+      :math:`\left\lfloor\frac{\texttt{in\_features}}{\texttt{div\_value}^{idx}}\right\rfloor`,
       where :math:`idx` is the cluster index (with clusters
       for less frequent words having larger indices,
       and indices starting from :math:`1`).
@@ -89,17 +90,12 @@ class AdaptiveLogSoftmaxWithLoss(Module):
               log likelihood loss
 
     Shape:
-        - input: :math:`(N, in\_features)`
-        - target: :math:`(N)` where each value satisfies :math:`0 <= target[i] <= n\_classes`
+        - input: :math:`(N, \texttt{in\_features})`
+        - target: :math:`(N)` where each value satisfies :math:`0 <= \texttt{target[i]} <= \texttt{n\_classes}`
         - output1: :math:`(N)`
         - output2: ``Scalar``
 
-
-    .. _Efficient softmax approximation for GPUs:
-        https://arxiv.org/abs/1609.04309
-
-    .. _Zipf's law:
-        https://en.wikipedia.org/wiki/Zipf%27s_law
+    .. _Zipf's law: https://en.wikipedia.org/wiki/Zipf%27s_law
     """
 
     def __init__(self, in_features, n_classes, cutoffs, div_value=4., head_bias=False):
@@ -222,19 +218,19 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         return out
 
     def log_prob(self, input):
-        r""" Computes log probabilities for all :math:`n\_classes`
+        r""" Computes log probabilities for all :math:`\texttt{n\_classes}`
 
         Args:
             input (Tensor): a minibatch of examples
 
         Returns:
             log-probabilities of for each class :math:`c`
-            in range :math:`0 <= c <= n\_classes`, where :math:`n\_classes` is a
+            in range :math:`0 <= c <= \texttt{n\_classes}`, where :math:`\texttt{n\_classes}` is a
             parameter passed to ``AdaptiveLogSoftmaxWithLoss`` constructor.
 
         Shape:
-            - Input: :math:`(N, in\_features)`
-            - Output: :math:`(N, n\_classes)`
+            - Input: :math:`(N, \texttt{in\_features})`
+            - Output: :math:`(N, \texttt{n\_classes})`
 
         """
 
@@ -252,7 +248,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             output (Tensor): a class with the highest probability for each example
 
         Shape:
-            - Input: :math:`(N, in\_features)`
+            - Input: :math:`(N, \texttt{in\_features})`
             - Output: :math:`(N)`
         """
 

@@ -1,6 +1,21 @@
 #ifndef THC_TENSOR_TOPK_CUH
 #define THC_TENSOR_TOPK_CUH
 
+#include <THC/THC.h>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCTensorMath.h>
+#include <THC/THCAsmUtils.cuh>
+#include <THC/THCScanUtils.cuh>
+#include <THC/THCTensorTypeUtils.cuh>
+#include <THC/THCTensorMathReduce.cuh>
+#include <ATen/WrapDimUtils.h>
+#include <algorithm> // for std::min
+
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+#include <thrust/system/cuda/execution_policy.h>
+#endif
+
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 
@@ -52,6 +67,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
     inputSliceStart, outputSliceSize,
     inputSliceSize, inputWithinSliceStride,
     smem, &topKValue);
+  const auto topKConverted = at::native::TopKTypeConfig<T>::convert(topKValue);
 
   // Every value that is strictly less/greater than `pattern`
   // (depending on sort dir) in sorted int format is in the top-K.
@@ -74,11 +90,12 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
     bool inRange = (i < inputSliceSize);
     T v =
       inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
+    const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
     bool hasTopK;
     if (Order) {
-      hasTopK = inRange && (THCNumerics<T>::gt(v, topKValue));
+      hasTopK = inRange && (convertedV > topKConverted);
     } else {
-      hasTopK = inRange && (THCNumerics<T>::lt(v, topKValue));
+      hasTopK = inRange && (convertedV < topKConverted);
     }
 
     int index;
@@ -111,7 +128,8 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
     bool inRange = (i < inputSliceSize);
     T v =
       inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
-    bool hasTopK = inRange && (THCNumerics<T>::eq(v, topKValue));
+    const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
+    bool hasTopK = inRange && (convertedV == topKConverted);
 
     int index;
     int carry;

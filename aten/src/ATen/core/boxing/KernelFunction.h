@@ -2,13 +2,13 @@
 
 #include <ATen/core/stack.h>
 #include <c10/util/TypeList.h>
-#include <ATen/core/boxing/kernel_functor.h>
-#include <ATen/core/boxing/kernel_function.h>
-#include <ATen/core/boxing/kernel_lambda.h>
 
 namespace c10 {
 
+using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
+
 class OperatorHandle;
+struct OperatorKernel;
 
 // This kernel implements the behavior of falling through to the next available
 // registered dispatch key.  The implementation of this function is FAST; it is
@@ -66,16 +66,16 @@ public:
    *
    * > KernelFunction func = KernelFunction::makeFromUnboxedLambda(
    * >      [] (Tensor a, bool b) -> Tensor {...});
-   * > Tensor result = func.callUnboxed<Tensor, Tensor, bool>(tensor1, true);
+   * > Tensor result = func.call<Tensor, Tensor, bool>(tensor1, true);
    *
    * Or, with a boxed implementation:
    *
    * > void boxed_func(OperatorKernel*, Stack* stack) {...}
    * > KernelFunction func = KernelFunction::makeFromBoxedFunction(&boxed_func);
-   * > Tensor result = func.callUnboxed<Tensor, Tensor, bool>(tensor1, true);
+   * > Tensor result = func.call<Tensor, Tensor, bool>(tensor1, true);
    */
   template<class Return, class... Args>
-  Return callUnboxed(const OperatorHandle& opHandle, Args... args) const;
+  Return call(const OperatorHandle& opHandle, Args... args) const;
 
   /**
    * Create a KernelFunction from a boxed function.
@@ -103,33 +103,9 @@ public:
   static KernelFunction makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
 
   /**
-   * Create a KernelFunction from an unboxed functor and delay functor creation
-   * until the first call to the KernelFunction. This is useful for functors
-   * that are registered at static initialization time but can't be created
-   * there yet. For example, we want to allow functors to store Tensor members
-   * (we can't create Tensor objects at static initialization time because of SIOF)
-   * but these functors are registered as kernels at static initialization time.
-   * Using this method, we can delay functor instantiation until the operator
-   * is called for the first time.
-   *
-   * Example:
-   *
-   * > class MyFunctor final {
-   * >   public:
-   * >     Tensor operator()(Tensor a, Tensor b) {...}
-   * > };
-   * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor([] {
-   * >   return std::make_unique<MyFunctor>();
-   * > });
-   */
-  template<class KernelFunctor, bool AllowLegacyTypes = false>
-  static KernelFunction makeFromUnboxedFunctorFactory(std::function<std::unique_ptr<OperatorKernel>()> kernelFunctorFactory);
-
-  /**
    * Create a KernelFunction from an unboxed functor and prevent creation of an
-   * unboxing-wrapper. This means that you can only call this KernelFunction
-   * using KernelFunction::callUnboxedOnly(), not using KernelFunction::callBoxed()
-   * or KernelFunction::callUnboxed().
+   * unboxing-wrapper. This means that you cannot call this KernelFunction
+   * using KernelFunction::callBoxed()
    *
    * This is necessary because our unboxing wrappers don't work for all types
    * yet, so if you want to use one of these types as function arguments,
@@ -163,9 +139,8 @@ public:
 
   /**
    * Create a KernelFunction from an unboxed function and prevent creation of an
-   * unboxing-wrapper. This means that you can only call this KernelFunction
-   * using KernelFunction::callUnboxedOnly(), not using KernelFunction::callBoxed()
-   * or KernelFunction::callUnboxed().
+   * unboxing-wrapper. This means that you cannot call this KernelFunction
+   * using KernelFunction::callBoxed()
    *
    * This is necessary because our unboxing wrappers don't work for all types
    * yet, so if you want to use one of these types as function arguments,
@@ -209,27 +184,26 @@ public:
   template<bool AllowLegacyTypes = false, class Lambda>
   static KernelFunction makeFromUnboxedLambda(Lambda&& lambda);
 
+  std::string dumpState() const;
+  // For testing internal invariants only
+  bool _equalsBoxedAndUnboxed(const KernelFunction&) const;
+
+  // This function is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
+  // unboxing wrapper for aten operators. We still need those for some operators because not all work
+  // with the templated unboxing logic yet.
+  // TODO Delete setManuallyBoxedKernel_ once all operators work with the templated boxing logic. This can be done once https://github.com/pytorch/pytorch/issues/32366 is fixed.
+  void setManuallyBoxedKernel_(InternalBoxedKernelFunction* func);
+
 private:
 
-  explicit KernelFunction(std::function<std::unique_ptr<OperatorKernel>()> functorFactory, std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func);
+  explicit KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func);
 
   template<BoxedKernelFunction* func>
   static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, Stack* stack);
 
   OperatorKernel* getFunctor_() const;
 
-  // If the operator has an unboxed_kernel_func, then either
-  // functorFactory_ or functor_ must be set, possibly both.
-  // If functor_ is not set but functorFactory_ is, we will create
-  // functor_ by calling functorFactory_ the first time it is needed.
-  // We use this indirection because many KernelFunctions are created
-  // at static initialization time but are created with functors that
-  // store Tensor and we can't call the Tensor() constructor at static
-  // initialization time yet (SIOF). So these register with a
-  // functorFactory_ instead of a functor_ and will be initialized
-  // on the first call to the KernelFunction.
-  std::function<std::unique_ptr<OperatorKernel>()> functorFactory_;
-  mutable std::shared_ptr<OperatorKernel> functor_;
+  std::shared_ptr<OperatorKernel> functor_;
 
   InternalBoxedKernelFunction* boxed_kernel_func_;
   void* unboxed_kernel_func_;
@@ -237,4 +211,4 @@ private:
 
 }
 
-#include "KernelFunction_impl.h"
+#include <ATen/core/boxing/KernelFunction_impl.h>

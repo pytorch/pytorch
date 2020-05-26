@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <limits>
 
-#include <x86intrin.h>
+#include <immintrin.h>
 
 #include <fbgemm/QuantUtils.h>
 

@@ -80,6 +80,12 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_scatter.*'  # opset 11 is not supported yet
                      '|test_unique.*'  # opset 11 is not supported yet
                      '|test_gathernd.*'  # opset 11 is not supported yet
+                     '|test_dropout_random.*'  # opset 12 is not supported
+                     '|test_einsum.*'  # opset 12 is not supported
+                     '|test_.*training.*'  # training is not supported
+                     '|test_.*_loss.*'  # training is not supported
+                     '|test_split_zero_size.*'  # unsupported case
+                     '|test_constantofshape_int_shape_zero.*'  # unsupported case
                      '|test_constant_pad.*'  # 1d pad is not supported
                      '|test_edge_pad.*'  # 1d pad is not supported
                      '|test_reflect_pad.*'  # 1d pad is not supported
@@ -90,6 +96,17 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_.*negative_ind.*'  # negative axis is not supported yet
                      '|test_argmax_.*select_last_index.*'  # unsupported case
                      '|test_argmin_.*select_last_index_.*'  # unsupported case
+                     '|test_celu.*'  # unsupported case
+                     '|test_gathernd.*'  # unsupported case
+                     '|test_greater_equal.*'  # unsupported case
+                     '|test_inverse.*'  # unsupported case
+                     '|test_less_equal.*'  # unsupported case
+                     '|test_max_.*'  # unsupported case
+                     '|test_min_.*'  # unsupported case
+                     '|test_mean_square_distance_.*'  # unsupported case
+                     '|test_softmax_cross_entropy.*'  # unsupported case
+                     '|test_unfoldtodepth.*'  # unsupported case
+                     '|test_.*gradient.*'  # no support for gradient op in c2-onnx
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.

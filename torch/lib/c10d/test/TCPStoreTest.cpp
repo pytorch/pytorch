@@ -14,7 +14,7 @@ void testHelper(const std::string& prefix = "") {
   const auto numThreads = 16;
   const auto numWorkers = numThreads + 1;
 
-  auto serverTCPStore = std::make_unique<c10d::TCPStore>(
+  auto serverTCPStore = std::make_shared<c10d::TCPStore>(
       "127.0.0.1",
       0,
       numWorkers,
@@ -23,7 +23,7 @@ void testHelper(const std::string& prefix = "") {
       /* wait */ false);
 
   auto serverStore =
-      std::make_unique<c10d::PrefixStore>(prefix, *serverTCPStore);
+      std::make_unique<c10d::PrefixStore>(prefix, serverTCPStore);
   // server store
   auto serverThread = std::thread([&serverStore, &serverTCPStore] {
     // Wait for all workers to join.
@@ -44,14 +44,13 @@ void testHelper(const std::string& prefix = "") {
   c10d::test::Semaphore sem1, sem2;
 
   // Each thread will have a client store to send/recv data
-  std::vector<std::unique_ptr<c10d::TCPStore>> clientTCPStores;
+  std::vector<std::shared_ptr<c10d::TCPStore>> clientTCPStores;
   std::vector<std::unique_ptr<c10d::PrefixStore>> clientStores;
   for (auto i = 0; i < numThreads; i++) {
-    clientTCPStores.push_back(
-        std::unique_ptr<c10d::TCPStore>(new c10d::TCPStore(
-            "127.0.0.1", serverTCPStore->getPort(), numWorkers, false)));
+    clientTCPStores.push_back(std::make_unique<c10d::TCPStore>(
+        "127.0.0.1", serverTCPStore->getPort(), numWorkers, false));
     clientStores.push_back(std::unique_ptr<c10d::PrefixStore>(
-        new c10d::PrefixStore(prefix, *clientTCPStores[i])));
+        new c10d::PrefixStore(prefix, clientTCPStores[i])));
   }
 
   std::string expectedCounterRes = std::to_string(numThreads * numIterations);

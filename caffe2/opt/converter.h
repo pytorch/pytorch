@@ -29,11 +29,13 @@ CAFFE2_API caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
 // Pass in an oldNet to copy all the attributes of that network.
 // Be warned that transformations that modify the graph's inputs or outputs
 // are not reflected in changes to external_input or external_output.
-CAFFE2_API caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&, const caffe2::NetDef& oldNet);
+CAFFE2_API caffe2::NetDef convertToCaffe2Proto(
+    nom::repr::NNModule&,
+    const caffe2::NetDef& oldNet);
 
 // Use these functions instead of the registry directly.
-CAFFE2_API std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
-    const caffe2::OperatorDef& op);
+CAFFE2_API std::unique_ptr<nom::repr::NeuralNetOperator>
+convertToNeuralNetOperator(const caffe2::OperatorDef& op);
 
 CAFFE2_API caffe2::OperatorDef convertToOperatorDef(
     const nom::repr::NNGraph::NodeRef& instrNode);
@@ -52,6 +54,10 @@ class CAFFE2_API Converter {
       caffe2::OperatorDef op);
 
   virtual ~Converter() {}
+
+ protected:
+  caffe2::DeviceOption getDeviceOption(
+      const nom::repr::NeuralNetOperator* nnOp) const;
 };
 
 C10_DECLARE_REGISTRY(ConverterRegistry, Converter);
@@ -68,6 +74,5 @@ C10_DECLARE_REGISTRY(ConverterRegistry, Converter);
   };
 
 } // namespace caffe2
-
 
 #endif // CAFFE2_OPT_CONVERTER_H

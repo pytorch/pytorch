@@ -139,7 +139,7 @@ class WeightedRandomSampler(Sampler):
 
     Example:
         >>> list(WeightedRandomSampler([0.1, 0.9, 0.4, 0.7, 3.0, 0.6], 5, replacement=True))
-        [0, 0, 0, 1, 0]
+        [4, 4, 1, 4, 5]
         >>> list(WeightedRandomSampler([0.9, 0.4, 0.05, 0.2, 0.3, 0.1], 5, replacement=False))
         [0, 1, 4, 3, 2]
     """
@@ -167,7 +167,8 @@ class BatchSampler(Sampler):
     r"""Wraps another sampler to yield a mini-batch of indices.
 
     Args:
-        sampler (Sampler): Base sampler.
+        sampler (Sampler or Iterable): Base sampler. Can be any iterable object
+            with ``__len__`` implemented.
         batch_size (int): Size of mini-batch.
         drop_last (bool): If ``True``, the sampler will drop the last batch if
             its size would be less than ``batch_size``
@@ -180,10 +181,9 @@ class BatchSampler(Sampler):
     """
 
     def __init__(self, sampler, batch_size, drop_last):
-        if not isinstance(sampler, Sampler):
-            raise ValueError("sampler should be an instance of "
-                             "torch.utils.data.Sampler, but got sampler={}"
-                             .format(sampler))
+        # Since collections.abc.Iterable does not check for `__getitem__`, which
+        # is one way for an object to be an iterable, we don't do an `isinstance`
+        # check here.
         if not isinstance(batch_size, _int_classes) or isinstance(batch_size, bool) or \
                 batch_size <= 0:
             raise ValueError("batch_size should be a positive integer value, "

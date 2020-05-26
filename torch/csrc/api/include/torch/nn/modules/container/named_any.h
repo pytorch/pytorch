@@ -67,6 +67,10 @@ class NamedAnyModule {
   NamedAnyModule(std::string name, const ModuleHolder<M>& module_holder)
       : NamedAnyModule(std::move(name), module_holder.ptr()) {}
 
+  /// Creates a `NamedAnyModule` from a type-erased `AnyModule`.
+  NamedAnyModule(std::string name, AnyModule any_module)
+    : name_(std::move(name)), module_(std::move(any_module)) {}
+
   /// Returns a reference to the name.
   const std::string& name() const noexcept {
     return name_;
@@ -83,23 +87,9 @@ class NamedAnyModule {
   }
 
  private:
-  /// Creates a `NamedAnyModule` from a type-erased `AnyModule`.
-  NamedAnyModule(std::string name, AnyModule any_module)
-    : name_(std::move(name)), module_(std::move(any_module)) {}
-
   std::string name_;
   AnyModule module_;
 };
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-
-C10_DEPRECATED_MESSAGE("`torch::nn::modules_ordered_dict` is deprecated. " \
-                       "To construct a `Sequential` with named submodules, " \
-                       "you can do `Sequential sequential({{\"m1\", MyModule(1)}, {\"m2\", MyModule(2)}})`")
-TORCH_API torch::OrderedDict<std::string, AnyModule> modules_ordered_dict(
-  std::initializer_list<NamedAnyModule> named_modules);
-
-#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 } // namespace nn
 } // namespace torch

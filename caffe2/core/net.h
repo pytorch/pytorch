@@ -62,6 +62,8 @@ class CAFFE2_API NetBase : public Observable<NetBase> {
 
   virtual bool RunAsync();
 
+  virtual void Cancel() {}
+
   /* Benchmarks a network for one individual run so that we can feed new
    * inputs on additional calls.
    * This function returns the number of microseconds spent

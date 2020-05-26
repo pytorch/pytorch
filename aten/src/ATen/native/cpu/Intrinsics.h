@@ -1,6 +1,9 @@
 #pragma once
 
-#if defined(_MSC_VER)
+#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__))
+/* Clang-compatible compiler, targeting x86/x86-64 */
+#include <x86intrin.h>
+#elif defined(_MSC_VER)
 /* Microsoft C/C++-compatible compiler */
 #include <intrin.h>
 #if _MSC_VER <= 1900

@@ -3,6 +3,7 @@
 #include <caffe2/core/logging.h>
 #include <mutex>
 #include <random>
+#include <array>
 
 namespace caffe2 {
 

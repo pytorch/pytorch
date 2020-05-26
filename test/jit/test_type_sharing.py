@@ -475,3 +475,29 @@ class TestTypeSharing(JitTestCase):
         a()
         b = package(A())
         b()
+
+    def test_module_dict_same_type_different_name(self):
+        """
+        We should be able to differentiate between two ModuleDict instances
+        that have different keys but the same value types.
+        """
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            def forward(self, x):
+                return x
+
+        class Foo(torch.nn.Module):
+            def __init__(self, s):
+                super(Foo, self).__init__()
+                self.dict = torch.nn.ModuleDict(s)
+
+            def forward(self, x):
+                return x
+
+        a = Foo({'foo': A()})
+        b = Foo({'bar': A()})
+        c = Foo({'bar': A()})
+        self.assertDifferentType(a, b)
+        self.assertSameType(b, c)

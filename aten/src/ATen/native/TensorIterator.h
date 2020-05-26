@@ -3,12 +3,11 @@
 #include <ATen/ATen.h>
 #include <c10/util/FunctionRef.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/TypeCast.h>
 #include <ATen/core/Range.h>
-#include <ATen/detail/ScalarTypeConversions.h>
 #include <bitset>
-#include <c10/util/Optional.h>
-#include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/Parallel.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
 // arithmetic, comparisons, and trigonometric functions. It handles
@@ -132,6 +131,13 @@ struct CAFFE2_API OperandInfo {
 
 struct SplitUntil32Bit;
 
+enum class FastSetupType : uint8_t {
+  NONE,
+  CONTIGUOUS,
+  CHANNELS_LAST,
+  NON_OVERLAPPING_DENSE
+};
+
 enum class CommonDTypeStrategy : uint8_t {
   NONE, // Do not compute a common dtype
   CHECK, // Compute and validate a common dtype but don't promote.
@@ -171,7 +177,7 @@ struct CAFFE2_API TensorIterator {
     bool check_mem_overlap = false);
   static TensorIterator nullary_op(Tensor& out);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
-  static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
+  static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a, bool promote=true);
 
   int ndim() const { return shape_.size(); }
   IntArrayRef shape() const { return shape_; }
@@ -179,6 +185,7 @@ struct CAFFE2_API TensorIterator {
   int ntensors() const { return operands_.size(); }
   int noutputs() const { return num_outputs_; }
   int ninputs() const { return ntensors() - noutputs(); }
+  IntArrayRef view_offsets() const { return view_offsets_; }
 
   /// number of elements in the output operand. this is the same as numel() for
   /// operations that are not reductions.
@@ -252,11 +259,11 @@ struct CAFFE2_API TensorIterator {
   template <typename T>
   T scalar_value(int arg) {
     auto& op = operands_[arg];
-    return at::detail::load<T>(op.data, op.tensor.scalar_type());
+    return c10::fetch_and_cast<T>(op.tensor.scalar_type(), op.data);
   }
 
-  void for_each(loop_t loop);
-  void for_each(loop2d_t loop);
+  void for_each(loop_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
+  void for_each(loop2d_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
 
   void parallel_reduce(loop2d_t loop);
 
@@ -298,10 +305,6 @@ struct CAFFE2_API TensorIterator {
   /// as opposed to something that will be accumulated further. Only relevant for
   /// CUDA reductions.
   bool is_final_output() const { return final_output_; }
-
-  bool needs_dynamic_casting() const {
-    return force_dynamic_casting_ || ((common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_);
-  }
 
   bool has_contiguous_first_dim() const {
     int num_tensors = ntensors();
@@ -352,8 +355,21 @@ struct CAFFE2_API TensorIterator {
     resize_outputs_ = false;
   }
 
-  void dynamic_cast_if(bool condition) {
-    force_dynamic_casting_ = force_dynamic_casting_ || condition;
+  void declare_static_shape(IntArrayRef shape) {
+    // WARNING:
+    //   This will bypass all shape checking in the TensorIterator. Kernels which call this method
+    //   are expected to check shapes before calling `add_input` or `add_output`.
+    TORCH_CHECK(!resize_outputs_, "dont_resize_outputs() must be called before declare_static_shape(...)")
+    shape_ = shape;
+    static_shape_ = true;
+  }
+
+  void declare_static_shape(IntArrayRef shape, const int64_t squash_dim){
+    declare_static_shape(shape);
+    if (!shape_.size()) return;
+    TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(shape_.size()),
+                "squash_dim ", squash_dim, " must be in [0, ", shape_.size(), ").");
+    shape_[squash_dim] = 1;
   }
 
   void build();
@@ -368,8 +384,8 @@ protected:
   void compute_types();
   std::tuple<Device, ScalarType, bool> compute_common_type();
   void allocate_outputs();
-  void fast_set_up();
-  bool can_use_fast_set_up();
+  bool fast_set_up();
+  FastSetupType compute_fast_setup_type();
   void compute_names();
   void propagate_names_to_outputs();
   void coalesce_dimensions();
@@ -378,6 +394,8 @@ protected:
 protected:
   DimVector shape_;
   DimVector perm_;
+  /// The index offsets into the original tensors for each dimension
+  DimVector view_offsets_;
   NameVector names_;
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
@@ -391,10 +409,10 @@ protected:
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
-  bool have_differing_types_ = false;
-  bool force_dynamic_casting_ = false;
   bool all_ops_same_shape_ = false;
   bool requires_channels_last_output_ = false;
+  bool requires_channels_last_3d_output_ = false;
+  bool static_shape_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover

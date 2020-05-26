@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import collections
-import datetime
+from datetime import timedelta
 import enum
 
 import torch.distributed as dist
@@ -23,6 +23,18 @@ def _backend_type_repr(self):
 BackendType = enum.Enum(value="BackendType", names={})
 BackendType.__repr__ = _backend_type_repr
 
+def backend_registered(backend_name):
+    """
+    Checks if backend_name is registered as an RPC backend.
+
+    Arguments:
+        backend_name (str): string to identify the RPC backend.
+    Returns:
+        True if the backend has been registered with ``register_backend``, else
+        False.
+    """
+    return backend_name in BackendType.__members__.keys()
+
 
 def register_backend(
     backend_name, construct_rpc_backend_options_handler, init_backend_handler
@@ -39,7 +51,7 @@ def register_backend(
              This returns the agent.
     """
     global BackendType
-    if backend_name in BackendType.__members__.keys():
+    if backend_registered(backend_name):
         raise RuntimeError("RPC backend {}: already registered".format(backend_name))
     # Create a new enum type, `BackendType`, with extended members.
     existing_enum_dict = {member.name: member.value for member in BackendType}
@@ -59,12 +71,10 @@ def register_backend(
 
 def construct_rpc_backend_options(
     backend,
-    rpc_timeout=rpc_constants.DEFAULT_RPC_TIMEOUT,
+    rpc_timeout=rpc_constants.DEFAULT_RPC_TIMEOUT_SEC,
     init_method=rpc_constants.DEFAULT_INIT_METHOD,
     **kwargs
 ):
-    if not isinstance(rpc_timeout, datetime.timedelta):
-        raise RuntimeError("`rpc_timeout` must be a `datetime.timedelta`.")
 
     return backend.value.construct_rpc_backend_options_handler(
         rpc_timeout, init_method, **kwargs
@@ -83,11 +93,11 @@ def _process_group_construct_rpc_backend_options_handler(
 ):
     from . import ProcessGroupRpcBackendOptions
 
-    rpc_backend_options = ProcessGroupRpcBackendOptions()
-    rpc_backend_options.rpc_timeout = rpc_timeout
-    rpc_backend_options.init_method = init_method
-    rpc_backend_options.num_send_recv_threads = num_send_recv_threads
-    return rpc_backend_options
+    return ProcessGroupRpcBackendOptions(
+        rpc_timeout=rpc_timeout,
+        init_method=init_method,
+        num_send_recv_threads=num_send_recv_threads
+    )
 
 
 def _process_group_init_backend_handler(
@@ -101,8 +111,14 @@ def _process_group_init_backend_handler(
             "Default process group must not be initialized before init_rpc."
         )
 
+    process_group_timeout = rpc_constants.DEFAULT_PROCESS_GROUP_TIMEOUT
+
     dist.init_process_group(
-        backend="gloo", store=store, rank=rank, world_size=world_size
+        backend=dist.Backend.GLOO,
+        store=store,
+        rank=rank,
+        world_size=world_size,
+        timeout=process_group_timeout,
     )
 
     try:
@@ -124,7 +140,7 @@ def _process_group_init_backend_handler(
             name,
             group,
             rpc_backend_options.num_send_recv_threads,
-            rpc_backend_options.rpc_timeout,
+            timedelta(seconds=rpc_backend_options.rpc_timeout),
         )
     except Exception as ex:
         dist.destroy_process_group()
@@ -135,4 +151,45 @@ register_backend(
     "PROCESS_GROUP",
     _process_group_construct_rpc_backend_options_handler,
     _process_group_init_backend_handler,
+)
+
+def _tensorpipe_construct_rpc_backend_options_handler(
+    rpc_timeout,
+    init_method,
+    **kwargs
+):
+    from . import TensorPipeRpcBackendOptions
+
+    rpc_backend_options = TensorPipeRpcBackendOptions()
+    rpc_backend_options.rpc_timeout = rpc_timeout
+    rpc_backend_options.init_method = init_method
+    return rpc_backend_options
+
+
+def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
+    from . import TensorPipeRpcBackendOptions
+    from . import TensorPipeAgent
+
+    if not isinstance(store, dist.Store):
+        raise RuntimeError("`store` must be a c10d::Store. {}".format(store))
+
+    if not isinstance(
+        rpc_backend_options, TensorPipeRpcBackendOptions
+    ):
+        raise RuntimeError(
+            "`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`. {}".format(
+                rpc_backend_options
+            )
+        )
+
+    agent = TensorPipeAgent(
+        store, name, rank, world_size, rpc_backend_options
+    )
+    return agent
+
+
+register_backend(
+    "TENSORPIPE",
+    _tensorpipe_construct_rpc_backend_options_handler,
+    _tensorpipe_init_backend_handler,
 )

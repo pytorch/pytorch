@@ -5,12 +5,12 @@ macro(custom_protobuf_find)
   option(protobuf_BUILD_TESTS "" OFF)
   option(protobuf_BUILD_EXAMPLES "" OFF)
   option(protobuf_WITH_ZLIB "" OFF)
-  if (APPLE)
+  if(APPLE)
     # Protobuf generated files triggers a deprecated atomic operation warning
     # so we turn it off here.
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
   endif()
-  if (${CAFFE2_LINK_LOCAL_PROTOBUF})
+  if(${CAFFE2_LINK_LOCAL_PROTOBUF})
     # If we are going to link protobuf locally, we will need to turn off
     # shared libs build for protobuf.
     option(protobuf_BUILD_SHARED_LIBS "" OFF)
@@ -22,15 +22,15 @@ macro(custom_protobuf_find)
   # We will make sure that protobuf and caffe2 uses the same msvc runtime.
   option(protobuf_MSVC_STATIC_RUNTIME "" ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
 
-  if (${CAFFE2_LINK_LOCAL_PROTOBUF})
+  if(${CAFFE2_LINK_LOCAL_PROTOBUF})
     set(__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
     set(__caffe2_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS OFF)
     set(BUILD_SHARED_LIBS OFF)
-    if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+    if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
     endif()
-    if (${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY})
+    if(${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY})
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility-inlines-hidden")
     endif()
   endif()
@@ -38,7 +38,7 @@ macro(custom_protobuf_find)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-  if (MSVC)
+  if(MSVC)
     if(MSVC_Z7_OVERRIDE)
       foreach(flag_var
           CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
@@ -56,7 +56,7 @@ macro(custom_protobuf_find)
 
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
-  if (${CAFFE2_LINK_LOCAL_PROTOBUF})
+  if(${CAFFE2_LINK_LOCAL_PROTOBUF})
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
     set(BUILD_SHARED_LIBS ON)
     set(CMAKE_CXX_FLAGS ${__caffe2_CMAKE_CXX_FLAGS})
@@ -64,13 +64,13 @@ macro(custom_protobuf_find)
 
   # Protobuf "namespaced" target is only added post protobuf 3.5.1. As a
   # result, for older versions, we will manually add alias.
-  if (NOT TARGET protobuf::libprotobuf)
+  if(NOT TARGET protobuf::libprotobuf)
     add_library(protobuf::libprotobuf ALIAS libprotobuf)
     add_library(protobuf::libprotobuf-lite ALIAS libprotobuf-lite)
     # There is link error when cross compiling protoc on mobile:
     # https://github.com/protocolbuffers/protobuf/issues/2719
     # And protoc is very unlikely needed for mobile builds.
-    if (NOT (ANDROID OR IOS))
+    if(NOT (ANDROID OR IOS))
       add_executable(protobuf::protoc ALIAS protoc)
     endif()
   endif()
@@ -79,8 +79,8 @@ endmacro()
 # Main entry for protobuf. If we are building on Android, iOS or we have hard
 # coded BUILD_CUSTOM_PROTOBUF, we will hard code the use of custom protobuf
 # in the submodule.
-if (ANDROID OR IOS)
-  if (NOT ${BUILD_CUSTOM_PROTOBUF})
+if(ANDROID OR IOS)
+  if(NOT ${BUILD_CUSTOM_PROTOBUF})
     message(WARNING
         "For Android and iOS cross compilation, I am automatically using "
         "custom protobuf under third party. Note that this behavior may "
@@ -94,14 +94,14 @@ if (ANDROID OR IOS)
   set(protobuf_BUILD_PROTOC_BINARIES OFF CACHE BOOL "" FORCE)
   custom_protobuf_find()
   set(protobuf_BUILD_PROTOC_BINARIES ${__caffe2_protobuf_BUILD_PROTOC_BINARIES} CACHE BOOL "" FORCE)
-elseif (BUILD_CUSTOM_PROTOBUF)
+elseif(BUILD_CUSTOM_PROTOBUF)
   message(STATUS "Building using own protobuf under third_party per request.")
   custom_protobuf_find()
 else()
   include(cmake/public/protobuf.cmake)
 endif()
 
-if ((NOT TARGET protobuf::libprotobuf) AND (NOT TARGET protobuf::libprotobuf-lite))
+if((NOT TARGET protobuf::libprotobuf) AND (NOT TARGET protobuf::libprotobuf-lite))
   message(WARNING
       "Protobuf cannot be found. Caffe2 will automatically switch to use "
       "own protobuf under third_party. Note that this behavior may change in "
@@ -124,7 +124,7 @@ include_directories(BEFORE SYSTEM ${__tmp})
 # If Protobuf_VERSION is known (true in most cases, false if we are building
 # local protobuf), then we will add a protobuf version check in
 # Caffe2Config.cmake.in.
-if (DEFINED ${Protobuf_VERSION})
+if(DEFINED ${Protobuf_VERSION})
   set(CAFFE2_KNOWN_PROTOBUF_VERSION TRUE)
 else()
   set(CAFFE2_KNOWN_PROTOBUF_VERSION FALSE)
@@ -176,7 +176,7 @@ function(caffe2_protobuf_generate_cpp_py srcs_var hdrs_var python_var)
     # directory and are building it as part of the Caffe2 build. If
     # points to an existing path, it is a no-op.
 
-    if (${CAFFE2_LINK_LOCAL_PROTOBUF})
+    if(${CAFFE2_LINK_LOCAL_PROTOBUF})
       # We need to rewrite the pb.h files to route GetEmptyStringAlreadyInited
       # through our wrapper in proto_utils so the memory location test
       # is correct.

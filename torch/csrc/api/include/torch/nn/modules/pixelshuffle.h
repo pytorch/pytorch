@@ -9,13 +9,20 @@
 namespace torch {
 namespace nn {
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ PixelShuffle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 /// Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)`
 /// to a tensor of shape :math:`(*, C, H \times r, W \times r)`.
-/// This is useful for implementing efficient sub-pixel convolution
-/// with a stride of :math:`1/r`.
-/// Look at the paper:
-/// `Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network`_
-/// by Shi et. al (2016) for more details.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.PixelShuffle to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::PixelShuffleOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// PixelShuffle model(PixelShuffleOptions(5));
+/// ```
 struct TORCH_API PixelShuffleImpl : public torch::nn::Cloneable<PixelShuffleImpl> {
   explicit PixelShuffleImpl(const PixelShuffleOptions& options_);
 
@@ -30,6 +37,11 @@ struct TORCH_API PixelShuffleImpl : public torch::nn::Cloneable<PixelShuffleImpl
   PixelShuffleOptions options;
 };
 
+/// A `ModuleHolder` subclass for `PixelShuffleImpl`.
+/// See the documentation for `PixelShuffleImpl` class to learn what methods it
+/// provides, and examples of how to use `PixelShuffle` with `torch::nn::PixelShuffleOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(PixelShuffle);
 
 } // namespace nn

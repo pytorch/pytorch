@@ -46,7 +46,7 @@ Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options)
   auto dims = it.get_dims();
   IDeepTensorWrapperPtr handle = c10::make_intrusive<IDeepTensorWrapper>(std::move(it));
   return detail::make_tensor<MKLDNNTensorImpl>(
-    DispatchKeySet(DispatchKey::MkldnnCPUTensorId),
+    DispatchKeySet(DispatchKey::MkldnnCPU),
     options.dtype(), options.device(), handle,
     std::vector<int64_t>(dims.begin(), dims.end()));
 }

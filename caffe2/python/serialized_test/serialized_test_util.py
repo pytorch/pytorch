@@ -229,6 +229,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
         grad_reference=None,
         atol=None,
         outputs_to_check=None,
+        ensure_outputs_are_inferred=False,
     ):
         outs = super(SerializedTestCase, self).assertReferenceChecks(
             device_option,
@@ -241,6 +242,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
             grad_reference,
             atol,
             outputs_to_check,
+            ensure_outputs_are_inferred,
         )
         if not getattr(_output_context, 'disable_serialized_check', False):
             grad_ops = _getGradientOrNone(op)

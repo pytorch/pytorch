@@ -12,6 +12,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 import torch
 import torch.jit
+import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName
 
@@ -66,10 +67,12 @@ class TestMkldnn(TestCase):
 
         # because MKLDNN only supports float32, we need to lessen the precision.
         # these numbers are just empirical results that seem to work.
-        self.assertWarnsRegex(lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2),
-                              'double precision floating point')
-        self.assertWarnsRegex(lambda: gradgradcheck(func, [root], atol=4e-2, rtol=1e-2),
-                              'double precision floating point')
+        self.assertWarnsRegex(UserWarning,
+                              'double precision floating point',
+                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2))
+        self.assertWarnsRegex(UserWarning,
+                              'double precision floating point',
+                              lambda: gradgradcheck(func, [root], atol=4e-2, rtol=1e-2))
 
     def test_autograd_from_mkldnn(self):
         # MKLDNN only supports float32
@@ -80,8 +83,9 @@ class TestMkldnn(TestCase):
 
         # because MKLDNN only supports float32, we need to lessen the precision.
         # these numbers are just empirical results that seem to work.
-        self.assertWarnsRegex(lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2),
-                              'double precision floating point')
+        self.assertWarnsRegex(UserWarning,
+                              'double precision floating point',
+                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2))
 
     def test_detach(self):
         root = torch.randn(4, 5, dtype=torch.float32).to_mkldnn().requires_grad_()
@@ -100,12 +104,35 @@ class TestMkldnn(TestCase):
         self.assertTrue("layout=torch._mkldnn" in str(torch.randn((1, 2, 3, 4),
                                                                   dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
 
+    def test_conv1d(self):
+        for groups in [1, 4]:
+            N = torch.randint(3, 10, (1,)).item()
+            C = torch.randint(1, 3, (1,)).item() * groups
+            M = torch.randint(1, 3, (1,)).item() * groups
+            x = torch.randn(N, C, 224, dtype=torch.float32)
+            for bias in [True, False]:
+                conv1d = torch.nn.Conv1d(in_channels=C,
+                                         out_channels=M,
+                                         kernel_size=3,
+                                         stride=2,
+                                         padding=1,
+                                         bias=bias,
+                                         groups=groups).float()
+                mkldnn_conv1d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv1d))
+                with torch.backends.mkldnn.flags(enabled=False):
+                    y_aten = conv1d(x)
+                y_mkldnn = mkldnn_conv1d(x.to_mkldnn()).to_dense()
+                self.assertEqual(y_aten, y_mkldnn)
+
+                self._test_serialization(mkldnn_conv1d, (x.to_mkldnn(),))
+                self._test_tracing(mkldnn_conv1d, (x.to_mkldnn(),))
+
     def test_conv2d(self):
         for groups in [1, 4]:
             N = torch.randint(3, 10, (1,)).item()
             C = torch.randint(1, 3, (1,)).item() * groups
             M = torch.randint(1, 3, (1,)).item() * groups
-            x = torch.randn(N, C, 224, 224, dtype=torch.float32) * 100
+            x = torch.randn(N, C, 224, 224, dtype=torch.float32)
             for bias in [True, False]:
                 conv2d = torch.nn.Conv2d(in_channels=C,
                                          out_channels=M,
@@ -115,12 +142,39 @@ class TestMkldnn(TestCase):
                                          bias=bias,
                                          groups=groups).float()
                 mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
-                self.assertEqual(
-                    conv2d(x),
-                    mkldnn_conv2d(x.to_mkldnn()).to_dense())
+                with torch.backends.mkldnn.flags(enabled=False):
+                    y_aten = conv2d(x)
+                y_mkldnn = mkldnn_conv2d(x.to_mkldnn()).to_dense()
+                self.assertEqual(y_aten, y_mkldnn)
 
                 self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
                 self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
+
+    def test_conv2d_legacy_jit_model(self):
+        """
+        MKLDNN integration used to serialize models with 5d weight for grouped
+        convolutions, we'd like to preserve this behavior
+        """
+        g = 4
+        conv2d = torch.nn.Conv2d(16, 16, 3, groups=g)
+        conv2d_mkldnn = torch.utils.mkldnn.to_mkldnn(conv2d)
+
+        # contrive legacy conv2d module with a 5-d weight
+        o, i, h, w = conv2d.weight.shape
+        weight_5d = conv2d.weight.reshape((g, o // g, i, h, w))
+        conv2d_mkldnn.weight = weight_5d.to_mkldnn()
+
+        x = torch.randn(1, 16, 8, 8)
+
+        with TemporaryFileName() as fname:
+            torch.jit.save(conv2d_mkldnn, fname)
+            conv2d_loaded = torch.jit.load(fname)
+
+            self.assertEqual(conv2d_mkldnn.weight.ndimension(), 5)
+            self.assertEqual(conv2d_loaded.weight.ndimension(), 4)
+            self.assertEqual(
+                conv2d(x),
+                conv2d_loaded(x.to_mkldnn()).to_dense())
 
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
@@ -294,6 +348,22 @@ class TestMkldnn(TestCase):
             y.reshape(size).to_dense(),
             z.to_dense(),
         )
+
+    def test_reshape_blocked_format(self):
+        # construct an mkldnn blocked tensor with mkldnn conv2d
+        C = 7
+        m = mkldnn_utils.to_mkldnn(torch.nn.Conv2d(C, C, 3))
+        x = torch.randn(1, C, 8, 8).to_mkldnn()
+
+        # mkldnn tensor w/ blocked format
+        y_block = m(x)
+        # aten tensor w/ plain format
+        y_plain = y_block.to_dense()
+
+        y_block_reshape = y_block.reshape(C, -1)
+        y_plain_reshape = y_plain.reshape(C, -1)
+
+        self.assertEqual(y_plain_reshape, y_block_reshape.to_dense())
 
     def test_clone(self):
         x = torch.randn(4, 5, dtype=torch.float32) * 10

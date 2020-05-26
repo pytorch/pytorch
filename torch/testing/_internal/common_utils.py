@@ -11,7 +11,9 @@ import platform
 import re
 import gc
 import types
+from functools import partial
 import inspect
+import io
 import argparse
 import unittest
 import warnings
@@ -28,20 +30,17 @@ from copy import deepcopy
 from numbers import Number
 import tempfile
 import json
-if sys.version_info[0] == 2:
-    from urllib2 import urlopen  # noqa f811
-else:
-    from urllib.request import urlopen
-
+from urllib.request import urlopen
 import __main__
 import errno
 
 from torch.testing._internal import expecttest
+from torch.testing import _compare_tensors_internal, _compare_scalars_internal
 
 import torch
 import torch.cuda
 from torch._utils_internal import get_writable_path
-from torch._six import string_classes, inf
+from torch._six import string_classes
 import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
@@ -57,8 +56,22 @@ class ProfilingMode(Enum):
     SIMPLE = 2
     PROFILING = 3
 
+def cppProfilingFlagsToProfilingMode():
+    old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
+    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    torch._C._jit_set_profiling_executor(old_prof_exec_state)
+    torch._C._jit_set_profiling_mode(old_prof_mode_state)
+
+    if old_prof_exec_state:
+        if old_prof_mode_state:
+            return ProfilingMode.PROFILING
+        else:
+            return ProfilingMode.SIMPLE
+    else:
+        return ProfilingMode.LEGACY
+
 @contextmanager
-def enable_profiling_mode():
+def enable_profiling_mode_for_profiling_tests():
     if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
         old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
         old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
@@ -69,6 +82,16 @@ def enable_profiling_mode():
             torch._C._jit_set_profiling_executor(old_prof_exec_state)
             torch._C._jit_set_profiling_mode(old_prof_mode_state)
 
+@contextmanager
+def enable_profiling_mode():
+    old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
+    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_profiling_executor(old_prof_exec_state)
+        torch._C._jit_set_profiling_mode(old_prof_mode_state)
+
 func_call = torch._C.ScriptFunction.__call__
 meth_call = torch._C.ScriptMethod.__call__
 
@@ -76,7 +99,7 @@ def prof_callable(callable, *args, **kwargs):
     if 'profile_and_replay' in kwargs:
         del kwargs['profile_and_replay']
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 callable(*args, **kwargs)
                 return callable(*args, **kwargs)
 
@@ -91,40 +114,56 @@ def prof_meth_call(*args, **kwargs):
 torch._C.ScriptFunction.__call__ = prof_func_call
 torch._C.ScriptMethod.__call__ = prof_meth_call
 
+def _get_test_report_path():
+    # allow users to override the test file location. We need this
+    # because the distributed tests run the same test file multiple
+    # times with different configurations.
+    override = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
+    test_source = override if override is not None else 'python-unittest'
+    return os.path.join('test-reports', test_source)
+
+
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 parser.add_argument('--ge_config', type=str)
+parser.add_argument('--repeat', type=int, default=1)
+parser.add_argument('--test_bailouts', action='store_true')
+parser.add_argument('--save-xml', nargs='?', type=str,
+                    const=_get_test_report_path(),
+                    default=_get_test_report_path() if bool(os.environ.get('IN_CIRCLECI')) else None)
+parser.add_argument('--discover-tests', action='store_true')
+parser.add_argument('--log-suffix', type=str, default="")
+parser.add_argument('--run-parallel', type=int, default=1)
 
-GRAPH_EXECUTOR = ProfilingMode.SIMPLE if IS_SANDCASTLE else ProfilingMode.PROFILING
 args, remaining = parser.parse_known_args()
 if args.ge_config == 'legacy':
     GRAPH_EXECUTOR = ProfilingMode.LEGACY
+elif args.ge_config == 'profiling':
+    GRAPH_EXECUTOR = ProfilingMode.PROFILING
 elif args.ge_config == 'simple':
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
+else:
+    # infer flags based on the default settings
+    GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
 
+
+LOG_SUFFIX = args.log_suffix
+RUN_PARALLEL = args.run_parallel
+TEST_BAILOUTS = args.test_bailouts
+TEST_DISCOVER = args.discover_tests
 TEST_IN_SUBPROCESS = args.subprocess
+TEST_SAVE_XML = args.save_xml
+REPEAT_COUNT = args.repeat
 SEED = args.seed
 if not expecttest.ACCEPT:
     expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
-
-def shell(command, cwd=None):
-    sys.stdout.flush()
-    sys.stderr.flush()
-    # The following cool snippet is copied from Py3 core library subprocess.call
-    # only the with
-    #   1. `except KeyboardInterrupt` block added for SIGINT handling.
-    #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do
-    #      `p.wait()` in a `final` block for the code to be portable.
-    #
-    # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
-    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
-    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
+def wait_for_process(p):
     try:
         return p.wait()
     except KeyboardInterrupt:
@@ -142,6 +181,20 @@ def shell(command, cwd=None):
     finally:
         # Always call p.wait() to ensure exit
         p.wait()
+
+def shell(command, cwd=None, env=None):
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # The following cool snippet is copied from Py3 core library subprocess.call
+    # only the with
+    #   1. `except KeyboardInterrupt` block added for SIGINT handling.
+    #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do
+    #      `p.wait()` in a `final` block for the code to be portable.
+    #
+    # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
+    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
+    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env)
+    return wait_for_process(p)
 
 
 # Used to run the same test with different tensor types
@@ -161,25 +214,35 @@ def repeat_test_for_types(dtypes):
 
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
 IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
-IN_CIRCLECI = bool(os.environ.get('IN_CIRCLECI'))
-TEST_REPORT_SOURCE_OVERRIDE = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
 
 PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
 
+def discover_test_cases_recursively(suite_or_case):
+    if isinstance(suite_or_case, unittest.TestCase):
+        return [suite_or_case]
+    rc = []
+    for element in suite_or_case:
+        rc.extend(discover_test_cases_recursively(element))
+    return rc
+
+def get_test_names(test_cases):
+    return ['.'.join(case.id().split('.')[-2:]) for case in test_cases]
+
+def chunk_list(lst, nchunks):
+    return [lst[i::nchunks] for i in range(nchunks)]
+
+
+
 def run_tests(argv=UNITTEST_ARGS):
-    if TEST_IN_SUBPROCESS:
+    if TEST_DISCOVER:
         suite = unittest.TestLoader().loadTestsFromModule(__main__)
-        test_cases = []
-
-        def add_to_test_cases(suite_or_case):
-            if isinstance(suite_or_case, unittest.TestCase):
-                test_cases.append(suite_or_case)
-            else:
-                for element in suite_or_case:
-                    add_to_test_cases(element)
-
-        add_to_test_cases(suite)
+        test_cases = discover_test_cases_recursively(suite)
+        for name in get_test_names(test_cases):
+            print(name)
+    elif TEST_IN_SUBPROCESS:
+        suite = unittest.TestLoader().loadTestsFromModule(__main__)
+        test_cases = discover_test_cases_recursively(suite)
         failed_tests = []
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
@@ -189,28 +252,33 @@ def run_tests(argv=UNITTEST_ARGS):
 
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
+    elif RUN_PARALLEL > 1:
+        suite = unittest.TestLoader().loadTestsFromModule(__main__)
+        test_cases = discover_test_cases_recursively(suite)
+        test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
+        processes = []
+        for i in range(RUN_PARALLEL):
+            command = [sys.executable] + argv + ['--log-suffix=-shard-{}'.format(i + 1)] + test_batches[i]
+            processes.append(subprocess.Popen(command, universal_newlines=True))
+        failed = False
+        for p in processes:
+            failed |= wait_for_process(p) != 0
+        assert not failed, "Some test shards have failed"
+    elif TEST_SAVE_XML is not None:
+        # import here so that non-CI doesn't need xmlrunner installed
+        import xmlrunner
+        test_report_path = TEST_SAVE_XML + LOG_SUFFIX
+        os.makedirs(test_report_path, exist_ok=True)
+        verbose = '--verbose' in argv or '-v' in argv
+        if verbose:
+            print('Test results will be stored in {}'.format(test_report_path))
+        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
+    elif REPEAT_COUNT > 1:
+        for _ in range(REPEAT_COUNT):
+            if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
+                sys.exit(-1)
     else:
-        if IN_CIRCLECI:
-            # import here so that non-CI doesn't need xmlrunner installed
-            import xmlrunner
-            # allow users to override the test file location. We need this
-            # because the distributed tests run the same test file multiple
-            # times with different configurations.
-            if TEST_REPORT_SOURCE_OVERRIDE is not None:
-                test_source = TEST_REPORT_SOURCE_OVERRIDE
-            else:
-                test_source = 'python-unittest'
-
-            test_report_path = os.path.join('test-reports', test_source)
-            if PY3:
-                os.makedirs(test_report_path, exist_ok=True)
-            else:
-                if not os.path.exists(test_report_path):
-                    os.makedirs(test_report_path)
-
-            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path))
-        else:
-            unittest.main(argv=argv)
+        unittest.main(argv=argv)
 
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
@@ -242,14 +310,7 @@ def _check_module_exists(name):
     our tests, e.g., setting multiprocessing start method when imported
     (see librosa/#747, torchvision/#544).
     """
-    if not PY3:  # Python 2
-        import imp
-        try:
-            imp.find_module(name)
-            return True
-        except ImportError:
-            return False
-    elif not PY34:  # Python [3, 3.4)
+    if not PY34:  # Python [3, 3.4)
         import importlib
         loader = importlib.find_loader(name)
         return loader is not None
@@ -264,16 +325,12 @@ TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_NUMBA = _check_module_exists('numba')
 
-# Skip the test until issue #28313 gets fixed on Py2.
-TEST_DILL = _check_module_exists('dill') and PY3
+TEST_DILL = _check_module_exists('dill')
 
-# On Py2, importing librosa 0.6.1 triggers a TypeError (if using newest joblib)
-# see librosa/librosa#729.
-# TODO: allow Py2 when librosa 0.6.2 releases
-TEST_LIBROSA = _check_module_exists('librosa') and PY3
+TEST_LIBROSA = _check_module_exists('librosa')
 
 # Python 2.7 doesn't have spawn
-NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1' or sys.version_info[0] == 2
+NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
 TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
@@ -289,6 +346,24 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 
 if TEST_NUMPY:
     import numpy
+
+    # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
+    numpy_to_torch_dtype_dict = {
+        numpy.bool       : torch.bool,
+        numpy.uint8      : torch.uint8,
+        numpy.int8       : torch.int8,
+        numpy.int16      : torch.int16,
+        numpy.int32      : torch.int32,
+        numpy.int64      : torch.int64,
+        numpy.float16    : torch.float16,
+        numpy.float32    : torch.float32,
+        numpy.float64    : torch.float64,
+        numpy.complex64  : torch.complex64,
+        numpy.complex128 : torch.complex128
+    }
+
+    # Dict of torch dtype -> NumPy dtype
+    torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
 
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
@@ -335,7 +410,6 @@ def skipIfCompiledWithoutNumpy(fn):
             fn(*args, **kwargs)
     return wrapper
 
-
 def _test_function(fn, device):
     def run_test_function(self):
         return fn(self, device)
@@ -370,6 +444,16 @@ def skipIfNotRegistered(op_name, message):
     except ImportError:
         skipper = unittest.skip("Cannot import `caffe2.python.core`")
     return skipper
+
+
+def skipIfNoSciPy(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not TEST_SCIPY:
+            raise unittest.SkipTest("test require SciPy, but SciPy not found")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 
 def slowTest(fn):
@@ -441,10 +525,7 @@ def to_gpu(obj, type_map=None):
 
 
 def get_function_arglist(func):
-    if sys.version_info > (3,):
-        return inspect.getfullargspec(func).args
-    else:
-        return inspect.getargspec(func).args
+    return inspect.getfullargspec(func).args
 
 
 def set_rng_seed(seed):
@@ -464,6 +545,12 @@ def freeze_rng_state():
         torch.cuda.set_rng_state(cuda_rng_state)
     torch.set_rng_state(rng_state)
 
+@contextlib.contextmanager
+def set_default_dtype(dtype):
+    saved_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(dtype)
+    yield
+    torch.set_default_dtype(saved_dtype)
 
 def iter_indices(tensor):
     if tensor.dim() == 0:
@@ -532,7 +619,7 @@ class CudaMemoryLeakCheck():
         for i, (before, after) in enumerate(zip(self.befores, afters)):
             if not TEST_WITH_ROCM:
                 self.testcase.assertEqual(
-                    before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
+                    before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
                         self.name, after - before, i))
             else:
                 # TODO: Investigate ROCm memory leaking.
@@ -629,14 +716,43 @@ def check_disabled(test_name):
             "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
             " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
 
+# Acquires the comparison dtype, required since isclose
+# requires both inputs have the same dtype, and isclose is not supported
+# for some device x dtype combinations.
+# NOTE: Remaps bfloat16 to float32 since neither the CPU or CUDA device types
+#  support needed bfloat16 comparison methods.
+# NOTE: Remaps float16 to float32 on CPU since the CPU device type doesn't
+#   support needed float16 comparison methods.
+# TODO: Update this once bfloat16 and float16 are better supported.
+def get_comparison_dtype(a, b):
+    # TODO: update this when promote_types supports bfloat16 and/or
+    # isclose supports bfloat16.
+    a_dtype = torch.float32 if a.dtype is torch.bfloat16 else a.dtype
+    b_dtype = torch.float32 if b.dtype is torch.bfloat16 else b.dtype
+
+    compare_dtype = torch.promote_types(a_dtype, b_dtype)
+
+    # non-CUDA (CPU, for example) float16 -> float32
+    # TODO: update this when isclose is implemented for CPU float16
+    if (compare_dtype is torch.float16 and
+        (a.device != b.device or a.device.type != 'cuda' or
+            b.device.type != 'cuda')):
+        compare_dtype = torch.float32
+
+    return compare_dtype
+
 class TestCase(expecttest.TestCase):
-    precision = 1e-5
-    maxDiff = None
+    # NOTE: "precision" lets classes and generated tests set minimum
+    # atol values when comparing tensors. Used by @precisionOverride, for
+    # example.
+    # TODO: provide a better mechanism for generated tests to set rtol/atol.
+    precision = 0
+
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
 
     def __init__(self, method_name='runTest'):
-        super(TestCase, self).__init__(method_name)
+        super().__init__(method_name)
 
         test_method = getattr(self, method_name)
         # Wraps the tested method if we should do CUDA memory check.
@@ -693,13 +809,6 @@ class TestCase(expecttest.TestCase):
         check_disabled(str(self))
 
         set_rng_seed(SEED)
-
-    def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
-        max_err = 0
-        self.assertEqual(x.size(), y.size())
-        for index in iter_indices(x):
-            max_err = max(max_err, abs(x[index] - y[index]))
-        self.assertLessEqual(max_err, prec, message)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu'):
         # Assert not given impossible combination, where the sparse dims have
@@ -772,167 +881,240 @@ class TestCase(expecttest.TestCase):
 
         return tg
 
-    def assertEqual(self, x, y, prec=None, message='', allow_inf=False):
-        if isinstance(prec, str) and message == '':
-            message = prec
-            prec = None
-        if prec is None:
-            prec = self.precision
+    # Some analysis of tolerance by logging tests from test_torch.py can be found
+    # in https://github.com/pytorch/pytorch/pull/32538.
+    # dtype name : (rtol, atol)
+    dtype_precisions = {
+        torch.float16    : (0.001, 1e-5),
+        torch.bfloat16   : (0.016, 1e-5),
+        torch.float32    : (1.3e-6, 1e-5),
+        torch.float64    : (1e-7, 1e-7),
+        torch.complex32  : (0.001, 1e-5),
+        torch.complex64  : (1.3e-6, 1e-5),
+        torch.complex128 : (1e-7, 1e-7),
+    }
 
+    # Returns the "default" rtol and atol for comparing scalars or
+    # tensors of the given dtypes.
+    def _getDefaultRtolAndAtol(self, dtype0, dtype1):
+        rtol = max(self.dtype_precisions.get(dtype0, (0, 0))[0],
+                   self.dtype_precisions.get(dtype1, (0, 0))[0])
+        atol = max(self.dtype_precisions.get(dtype0, (0, 0))[1],
+                   self.dtype_precisions.get(dtype1, (0, 0))[1])
+
+        return rtol, atol
+
+    # Checks if two dense tensors are equal(-ish), returning (True, None)
+    #   when they are and (False, debug_msg) when they are not.
+    # If exact_dtype is true both tensors must have the same dtype.
+    # If exact_device is true both tensors must be on the same device.
+    # See the "Test Framework Tensor 'Equality'" note for more details.
+    # NOTE: tensors on different devices are moved to the CPU to be compared when
+    #   exact_device is False.
+    # NOTE: this function checks the tensors' devices, sizes, and dtypes
+    #  and acquires the appropriate device, dtype, rtol and atol to compare
+    #  them with. It then calls _compare_tensors_internal.
+    def _compareTensors(self, a, b, *, rtol=None, atol=None, equal_nan=True,
+                        exact_dtype=True, exact_device=False):
+        assert (atol is None) == (rtol is None)
+        if not isinstance(a, torch.Tensor):
+            return (False, "argument a, {0}, to _compareTensors is not a tensor!".format(a))
+        if not isinstance(b, torch.Tensor):
+            return (False, "argument b, {0}, to _compareTensors is not a tensor!".format(b))
+
+        # Validates tensors are on the same device
+        if exact_device and a.device != b.device:
+            return (False, ("Attempted to compare equality of tensors on "
+                            "different devices! Got devices {0} and "
+                            "{1}.".format(a.device, b.device)))
+
+        # Compares tensors of different devices on the CPU
+        if a.device != b.device:
+            a = a.cpu()
+            b = b.cpu()
+
+        # Checks size matches
+        if a.size() != b.size():
+            return (False, ("Attempted to compare equality of tensors with "
+                            "different sizes. Got sizes {0} and {1}.").format(a.size(), b.size()))
+
+        # Checks dtype (if exact_dtype)
+        if exact_dtype and a.dtype is not b.dtype:
+            return (False, ("Attempted to compare equality of tensors with "
+                            "different dtypes. Got dtypes {0} and {1}.").format(a.dtype, b.dtype))
+
+        # Acquires rtol and atol
+        if rtol is None:
+            rtol, atol = self._getDefaultRtolAndAtol(a.dtype, b.dtype)
+
+        atol = max(atol, self.precision)
+
+        # Converts to comparison dtype
+        dtype = get_comparison_dtype(a, b)
+        a = a.to(dtype)
+        b = b.to(dtype)
+
+        return _compare_tensors_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
+
+    # Checks if two scalars are equal(-ish), returning (True, None)
+    #   when they are and (False, debug_msg) when they are not.
+    # NOTE: this function just acquires rtol and atol
+    #   before calling _compare_scalars_internal.
+    def _compareScalars(self, a, b, *, rtol=None, atol=None, equal_nan=True):
+        # Acquires rtol and atol
+        assert (atol is None) == (rtol is None)
+        if rtol is None:
+            if isinstance(a, complex) or isinstance(b, complex):
+                rtol, atol = self._getDefaultRtolAndAtol(torch.complex64, torch.complex64)
+            elif isinstance(a, float) or isinstance(b, float):
+                rtol, atol = self._getDefaultRtolAndAtol(torch.float32, torch.float32)
+            else:
+                rtol, atol = 0, 0
+        atol = max(atol, self.precision)
+
+        return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
+
+    def assertEqualIgnoreType(self, *args, **kwargs):
+        # If you are seeing this function used, that means test is written wrongly
+        # and deserves detailed investigation
+        return self.assertEqual(*args, exact_dtype=False, **kwargs)
+
+    # Compares x and y
+    # TODO: default exact_device to True
+    def assertEqual(self, x, y, *, atol=None, rtol=None, equal_nan=True,
+                    exact_dtype=True, exact_device=False, msg=None):
+        assert (atol is None) == (rtol is None), "If one of atol or rtol is specified the other must be, too"
+
+        # Tensor x Number and Number x Tensor comparisons
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
-            self.assertEqual(x.item(), y, prec=prec, message=message,
-                             allow_inf=allow_inf)
+            self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
-            self.assertEqual(x, y.item(), prec=prec, message=message,
-                             allow_inf=allow_inf)
+            self.assertEqual(x, y.item(), atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
+        # Tensor x np.bool
         elif isinstance(x, torch.Tensor) and isinstance(y, numpy.bool_):
-            self.assertEqual(x.item(), y, prec=prec, message=message,
-                             allow_inf=allow_inf)
+            self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(y, torch.Tensor) and isinstance(x, numpy.bool_):
-            self.assertEqual(x, y.item(), prec=prec, message=message,
-                             allow_inf=allow_inf)
+            self.assertEqual(x, y.item(), atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
+        # Tensor x Tensor
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-            def assertTensorsEqual(a, b):
-                super(TestCase, self).assertEqual(a.size(), b.size(), message)
-                if a.numel() > 0:
-                    if (a.device.type == 'cpu' and (a.dtype == torch.float16 or a.dtype == torch.bfloat16)):
-                        # CPU half and bfloat16 tensors don't have the methods we need below
-                        a = a.to(torch.float32)
-                    if (a.device.type == 'cuda' and a.dtype == torch.bfloat16):
-                        # CUDA bfloat16 tensors don't have the methods we need below
-                        a = a.to(torch.float32)
-                    b = b.to(a)
-
-                    if (a.dtype == torch.bool) != (b.dtype == torch.bool):
-                        raise TypeError("Was expecting both tensors to be bool type.")
-                    else:
-                        if a.dtype == torch.bool and b.dtype == torch.bool:
-                            # we want to respect precision but as bool doesn't support subtraction,
-                            # boolean tensor has to be converted to int
-                            a = a.to(torch.int)
-                            b = b.to(torch.int)
-
-                        diff = a - b
-                        if a.is_floating_point():
-                            # check that NaNs are in the same locations
-                            nan_mask = torch.isnan(a)
-                            self.assertTrue(torch.equal(nan_mask, torch.isnan(b)), message)
-                            diff[nan_mask] = 0
-                            # inf check if allow_inf=True
-                            if allow_inf:
-                                inf_mask = torch.isinf(a)
-                                inf_sign = inf_mask.sign()
-                                self.assertTrue(torch.equal(inf_sign, torch.isinf(b).sign()), message)
-                                diff[inf_mask] = 0
-                        # TODO: implement abs on CharTensor (int8)
-                        if diff.is_signed() and diff.dtype != torch.int8:
-                            diff = diff.abs()
-                        max_err = diff.max()
-                        self.assertLessEqual(max_err, prec, message)
-            super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
-            super(TestCase, self).assertEqual(x.is_quantized, y.is_quantized, message)
+            super().assertEqual(x.is_sparse, y.is_sparse, msg=msg)
+            super().assertEqual(x.is_quantized, y.is_quantized, msg=msg)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
-                assertTensorsEqual(x._indices(), y._indices())
-                assertTensorsEqual(x._values(), y._values())
+                indices_result, debug_msg = self._compareTensors(x._indices(), y._indices(),
+                                                                 rtol=rtol, atol=atol,
+                                                                 equal_nan=equal_nan, exact_dtype=exact_dtype,
+                                                                 exact_device=exact_device)
+
+                if not indices_result and msg is None:
+                    msg = "Sparse tensor indices failed to compare as equal! " + debug_msg
+                self.assertTrue(indices_result, msg=msg)
+
+                values_result, debug_msg = self._compareTensors(x._values(), y._values(),
+                                                                rtol=rtol, atol=atol,
+                                                                equal_nan=equal_nan, exact_dtype=exact_dtype,
+                                                                exact_device=exact_device)
+
+                if not values_result and msg is None:
+                    msg = "Sparse tensor values failed to compare as equal! " + debug_msg
+                self.assertTrue(values_result, msg=msg)
             elif x.is_quantized and y.is_quantized:
-                self.assertEqual(x.qscheme(), y.qscheme(), prec=prec,
-                                 message=message, allow_inf=allow_inf)
+                self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
+                                 msg=msg, exact_dtype=exact_dtype,
+                                 exact_device=exact_device)
+
                 if x.qscheme() == torch.per_tensor_affine:
-                    self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
-                                     message=message, allow_inf=allow_inf)
+                    self.assertEqual(x.q_scale(), y.q_scale(), atol=atol, rtol=rtol,
+                                     msg=msg, exact_dtype=exact_dtype,
+                                     exact_device=exact_device)
                     self.assertEqual(x.q_zero_point(), y.q_zero_point(),
-                                     prec=prec, message=message,
-                                     allow_inf=allow_inf)
+                                     atol=atol, rtol=rtol, msg=msg,
+                                     exact_dtype=exact_dtype, exact_device=exact_device)
                 elif x.qscheme() == torch.per_channel_affine:
-                    self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), prec=prec,
-                                     message=message, allow_inf=allow_inf)
+                    self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), atol=atol, rtol=rtol,
+                                     msg=msg, exact_dtype=exact_dtype,
+                                     exact_device=exact_device)
                     self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
-                                     prec=prec, message=message,
-                                     allow_inf=allow_inf)
+                                     atol=atol, rtol=rtol, msg=msg,
+                                     exact_dtype=exact_dtype, exact_device=exact_device)
                     self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
-                                     prec=prec, message=message)
-                self.assertEqual(x.dtype, y.dtype)
-                self.assertEqual(x.int_repr().to(torch.int32),
-                                 y.int_repr().to(torch.int32), prec=prec,
-                                 message=message, allow_inf=allow_inf)
+                                     atol=atol, rtol=rtol, msg=msg,
+                                     exact_dtype=exact_dtype, exact_device=exact_device)
+
+                result, debug_msg = self._compareTensors(x.int_repr().to(torch.int32),
+                                                         y.int_repr().to(torch.int32),
+                                                         atol=atol, rtol=rtol,
+                                                         exact_dtype=exact_dtype,
+                                                         exact_device=exact_device)
+
+                if not result and msg is None:
+                    msg = "Quantized representations failed to compare as equal! " + debug_msg
+                self.assertTrue(result, msg=msg)
             else:
-                assertTensorsEqual(x, y)
+                result, debug_msg = self._compareTensors(x, y, rtol=rtol, atol=atol,
+                                                         equal_nan=equal_nan, exact_dtype=exact_dtype,
+                                                         exact_device=exact_device)
+
+                if not result and msg is None:
+                    msg = "Tensors failed to compare as equal! " + debug_msg
+                self.assertTrue(result, msg=msg)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, msg=msg)
         elif type(x) == set and type(y) == set:
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, msg=msg)
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
-                self.assertEqual(x.items(), y.items(), prec=prec,
-                                 message=message, allow_inf=allow_inf)
+                self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
+                                 msg=msg, exact_dtype=exact_dtype,
+                                 exact_device=exact_device)
             else:
-                self.assertEqual(set(x.keys()), set(y.keys()), prec=prec,
-                                 message=message, allow_inf=allow_inf)
+                self.assertEqual(set(x.keys()), set(y.keys()), atol=atol, rtol=rtol,
+                                 msg=msg, exact_dtype=exact_dtype,
+                                 exact_device=exact_device)
                 key_list = list(x.keys())
                 self.assertEqual([x[k] for k in key_list],
                                  [y[k] for k in key_list],
-                                 prec=prec, message=message,
-                                 allow_inf=allow_inf)
+                                 atol=atol, rtol=rtol, msg=msg,
+                                 exact_dtype=exact_dtype, exact_device=exact_device)
         elif is_iterable(x) and is_iterable(y):
-            super(TestCase, self).assertEqual(len(x), len(y), message)
+            super().assertEqual(len(x), len(y), msg=msg)
             for x_, y_ in zip(x, y):
-                self.assertEqual(x_, y_, prec=prec, message=message,
-                                 allow_inf=allow_inf)
+                self.assertEqual(x_, y_, atol=atol, rtol=rtol, msg=msg,
+                                 exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(x, bool) and isinstance(y, bool):
-            super(TestCase, self).assertEqual(x, y, message)
-        elif isinstance(x, Number) and isinstance(y, Number):
-            if abs(x) == inf or abs(y) == inf:
-                if allow_inf:
-                    super(TestCase, self).assertEqual(x, y, message)
-                else:
-                    self.fail("Expected finite numeric values - x={}, y={}".format(x, y))
-                return
-            super(TestCase, self).assertLessEqual(abs(x - y), prec, message)
-        else:
-            super(TestCase, self).assertEqual(x, y, message)
+            self.assertTrue(x == y, msg=msg)
 
-    def assertAlmostEqual(self, x, y, places=None, msg=None, delta=None, allow_inf=None):
+        # Scalar x Scalar
+        elif isinstance(x, Number) and isinstance(y, Number):
+            result, debug_msg = self._compareScalars(x, y, rtol=rtol, atol=atol,
+                                                     equal_nan=equal_nan)
+            if not result and msg is None:
+                msg = "Scalars failed to compare as equal! " + debug_msg
+            self.assertTrue(result, msg=msg)
+        else:
+            super().assertEqual(x, y, msg=msg)
+
+    def assertAlmostEqual(self, x, y, *, places=None, msg=None, delta=None):
         prec = delta
         if places:
             prec = 10**(-places)
-        self.assertEqual(x, y, prec, msg, allow_inf)
+        rtol = None if prec is None else 0
+        self.assertEqual(x, y, msg=msg, atol=prec, rtol=rtol)
 
-    def assertNotEqual(self, x, y, prec=None, message=''):
-        if isinstance(prec, str) and message == '':
-            message = prec
-            prec = None
-        if prec is None:
-            prec = self.precision
+    def assertNotEqual(self, x, y, *, msg=None, atol=None, rtol=None):
+        with self.assertRaises(AssertionError):
+            self.assertEqual(x, y, msg=msg, atol=atol, rtol=rtol)
 
-        if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-            if x.size() != y.size():
-                super(TestCase, self).assertNotEqual(x.size(), y.size())
-            self.assertGreater(x.numel(), 0)
-            y = y.type_as(x)
-            y = y.cuda(device=x.get_device()) if x.is_cuda else y.cpu()
-            nan_mask = x != x
-            if torch.equal(nan_mask, y != y):
-                diff = x - y
-                if diff.is_signed():
-                    diff = diff.abs()
-                diff[nan_mask] = 0
-                # Use `item()` to work around:
-                # https://github.com/pytorch/pytorch/issues/22301
-                max_err = diff.max().item()
-                self.assertGreaterEqual(max_err, prec, message)
-        elif type(x) == str and type(y) == str:
-            super(TestCase, self).assertNotEqual(x, y)
-        elif is_iterable(x) and is_iterable(y):
-            super(TestCase, self).assertNotEqual(x, y)
-        else:
-            try:
-                self.assertGreaterEqual(abs(x - y), prec, message)
-                return
-            except (TypeError, AssertionError):
-                pass
-            super(TestCase, self).assertNotEqual(x, y, message)
+    def assertEqualTypeString(self, x, y):
+        # This API is used simulate deprecated x.type() == y.type()
+        self.assertEqual(x.device, y.device)
+        self.assertEqual(x.dtype, y.dtype)
+        self.assertEqual(x.is_sparse, y.is_sparse)
 
     def assertObjectIn(self, obj, iterable):
         for elem in iterable:
@@ -960,31 +1142,10 @@ class TestCase(expecttest.TestCase):
         r"""
         Test if :attr:`callable` does not raise a warning.
         """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
+        with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             callable()
             self.assertTrue(len(ws) == 0, msg)
-
-    def assertWarns(self, callable, msg=''):
-        r"""
-        Test if :attr:`callable` raises a warning.
-        """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
-            self.assertTrue(len(ws) > 0, msg)
-
-    def assertWarnsRegex(self, callable, regex, msg=''):
-        r"""
-        Test if :attr:`callable` raises any warning with message that contains
-        the regex pattern :attr:`regex`.
-        """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
-            self.assertTrue(len(ws) > 0, msg)
-            found = any(re.search(regex, str(w.message)) is not None for w in ws)
-            self.assertTrue(found, msg)
 
     @contextmanager
     def maybeWarnsRegex(self, category, regex=''):
@@ -993,7 +1154,7 @@ class TestCase(expecttest.TestCase):
         This filters expected warnings from the test log and fails the test if
         any unexpected warnings are caught.
         """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
+        with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             # Ignore expected warnings
             warnings.filterwarnings("ignore", message=regex, category=category)
@@ -1008,46 +1169,6 @@ class TestCase(expecttest.TestCase):
                         msg += '\n'
                     self.fail(msg)
 
-    @contextmanager
-    def _reset_warning_registry(self):
-        r"""
-        warnings.catch_warnings() in Python 2 misses already registered
-        warnings. We need to manually clear the existing warning registries to
-        ensure catching warnings in a scope.
-        """
-        # Python 3 has no problem.
-        if sys.version_info >= (3,):
-            yield
-            return
-
-        # Backup and clear all existing warning registries.
-        backup = {}
-        for name, mod in list(sys.modules.items()):
-            try:
-                reg = mod.__warningregistry__
-            except AttributeError:
-                continue
-            else:
-                backup[name] = reg.copy()
-                reg.clear()
-
-        yield
-
-        # Restore backed up warning registries.
-        for name, reg_orig in backup.items():
-            try:
-                mod = sys.modules[name]
-            except KeyError:
-                continue
-
-            try:
-                reg = mod.__warningregistry__
-            except AttributeError:
-                mod.__warningregistry__ = reg_orig
-            else:
-                reg.clear()
-                reg.update(reg_orig)
-
     def assertExpected(self, s, subname=None):
         r"""
         Test that a string matches the recorded contents of a file
@@ -1059,7 +1180,7 @@ class TestCase(expecttest.TestCase):
         If you call this multiple times in a single function, you must
         give a unique subname each time.
         """
-        if not (isinstance(s, str) or (sys.version_info[0] == 2 and isinstance(s, unicode))):
+        if not isinstance(s, str):
             raise TypeError("assertExpected is strings only")
 
         def remove_prefix(text, prefix):
@@ -1109,6 +1230,11 @@ class TestCase(expecttest.TestCase):
             expected = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', expected)
             s = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', s)
 
+        # Adjust for producer_version
+        expected = expected.replace(
+            'producer_version: "XXX"',
+            'producer_version: "{}"'.format(torch.onnx.producer_version)
+        )
         if expecttest.ACCEPT:
             if expected != s:
                 return accept_output("updated output")
@@ -1150,14 +1276,8 @@ class TestCase(expecttest.TestCase):
 
 
 def download_file(url, binary=True):
-    if sys.version_info < (3,):
-        from urlparse import urlsplit
-        import urllib2
-        request = urllib2
-        error = urllib2
-    else:
-        from urllib.parse import urlsplit
-        from urllib import request, error
+    from urllib.parse import urlsplit
+    from urllib import request, error
 
     filename = os.path.basename(urlsplit(url)[2])
     data_dir = get_writable_path(os.path.join(os.path.dirname(__file__), 'data'))
@@ -1184,9 +1304,17 @@ def find_free_port():
     sock.close()
     return sockname[1]
 
+# Errors that we can get in c10d initialization for which we should retry tests for.
+ADDRESS_IN_USE = "Address already in use"
+CONNECT_TIMEOUT = "connect() timed out."
 
-def retry_on_address_already_in_use_error(func):
-    """Reruns a test if it sees "Address already in use" error."""
+def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
+    """Reruns a test if the test returns a RuntimeError and the exception
+    matches exactly with one of the strings in connect_errors."""
+    # This if block is executed when using this function as a decorator with arguments.
+    if func is None:
+        return partial(retry_on_connect_failures, connect_errors=connect_errors)
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         tries_remaining = 10
@@ -1194,7 +1322,7 @@ def retry_on_address_already_in_use_error(func):
             try:
                 return func(*args, **kwargs)
             except RuntimeError as error:
-                if str(error) == "Address already in use":
+                if str(error) in connect_errors:
                     tries_remaining -= 1
                     if tries_remaining == 0:
                         raise
@@ -1202,6 +1330,28 @@ def retry_on_address_already_in_use_error(func):
                     continue
                 raise
     return wrapper
+
+
+# Decorator to retry upon certain Exceptions.
+def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
+    def deco_retry(f):
+        @wraps(f)
+        def f_retry(*args, **kwargs):
+            mtries, mdelay = tries, delay
+            while mtries > 1:
+                try:
+                    return f(*args, **kwargs)
+                except ExceptionToCheck as e:
+                    msg = "%s, Retrying in %d seconds..." % (str(e), mdelay)
+                    print(msg)
+                    time.sleep(mdelay)
+                    mtries -= 1
+            try:
+                return f(*args, **kwargs)
+            except ExceptionToCheck as e:
+                raise unittest.SkipTest(f"Skipping after {tries} consecutive {str(e)}") from e if skip_after_retries else e
+        return f_retry  # true decorator
+    return deco_retry
 
 
 # Methods for matrix generation
@@ -1281,6 +1431,13 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
 
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):
+    """Return rectangular matrix or batches of rectangular matrices.
+
+    Parameters:
+      dtype - the data type
+      device - the device kind
+      singular - when True, the output will be singular
+    """
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     silent = kwargs.get("silent", False)
@@ -1293,7 +1450,7 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
     s = torch.zeros(rows, columns, dtype=dtype, device=device)
     k = min(rows, columns)
     for i in range(k):
-        s[i, i] = (i + 1) / (k + 1)
+        s[i, i] = float(i + 1) / (k + 1)
     if singular:
         # make matrix singular
         s[k - 1, k - 1] = 0
@@ -1304,26 +1461,96 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
     return u.matmul(s.expand(batch_dims + (rows, columns)).matmul(v.transpose(-2, -1)))
 
 
-def brute_pdist(inp, p=2):
-    """Computes the same as torch.pdist using primitives"""
-    n = inp.shape[-2]
-    k = n * (n - 1) // 2
-    if k == 0:
-        # torch complains about empty indices
-        return torch.empty(inp.shape[:-2] + (0,), dtype=inp.dtype, device=inp.device)
-    square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
-    unroll = square.view(square.shape[:-2] + (n * n,))
-    inds = torch.ones(k, dtype=torch.int)
-    inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)
-    return unroll[..., inds.cumsum(0)]
+def random_lowrank_matrix(rank, rows, columns, *batch_dims, **kwargs):
+    """Return rectangular matrix or batches of rectangular matrices with
+    given rank.
+    """
+    B = random_matrix(rows, rank, *batch_dims, **kwargs)
+    C = random_matrix(rank, columns, *batch_dims, **kwargs)
+    return B.matmul(C)
 
 
-def brute_cdist(x, y, p=2):
-    r1 = x.shape[-2]
-    r2 = y.shape[-2]
-    if r1 == 0 or r2 == 0:
-        return torch.empty(r1, r2, device=x.device)
-    return torch.norm(x[..., None, :] - y[..., None, :, :], p=p, dim=-1)
+def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
+    """Return rectangular random sparse matrix within given density.
+
+    The density of the result approaches to given density as the size
+    of the matrix is increased and a relatively small value of density
+    is specified but higher than min(rows, columns)/(rows * columns)
+    for non-singular matrices.
+    """
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    singular = kwargs.get("singular", False)
+
+    k = min(rows, columns)
+    nonzero_elements = max(min(rows, columns), int(rows * columns * density))
+
+    row_indices = [i % rows for i in range(nonzero_elements)]
+    column_indices = [i % columns for i in range(nonzero_elements)]
+    random.shuffle(column_indices)
+    indices = [row_indices, column_indices]
+    values = torch.randn(nonzero_elements, dtype=dtype, device=device)
+    # ensure that the diagonal dominates
+    values *= torch.tensor([-float(i - j)**2 for i, j in zip(*indices)], dtype=dtype, device=device).exp()
+    A = torch.sparse_coo_tensor(indices, values, (rows, columns), device=device)
+    return A.coalesce()
+
+
+def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
+    """Return random sparse positive-definite matrix with given density.
+
+    The eigenvalues of the matrix are defined as::
+      arange(1, matrix_size+1)/matrix_size
+
+    Algorithm:
+      A = diag(arange(1, matrix_size+1)/matrix_size)
+      while <A density is smaller than required>:
+          <choose random i, j in range(matrix_size), theta in [0, 2*pi]>
+          R = <rotation matrix (i,j,theta)>
+          A = R^T A R
+    """
+    import math
+    torch = kwargs.get('torch', globals()['torch'])
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    data = dict([((i, i), float(i + 1) / matrix_size)
+                 for i in range(matrix_size)])
+
+
+    def multiply(data, N, i, j, cs, sn, left=True):
+        for k in range(N):
+            if left:
+                ik, jk = (k, i), (k, j)
+            else:
+                ik, jk = (i, k), (j, k)
+            aik, ajk = data.get(ik, 0), data.get(jk, 0)
+            aik, ajk = cs * aik + sn * ajk, -sn * aik + cs * ajk
+            if aik:
+                data[ik] = aik
+            else:
+                data.pop(ik, None)
+            if ajk:
+                data[jk] = ajk
+            else:
+                data.pop(jk, None)
+
+    target_nnz = density * matrix_size * matrix_size
+    while len(data) < target_nnz:
+        i = random.randint(0, matrix_size - 1)
+        j = random.randint(0, matrix_size - 1)
+        if i != j:
+            theta = random.uniform(0, 2 * math.pi)
+            cs = math.cos(theta)
+            sn = math.sin(theta)
+            multiply(data, matrix_size, i, j, cs, sn, left=True)
+            multiply(data, matrix_size, i, j, cs, sn, left=False)
+    icoords, jcoords, values = [], [], []
+    for (i, j), v in sorted(data.items()):
+        icoords.append(i)
+        jcoords.append(j)
+        values.append(v)
+    indices = [icoords, jcoords]
+    return torch.sparse_coo_tensor(indices, values, (matrix_size, matrix_size), dtype=dtype, device=device)
 
 
 def do_test_dtypes(self, dtypes, layout, device):
@@ -1447,6 +1674,13 @@ def load_tests(loader, tests, pattern):
     return test_suite
 
 
+class BytesIOContext(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
 def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
     # call assert function rather than returning a bool since it's nicer
     # if we get whether this failed on the gradcheck or the gradgradcheck.
@@ -1454,7 +1688,9 @@ def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
     test_case.assertTrue(gradgradcheck(apply_fn, inputs))
 
 
-dtype2prec = {torch.float: 1e-5,
-              torch.double: 1e-5,
-              torch.half: 1e-2,
-              torch.bfloat16: 1e-1}
+# Using @precisionOverride specific to your test is the recommended way
+# of doing this. These are just some values that worked for test_nn.
+dtype2prec_DONTUSE = {torch.float: 1e-5,
+                      torch.double: 1e-5,
+                      torch.half: 1e-2,
+                      torch.bfloat16: 1e-1}

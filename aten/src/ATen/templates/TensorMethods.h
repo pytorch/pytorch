@@ -15,7 +15,9 @@
 #include <ATen/TypeDefault.h>
 #include <ATen/CPUType.h>
 #include <ATen/QuantizedCPUType.h>
-#include <ATen/SparseCPUType.h>
+#ifdef USE_VULKAN
+#include <ATen/VulkanType.h>
+#endif
 #endif
 
 namespace at {
@@ -37,6 +39,10 @@ inline Tensor Tensor::cuda() const {
 
 inline Tensor Tensor::hip() const {
   return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
+}
+
+inline Tensor Tensor::vulkan() const {
+  return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
@@ -131,6 +137,15 @@ inline bool is_mkldnn(Tensor self) {
   return self.is_mkldnn();
 }
 
+inline bool Tensor::is_vulkan() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_vulkan();
+}
+
+inline bool is_vulkan(Tensor self) {
+  return self.is_vulkan();
+}
+
 inline bool Tensor::is_quantized() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_quantized();
@@ -156,6 +171,25 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
 AT_FORALL_QINT_TYPES(DEFINE_CAST)
 #undef DEFINE_CAST
 
+// TODO(@zasdfgbnm): Remove this!
+// This is needed only when the migration of std::complex to c10::complex
+// is not done. This should be removed once the migration is done.
+template <>
+inline std::complex<float>* Tensor::data_ptr() const {
+  TORCH_CHECK(scalar_type() == ScalarType::ComplexFloat,
+    "expected scalar type ComplexFloat but found ",
+    c10::toString(scalar_type()));
+  return static_cast<std::complex<float>*>(this->unsafeGetTensorImpl()->data());
+}
+template <>
+inline std::complex<double>* Tensor::data_ptr() const {
+  TORCH_CHECK(scalar_type() == ScalarType::ComplexDouble,
+    "expected scalar type ComplexDouble but found ",
+    c10::toString(scalar_type()));
+  return static_cast<std::complex<double>*>(this->unsafeGetTensorImpl()->data());
+}
+// end TODO
+
 #define DEFINE_ITEM(T, name)      \
   template <>                     \
   inline T Tensor::item() const { \
@@ -164,6 +198,21 @@ AT_FORALL_QINT_TYPES(DEFINE_CAST)
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
 #undef DEFINE_ITEM
+
+// TODO(@zasdfgbnm): Remove this!
+// This is needed only when the migration of std::complex to c10::complex
+// is not done. This should be removed once the migration is done.
+template <>
+inline std::complex<float> Tensor::item() const {
+  // casting from c10::complex<float> to std::complex<float>
+  return static_cast<std::complex<float>>(item().toComplexFloat());
+}
+template <>
+inline std::complex<double> Tensor::item() const {
+  // casting from c10::complex<double> to std::complex<double>
+  return static_cast<std::complex<double>>(item().toComplexFloat()); 
+}
+// end TODO
 
 // Gradient Node and Edges
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

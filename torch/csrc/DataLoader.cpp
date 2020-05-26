@@ -182,7 +182,7 @@ static PyObject *THPModule_removeWorkerPIDs(PyObject *module, PyObject *loader_i
   int64_t key = THPUtils_unpackLong(loader_id);
   auto it = worker_pids.find(key);
   if (it == worker_pids.end()) {
-    throw ValueError("Cannot find worker information for _BaseDataLoaderIter with id %ld.", key);
+    throw ValueError("Cannot find worker information for _BaseDataLoaderIter with id %" PRId64, key);
   }
   worker_pids.erase(it);
 

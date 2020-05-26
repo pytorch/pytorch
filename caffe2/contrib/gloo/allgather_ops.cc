@@ -52,6 +52,9 @@ void AllgatherOp<Context>::initializeAlgorithm() {
   }
 }
 
+// Used outside of the translation unit
+template void AllgatherOp<CPUContext>::initializeAlgorithm();
+
 namespace {
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Allgather, GLOO, AllgatherOp<CPUContext>);
