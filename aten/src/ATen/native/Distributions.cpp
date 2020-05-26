@@ -144,7 +144,7 @@ Tensor bernoulli(const Tensor& self, c10::optional<Generator> gen) {
 }
 
 Tensor bernoulli(const Tensor& self, double p, c10::optional<Generator> gen) {
-  return at::native::templates::bernoulli_p_impl<BernoulliStub, Generator>(self, p, gen);
+  return at::native::templates::bernoulli_impl<BernoulliStub, Generator>(self, p, gen);
 }
 
 Tensor& bernoulli_out(Tensor& result, const Tensor& self, c10::optional<Generator> gen) {
