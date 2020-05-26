@@ -191,6 +191,9 @@ option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
+option(USE_VULKAN "Use Vulkan GPU backend" OFF)
+option(USE_VULKAN_WRAPPER "Use Vulkan wrapper" ON)
+option(USE_VULKAN_SHADERC_RUNTIME "Use Vulkan Shader compilation runtime(Needs shaderc lib)" OFF)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
@@ -473,6 +476,18 @@ endif()
 
 if(USE_XNNPACK)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_XNNPACK -DUSE_INTERNAL_THREADPOOL_IMPL")
+endif()
+
+if(USE_VULKAN)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN")
+endif()
+
+if(USE_VULKAN_WRAPPER)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN_WRAPPER")
+endif()
+
+if(USE_VULKAN_SHADERC_RUNTIME)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN_SHADERC_RUNTIME")
 endif()
 
 # ---[ Whitelist file if whitelist is specified
