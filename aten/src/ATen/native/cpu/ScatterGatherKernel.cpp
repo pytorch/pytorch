@@ -11,7 +11,6 @@ namespace {
 // Implement as functors since lambdas don't get optimized.
 class ReduceMultiply {
 public:
-  ReduceMultiply() {};
   template <typename scalar_t>
   void operator()(scalar_t * self_data, scalar_t * src_data) {
     *self_data *= *src_data;
@@ -25,7 +24,6 @@ ReduceMultiply reduce_multiply;
 
 class ReduceAdd {
 public:
-  ReduceAdd() {};
   template <typename scalar_t>
   void operator()(scalar_t * self_data, scalar_t * src_data) {
     *self_data += *src_data;
@@ -35,7 +33,6 @@ ReduceAdd reduce_add;
 
 class ReduceSubtract {
 public:
-  ReduceSubtract() {};
   template <typename scalar_t>
   void operator()(scalar_t * self_data, scalar_t * src_data) {
     *self_data -= *src_data;
@@ -45,7 +42,6 @@ ReduceSubtract reduce_subtract;
   
 class ReduceDivide {
 public:
-  ReduceDivide() {};
   template <typename scalar_t>
   void operator()(scalar_t * self_data, scalar_t * src_data) {
     *self_data /= *src_data;
@@ -55,7 +51,6 @@ ReduceDivide reduce_divide;
 
 class TensorAssign {
 public:
-  TensorAssign() {};
   template <typename scalar_t>
   void operator()(scalar_t * self_data, scalar_t * src_data) {
     *self_data = *src_data;
@@ -72,7 +67,7 @@ struct _cpu_scatter_gather_dim_loop {
     scalar_t* src_data, int64_t src_dim_stride,
     int64_t dim, int64_t index_dim_size,
     int64_t index_upper_bound,
-    func_t f
+    const func_t& f
   ) {
 
     for (int64_t i = 0; i < index_dim_size; ++i) {
@@ -99,7 +94,7 @@ struct _cpu_scatter_gather_dim_loop {
     Scalar value,
     int64_t dim, int64_t index_dim_size,
     int64_t index_upper_bound,
-    func_t f
+    const func_t& f
   ) {
 
     for (int64_t i = 0; i < index_dim_size; ++i) {
@@ -126,7 +121,7 @@ struct cpu_scatter_gather_base_kernel {
   void operator()(Tensor& self, int64_t dim,
     const Tensor& index, Scalar& value,
     const std::string& method_name,
-    bool serial_exec, func_t kernel_func) {
+    bool serial_exec, const func_t& kernel_func) {
     // no-op if index is empty
     if (index.numel() == 0) {
       return;
@@ -151,18 +146,11 @@ struct cpu_scatter_gather_base_kernel {
     index_sizes[dim] = 1;
     index_strides[dim] = 0;
 
-    // set self.shape = src.shape = index.shape,
-    // this defines the number of elements to iterate over,
-    // and set self.stride(dim) = src.stride(dim) = 0,
-    // because `dim` is traversed in the kernel.
-    auto self_restrided = restride_dim(self, dim, index_sizes);
-    auto index_restrided = index.as_strided(index_sizes, index_strides);
-
     auto iter = TensorIterator();
     iter.dont_compute_common_dtype();
     iter.dont_resize_outputs();
-    iter.add_output(self_restrided);
-    iter.add_input(index_restrided);
+    iter.add_output(self);
+    iter.add_input(index);
     iter.build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
@@ -173,7 +161,7 @@ struct cpu_scatter_gather_base_kernel {
     
     auto index_upper_bound = self_dim_size;
 
-    AT_DISPATCH_ALL_TYPES_AND2(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Bool, ScalarType::Half, iter.dtype(),
       method_name, [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
@@ -239,7 +227,7 @@ struct cpu_scatter_gather_base_kernel {
     const Tensor& index, const Tensor& src,
     const std::string& method_name,
     bool serial_exec,
-    func_t kernel_func) {
+    const func_t& kernel_func) {
     // no-op if index is empty
     if (index.numel() == 0) {
       return;

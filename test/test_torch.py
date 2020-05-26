@@ -2610,7 +2610,7 @@ class _TestTorchMixin(object):
         self._test_scatter_add_mult_index_base(self, lambda t: t)
 
     @staticmethod
-    def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True, *, test_complex=False):
+    def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True, reduction=None, *, test_complex=False):
         if test_complex:
             dtypes = [torch.complex64, torch.complex128]
         else:
@@ -2641,7 +2641,17 @@ class _TestTorchMixin(object):
                         ii = [i, j, k]
                         ii[dim] = idx[i, j, k]
                         if method == 'scatter_' and not is_scalar:
-                            expected[tuple(ii)] = src[i, j, k]
+                            if reduction:
+                                if reduction == "add":
+                                    expected[tuple(ii)] += src[i, j, k]
+                                elif reduction == "subtract":
+                                    expected[tuple(ii)] -= src[i, j, k]
+                                elif reduction == "multiply":
+                                    expected[tuple(ii)] *= src[i, j, k]
+                                elif reduction == "divide":
+                                    expected[tuple(ii)] /= src[i, j, k]
+                            else:
+                                expected[tuple(ii)] = src[i, j, k]
                         elif method == 'scatter_add_':
                             expected[tuple(ii)] += src[i, j, k]
                         else:
@@ -2666,6 +2676,10 @@ class _TestTorchMixin(object):
 
     def test_scatterFill(self):
         self._test_scatter_base(self, lambda t: t, 'scatter_', True)
+
+    def test_scatterReduce(self):
+        for method in ["add", "subtract", "multiply", "divide"]:
+            self._test_scatter_base(self, lambda t: t, 'scatter_', reduction=method)
 
     def test_masked_scatter(self):
         with warnings.catch_warnings(record=True) as w:
@@ -12093,9 +12107,8 @@ class TestTorchDeviceType(TestCase):
                     src = torch.randn(indices_shape, device=device)
                     self.assertEqual(dst, dst.put_(indices, src, accumulate=accumulate))
 
+    @onlyCPU
     def test_scatter_reduce_operations_to_large_input(self, device):
-        # restrict to CPU until CUDA implementation is done.
-        device = torch.device('cpu')
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
             (torch.zeros(4, 4, device=device, dtype=torch.float32),
@@ -12129,8 +12142,8 @@ class TestTorchDeviceType(TestCase):
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result, operation)
 
+    @onlyCPU
     def test_scatter_reduce_scalar(self, device):
-        device = torch.device('cpu')
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
             (torch.zeros(4, 4, device=device, dtype=torch.float32), 1,
@@ -12173,9 +12186,8 @@ class TestTorchDeviceType(TestCase):
                          torch.tensor([[3], [1]], device=device,
                                       dtype=torch.float32).repeat(1, width))
 
+    @onlyCPU
     def test_scatter_reduce_non_unique_index(self, device):
-        # restrict to CPU until CUDA implementation is done.
-        device = torch.device('cpu')
         height = 2
         width = 2
         index = torch.zeros(height, width, dtype=torch.long, device=device)
@@ -12201,11 +12213,7 @@ class TestTorchDeviceType(TestCase):
         ]
 
         for input, src, result, operation in test_data:
-            print("--src--")
-            print(src)
             input.scatter_(0, index, src, reduce=operation)
-            print(input)
-            print(result)
             self.assertEqual(input, result, operation)
 
 
