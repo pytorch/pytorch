@@ -77,7 +77,8 @@
 //
 //   * Script-generated VariableType kernels. The guard is not necessary as
 //     tracing is already disabled explicitly by `setTracingState(null)` in
-//     corresponding TraceType kernels - it can be replaced by the new guard.
+//     generated TraceType kernels - we could keep it as is or use the new guard
+//     instead.
 //
 //   * Custom ops. Will be handled by fallback kernel for `Tracer`.
 //
@@ -112,12 +113,12 @@ namespace at {
 namespace tracer {
 namespace impl {
 
-static bool is_dispatch_enabled() {
+static inline bool is_dispatch_enabled() {
   return c10::impl::tls_is_dispatch_key_included(at::DispatchKey::Tracer) &&
       !c10::impl::tls_is_dispatch_key_excluded(at::DispatchKey::Tracer);
 }
 
-static void set_dispatch_enabled(bool enabled) {
+static inline void set_dispatch_enabled(bool enabled) {
   TORCH_INTERNAL_ASSERT(
       !c10::impl::tls_is_dispatch_key_excluded(at::DispatchKey::Tracer),
       "Cannot enable tracing within the scope of NoTracerDispatchMode!");

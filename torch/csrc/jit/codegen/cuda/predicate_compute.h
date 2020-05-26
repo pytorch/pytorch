@@ -38,7 +38,7 @@ struct PredicateCompute {
 
   // Return the series of predicates, if an axis doesn't have a predicate
   // reutrns 1
-  static std::vector<Int*> computePredicates(const TensorIndex*);
+  static std::vector<Bool*> computePredicates(const TensorIndex*);
 };
 
 } // namespace fuser
