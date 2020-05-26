@@ -206,14 +206,17 @@ void cpu_kernel(TensorIterator& iter, func_t&& op) {
   iter.cast_outputs();
 }
 
-template <typename func_t, typename vec_func_t>
+template <bool check_dynamic_cast=true, typename func_t, typename vec_func_t>
 void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
   using traits = function_traits<func_t>;
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
-  // dynamic casting not currently supported on CPU
-  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+  // dynamic casting not currently supported on CPU, but some kernels (like Fill)
+  // explicitly dynamic_cast, so we give the opt-out of checking.
+  c10::guts::if_constexpr<check_dynamic_cast>(
+   [&] { TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter)); }
+  );
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
