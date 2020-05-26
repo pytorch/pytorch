@@ -160,20 +160,6 @@ struct SquareFunctor {
     const T mean;
 };
 
-template <typename T>
-struct ReduceMin {
-  inline __device__ T operator()(T a, T b) const {
-    return (THCNumerics<T>::lt(a, b) || THCNumerics<T>::isnan(a)) ? a : b;
-  }
-};
-
-template <typename T>
-struct ReduceMax {
-  inline __device__ T operator()(T a, T b) const {
-    return (THCNumerics<T>::gt(a, b) || THCNumerics<T>::isnan(a)) ? a : b;
-  }
-};
-
 struct LogicalAll {
   inline __device__ unsigned char operator()(const unsigned char x,
                                              const unsigned char y) const {

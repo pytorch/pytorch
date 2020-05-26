@@ -98,10 +98,21 @@ static void min_kernel_impl(Tensor& result, Tensor& indice, const Tensor& self, 
   });
 }
 
+static void max_kernel_impl(Tensor& result, Tensor& indice, const Tensor& self, int64_t dim, bool keepdim) {
+  at::TensorIterator iter = make_reduction("max", result, indice, self, dim, keepdim, self.scalar_type(), kLong, false);
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(2), "max_cuda", [&]() {
+    gpu_reduce_kernel<scalar_t, int64_t>(
+      iter,
+      MaxOps<scalar_t>{},
+      thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::upper_bound(), 0));
+  });
+}
+
 REGISTER_DISPATCH(max_values_stub, &max_values_kernel_cuda);
 REGISTER_DISPATCH(min_values_stub, &min_values_kernel_cuda);
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_cuda);
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_cuda);
 REGISTER_DISPATCH(min_stub, &min_kernel_impl);
+REGISTER_DISPATCH(max_stub, &min_kernel_impl);
 
 }} // namespace at::native
