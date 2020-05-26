@@ -575,6 +575,8 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(False)
                 elif t.startswith('int') or t in {'Dimname', 'DimnameList'}:
                     func_args.append(0)
+                elif t in {'Stream'}:
+                    func_args.append(torch.Stream())
                 elif t.startswith('float') or t == 'double':
                     func_args.append(1.0)
                 elif t in {'Generator', 'MemoryFormat', 'TensorOptions'}:

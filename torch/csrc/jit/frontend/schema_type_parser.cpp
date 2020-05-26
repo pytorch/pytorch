@@ -12,6 +12,7 @@ using c10::AliasInfo;
 using c10::BoolType;
 using c10::CapsuleType;
 using c10::DeviceObjType;
+using c10::StreamObjType;
 using c10::DictType;
 using c10::FloatType;
 using c10::FutureType;
@@ -48,6 +49,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
                         // parser, it should use the custom class mechanism
                         // instead. @jerryzh
       {"Device", DeviceObjType::get()},
+      {"Stream", StreamObjType::get()},
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},
       {"float", FloatType::get()},

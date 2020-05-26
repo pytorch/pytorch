@@ -1,6 +1,7 @@
 #include <c10/core/Scalar.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
+#include <c10/core/Stream.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
@@ -13,6 +14,8 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace at {
+
+using Stream = c10::Stream;
 
 Tensor Tensor::cpu() const {
   return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);

@@ -35,6 +35,13 @@ class device:
 
     def __reduce__(self) -> Tuple[Any, ...]: ...  # THPDevice_reduce
 
+# Defined in torch/csrc/Stream.cpp
+class Stream:
+    _cdata: _int  # Stream handle
+    device: device # The device of the stream
+
+    ...
+
 # Defined in torch/csrc/Size.cpp
 class Size(Tuple[_int, ...]):
     # TODO: __reduce__
@@ -674,6 +681,10 @@ class StringType(JitType):
 class DeviceObjType(JitType):
     @staticmethod
     def get() -> DeviceObjType: ...
+
+class StreamObjType(JitType):
+    @staticmethod
+    def get() -> StreamObjType: ...
 
 class ListType(JitType):
     def __init__(self, a: JitType) -> None: ...

@@ -4,6 +4,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
+#include <c10/core/Stream.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
@@ -48,6 +49,8 @@ namespace at {
 
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
+
+using Stream = c10::Stream;
 
 namespace impl {
 inline bool variable_excluded_from_dispatch() {
