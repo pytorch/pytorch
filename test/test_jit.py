@@ -17140,7 +17140,8 @@ a")
         names = x.method()
         for name in names:
             self.assertNotEqual('z', name)
-        
+
+
     def test_named_parameters_are_iterable(self):
         class MyModNested(torch.nn.Module):
             def __init__(self):

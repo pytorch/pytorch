@@ -1080,7 +1080,7 @@ class Module(object):
             for name, module in self._modules.items():
                 if module is None:
                     continue
-                
+
                 print("Prefix: ")
                 print(prefix)
                 submodule_prefix = prefix + ('.' if prefix else '')
