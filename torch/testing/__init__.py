@@ -53,8 +53,15 @@ _nelems_small = 4
 
 # Helper for fixtures. See fixtures documentation.
 def _fixtures_helper(vals, device, dtype, *,
+                     include_nonfinites, include_defaults,
+                     nonfinites, defaults,
                      type_filter, tensor_factory):
-    # Filters mismatched values
+
+    # Populates vals, filtering to unique values matching the type_filter
+    if include_nonfinites:
+        vals.extend(nonfinites)
+    if include_defaults:
+        vals.extend(defaults)
     vals = list(set([v for v in vals if isinstance(v, type_filter)]))
 
     v = torch.tensor(vals, device=device, dtype=dtype)
@@ -63,12 +70,11 @@ def _fixtures_helper(vals, device, dtype, *,
     # Creates "large" tensor
     # NOTE: the large tensor is filled with the values in vals followed by
     #  random values.
-    large_t = None
     if len(vals) > _nelems_large:
         large_t = v
     else:
         large_t = tensor_factory((_nelems_large,), device=device, dtype=dtype)
-        large_t[0:len(vals)] = v
+        large_t[0:len(vals)].copy_(v)
         results.append(large_t)
 
     # Creates scalar tensors
@@ -94,7 +100,7 @@ def _fixtures_helper(vals, device, dtype, *,
 #
 #   if include_nonfinite is True then nonfinite values like infinity are in the tensors
 #   if include_defaults is True then commonly used values like 0 and 1 are in the tensors
-def fixtures(vals, device, dtype, *, include_nonfinite=True, include_defaults=True):
+def fixtures(vals, device, dtype, *, include_nonfinites=True, include_defaults=True):
     assert dtype is not torch.bfloat16, "bfloat16 fixtures not yet supported"
     assert dtype is not torch.float16, "float16 fixtures not yet supported"
 
@@ -103,37 +109,46 @@ def fixtures(vals, device, dtype, *, include_nonfinite=True, include_defaults=Tr
     non_finites = None
     defaults = None
     if dtype.is_floating_point:
-        type_filter = float
-        tensor_factory = torch.randn
-        non_finites = _float_nonfinites
-        defaults = _float_defaults
+        return _fixtures_helper(vals, device, dtype,
+                                include_nonfinites=include_nonfinites,
+                                include_defaults=include_defaults,
+                                nonfinites=_float_nonfinites,
+                                defaults=_float_defaults,
+                                type_filter=float,
+                                tensor_factory=torch.randn)
     elif dtype.is_complex:
-        type_filter = complex
-        tensor_factory = torch.randn
-        non_finites = _complex_nonfinites
-        include_defaults = _complex_defaults
-    else:
-        type_filter = int
-        tensor_factory = partial(torch.randint, -9, 10)
-        defaults = _int_defaults
+        return _fixtures_helper(vals, device, dtype,
+                                include_nonfinites=include_nonfinites,
+                                include_defaults=include_defaults,
+                                nonfinites=_complex_nonfinites,
+                                defaults=_complex_defaults,
+                                type_filter=complex,
+                                tensor_factory=torch.randn)
+    elif dtype is torch.uint8:
+        return _fixtures_helper(vals, device, dtype,
+                                include_nonfinites=False,
+                                include_defaults=include_defaults,
+                                nonfinites=[],
+                                defaults=_int_defaults,
+                                type_filter=int,
+                                tensor_factory=partial(torch.randint, 0, 10))
+    elif dtype is torch.bool:
+        return _fixtures_helper(vals, device, dtype,
+                                include_nonfinites=False,
+                                include_defaults=include_defaults,
+                                nonfinites=[],
+                                defaults=_bool_defaults,
+                                type_filter=int,
+                                tensor_factory=partial(torch.randint, 0, 2))
 
-        # Specializations for unsigned types
-        if dtype is torch.uint8:
-            tensor_factory = partial(torch.randint, 0, 10)
-        elif dtype is torch.bool:
-            tensor_factory = partial(torch.randint, 0, 2)
-            defaults = _bool_defaults
-
-    # Includes nonfinites (if requested)
-    if include_nonfinite and non_finites is not None:
-        vals.extend(non_finites)
-    # Includes defaults (if requested)
-    if include_defaults and defaults is not None:
-        vals.extend(defaults)
-
+    # Signed integer fallthrough
     return _fixtures_helper(vals, device, dtype,
-                            type_filter=type_filter,
-                            tensor_factory=tensor_factory)
+                            include_nonfinites=False,
+                            include_defaults=include_defaults,
+                            nonfinites=[],
+                            defaults=_int_defaults,
+                            type_filter=int,
+                            tensor_factory=partial(torch.randint, -9, 10))
 
 # Helper function that returns True when the dtype is an integral dtype,
 # False otherwise.
