@@ -332,12 +332,6 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   requestMessage.setId(nextMessageID_++);
   pendingResponseMessage[requestMessage.id()] = futureResponseMessage;
 
-  futureResponseMessage->addCallback([this]() {
-    TORCH_INTERNAL_ASSERT(
-        this->threadPool_.inThreadPool(),
-        "Future marked completed from outside the thread pool");
-  });
-
   ++clientActiveCalls_;
   // Use the default RPC timeout if no timeout is specified for this send call
   auto timeout = rpcTimeoutSeconds == kUnsetRpcTimeout
@@ -375,9 +369,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
           const tensorpipe::Error& error) {
         if (error) {
           LOG(WARNING) << "client write error: " << error.what();
-          threadPool_.run([futureResponseMessage, errorMsg{error.what()}]() {
-            futureResponseMessage->setError(errorMsg);
-          });
+          futureResponseMessage->setError(error.what());
           return;
         }
 
@@ -398,9 +390,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                 }
                 for (auto& p : pendingMsgs) {
                   std::shared_ptr<FutureMessage>& futureMessage = p.second;
-                  threadPool_.run([futureMessage, errorMsg{error.what()}]() {
-                    futureMessage->setError(errorMsg);
-                  });
+                  futureMessage->setError(error.what());
                 }
                 return;
               }
@@ -483,8 +473,7 @@ void TensorPipeAgent::pollTimeoutRpcs() {
       std::string errorMsg = c10::str(
           "RPC ran for more than set timeout and will now be marked with an error");
       // Using setErrorIfNeeded so completed futures are ignored.
-      threadPool_.run(
-          [future, errorMsg]() { future->setErrorIfNeeded(errorMsg); });
+      future->setErrorIfNeeded(errorMsg);
     }
   }
 }
