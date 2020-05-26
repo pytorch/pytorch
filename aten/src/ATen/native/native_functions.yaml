@@ -5367,7 +5367,7 @@
   variants: method, function
   dispatch:
     CPU: min
-    CUDA: legacy::cuda::_th_min
+    CUDA: min
     QuantizedCPU: min_quant
   supports_named_tensor: True
 
@@ -5382,7 +5382,7 @@
   variants: method, function
   dispatch:
     CPU: max
-    CUDA: legacy::cuda::_th_max
+    CUDA: max
     QuantizedCPU: max_quant
   supports_named_tensor: True
 
