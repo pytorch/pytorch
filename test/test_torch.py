@@ -9113,39 +9113,59 @@ class TestTorchDeviceType(TestCase):
 
         for dtype in types:
             x = torch.tensor(example, device=device, dtype=dtype)
-            self.assertEqual(x.max().item(), 6)
-            self.assertEqual(x.max(0), (torch.tensor([5, 3, 6], dtype=dtype),
-                                        torch.tensor([1, 1, 1], dtype=torch.int64)))
-            self.assertEqual(x.max(1), (torch.tensor([2, 6], dtype=dtype),
-                                        torch.tensor([1, 2], dtype=torch.int64)))
 
-        for dtype in types:
-            x = torch.tensor(example, device=device, dtype=dtype)
             self.assertEqual(x.min().item(), -1)
+            self.assertEqual(x.argmin().item(), 0)
+
+            # TODO: torch.min does not support the same operation as argmin
+            # for the same case, should we enable it?
+            self.assertEqual(x.argmin(dim=None).item(), 0)
+
             self.assertEqual(x.min(0), (torch.tensor([-1, 2, 1], dtype=dtype),
                                         torch.tensor([0, 0, 0], dtype=torch.int64)))
+            self.assertEqual(x.argmin(0), torch.tensor([0, 0, 0], dtype=torch.int64))
+
+            self.assertEqual(x.min(dim=0, keepdim=True), (torch.tensor([[-1, 2, 1]], dtype=dtype),
+                                                          torch.tensor([[0, 0, 0]], dtype=torch.int64)))
+            self.assertEqual(x.argmin(dim=0, keepdim=True), torch.tensor([[0, 0, 0]], dtype=torch.int64))
+
             self.assertEqual(x.min(1), (torch.tensor([-1, 3], dtype=dtype),
                                         torch.tensor([0, 1], dtype=torch.int64)))
+            self.assertEqual(x.argmin(1), torch.tensor([0, 1], dtype=torch.int64))
 
-        for dtype in types:
-            x = torch.tensor(example, device=device, dtype=dtype)
-            self.assertEqual(x.argmax().item(), 5)
-            self.assertEqual(x.argmax(dim=None).item(), 5)
-            self.assertEqual(x.argmax(dim=0), torch.tensor([1, 1, 1], dtype=torch.int64))
-            self.assertEqual(x.argmax(dim=1), torch.tensor([1, 2], dtype=torch.int64))
-            self.assertEqual(x.argmax(dim=0, keepdim=True), torch.tensor([[1, 1, 1]], dtype=torch.int64))
-            # test that non-contiguous tensors work
-            self.assertEqual(x[:, :2].argmax().item(), 2)
-
-        for dtype in types:
-            x = torch.tensor(example, device=device, dtype=dtype)
-            self.assertEqual(x.argmin().item(), 0)
-            self.assertEqual(x.argmin(dim=None).item(), 0)
-            self.assertEqual(x.argmin(dim=0), torch.tensor([0, 0, 0], dtype=torch.int64))
-            self.assertEqual(x.argmin(dim=1), torch.tensor([0, 1], dtype=torch.int64))
+            self.assertEqual(x.min(dim=1, keepdim=True), (torch.tensor([[-1], [3]], dtype=dtype),
+                                                          torch.tensor([[0], [1]], dtype=torch.int64)))
             self.assertEqual(x.argmin(dim=1, keepdim=True), torch.tensor([[0], [1]], dtype=torch.int64))
+
             # test that non-contiguous tensors work
+            self.assertEqual(x[:, :2].min().item(), -1)
             self.assertEqual(x[:, :2].argmin().item(), 0)
+
+        for dtype in types:
+            x = torch.tensor(example, device=device, dtype=dtype)
+
+            self.assertEqual(x.max().item(), 6)
+            self.assertEqual(x.argmax().item(), 5)
+
+            self.assertEqual(x.max(0), (torch.tensor([5, 3, 6], dtype=dtype),
+                                        torch.tensor([1, 1, 1], dtype=torch.int64)))
+            self.assertEqual(x.argmax(dim=0), torch.tensor([1, 1, 1], dtype=torch.int64))
+
+            self.assertEqual(x.max(dim=0, keepdim=True), (torch.tensor([[5, 3, 6]], dtype=dtype),
+                                                          torch.tensor([[1, 1, 1]], dtype=torch.int64)))
+            self.assertEqual(x.argmax(dim=0, keepdim=True), torch.tensor([[1, 1, 1]], dtype=torch.int64))
+
+            self.assertEqual(x.max(1), (torch.tensor([2, 6], dtype=dtype),
+                                        torch.tensor([1, 2], dtype=torch.int64)))
+            self.assertEqual(x.argmax(dim=1), torch.tensor([1, 2], dtype=torch.int64))
+
+            self.assertEqual(x.max(1, keepdim=True), (torch.tensor([[2], [6]], dtype=dtype),
+                                                      torch.tensor([[1], [2]], dtype=torch.int64)))
+            self.assertEqual(x.argmax(dim=1, keepdim=True), torch.tensor([[1], [2]], dtype=torch.int64))
+
+            # test that non-contiguous tensors work
+            self.assertEqual(x[:, :2].max().item(), 5)
+            self.assertEqual(x[:, :2].argmax().item(), 2)
 
         dim_red_fns = [
             "mean", "median", "mode", "norm", "prod",
@@ -9282,23 +9302,48 @@ class TestTorchDeviceType(TestCase):
             xs = x.sum(dim=-1)
             for j in range(7):
                 self.assertEqual(xs[j].item(), float(j))
-        # 2D case: argmax
+        # 2D case: max/argmax
         size = (7, 1024 * 1024 + 3)
         x = torch.zeros(size, dtype=dtype, device=device)
         for i in range(100):
             x.zero_()
             for j in range(7):
                 x[j][i] = j + 1
-            xs = x.argmax(dim=-1)
+            xs1 = x.argmax(dim=-1)
+            xs2 = x.max(dim=-1).indices
             for j in range(7):
-                self.assertEqual(xs[j].item(), i)
+                self.assertEqual(xs1[j].item(), i)
+                self.assertEqual(xs2[j].item(), i)
         for i in range(1, 100):
             x.zero_()
             for j in range(7):
                 x[j][-i] = j + 1
-            xs = x.argmax(dim=-1)
+            xs1 = x.argmax(dim=-1)
+            xs2 = x.max(dim=-1).indices
             for j in range(7):
-                self.assertEqual(xs[j].item(), size[1] - i)
+                self.assertEqual(xs1[j].item(), size[1] - i)
+                self.assertEqual(xs2[j].item(), size[1] - i)
+        # 2D case: min/argmin
+        size = (7, 1024 * 1024 + 3)
+        x = torch.zeros(size, dtype=dtype, device=device)
+        for i in range(100):
+            x.zero_()
+            for j in range(7):
+                x[j][i] = -(j + 1)
+            xs1 = x.argmin(dim=-1)
+            xs2 = x.min(dim=-1).indices
+            for j in range(7):
+                self.assertEqual(xs1[j].item(), i)
+                self.assertEqual(xs2[j].item(), i)
+        for i in range(1, 100):
+            x.zero_()
+            for j in range(7):
+                x[j][-i] = -(j + 1)
+            xs1 = x.argmin(dim=-1)
+            xs2 = x.min(dim=-1).indices
+            for j in range(7):
+                self.assertEqual(xs1[j].item(), size[1] - i)
+                self.assertEqual(xs2[j].item(), size[1] - i)
 
 
     @slowTest
@@ -9309,8 +9354,10 @@ class TestTorchDeviceType(TestCase):
             x = torch.zeros((2, 2**32), device=device, dtype=torch.int8)
             x[:, -1] = 1
             self.assertEqual(x.argmax(1), [x.shape[1] - 1] * 2)
+            self.assertEqual(x.max(1).indices, [x.shape[1] - 1] * 2)
             x[:, -1] = -1
             self.assertEqual(x.argmin(1), [x.shape[1] - 1] * 2)
+            self.assertEqual(x.min(1).indices, [x.shape[1] - 1] * 2)
         except RuntimeError as e:
             if 'memory' in str(e):
                 raise unittest.SkipTest('Insufficient memory')
