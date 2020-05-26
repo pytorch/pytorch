@@ -41,6 +41,7 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     supported_qengines,
+    override_qengines,
 )
 
 # Reference method for fake quantize
@@ -785,6 +786,7 @@ class TestDistributed(QuantizationTestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @override_qengines
     def test_device_affinity(self):
         """
         Tests that converting a model to QAT respects device affinity
@@ -800,7 +802,7 @@ class TestDistributed(QuantizationTestCase):
                 return x
 
         model = Model()
-        model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+        model.qconfig = torch.quantization.get_default_qat_qconfig(torch.backends.quantized.engine)
         device = torch.device('cuda:0')
         model.to(device)
         torch.quantization.prepare_qat(model, inplace=True)
