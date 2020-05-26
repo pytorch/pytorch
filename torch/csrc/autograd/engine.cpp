@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/engine.h>
 
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -630,6 +631,8 @@ void validate_outputs(
       ss << metadata.device() << " but got " << grad_device;
       AT_ERROR(format_error(ss.str()));
     }
+    // We should not build graph for Tensors that are not differentiable
+    TORCH_INTERNAL_ASSERT(isDifferentiableType(grad.scalar_type()));
   }
 }
 

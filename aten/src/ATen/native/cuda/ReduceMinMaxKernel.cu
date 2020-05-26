@@ -6,6 +6,8 @@
 #include <ATen/cuda/NumericLimits.cuh>
 #include <THC/THCNumerics.cuh>
 #include <ATen/native/ReduceOps.h>
+#include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/TensorCompare.h>
 
 
 namespace at { namespace native {
@@ -86,9 +88,20 @@ void argmin_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+static void min_kernel_impl(Tensor& result, Tensor& indice, const Tensor& self, int64_t dim, bool keepdim) {
+  at::TensorIterator iter = make_reduction("min", result, indice, self, dim, keepdim, self.scalar_type(), kLong, false);
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(2), "min_cuda", [&]() {
+    gpu_reduce_kernel<scalar_t, int64_t>(
+      iter,
+      MinOps<scalar_t>{},
+      thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::upper_bound(), 0));
+  });
+}
+
 REGISTER_DISPATCH(max_values_stub, &max_values_kernel_cuda);
 REGISTER_DISPATCH(min_values_stub, &min_values_kernel_cuda);
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_cuda);
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_cuda);
+REGISTER_DISPATCH(min_stub, &min_kernel_impl);
 
 }} // namespace at::native
