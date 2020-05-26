@@ -1594,7 +1594,6 @@ void testAutogradSymbols() {
 }
 
 void testDefaultArgTypeHinting() {
-
   const auto text_non_hinted = R"(
 
 def a(x, y=1):
@@ -1619,6 +1618,6 @@ def a(x, y:int=1):
 
   auto cu = compile(text_hinted);
 }
- 
+
 } // namespace jit
 } // namespace torch
