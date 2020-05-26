@@ -869,6 +869,13 @@ Args:
     {memory_format}
 """.format(**common_args))
 
+add_docstr_all('logcumsumexp',
+               r"""
+logcumsumexp(dim) -> Tensor
+
+See :func:`torch.logcumsumexp`
+""")
+
 add_docstr_all('cummax',
                r"""
 cummax(dim) -> (Tensor, Tensor)
