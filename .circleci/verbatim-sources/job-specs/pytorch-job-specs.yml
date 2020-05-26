@@ -243,7 +243,7 @@ jobs:
           root: "C:/w"
           paths: build-results
       - store_artifacts:
-          path: C:/w/build-results 
+          path: C:/w/build-results
 
   pytorch_windows_test:
     <<: *pytorch_windows_params
