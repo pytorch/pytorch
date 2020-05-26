@@ -262,22 +262,24 @@ class OnnxifiOp final : public Operator<Context> {
   /// Set up function pointer if onnxifi_ext is enabled
   void getExtFunctionPointers() {
 #ifdef ONNXIFI_ENABLE_EXT
-    onnxExtensionFunctionPointer p;
+    union {
+       onnxExtensionFunctionPointer p;
+       decltype(onnxSetIOAndRunGraphPointer_) set;
+       decltype(onnxReleaseTraceEventsPointer_) release;
+    } u;
     if (lib_->onnxGetExtensionFunctionAddress(
-            backend_id_, "onnxSetIOAndRunGraphFunction", &p) !=
+            backend_id_, "onnxSetIOAndRunGraphFunction", &u.p) !=
         ONNXIFI_STATUS_SUCCESS) {
       onnxSetIOAndRunGraphPointer_ = nullptr;
     } else {
-      onnxSetIOAndRunGraphPointer_ =
-          reinterpret_cast<decltype(onnxSetIOAndRunGraphPointer_)>(p);
+      onnxSetIOAndRunGraphPointer_ = u.set;
     }
     if (lib_->onnxGetExtensionFunctionAddress(
-            backend_id_, "onnxReleaseTraceEventsFunction", &p) !=
+            backend_id_, "onnxReleaseTraceEventsFunction", &u.p) !=
         ONNXIFI_STATUS_SUCCESS) {
       onnxReleaseTraceEventsPointer_ = nullptr;
     } else {
-      onnxReleaseTraceEventsPointer_ =
-          reinterpret_cast<decltype(onnxReleaseTraceEventsPointer_)>(p);
+      onnxReleaseTraceEventsPointer_ = u.release;
     }
 #endif
   }
