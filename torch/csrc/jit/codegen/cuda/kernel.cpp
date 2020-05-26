@@ -90,7 +90,7 @@ struct KernelArgumentHolder {
       const at::Tensor& val,
       c10::optional<at::IntArrayRef> broadcasted_size = c10::nullopt) {
     changed = true;
-    ExtractSizeStride ess(val, broadcasted_size);
+    ExtractSizeStride ess(val, std::move(broadcasted_size));
     int nDims = ess.sizes.size();
 
     c10::ScalarType dtype = val.scalar_type();
