@@ -584,16 +584,14 @@ void EncoderBase::AddAttribute(
     case AttributeKind::t: {
       attr->set_type(onnx::AttributeProto_AttributeType_TENSOR);
       auto t = attr->mutable_t();
-      if (use_external_data_format) {
-        if (!t->has_name()) {
-          t->set_name(createAttributeTensorName(
-              node_proto, t, name, num_external_data_));
-        }
+      if (use_external_data_format && !t->has_name()) {
+        t->set_name(createAttributeTensorName(
+            node_proto, t, name, num_external_data_));
       }
       EncodeTensor(
           t,
           node->t(name),
-          t->name(),
+          {},
           use_external_data_format,
           onnx_file_path);
     } break;
@@ -601,13 +599,11 @@ void EncoderBase::AddAttribute(
       attr->set_type(onnx::AttributeProto_AttributeType_TENSORS);
       for (auto& v : node->ts(name)) {
         auto t = attr->add_tensors();
-        if (use_external_data_format) {
-          if (!t->has_name()) {
-            t->set_name(createAttributeTensorName(
-                node_proto, t, name, num_external_data_));
-          }
+        if (use_external_data_format && !t->has_name()) {
+          t->set_name(createAttributeTensorName(
+              node_proto, t, name, num_external_data_));
         }
-        EncodeTensor(t, v, t->name(), use_external_data_format, onnx_file_path);
+        EncodeTensor(t, v, {}, use_external_data_format, onnx_file_path);
       }
       break;
     case AttributeKind::g: {
@@ -781,10 +777,8 @@ void GraphEncoder::EncodeTensor(
     if (use_external_data_format &&
         tensorSize > ParamSizeThresholdForExternalStorage) {
       AT_ASSERT(!onnx_file_path.empty());
-      AT_ASSERT(
-          (external_ref != c10::nullopt) &&
-          (external_ref.value() == tensor_proto->name()));
-      auto tensorName = GetExternalFileName(external_ref);
+      AT_ASSERT(tensor_proto->has_name());
+      auto tensorName = GetExternalFileName(tensor_proto->name());
       CreateExternalFile(t, tensorName, onnx_file_path);
       onnx::StringStringEntryProto* location =
           tensor_proto->mutable_external_data()->Add();
