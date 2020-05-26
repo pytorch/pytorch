@@ -55,6 +55,7 @@ enum class DispatchKey : uint8_t {
   MSNPU, // unused externally, but tested at
          // test/cpp_extensions/msnpu_extension.cpp
   XLA, // lives out of tree at https://github.com/pytorch/xla
+  Vulkan,
 
   // These are Caffe2 device types which we grandfathered into
   // DispatchKey.
