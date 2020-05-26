@@ -72,7 +72,7 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     else:
         max_val = max(max_val, 0.0)
         min_val = min(min_val, 0.0)
-        scale = (max_val - min_val) / n_levels
+        scale = (max_val - min_val) / (qmax - qmin)
         scale = max(scale, np.finfo(np.float32).eps)
         zero_point = qmin - round(min_val / scale)
         zero_point = max(qmin, zero_point)
