@@ -19,6 +19,19 @@ def _find_match(str_list, key_str, postfix):
                 return s2
             if match_string == pattern2:
                 return s2
+
+        # For matching "fc.weight" and "fc._packed_params._packed_params"
+        if postfix == "_packed_params":
+            match_string = "".join(key_str.split(".")[0:-2])
+            if len(match_string) == 0:
+                return None
+            for s2 in str_list:
+                pattern1 = "".join(s2.split(".")[0:-1])
+                pattern2 = "".join(s2.split(".")[0:-2])
+                if match_string == pattern1:
+                    return s2
+                if match_string == pattern2:
+                    return s2
     else:
         return None
 
@@ -51,6 +64,15 @@ def compare_weights(float_dict, quantized_dict):
             weight_dict[key] = {}
             weight_dict[key]["float"] = float_dict[match_key]
             weight_dict[key]["quantized"] = quantized_dict[key]
+            continue
+
+        # For matching "fc.weight" and "fc._packed_params._packed_params"
+        match_key = _find_match(float_dict, key, "_packed_params")
+        if match_key is not None:
+            weight_dict[key] = {}
+            weight_dict[key]["float"] = float_dict[match_key]
+            weight_dict[key]["quantized"] = quantized_dict[key][0]
+
     return weight_dict
 
 
@@ -171,7 +193,8 @@ class Shadow(nn.Module):
 
     def forward(self, x):
         output = self.orig_module(x)
-        x = x.dequantize()
+        if x.is_quantized:
+            x = x.dequantize()
         shadow_output = self.shadow_module(x)
         self.logger(output, shadow_output)
         return output
