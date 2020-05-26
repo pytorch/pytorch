@@ -57,11 +57,13 @@ struct TORCH_CUDA_API Bool : public Val {
  * is compiled) or a constant value (inlined into the kernel definition).
  */
 struct TORCH_CUDA_API Float : public Val {
+  using ScalarType = double;
+
   ~Float() = default;
 
   Float() : Val(ValType::Scalar, DataType::Float), maybe_value_{c10::nullopt} {}
 
-  Float(float _value)
+  Float(ScalarType _value)
       : Val(ValType::Scalar, DataType::Float), maybe_value_{_value} {}
 
   Float(const Float& other) = delete;
@@ -76,14 +78,14 @@ struct TORCH_CUDA_API Float : public Val {
   bool isConst() const {
     return maybe_value_.has_value();
   }
-  c10::optional<float> value() const noexcept {
+  c10::optional<ScalarType> value() const noexcept {
     return maybe_value_;
   }
 
   bool sameAs(const Float* const other) const;
 
  private:
-  const c10::optional<float> maybe_value_;
+  const c10::optional<ScalarType> maybe_value_;
 };
 
 /*
@@ -124,11 +126,14 @@ struct TORCH_CUDA_API Half : public Val {
 // An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
 // inlined literal in the kernel.
 struct TORCH_CUDA_API Int : public Val {
+  using ScalarType = int64_t;
+
   ~Int() = default;
 
   Int() : Val(ValType::Scalar, DataType::Int), maybe_value_{c10::nullopt} {}
 
-  Int(int _value) : Val(ValType::Scalar, DataType::Int), maybe_value_{_value} {}
+  Int(ScalarType _value)
+      : Val(ValType::Scalar, DataType::Int), maybe_value_{_value} {}
 
   Int(const Int& other) = delete;
   Int& operator=(const Int& other) = delete;
@@ -142,14 +147,14 @@ struct TORCH_CUDA_API Int : public Val {
   bool isConst() const {
     return maybe_value_.has_value();
   }
-  c10::optional<int> value() const noexcept {
+  c10::optional<ScalarType> value() const noexcept {
     return maybe_value_;
   }
 
   bool sameAs(const Int* const other) const;
 
  private:
-  const c10::optional<int> maybe_value_;
+  const c10::optional<ScalarType> maybe_value_;
 };
 
 struct TransformReplay;
