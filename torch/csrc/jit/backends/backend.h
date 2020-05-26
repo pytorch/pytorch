@@ -14,7 +14,6 @@
 namespace torch {
 namespace jit {
 
-
 // Static registration API for backends.
 template <class TBackendInterface>
 class backend {
