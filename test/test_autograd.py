@@ -45,7 +45,8 @@ from torch.testing._internal.common_methods_invocations import (method_tests,
                                                                 S)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
-                                                        deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
+                                                        deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
+                                                        skipCUDAIf)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -559,8 +560,8 @@ class TestAutograd(TestCase):
         z.register_hook(bw_hook)
         z.sum().backward()
 
-        self.assertEqual(counter[0], 1, 'bw_hook not called')
-        self.assertEqual(x.grad, torch.ones(5, 5) * 2, atol=1e-5)
+        self.assertEqual(counter[0], 1, msg='bw_hook not called')
+        self.assertEqual(x.grad, torch.ones(5, 5) * 2, atol=1e-5, rtol=0)
 
     def test_hook_none(self):
         # WARNING: this is a test for autograd internals.
@@ -5792,8 +5793,7 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(where, [cond, x, y], raise_exception=True)
         gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, 5, device=device)])
 
-    @skipCUDAIfRocm
-    @unittest.skipIf(IS_WINDOWS, """Test is flaky on Windows:
+    @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
             https://github.com/pytorch/pytorch/issues/34870""")
     def test_ctc_loss(self, device):
         batch_size = 64
@@ -5866,7 +5866,7 @@ class TestAutogradDeviceType(TestCase):
                                                   input_lengths, target_lengths, reduction='none')
         self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
-        self.assertEqual(grad_cudnn, grad_native, atol=1e-4)
+        self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
     @skipCUDAIfRocm
     def test_leaky_relu_inplace_with_neg_slope(self, device):

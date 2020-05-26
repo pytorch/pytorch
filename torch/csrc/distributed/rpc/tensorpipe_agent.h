@@ -137,7 +137,7 @@ class TensorPipeAgent : public RpcAgent {
   // only if it isn't yet. It does exist for errors (setErrorIfNeeded) but, even
   // then, it ends up printing a log message, which may worry the user. To solve
   // both issues we use a separate atomic flag to know the status of the future.
-  struct WrappedFutureMessage {
+  struct AtomicFutureMessage {
     FutureMessage futMsg;
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
   };
@@ -151,7 +151,7 @@ class TensorPipeAgent : public RpcAgent {
     explicit ClientPipe(std::shared_ptr<tensorpipe::Pipe> pipe) : pipe_(pipe) {}
     std::shared_ptr<tensorpipe::Pipe> pipe_;
     bool readError_{false};
-    std::unordered_map<uint64_t, std::shared_ptr<WrappedFutureMessage>>
+    std::unordered_map<uint64_t, std::shared_ptr<AtomicFutureMessage>>
         pendingResponseMessage_;
   };
 
@@ -176,7 +176,7 @@ class TensorPipeAgent : public RpcAgent {
   // Map to store the expiration times for each message.
   std::map<
       steady_clock_time_point,
-      std::vector<std::shared_ptr<WrappedFutureMessage>>>
+      std::vector<std::shared_ptr<AtomicFutureMessage>>>
       timeoutMap_;
 
   // Thread that will poll the timeoutMap_ for timed out messages and mark them
@@ -239,6 +239,14 @@ class TensorPipeAgent : public RpcAgent {
   std::atomic<int32_t> serverActiveCalls_{0};
   // Running total of RPC requests that will be completed asynchronously
   std::atomic<int32_t> serverActiveAsyncCalls_{0};
+
+  // Helpers to set the state of the requests.
+  void markFutureAsComplete(
+      std::shared_ptr<AtomicFutureMessage> futureMessage,
+      Message message);
+  void markFutureWithError(
+      std::shared_ptr<AtomicFutureMessage> futureMessage,
+      std::string errorMsg);
 };
 
 } // namespace rpc
