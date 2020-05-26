@@ -70,6 +70,13 @@ void TensorPipeAgent::collectNames() {
         addressStore_->get("names/" + c10::to_string(workerId));
     std::string workerName(
         (char*)workerNameVector.data(), workerNameVector.size());
+
+    TORCH_CHECK(
+        workerNameToInfo_.find(workerName) == workerNameToInfo_.end(),
+        "RPC worker name ",
+        workerName,
+        " is not unique.");
+
     workerIdToInfo_.emplace(workerId, WorkerInfo(workerName, workerId));
     workerNameToInfo_.emplace(workerName, WorkerInfo(workerName, workerId));
   }
