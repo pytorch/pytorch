@@ -341,6 +341,35 @@ class TestCudaFuser(JitTestCase):
         self._run_helper(lerp_scale_jit, lerp_scale, True, x, y, 0.5)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
+    @skipIfRocm
+    def test_addcmul_ops(self):
+        x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        y = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        z = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+
+        def addcmul(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor, value : float):
+            o = torch.add(x, 0.5)
+            o = torch.addcmul(o, y, z, value=value)
+            return o
+        addcmul_jit = torch.jit.script(addcmul)
+        self._run_helper(addcmul_jit, addcmul, True, x, y, z, 2.0)
+
+        def addcmul_no_alpha(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
+            o = torch.add(x, 0.5)
+            o = torch.addcmul(o, y, z)
+            return o
+        addcmul_no_alpha_jit = torch.jit.script(addcmul_no_alpha)
+        self._run_helper(addcmul_no_alpha_jit, addcmul_no_alpha, True, x, y, z)
+
+        def addcmul_const_alpha(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
+            o = torch.add(x, 0.5)
+            o = torch.addcmul(o, y, z, value=0.75)
+            return o
+        addcmul_const_alpha_jit = torch.jit.script(addcmul_const_alpha)
+        self._run_helper(addcmul_const_alpha_jit, addcmul_const_alpha, True, x, y, z)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Requires profiling node to run cuda fuser")
     @skipIfRocm
     def test_dynamic_size(self):
