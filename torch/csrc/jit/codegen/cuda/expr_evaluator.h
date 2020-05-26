@@ -3,6 +3,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 
 #include <c10/util/Optional.h>
 
@@ -22,10 +23,10 @@ class TORCH_CUDA_API EvaluationContext {
   explicit EvaluationContext(const Fusion* fusion) : fusion_(fusion) {}
 
   // Set the concrete value for a Int*
-  void bind(const Val* value, int concrete_value);
+  void bind(const Val* value, Int::ScalarType concrete_value);
 
   // Retrieves the concrete value, or nullopt if not set
-  c10::optional<int> concreteValue(const Val* value) const;
+  c10::optional<Int::ScalarType> concreteValue(const Val* value) const;
 
   const Fusion* fusion() const {
     return fusion_;
@@ -35,7 +36,7 @@ class TORCH_CUDA_API EvaluationContext {
   void print() const;
 
  private:
-  std::unordered_map<const Val*, int> bindings_;
+  std::unordered_map<const Val*, Int::ScalarType> bindings_;
   const Fusion* fusion_ = nullptr;
 };
 
@@ -46,7 +47,7 @@ class TORCH_CUDA_API ExpressionEvaluator : private OptInConstDispatch {
  public:
   // Returns the result of the specified expression, or nullopt if
   // the result cannot be evaluated
-  static c10::optional<int> evaluate(
+  static c10::optional<Int::ScalarType> evaluate(
       const Statement* expr,
       const EvaluationContext* context);
 
@@ -64,7 +65,7 @@ class TORCH_CUDA_API ExpressionEvaluator : private OptInConstDispatch {
 
  private:
   const EvaluationContext* context_ = nullptr;
-  c10::optional<int> result_;
+  c10::optional<Int::ScalarType> result_;
 };
 
 } // namespace fuser
