@@ -137,11 +137,11 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   }
 
   void markCompleted(const py::object& pyValue) {
-      DCHECK(PyGILState_Check());
-      IValue value = toIValue(pyValue, PyObjectType::get());
+    DCHECK(PyGILState_Check());
+    IValue value = toIValue(pyValue, PyObjectType::get());
 
-      py::gil_scoped_release release;
-      fut->markCompleted(std::move(value));
+    py::gil_scoped_release release;
+    fut->markCompleted(std::move(value));
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> fut;
