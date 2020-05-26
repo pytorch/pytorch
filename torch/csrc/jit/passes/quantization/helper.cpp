@@ -30,10 +30,6 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "linear",
     "addmm",
     "matmul",
-    "add_",
-    "add",
-    "mul",
-    "mul_",
     "hardswish",
     "layer_norm",
 };
@@ -182,7 +178,17 @@ std::vector<std::string> _tensor_info_funcs = {"size"};
 
 // Aten functions whose output will be quantized or not quantized depending
 // on input tensor
-std::vector<std::string> _propagate_quant_ops = {"cat"};
+std::vector<std::string> _propagate_quant_single_input_ops = {"cat"};
+
+// Rules are slightly different for binary ops like `aten::add`, for these ops,
+// if both of the inputs are Tensor, we'll quantize the output only if both of
+// the inputs are quantized
+// if the second input is a Scalar, we'll only look at the first input to decide
+// if we need to quantize the output
+std::vector<std::string> _propagate_quant_binary_ops = {"add",
+                                                        "add_",
+                                                        "mul",
+                                                        "mul_"};
 
 // Check if `use` is an aten function of name `func_name` and if value
 // `v` is the nth argument (if provided) of the function.
@@ -245,10 +251,6 @@ bool isBiasOfConvOrLinear(Value* v) {
           {{"conv1d", 2}, {"conv2d", 2}, {"conv3d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
   return result;
-}
-
-bool mayRequireObservation(Value* v) {
-  return !hasScalarInput(v->node());
 }
 
 std::vector<Value*> getPassThroughInputs(Value* v) {
@@ -353,8 +355,16 @@ bool isTensorInfoNode(Node* n) {
   return isAtenFunc(n, _tensor_info_funcs);
 }
 
+bool isPropagateQuantSingleInputOp(Node* n) {
+  return isAtenFunc(n, _propagate_quant_single_input_ops);
+}
+
+bool isPropagateQuantBinaryOp(Node* n) {
+  return isAtenFunc(n, _propagate_quant_binary_ops);
+}
+
 bool isPropagateQuantNode(Node* n) {
-  return isAtenFunc(n, _propagate_quant_ops);
+  return isPropagateQuantSingleInputOp(n) || isPropagateQuantBinaryOp(n);
 }
 
 c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
@@ -374,14 +384,6 @@ bool userDefinedCallFunction(Node* n) {
   return n->kind() == prim::CallFunction &&
       !isSingleInputGeneralCallFunction(n) &&
       !isFunctionNode(n, _static_quantizable_call_funcs, {});
-}
-
-bool hasScalarInput(Node* n) {
-  std::vector<std::string> scalar_ops = {"add", "add_", "mul", "mul_"};
-
-  return isAtenFunc(n, scalar_ops) &&
-      n->input(0)->type()->isSubtypeOf(TensorType::get()) &&
-      n->input(1)->type()->isSubtypeOf(NumberType::get());
 }
 
 bool nodeQuantizable(Node* n, bool is_dynamic) {

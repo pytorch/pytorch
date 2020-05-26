@@ -42,7 +42,6 @@ def iter_tensors(x, only_requiring_grad=False):
             for result in iter_tensors(elem, only_requiring_grad):
                 yield result
 
-
 def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
     """
     input: input to `fn`
@@ -258,14 +257,21 @@ def gradcheck(
 
     # Make sure that gradients are saved for at least one input
     any_input_requiring_grad = False
-    for inp in tupled_inputs:
+    for idx, inp in enumerate(tupled_inputs):
         if isinstance(inp, torch.Tensor) and inp.requires_grad:
             if not (inp.dtype == torch.float64 or inp.dtype == torch.complex128):
                 warnings.warn(
-                    'At least one of the inputs that requires gradient '
-                    'is not of double precision floating point or complex. '
+                    'The {}th input requires gradient and '
+                    'is not a double precision floating point or complex. '
                     'This check will likely fail if all the inputs are '
                     'not of double precision floating point or complex. ')
+            content = inp._values() if inp.is_sparse else inp
+            if content.layout is not torch._mkldnn and any([s == 0 for s in content.stride()]):
+                raise RuntimeError(
+                    'The {}th input has a dimension with stride 0. gradcheck only '
+                    'supports inputs that are non-overlapping to be able to '
+                    'compute the numerical gradients correctly. You should call '
+                    '.contiguous on the input before passing it to gradcheck.')
             any_input_requiring_grad = True
             inp.retain_grad()
     if not any_input_requiring_grad:
