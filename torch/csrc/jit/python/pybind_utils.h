@@ -136,6 +136,14 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         PyObjectType::get()));
   }
 
+  void markCompleted(const py::object& pyValue) {
+      DCHECK(PyGILState_Check());
+      IValue value = toIValue(pyValue, PyObjectType::get());
+
+      py::gil_scoped_release release;
+      fut->markCompleted(value);
+  }
+
   c10::intrusive_ptr<c10::ivalue::Future> fut;
   // unwrap_func works like a callback for the value returned by
   // PythonFutureWrapper::wait().

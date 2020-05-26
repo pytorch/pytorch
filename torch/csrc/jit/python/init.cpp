@@ -827,13 +827,34 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PythonFutureWrapper, std::shared_ptr<PythonFutureWrapper>>(
       m, "Future")
+      .def(py::init([]() {
+        return std::make_shared<PythonFutureWrapper>(
+            c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get()));
+      }))
       .def(
           "wait",
           &PythonFutureWrapper::wait,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_then",
+          "then",
           &PythonFutureWrapper::then,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "set_result",
+          // Intentionally not releasing GIL
+          &PythonFutureWrapper::markCompleted)
+      .def(
+          "__getstate__",
+          [](const PythonFutureWrapper& /* unused */) {
+            TORCH_CHECK(false, "Can not pickle torch.futures.Future");
+          },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "__setstate__",
+          [](const PythonFutureWrapper& /* unused */,
+             const py::tuple& /* unused */) {
+            TORCH_CHECK(false, "Can not unpickle torch.futures.Future");
+          },
           py::call_guard<py::gil_scoped_release>());
 
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
