@@ -718,11 +718,11 @@ class TestTypePromotion(TestCase):
     def test_integer_addcdiv_deprecated(self, device, dtype):
         t = torch.tensor(1, device=device, dtype=dtype)
 
-        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is deprecated.+'):
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
             torch.addcdiv(t, t, t)
-        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is deprecated.+'):
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
             torch.addcdiv(t, t, t, out=t)
-        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is deprecated.+'):
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported+'):
             t.addcdiv_(t, t)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")

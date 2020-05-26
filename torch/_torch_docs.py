@@ -272,9 +272,9 @@ Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
 multiply the result by the scalar :attr:`value` and add it to :attr:`input`.
 
 .. warning::
-    Integer division with addcdiv is deprecated, and in a future release
+    Integer division with addcdiv is no longer supported, and in a future release
     addcdiv will perform a true division of :attr:`tensor1` and :attr:`tensor2`.
-    The historic addcdiv behavior can be replicated using :func:`floor_divide`
+    The historic addcdiv behavior can be implemented using :func:`floor_divide`
     for integral inputs
     (:attr:`input` + :attr:`value` * :attr:`tensor1` // :attr:`tensor2`)
     and :func:`div` for float inputs
@@ -1416,7 +1416,7 @@ add_docstr(torch.logcumsumexp,
            r"""
 logcumsumexp(input, dim, out=None) -> Tensor
 Returns the logarithm of the cumulative summation of the exponentiation of
-elements of :attr:`input` in the dimension :attr:`dim`. 
+elements of :attr:`input` in the dimension :attr:`dim`.
 
 For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
 
