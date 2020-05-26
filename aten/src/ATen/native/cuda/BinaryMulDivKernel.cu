@@ -24,7 +24,7 @@ void div_kernel_cuda(TensorIterator& iter) {
       });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a / b;
       });
@@ -39,7 +39,7 @@ void mul_kernel_cuda(TensorIterator& iter) {
       return a && b;
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a * b;
       });
