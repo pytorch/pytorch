@@ -2,6 +2,7 @@
 #include <test/cpp/jit/test_base.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -24,12 +25,24 @@ namespace jit {
 
 using namespace torch::jit::fuser;
 
-TensorView* makeDummyTensor(int nDims, DataType dtype = DataType::Float) {
+static TensorView* makeDummyTensor(
+    int nDims,
+    DataType dtype = DataType::Float) {
   std::vector<IterDomain*> dom;
   for (int i = 0; i < nDims; i++)
     dom.push_back(new IterDomain(new Int(0), new Int()));
 
   return new TensorView(new TensorDomain(dom), dtype);
+}
+
+static void checkIntValue(
+    const EvaluationContext* eval_context,
+    const Val* val,
+    int expected_value) {
+  TORCH_CHECK(val->isAnInt());
+  const auto actual_value = ExpressionEvaluator::evaluate(val, eval_context);
+  TORCH_CHECK(actual_value.has_value());
+  TORCH_CHECK(actual_value.value() == expected_value);
 }
 
 // 1. Test cases are void() functions.
@@ -47,6 +60,174 @@ void testGPU_FusionDispatch() {
   TORCH_CHECK(
       ss1.str().compare(ss2.str()) == 0 && ss1.str().compare(ss3.str()) == 0,
       "Error with dispatch system where results differ by passing Float* vs Val* vs Statement*.");
+}
+
+// Evaluate basic scalar operations with constant values
+void testGPU_FusionExprEvalConstants() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  EvaluationContext eval_context(&fusion);
+
+  auto* a = new Int(7);
+  auto* b = new Int(3);
+
+  checkIntValue(&eval_context, add(a, b), 10);
+  checkIntValue(&eval_context, mul(sub(a, b), div(a, b)), 8);
+  checkIntValue(&eval_context, mod(a, b), 1);
+  checkIntValue(&eval_context, ceilDiv(a, b), 3);
+}
+
+// Evaluate basic scalar operations with bound values
+void testGPU_FusionExprEvalBindings() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  EvaluationContext eval_context(&fusion);
+
+  auto* a = new Int();
+  auto* b = new Int();
+  auto* c = add(a, b);
+  auto* d = ceilDiv(add(a, b), b);
+
+  eval_context.bind(a, 7);
+  eval_context.bind(b, 3);
+
+  checkIntValue(&eval_context, c, 10);
+  checkIntValue(&eval_context, sub(a, b), 4);
+  checkIntValue(&eval_context, mod(a, b), 1);
+  checkIntValue(&eval_context, ceilDiv(a, b), 3);
+  checkIntValue(&eval_context, d, 4);
+
+  eval_context.bind(a, 2);
+  eval_context.bind(b, 5);
+
+  checkIntValue(&eval_context, c, 7);
+  checkIntValue(&eval_context, sub(a, b), -3);
+  checkIntValue(&eval_context, mod(a, b), 2);
+  checkIntValue(&eval_context, ceilDiv(a, b), 1);
+  checkIntValue(&eval_context, d, 2);
+}
+
+// Evaluate expressions in a simple IR
+void testGPU_FusionExprEvalBasic() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Create a non-trivial IR
+  TensorView* tv0 = makeDummyTensor(2);
+  TensorView* tv1 = makeDummyTensor(2);
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  TensorView* tv2 = static_cast<TensorView*>(add(tv1, new Float(2.0)));
+  TensorView* tv3 = static_cast<TensorView*>(add(tv0, tv2));
+
+  fusion.addOutput(tv3);
+
+  tv3->split(0, 4);
+
+  tv0->computeAt(tv3, 1);
+  tv1->computeAt(tv3, 1);
+
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::Unroll);
+  tv3->axis(1)->parallelize(ParallelType::Unroll);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // 1. Create an evaluation context
+  EvaluationContext eval_context(&fusion);
+
+  // 2. Bind values
+  //
+  // IMPORTANT:
+  // a. The bindings are only as stable as the Vals are in the fusion graph
+  // b. You must use the original (rootDomain) extents
+  //  (ex. `tv0->getRootDomain()->axis(0)->extent()`
+  //   instead of `tv0->axis(0)->extent()`)
+  //
+  eval_context.bind(tv0->getRootDomain()->axis(0)->extent(), 6);
+  eval_context.bind(tv0->getRootDomain()->axis(1)->extent(), 128);
+  eval_context.bind(tv1->getRootDomain()->axis(0)->extent(), 6);
+  eval_context.bind(tv1->getRootDomain()->axis(1)->extent(), 128);
+
+  // 3. Evaluate and check result values
+  TORCH_CHECK(tv2->domain()->nDims() == 3);
+  checkIntValue(&eval_context, tv2->axis(0)->rawExtent(), 2);
+  checkIntValue(&eval_context, tv2->axis(1)->rawExtent(), 4);
+  checkIntValue(&eval_context, tv2->axis(2)->rawExtent(), 128);
+
+  TORCH_CHECK(tv3->domain()->nDims() == 3);
+  checkIntValue(&eval_context, tv3->axis(0)->rawExtent(), 2);
+  checkIntValue(&eval_context, tv3->axis(1)->rawExtent(), 4);
+  checkIntValue(&eval_context, tv3->axis(2)->rawExtent(), 128);
+}
+
+// Evaluate expressions in a more complex IR
+void testGPU_FusionExprEvalComplex() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = static_cast<TensorView*>(mul(tv0, new Float(-1.0)));
+  TensorView* tv2 = static_cast<TensorView*>(add(tv0, new Float(3.0)));
+  TensorView* tv3 = static_cast<TensorView*>(mul(tv0, new Float(2.0)));
+  TensorView* tv4 = static_cast<TensorView*>(add(tv2, tv1));
+  TensorView* tv5 = static_cast<TensorView*>(add(tv4, tv3));
+  TensorView* tv6 = static_cast<TensorView*>(add(tv0, tv3));
+
+  fusion.addOutput(tv5);
+  fusion.addOutput(tv6);
+
+  tv6->merge(0);
+  tv6->split(0, 128);
+  tv6->split(0, 4);
+  tv6->axis(0)->parallelize(ParallelType::BIDx);
+  tv5->reorder({{-1, 0}});
+  tv0->computeAt(tv3, 1);
+  tv0->computeAt(tv6, 1);
+  tv6->split(0, 5);
+  tv5->merge(0);
+
+  for (Val* val : fusion.vals()) {
+    if (!fusion.hasInput(val) &&
+        val->getValType().value() == ValType::TensorView) {
+      TensorView* tv = static_cast<TensorView*>(val);
+      tv->axis(-1)->parallelize(ParallelType::TIDx);
+    }
+  }
+
+  // 1. Create an evaluation context
+  EvaluationContext eval_context(&fusion);
+
+  // 2. Bind values
+  eval_context.bind(tv0->getRootDomain()->axis(0)->extent(), 129);
+  eval_context.bind(tv0->getRootDomain()->axis(1)->extent(), 127);
+
+  // Evaluate and check extent values
+  TORCH_CHECK(tv0->domain()->nDims() == 2);
+  checkIntValue(&eval_context, tv0->axis(0)->rawExtent(), 129);
+  checkIntValue(&eval_context, tv0->axis(1)->rawExtent(), 127);
+
+  TORCH_CHECK(tv3->domain()->nDims() == 2);
+  checkIntValue(&eval_context, tv3->axis(0)->rawExtent(), 129);
+  checkIntValue(&eval_context, tv3->axis(1)->rawExtent(), 127);
+
+  TORCH_CHECK(tv4->domain()->nDims() == 2);
+  checkIntValue(&eval_context, tv4->axis(0)->rawExtent(), 129);
+  checkIntValue(&eval_context, tv4->axis(1)->rawExtent(), 127);
+
+  TORCH_CHECK(tv5->domain()->nDims() == 1);
+  checkIntValue(&eval_context, tv5->axis(0)->rawExtent(), 16383);
+
+  TORCH_CHECK(tv6->domain()->nDims() == 3);
+  checkIntValue(&eval_context, tv6->axis(0)->rawExtent(), 26);
+  checkIntValue(&eval_context, tv6->axis(1)->rawExtent(), 5);
+  checkIntValue(&eval_context, tv6->axis(2)->rawExtent(), 127);
 }
 
 void testGPU_FusionSimpleArith() {
