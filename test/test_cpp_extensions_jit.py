@@ -146,10 +146,10 @@ class TestCppExtensionJIT(common.TestCase):
             actual_arches = sorted(re.findall(r'sm_\d\d', output))
             expected_arches = ['sm_' + xx for xx in expected_values]
             self.assertEqual(actual_arches, expected_arches,
-                             message="Flags: {},  Actual: {},  Expected: {}\n"
-                                     "Stderr: {}\nOutput: {}".format(
-                                         flags, actual_arches, expected_arches,
-                                         err, output))
+                             msg="Flags: {},  Actual: {},  Expected: {}\n"
+                                 "Stderr: {}\nOutput: {}".format(
+                                     flags, actual_arches, expected_arches,
+                                     err, output))
 
         temp_dir = tempfile.mkdtemp()
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
