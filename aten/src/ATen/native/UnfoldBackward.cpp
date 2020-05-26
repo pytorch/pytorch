@@ -11,13 +11,12 @@ Tensor unfold_backward(
   int64_t size,
   int64_t step
 ) {
-  auto grad_input = at::zeros(input_sizes, grad.options()).contiguous();
-  auto grad_contiguous = grad.contiguous();
+  auto grad_input = at::zeros(input_sizes, grad.options());
 
   unfold_backward_stub(
     grad.device().type(),
     grad_input,
-    grad_contiguous,
+    grad,
     dim, size, step
   );
 

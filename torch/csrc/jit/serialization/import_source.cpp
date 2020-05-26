@@ -358,6 +358,7 @@ struct SourceImporterImpl : public Resolver,
 
     // Module-specific: which attrs are parameters?
     std::unordered_set<std::string> parameter_names;
+    std::unordered_set<std::string> buffer_names;
     // Process statements, splitting things into attribute and method
     // definitions.
     for (const auto& statement : class_def.body()) {
@@ -384,6 +385,14 @@ struct SourceImporterImpl : public Resolver,
               } else if (name == "__annotations__") {
                 // This is to initialize the annotations dict, just ignore.
                 continue;
+              } else if (name == "__buffers__") {
+                TORCH_INTERNAL_ASSERT(
+                    is_module, "Buffers only exist on modules at the moment");
+                const auto buffer_list =
+                    ListLiteral(assign.rhs().get()).inputs();
+                for (const auto& buffer : buffer_list) {
+                  buffer_names.insert(StringLiteral(buffer).text());
+                }
               } else {
                 if (auto fixed_up = attributeAssignmentSpecialHandlingHack(
                         qualified_classname, assign)) {
@@ -439,7 +448,8 @@ struct SourceImporterImpl : public Resolver,
           TORCH_INTERNAL_ASSERT(name != "__parameters__");
           const auto type = type_parser.parseTypeFromExpr(assign.type().get());
           const bool is_parameter = parameter_names.count(name);
-          class_type->addAttribute(name, type, is_parameter);
+          const bool is_buffer = buffer_names.count(name);
+          class_type->addAttribute(name, type, is_parameter, false, is_buffer);
         } break;
         case TK_SUBSCRIPT: {
           const auto name =
@@ -447,7 +457,8 @@ struct SourceImporterImpl : public Resolver,
                   .text();
           const auto type = type_parser.parseTypeFromExpr(assign.rhs().get());
           const bool is_parameter = parameter_names.count(name);
-          class_type->addAttribute(name, type, is_parameter);
+          const bool is_buffer = buffer_names.count(name);
+          class_type->addAttribute(name, type, is_parameter, false, is_buffer);
         }
       }
     }
