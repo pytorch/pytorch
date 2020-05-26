@@ -97,8 +97,8 @@ struct WriteableTensorData {
   size_t sizeInBytes() const {
     return size_;
   }
-  size_t numel() const {
-    return tensor_.storage().numel();
+  size_t nbytes() const {
+    return tensor_.storage().nbytes();
   }
   bool storageHasDeleter() const {
     return tensor_.storage().data_ptr().get_context() != nullptr;

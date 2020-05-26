@@ -474,6 +474,165 @@ elseif(NOT TARGET XNNPACK AND USE_SYSTEM_XNNPACK)
   list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
 endif()
 
+# ---[ Vulkan deps
+if(USE_VULKAN)
+  if(ANDROID)
+    if(NOT ANDROID_NDK)
+      message(FATAL_ERROR "USE_VULKAN requires ANDROID_NDK set")
+    endif()
+
+    # Vulkan from ANDROID_NDK
+    set(VULKAN_INCLUDE_DIR "${ANDROID_NDK}/sources/third-party/vulkan/src/include")
+    message(STATUS "VULKAN_INCLUDE_DIR:${VULKAN_INCLUDE_DIR}")
+
+    set(VULKAN_ANDROID_NDK_WRAPPER_DIR "${ANDROID_NDK}/sources/third_party/vulkan/src/common")
+    message(STATUS "Vulkan_ANDROID_NDK_WRAPPER_DIR:${VULKAN_ANDROID_NDK_WRAPPER_DIR}")
+    set(VULKAN_WRAPPER_DIR "${VULKAN_ANDROID_NDK_WRAPPER_DIR}")
+
+    add_library(
+      VulkanWrapper
+      STATIC
+      ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.h
+      ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.cpp)
+
+    target_include_directories(VulkanWrapper PUBLIC .)
+    target_include_directories(VulkanWrapper PUBLIC "${VULKAN_INCLUDE_DIR}")
+
+    target_link_libraries(VulkanWrapper ${CMAKE_DL_LIBS})
+
+    include_directories(SYSTEM ${VULKAN_WRAPPER_DIR})
+    list(APPEND Caffe2_DEPENDENCY_LIBS VulkanWrapper)
+
+    # Shaderc
+    if(USE_VULKAN_SHADERC_RUNTIME)
+      # Shaderc from ANDROID_NDK
+      set(Shaderc_ANDROID_NDK_INCLUDE_DIR "${ANDROID_NDK}/sources/third_party/shaderc/include")
+      message(STATUS "Shaderc_ANDROID_NDK_INCLUDE_DIR:${Shaderc_ANDROID_NDK_INCLUDE_DIR}")
+
+      find_path(
+        GOOGLE_SHADERC_INCLUDE_DIRS
+        NAMES shaderc/shaderc.hpp
+        PATHS "${Shaderc_ANDROID_NDK_INCLUDE_DIR}")
+
+      set(Shaderc_ANDROID_NDK_LIB_DIR "${ANDROID_NDK}/sources/third_party/shaderc/libs/${ANDROID_STL}/${ANDROID_ABI}")
+      message(STATUS "Shaderc_ANDROID_NDK_LIB_DIR:${Shaderc_ANDROID_NDK_LIB_DIR}")
+
+      find_library(
+        GOOGLE_SHADERC_LIBRARIES
+        NAMES shaderc
+        PATHS "${Shaderc_ANDROID_NDK_LIB_DIR}")
+
+      # Shaderc in NDK is not prebuilt
+      if(NOT GOOGLE_SHADERC_LIBRARIES)
+        set(NDK_SHADERC_DIR "${ANDROID_NDK}/sources/third_party/shaderc")
+        set(NDK_BUILD_CMD "${ANDROID_NDK}/ndk-build")
+
+        execute_process(
+          COMMAND ${NDK_BUILD_CMD}
+          NDK_PROJECT_PATH=${NDK_SHADERC_DIR}
+          APP_BUILD_SCRIPT=${NDK_SHADERC_DIR}/Android.mk
+          APP_PLATFORM=${ANDROID_PLATFORM}
+          APP_STL=${ANDROID_STL}
+          APP_ABI=${ANDROID_ABI}
+          libshaderc_combined -j8
+          WORKING_DIRECTORY "${NDK_SHADERC_DIR}"
+          RESULT_VARIABLE error_code)
+
+        if(error_code)
+          message(FATAL_ERROR "Failed to build ANDROID_NDK shaderc error_code:${error_code}")
+        else()
+          unset(GOOGLE_SHADERC_LIBRARIES CACHE)
+          find_library(
+            GOOGLE_SHADERC_LIBRARIES
+            NAMES shaderc
+            HINTS "${Shaderc_ANDROID_NDK_LIB_DIR}")
+        endif()
+      endif(NOT GOOGLE_SHADERC_LIBRARIES)
+
+      if(GOOGLE_SHADERC_INCLUDE_DIRS AND GOOGLE_SHADERC_LIBRARIES)
+        message(STATUS "shaderc FOUND include:${GOOGLE_SHADERC_INCLUDE_DIRS}")
+        message(STATUS "shaderc FOUND libs:${GOOGLE_SHADERC_LIBRARIES}")
+        set(Shaderc_FOUND TRUE)
+      endif()
+
+      include_directories(SYSTEM ${GOOGLE_SHADERC_INCLUDE_DIRS})
+      list(APPEND Caffe2_DEPENDENCY_LIBS ${GOOGLE_SHADERC_LIBRARIES})
+    endif(USE_VULKAN_SHADERC_RUNTIME)
+  else()
+    # USE_VULKAN AND NOT ANDROID
+    if(NOT DEFINED ENV{VULKAN_SDK})
+      message(FATAL_ERROR "USE_VULKAN requires environment var VULKAN_SDK set")
+    endif()
+    message(STATUS "VULKAN_SDK:$ENV{VULKAN_SDK}")
+
+    set(VULKAN_INCLUDE_DIR "$ENV{VULKAN_SDK}/source/Vulkan-Headers/include")
+    message(STATUS "VULKAN_INCLUDE_DIR:${VULKAN_INCLUDE_DIR}")
+
+    if(USE_VULKAN_WRAPPER)
+      # Vulkan wrapper from VULKAN_SDK
+      set(VULKAN_SDK_WRAPPER_DIR "$ENV{VULKAN_SDK}/source/Vulkan-Tools/common")
+      message(STATUS "Vulkan_SDK_WRAPPER_DIR:${VULKAN_SDK_WRAPPER_DIR}")
+      set(VULKAN_WRAPPER_DIR "${VULKAN_SDK_WRAPPER_DIR}")
+
+      add_library(
+        VulkanWrapper
+        STATIC
+        ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.h
+        ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.cpp)
+
+      target_include_directories(VulkanWrapper PUBLIC .)
+      target_include_directories(VulkanWrapper PUBLIC "${VULKAN_INCLUDE_DIR}")
+
+      target_link_libraries(VulkanWrapper ${CMAKE_DL_LIBS})
+
+      include_directories(SYSTEM ${VULKAN_WRAPPER_DIR})
+      list(APPEND Caffe2_DEPENDENCY_LIBS VulkanWrapper)
+    else(USE_VULKAN_WRAPPER)
+      find_library(VULKAN_LIBRARY
+        NAMES vulkan
+        PATHS
+        "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/lib")
+
+      if(NOT VULKAN_LIBRARY)
+        message(FATAL_ERROR "USE_VULKAN: Vulkan library not found")
+      endif()
+
+      message(STATUS "VULKAN_LIBRARY:${VULKAN_LIBRARY}")
+      message(STATUS "VULKAN_INCLUDE_DIR:${VULKAN_INCLUDE_DIR}")
+
+      include_directories(SYSTEM ${VULKAN_INCLUDE_DIR})
+      list(APPEND Caffe2_DEPENDENCY_LIBS ${VULKAN_LIBRARY})
+    endif(USE_VULKAN_WRAPPER)
+
+    if(USE_VULKAN_SHADERC_RUNTIME)
+      # shaderc from VULKAN_SDK
+      find_path(
+          GOOGLE_SHADERC_INCLUDE_DIRS
+          NAMES shaderc/shaderc.hpp
+          PATHS $ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/include)
+
+      find_library(
+          GOOGLE_SHADERC_LIBRARIES
+          NAMES shaderc_combined
+          PATHS $ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/lib)
+
+      find_package_handle_standard_args(
+          Shaderc
+          DEFAULT_MSG
+          GOOGLE_SHADERC_INCLUDE_DIRS
+          GOOGLE_SHADERC_LIBRARIES)
+      if(NOT Shaderc_FOUND)
+        message(FATAL_ERROR "USE_VULKAN: Shaderc not found in VULKAN_SDK")
+      else()
+        message(STATUS "shaderc FOUND include:${GOOGLE_SHADERC_INCLUDE_DIRS}")
+        message(STATUS "shaderc FOUND libs:${GOOGLE_SHADERC_LIBRARIES}")
+      endif()
+      include_directories(SYSTEM ${GOOGLE_SHADERC_INCLUDE_DIRS})
+      list(APPEND Caffe2_DEPENDENCY_LIBS ${GOOGLE_SHADERC_LIBRARIES})
+    endif(USE_VULKAN_SHADERC_RUNTIME)
+  endif()
+endif()
+
 # ---[ gflags
 if(USE_GFLAGS)
   include(${CMAKE_CURRENT_LIST_DIR}/public/gflags.cmake)
@@ -596,6 +755,13 @@ if(USE_FBGEMM)
   if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
     message(WARNING
       "A compiler with AVX512 support is required for FBGEMM. "
+      "Not compiling with FBGEMM. "
+      "Turn this warning off by USE_FBGEMM=OFF.")
+    set(USE_FBGEMM OFF)
+  endif()
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(WARNING
+      "x64 operating system is required for FBGEMM. "
       "Not compiling with FBGEMM. "
       "Turn this warning off by USE_FBGEMM=OFF.")
     set(USE_FBGEMM OFF)
@@ -881,9 +1047,11 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-find_package(pybind11 CONFIG)
-if(NOT pybind11_FOUND)
-  find_package(pybind11)
+if(NOT ${pybind11_PREFER_third_party})
+  find_package(pybind11 CONFIG)
+  if(NOT pybind11_FOUND)
+    find_package(pybind11)
+  endif()
 endif()
 
 if(pybind11_FOUND)
@@ -894,6 +1062,9 @@ else()
     install(DIRECTORY ${pybind11_INCLUDE_DIRS}
             DESTINATION ${CMAKE_INSTALL_PREFIX}
             FILES_MATCHING PATTERN "*.h")
+    set(pybind11_PREFER_third_party ON CACHE BOOL
+        "Use the third_party/pybind11 submodule, instead of looking for system
+        installation of pybind11")
 endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
@@ -1125,7 +1296,12 @@ if(USE_ROCM)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
+endif()
 
+# ---[ ROCm
+if(USE_ROCM)
+  # We check again for USE_ROCM because it might have been set to OFF
+  # in the if above
   include_directories(SYSTEM ${HIP_PATH}/include)
   include_directories(SYSTEM ${ROCBLAS_PATH}/include)
   include_directories(SYSTEM ${ROCFFT_PATH}/include)
@@ -1572,6 +1748,15 @@ if(NOT INTERN_BUILD_MOBILE)
 
   set(AT_MKLDNN_ENABLED 0)
   set(CAFFE2_USE_MKLDNN OFF)
+  if(USE_MKLDNN)
+    if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+      message(WARNING
+        "x64 operating system is required for MKLDNN. "
+        "Not compiling with MKLDNN. "
+        "Turn this warning off by USE_MKLDNN=OFF.")
+      set(USE_MKLDNN OFF)
+    endif()
+  endif()
   if(USE_MKLDNN)
     include(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
     if(MKLDNN_FOUND)

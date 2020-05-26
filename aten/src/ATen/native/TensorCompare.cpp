@@ -115,13 +115,9 @@ Tensor isfinite(const Tensor& self) {
 
 bool is_nonzero(const Tensor& self) {
   auto n = self.numel();
-  AT_ASSERT(n >= 0);
-  if (n == 0) {
-    AT_ERROR("bool value of Tensor with no values is ambiguous");
-  }
-  if (n > 1) {
-    AT_ERROR("bool value of Tensor with more than one value is ambiguous");
-  }
+  TORCH_CHECK(n != 0, "Boolean value of Tensor with no values is ambiguous");
+  TORCH_CHECK(n < 2, "Boolean value of Tensor with more than one value is ambiguous");
+
   Scalar localScalar = self.item();
   if (localScalar.isFloatingPoint()) {
     return localScalar.to<double>() != 0;
@@ -132,18 +128,17 @@ bool is_nonzero(const Tensor& self) {
   } else if (localScalar.isBoolean()) {
     return localScalar.to<bool>();
   }
-  AT_ERROR("expected non-Tensor backend scalar");
+  TORCH_INTERNAL_ASSERT(false, "Expected non-Tensor backend scalar");
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(condition.device() == self.device() && self.device() == other.device(),
-              "expected condition, x and y to be on the same device, but condition is on ",
+              "Expected condition, x and y to be on the same device, but condition is on ",
               condition.device(), " and x and y are on ", self.device(), " and ", other.device(),
               " respectively");
-  if (condition.scalar_type() != ScalarType::Byte && condition.scalar_type() != ScalarType::Bool) {
-    AT_ERROR("Expected condition to have ScalarType Byte, but got ScalarType ",
-                  toString(condition.scalar_type()));
-  }
+  TORCH_CHECK(condition.scalar_type() == ScalarType::Byte || condition.scalar_type() == ScalarType::Bool,
+              "Expected condition to have ScalarType Byte, but got ScalarType ",
+              toString(condition.scalar_type()));
   Tensor b_condition, b_self, b_other;
   std::tie(b_condition, b_self, b_other) = expand_outplace(condition, self, other, "where");
   return at::_s_where(b_condition, b_self, b_other);
@@ -259,20 +254,6 @@ std::tuple<Tensor&,Tensor&> max_out(Tensor& max, Tensor& max_indices,
   return result;
 }
 
-std::tuple<Tensor &,Tensor &> _min_out_cpu(Tensor& min, Tensor& min_indices,
-                                        const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
-  min_stub(kCPU, min, min_indices, self, dim, keepdim);
-  return std::tuple<Tensor &,Tensor &>{min, min_indices};
-}
-
-std::tuple<Tensor, Tensor> _min_cpu(const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
-  Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
-  Tensor min = at::empty({0}, self.options());
-  return at::native::_min_out_cpu(min, min_indices, self, dim, keepdim);
-}
-
 std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
   TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
   Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
@@ -305,7 +286,8 @@ static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indic
     min_indices.resize_({}).fill_(0);
     return std::forward_as_tuple(min, min_indices);
   } else {
-    return at::_min_out(min, min_indices, self, dim, keepdim);
+    min_stub(self.device().type(), min, min_indices, self, dim, keepdim);
+    return std::tuple<Tensor &,Tensor &>{min, min_indices};
   }
 }
 

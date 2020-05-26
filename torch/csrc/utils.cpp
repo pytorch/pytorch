@@ -15,6 +15,9 @@
 #include <TH/THGenerateAllTypes.h>
 
 #include <torch/csrc/generic/utils.cpp>
+#include <TH/THGenerateComplexTypes.h>
+
+#include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateHalfType.h>
 
 #include <torch/csrc/generic/utils.cpp>

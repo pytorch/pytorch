@@ -12,6 +12,7 @@ def _faulty_process_group_construct_rpc_backend_options_handler(
     init_method,
     num_send_recv_threads,
     messages_to_fail,
+    messages_to_delay,
     num_fail_sends,
     **kwargs
 ):
@@ -22,6 +23,7 @@ def _faulty_process_group_construct_rpc_backend_options_handler(
         init_method=init_method,
         num_send_recv_threads=num_send_recv_threads,
         messages_to_fail=messages_to_fail,
+        messages_to_delay=messages_to_delay,
         num_fail_sends=num_fail_sends,
     )
 
@@ -66,6 +68,7 @@ def _faulty_process_group_init_backend_handler(
             rpc_backend_options.num_send_recv_threads,
             timedelta(seconds=rpc_backend_options.rpc_timeout),
             rpc_backend_options.messages_to_fail,
+            rpc_backend_options.messages_to_delay,
             rpc_backend_options.num_fail_sends,
         )
     except Exception as ex:
