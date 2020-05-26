@@ -38,7 +38,6 @@
 <script>
   if (location.hash) { // e.g., #torch.flip
     var anchorName = location.hash.substr(1); // remove the leading "#"
-    console.log(document.getElementById(anchorName))
     if (document.getElementById(anchorName) === null) { // anchor not found
       window.location.replace("generated/" + anchorName + ".html#" + anchorName);
     }
