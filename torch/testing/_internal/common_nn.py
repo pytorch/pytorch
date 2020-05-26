@@ -4482,7 +4482,7 @@ class ModuleTest(TestBase):
                 grad = test_case._backward(module, i, out, go)
 
                 test_case.assertEqual(out, output)
-                test_case.assertEqual(grad, d_input, 1e-4)
+                test_case.assertEqual(grad, d_input, atol=1e-4, rtol=0)
                 test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
 
     def test_cuda(self, test_case):
@@ -4507,7 +4507,7 @@ class ModuleTest(TestBase):
             cpu_output = test_case._forward(cpu_module, cpu_input)
             gpu_output = test_case._forward(gpu_module, gpu_input)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_output, gpu_output, self.precision)
+            test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
 
             # Run backwards on CPU and GPU and compare results
             for _ in range(5):
@@ -4516,9 +4516,9 @@ class ModuleTest(TestBase):
                 cpu_gradInput = test_case._backward(cpu_module, cpu_input, cpu_output, cpu_gradOutput)
                 gpu_gradInput = test_case._backward(gpu_module, gpu_input, gpu_output, gpu_gradOutput)
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, self.precision)
+                test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
                 for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
-                    test_case.assertEqual(cpu_d_p, gpu_d_p, self.precision)
+                    test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
             # Run double-backwards on CPU and GPU and compare results
             if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
@@ -4542,7 +4542,7 @@ class ModuleTest(TestBase):
 
                 for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
                     # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    test_case.assertEqualIgnoreType(cpu_d_i, gpu_d_i, self.precision)
+                    test_case.assertEqualIgnoreType(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0)
 
                 # We mix output into the second backwards computation so that
                 # torch.autograd.grad doesn't complain that some inputs
@@ -4557,10 +4557,10 @@ class ModuleTest(TestBase):
                     (gpu_input, gpu_gradOutput) + tuple(gpu_module.parameters()),
                     retain_graph=True)
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, self.precision)
+                test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
                 for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
                     # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, self.precision)
+                    test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
             self.test_noncontig(test_case, gpu_module, gpu_input)
         except NotImplementedError:
@@ -4625,12 +4625,12 @@ class CriterionTest(TestBase):
 
             cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target)
             gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target)
-            test_case.assertEqual(cpu_output, gpu_output, 4e-4)
+            test_case.assertEqual(cpu_output, gpu_output, atol=4e-4, rtol=0)
 
             gradOutput = torch.randn(())
             cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, gradOutput)
             gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, gradOutput)
-            test_case.assertEqual(cpu_gradInput, gpu_gradInput, 4e-4)
+            test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=4e-4, rtol=0)
         except NotImplementedError:
             pass
 
@@ -4882,12 +4882,14 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
             gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
             # dtype can be None, so set precision in this way instead of a precision map
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_output, gpu_output, 1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4)
+            test_case.assertEqualIgnoreType(cpu_output, gpu_output,
+                                            atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
 
             cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
             gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, 1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4)
+            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
+                                            atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
         except NotImplementedError:
             pass
 
