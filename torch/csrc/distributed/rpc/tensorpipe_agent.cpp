@@ -488,7 +488,7 @@ void TensorPipeAgent::join() {
 
 void TensorPipeAgent::shutdownImpl() {
   LOG(INFO) << "Shutting down TensorPipeAgent on node "
-            << RpcAgent::getWorkerInfo().id_;
+            << RpcAgent::getWorkerInfo().name_;
   threadPool_.waitWorkComplete();
 
   // Join the Timeout Thread
