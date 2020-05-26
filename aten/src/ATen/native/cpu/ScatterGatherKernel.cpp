@@ -67,7 +67,7 @@ struct _cpu_scatter_gather_dim_loop {
     scalar_t* src_data, int64_t src_dim_stride,
     int64_t dim, int64_t index_dim_size,
     int64_t index_upper_bound,
-    const func_t& f
+    func_t& f
   ) {
 
     for (int64_t i = 0; i < index_dim_size; ++i) {
@@ -94,7 +94,7 @@ struct _cpu_scatter_gather_dim_loop {
     Scalar value,
     int64_t dim, int64_t index_dim_size,
     int64_t index_upper_bound,
-    const func_t& f
+    func_t& f
   ) {
 
     for (int64_t i = 0; i < index_dim_size; ++i) {
@@ -121,7 +121,7 @@ struct cpu_scatter_gather_base_kernel {
   void operator()(Tensor& self, int64_t dim,
     const Tensor& index, Scalar& value,
     const std::string& method_name,
-    bool serial_exec, const func_t& kernel_func) {
+    bool serial_exec, func_t& kernel_func) {
     // no-op if index is empty
     if (index.numel() == 0) {
       return;
@@ -227,7 +227,7 @@ struct cpu_scatter_gather_base_kernel {
     const Tensor& index, const Tensor& src,
     const std::string& method_name,
     bool serial_exec,
-    const func_t& kernel_func) {
+    func_t& kernel_func) {
     // no-op if index is empty
     if (index.numel() == 0) {
       return;
