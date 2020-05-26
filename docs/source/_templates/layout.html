@@ -35,5 +35,15 @@
   gtag('config', 'UA-117752657-2');
 </script>
 
+<script>
+  if (location.hash) { // e.g., #torch.flip
+    var anchorName = location.hash.substr(1); // remove the leading "#"
+    console.log(document.getElementById(anchorName))
+    if (document.getElementById(anchorName) === null) { // anchor not found
+      window.location.replace("generated/" + anchorName + ".html#" + anchorName);
+    }
+  }
+</script>
+
 <img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
 {% endblock %}
