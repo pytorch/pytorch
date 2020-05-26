@@ -9,15 +9,27 @@
 #endif
 #ifdef TP_ENABLE_SHM
 #include <tensorpipe/transport/shm/context.h>
-#include <unistd.h>
 #endif
 #include <tensorpipe/transport/uv/context.h>
+
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
 constexpr long kToMilliseconds = 1000;
+// This large time duration is for the timeoutMapCV_. We cannot use
+// std::chrono::time_point::max() due to a known overflow-related bug. Here is
+// an explanation of the bug:
+// https://stackoverflow.com/questions/42638847/what-is-the-maximum-value-i-can-pass-to-stdthreadsleep-for-and-sleep-until
+constexpr auto kLargeTimeDuration = std::chrono::hours(10000);
 
 const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
 const std::string kThreadPoolSize = "agent.thread_pool_size";
@@ -112,7 +124,7 @@ void TensorPipeAgent::startImpl() {
   // Ideally tensorpipe could provide a helper to get IP address for given
   // device interface or host names, or return the IP address of the default
   // host name. https://github.com/pytorch/pytorch/issues/36715
-  std::vector<std::string> addresses = {"tcp://127.0.0.1"};
+  std::vector<std::string> addresses = {"tcp://" + getDefaultIPAddress()};
 #ifdef TP_ENABLE_SHM
   addresses.push_back(createUniqueShmAddr());
 #endif
@@ -131,6 +143,9 @@ void TensorPipeAgent::startImpl() {
         std::string((const char*)nodeAddrData.data(), nodeAddrData.size());
     workerNameToURL_.insert({name, nodeAddrStr});
   }
+
+  // Start the Timeout Thread
+  timeoutThread_ = std::thread(&TensorPipeAgent::pollTimeoutRpcs, this);
 
   listener_->accept([this](
                         const tensorpipe::Error& error,
@@ -286,7 +301,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 std::shared_ptr<FutureMessage> TensorPipeAgent::send(
     const WorkerInfo& toWorkerInfo,
     Message&& requestMessage,
-    const float /* unused */) {
+    const float rpcTimeoutSeconds) {
   TORCH_CHECK(
       requestMessage.isRequest(),
       "TensorPipeAgent::send(..) is only for sending requests.");
@@ -320,9 +335,34 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   pendingResponseMessage[requestMessage.id()] = futureResponseMessage;
 
   ++clientActiveCalls_;
+  // Use the default RPC timeout if no timeout is specified for this send call
+  auto timeout = rpcTimeoutSeconds == kUnsetRpcTimeout
+      ? getRpcTimeout()
+      : std::chrono::milliseconds(
+            static_cast<int>(rpcTimeoutSeconds * kToMilliseconds));
+
+  // We only add to the timeoutMap_ if the timeout is not 0. Per our
+  // documentation, a user-provided timeout of 0 indicates the RPC should never
+  // expire (infinite timeout), so there is no need to track it in the
+  // timeoutMap_.
+  if (timeout.count() != 0) {
+    // Compute the expiration time for this message based on the timeout
+    auto expirationTime = computeRpcMessageExpiryTime(timeout);
+
+    // Add the Future to the right vector in the timeoutMap_
+    auto& timeoutFuturesVector = timeoutMap_[expirationTime];
+    timeoutFuturesVector.emplace_back(futureResponseMessage);
+    timeoutThreadCV_.notify_one();
+  }
 
   // Don't need to hold lock while calling tensorpipe API.
   lock.unlock();
+
+  futureResponseMessage->addCallback([this]() {
+    // Decrease the callcount through a callback so it is only decremented once
+    // per future.
+    --clientActiveCalls_;
+  });
 
   pipeWrite(
       clientPipe.pipe_,
@@ -331,7 +371,6 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
           const tensorpipe::Error& error) {
         if (error) {
           LOG(WARNING) << "client write error: " << error.what();
-          --clientActiveCalls_;
           futureResponseMessage->setError(error.what());
           return;
         }
@@ -347,7 +386,6 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                 // Flushing all future messages belonging to this pipe due to
                 // error state.
                 for (auto& p : clientPipe.pendingResponseMessage_) {
-                  --clientActiveCalls_;
                   std::shared_ptr<FutureMessage>& futureMessage = p.second;
                   futureMessage->setError(error.what());
                 }
@@ -379,7 +417,6 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                   [this,
                    futureResponseMessage,
                    responseMessage{std::move(responseMessage)}]() mutable {
-                    --clientActiveCalls_;
                     if (responseMessage.type() == MessageType::EXCEPTION) {
                       futureResponseMessage->setError(std::string(
                           responseMessage.payload().begin(),
@@ -395,6 +432,52 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   return futureResponseMessage;
 }
 
+void TensorPipeAgent::pollTimeoutRpcs() {
+  while (rpcAgentRunning_.load()) {
+    std::unique_lock<std::mutex> lock(timeoutMapMutex_);
+
+    // We sleep until the earliest expiring RPC in the timeoutMap_. We must
+    // also ensure that we sleep while the map is empty, and we exit sleeping
+    // if the RPC Agent has been shutdown.
+    for (;;) {
+      if (!rpcAgentRunning_.load()) {
+        return;
+      }
+
+      steady_clock_time_point earliestTimeout =
+          std::chrono::steady_clock::now() + kLargeTimeDuration;
+
+      if (std::chrono::steady_clock::now() >= earliestTimeout) {
+        break;
+      }
+      if (!timeoutMap_.empty()) {
+        earliestTimeout = timeoutMap_.begin()->first;
+      }
+      timeoutThreadCV_.wait_until(lock, earliestTimeout);
+    }
+
+    // Move all these futures to a separate vector so we can process them
+    // outside the lock.
+    std::vector<std::shared_ptr<FutureMessage>> timedOutFutures =
+        std::move(timeoutMap_.begin()->second);
+    // We can safely remove this key from the timeoutMap_ since all these
+    // futures will be processed.
+    timeoutMap_.erase(timeoutMap_.begin());
+
+    lock.unlock();
+
+    // Set an error on futures added to the timedOutFutures vector. We do this
+    // outside the lock to prevent potential lock-order-inversions by callbacks
+    // triggered by the serError call.
+    for (const auto& future : timedOutFutures) {
+      std::string errorMsg = c10::str(
+          "RPC ran for more than set timeout and will now be marked with an error");
+      // Using setErrorIfNeeded so completed futures are ignored.
+      future->setErrorIfNeeded(errorMsg);
+    }
+  }
+}
+
 // TODO: Remove sync()
 void TensorPipeAgent::sync() {}
 
@@ -405,6 +488,12 @@ void TensorPipeAgent::join() {
 
 void TensorPipeAgent::shutdownImpl() {
   threadPool_.waitWorkComplete();
+
+  // Join the Timeout Thread
+  timeoutThreadCV_.notify_one();
+  if (timeoutThread_.joinable()) {
+    timeoutThread_.join();
+  }
   // TODO: context_->join() is not absolutely ready yet.
   // NOTE: context_->join() will wait for available RPC message to be
   //       read or written, and wait for the remaining unavailable ones
@@ -514,6 +603,65 @@ void TensorPipeAgent::trackNetworkError(
   networkData_[destWorkerName].numCalls++;
   networkData_[destWorkerName].totalSentBytes += requestSize;
   networkData_[destWorkerName].totalErrors++;
+}
+
+std::string TensorPipeAgent::getDefaultIPAddress() {
+  std::string defaultIP = "127.0.0.1";
+
+  std::array<char, NI_MAXHOST> hostname{};
+  int rv = gethostname(hostname.data(), NI_MAXHOST);
+  if (rv != 0) {
+    LOG(WARNING) << "Unable to get local hostname. Falling back to "
+                 << "bind with " << defaultIP;
+    return defaultIP;
+  }
+
+  struct addrinfo hints {};
+  memset(&hints, 0, sizeof hints);
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_protocol = IPPROTO_TCP;
+  struct addrinfo* servinfo;
+  rv = getaddrinfo(hostname.data(), nullptr, &hints, &servinfo);
+  if (rv != 0) {
+    LOG(WARNING) << "Get address info error: " << gai_strerror(rv)
+                 << ". Falling back to bind with " << defaultIP;
+    return defaultIP;
+  }
+
+  // Loop through all the results and pick up the first we can bind.
+  for (struct addrinfo* p = servinfo; p != nullptr; p = p->ai_next) {
+    int fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+    if (fd == -1) {
+      continue;
+    }
+    int bind_rv = bind(fd, p->ai_addr, p->ai_addrlen);
+    if (bind_rv == -1) {
+      close(fd);
+      continue;
+    }
+    close(fd);
+
+    if (p->ai_family == AF_INET6) {
+      std::string ipv6(INET6_ADDRSTRLEN, '\0');
+      struct sockaddr_in6* h = (struct sockaddr_in6*)p->ai_addr;
+      inet_ntop(AF_INET6, &h->sin6_addr, (char*)ipv6.data(), INET6_ADDRSTRLEN);
+      freeaddrinfo(servinfo);
+      return ipv6;
+    } else if (p->ai_family == AF_INET) {
+      std::string ipv4(INET_ADDRSTRLEN, '\0');
+      struct sockaddr_in* h = (struct sockaddr_in*)p->ai_addr;
+      inet_ntop(AF_INET, &h->sin_addr, (char*)ipv4.data(), INET_ADDRSTRLEN);
+      freeaddrinfo(servinfo);
+      return ipv4;
+    }
+  }
+
+  freeaddrinfo(servinfo);
+
+  LOG(WARNING) << "TensorPipe agent didn't find associated IP address with "
+               << hostname.data() << ". Using " << defaultIP << " to bind";
+  return defaultIP;
 }
 
 } // namespace rpc
