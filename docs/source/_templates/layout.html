@@ -36,12 +36,15 @@
 </script>
 
 <script>
-  if (location.hash) { // e.g., #torch.flip
-    var anchorName = location.hash.substr(1); // remove the leading "#"
-    if (document.getElementById(anchorName) === null) { // anchor not found
-      window.location.replace("generated/" + anchorName + ".html#" + anchorName);
+  function redirectAnchor() {
+    if (location.hash) { // e.g., #torch.flip
+      var anchorName = location.hash.substr(1); // remove the leading "#"
+      if (document.getElementById(anchorName) === null) { // anchor not found
+        window.location.replace("generated/" + anchorName + ".html#" + anchorName);
+      }
     }
   }
+  window.onhashchange = redirectAnchor;
 </script>
 
 <img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
