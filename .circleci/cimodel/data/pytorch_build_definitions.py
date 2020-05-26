@@ -221,12 +221,14 @@ def instantiate_configs():
 
         if cuda_version in ["9.2", "10", "10.1", "10.2"]:
             # TODO The gcc version is orthogonal to CUDA version?
-            cuda_gcc_version = fc.find_prop("cuda_gcc_override") or "gcc7"
-            parms_list.append(cuda_gcc_version)
+            parms_list.append("gcc7")
 
         is_libtorch = fc.find_prop("is_libtorch") or False
         is_important = fc.find_prop("is_important") or False
         parallel_backend = fc.find_prop("parallel_backend") or None
+        build_only = fc.find_prop("build_only") or False
+        if build_only and restrict_phases is None:
+            restrict_phases = ["build"]
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":

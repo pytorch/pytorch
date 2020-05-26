@@ -73,6 +73,14 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
         ):
             _build_faulty_backend_options(self, faulty_messages, messages_to_delay)
 
+        if (
+            rpc.backend_registry.backend_registered("TENSORPIPE")
+            and self.rpc_backend
+            == rpc.backend_registry.BackendType.TENSORPIPE
+        ):
+            TEST_CONFIG.rpc_backend_name = "TENSORPIPE"
+            _build_tensorpipe_backend_options()
+
         if setup_rpc:
             rpc.init_rpc(
                 name="worker%d" % self.rank,
@@ -125,6 +133,11 @@ def _build_faulty_backend_options(faulty_agent_fixture, faulty_messages, message
         messages_to_delay=messages_to_delay,
     )
 
+def _build_tensorpipe_backend_options():
+    TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
+        test_object.rpc_backend,
+        init_method=test_object.init_method,
+    )
 
 def noop():
     pass

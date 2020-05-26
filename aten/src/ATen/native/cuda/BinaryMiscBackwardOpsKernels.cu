@@ -3,6 +3,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/cuda/zmath.cuh>
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
@@ -20,11 +21,22 @@ void sigmoid_backward_kernel_cuda(TensorIterator& iter) {
 }
 
 void tanh_backward_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "tanh_backward_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return a * (scalar_t(1.) - b * b);
+  if (at::isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cuda", [&] {
+      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+      gpu_kernel(iter, []GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
+        return a * (thrust_t{1., 0} - b * b);
+      });
     });
-  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "tanh_backward_cuda", [&]() {
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "tanh_backward_cuda", [&] {
+        gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+          return a * (scalar_t(1.) - b * b);
+        });
+      });
+    });
+  }
 }
 
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel_cuda);
