@@ -81,7 +81,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
           reduction == at::Reduction::Mean
           );
       THCudaCheck(cudaGetLastError());
-      THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, scalar_t>::to(THCTensor_(sumall)(state, output_tmp)));
+      THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, scalar_t>::to(THTensor_wrap(output_tmp).sum().item<scalar_t>()));
       THCTensor_(free)(state, output_tmp);
     }
     else

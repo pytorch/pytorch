@@ -2,8 +2,6 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathReduce.h"
 #else
 
-THC_API accreal THCTensor_(sumall)(THCState *state, THCTensor *self);
-
 THC_API void THCTensor_(min)(THCState *state,
                              THCTensor *values,
                              THCudaLongTensor *indices,

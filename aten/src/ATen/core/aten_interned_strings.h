@@ -134,7 +134,6 @@ _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
 _(aten, _sum) \
 _(aten, _sum_cuda) \
-_(aten, _sumall) \
 _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_backward) \
