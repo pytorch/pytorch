@@ -9,10 +9,7 @@
 
 namespace c10 {
 
-#ifdef _MSC_VER
-  C10_API
-#endif
-enum class DebugInfoKind : uint8_t {
+enum class C10_API_ENUM DebugInfoKind : uint8_t {
   PRODUCER_INFO = 0,
   MOBILE_RUNTIME_INFO,
   PROFILER_STATE,
