@@ -80,6 +80,7 @@ TensorPipeAgent::TensorPipeAgent(
     std::string selfName,
     worker_id_t selfId,
     int worldSize,
+    std::shared_ptr<c10d::ProcessGroup> processGroup,
     TensorPipeRpcBackendOptions opts)
     : RpcAgent(
           WorkerInfo(std::move(selfName), selfId),
@@ -90,7 +91,8 @@ TensorPipeAgent::TensorPipeAgent(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
       addressStore_(std::move(addressStore)),
       worldSize_(worldSize),
-      opts_(std::move(opts)) {
+      opts_(std::move(opts)),
+      processGroup_(std::move(processGroup)) {
   collectNames();
 
   // Initialize the time-series metrics tracking map
@@ -327,14 +329,14 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   ClientPipe& clientPipe = it->second;
   auto& pendingResponseMessage = clientPipe.pendingResponseMessage_;
 
-  auto futureResponseMessage = std::make_shared<WrappedFutureMessage>();
+  auto futureResponseMessage = std::make_shared<AtomicFutureMessage>();
   requestMessage.setId(nextMessageID_++);
   pendingResponseMessage[requestMessage.id()] = futureResponseMessage;
 
   futureResponseMessage->futMsg.addCallback([this]() {
     TORCH_INTERNAL_ASSERT(
         this->threadPool_.inThreadPool(),
-        "Future marked completed from outside the thread pool");
+        "Future marked complete from outside the thread pool");
   });
 
   increaseCallCount(clientActiveCalls_);
@@ -361,24 +363,14 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   // Don't need to hold lock while calling tensorpipe API.
   lock.unlock();
 
-  futureResponseMessage->futMsg.addCallback([this]() {
-    // Decrease the callcount through a callback so it is only decremented once
-    // per future.
-    decreaseCallCount(clientActiveCalls_);
-  });
-
   pipeWrite(
       clientPipe.pipe_,
       std::move(requestMessage),
       [this, &clientPipe, futureResponseMessage](
-          const tensorpipe::Error& error) {
+          const tensorpipe::Error& error) mutable {
         if (error) {
           LOG(WARNING) << "client write error: " << error.what();
-          if (!futureResponseMessage->isComplete.test_and_set()) {
-            threadPool_.run([futureResponseMessage, errorMsg{error.what()}]() {
-              futureResponseMessage->futMsg.setError(errorMsg);
-            });
-          }
+          markFutureWithError(std::move(futureResponseMessage), error.what());
           return;
         }
 
@@ -397,21 +389,16 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                   std::swap(clientPipe.pendingResponseMessage_, pendingMsgs);
                   clientPipe.readError_ = true;
                 }
+                std::string errorMsg = error.what();
                 for (auto& p : pendingMsgs) {
-                  std::shared_ptr<WrappedFutureMessage>& futureMessage =
-                      p.second;
-                  if (!futureMessage->isComplete.test_and_set()) {
-                    threadPool_.run([futureMessage, errorMsg{error.what()}]() {
-                      futureMessage->futMsg.setError(errorMsg);
-                    });
-                  }
+                  markFutureWithError(std::move(p.second), errorMsg);
                 }
                 return;
               }
 
               // Identify future response message by message ID
               uint64_t messageId = responseMessage.id();
-              std::shared_ptr<WrappedFutureMessage> futureResponseMessage;
+              std::shared_ptr<AtomicFutureMessage> futureResponseMessage;
               {
                 std::lock_guard<std::mutex> lock(mutex_);
                 // A read error will lead all following callbacks to be
@@ -428,20 +415,16 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                 clientPipe.pendingResponseMessage_.erase(it);
               }
 
-              if (!futureResponseMessage->isComplete.test_and_set()) {
-                threadPool_.run(
-                    [this,
-                     futureResponseMessage,
-                     responseMessage{std::move(responseMessage)}]() mutable {
-                      if (responseMessage.type() == MessageType::EXCEPTION) {
-                        futureResponseMessage->futMsg.setError(std::string(
-                            responseMessage.payload().begin(),
-                            responseMessage.payload().end()));
-                      } else {
-                        futureResponseMessage->futMsg.markCompleted(
-                            std::move(responseMessage));
-                      }
-                    });
+              if (responseMessage.type() == MessageType::EXCEPTION) {
+                markFutureWithError(
+                    std::move(futureResponseMessage),
+                    std::string(
+                        responseMessage.payload().begin(),
+                        responseMessage.payload().end()));
+              } else {
+                markFutureAsComplete(
+                    std::move(futureResponseMessage),
+                    std::move(responseMessage));
               }
             });
       });
@@ -475,7 +458,7 @@ void TensorPipeAgent::pollTimeoutRpcs() {
 
     // Move all these futures to a separate vector so we can process them
     // outside the lock.
-    std::vector<std::shared_ptr<WrappedFutureMessage>> timedOutFutures =
+    std::vector<std::shared_ptr<AtomicFutureMessage>> timedOutFutures =
         std::move(timeoutMap_.begin()->second);
     // We can safely remove this key from the timeoutMap_ since all these
     // futures will be processed.
@@ -486,14 +469,10 @@ void TensorPipeAgent::pollTimeoutRpcs() {
     // Set an error on futures added to the timedOutFutures vector. We do this
     // outside the lock to prevent potential lock-order-inversions by callbacks
     // triggered by the serError call.
-    for (const auto& future : timedOutFutures) {
+    for (auto& future : timedOutFutures) {
       std::string errorMsg = c10::str(
           "RPC ran for more than set timeout and will now be marked with an error");
-      // Using setErrorIfNeeded so completed futures are ignored.
-      if (!future->isComplete.test_and_set()) {
-        threadPool_.run(
-            [future, errorMsg]() { future->futMsg.setError(errorMsg); });
-      }
+      markFutureWithError(std::move(future), std::move(errorMsg));
     }
   }
 }
@@ -503,19 +482,50 @@ void TensorPipeAgent::sync() {}
 
 // TODO: Remove join()
 void TensorPipeAgent::join() {
-  std::unique_lock<std::mutex> lock(callCountMutex_);
-  // No need to wait for serverActiveCalls_ to reach zero, because after joining
-  // all workers will perform another barrier, thus waiting for all the requests
-  // from all the workers to complete.
-  // FIXME In fact, waiting for serverActiveCalls_ to reach zero would be wrong,
-  // because that count is decreased when the computation finishes, before the
-  // response is actually written back. Thus if we shutdown when it gets to zero
-  // we might abort some pending write operation. Should we decrease it in the
-  // write callback?
-  callCountCV_.wait(lock, [this] { return clientActiveCalls_ == 0; });
+  // This method behaves like a barrier, as it can only return once all workers
+  // have no more requests pending, including "nested" requests (triggered from
+  // within the remote code of another call) and "follow-up" requests (triggered
+  // from the callback of a future).
+  while (true) {
+    {
+      std::unique_lock<std::mutex> lock(callCountMutex_);
+      // It is enough to wait for there to be no more active client calls, since
+      // each server call corresponds to a client call for some other worker.
+      callCountCV_.wait(lock, [this] { return clientActiveCalls_ == 0; });
+    }
+    // We'd like to immediately proceed with the allreduce, but it's a call that
+    // may block for some time, as it waits for other workers to also complete
+    // all their active client calls. While we call allreduce we must hold the
+    // mutex, or else the count we send to other workers may get stale (e.g.,
+    // if some nested call happens in the meantime). But we can't hold the lock
+    // for an indeterminately long time, as that would block other operations
+    // (e.g., send). Thus we must release the lock and only re-acquire it when
+    // all workers are ready to proceed with the allreduce. We perform this
+    // synchronization using a barrier.
+    processGroup_->barrier()->wait();
+    {
+      std::unique_lock<std::mutex> lock(callCountMutex_);
+      // At this point, the count may have become non-zero again. We can't wait
+      // for those calls to complete as other workers are waiting for us in the
+      // allreduce and we would block them. Thus we send our count even if it is
+      // non-zero and if anyone (be it us or another worker) has a non-zero
+      // count we'll just do another round.
+      std::vector<at::Tensor> totalClientActiveCalls = {
+          at::zeros({}, at::kLong)};
+      *totalClientActiveCalls[0].data_ptr<int64_t>() = clientActiveCalls_;
+      processGroup_->allreduce(totalClientActiveCalls)->wait();
+      if (*totalClientActiveCalls[0].data_ptr<int64_t>() == 0) {
+        break;
+      }
+    }
+  }
 }
 
 void TensorPipeAgent::shutdownImpl() {
+  // This will close all the pipes and listeners, invoke all callbacks with
+  // errors, turn down the I/O event loops and wait for everything to terminate.
+  context_->join();
+
   threadPool_.waitWorkComplete();
 
   // Join the Timeout Thread
@@ -523,8 +533,6 @@ void TensorPipeAgent::shutdownImpl() {
   if (timeoutThread_.joinable()) {
     timeoutThread_.join();
   }
-
-  context_->join();
 }
 
 const WorkerInfo& TensorPipeAgent::getWorkerInfo(
@@ -703,6 +711,44 @@ void TensorPipeAgent::decreaseCallCount(int32_t& count) {
   std::unique_lock<std::mutex> lock(callCountMutex_);
   --count;
   callCountCV_.notify_all();
+}
+
+void TensorPipeAgent::markFutureAsComplete(
+    std::shared_ptr<AtomicFutureMessage> futureMessage,
+    Message message) {
+  if (!futureMessage->isComplete.test_and_set()) {
+    // Completing the future will run its callbacks, which could execute
+    // arbitrary user code. To prevent blocking or stalling the TensorPipe event
+    // loops, we defer this to a worker thread.
+    threadPool_.run([this,
+                     futureMessage{std::move(futureMessage)},
+                     message{std::move(message)}]() mutable {
+      futureMessage->futMsg.markCompleted(std::move(message));
+      // The future's callbacks may schedule further RPCs, increasing the count.
+      // Thus we must decrease it after completing the future, otherwise it may
+      // briefly dip to zero and trick join into thinking all work is done.
+      decreaseCallCount(clientActiveCalls_);
+    });
+  }
+}
+
+void TensorPipeAgent::markFutureWithError(
+    std::shared_ptr<AtomicFutureMessage> futureMessage,
+    std::string errorMsg) {
+  if (!futureMessage->isComplete.test_and_set()) {
+    // Completing the future will run its callbacks, which could execute
+    // arbitrary user code. To prevent blocking or stalling the TensorPipe event
+    // loops, we defer this to a worker thread.
+    threadPool_.run([this,
+                     futureMessage{std::move(futureMessage)},
+                     errorMsg{std::move(errorMsg)}]() mutable {
+      futureMessage->futMsg.setError(std::move(errorMsg));
+      // The future's callbacks may schedule further RPCs, increasing the count.
+      // Thus we must decrease it after completing the future, otherwise it may
+      // briefly dip to zero and trick join into thinking all work is done.
+      decreaseCallCount(clientActiveCalls_);
+    });
+  }
 }
 
 } // namespace rpc

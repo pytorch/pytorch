@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/thread_pool.h>
+#include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 #include <tensorpipe/core/context.h>
 #include <tensorpipe/core/listener.h>
@@ -47,6 +48,7 @@ class TensorPipeAgent : public RpcAgent {
       std::string selfName,
       worker_id_t selfId,
       int worldSize,
+      std::shared_ptr<c10d::ProcessGroup> processGroup,
       TensorPipeRpcBackendOptions opts);
 
   TensorPipeAgent(const TensorPipeAgent&) = delete;
@@ -137,7 +139,7 @@ class TensorPipeAgent : public RpcAgent {
   // only if it isn't yet. It does exist for errors (setErrorIfNeeded) but, even
   // then, it ends up printing a log message, which may worry the user. To solve
   // both issues we use a separate atomic flag to know the status of the future.
-  struct WrappedFutureMessage {
+  struct AtomicFutureMessage {
     FutureMessage futMsg;
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
   };
@@ -151,7 +153,7 @@ class TensorPipeAgent : public RpcAgent {
     explicit ClientPipe(std::shared_ptr<tensorpipe::Pipe> pipe) : pipe_(pipe) {}
     std::shared_ptr<tensorpipe::Pipe> pipe_;
     bool readError_{false};
-    std::unordered_map<uint64_t, std::shared_ptr<WrappedFutureMessage>>
+    std::unordered_map<uint64_t, std::shared_ptr<AtomicFutureMessage>>
         pendingResponseMessage_;
   };
 
@@ -170,13 +172,18 @@ class TensorPipeAgent : public RpcAgent {
   const int worldSize_;
   const TensorPipeRpcBackendOptions opts_;
 
+  // The join method is required to behave like a barrier and perform collective
+  // operations. For simplicity and reliability, we offload this to a process
+  // group, but probably one day we might want to re-implement them using RPCs.
+  const std::shared_ptr<c10d::ProcessGroup> processGroup_;
+
   mutable std::mutex mutex_;
   uint64_t nextMessageID_{0};
 
   // Map to store the expiration times for each message.
   std::map<
       steady_clock_time_point,
-      std::vector<std::shared_ptr<WrappedFutureMessage>>>
+      std::vector<std::shared_ptr<AtomicFutureMessage>>>
       timeoutMap_;
 
   // Thread that will poll the timeoutMap_ for timed out messages and mark them
@@ -246,6 +253,14 @@ class TensorPipeAgent : public RpcAgent {
   // Helpers to modify the counts while correctly dealing with the mutex and cv.
   void increaseCallCount(int32_t& count);
   void decreaseCallCount(int32_t& count);
+
+  // Helpers to set the state of the requests.
+  void markFutureAsComplete(
+      std::shared_ptr<AtomicFutureMessage> futureMessage,
+      Message message);
+  void markFutureWithError(
+      std::shared_ptr<AtomicFutureMessage> futureMessage,
+      std::string errorMsg);
 };
 
 } // namespace rpc
