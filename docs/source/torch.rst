@@ -106,7 +106,7 @@ Generators
     :toctree: generated
     :nosignatures:
 
-    _C.Generator
+    Generator
 
 .. _random-sampling:
 

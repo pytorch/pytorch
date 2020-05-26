@@ -509,9 +509,9 @@ class TestCuda(TestCase):
             torch.save(q, f)
             f.seek(0)
             q_copy = torch.load(f)
-        self.assertEqual(q_copy, q, 0)
+        self.assertEqual(q_copy, q, atol=0, rtol=0)
         q_copy[0].fill_(5)
-        self.assertEqual(q_copy[0], q_copy[2], 0)
+        self.assertEqual(q_copy[0], q_copy[2], atol=0, rtol=0)
         self.assertTrue(isinstance(q_copy[0], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
         self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
@@ -723,7 +723,7 @@ class TestCuda(TestCase):
             chunk_end = chunk_start + chunk_sizes[i]
             index = [slice(None, None), slice(None, None)]
             index[dim] = slice(chunk_start, chunk_end)
-            self.assertEqual(r, input[tuple(index)], 0)
+            self.assertEqual(r, input[tuple(index)], atol=0, rtol=0)
             chunk_start = chunk_end
 
     def test_scatter_cpu(self):
@@ -1446,7 +1446,7 @@ class TestCuda(TestCase):
         with torch.cuda.stream(stream):
             tmp2 = torch.cuda.FloatTensor(t.size())
             tmp2.zero_()
-            self.assertNotEqual(tmp2.data_ptr(), ptr[0], 'allocation re-used to soon')
+            self.assertNotEqual(tmp2.data_ptr(), ptr[0], msg='allocation re-used to soon')
 
         self.assertEqual(result.tolist(), [1, 2, 3, 4])
 
@@ -1454,7 +1454,7 @@ class TestCuda(TestCase):
         torch.cuda.current_stream().synchronize()
         with torch.cuda.stream(stream):
             tmp3 = torch.cuda.FloatTensor(t.size())
-            self.assertEqual(tmp3.data_ptr(), ptr[0], 'allocation not re-used')
+            self.assertEqual(tmp3.data_ptr(), ptr[0], msg='allocation not re-used')
 
     def test_record_stream_on_shifted_view(self):
         # See issue #27366
@@ -1501,7 +1501,7 @@ class TestCuda(TestCase):
         ptr = t.data_ptr()
         del t
         t = torch.FloatTensor([1]).pin_memory()
-        self.assertEqual(t.data_ptr(), ptr, 'allocation not reused')
+        self.assertEqual(t.data_ptr(), ptr, msg='allocation not reused')
 
         # check that the allocation is not re-used if it's in-use by a copy
         gpu_tensor = torch.cuda.FloatTensor([0])
@@ -1509,7 +1509,7 @@ class TestCuda(TestCase):
         gpu_tensor.copy_(t, non_blocking=True)
         del t
         t = torch.FloatTensor([1]).pin_memory()
-        self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
+        self.assertNotEqual(t.data_ptr(), ptr, msg='allocation re-used too soon')
         self.assertEqual(list(gpu_tensor), [1])
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
@@ -1529,7 +1529,7 @@ class TestCuda(TestCase):
 
         del t
         t = torch.FloatTensor([2]).pin_memory()
-        self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
+        self.assertNotEqual(t.data_ptr(), ptr, msg='allocation re-used too soon')
 
         with torch.cuda.device(0):
             gpu_tensor0.copy_(t, non_blocking=True)
@@ -1787,8 +1787,8 @@ class TestCuda(TestCase):
         torch.cuda.set_rng_state_all(states)
         after0 = torch.cuda.FloatTensor(100, device=0).normal_()
         after1 = torch.cuda.FloatTensor(100, device=1).normal_()
-        self.assertEqual(before0, after0, 0)
-        self.assertEqual(before1, after1, 0)
+        self.assertEqual(before0, after0, atol=0, rtol=0)
+        self.assertEqual(before1, after1, atol=0, rtol=0)
 
     @skipIfRocm
     def test_nvtx(self):
