@@ -105,11 +105,11 @@ static void max_kernel_impl(Tensor& result, Tensor& indice, const Tensor& self, 
     gpu_reduce_kernel<scalar_t, int64_t>(
       iter,
       MaxOps<scalar_t>{},
-      thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::upper_bound(), 0));
+      thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::lower_bound(), 0));
   });
 }
 
-void min_all_kernel_impl(Tensor& result, const Tensor& input) {
+static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
   auto dtype = input.scalar_type();
   auto iter = make_reduction("min_all", result, input, std::vector<int64_t>{}, false, dtype);
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, dtype, "min_all_cuda", [&] {
@@ -117,7 +117,7 @@ void min_all_kernel_impl(Tensor& result, const Tensor& input) {
   });
 }
 
-void max_all_kernel_impl(Tensor& result, const Tensor& input) {
+static void max_all_kernel_impl(Tensor& result, const Tensor& input) {
   auto dtype = input.scalar_type();
   auto iter = make_reduction("min_all", result, input, std::vector<int64_t>{}, false, dtype);
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, dtype, "max_all_cuda", [&] {
