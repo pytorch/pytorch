@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
+#include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/utils/hash.h>
 #include <torch/csrc/utils/memory.h>
 
@@ -226,14 +227,16 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
     TORCH_INTERNAL_ASSERT(!grad.is_alias_of(bucket_view));
     TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
     TORCH_INTERNAL_ASSERT(grad.sizes() == bucket_view.sizes());
-    // Checks below are too harsh.  AccumulateGrad doesn't HAVE to obey
-    // the grad layout contract.  The penalty for disobedience is reduced
-    // performance, not numerical death.
-    // What should I do here?  Warn?  Do nothing?
-    TORCH_INTERNAL_ASSERT(grad.strides() == bucket_view.strides());
-    TORCH_INTERNAL_ASSERT(variable.is_non_overlapping_and_dense() ?
-                         (grad.strides() == variable.strides()) :
-                         grad.is_contiguous(at::MemoryFormat::Contiguous));
+    // AccumulateGrad doesn't HAVE to obey the grad layout contract.
+    // The penalty for disobedience is reduced performance, not numerical death.
+    // Warnings here help diagnose poor DDP performance.
+    if (grad.strides() != bucket_view.strides()) {
+      TORCH_WARN_ONCE("Grad strides do not match bucket view strides. ",
+                      "This may indicate grad was not created according to the ",
+                      "gradient layout contract, or that the param's strides ",
+                      "changed since DDP was constructed.  This is not an error, ",
+                      "but may impair performance.");
+    }
     bucket_view.copy_(grad, /* non_blocking */ true);
   } else {
     bucket_view.zero_();
@@ -724,16 +727,14 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 
       // If a parameter is globally unused, we keep its grad untouched.
       if (!global_unused) {
+        const auto& bucket_view = replica.bucket_views[intra_bucket_index];
         if (!grad.defined()) {
           // Creates grad according to the "Gradient Layout Contract"
-          // (see torch/csrc/grad/AccumulateGrad.cpp)
-          grad = variable.is_non_overlapping_and_dense() ?
-                 at::empty_strided(variable.sizes(), variable.strides(),
-                                   variable.options().memory_format(c10::nullopt)) :
-                 at::empty(variable.sizes(),
-                           variable.options().memory_format(at::MemoryFormat::Contiguous));
+          // (see torch/csrc/grad/AccumulateGrad.h)
+          grad = torch::autograd::utils::clone_obey_contract(bucket_view, variable);
+        } else {
+          grad.copy_(bucket_view);
         }
-        grad.copy_(replica.bucket_views[intra_bucket_index]);
       }
     }
   }
