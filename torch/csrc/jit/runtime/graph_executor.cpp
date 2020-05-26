@@ -37,6 +37,7 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
