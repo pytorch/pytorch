@@ -14,6 +14,7 @@
 #include <c10/util/Optional.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Context.h>
+#include <ATen/TracerMode.h>
 
 namespace at {
 
@@ -28,6 +29,7 @@ inline Tensor from_blob(
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {},
     const c10::optional<Device> target_device = c10::nullopt) {
+  tracer::impl::NoTracerDispatchMode tracer_guard;
   AutoNonVariableTypeMode guard;
   auto device = (target_device.has_value()?
     target_device.value() : globalContext().getDeviceFromPtr(data, options.device().type()));
@@ -59,6 +61,7 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     IntArrayRef strides,
     const TensorOptions& options = {}) {
+  tracer::impl::NoTracerDispatchMode tracer_guard;
   AutoNonVariableTypeMode guard;
   auto device = globalContext().getDeviceFromPtr(data, options.device().type());
   if (options.device().has_index()) {
