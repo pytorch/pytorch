@@ -9,16 +9,17 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-void EvaluationContext::bind(const Val* value, int concrete_value) {
+void EvaluationContext::bind(const Val* value, Int::ScalarType concrete_value) {
   TORCH_CHECK(value->isAnInt());
   TORCH_CHECK(!value->as<Int>()->value().has_value());
   TORCH_CHECK(fusion_->origin(value) == nullptr);
   bindings_[value] = concrete_value;
 }
 
-c10::optional<int> EvaluationContext::concreteValue(const Val* value) const {
+c10::optional<Int::ScalarType> EvaluationContext::concreteValue(
+    const Val* value) const {
   const auto it = bindings_.find(value);
-  return (it != bindings_.end()) ? c10::optional<int>(it->second)
+  return (it != bindings_.end()) ? c10::optional<Int::ScalarType>(it->second)
                                  : c10::nullopt;
 }
 
@@ -36,7 +37,7 @@ void EvaluationContext::print() const {
   std::cout << "--------------------\n\n";
 }
 
-c10::optional<int> ExpressionEvaluator::evaluate(
+c10::optional<Int::ScalarType> ExpressionEvaluator::evaluate(
     const Statement* expr,
     const EvaluationContext* context) {
   TORCH_CHECK(context != nullptr);
@@ -67,7 +68,7 @@ void ExpressionEvaluator::handle(const UnaryOp* uop) {
   if (in.has_value()) {
     switch (uop->getUnaryOpType()) {
       case UnaryOpType::Neg:
-        result_ = int(!*in);
+        result_ = Int::ScalarType(!*in);
         break;
       case UnaryOpType::Cast:
         result_ = *in;
@@ -102,14 +103,14 @@ void ExpressionEvaluator::handle(const BinaryOp* bop) {
         result_ = *lhs % *rhs;
         break;
       case BinaryOpType::LT:
-        result_ = int(*lhs < *rhs);
+        result_ = Int::ScalarType(*lhs < *rhs);
         break;
       case BinaryOpType::CeilDiv:
         TORCH_CHECK(*rhs != 0);
         result_ = (*lhs + *rhs - 1) / *rhs;
         break;
       case BinaryOpType::And:
-        result_ = int(*lhs && *rhs);
+        result_ = Int::ScalarType(*lhs && *rhs);
         break;
       default:
         TORCH_CHECK(!"Unexpected operator type");

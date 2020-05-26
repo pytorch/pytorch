@@ -38,7 +38,7 @@ static TensorView* makeDummyTensor(
 static void checkIntValue(
     const EvaluationContext* eval_context,
     const Val* val,
-    int expected_value) {
+    Int::ScalarType expected_value) {
   TORCH_CHECK(val->isAnInt());
   const auto actual_value = ExpressionEvaluator::evaluate(val, eval_context);
   TORCH_CHECK(actual_value.has_value());
