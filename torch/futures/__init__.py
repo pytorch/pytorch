@@ -68,18 +68,22 @@ class Future(torch._C.Future):
             result (object): the result object of this ``Future``.
 
         Example::
-            >>> from torch.distributed import rpc
+            >>> import threading
+            >>> import time
             >>> import torch
             >>>
-            >>> fut = rpc.Future()
-            >>> rpc_fut = rpc.async(
-            >>>     "worker1",
-            >>>     torch.add,
-            >>>     args=(torch.ones(2), 1)
+            >>> def slow_set_future(fut, value):
+            >>>     time.sleep(0.5)
+            >>>     fut.set_result(value)
+            >>>
+            >>> fut = torch.futures.Future()
+            >>> t = threading.Thread(
+            >>>     target=slow_set_future,
+            >>>     args=(fut, torch.ones(2) * 3)
             >>> )
-            >>> rpc_fut.add_done_callback(
-            >>>     lambda rpc_fut : fut.set_result(rpc_fut.wait() + 1)
-            >>> )
+            >>> t.daemon = True
+            >>> t.start()
+            >>>
             >>> print(fut.wait())  # tensor([3., 3.])
         """
         super(Future, self).set_result(result)
