@@ -1,8 +1,13 @@
+"""
+The ``torch.futures`` package contains a ``Future`` type and corresponding
+utility functions.
+"""
 import torch
 
 
 class Future(torch._C.Future):
-    r"""Wrapper around a ``torch._C.Future``.
+    r"""
+    Wrapper around a ``torch._C.Future``.
     """
     def __new__(cls):
         return super(Future, cls).__new__(cls)
@@ -34,6 +39,6 @@ class Future(torch._C.Future):
 
     def set_result(self, result):
         r"""
-        Mark this future as completed using the provided result.
+        Mark this future as completed using the provided result object.
         """
         super(Future, self).set_result(result)

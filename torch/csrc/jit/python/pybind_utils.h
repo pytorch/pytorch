@@ -141,7 +141,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
       IValue value = toIValue(pyValue, PyObjectType::get());
 
       py::gil_scoped_release release;
-      fut->markCompleted(value);
+      fut->markCompleted(std::move(value));
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> fut;
