@@ -130,7 +130,7 @@ REGISTER_DISPATCH(min_values_stub, &min_values_kernel_cuda);
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_cuda);
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_cuda);
 REGISTER_DISPATCH(min_stub, &min_kernel_impl);
-REGISTER_DISPATCH(max_stub, &min_kernel_impl);
+REGISTER_DISPATCH(max_stub, &max_kernel_impl);
 REGISTER_DISPATCH(min_all_stub, &min_all_kernel_impl);
 REGISTER_DISPATCH(max_all_stub, &max_all_kernel_impl);
 
