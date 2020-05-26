@@ -9323,6 +9323,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(x.argmax(dim=0), torch.zeros(n, dtype=torch.int64))
         self.assertEqual(x.argmin(dim=0), torch.zeros(n, dtype=torch.int64))
 
+        self.assertEqual(x.argmax(dim=0, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
+        self.assertEqual(x.argmin(dim=0, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
+
     def test_remainder_overflow(self, device):
         # Check Integer Overflows
         x = torch.tensor(23500, dtype=torch.int64, device=device)
