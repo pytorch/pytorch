@@ -244,14 +244,14 @@ class TestTypePromotion(TestCase):
                     first = first.transpose(0, 2)
                     second = second.transpose(2, 1)
                     self.assertNotEqual(first.stride(), second.stride(),
-                                        "some non-contiguous issues could be missed if tensors have same strides")
+                                        msg="some non-contiguous issues could be missed if tensors have same strides")
 
                 self.assertEqual(not first.is_contiguous(), non_contiguous)
                 self.assertEqual(not second.is_contiguous(), non_contiguous)
                 result = op(first, second)
                 expected = op(first.to(common_dtype), second.to(common_dtype))
-                self.assertEqual(result.dtype, expected.dtype, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
-                self.assertEqual(result, expected, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
+                self.assertEqual(result.dtype, expected.dtype, msg='{} with {}, {}'.format(op.__name__, dt1, dt2))
+                self.assertEqual(result, expected, msg='{} with {}, {}'.format(op.__name__, dt1, dt2))
 
     @float_double_default_dtype
     def test_non_promoting_ops(self, device):
@@ -617,6 +617,7 @@ class TestTypePromotion(TestCase):
 
         expected = op(dense1.clone(), dense2)
         precision = self._get_precision(expected.dtype, coalesced)
+        rtol = None if precision is None else 0
         test_tensors = [expected, dense1, sparse1, dense2, sparse2]
         e, d1, s1, d2, s2 = [x.clone() for x in test_tensors] if inplace else test_tensors
 
@@ -624,7 +625,7 @@ class TestTypePromotion(TestCase):
         if op_name != 'div':
             sparse = op(s1, s2)
             self.assertEqual(sparse.dtype, e.dtype)
-            self.assertEqual(e, sparse.to_dense(), atol=precision, message=err)
+            self.assertEqual(e, sparse.to_dense(), atol=precision, rtol=rtol, msg=err)
         else:
             # sparse division only supports division by a scalar
             self.assertRaises(RuntimeError, lambda: op(s1, s2).to_dense())
@@ -634,7 +635,7 @@ class TestTypePromotion(TestCase):
             if inplace:
                 e, d1, s1, d2, s2 = [x.clone() for x in test_tensors]
             dense_sparse = op(d1, s2)
-            self.assertEqual(e, dense_sparse, atol=precision, message=err)
+            self.assertEqual(e, dense_sparse, atol=precision, rtol=rtol, msg=err)
         else:
             # sparse division only supports division by a scalar
             # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'
@@ -655,7 +656,7 @@ class TestTypePromotion(TestCase):
             sparse = op(s1, scalar)
             dense_scalar = op(d1, scalar)
             self.assertEqual(sparse.dtype, dense_scalar.dtype)
-            self.assertEqual(dense_scalar, sparse.to_dense(), atol=precision, message=err)
+            self.assertEqual(dense_scalar, sparse.to_dense(), atol=precision, rtol=rtol, msg=err)
         else:
             # add(sparse, dense) is not supported. Use add(dense, sparse) instead.
             # "mul_cpu" / "div_cpu" not implemented for 'Half'
