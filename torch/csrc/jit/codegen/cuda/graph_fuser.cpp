@@ -912,7 +912,6 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 } // anonymous namespace
 
 TORCH_CUDA_API void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
-  std::cout << "prior to fuser graph" << std::endl << *graph << std::endl;
   CudaGraphFuser(graph->block(), graph).run();
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
@@ -923,7 +922,6 @@ TORCH_CUDA_API void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   PeepholeOptimizeShapeExpressions(graph->block());
   // Compile CudaFusionGroup
   compileFusionRecursive(graph->block());
-  std::cout << "compiled graph" << std::endl << *graph << std::endl;
 }
 
 } // namespace cuda

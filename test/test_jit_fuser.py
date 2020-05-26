@@ -58,10 +58,13 @@ class TestFuser(JitTestCase):
             graph = diff_graphs[0].g('Subgraph')
 
         allowed_nodes = {'prim::Constant', 'prim::CudaFusionGroup', 'prim::BailoutTemplate',
-                         'prim::BailOut', 'prim::TupleConstruct'} | set(except_for)
+                         'prim::BailOut', 'prim::TupleConstruct', 'prim::FusionGroup'} | set(except_for)
         self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
                         'got {}'.format(graph))
-        self.assertTrue([node.kind() for node in graph.nodes()].count('prim::CudaFusionGroup') == 1)
+        # TODO: this is not accurate, but will do for now.
+        nvFuser_num = [node.kind() for node in graph.nodes()].count('prim::CudaFusionGroup')
+        legacy_num = [node.kind() for node in graph.nodes()].count('prim::FusionGroup')
+        self.assertTrue((nvFuser_num==1 or legacy_num ==1) and (nvFuser_num != legacy_num))
 
     def _test_fused_abs(self, device='cpu'):
         def func(x):

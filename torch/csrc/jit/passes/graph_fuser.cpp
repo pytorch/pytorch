@@ -1244,7 +1244,6 @@ void PeepholeOptimizeShapeExpressions(Block* block, AliasDb* db) {
 } // anonymous namespace
 
 void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
-  std::cout << "prior to fuser graph" << std::endl << *graph << std::endl;
   AliasDb db(graph);
   GraphFuser(&db, graph->block(), strict_fuser_check).run();
   Lint(&db);
@@ -1255,7 +1254,6 @@ void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
   EliminateDeadCode(graph);
   // Improve the quality of shape propagation code that was left
   PeepholeOptimizeShapeExpressions(graph->block(), &db);
-  std::cout << "fused graph" << std::endl << *graph << std::endl;
 }
 
 void CustomFuseGraph(
