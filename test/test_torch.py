@@ -31,7 +31,7 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, onlyOnCPUAndCUDA
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA
 import torch.backends.quantized
 import torch.testing._internal.data
 
@@ -6382,7 +6382,8 @@ class TestTorchDeviceType(TestCase):
         input_ = layer_norm(input_.transpose(1, 2).contiguous()).contiguous()
         input_.sum().backward()
 
-    @skipIfRocm
+    @skipCUDAIfRocm
+    @largeTensorTest('12GB')
     def test_conv_transposed_large(self, device):
         # ConvTranspose3d works for large input tensors (gh-32866)
         in_channels = 64
