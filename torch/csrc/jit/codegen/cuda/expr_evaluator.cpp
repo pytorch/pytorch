@@ -11,6 +11,8 @@ namespace fuser {
 
 void EvaluationContext::bind(const Val* value, int concrete_value) {
   TORCH_CHECK(value->isAnInt());
+  TORCH_CHECK(!value->as<Int>()->value().has_value());
+  TORCH_CHECK(fusion_->origin(value) == nullptr);
   bindings_[value] = concrete_value;
 }
 
@@ -44,14 +46,15 @@ c10::optional<int> ExpressionEvaluator::evaluate(
 }
 
 void ExpressionEvaluator::handle(const Int* i) {
-  // explicit bindings can override values
-  const auto& bound_value = context_->concreteValue(i);
-  if (bound_value.has_value()) {
-    result_ = bound_value;
-  } else if (i->value().has_value()) {
+  if (i->value().has_value()) {
     result_ = i->value();
   } else if (const auto* def = context_->fusion()->origin(i)) {
     result_ = evaluate(def, context_);
+  } else {
+    const auto& bound_value = context_->concreteValue(i);
+    if (bound_value.has_value()) {
+      result_ = bound_value;
+    }
   }
 }
 
