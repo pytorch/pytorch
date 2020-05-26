@@ -10,6 +10,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/quantized/QuantizerBase.h>
 
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
@@ -19,11 +20,11 @@
 
 namespace at {
 
-struct Quantizer;
+// struct Quantizer;
 // This is temporary typedef to enable Quantizer in aten native function API
 // we'll remove them when we are actually exposing Quantizer class
 // to frontend
-using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
+// using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 inline Tensor Tensor::cpu() const {
   return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
@@ -194,7 +195,7 @@ inline std::complex<float> Tensor::item() const {
 template <>
 inline std::complex<double> Tensor::item() const {
   // casting from c10::complex<double> to std::complex<double>
-  return static_cast<std::complex<double>>(item().toComplexFloat()); 
+  return static_cast<std::complex<double>>(item().toComplexFloat());
 }
 // end TODO
 
