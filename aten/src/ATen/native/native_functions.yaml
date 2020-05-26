@@ -326,6 +326,7 @@
     SparseCPU: add_sparse
     SparseCUDA: add_sparse
     MkldnnCPU: mkldnn_add
+    Vulkan: vulkan_add
   supports_named_tensor: True
 
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
@@ -764,6 +765,7 @@
     CPU: clamp
     CUDA: clamp
     QuantizedCPU: quantized_clamp
+    Vulkan: vulkan_clamp
 
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
   supports_named_tensor: True
@@ -1183,6 +1185,7 @@
     MkldnnCPU: empty_mkldnn
     SparseCPU: empty_sparse
     SparseCUDA: empty_sparse
+    Vulkan: empty_vulkan
 
 - func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
@@ -1923,6 +1926,7 @@
     CPU: mean_cpu_gpu
     CUDA: mean_cpu_gpu
     QuantizedCPU: quantized_mean_cpu
+    Vulkan: mean_vulkan
 
 - func: mean.out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
@@ -2230,6 +2234,9 @@
   dispatch:
     CPU: batch_norm_update_stats_cpu
     CUDA: batch_norm_update_stats_cuda
+
+- func: is_vulkan_available() -> bool
+  use_c10_dispatcher: full
 
 - func: _nnpack_available() -> bool
   use_c10_dispatcher: full
@@ -3476,6 +3483,7 @@
     CUDA: addmm_cuda
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
+    Vulkan: vulkan_addmm
   supports_named_tensor: True
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
@@ -5962,6 +5970,7 @@
     CPU: hardtanh_
     CUDA: hardtanh_
     QuantizedCPU: quantized_hardtanh_
+    Vulkan: vulkan_hardtanh_
 
 - func: hardswish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -6705,6 +6714,7 @@
     CPU: upsample_nearest2d_cpu
     CUDA: upsample_nearest2d_cuda
     QuantizedCPU: quantized_upsample_nearest2d_cpu
+    Vulkan: upsample_nearest2d_vulkan
 
 - func: upsample_nearest2d_backward.grad_input(Tensor grad_output, int[2] output_size, int[4] input_size, float? scales_h=None, float? scales_w=None, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
