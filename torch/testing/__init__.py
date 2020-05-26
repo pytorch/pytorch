@@ -5,6 +5,7 @@ The testing package contains testing-specific utilities.
 import torch
 import random
 import math
+from functools import partial
 
 FileCheck = torch._C.FileCheck
 
@@ -14,6 +15,125 @@ __all__ = [
 
 rand_like = torch.rand_like
 randn_like = torch.randn_like
+
+# Datastructures and helpers for returning a collection of appropriate
+# tensors to use during testing.
+# NOTE: Intended to eventually be a replacement for
+#   most ad hoc and historic test tensor construction methods like _make_tensor
+#   and _make_tensors in test_torch.py.
+_complex_nonfinites = [complex(float('inf'), float('inf')),
+                       complex(float('inf'), float('-inf')),
+                       complex(float('inf'), float('nan')),
+                       complex(float('inf'), 0),
+                       complex(float('-inf'), float('inf')),
+                       complex(float('-inf'), float('-inf')),
+                       complex(float('-inf'), float('nan')),
+                       complex(float('-inf'), 0),
+                       complex(float('nan'), float('inf')),
+                       complex(float('nan'), float('-inf')),
+                       complex(float('nan'), float('nan')),
+                       complex(float('nan'), 0),
+                       complex(0, float('inf')),
+                       complex(0, float('-inf')),
+                       complex(0, float('nan'))]
+_complex_defaults = [complex(0, 0),
+                     complex(1, 0), complex(-1, 0), complex(0, 1), complex(0, -1),
+                     complex(math.pi, 0), complex(-math.pi), complex(0, math.pi), complex(0, -math.pi),
+                     complex(math.pi, math.pi), complex(math.pi, -math.pi),
+                     complex(-math.pi, math.pi), complex(-math.pi, -math.pi)]
+
+_int_defaults = [0, 1, 127]
+_bool_defaults = [True, False]
+
+_float_nonfinites = [float('inf'), float('-inf'), float('nan')]
+_float_defaults = [0., -1., 1., -math.pi, math.pi]
+
+_nelems_large = 65
+_nelems_small = 4
+
+# Helper for fixtures. See fixtures documentation.
+def _fixtures_helper(vals, device, dtype, *,
+                     type_filter, tensor_factory):
+    # Filters mismatched values
+    vals = list(set([v for v in vals if isinstance(v, type_filter)]))
+
+    v = torch.tensor(vals, device=device, dtype=dtype)
+    results = []
+
+    # Creates "large" tensor
+    # NOTE: the large tensor is filled with the values in vals followed by
+    #  random values.
+    large_t = None
+    if len(vals) > _nelems_large:
+        large_t = v
+    else:
+        large_t = tensor_factory((_nelems_large,), device=device, dtype=dtype)
+        large_t[0:len(vals)] = v
+        results.append(large_t)
+
+    # Creates scalar tensors
+    scalars = []
+    if len(vals) == 0:
+        scalars.append(tensor_factory((1,), device=device, dtype=dtype))
+    else:
+        for v in vals:
+            scalars.append(torch.tensor((v), device=device, dtype=dtype))
+
+    return results
+
+# TODO: support division generation by bounding away from zero (min abs)
+# TODO: support nDims parameter (produces square tensors)
+# TODO: support shape parameter
+# TODO: support range parameter (e.g. values between 100 and 200)
+# TODO: support noncontiguous outputs
+# TODO: allow disabling scalar tensor fixtures
+# TODO: replace test_torch.py's _make_tensor and _make_tensors
+# Returns a list of tensors suitable for testing. The list includes a larger
+#   tensor suitable for validating vectorization pathways as well as at least
+#   one zero-dim "scalar" tensor to test non-vectorized codepaths.
+#
+#   if include_nonfinite is True then nonfinite values like infinity are in the tensors
+#   if include_defaults is True then commonly used values like 0 and 1 are in the tensors
+def fixtures(vals, device, dtype, *, include_nonfinite=True, include_defaults=True):
+    assert dtype is not torch.bfloat16, "bfloat16 fixtures not yet supported"
+    assert dtype is not torch.float16, "float16 fixtures not yet supported"
+
+    vals = list(vals)
+
+    non_finites = None
+    defaults = None
+    if dtype.is_floating_point:
+        type_filter = float
+        tensor_factory = torch.randn
+        non_finites = _float_nonfinites
+        defaults = _float_defaults
+    elif dtype.is_complex:
+        type_filter = complex
+        tensor_factory = torch.randn
+        non_finites = _complex_nonfinites
+        include_defaults = _complex_defaults
+    else:
+        type_filter = int
+        tensor_factory = partial(torch.randint, -9, 10)
+        defaults = _int_defaults
+
+        # Specializations for unsigned types
+        if dtype is torch.uint8:
+            tensor_factory = partial(torch.randint, 0, 10)
+        elif dtype is torch.bool:
+            tensor_factory = partial(torch.randint, 0, 2)
+            defaults = _bool_defaults
+
+    # Includes nonfinites (if requested)
+    if include_nonfinite and non_finites is not None:
+        vals.extend(non_finites)
+    # Includes defaults (if requested)
+    if include_defaults and defaults is not None:
+        vals.extend(defaults)
+
+    return _fixtures_helper(vals, device, dtype,
+                            type_filter=type_filter,
+                            tensor_factory=tensor_factory)
 
 # Helper function that returns True when the dtype is an integral dtype,
 # False otherwise.
