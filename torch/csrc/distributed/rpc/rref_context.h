@@ -285,6 +285,8 @@ class TORCH_API RRefContext {
   std::unordered_map<ForkId, c10::intrusive_ptr<RRef>, ForkId::Hash>
       pendingChildren_;
 
+  std::atomic<int64_t> numPendingFutures_{0};
+
   std::mutex destroyedMutex_;
   bool destroyed_;
 
