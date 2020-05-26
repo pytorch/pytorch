@@ -9717,14 +9717,14 @@ class TestTorchDeviceType(TestCase):
             res = x.norm(p, 1).cpu()
             expected = np.linalg.norm(xn, p, 1)
             self.assertEqual(res.shape, expected.shape)
-            self.assertEqual(res, expected, message="dim reduction failed for {}-norm".format(p))
+            self.assertEqual(res, expected, msg="dim reduction failed for {}-norm".format(p))
 
         # matrix norm
         for p in ['fro', 'nuc']:
             res = x.norm(p).cpu()
             expected = np.linalg.norm(xn, p)
             self.assertEqual(res.shape, expected.shape)
-            self.assertEqual(res, expected, message="dim reduction failed for {}-norm".format(p))
+            self.assertEqual(res, expected, msg="dim reduction failed for {}-norm".format(p))
 
         # larger tensor sanity check
         self.assertEqual(2 * torch.norm(torch.ones(10000)), torch.norm(torch.ones(40000)))
@@ -11477,6 +11477,10 @@ class TestTorchDeviceType(TestCase):
         # negative nbins throws
         with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
             torch.histc(torch.tensor([1], dtype=torch.float, device=device), bins=-1)
+        # empty tensor
+        actual = torch.histc(torch.tensor([], device=device), min=0, max=3)
+        expected = torch.zeros(100, dtype=torch.float, device=device)
+        self.assertEqual(expected, actual)
 
         # without nbins
         actual = torch.histc(
@@ -14891,11 +14895,11 @@ class TestTorchDeviceType(TestCase):
             actual = torch.einsum(test[0], test[1:])
             expected = np.einsum(test[0], *[t.numpy() for t in test[1:]])
             self.assertEqual(expected.shape, actual.shape, test[0])
-            self.assertEqual(expected, actual, message=test[0])
+            self.assertEqual(expected, actual, msg=test[0])
             # test vararg
             actual2 = torch.einsum(test[0], *test[1:])
             self.assertEqual(expected.shape, actual2.shape, test[0])
-            self.assertEqual(expected, actual2, message=test[0])
+            self.assertEqual(expected, actual2, msg=test[0])
 
             def do_einsum(*args):
                 return torch.einsum(test[0], args)
