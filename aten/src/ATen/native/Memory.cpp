@@ -23,7 +23,6 @@ Tensor pin_memory(const Tensor& self) {
   auto* allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
   auto storage = Storage(
       Storage::use_byte_size_t(),
-      self.dtype(),
       detail::computeStorageNbytes(
           self.sizes(), self.strides(), self.dtype().itemsize()),
       allocator,
