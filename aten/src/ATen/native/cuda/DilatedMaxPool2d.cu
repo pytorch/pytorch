@@ -445,6 +445,7 @@ void max_pool2d_with_indices_out_cuda_template(
 
   if(input.ndimension() == 3) {
     output.resize_({nInputPlane, outputHeight, outputWidth});
+    indices.resize_({nInputPlane, outputHeight, outputWidth});
   }
 }
 
