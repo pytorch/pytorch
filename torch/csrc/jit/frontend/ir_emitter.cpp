@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
@@ -637,6 +638,9 @@ struct to_ir {
     // and run the pass early to avoid jitter. Like conversion to SSA,
     // it only needs to run once.
     CanonicalizeModifiedLoops(graph);
+
+    // Convert Ops to a Normalized Form
+    NormalizeOps(graph);
 
     runCleanupPasses(graph);
   }

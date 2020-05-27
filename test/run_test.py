@@ -61,7 +61,6 @@ TESTS = [
     'test_jit_profiling',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
-    'test_jit_fuser_profiling',
     'test_tensorboard',
     'test_namedtensor',
     'test_type_promotion',
@@ -101,6 +100,7 @@ ROCM_BLACKLIST = [
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
+    'distributed/test_nccl',
     'test_determination',
     'test_multiprocessing',
     'test_jit_simple',
@@ -136,7 +136,6 @@ SLOW_TESTS = [
     'test_overrides',
     'test_jit',
     'test_jit_profiling',
-    'test_jit_fuser_profiling',
     'test_torch',
     'distributed/test_distributed',
     'distributed/rpc/test_rpc_spawn',
@@ -574,6 +573,13 @@ def get_dep_modules(test):
             'urllib',
             'json',
             'collections',
+            # Modules below are excluded because they are hitting https://bugs.python.org/issue40350
+            # Trigger AttributeError: 'NoneType' object has no attribute 'is_package'
+            'mpl_toolkits',
+            'google',
+            'onnx',
+            # Triggers RecursionError
+            'mypy'
         ],
     )
     # HACK: some platforms default to ascii, so we can't just run_script :(
