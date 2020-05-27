@@ -368,7 +368,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
           const tensorpipe::Error& error) mutable {
         if (error) {
           LOG(WARNING) << "client write error: " << error.what();
-          markFutureWithError(std::move(futureResponseMessage), error.what());
+          markFutureWithError(*futureResponseMessage, error.what());
           return;
         }
 
@@ -389,7 +389,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                 }
                 std::string errorMsg = error.what();
                 for (auto& p : pendingMsgs) {
-                  markFutureWithError(std::move(p.second), errorMsg);
+                  markFutureWithError(*p.second, errorMsg);
                 }
                 return;
               }
@@ -419,14 +419,13 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                    responseMessage{std::move(responseMessage)}]() mutable {
                     if (responseMessage.type() == MessageType::EXCEPTION) {
                       markFutureWithError(
-                          std::move(futureResponseMessage),
+                          *futureResponseMessage,
                           std::string(
                               responseMessage.payload().begin(),
                               responseMessage.payload().end()));
                     } else {
                       markFutureAsComplete(
-                          std::move(futureResponseMessage),
-                          std::move(responseMessage));
+                          *futureResponseMessage, std::move(responseMessage));
                     }
                   });
             });
@@ -475,7 +474,7 @@ void TensorPipeAgent::pollTimeoutRpcs() {
     for (auto& future : timedOutFutures) {
       std::string errorMsg = c10::str(
           "RPC ran for more than set timeout and will now be marked with an error");
-      markFutureWithError(std::move(future), std::move(errorMsg));
+      markFutureWithError(*future, std::move(errorMsg));
     }
   }
 }
@@ -667,18 +666,18 @@ std::string TensorPipeAgent::getDefaultIPAddress() {
 }
 
 void TensorPipeAgent::markFutureAsComplete(
-    std::shared_ptr<AtomicFutureMessage> futureMessage,
+    AtomicFutureMessage& futureMessage,
     Message message) {
-  if (!futureMessage->isComplete.test_and_set()) {
-    futureMessage->futMsg.markCompleted(std::move(message));
+  if (!futureMessage.isComplete.test_and_set()) {
+    futureMessage.futMsg.markCompleted(std::move(message));
   }
 }
 
 void TensorPipeAgent::markFutureWithError(
-    std::shared_ptr<AtomicFutureMessage> futureMessage,
+    AtomicFutureMessage& futureMessage,
     std::string errorMsg) {
-  if (!futureMessage->isComplete.test_and_set()) {
-    futureMessage->futMsg.setError(std::move(errorMsg));
+  if (!futureMessage.isComplete.test_and_set()) {
+    futureMessage.futMsg.setError(std::move(errorMsg));
   }
 }
 

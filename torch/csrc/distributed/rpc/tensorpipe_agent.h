@@ -242,10 +242,10 @@ class TensorPipeAgent : public RpcAgent {
 
   // Helpers to set the state of the requests.
   void markFutureAsComplete(
-      std::shared_ptr<AtomicFutureMessage> futureMessage,
+      AtomicFutureMessage& futureMessage,
       Message message);
   void markFutureWithError(
-      std::shared_ptr<AtomicFutureMessage> futureMessage,
+      AtomicFutureMessage& futureMessage,
       std::string errorMsg);
 };
 

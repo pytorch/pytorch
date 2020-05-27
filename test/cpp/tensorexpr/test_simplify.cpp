@@ -2039,6 +2039,23 @@ void testSimplifyForCleansUp() {
   }
 }
 
+void testSimplifyEliminateEmptyFor() {
+  KernelScope kernel_scope;
+
+  {
+    // Flatten many layers around an empty block to an empty block.
+    Stmt* last = new Block({});
+    for (int i = 0; i < 11; ++i) {
+      VarHandle loopVar("loopVar", kInt);
+      last = For::make(loopVar, 0, 10, last);
+    }
+
+    Stmt* simplified = IRSimplifier::simplify(last);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 0);
+  }
+}
+
 void testSimplifyFlattenBlock() {
   KernelScope kernel_scope;
 

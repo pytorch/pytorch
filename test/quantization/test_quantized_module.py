@@ -46,9 +46,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy6 = relu6_module(qx)
 
         self.assertEqual(y_ref, qy.dequantize(),
-                         msg="ReLU module API failed")
+                         message="ReLU module API failed")
         self.assertEqual(y6_ref, qy6.dequantize(),
-                         msg="ReLU6 module API failed")
+                         message="ReLU6 module API failed")
 
 
     @given(
@@ -92,7 +92,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         qlinear.set_weight_bias(W_q, B)
         # Simple round-trip test to ensure weight()/set_weight() API
-        self.assertEqual(qlinear.weight(), W_q, atol=1e-5, rtol=0)
+        self.assertEqual(qlinear.weight(), W_q, atol=1e-5)
         W_pack = qlinear._packed_params._packed_params
 
         qlinear.scale = float(scale)
@@ -576,7 +576,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy = quant_mod(qx)
 
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
-                         msg="BatchNorm2d module API failed")
+                         message="BatchNorm2d module API failed")
 
     def test_batch_norm3d(self):
         """Tests the correctness of the batchnorm3d module.
@@ -594,7 +594,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy = quant_mod(qx)
 
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
-                         msg="BatchNorm3d module API failed")
+                         message="BatchNorm3d module API failed")
 
     def test_layer_norm(self):
         """Tests the correctness of the layernorm module.
@@ -624,7 +624,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qY = quant_mod(qX)
 
         self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
-                         msg="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
+                         message="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
                          .format(qY_ref, qY))
 
 
