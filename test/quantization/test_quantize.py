@@ -60,6 +60,7 @@ from torch.testing._internal.common_quantization import (
     ActivationsTestModel,
     ActivationsQATTestModel,
     NormalizationTestModel,
+    NormalizationQATTestModel,
     test_only_eval_fn,
     test_only_train_fn,
     prepare_dynamic,
@@ -910,6 +911,33 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
 
                 model = quantize_qat(ActivationsQATTestModel(qengine), test_only_train_fn,
                                      self.train_data)
+                checkQuantized(model)
+
+    def test_normalization(self):
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                model = NormalizationQATTestModel(qengine)
+                model = prepare_qat(model)
+
+                self.assertEqual(type(model.fc1), torch.nn.qat.modules.Linear)
+                self.assertEqual(
+                    type(model.group_norm), torch.nn.qat.modules.GroupNorm)
+
+                self.checkObservers(model)
+                test_only_train_fn(model, self.train_data)
+                model = convert(model)
+
+                def checkQuantized(model):
+                    self.assertEqual(type(model.fc1), nnq.Linear)
+                    self.assertEqual(type(model.group_norm), nnq.GroupNorm)
+                    test_only_eval_fn(model, self.calib_data)
+                    self.checkScriptable(model, self.calib_data)
+
+                checkQuantized(model)
+
+                model = quantize_qat(
+                    NormalizationQATTestModel(qengine), test_only_train_fn,
+                    self.train_data)
                 checkQuantized(model)
 
     def test_eval_only_fake_quant(self):
