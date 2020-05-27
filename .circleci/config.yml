@@ -2808,6 +2808,14 @@ workflows:
             - setup
           build_environment: "pytorch-linux-bionic-py3.8-gcc9-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.8-gcc9:209062ef-ab58-422a-b295-36c4eed6e906"
+      - pytorch_linux_test:
+          name: pytorch_linux_bionic_py3_8_gcc9_test
+          requires:
+            - setup
+            - pytorch_linux_bionic_py3_8_gcc9_build
+          build_environment: "pytorch-linux-bionic-py3.8-gcc9-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.8-gcc9:209062ef-ab58-422a-b295-36c4eed6e906"
+          resource_class: large
       - pytorch_macos_10_13_py3_build:
           requires:
             - setup
