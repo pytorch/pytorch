@@ -536,6 +536,34 @@ class TestFakeQuantizePerTensor(TestCase):
         self.assertNotEqual(fq_module.scale, scale)
         self.assertNotEqual(fq_module.zero_point, zero_point)
 
+    def test_fake_quant_preserves_qparam_shapes_for_activations(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.linear = nn.Linear(4, 4)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        m = Model()
+
+        m.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+        torch.quantization.prepare_qat(m, inplace=True)
+
+        scale_shape_before = m.linear.activation_post_process.scale.shape
+        zero_point_shape_before = m.linear.activation_post_process.zero_point.shape
+
+        x = torch.rand(4, 4, 4, 4)
+        m(x)
+        scale_shape_after = m.linear.activation_post_process.scale.shape
+        zero_point_shape_after = m.linear.activation_post_process.zero_point.shape
+        self.assertEqual(
+            scale_shape_before, scale_shape_after,
+            "FakeQuant scale shape must stay consistent")
+        self.assertEqual(
+            zero_point_shape_before, zero_point_shape_after,
+            "FakeQuant zero_point shape must stay consistent")
 
 
 class TestFakeQuantizePerChannel(TestCase):
@@ -748,3 +776,37 @@ class TestDistributed(QuantizationTestCase):
                 quant_model = torch.quantization.convert(quant_model.eval().cpu(), inplace=False)
                 with torch.no_grad():
                     out = quant_model(torch.rand(1, 3, 28, 28))
+
+    def test_qat_convbn_fused_syncbn_replacement(self):
+        """
+        Tests that SyncBatchNorm replacement works for fused ConvBN.
+        """
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            return
+        with override_quantized_engine('fbgemm'):
+            # create conv-bn
+            class Model(nn.Module):
+                def __init__(self):
+                    super(Model, self).__init__()
+                    self.conv = nn.Conv2d(4, 1, 3, padding=1)
+                    self.bn = nn.BatchNorm2d(1)
+
+                def forward(self, x):
+                    x = self.conv(x)
+                    x = self.bn(x)
+                    return x
+
+            model = Model()
+            # fuse it
+            fused_model = torch.quantization.fuse_modules(
+                model,
+                [['conv', 'bn']],
+            )
+            # convert to QAT
+            fused_model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+            torch.quantization.prepare_qat(fused_model, inplace=True)
+            # replace with DDP
+            fused_model = nn.SyncBatchNorm.convert_sync_batchnorm(fused_model)
+            self.assertTrue(
+                isinstance(fused_model.conv.bn, nn.SyncBatchNorm),
+                "Expected BN to be converted to SyncBN")

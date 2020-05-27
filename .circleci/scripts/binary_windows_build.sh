@@ -5,10 +5,15 @@ source "/c/w/env"
 mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
 export CUDA_VERSION="${DESIRED_CUDA/cu/}"
-export VC_YEAR=2017
 export USE_SCCACHE=1
 export SCCACHE_BUCKET=ossci-compiler-cache-windows
 export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
+
+if [[ "$CUDA_VERSION" == "92" || "$CUDA_VERSION" == "100" ]]; then
+  export VC_YEAR=2017
+else
+  export VC_YEAR=2019
+fi
 
 set +x
 export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
