@@ -65,8 +65,7 @@ class TORCH_API Future final {
   void markCompletedIfNeeded(T value) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed_) {
-      LOG(INFO) << "Skipping marking the Future completed since it has " <<
-        "already been completed.";
+      LOG(INFO) << "markCompletedIfNeeded skipped since future is already complete.";
       return;
     } else {
       markCompletedInternal(std::move(value), lock);
