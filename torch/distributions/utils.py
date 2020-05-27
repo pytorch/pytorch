@@ -85,6 +85,10 @@ def probs_to_logits(probs, is_binary=False):
     return torch.log(ps_clamped)
 
 def as_float(x):
+    r"""
+    Converts a tensor of non-floating point type to the current default 
+    floating point type. For int scalars, applies the float cast.
+    """    
     if isinstance(x, torch.Tensor):
         if not x.is_floating_point():
             x = x.to(dtype=torch.get_default_dtype())
