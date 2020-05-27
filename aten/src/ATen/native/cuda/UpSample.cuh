@@ -197,6 +197,15 @@ __device__ __forceinline__ static int nearest_neighbor_compute_source_index(
   return src_index;
 }
 
+__device__ __forceinline__ static int nearest_neighbor_bw_compute_source_index(
+    const float scale,
+    int dst_index,
+    int output_size) {
+  const int src_index =
+      static_cast<int>(ceilf(dst_index * scale));
+  return src_index;
+}
+
 /* Used by UpSampleBicubic2d.cu */
 template <typename scalar_t>
 __device__ __forceinline__ static scalar_t upsample_get_value_bounded(
