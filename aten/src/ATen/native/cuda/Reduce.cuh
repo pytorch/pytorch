@@ -662,6 +662,19 @@ struct ReduceOp {
       *res1 = thrust::get<1>(x);
     }
   }
+  template<class T1, class T2>
+  C10_DEVICE void set_results(const thrust::pair<T1, T2> x, const index_t base_offset) const {
+    if (noutputs >= 1) {
+      auto res0 = (T1*)((char*)dst[0] + base_offset);
+      *res0 = x.first;
+    }
+    if (noutputs >= 2) {
+      // base offset is computed assuming element size being sizeof(T1), so we need to make a
+      // correction to obtain the correct base offset
+      auto res1 = (T2*) ((char *) dst[1] + base_offset / sizeof(T1) * sizeof(T2));
+      *res1 = x.second;
+    }
+  }
 
   C10_DEVICE void set_results_to_output(arg_t value, index_t base_offset) const {
     assert(final_output);
