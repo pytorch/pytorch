@@ -11152,10 +11152,10 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
             self.assertTrue(ref_out.is_contiguous())
-            self.assertEqual(out, ref_out, rtol=0.001, atol=0.001)
-            self.assertEqual(conv.weight.grad, ref_conv.weight.grad, rtol=0.001, atol=0.001)
-            self.assertEqual(conv.bias.grad, ref_conv.bias.grad, rtol=0.001, atol=0.001)
-            self.assertEqual(input.grad, ref_input.grad, rtol=0.001, atol=0.001)
+            self.assertEqual(out, ref_out)
+            self.assertEqual(conv.weight.grad, ref_conv.weight.grad)
+            self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
+            self.assertEqual(input.grad, ref_input.grad)
 
         _helper(2, 8, 4, 4, out_channels=4, kernel_size=3, groups=1)
         _helper(2, 8, 4, 4, out_channels=8, kernel_size=3, groups=8)
