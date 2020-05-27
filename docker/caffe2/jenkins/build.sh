@@ -40,7 +40,7 @@ if [[ "$image" == *rocm* ]]; then
   ROCM_VERSION="$(echo "${image}" | perl -n -e'/rocm(\d+\.\d+\.\d+|nightly)/ && print $1')"
   DOCKERFILE="${OS}-rocm/Dockerfile"
   # newer cmake version needed
-  CMAKE_VERSION=3.6.3
+  CMAKE_VERSION=3.12
 fi
 
 if [[ "$image" == *conda* ]]; then
@@ -57,7 +57,7 @@ if [[ "$image" == *-android-* ]]; then
 
   # The Android NDK requires CMake 3.6 or higher.
   # See https://github.com/caffe2/caffe2/pull/1740 for more info.
-  CMAKE_VERSION=3.6.3
+  CMAKE_VERSION=3.12
 
   if [[ "$image" == *-ndk-* ]]; then
     ANDROID_NDK_VERSION="$(echo "${image}" | perl -n -e'/-ndk-([^-]+)/ && print $1')"
@@ -88,6 +88,10 @@ cp -a common/* "$(dirname ${DOCKERFILE})"
 if [ -n "${JENKINS:-}" ]; then
   JENKINS_UID=$(id -u jenkins)
   JENKINS_GID=$(id -g jenkins)
+fi
+
+if [ -n "${CMAKE_VERSION:-}" ]; then
+  CMAKE_VERSION=3.12
 fi
 
 # Build image

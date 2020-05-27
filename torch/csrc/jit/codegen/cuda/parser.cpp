@@ -67,6 +67,14 @@ class IrParser {
     for (auto val : block->inputs()) {
       TORCH_CHECK(registerValue(val, broadcast_dim));
       fusion_->addInput(value_map_[val->unique()]);
+
+      auto opt_dtype = value_map_[val->unique()]->getDataType();
+      // computation promotion, we cast fp16 inputs to fp32 and use promoted
+      // type in the computation.
+      if (opt_dtype.has_value() && opt_dtype.value() == DataType::Half) {
+        Val* promoted_val = castOp(DataType::Float, value_map_[val->unique()]);
+        value_map_[val->unique()] = promoted_val;
+      }
     }
 
     // TODO: disable unroll to ensure rand_like generates identical output as
@@ -84,6 +92,16 @@ class IrParser {
     for (auto jit_output : block->outputs()) {
       TensorView* out =
           static_cast<TensorView*>(value_map_[jit_output->unique()]);
+
+      // demote output dtype to be match PyTorch JIT graph.
+      auto tensor_type = jit_output->type()->cast<TensorType>();
+      TORCH_INTERNAL_ASSERT(
+          tensor_type, "output of fusion group is not TensorType.");
+      if (tensor_type->scalarType() == at::ScalarType::Half) {
+        // No need to update value_map_ after this point.
+        out = static_cast<TensorView*>(castOp(DataType::Half, out));
+      }
+
       fusion_->addOutput(out);
 
       // Merge all dimensions because we're only supporting pointwise
@@ -93,36 +111,40 @@ class IrParser {
       out->split(0, nthreads);
       // Split by another 4 which will be our unroll factor
       auto ur_factor = disable_unroll ? 1 : unroll_factor;
-      out->split(0, ur_factor);
-      cuda_kernel_->unroll_factor_ = ur_factor;
-
-      // Map blocks/threads
-      out->axis(0)->parallelize(ParallelType::BIDx);
-      out->axis(1)->parallelize(ParallelType::Unroll);
-      out->axis(-1)->parallelize(ParallelType::TIDx);
+      if (!disable_unroll) {
+        out->split(0, ur_factor);
+        cuda_kernel_->unroll_factor_ = ur_factor;
+      }
     }
 
     // Run through outputs, grab all inputs of outputs
     // squeeze with computeAt to set overall structure.
-    for (auto jit_output : block->outputs()) {
-      TensorView* out =
-          static_cast<TensorView*>(value_map_[jit_output->unique()]);
-
-      for (Val* inp : fusion_->inputsOf(out)) {
+    for (auto output : fusion_->outputs()) {
+      if (output->getValType() != ValType::TensorView)
+        continue;
+      TensorView* out_tv = static_cast<TensorView*>(output);
+      for (Val* inp : fusion_->inputsOf(output)) {
         if (inp->getValType().value() == ValType::TensorView)
-          static_cast<TensorView*>(inp)->computeAt(out, 1);
+          static_cast<TensorView*>(inp)->computeAt(out_tv, 1);
       }
+      out_tv->axis(0)->parallelize(ParallelType::BIDx);
     }
 
     // Run through intermediates, unroll, and bind their axes
     for (auto val : fusion_->vals()) {
-      if (fusion_->hasInput(val) || fusion_->hasOutput(val))
-        continue;
       if (val->getValType().value() != ValType::TensorView)
         continue;
       TensorView* tv = static_cast<TensorView*>(val);
-      tv->axis(-2)->parallelize(ParallelType::Unroll);
-      tv->axis(-1)->parallelize(ParallelType::TIDx);
+
+      // Should be true for all intermediates, but if one isn't hooked
+      // up right, skip it and hope for the best for now
+      if (!disable_unroll && tv->nDims() == 3) {
+        tv->axis(-2)->parallelize(ParallelType::Unroll);
+        tv->axis(-1)->parallelize(ParallelType::TIDx);
+      } else {
+        if (tv->nDims() == 2)
+          tv->axis(-1)->parallelize(ParallelType::TIDx);
+      }
     }
   }
 
