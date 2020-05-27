@@ -126,7 +126,7 @@ Reducer::Reducer(
                     [=](const torch::autograd::variable_list& outputs,
                         const torch::autograd::variable_list& /* unused */) {
                       this->rpc_context_.set(
-                          ThreadLocalDistAutogradContext::getContextWeakPtr());
+                          ThreadLocalDistAutogradContext::getContextPtr());
                       this->autograd_hook(index);
                       return outputs;
                     })),
@@ -779,13 +779,12 @@ void Reducer::runGradCallbackForVariable(
   if (context_ptr == nullptr) {
     cb(variable.grad());
   } else {
-    // Under distributed autograa
+    // Under distributed autograd
     context_ptr->runGradCallbackForVariable(variable, std::move(cb));
   }
 }
 
-void Reducer::RpcContext::set(ContextWeakPtr&& context_weak_ptr) {
-  auto new_context_ptr = context_weak_ptr.lock();
+void Reducer::RpcContext::set(ContextPtr&& new_context_ptr) {
   if (!new_context_ptr) {
     // Not under distributed autograd
     return;

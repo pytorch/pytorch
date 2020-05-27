@@ -224,7 +224,7 @@ class Trainer:
     def __del__(self):
         dist.destroy_process_group(self.process_group_for_ddp)
 
-    def do_backward(self, mini_batch: FeatureSet):
+    def train_batch(self, mini_batch: FeatureSet):
         grads_dict = None
         with dist_autograd.context() as context_id:
             output = self.hybrid_module.forward(mini_batch)
@@ -361,7 +361,7 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase):
             for idx, trainer_rref in enumerate(trainer_rrefs):
                 futures.append(
                     _remote_method_async(
-                        Trainer.do_backward,
+                        Trainer.train_batch,
                         trainer_rref,
                         training_examples[idx],
                     )

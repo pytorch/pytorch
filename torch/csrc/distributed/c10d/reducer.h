@@ -220,12 +220,11 @@ class Reducer {
 
   struct RpcContext {
     using ContextPtr = torch::distributed::autograd::ContextPtr;
-    using ContextWeakPtr = torch::distributed::autograd::ContextWeakPtr;
     // The shared_ptr is to hold the context instance.
     ContextPtr context_ptr_holder;
     std::atomic<ContextPtr::element_type*> context_ptr{nullptr};
 
-    void set(ContextWeakPtr&& context_weak_ptr);
+    void set(ContextPtr&& new_context_ptr);
     void clear();
   };
   RpcContext rpc_context_;

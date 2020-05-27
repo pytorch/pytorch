@@ -215,35 +215,39 @@ const c10::Dict<torch::Tensor, torch::Tensor> DistAutogradContext::
 void DistAutogradContext::runGradCallbackForVariable(
     const torch::autograd::Variable& variable,
     GradCallback&& cb) {
-  std::lock_guard<std::mutex> guard(lock_);
-  auto it = accumulatedGrads_.find(variable);
-  TORCH_INTERNAL_ASSERT(
-      it != accumulatedGrads_.end(),
-      "The grad for the variable should exist in dist_autograd context.");
-  auto grad = it->value();
+  torch::Tensor grad;
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    auto it = accumulatedGrads_.find(variable);
+    TORCH_INTERNAL_ASSERT(
+        it != accumulatedGrads_.end(),
+        "The grad for the variable should exist in dist_autograd context.");
+    grad = it->value();
+  }
   if (cb(grad)) {
+    std::lock_guard<std::mutex> guard(lock_);
     // Needs to update the grad in the map.
     accumulatedGrads_.insert(variable, std::move(grad));
   }
 }
 
 namespace {
-thread_local ContextWeakPtr tl_context_weak_ptr;
+thread_local ContextPtr tl_context_ptr;
 } // namespace
 
 ThreadLocalDistAutogradContext::ThreadLocalDistAutogradContext(
-    ContextWeakPtr&& new_context_wp)
-    : prev_context_weak_ptr_(std::move(tl_context_weak_ptr)) {
-  tl_context_weak_ptr = std::move(new_context_wp);
+    ContextPtr&& new_context)
+    : prev_context_ptr_(std::move(tl_context_ptr)) {
+  tl_context_ptr = std::move(new_context);
 }
 
 ThreadLocalDistAutogradContext::~ThreadLocalDistAutogradContext() {
-  tl_context_weak_ptr = std::move(prev_context_weak_ptr_);
+  tl_context_ptr = std::move(prev_context_ptr_);
 }
 
 // static
-ContextWeakPtr ThreadLocalDistAutogradContext::getContextWeakPtr() {
-  return tl_context_weak_ptr;
+ContextPtr ThreadLocalDistAutogradContext::getContextPtr() {
+  return tl_context_ptr;
 }
 
 } // namespace autograd
