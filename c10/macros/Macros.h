@@ -209,25 +209,16 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define __func__ __FUNCTION__
 #endif
 
-// CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
-// kernels. This is not supported by Apple platforms so we special case it.
-// See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
-#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
-#define CUDA_KERNEL_ASSERT(...)
-#else // __APPLE__
-#define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
-#endif // __APPLE__
-
-// CUDA_ALWAYS_ASSERT is similar to CUDA_KERNEL_ASSERT but checks the assertion
+// CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that when building Release.
 #if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
 // Those platforms do not support assert()
-#define CUDA_ALWAYS_ASSERT(cond)
+#define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
 // TODO: This should be defined but I don't have the environment to properly
 // test it. See e.g., https://github.com/pytorch/pytorch/pull/32719#discussion_r379918384
-#define CUDA_ALWAYS_ASSERT(cond)
+#define CUDA_KERNEL_ASSERT(cond)
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)
 extern "C" {
@@ -246,7 +237,7 @@ __host__ __device__
         const char* function) throw();
 }
 #endif // NDEBUG
-#define CUDA_ALWAYS_ASSERT(cond)                                         \
+#define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(#cond, __FILE__, static_cast<unsigned int>(__LINE__),  \
                   __func__);                                             \
