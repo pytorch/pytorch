@@ -30,6 +30,8 @@ const char* toString(DispatchKey t) {
       return "MSNPU";
     case DispatchKey::XLA:
       return "XLA";
+    case DispatchKey::Vulkan:
+      return "Vulkan";
     case DispatchKey::MkldnnCPU:
       return "MkldnnCPU";
     case DispatchKey::QuantizedCPU:
