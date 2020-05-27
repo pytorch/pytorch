@@ -1107,6 +1107,31 @@ class _TestTorchMixin(object):
         a = torch.tensor([True, True, False, True, True], dtype=torch.bool)
         b = torch.tensor([-1, -1.1, 0, 1, 1.1], dtype=torch.bool)
         self.assertEqual(a, b)
+        c = torch.tensor([-0.1, -1.1, 0, 1, 0.1], dtype=torch.bool)
+        self.assertEqual(a, c)
+        d = torch.tensor((-.3, 0, .3, 1, 3 / 7), dtype=torch.bool)
+        e = torch.tensor((True, False, True, True, True), dtype=torch.bool)
+        self.assertEqual(e, d)
+        f = torch.tensor((-1, 0, -1.1, 1, 1.1), dtype=torch.bool)
+        self.assertEqual(e, f)
+
+        int64_max = torch.iinfo(torch.int64).max
+        int64_min = torch.iinfo(torch.int64).min
+        float64_max = torch.finfo(torch.float64).max
+        float64_min = torch.finfo(torch.float64).min
+        g_1 = torch.tensor((float('nan'), 0, int64_min, int64_max, int64_min - 1), dtype=torch.bool)
+        self.assertEqual(e, g_1)
+        g_2 = torch.tensor((int64_max + 1, 0, (int64_max + 1) * 2, (int64_max + 1) * 2 + 1, float64_min), dtype=torch.bool)
+        self.assertEqual(e, g_2)
+        g_3 = torch.tensor((float64_max, 0, float64_max + 1, float64_min - 1, float64_max + 1e291), dtype=torch.bool)
+        self.assertEqual(e, g_3)
+
+        h = torch.tensor([True, False, False, True, False, True, True], dtype=torch.bool)
+        i = torch.tensor([1e-323, 1e-324, 0j, 1e-323j, 1e-324j, 1 + 2j, -1j], dtype=torch.bool)
+        self.assertEqual(h, i)
+        j = torch.tensor((True, True, True, True), dtype=torch.bool)
+        k = torch.tensor((1e323, -1e323, float('inf'), -float('inf')), dtype=torch.bool)
+        self.assertEqual(j, k)
 
     def test_tensor_factory_copy_var(self):
 
@@ -6728,13 +6753,6 @@ class TestTorchDeviceType(TestCase):
             raise unittest.SkipTest('logical_not not supported on {}'.format(dtype))
 
         a_np = np.array(data, dtype=torch_to_numpy_dtype_dict[dtype])
-
-        if dtype == torch.bool:
-            # this is set to trip when https://github.com/pytorch/pytorch/issues/37398 is fixed
-            # so that we combine with the above test.
-            self.assertNotEqual(a_np, a)
-            a_np = a.cpu().numpy()  # ensure they are the same because of above issue
-
         self.assertEqual(np.logical_not(a_np), torch.logical_not(a).to('cpu'))
         self.assertEqual(np.logical_not(a_np, out=a_np), a.logical_not_().to('cpu'))
 
