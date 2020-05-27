@@ -362,7 +362,10 @@ Tensor bernoulli_impl(const Tensor& self, c10::optional<Generator> gen) {
 
 template<template<typename> class bernoulli_scalar_kernel, typename RNG>
 Tensor bernoulli_impl(const Tensor& self, double p, c10::optional<Generator> gen) {
-  return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(p, gen);
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+//  result.bernoulli_(p, gen);
+  bernoulli_impl_<bernoulli_scalar_kernel, RNG>(result, p, gen);
+  return result;
 }
 
 template<template<typename> class bernoulli_tensor_kernel, typename RNG>
