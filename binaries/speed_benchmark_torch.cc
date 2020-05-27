@@ -62,6 +62,10 @@ C10_DEFINE_bool(
   "Whether to print performance stats for AI-PEP.");
 
 C10_DEFINE_int(pytext_len, 0, "Length of input sequence.");
+C10_DEFINE_bool(
+    vulkan,
+    false,
+    "Whether to use Vulkan backend (GPU).");
 
 std::vector<std::string>
 split(char separator, const std::string& string, bool ignore_empty = true) {
@@ -136,9 +140,15 @@ std::vector<c10::IValue> create_inputs() {
           "Unsupported input memory format: ", input_memory_format_list[i]);
     }
 
-    inputs.push_back(torch::ones(
+    auto input_tensor = torch::ones(
         input_dims,
-        at::TensorOptions(input_type).memory_format(input_memory_format)));
+        at::TensorOptions(input_type).memory_format(input_memory_format));
+    if (FLAGS_vulkan) {
+      auto input_tensor_vulkan = input_tensor.vulkan();
+      inputs.push_back(input_tensor_vulkan);
+    } else {
+      inputs.push_back(input_tensor);
+    }
   }
 
   if (FLAGS_pytext_len > 0) {
