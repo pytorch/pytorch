@@ -106,4 +106,35 @@ Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim) {
   return makeBatched(batched->value(), std::move(new_bdims));
 }
 
+BatchDims computeFrontBatchDims(std::bitset<kVmapNumLevels> levels_bitset) {
+  BatchDims bdims;
+  int64_t dim = 0;
+  for (int64_t level = 0; level < kVmapNumLevels; level++) {
+    if (!levels_bitset[level]) {
+      continue;
+    }
+    bdims.emplace_back(level, dim++);
+  }
+  return bdims;
+}
+
+Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
+  TORCH_INTERNAL_ASSERT(!isBatched(tensor));
+  auto tensor_dim = tensor.dim();
+  TORCH_CHECK(
+      tensor_dim <= kVmapMaxTensorDims,
+      "vmap only supports tensors of dimensionality up to ", kVmapMaxTensorDims,
+      "; got a tensor with dim ", tensor_dim);
+  TORCH_INTERNAL_ASSERT(
+      std::all_of(bdims.begin(), bdims.end(),
+        [](const BatchDim& bdim) { return bdim.level() < kVmapNumLevels; }),
+      "We only supports up to ", kVmapNumLevels, " nested vmaps");
+  return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
+}
+
+Tensor makeBatchedFromLevels(const Tensor& tensor, std::bitset<kVmapNumLevels> levels) {
+  return makeBatched(tensor, std::move(computeFrontBatchDims(levels)));
+}
+
+
 } // namespace at

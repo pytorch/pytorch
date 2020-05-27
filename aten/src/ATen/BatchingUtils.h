@@ -4,36 +4,39 @@ namespace at {
 
 /*
  * Utility functions used to implement batching rules.
- *
- * NB: All of these do NOT accept Tensors backed by BatchedTensor, unless
- * otherwise specified. These APIs usually operate on "unpacked BatchedTensors",
- * i.e. a (value Tensor, BatchDims) pair. This is for performance reasons:
- * we do not want to always wrap and unwrap BatchedTensors; we try to
- * only unwrap once per input tensor per operator and wrap once per output
- * tensor per operator.
  */ 
 
-// If the input is a Tensor backed with a BatchedTensorImpl, then
-// this function returns the underlying Tensor and BatchDims.
-// If the input is a Tensor backed with regular TensorImpl, then
-// this function returns the tensor and empty BatchDims.
-TORCH_API std::pair<std::reference_wrapper<const Tensor>,BatchDimsRef> unpackBatched(const Tensor& self);
-
-// Moves the specified BatchDims to the front of `self`, ordered by their level.
-// Returns a view of the original tensor if any dims were moved; otherwise
-// returns the original tensor.
+// Creates a bitset of all the levels present in `bdims`.
 //
 // For example:
-//   moveBatchDimsToFront(ones(2, 3, 5), [(lvl=1, dim=2), (lvl=2, dim=1)])
-// would return a permuted view of size [5, 3, 2].
-TORCH_API Tensor moveBatchDimsToFront(const Tensor& self, BatchDimsRef bdims);
+//   createLevelsBitset([(lvl=1, dim=2), (lvl=3, dim=1)]) -> 1010000...
+std::bitset<kVmapNumLevels> createLevelsBitset(BatchDimsRef bdims);
 
-// Reindexes batch dims (out-of-place) assuming they appear at the front of
-// a tensor.
+// Produces a new vector of the same size as `arr` where each element of is
+// created by calling `func` on  each element of `arr` in order.
+// Equivalent to `output = map(func, arr)` in Python.
+std::vector<int64_t> transform(IntArrayRef arr, std::function<int64_t(int64_t)> func);
+
+// Takes a BatchedTensor or a regular Tensor and permutes all of the batch dims of
+// the underlying tensor (if they exist) to the front, in the order of their level `.
+// Returns the (possibly) permuted tensor, which is a regular Tensor(!!)
+// (not a BatchedTensor), and a bitset of the levels that that correspond to the
+// levels present in the batch dims.
+//
 // For example:
-//   moveBatchDimsToFront([(lvl=1, dim=2), (lvl=3, dim=1)])
-// returns:
-//   [(lvl=1, dim=0), (lvl=3, dim=1)]
-TORCH_API BatchDims moveBatchDimsToFront(BatchDimsRef bdims);
+//     materializeBatchDimsAtFront(ones({2, 3})) -> ones({2, 3}), 0
+// and
+//     materializeBatchDimsAtFront(makeBatched(
+//         ones({2, 3, 4}), {{/lvl*/=1, dim=1}, {/*lvl*/=3, dim=0}}
+// returns
+//     tensor = ones({3, 2, 4}), levels = 0101000...
+// (so the dimension with level 1 is at the front of the tensor, followed by
+// the dimension with level 3).
+//
+// This transformation is central to the semantics of BatchedTensor. Most
+// (unary) batching rules will materialize the batch dimensions at the front
+// of the tensor and then perform some operations on the returned tensor.
+TORCH_API std::pair<Tensor,std::bitset<kVmapNumLevels>>
+materializeBatchDimsAtFront(const Tensor& tensor);
 
 }

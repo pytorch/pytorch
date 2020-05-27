@@ -12,45 +12,50 @@ static bool areBdimsAtFrontInOrder(BatchDimsRef bdims) {
   return true;
 }
 
-// NB: We rely on BatchDims being sorted by level.
-// See NOTE: [BatchDims sorted by level] for more details
-BatchDims moveBatchDimsToFront(BatchDimsRef bdims) {
-  BatchDims result;
-  result.reserve(bdims.size());
-  for (int64_t idx = 0; idx < bdims.size(); idx++) {
-    result.emplace_back(bdims[idx].level(), idx);
+std::bitset<kVmapNumLevels> createLevelsBitset(BatchDimsRef bdims) {
+  std::bitset<kVmapNumLevels> result;
+  for (const auto& bdim : bdims) {
+    result.set(bdim.level());
   }
   return result;
 }
 
-Tensor moveBatchDimsToFront(const Tensor& self, BatchDimsRef bdims) {
-  TORCH_INTERNAL_ASSERT(!isBatched(self));
-  if (areBdimsAtFrontInOrder(bdims)) {
-    return self;
+std::vector<int64_t> transform(IntArrayRef arr, std::function<int64_t(int64_t)> func) {
+  std::vector<int64_t> result;
+  result.reserve(arr.size());
+  for (int64_t elt : arr) {
+    result.push_back(func(elt));
   }
-  const auto self_sizes = self.sizes();
-  std::vector<int64_t> permutation(self_sizes.size(), 0);
-  permutation.reserve(self_sizes.size());
+  return result;
+}
+
+std::pair<Tensor,std::bitset<kVmapNumLevels>>
+materializeBatchDimsAtFront(const Tensor& tensor) {
+  auto* batched = maybeGetBatched(tensor);
+  if (!batched) {
+    return std::make_pair(tensor, 0);
+  }
+  auto bdims = batched->bdims();
+  const Tensor& tensor_ = batched->value();
+  auto levels = createLevelsBitset(bdims);
+  if (areBdimsAtFrontInOrder(bdims)) {
+    return std::make_pair(tensor_, levels);
+  }
+  const auto sizes = tensor_.sizes();
+  std::vector<int64_t> permutation(sizes.size(), 0);
+  permutation.reserve(sizes.size());
   const auto is_bdim = createBatchDimBitset(bdims);
   int64_t idx = 0;
   for (const auto& bdim : bdims) {
     permutation[idx++] = bdim.dim();
   }
-  for (int64_t ptr = 0; idx < self_sizes.size(); ptr++) {
+  for (int64_t ptr = 0; idx < sizes.size(); ptr++) {
     if (is_bdim[ptr]) {
       continue;
     }
     permutation[idx++] = ptr;
   }
-  return self.permute(permutation);
-}
-
-std::pair<std::reference_wrapper<const Tensor>,BatchDimsRef> unpackBatched(const Tensor& self) {
-  const auto* batched = maybeGetBatched(self);
-  if (batched) {
-    return { batched->value(), batched->bdims() };
-  }
-  return { self, {} };
+  return std::make_pair(tensor_.permute(permutation), levels);
 }
 
 }

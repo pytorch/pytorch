@@ -12,6 +12,9 @@ namespace at {
 // but there isn't a centralized definition.
 constexpr int64_t kVmapMaxTensorDims = 64;
 
+// The valid vmap levels range from [0, 64).
+constexpr int64_t kVmapNumLevels = 64;
+
 // Store this number of elements of BatchDims on the stack. Most people will
 // probably use <= 5 nested vmaps, but adjust this number as necessary.
 constexpr int64_t kBatchDimsStackSize = 5;
@@ -37,6 +40,8 @@ using BatchDims = SmallVector<BatchDim, kBatchDimsStackSize>;
 using BatchDimsRef = ArrayRef<BatchDim>;
 
 // A BatchedTensorImpl holds an underlying Tensor and a list of BatchDim
+// NB: We use the term "BatchedTensor" to represent a Tensor that is backed with a
+// BatchedTensorImpl.
 //
 // The batch dimensions are treated as being "private"; they are not user-visible.
 // For example, in the following Tensor,
@@ -115,17 +120,22 @@ inline std::ostream& operator<<(std::ostream& out, const BatchDim& bdim) {
   return out;
 }
 
-inline Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
-  TORCH_INTERNAL_ASSERT(!isBatched(tensor));
-  auto tensor_dim = tensor.dim();
-  TORCH_CHECK(
-      tensor_dim <= kVmapMaxTensorDims,
-      "vmap only supports tensors of dimensionality up to ", kVmapMaxTensorDims,
-      "; got a tensor with dim ", tensor_dim);
-  return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
-}
+// Given some levels, and assuming they represent BatchDims that are at the
+// front of some tensor, reconstruct those BatchDims.
+//
+// For example:
+//     computeFrontBatchDims(0101100...)
+// would return {{lvl=1, dim=0}, {lvl=3, dim=1}, {lvl=4,dim=2}}
+BatchDims computeFrontBatchDims(std::bitset<kVmapNumLevels> levels_bitset);
 
-// Adds a batch dim to `tensor`, returning a Tensor backed by a BatchedTensorImpl.
+// Use this to construct a BatchedTensor from a regular Tensor
+TORCH_API Tensor makeBatched(const Tensor& tensor, BatchDims bdims);
+
+// Use this to construct a BatchedTensor from a regular Tensor and some levels.
+// Assumes that the batch dims (specified by levels) are at the beginning of `tensor`.
+TORCH_API Tensor makeBatchedFromLevels(const Tensor& tensor, std::bitset<kVmapNumLevels> levels);
+
+// Adds a batch dim to `tensor`, returning a BatchedTensor
 TORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim);
 
 

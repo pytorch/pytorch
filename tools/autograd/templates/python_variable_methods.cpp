@@ -712,7 +712,7 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  return createPyObject(self_.storage());
+  return createPyObject(self_.storage(), self_.dtype());
   END_HANDLE_TH_ERRORS
 }
 
@@ -720,7 +720,7 @@ static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  auto storage = THPObjectPtr(createPyObject(self_.storage()));
+  auto storage = THPObjectPtr(createPyObject(self_.storage(), self_.dtype()));
   auto storage_type = (PyObject*)Py_TYPE(storage);
   Py_INCREF(storage_type);
   return storage_type;
@@ -839,6 +839,83 @@ static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, P
   return ret;
 }
 
+// set_ has to be defined in the template because the c10::Storage object
+// does not have a type, and we need to make sure the Python storage object's
+// type matches the tensor's type
+static PyObject* THPVariable_set_(
+    PyObject* self_,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  Tensor& self = reinterpret_cast<THPVariable*>(self_)->cdata;
+  static PythonArgParser parser(
+      {
+          "set_()",
+          "set_(Storage source)",
+          "set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride=None)",
+          "set_(Tensor source)",
+      },
+      /*traceable=*/false);
+
+  ParsedArgs<4> parsed_args;
+  auto _r = parser.parse(args, kwargs, parsed_args);
+
+  switch (_r.idx) {
+    case 0: {
+      // aten::set_(Tensor(a!) self) -> Tensor(a!)
+      auto dispatch_set_ = [](Tensor& self) -> Tensor {
+        pybind11::gil_scoped_release no_gil;
+        return self.set_();
+      };
+      return wrap(dispatch_set_(self));
+    }
+    case 1: {
+      // aten::set_.source_Storage(Tensor(a!) self, Storage source) ->
+      // Tensor(a!)
+      THPObjectPtr dtype_attr(PyObject_GetAttrString(_r.pyobject(0), "dtype"));
+      if (!dtype_attr) throw python_error();
+      at::ScalarType storage_scalar_type = reinterpret_cast<THPDtype*>(
+        dtype_attr.get())->scalar_type;
+      TORCH_INTERNAL_ASSERT(storage_scalar_type == self.dtype());
+      auto dispatch_set_ = [](Tensor& self, Storage source) -> Tensor {
+        pybind11::gil_scoped_release no_gil;
+        return self.set_(source);
+      };
+      return wrap(dispatch_set_(self, _r.storage(0)));
+    }
+    case 2: {
+      // aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage
+      // source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
+      THPObjectPtr dtype_attr(PyObject_GetAttrString(_r.pyobject(0), "dtype"));
+      if (!dtype_attr) throw python_error();
+      at::ScalarType storage_scalar_type = reinterpret_cast<THPDtype*>(
+        dtype_attr.get())->scalar_type;
+      TORCH_INTERNAL_ASSERT(storage_scalar_type == self.dtype());
+      auto dispatch_set_ = [](Tensor& self,
+                              Storage source,
+                              int64_t storage_offset,
+                              IntArrayRef size,
+                              IntArrayRef stride) -> Tensor {
+        pybind11::gil_scoped_release no_gil;
+        return self.set_(source, storage_offset, size, stride);
+      };
+      return wrap(dispatch_set_(
+          self, _r.storage(0), _r.toInt64(1), _r.intlist(2), _r.intlist(3)));
+    }
+    case 3: {
+      // aten::set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
+      auto dispatch_set_ = [](Tensor& self, const Tensor& source) -> Tensor {
+        TORCH_INTERNAL_ASSERT(source.dtype() == self.dtype());
+        pybind11::gil_scoped_release no_gil;
+        return self.set_(source);
+      };
+      return wrap(dispatch_set_(self, _r.tensor(0)));
+    }
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // XXX: ops that are bound here are not exposed to the C++ api nor the JIT.
 // Any new ops added here should be accompanied with a comment why they are not
 // being registered through native_functions.yaml, and be tagged cpp / JIT
@@ -900,6 +977,7 @@ PyMethodDef variable_methods[] = {
   {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},
   {"record_stream", (PyCFunction)THPVariable_record_stream, METH_O, NULL},
   {"requires_grad_", (PyCFunction)(void(*)(void))THPVariable_requires_grad_, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"set_", (PyCFunction)(void (*)(void))THPVariable_set_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"short", (PyCFunction)(void(*)(void))THPVariable_short, METH_VARARGS | METH_KEYWORDS, NULL},
   {"size", (PyCFunction)(void(*)(void))THPVariable_size, METH_VARARGS | METH_KEYWORDS, NULL},
   {"storage", (PyCFunction)THPVariable_storage, METH_NOARGS, NULL},

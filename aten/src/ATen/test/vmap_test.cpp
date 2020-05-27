@@ -128,81 +128,46 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
         kVmapMaxTensorDims - 1);
   }
 }
-TEST(VmapTest, TestUnpackBatched) {
-  {
-    // Call unpackBatched on a Tensor not backed by BatchedTensorImpl
-    Tensor out;
-    BatchDimsRef out_bdims;
 
-    auto tensor = at::randn({2, 3, 5, 7});
-    std::tie(out, out_bdims) = unpackBatched(tensor);
-    ASSERT_TRUE(out.is_same(tensor));
-    ASSERT_EQ(out_bdims.size(), 0);
-  }
+TEST(VmapTest, TestMaterializeBatchDimsAtFront) {
   {
-    // Call unpackBatched on a Tensor backed by BatchedTensorImpl
-    Tensor out;
-    BatchDimsRef out_bdims;
-
-    auto tensor = at::randn({2, 3, 5, 7});
-    BatchDims bdims = {{/*lvl*/1, /*dim*/0}, {/*lvl*/2, /*dim*/2}};
-    auto batched_tensor = makeBatched(tensor, bdims);
-    std::tie(out, out_bdims) = unpackBatched(batched_tensor);
-
-    ASSERT_TRUE(out.is_same(tensor));
-    ASSERT_EQ(out_bdims.size(), bdims.size());
-    ASSERT_EQ(out_bdims[0].level(), 1);
-    ASSERT_EQ(out_bdims[0].dim(), 0);
-    ASSERT_EQ(out_bdims[1].level(), 2);
-    ASSERT_EQ(out_bdims[1].dim(), 2);
-  }
-}
-
-TEST(VmapTest, TestMoveBatchDimsToFront) {
-  {
-    auto result = moveBatchDimsToFront({});
-    ASSERT_EQ(result.size(), 0);
-  }
-  {
-    BatchDims bdims = {{/*lvl*/1, /*dim*/2}, {/*lvl*/3, /*dim*/0}};
-    auto result = moveBatchDimsToFront(bdims);
-    ASSERT_EQ(result.size(), bdims.size());
-    ASSERT_EQ(result[0].level(), 1);
-    ASSERT_EQ(result[0].dim(), 0);
-    ASSERT_EQ(result[1].level(), 3);
-    ASSERT_EQ(result[1].dim(), 1);
-  }
-}
-
-TEST(VmapTest, TestMoveTensorBatchDimsToFront) {
-  {
-    // Nullary case (bdims = {})
+    // Input is regular Tensor
     auto tensor = ones({2, 3, 5});
-    auto result = moveBatchDimsToFront(tensor, {});
-    ASSERT_TRUE(result.is_same(tensor));
+    auto result = materializeBatchDimsAtFront(tensor);
+    ASSERT_TRUE(result.first.is_same(tensor));
+    ASSERT_EQ(result.second, 0);
   }
   {
-    // Batch dims are already at the front
+    // Input is BatchedTensor, Batch dims are already at the front
     auto tensor = ones({2, 3, 5});
     BatchDims bdims = {{/*lvl*/1, /*dim*/0}, {/*lvl*/3, /*dim*/1}};
-    auto result = moveBatchDimsToFront(tensor, bdims);
-    ASSERT_TRUE(result.is_same(tensor));
+    auto batched = makeBatched(tensor, bdims);
+
+    auto result = materializeBatchDimsAtFront(batched);
+    ASSERT_TRUE(result.first.is_same(tensor));
+    ASSERT_EQ(result.second, 2 | 8);
   }
   {
     // Single batch dim, not at front
     auto tensor = ones({2, 3, 5});
     BatchDims bdims = {{/*lvl*/1, /*dim*/1}};
-    auto result = moveBatchDimsToFront(tensor, bdims);
-    ASSERT_EQ(result.data_ptr(), tensor.data_ptr());
-    ASSERT_TRUE(at::allclose(result, tensor.permute({1, 0, 2})));
+    auto batched = makeBatched(tensor, bdims);
+
+    auto result = materializeBatchDimsAtFront(batched);
+    ASSERT_EQ(result.first.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(result.first, tensor.permute({1, 0, 2})));
+    ASSERT_EQ(result.second, 2);
   }
   {
     // Multiple batch dims, not at front. 
     auto tensor = ones({2, 3, 5});
     BatchDims bdims = {{/*lvl*/1, /*dim*/1}, {/*lvl*/2,/*dim*/2}, {/*lvl*/3,/*dim*/0}};
-    auto result = moveBatchDimsToFront(tensor, bdims);
-    ASSERT_EQ(result.data_ptr(), tensor.data_ptr());
-    ASSERT_TRUE(at::allclose(result, tensor.permute({1, 2, 0})));
+    auto batched = makeBatched(tensor, bdims);
+
+    auto result = materializeBatchDimsAtFront(batched);
+    ASSERT_EQ(result.first.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(result.first, tensor.permute({1, 2, 0})));
+    ASSERT_EQ(result.second, 2 | 4 | 8);
   }
 }
 
@@ -213,44 +178,40 @@ TEST(VmapTest, TestBatchedTensorSum) {
   {
     // Simple: single batch dim, single reduce dim
     Tensor x = at::randn({2, 3, 5, 7});
-    Tensor out;
 
     Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/0}});
     Tensor batched_out = batched_x.sum(0);
-    std::tie(out, std::ignore) = unpackBatched(batched_out);
+    const auto& out = maybeGetBatched(batched_out)->value();
 
     ASSERT_TRUE(at::allclose(out, x.sum(1)));
   }
   {
     // single batch dim, -1 reduce dim handling
     Tensor x = at::randn({2, 3});
-    Tensor out;
 
     Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/1}});
     Tensor batched_out = batched_x.sum(-1);
-    std::tie(out, std::ignore) = unpackBatched(batched_out);
+    const auto& out = maybeGetBatched(batched_out)->value();
 
     ASSERT_TRUE(at::allclose(out, x.sum(0)));
   }
   {
     // single batch dim, multiple reduce dim
     Tensor x = at::randn({2, 3, 5, 7});
-    Tensor out;
 
     Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/1}});
     Tensor batched_out = batched_x.sum(std::vector<int64_t>{0, 1});
-    std::tie(out, std::ignore) = unpackBatched(batched_out);
+    const auto& out = maybeGetBatched(batched_out)->value();
 
     ASSERT_TRUE(at::allclose(out, x.sum(std::vector<int64_t>{0, 2})));
   }
   {
     // multiple batch dim, multiple reduce dim
     Tensor x = at::randn({2, 3, 5, 7});
-    Tensor out;
 
     Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/0}, {/*lvl*/2, /*dim*/1}});
     Tensor batched_out = batched_x.sum(std::vector<int64_t>{0, 1});
-    std::tie(out, std::ignore) = unpackBatched(batched_out);
+    const auto& out = maybeGetBatched(batched_out)->value();
 
     ASSERT_TRUE(at::allclose(out, x.sum(std::vector<int64_t>{2, 3})));
   }
