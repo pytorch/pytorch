@@ -34,10 +34,9 @@ std::vector<Expr*> ExprSort::getExprs(
   return es.exprs;
 }
 
-std::vector<Statement*> InputsOf::next(Val* v) {
+void InputsOf::handle(Val* v) {
   if (FusionGuard::getCurFusion()->origin(v) == nullptr)
     inputs.emplace(v);
-  return IterVisitor::next(v);
 }
 
 std::set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
@@ -47,7 +46,7 @@ std::set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
       output_,
       " however, it is not an output of the provided fusion.");
   InputsOf io;
-  io.traverseFrom(FusionGuard::getCurFusion(), {output_});
+  io.traverseFrom(FusionGuard::getCurFusion(), {output_}, false);
   return io.inputs;
 }
 
@@ -322,11 +321,25 @@ StmtNameType Fusion::getExprName() {
   return expr_name_counter_++;
 }
 
-void Fusion::setRandom(bool r) {
-  this->random_ = r;
+// Indicate to kernel to set itself up to generate random numbers
+bool Fusion::hasRNG() {
+  for (auto expr : exprs(true))
+    if (expr->getExprType() == ExprType::UnaryOp)
+      if (static_cast<UnaryOp*>(expr)->getUnaryOpType() ==
+          UnaryOpType::RandLike)
+        return true;
+  return false;
 }
-bool Fusion::random() const noexcept {
-  return random_;
+
+// Indicate to kernel to set itself up to generate random numbers
+bool Fusion::hasReduction() {
+  for (auto expr : exprs(true))
+    for (auto out : expr->outputs())
+      if (out->getValType() == ValType::TensorView)
+        if (static_cast<TensorView*>(out)->hasReduction())
+          return true;
+
+  return false;
 }
 
 } // namespace fuser

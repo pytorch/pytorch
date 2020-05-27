@@ -55,24 +55,68 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-// Play split/merge/reorder operations backwards to compute indexing into
-// original tensor.
 struct IndexCompute : public TransformIter {
- protected:
-  // Replay overrides which modify indices
-  void replayBackward(Split* expr) override;
-  void replayBackward(Merge* expr) override;
-  void replayBackward(Reorder* expr) override;
+ private:
+  TensorDomain* replayBackward(Split*, TensorDomain*) override;
+  TensorDomain* replayBackward(Merge*, TensorDomain*) override;
+  TensorDomain* replayBackward(Reorder*, TensorDomain*) override;
 
-  // Axis_map for
+  TensorDomain* runBackward(std::vector<Expr*> history);
+
+  // Otherwise warning on runBackward as it hides an overloaded virtual function
+  using TransformIter::runBackward;
+
+  IndexCompute(TensorDomain* td, std::vector<Val*> _indices);
   std::vector<Val*> indices;
 
-  IndexCompute(const TensorView* tv, std::vector<Val*> _indices);
+ public:
+  static std::vector<Val*> get(
+      TensorDomain* td,
+      const std::vector<Val*>& _indices);
+};
+
+// Simple interface for IndexCompute
+struct Index : public TransformIter {
+ private:
+  // Producer indexing if it's in shared or local memory
+  static TensorIndex* getProducerIndex_impl(
+      TensorView* producer,
+      TensorView* consumer,
+      const std::vector<ForLoop*>& loops);
+
+  // Consumer indexing if it's in shared or local memory
+  static TensorIndex* getConsumerIndex_impl(
+      TensorView* consumer,
+      const std::vector<ForLoop*>& loops);
 
  public:
-  static std::vector<Val*> computeIndices(
-      const TensorView* tv,
-      std::vector<Val*> _indices);
+  // Producer if it's in global memory
+  static TensorIndex* getGlobalProducerIndex(
+      TensorView* producer,
+      TensorView* consumer,
+      const std::vector<ForLoop*>& loops);
+
+  // Consumer indexing if it's in global memory
+  static TensorIndex* getGlobalConsumerIndex(
+      TensorView* consumer,
+      const std::vector<ForLoop*>& loops);
+
+  // Indexing functions
+  // Consumer = Producer
+  // i.e. T0 = T1... -> T0 is the consumer, T1 is the producer
+  // Producer indexing dispatch
+  static TensorIndex* getProducerIndex(
+      TensorView* producer,
+      TensorView* consumer,
+      const std::vector<ForLoop*>& loops);
+
+  // Consumer index dispatch
+  static TensorIndex* getConsumerIndex(
+      TensorView* consumer,
+      const std::vector<ForLoop*>& loops);
+
+  // Will run inds through back prop index computation for tv
+  static TensorIndex* manualBackprop(TensorView tv, std::vector<Val*> inds);
 };
 
 } // namespace fuser
