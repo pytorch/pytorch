@@ -35,7 +35,7 @@ class IrNodeLabel : private OptInConstDispatch {
     if (f->isSymbolic()) {
       label_ << "f" << f->name();
     } else {
-      if (detail_level_ > DetailLevel::Basic) {
+      if (detail_level_ >= DetailLevel::Explicit) {
         label_ << "f" << f->name() << "=";
       }
       label_ << std::fixed << std::setprecision(2) << *f->value();
@@ -46,7 +46,7 @@ class IrNodeLabel : private OptInConstDispatch {
     if (i->isSymbolic()) {
       label_ << "i" << i->name();
     } else {
-      if (detail_level_ > DetailLevel::Basic) {
+      if (detail_level_ >= DetailLevel::Explicit) {
         label_ << "i" << i->name() << "=";
       }
       label_ << *i->value();
@@ -268,7 +268,11 @@ void IrGraphGenerator::generateScheduleGraph() {
   // Connect TensorView with their TensorDomain
   // (this will trigger the traversal of the schedule graph)
   for (auto tv : tensor_views_) {
-    addArc(tv->domain(), tv, "[style=dashed]");
+    addArc(tv->domain(), tv, "[style=dashed, arrowhead=none]");
+    if (detail_level_ >= DetailLevel::Explicit) {
+      const auto root_domain = tv->getRootDomain();
+      addArc(tv, root_domain, "[style=dashed, color=green, arrowhead=none]");
+    }
   }
 
   graph_def_ << "  }\n";
@@ -314,7 +318,8 @@ void IrGraphGenerator::handle(const IterDomain* id) {
 
   addArc(id->rawExtent(), id, "[color=gray]");
 
-  if (detail_level_ > DetailLevel::Basic && id->rawExtent() != id->extent()) {
+  if (detail_level_ >= DetailLevel::Explicit &&
+      id->rawExtent() != id->extent()) {
     addArc(id->extent(), id, "[color=gray, style=dashed]");
   }
 }
