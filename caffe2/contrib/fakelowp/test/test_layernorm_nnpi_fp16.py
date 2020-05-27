@@ -46,10 +46,22 @@ class LayerNorm(TestCase):
             )
         )
 
+        pred_net_ref = caffe2_pb2.NetDef()
+        pred_net_ref.name = "pred"
+        pred_net_ref.external_input.extend(["X"])
+        pred_net_ref.external_output.extend(["Y", "mean", "rstd"])
+        pred_net_ref.op.add().CopyFrom(
+            core.CreateOperator(
+                "LayerNormFakeFP16",
+                ["X"],
+                ["Y", "mean", "rstd"],
+                #axis=-1,
+                epsilon=epsilon
+            )
+        )
+
         X = np.random.rand(
             batch_size, input_channels, size, size).astype(np.float32) - 0.5
-
-        workspace.FeedBlob("X", X)
 
         pred_net_onnxified = onnxifi_caffe2_net(
             pred_net,
@@ -65,9 +77,9 @@ class LayerNorm(TestCase):
         workspace.FeedBlob("X", X)
 
         workspace.CreateNet(pred_net_onnxified)
-        workspace.CreateNet(pred_net)
+        workspace.CreateNet(pred_net_ref)
 
-        workspace.RunNet(pred_net.name)
+        workspace.RunNet(pred_net_ref.name)
         Y_c2 = workspace.FetchBlob("Y")
         mean_c2 = workspace.FetchBlob("mean")
         std_c2 = workspace.FetchBlob("rstd")
@@ -86,6 +98,8 @@ class LayerNorm(TestCase):
                 {
                     "seed": seed,
                     "X": X,
+                    "Y_glow": Y_glow,
+                    "Y_c2": Y_c2,
                     "Y": diff_Y,
                     "mean": diff_mean,
                     "std": diff_std,
