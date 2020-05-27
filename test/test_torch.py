@@ -2633,7 +2633,10 @@ class _TestTorchMixin(object):
                 src = cast(torch.randn(src_size, dtype=dtype))
 
             base = cast(torch.randn(m, n, o, dtype=dtype))
-            actual = getattr(base.clone(), method)(dim, idx, src)
+            if reduction:
+                actual = getattr(base.clone(), method)(dim, idx, src, reduce=reduction)
+            else:
+                actual = getattr(base.clone(), method)(dim, idx, src)
             expected = base.clone()
             for i in range(idx_size[0]):
                 for j in range(idx_size[1]):
@@ -2661,11 +2664,18 @@ class _TestTorchMixin(object):
             if test_bounds:
                 idx[0][0][0] = 34
                 with self.assertRaises(RuntimeError):
-                    getattr(base.clone(), method)(dim, idx, src)
+                    if reduction:
+                        getattr(base.clone(), method)(dim, idx, src, reduce=reduction)
+                    else:
+                        getattr(base.clone(), method)(dim, idx, src)
 
             # test for empty index, should be a no-op
             idx = cast(torch.LongTensor())
-            actual = getattr(base.clone(), method)(dim, idx, src)
+            actual=None
+            if reduction:
+                actual = getattr(base.clone(), method)(dim, idx, src, reduce=reduction)
+            else:
+                actual = getattr(base.clone(), method)(dim, idx, src)
             self.assertEqual(actual, base, 0)
 
     def test_scatter(self):
