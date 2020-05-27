@@ -4,6 +4,7 @@ import glob
 import imp
 import os
 import re
+import shlex
 import setuptools
 import subprocess
 import sys
@@ -324,7 +325,7 @@ class BuildExtension(build_ext, object):
         super(BuildExtension, self).__init__(*args, **kwargs)
         self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
 
-        self.use_ninja = kwargs.get('use_ninja', False if IS_HIP_EXTENSION else True)
+        self.use_ninja = kwargs.get('use_ninja', True)
         if self.use_ninja:
             # Test if we can use ninja. Fallback otherwise.
             msg = ('Attempted to use ninja as the BuildExtension backend but '
@@ -438,6 +439,8 @@ class BuildExtension(build_ext, object):
                 post_cflags = extra_postargs['cxx']
             else:
                 post_cflags = list(extra_postargs)
+            if IS_HIP_EXTENSION:
+                post_cflags += COMMON_HIPCC_FLAGS
             append_std14_if_no_std_present(post_cflags)
 
             cuda_post_cflags = None
@@ -454,12 +457,14 @@ class BuildExtension(build_ext, object):
                 else:
                     cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
                 append_std14_if_no_std_present(cuda_post_cflags)
+                cuda_cflags = [shlex.quote(f) for f in cuda_cflags]
+                cuda_post_cflags = [shlex.quote(f) for f in cuda_post_cflags]
 
             _write_ninja_file_and_compile_objects(
                 sources=sources,
                 objects=objects,
-                cflags=extra_cc_cflags + common_cflags,
-                post_cflags=post_cflags,
+                cflags=[shlex.quote(f) for f in extra_cc_cflags + common_cflags],
+                post_cflags=[shlex.quote(f) for f in post_cflags],
                 cuda_cflags=cuda_cflags,
                 cuda_post_cflags=cuda_post_cflags,
                 build_directory=output_dir,
