@@ -157,7 +157,6 @@ class TORCH_API Future final {
   void markCompletedInternal(T value,
       std::unique_lock<std::mutex>& lock) {
     TORCH_CHECK(!completed_);
-    // Set value first as completed_ is accessed without lock
     value_ = std::move(value);
     completed_ = true;
 
