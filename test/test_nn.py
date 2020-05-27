@@ -11130,7 +11130,7 @@ class TestNNDeviceType(NNTestCase):
     @skipCUDAIfCudnnVersionLessThan(7603)
     @dtypes(torch.half, torch.float)
     def test_conv_cudnn_nhwc(self, device, dtype):
-        def _helper(n, c, h, w, out_channels, kernel_size, groups):
+        def helper(n, c, h, w, out_channels, kernel_size, groups):
             input = torch.randn(n, c, h, w, dtype=dtype, device=device).to(memory_format=torch.channels_last)
             input.requires_grad_()
             conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups).cuda().to(dtype).to(memory_format=torch.channels_last)
@@ -11157,10 +11157,10 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
             self.assertEqual(input.grad, ref_input.grad)
 
-        _helper(2, 8, 4, 4, out_channels=4, kernel_size=3, groups=1)
-        _helper(2, 8, 4, 4, out_channels=8, kernel_size=3, groups=8)
-        _helper(1, 24, 56, 56, out_channels=24, kernel_size=3, groups=1)
-        _helper(1, 24, 56, 56, out_channels=24, kernel_size=3, groups=24)
+        helper(2, 8, 4, 4, out_channels=4, kernel_size=3, groups=1)
+        helper(2, 8, 4, 4, out_channels=8, kernel_size=3, groups=8)
+        helper(1, 24, 56, 56, out_channels=24, kernel_size=3, groups=1)
+        helper(1, 24, 56, 56, out_channels=24, kernel_size=3, groups=24)
 
     def _run_conv(self, layer, device, inp, grad, ref_conv, ref_input, ref_out,
                   input_format, weight_format, grad_format, output_format):
