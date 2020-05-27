@@ -1598,10 +1598,10 @@ void testGPU_FusionUnaryOps() {
   using OpTuple =
       std::tuple<at::Tensor (*)(const at::Tensor&), UnaryOpType, std::string>;
 
-  // [Note: explict tuple type for uniform initialization list]
-  // Tuple type must be specified for each uniform initialization list within
-  // the vector to make this code compatible with some old env but we still
-  // need to support. eg. gcc 5.4 + cuda 9.2.
+  // [Note: explicit tuple type for uniform initialization list]
+  // Tuple type must be explicitly specified for each uniform initialization
+  // list within the vector to make this code compatible with some old env
+  // which we still need to support. eg. gcc 5.4 + cuda 9.2.
   std::vector<OpTuple> ops{
       OpTuple{at::abs, UnaryOpType::Abs, "abs"},
       OpTuple{at::acos, UnaryOpType::Acos, "acos"},
@@ -1672,14 +1672,13 @@ void testGPU_FusionBinaryOps() {
   using AtenFuncSig = at::Tensor (*)(const at::Tensor&, const at::Tensor&);
   using OpTuple = std::tuple<AtenFuncSig, BinaryOpType, std::string>;
 
-  // see [Note: explict tuple type for uniform initialization list]
-  std::vector<OpTuple> logic_ops{
-      OpTuple{at::eq, BinaryOpType::Eq, "eq"},
-      OpTuple{at::ge, BinaryOpType::GE, "ge"},
-      OpTuple{at::gt, BinaryOpType::GT, "gt"},
-      OpTuple{at::le, BinaryOpType::LE, "le"},
-      OpTuple{at::lt, BinaryOpType::LT, "lt"},
-      OpTuple{at::ne, BinaryOpType::NE, "ne"}};
+  // see [Note: explicit tuple type for uniform initialization list]
+  std::vector<OpTuple> logic_ops{OpTuple{at::eq, BinaryOpType::Eq, "eq"},
+                                 OpTuple{at::ge, BinaryOpType::GE, "ge"},
+                                 OpTuple{at::gt, BinaryOpType::GT, "gt"},
+                                 OpTuple{at::le, BinaryOpType::LE, "le"},
+                                 OpTuple{at::lt, BinaryOpType::LT, "lt"},
+                                 OpTuple{at::ne, BinaryOpType::NE, "ne"}};
 
   std::for_each(logic_ops.begin(), logic_ops.end(), [](OpTuple& op) {
     test_op(
@@ -1701,7 +1700,7 @@ void testGPU_FusionBinaryOps() {
             std::make_pair(ValType::TensorView, DataType::Float)));
   });
 
-  // see [Note: explict tuple type for uniform initialization list]
+  // see [Note: explicit tuple type for uniform initialization list]
   std::vector<OpTuple> math_ops{
       OpTuple{at::atan2, BinaryOpType::Atan2, "atan2"},
       OpTuple{at::div, BinaryOpType::Div, "div"},
