@@ -523,6 +523,17 @@ TensorTypePtr TensorType::merge(TensorTypePtr other, bool merge_sizes) const {
       undef);
 }
 
+bool TensorType::exactMatchTensor(const at::Tensor& t) {
+    if (undefined() && !t.defined()) {
+        return true;
+    }
+    return t.defined() && !undefined() && isComplete() && t.scalar_type() == scalarType().value()
+        && t.device() == device().value()
+    && t.strides() == strides().concrete_sizes().value()
+    && t.requires_grad() == requiresGrad().value()
+    && t.sizes() == sizes().concrete_sizes().value();
+}
+
 bool TensorType::operator==(const c10::Type& rhs) const {
   if (rhs.kind() != kind()) {
     return false;
