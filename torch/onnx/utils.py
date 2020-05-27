@@ -550,7 +550,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                     val_use_external_data_format, model_file_location)
 
             if enable_onnx_checker and \
-                operator_export_type is OperatorExportTypes.ONNX and \
+                operator_export_type is OperatorExportTypes.ONNX_ATEN_FALLBACK and \
                     not val_use_external_data_format:
                 # Only run checker if enabled and we are not using ATEN fallback and
                 # large model format export in not enabled.
