@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/memory.h>
 
@@ -862,6 +863,47 @@ void AliasDb::analyzeConservative(Node* node) {
   }
 }
 
+bool AliasDb::functionalNonAliasingListUse(const Use& use) const {
+  Node* n = use.user;
+  size_t offset = use.offset;
+  Value* container = n->inputs().at(offset);
+
+  // only consider aten op uses of lists
+  if (!n->kind().is_aten() || !container->type()->cast<ListType>()) {
+    return false;
+  }
+
+  // we are looking ahead to a use that we have not analyzed yet,
+  // and there isn't a great way of checking for aliasing dependence
+  // of a node without constructing an alias db. so in order to check,
+  // copy the single use as a singleton subgraph, and analyze the node
+  // within the subgraph
+
+  WithInsertPoint guard(n);
+  auto g = n->owningGraph();
+  auto clone =
+      g->insertNode(g->createClone(n, [](Value* v) -> Value* { return v; }));
+
+  auto subgraph_node = SubgraphUtils::createSingletonSubgraph(
+      clone, Symbol::fromQualString("prim::TempGraph"));
+  auto subgraph = subgraph_node->g(attr::Subgraph);
+
+  // subgraph outputs are added to the wildcard set, so we need to remove them
+  // first
+  while (subgraph->outputs().size()) {
+    subgraph->eraseOutput(0);
+  }
+  AliasDb db(subgraph);
+
+  auto singleton_node = subgraph->block()->nodes().end()->prev();
+  bool functional_non_aliasing_use =
+      !db.mayContainAlias(
+          singleton_node->inputs().at(offset), singleton_node->outputs()) &&
+      !db.hasWriters(singleton_node->inputs().at(offset));
+  subgraph_node->destroy();
+  return functional_non_aliasing_use;
+}
+
 // List or dict or tuple: construct: create an aliasing element for the actual
 // container, then mark all inputs as wildcards, since they've gone inside the
 // container. Then, add the wildcard sets of appropriate type to the contained
@@ -879,6 +921,20 @@ void AliasDb::analyzeContainerConstruct(Node* node) {
 
   TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
   auto container = node->output();
+
+  // optimization:
+  // if a list is only used once in an aten op, and the op output
+  // doesn't alias the input, then we can add all inputs to the list's
+  // contained elements instead of the wildcard set.
+  if (container->uses().size() == 1 &&
+      functionalNonAliasingListUse(container->uses().at(0))) {
+    giveFreshAlias(container, false);
+    for (Value* v : node->inputs()) {
+      addToContainedElements(v, container);
+    }
+    return;
+  }
+
   giveFreshAlias(container);
   auto container_elem = elementMap_.at(container);
   for (auto input : node->inputs()) {
@@ -1052,7 +1108,9 @@ void AliasDb::createValue(const Value* value) {
   elementMap_[value] = new_elem;
 }
 
-void AliasDb::giveFreshAlias(const Value* value) {
+void AliasDb::giveFreshAlias(
+    const Value* value,
+    bool add_wildcard_to_contained_elems) {
   auto maybe_mut_type = getMutableTypePtr(value->type());
   if (!maybe_mut_type) {
     return;
@@ -1066,7 +1124,9 @@ void AliasDb::giveFreshAlias(const Value* value) {
 
   auto new_elem = memoryDAGBuilder_->makeFreshValue(value);
   elementMap_[value] = new_elem;
-  addContainedTypesToFreshElement(new_elem, *maybe_mut_type);
+  if (add_wildcard_to_contained_elems) {
+    addContainedTypesToFreshElement(new_elem, *maybe_mut_type);
+  }
 }
 
 Element* AliasDb::getOrCreateElement(const Value* value) {

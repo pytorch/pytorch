@@ -357,6 +357,52 @@ class TestList(JitTestCase):
 
         self.checkScript(test_sorted_copy, ())
 
+    def test_list_non_aliasing_use(self):
+        # naively, we would consider x to alias input because it
+        # enters the heap via list.
+        # however, as an optimization, we observe that y is only used
+        # once in a non-aliasing op (outputs have no alias relation to y)
+        # we can thus add x to y's contained elements instead of the heap
+        # and not consider input to alias x
+
+        @torch.jit.script
+        def foo(input):
+            x = torch.tensor([1, 2, 3, 4])
+            y = [x, x]
+            input.add_(1)
+            print(torch.cat(y))
+
+        self.run_pass('constant_propagation', foo.graph)
+        FileCheck().check_not("ListConstruct").run(foo.graph)
+
+        # here, broadcast_tensors output does alias input so we default
+        # back to adding y to the heap
+
+        @torch.jit.script
+        def foo(input):
+            x = torch.tensor([1, 2, 3, 4])
+            y = [x, x]
+            input.add_(1)
+            print(torch.broadcast_tensors(y))
+
+        self.run_pass('constant_propagation', foo.graph)
+        FileCheck().check("ListConstruct").run(foo.graph)
+
+        # only consider list construct optimization for use in aten ops
+        # here, y is used in an if statement
+
+        @torch.jit.script
+        def foo(input, cond: bool, li: List[torch.Tensor]):
+            x = torch.tensor([1, 2, 3, 4])
+            y = [x, x]
+            if cond:
+                li = y
+            input.add_(1)
+            print(li)
+
+        self.run_pass('constant_propagation', foo.graph)
+        FileCheck().check("ListConstruct").run(foo.graph)
+
     def test_list_slice(self):
         def test_regular_slice():
             a = [0, 1, 2, 3, 4]
