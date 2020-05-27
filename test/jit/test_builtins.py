@@ -170,7 +170,6 @@ class TestTensorBuiltins(JitTestCase):
             if p in MISSING_PROPERTIES:
                 continue
             code = code_template.format(p)
-            print(code)
             cu = torch.jit.CompilationUnit()
             cu.define(code)
             if p in EQUALITY_MISMATCH:
