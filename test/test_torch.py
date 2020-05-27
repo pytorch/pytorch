@@ -17539,7 +17539,7 @@ class TestViewOps(TestCase):
         return True
 
     @onlyOnCPUAndCUDA
-    @dtypes(torch.float, torch.double, torch.long)
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_real_self(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
         s = torch.real(t)
@@ -17550,7 +17550,7 @@ class TestViewOps(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @onlyOnCPUAndCUDA
-    @dtypes(torch.cfloat, torch.cdouble)
+    @dtypes(*torch.testing.get_all_complex_dtypes())
     def test_real_imag_view(self, device, dtype):
         t = torch.randn(3, 3, dtype=dtype, device=device)
         re = t.real
