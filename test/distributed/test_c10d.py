@@ -2782,7 +2782,8 @@ class ReducerModule(nn.Module):
 @requires_gloo()
 class ReducerTest(TestCase):
     def setUp(self):
-        self.store = c10d.FileStore("/dev/null", 1)
+        self.file = tempfile.NamedTemporaryFile(delete=False)
+        self.store = c10d.FileStore(self.file.name, 1)
         self.process_group = c10d.ProcessGroupGloo(self.store, 0, 1)
 
     def test_single_dtype_single_bucket(self):
