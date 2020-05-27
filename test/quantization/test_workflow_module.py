@@ -560,10 +560,10 @@ class TestFakeQuantizePerTensor(TestCase):
         zero_point_shape_after = m.linear.activation_post_process.zero_point.shape
         self.assertEqual(
             scale_shape_before, scale_shape_after,
-            msg="FakeQuant scale shape must stay consistent")
+            "FakeQuant scale shape must stay consistent")
         self.assertEqual(
             zero_point_shape_before, zero_point_shape_after,
-            msg="FakeQuant zero_point shape must stay consistent")
+            "FakeQuant zero_point shape must stay consistent")
 
 
 class TestFakeQuantizePerChannel(TestCase):
@@ -710,7 +710,7 @@ class TestDistributed(QuantizationTestCase):
             self.assertEqual(
                 buffer_ids_before,
                 buffer_ids_after,
-                msg="{}: Buffers must be modified in place".format(str(observer)))
+                "{}: Buffers must be modified in place".format(str(observer)))
 
     def test_fake_quant_preserves_buffers(self):
         """
@@ -732,7 +732,7 @@ class TestDistributed(QuantizationTestCase):
         self.assertEqual(
             buffer_ids_before,
             buffer_ids_after,
-            msg="FakeQuant: Buffers must be modified in place")
+            "FakeQuant: Buffers must be modified in place")
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
