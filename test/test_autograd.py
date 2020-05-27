@@ -560,8 +560,8 @@ class TestAutograd(TestCase):
         z.register_hook(bw_hook)
         z.sum().backward()
 
-        self.assertEqual(counter[0], 1, msg='bw_hook not called')
-        self.assertEqual(x.grad, torch.ones(5, 5) * 2, atol=1e-5, rtol=0)
+        self.assertEqual(counter[0], 1, 'bw_hook not called')
+        self.assertEqual(x.grad, torch.ones(5, 5) * 2, atol=1e-5)
 
     def test_hook_none(self):
         # WARNING: this is a test for autograd internals.
@@ -5877,7 +5877,7 @@ class TestAutogradDeviceType(TestCase):
                                                   input_lengths, target_lengths, reduction='none')
         self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
-        self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
+        self.assertEqual(grad_cudnn, grad_native, atol=1e-4)
 
     @skipCUDAIfRocm
     def test_leaky_relu_inplace_with_neg_slope(self, device):

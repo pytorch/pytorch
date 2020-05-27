@@ -725,7 +725,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     (i * self.world_size) + (i % self.world_size)
                 ]),
                 inputs[i],
-                msg=("Mismatch in iteration %d" % i),
+                message=("Mismatch in iteration %d" % i),
             )
 
     def test_broadcast_stress(self):
@@ -811,7 +811,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     (self.world_size * (self.world_size - 1) / 2)
                 ]),
                 inputs[i],
-                msg=("Mismatch in iteration %d" % i),
+                message=("Mismatch in iteration %d" % i),
             )
 
     def test_allreduce_stress(self):
@@ -886,7 +886,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqualIgnoreType(
                 2 * [torch.tensor([(i * self.world_size) + (self.world_size * (self.world_size - 1) / 2)])],
                 inputs[i],
-                msg="Mismatch in interation {}".format(i)
+                message="Mismatch in interation {}".format(i)
             )
 
     def test_allreduce_coalesced_stress(self):
@@ -1067,7 +1067,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 torch.tensor([iter + root]),
                 outputs[iter][root],
-                msg=("Mismatch in iteration %d for rank %d" % (iter, root)),
+                message=("Mismatch in iteration %d for rank %d" % (iter, root)),
             )
 
     def test_scatter_stress(self):
@@ -1217,7 +1217,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(
                     expected_outputs[iter],
                     outputs[iter],
-                    msg=("Mismatch in iteration %d for root %d" % (iter, root))
+                    message=("Mismatch in iteration %d for root %d" % (iter, root))
                 )
 
     def test_gather_stress(self):
@@ -1318,7 +1318,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 expected_outputs[i],
                 outputs[i],
-                msg=("Mismatch in iteration %d" % i),
+                message=("Mismatch in iteration %d" % i),
             )
 
     def test_allgather_stress(self):
@@ -1446,7 +1446,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                         (self.world_size * (self.world_size - 1) / 2)
                     ]),
                     outputs[i],
-                    msg=("Mismatch in iteration %d with root rank %d" % (iter, root)),
+                    message=("Mismatch in iteration %d with root rank %d" % (iter, root)),
                 )
 
     def test_reduce_stress(self):
