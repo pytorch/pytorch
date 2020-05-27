@@ -177,7 +177,7 @@ struct CAFFE2_API TensorIterator {
     bool check_mem_overlap = false);
   static TensorIterator nullary_op(Tensor& out);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
-  static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
+  static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a, bool promote=true);
 
   int ndim() const { return shape_.size(); }
   IntArrayRef shape() const { return shape_; }

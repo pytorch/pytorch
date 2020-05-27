@@ -129,6 +129,9 @@ static void frac_kernel(TensorIterator& iter) {
 }
 
 static void logical_not_kernel(TensorIterator& iter) {
+  // NOTE: this implementation differs from the CUDA implementation which only does single dispatch
+  // (to avoid expensive compilation) because CPU kernels don't handle dynamic_casting
+  // (see needs_dynamic_casting).
   AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_not_cpu", [&]() {
     using self_t = scalar_t;
     AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_not_cpu", [&]() {
@@ -220,7 +223,7 @@ static void polygamma_kernel(TensorIterator& iter, int64_t n) {
 
 static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_scalar) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
-    ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
+    c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
     auto min = min_scalar.to<scalar_t>();
     auto max = max_scalar.to<scalar_t>();
     auto min_vec = Vec256<scalar_t>(min);
@@ -233,7 +236,7 @@ static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_sca
 
 static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
-    ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
+    c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
     auto max = max_scalar.to<scalar_t>();
     auto max_vec = Vec256<scalar_t>(max);
     cpu_kernel_vec(iter,
@@ -244,7 +247,7 @@ static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
 
 static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
-    ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
+    c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
     auto min = min_scalar.to<scalar_t>();
     auto min_vec = Vec256<scalar_t>(min);
     cpu_kernel_vec(iter,

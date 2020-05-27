@@ -714,7 +714,7 @@ TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   return iter;
 }
 
-TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
+TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a, bool promote) {
   TORCH_INTERNAL_ASSERT(out1.defined());
   TORCH_INTERNAL_ASSERT(out2.defined());
   TORCH_CHECK((!a.is_cuda() && !out1.is_cuda() && !out2.is_cuda()) || (a.device() == out1.device() && out1.device() == out2.device()),
@@ -730,7 +730,11 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
   iter.add_output(out1);
   iter.add_output(out2);
   iter.add_input(a);
-  iter.promote_gpu_output_dtypes_ = true;
+  if (promote) {
+    iter.promote_gpu_output_dtypes_ = true;
+  } else {
+    iter.dont_compute_common_dtype();
+  }
   iter.resize_outputs_ = false;
   iter.is_reduction_ = true;
   iter.build();
