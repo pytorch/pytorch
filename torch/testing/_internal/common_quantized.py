@@ -63,7 +63,6 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
             qmin, qmax = 0, 127
         else:
             qmin, qmax = 0, 255
-    n_levels = 255.0
     min_val = X.min()
     max_val = X.max()
     if min_val == max_val:
