@@ -1579,6 +1579,29 @@ except RuntimeError as e:
         check_len(DataLoader(self.dataset, batch_size=2), 50)
         check_len(DataLoader(self.dataset, batch_size=3), 34)
 
+    def test_iterabledataset_len(self):
+        class IterableDataset(torch.utils.data.IterableDataset):
+            def __len__(self):
+                return 10
+
+            def __iter__(self):
+                return iter(range(10))
+
+        iterable_loader = DataLoader(IterableDataset(), batch_size=1)
+        self.assertEqual(len(iterable_loader), 10)
+        iterable_loader = DataLoader(IterableDataset(), batch_size=1, drop_last=True)
+        self.assertEqual(len(iterable_loader), 10)
+
+        iterable_loader = DataLoader(IterableDataset(), batch_size=2)
+        self.assertEqual(len(iterable_loader), 5)
+        iterable_loader = DataLoader(IterableDataset(), batch_size=2, drop_last=True)
+        self.assertEqual(len(iterable_loader), 5)
+
+        iterable_loader = DataLoader(IterableDataset(), batch_size=3)
+        self.assertEqual(len(iterable_loader), 4)
+        iterable_loader = DataLoader(IterableDataset(), batch_size=3, drop_last=True)
+        self.assertEqual(len(iterable_loader), 3)
+
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_numpy_scalars(self):
         import numpy as np

@@ -139,9 +139,10 @@ class TestTensorBuiltins(JitTestCase):
         tensor = torch.arange(4, dtype=torch.float).view(2, 2)
         keys = dir(tensor)
 
-        # imag is only implemented for complex tensors.
+        # real and imag are only implemented for complex tensors.
         self.assertRaises(RuntimeError, lambda: should_keep(tensor, 'imag'))
         keys.remove('imag')
+        self.assertRaises(RuntimeError, lambda: should_keep(tensor, 'real'))
         keys.remove('real')
 
         properties = [p for p in keys if should_keep(tensor, p)]

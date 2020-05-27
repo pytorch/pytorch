@@ -3736,8 +3736,10 @@ If ``n`` is the number of dimensions in ``x``,
 add_docstr_all('real',
                r"""
 Returns a new tensor containing real values of the :attr:`self` tensor.
-The returned tensor shares the same data as :attr:`self`. For complex tensors,
-the returned tensor has the corresponding real dtype.
+The returned tensor and :attr:`self` share the same underlying storage.
+
+.. warning::
+    :func:`real` is only supported for tensors with complex dtypes.
 
 Example::
     >>> x=torch.randn(4, dtype=torch.cfloat)
@@ -3751,8 +3753,10 @@ Example::
 add_docstr_all('imag',
                r"""
 Returns a new tensor containing imaginary values of the :attr:`self` tensor.
-The returned tensor shares the same data as :attr:`self`. For complex tensors,
-the returned tensor has the corresponding real dtype.
+The returned tensor and :attr:`self` share the same underlying storage.
+
+.. warning::
+    :func:`imag` is only supported for tensors with complex dtypes.
 
 Example::
     >>> x=torch.randn(4, dtype=torch.cfloat)
