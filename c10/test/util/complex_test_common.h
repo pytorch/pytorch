@@ -61,7 +61,7 @@ TEST(TestMemory, ReinterpretCast) {
 }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-TEST(TestMemory, ReinterpretCast) {
+TEST(TestMemory, ThrustReinterpretCast) {
   {
   thrust::complex<float> z(1, 2);
   c10::complex<float> zz = *reinterpret_cast<c10::complex<float>*>(&z);
