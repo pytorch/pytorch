@@ -17,7 +17,8 @@ class TestSerialization(TestCase):
     """ Test backward compatiblity for serialization and numerics
     """
     # Copy and modified from TestCase.assertExpected
-    def _test_op(self, qmodule, subname=None, input_size=None, input_quantized=True, generate=False, prec=None, iter=0):
+    def _test_op(self, qmodule, subname=None, input_size=None, input_quantized=True,
+                 generate=False, prec=None, iter=0, new_zipfile_serialization=False):
         r""" Test quantized modules serialized previously can be loaded
         with current code, make sure we don't break backward compatibility for the
         serialization of quantized modules
@@ -53,7 +54,7 @@ class TestSerialization(TestCase):
             if input_quantized:
                 input_tensor = torch.quantize_per_tensor(input_tensor, 0.5, 2, torch.quint8)
             torch.save(input_tensor, input_file)
-            torch.save(qmodule.state_dict(), state_dict_file)
+            torch.save(qmodule.state_dict(), state_dict_file, _use_new_zipfile_serialization=new_zipfile_serialization)
             torch.jit.save(torch.jit.script(qmodule), scripted_module_file)
             torch.jit.save(torch.jit.trace(qmodule, input_tensor), traced_module_file)
             torch.save(qmodule(input_tensor), expected_file)
@@ -131,4 +132,4 @@ class TestSerialization(TestCase):
                 return x
 
         mod = LSTMModule()
-        self._test_op(mod, input_size=[4, 4, 3], input_quantized=False, generate=False)
+        self._test_op(mod, input_size=[4, 4, 3], input_quantized=False, generate=False, new_zipfile_serialization=True)

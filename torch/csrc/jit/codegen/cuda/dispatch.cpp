@@ -59,6 +59,7 @@ void Val::dispatch(T handler, Val* val) {
         default:
           break;
       }
+      break;
     case ValType::IterDomain:
       ptr(handler)->handle(static_cast<IterDomain*>(val));
       return;
@@ -101,6 +102,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::TernaryOp:
       ptr(handler)->handle(static_cast<TernaryOp*>(expr));
       return;
+    case ExprType::ReductionOp:
+      ptr(handler)->handle(static_cast<ReductionOp*>(expr));
+      return;
     case ExprType::ForLoop:
       ptr(handler)->handle(static_cast<ForLoop*>(expr));
       return;
@@ -134,31 +138,32 @@ void Val::constDispatch(T handler, const Val* const val) {
           ptr(handler)->handle(static_cast<const Bool* const>(val));
           return;
         case DataType::Float:
-          ptr(handler)->handle(static_cast<const Float* const>(val));
+          ptr(handler)->handle(static_cast<const Float*>(val));
           return;
         case DataType::Half:
           ptr(handler)->handle(static_cast<const Half* const>(val));
           return;
         case DataType::Int:
-          ptr(handler)->handle(static_cast<const Int* const>(val));
+          ptr(handler)->handle(static_cast<const Int*>(val));
           return;
         default:
           break;
       }
+      break;
     case ValType::IterDomain:
-      ptr(handler)->handle(static_cast<const IterDomain* const>(val));
+      ptr(handler)->handle(static_cast<const IterDomain*>(val));
       return;
     case ValType::TensorDomain:
-      ptr(handler)->handle(static_cast<const TensorDomain* const>(val));
+      ptr(handler)->handle(static_cast<const TensorDomain*>(val));
       return;
     case ValType::TensorView:
-      ptr(handler)->handle(static_cast<const TensorView* const>(val));
+      ptr(handler)->handle(static_cast<const TensorView*>(val));
       return;
     case ValType::TensorIndex:
-      ptr(handler)->handle(static_cast<const TensorIndex* const>(val));
+      ptr(handler)->handle(static_cast<const TensorIndex*>(val));
       return;
     case ValType::NamedScalar:
-      ptr(handler)->handle(static_cast<const NamedScalar* const>(val));
+      ptr(handler)->handle(static_cast<const NamedScalar*>(val));
       return;
     default:
       break;
@@ -167,34 +172,37 @@ void Val::constDispatch(T handler, const Val* const val) {
 }
 
 template <typename T>
-void Expr::constDispatch(T handler, const Expr* const expr) {
+void Expr::constDispatch(T handler, const Expr* expr) {
   switch (*(expr->getExprType())) {
     case ExprType::Split:
-      ptr(handler)->handle(static_cast<const Split* const>(expr));
+      ptr(handler)->handle(static_cast<const Split*>(expr));
       return;
     case ExprType::Merge:
-      ptr(handler)->handle(static_cast<const Merge* const>(expr));
+      ptr(handler)->handle(static_cast<const Merge*>(expr));
       return;
     case ExprType::Reorder:
-      ptr(handler)->handle(static_cast<const Reorder* const>(expr));
+      ptr(handler)->handle(static_cast<const Reorder*>(expr));
       return;
     case ExprType::UnaryOp:
-      ptr(handler)->handle(static_cast<const UnaryOp* const>(expr));
+      ptr(handler)->handle(static_cast<const UnaryOp*>(expr));
       return;
     case ExprType::BinaryOp:
-      ptr(handler)->handle(static_cast<const BinaryOp* const>(expr));
+      ptr(handler)->handle(static_cast<const BinaryOp*>(expr));
       return;
     case ExprType::TernaryOp:
       ptr(handler)->handle(static_cast<const TernaryOp* const>(expr));
       return;
+    case ExprType::ReductionOp:
+      ptr(handler)->handle(static_cast<const ReductionOp* const>(expr));
+      return;
     case ExprType::ForLoop:
-      ptr(handler)->handle(static_cast<const ForLoop* const>(expr));
+      ptr(handler)->handle(static_cast<const ForLoop*>(expr));
       return;
     case ExprType::IfThenElse:
-      ptr(handler)->handle(static_cast<const IfThenElse* const>(expr));
+      ptr(handler)->handle(static_cast<const IfThenElse*>(expr));
       return;
     case ExprType::Allocate:
-      ptr(handler)->handle(static_cast<const Allocate* const>(expr));
+      ptr(handler)->handle(static_cast<const Allocate*>(expr));
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -202,11 +210,11 @@ void Expr::constDispatch(T handler, const Expr* const expr) {
 }
 
 template <typename T>
-void Statement::constDispatch(T handler, const Statement* const stmt) {
+void Statement::constDispatch(T handler, const Statement* stmt) {
   if (stmt->isVal()) {
-    ptr(handler)->handle(static_cast<const Val* const>(stmt));
+    ptr(handler)->handle(static_cast<const Val*>(stmt));
   } else if (stmt->isExpr()) {
-    ptr(handler)->handle(static_cast<const Expr* const>(stmt));
+    ptr(handler)->handle(static_cast<const Expr*>(stmt));
   } else
     TORCH_INTERNAL_ASSERT(false, "Unknown stmttype in dispatch!");
 }
@@ -238,6 +246,7 @@ Statement* Val::mutatorDispatch(T mutator, Val* val) {
         default:
           break;
       }
+      break;
     case ValType::IterDomain:
       return ptr(mutator)->mutate(static_cast<IterDomain*>(val));
     case ValType::TensorDomain:
@@ -269,6 +278,8 @@ Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
       return ptr(mutator)->mutate(static_cast<BinaryOp*>(expr));
     case ExprType::TernaryOp:
       return ptr(mutator)->mutate(static_cast<TernaryOp*>(expr));
+    case ExprType::ReductionOp:
+      return ptr(mutator)->mutate(static_cast<ReductionOp*>(expr));
     case ExprType::ForLoop:
       return ptr(mutator)->mutate(static_cast<ForLoop*>(expr));
     case ExprType::IfThenElse:
