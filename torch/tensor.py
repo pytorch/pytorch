@@ -934,9 +934,8 @@ class Tensor(torch._C._TensorBase):
 
         with _C.DisableTorchFunction():
             ret = func(*args, **kwargs)
-        
-        if cls is not Tensor and isinstance(ret, Tensor):
-            ret = ret.as_subclass(cls)
+            if cls is not Tensor and isinstance(ret, Tensor):
+                ret = ret.as_subclass(cls)
         
         return ret
 
