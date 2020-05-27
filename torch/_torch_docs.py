@@ -1493,6 +1493,28 @@ Example::
             [-1.2329,  1.9883,  1.0551]])
 """.format(**common_args))
 
+add_docstr(torch.logcumsumexp,
+           r"""
+logcumsumexp(input, dim, out=None) -> Tensor
+Returns the logarithm of the cumulative summation of the exponentiation of
+elements of :attr:`input` in the dimension :attr:`dim`. 
+
+For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
+
+    .. math::
+        \text{{logcumsumexp}}(x)_{{ij}} = \log \sum\limits_{{j=0}}^{{i}} \exp(x_{{ij}})
+
+Args:
+    {input}
+    dim  (int): the dimension to do the operation over
+    {out}
+Example::
+    >>> a = torch.randn(10)
+    >>> torch.logcumsumexp(a, dim=0)
+    tensor([-0.42296738, -0.04462666,  0.86278635,  0.94622083,  1.05277811,
+             1.39202815,  1.83525007,  1.84492621,  2.06084887,  2.06844475]))
+""".format(**reduceops_common_args))
+
 add_docstr(torch.cummax,
            r"""
 cummax(input, dim, out=None) -> (Tensor, LongTensor)
@@ -4746,9 +4768,9 @@ Args:
 """.format(**factory_like_common_args))
 
 add_docstr(torch.randint,
-           r"""
-randint(low=0, high, size, \*, generator=None, out=None, \
-        dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+           """
+randint(low=0, high, size, \\*, generator=None, out=None, \
+dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random integers generated uniformly
 between :attr:`low` (inclusive) and :attr:`high` (exclusive).
@@ -4789,8 +4811,8 @@ Example::
 """.format(**factory_common_args))
 
 add_docstr(torch.randint_like,
-           r"""
-randint_like(input, low=0, high, dtype=None, layout=torch.strided, device=None, requires_grad=False,
+           """
+randint_like(input, low=0, high, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
 memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same shape as Tensor :attr:`input` filled with
@@ -6749,8 +6771,8 @@ Example::
 """.format(**factory_common_args))
 
 add_docstr(torch.full_like,
-           r"""
-full_like(input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False,
+           """
+full_like(input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
 memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` filled with :attr:`fill_value`.
@@ -7751,7 +7773,7 @@ Example::
             [100, 200]], dtype=torch.uint8)
 """)
 
-add_docstr(torch._C.Generator,
+add_docstr(torch.Generator,
            r"""
 Generator(device='cpu') -> Generator
 
@@ -7772,7 +7794,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.set_state,
+add_docstr(torch.Generator.set_state,
            r"""
 Generator.set_state(new_state) -> void
 
@@ -7789,7 +7811,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.get_state,
+add_docstr(torch.Generator.get_state,
            r"""
 Generator.get_state() -> Tensor
 
@@ -7806,7 +7828,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.manual_seed,
+add_docstr(torch.Generator.manual_seed,
            r"""
 Generator.manual_seed(seed) -> Generator
 
@@ -7827,7 +7849,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.initial_seed,
+add_docstr(torch.Generator.initial_seed,
            r"""
 Generator.initial_seed() -> int
 
@@ -7841,7 +7863,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.seed,
+add_docstr(torch.Generator.seed,
            r"""
 Generator.seed() -> int
 
@@ -7856,7 +7878,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.device,
+add_docstr(torch.Generator.device,
            r"""
 Generator.device -> device
 

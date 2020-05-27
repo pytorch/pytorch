@@ -106,7 +106,7 @@ Generators
     :toctree: generated
     :nosignatures:
 
-    _C.Generator
+    Generator
 
 .. _random-sampling:
 
@@ -403,6 +403,7 @@ Other Operations
     rot90
     histc
     meshgrid
+    logcumsumexp
     renorm
     repeat_interleave
     roll
