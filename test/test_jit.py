@@ -47,7 +47,7 @@ from torch.testing._internal import jit_utils
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
-    enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype
+    enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -3737,16 +3737,15 @@ class TestScript(JitTestCase):
                 return 2
 
         with enable_profiling_mode_for_profiling_tests():
-            old_num_runs = torch._C._jit_set_num_profiled_runs(2)
-            test_not_const(torch.rand([1, 2]))
-            test_not_const(torch.rand([2, 2]))
-            test_not_const(torch.rand([3, 2]))
+            with num_profiled_runs(2):
+                test_not_const(torch.rand([1, 2]))
+                test_not_const(torch.rand([2, 2]))
+                test_not_const(torch.rand([3, 2]))
 
-            graph_str = torch.jit.last_executed_optimized_graph()
-            FileCheck().check("Double(*:2, 2:1) = ").run(graph_str)
-            FileCheck().check_not("Double(1:2, 2:1) = ").run(graph_str)
+                graph_str = torch.jit.last_executed_optimized_graph()
+                FileCheck().check("Double(*:2, 2:1) = ").run(graph_str)
+                FileCheck().check_not("Double(1:2, 2:1) = ").run(graph_str)
 
-        torch._C._jit_set_num_profiled_runs(old_num_runs)
 
     def test_nested_bailouts(self):
         @torch.jit.script
