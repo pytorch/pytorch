@@ -1166,13 +1166,13 @@ DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions opti
 
 Tensor try_get_weight_buf(
       const Tensor& input, TensorList parameters, bool has_biases,
-      cudnnRNNMode_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, bool type_2) {
+      cudnnRNNMode_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional) {
   // Prepare all relevant descriptors
   auto handle = getCudnnHandle();
   auto datatype = getCudnnDataType(input);
 
   RNNDescriptorParams rnn;
-  rnn.set(mode, hidden_size, num_layers, bidirectional, type_2, promote_rnn_math_type(datatype), datatype);
+  rnn.set(mode, hidden_size, num_layers, bidirectional, promote_rnn_math_type(datatype), datatype);
   RNNDescriptor rnn_desc = rnn.descriptor(handle);
 
   TensorGeometry x_geom ({1, input.size(-1)});
@@ -1237,7 +1237,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   }
 
   auto weight_buf = try_get_weight_buf(
-      input, params, has_biases, mode, hidden_size, num_layers, bidirectional, type_2);
+      input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
   if (!weight_buf.defined()) {
     TORCH_WARN(WEIGHT_FORMAT_WARN);
   }
@@ -1251,7 +1251,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto cudnn_output = at::_cudnn_rnn(
       input, params, has_biases ? 4 : 2, weight_buf,
       hx, cx, static_cast<int>(mode), hidden_size, num_layers, /*batch_first=*/false,
-      dropout_p, train, bidirectional, type_2, batch_sizes, dropout_state.buffer);
+      dropout_p, train, bidirectional, batch_sizes, dropout_state.buffer);
 
   return {std::get<0>(cudnn_output),
           pack_hidden<hidden_type>(std::get<1>(cudnn_output), std::get<2>(cudnn_output))};
@@ -1280,7 +1280,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   }
 
   auto weight_buf = try_get_weight_buf(
-      input, params, has_biases, mode, hidden_size, num_layers, bidirectional, type_2);
+      input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
   if (!weight_buf.defined()) {
     TORCH_WARN(WEIGHT_FORMAT_WARN);
   }
@@ -1291,7 +1291,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto cudnn_output = at::_cudnn_rnn(
       input, params, has_biases ? 4 : 2, weight_buf,
       hx, cx, static_cast<int>(mode), hidden_size, num_layers, batch_first, dropout_p,
-      train, bidirectional, /*batch_sizes=*/{}, type_2, dropout_state.buffer);
+      train, bidirectional, /*batch_sizes=*/{}, dropout_state.buffer);
 
   return {std::get<0>(cudnn_output),
           pack_hidden<hidden_type>(std::get<1>(cudnn_output), std::get<2>(cudnn_output))};
