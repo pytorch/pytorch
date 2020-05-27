@@ -18,7 +18,7 @@ if is_available() and not torch._C._rpc_init():
 if is_available():
     from . import api, backend_registry
     from .api import *  # noqa: F401
-    from .server_process_global_profiiler import (
+    from .server_process_global_profiler import (
         enable_server_process_global_profiler,
         disable_server_process_global_profiler,
     )

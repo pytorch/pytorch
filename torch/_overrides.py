@@ -139,6 +139,7 @@ def get_ignored_functions():
         torch.autocast_increment_nesting,
         torch.autocast_decrement_nesting,
         torch.nn.functional.hardswish,
+        torch.is_vulkan_available,
     )
 
 def get_testing_overrides():
@@ -245,6 +246,7 @@ def get_testing_overrides():
         torch.cummin: lambda input, dim, out=None: -1,
         torch.cumprod: lambda input, dim, out=None, dtype=None: -1,
         torch.cumsum: lambda input, dim, out=None, dtype=None: -1,
+        torch.logcumsumexp: lambda input, dim, out=None: -1,
         torch.dequantize: lambda input: -1,
         torch.det: lambda input: -1,
         torch.detach: lambda input: -1,

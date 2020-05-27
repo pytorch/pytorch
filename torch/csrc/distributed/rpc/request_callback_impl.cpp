@@ -585,17 +585,17 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
           // cost of thread local profiler state initialization .
           // int64_t startTime = ::torch::autograd::profiler::getTime();
           bool isServerProcessGlobalProfilerEnabled =
-              serverProcessGlobalProfilerEnabled();
+              profiler::processglobal::serverEnabled();
           // int64_t endTime = ::torch::autograd::profiler::getTime();
           // LOG(ERROR) << "Test profiler enabled took: "
           //            << (endTime - startTime) / 1000 << " us";
-          std::shared_ptr<ProcessGlobalProfilerState>
+          std::shared_ptr<profiler::processglobal::State>
               serverProcessGlobalProfilerStatePtr;
           if (isServerProcessGlobalProfilerEnabled) {
             // Initialize thread-local profiler state from process-global
             // profiler state.
             serverProcessGlobalProfilerStatePtr =
-                serverProcessGlobalProfilerState();
+                profiler::processglobal::serverState();
             ::torch::autograd::profiler::enableProfiler(
                 serverProcessGlobalProfilerStatePtr->config());
           }

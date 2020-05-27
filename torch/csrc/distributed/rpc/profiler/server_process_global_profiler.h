@@ -5,15 +5,28 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
+namespace profiler {
+namespace processglobal {
 
 using namespace torch::autograd::profiler;
 
 // Process global profiler state.
-class ProcessGlobalProfilerState {
+//
+// This class holds information about a profiling range, from "enable" to
+// "disable".
+// A instance of this ``State`` will be
+// pushed into a global stack, so nested profiling range is supported.
+//
+// It has 2 members.
+// One is ``autograd::profiler::ProfilerConfig``. It's set by user and
+// will be copied to thread-local profiler state of RPC threads.
+// The other is a container that aggregates recorded
+// ``autograd::profiler::Event``s from all thread-local profilers on RPC
+// threads.
+class State {
  public:
-  explicit ProcessGlobalProfilerState(const ProfilerConfig& config)
-      : config_(config) {}
-  ~ProcessGlobalProfilerState() = default;
+  explicit State(const ProfilerConfig& config) : config_(config) {}
+  ~State() = default;
 
   const ProfilerConfig& config() const {
     return config_;
@@ -52,15 +65,27 @@ class ProcessGlobalProfilerState {
 };
 
 // User-facing API.
-TORCH_API void enableServerProcessGlobalProfiler(
-    const ProfilerConfig& new_config);
-TORCH_API std::vector<thread_event_lists> disableServerProcessGlobalProfiler();
+//
+// Turn on the state that indicates the server-side process-global profiling is
+// on. This enables all RPC threads running server-side request callbacks.
+TORCH_API void enableServer(const ProfilerConfig& new_config);
+//
+// Turn on the state that indicates the server-side process-global profiling is
+// on. This enables all RPC threads running server-side request callbacks.
+TORCH_API std::vector<thread_event_lists> disableServer();
 
 // Internal API.
-bool serverProcessGlobalProfilerEnabled();
+//
+// This state indicates whether the server-side process-global profiling is on.
+// All RPC threads running server-side request callbacks queries this.
+bool serverEnabled();
 
-std::shared_ptr<ProcessGlobalProfilerState> serverProcessGlobalProfilerState();
+// If server-side process-global profiling is on, use this API to get server
+// process global profiler state to set thread-local profiling state.
+std::shared_ptr<State> serverState();
 
+} // namespace processglobal
+} // namespace profiler
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

@@ -630,3 +630,8 @@ def get_module_method(m, module, method):
 def attrs_with_prefix(module, prefix):
     return [x for x, _ in module._modules._c.items()
             if x.startswith(prefix)]
+
+op_alias_mappings = {
+    "absolute" : "abs",
+    "absolute_" : "abs_",
+}
