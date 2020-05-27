@@ -585,15 +585,11 @@ void EncoderBase::AddAttribute(
       attr->set_type(onnx::AttributeProto_AttributeType_TENSOR);
       auto t = attr->mutable_t();
       if (use_external_data_format && !t->has_name()) {
-        t->set_name(createAttributeTensorName(
-            node_proto, t, name, num_external_data_));
+        t->set_name(
+            createAttributeTensorName(node_proto, t, name, num_external_data_));
       }
       EncodeTensor(
-          t,
-          node->t(name),
-          {},
-          use_external_data_format,
-          onnx_file_path);
+          t, node->t(name), {}, use_external_data_format, onnx_file_path);
     } break;
     case AttributeKind::ts:
       attr->set_type(onnx::AttributeProto_AttributeType_TENSORS);
