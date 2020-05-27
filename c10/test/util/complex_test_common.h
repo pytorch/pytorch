@@ -60,6 +60,38 @@ TEST(TestMemory, ReinterpretCast) {
   }
 }
 
+#if defined(__CUDACC__) || defined(__HIPCC__)
+TEST(TestMemory, ReinterpretCast) {
+  {
+  thrust::complex<float> z(1, 2);
+  c10::complex<float> zz = *reinterpret_cast<c10::complex<float>*>(&z);
+  ASSERT_EQ(zz.real(), float(1));
+  ASSERT_EQ(zz.imag(), float(2));
+  }
+
+  {
+  c10::complex<float> z(3, 4);
+  thrust::complex<float> zz = *reinterpret_cast<thrust::complex<float>*>(&z);
+  ASSERT_EQ(zz.real(), float(3));
+  ASSERT_EQ(zz.imag(), float(4));
+  }
+
+  {
+  thrust::complex<double> z(1, 2);
+  c10::complex<double> zz = *reinterpret_cast<c10::complex<double>*>(&z);
+  ASSERT_EQ(zz.real(), double(1));
+  ASSERT_EQ(zz.imag(), double(2));
+  }
+  
+  {
+  c10::complex<double> z(3, 4);
+  thrust::complex<double> zz = *reinterpret_cast<thrust::complex<double>*>(&z);
+  ASSERT_EQ(zz.real(), double(3));
+  ASSERT_EQ(zz.imag(), double(4));
+  }
+}
+#endif
+
 }  // memory
 
 namespace constructors {
