@@ -14896,12 +14896,12 @@ class TestTorchDeviceType(TestCase):
         for test in test_list:
             actual = torch.einsum(test[0], test[1:])
             expected = np.einsum(test[0], *[t.numpy() for t in test[1:]])
-            self.assertEqual(expected.shape, actual.shape, test[0])
-            self.assertTrue(np.allclose(expected, actual.numpy()), test[0])
+            self.assertEqual(expected.shape, actual.shape, msg=test[0])
+            self.assertTrue(np.allclose(expected, actual.numpy()), msg=test[0])
             # test vararg
             actual2 = torch.einsum(test[0], *test[1:])
-            self.assertEqual(expected.shape, actual2.shape, test[0])
-            self.assertTrue(np.allclose(expected, actual2.numpy()), test[0])
+            self.assertEqual(expected.shape, actual2.shape, msg=test[0])
+            self.assertTrue(np.allclose(expected, actual2.numpy()), msg=test[0])
 
             def do_einsum(*args):
                 return torch.einsum(test[0], args)
