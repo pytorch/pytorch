@@ -29,13 +29,13 @@ at::Tensor vulkan_convolution_prepacked(
     int64_t groups);
 
 // No-op batch norm at the moment to be able to profile models with batch_norm
-std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
-vulkan_batch_norm_noop(
-    const at::Tensor& input,
-    const at::Tensor& weight /* optional */,
-    const at::Tensor& bias /* optional */,
-    const at::Tensor& running_mean /* optional */,
-    const at::Tensor& running_var /* optional */,
+std::tuple<Tensor, Tensor, Tensor> batch_norm_vulkan(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const Tensor& running_mean,
+    const Tensor& running_var,
+    bool train,
     double momentum,
     double eps);
 

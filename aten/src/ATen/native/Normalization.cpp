@@ -435,14 +435,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
              std::make_tuple(1));
   }
 
+  Tensor reserve = at::empty({0}, input.options().dtype(kByte));
+
   bool use_vulkan = input.is_vulkan();
   if (use_vulkan) {
     return std::tuple_cat(
-              at::native::vulkan_batch_norm_noop(input, weight, bias, running_mean, running_var, momentum, eps),
+              at::native::batch_norm_vulkan(
+                input, weight, bias,
+                running_mean, running_var,
+                training, momentum, eps),
+              std::tuple<Tensor>(reserve),
               std::make_tuple(3));
   }
-
-  Tensor reserve = at::empty({0}, input.options().dtype(kByte));
 
   bool use_miopen = (input.is_cuda()
                && input.dim() <= MIOPEN_DIM_MAX
