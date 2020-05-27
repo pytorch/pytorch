@@ -43,8 +43,8 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, NewCrit
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
-    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, largeCUDATensorTest, onlyOnCPUAndCUDA
-
+    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, largeCUDATensorTest, onlyOnCPUAndCUDA, \
+    deviceCountAtLeast
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -8076,12 +8076,6 @@ class TestNN(NNTestCase):
         self.assertEqual(F.softmin(x, 1), F.softmax(-x, 1))
         self.assertEqual(F.softmin(x, 0), F.softmax(-x, 0))
 
-    @repeat_test_for_types([torch.float, torch.bfloat16])
-    def test_log_softmax(self, dtype=torch.float):
-        x_small = torch.ones(1, 2, dtype=dtype)
-        x_big = x_small + 1e16
-        self.assertEqual(F.log_softmax(x_small, -1), F.log_softmax(x_big, -1))
-
     def test_log_softmax_cpu(self, dtype=torch.bfloat16):
         inputf = torch.rand(32, 100, device="cpu", dtype=torch.float, requires_grad=True)
         input = inputf.to(dtype).detach().requires_grad_(True)
@@ -8213,10 +8207,24 @@ class TestNN(NNTestCase):
             torch.nn.BatchNorm1d(100),
             torch.nn.InstanceNorm1d(100)
         ).cuda()
+
+        # necessary to have an anchor point for comparison, in case the
+        # convert_sync_batchnorm updates in place
+        comp_module = torch.nn.Sequential(
+            torch.nn.BatchNorm1d(100),
+            torch.nn.InstanceNorm1d(100)
+        ).cuda()
+        comp_module.load_state_dict(module.state_dict())
+
         sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module)
         children = list(sync_bn_module.children())
         self.assertEqual(children[0].__class__, torch.nn.SyncBatchNorm)
         self.assertEqual(children[1].__class__, torch.nn.InstanceNorm1d)
+
+        for layer, converted_layer in zip(comp_module.children(), sync_bn_module.children()):
+            for key in layer.state_dict().keys():
+                self.assertEqual(layer.state_dict()[key].device, converted_layer.state_dict()[key].device)
+                self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
 
     def test_functional_grad_conv(self):
         # Conv 1D
@@ -9590,6 +9598,27 @@ class TestNNDeviceType(NNTestCase):
         helper(1, 129, 8, 8, 3, stride=2)
 
     @onlyCUDA
+    def test_max_pool2d(self, device):
+        def helper(n, c, h, w, ks):
+            x = torch.randn(n, c, h, w, device='cuda', dtype=torch.float, requires_grad=True)
+            ref_x = x.detach().clone().cpu().requires_grad_()
+
+            pool = torch.nn.MaxPool2d(kernel_size=ks)
+
+            y = pool(x)
+            ref_y = pool(ref_x)
+
+            y.sum().backward()
+            ref_y.sum().backward()
+
+            self.assertEqual(y, ref_y)
+            self.assertEqual(x.grad, ref_x.grad)
+
+        helper(2, 8, 4, 4, ks=2)
+        helper(1, 100000, 32, 32, ks=4)
+        helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
+
+    @onlyCUDA
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_max_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None):
@@ -9620,6 +9649,31 @@ class TestNNDeviceType(NNTestCase):
         helper(4, 8, 7, 7, 3, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
+
+    @onlyCUDA
+    def test_max_pool2d_indices(self, device):
+        def helper(n, c, h, w, ks):
+            if n is None:
+                x = torch.randn(c, h, w, device='cuda', dtype=torch.float, requires_grad=True)
+            else:
+                x = torch.randn(n, c, h, w, device='cuda', dtype=torch.float, requires_grad=True)
+
+            ref_x = x.detach().clone().cpu().requires_grad_()
+
+            pool = torch.nn.MaxPool2d(kernel_size=ks, return_indices=True)
+
+            y, idx = pool(x)
+            ref_y, ref_idx = pool(ref_x)
+
+            y.sum().backward()
+            ref_y.sum().backward()
+
+            self.assertEqual(y, ref_y)
+            self.assertEqual(idx, ref_idx)  # assertEqual implicitly compares shape for tensors
+            self.assertEqual(x.grad, ref_x.grad)
+
+        helper(2, 8, 4, 4, ks=2)
+        helper(None, 3, 50, 50, ks=5)
 
     def test_embedding_dense_grad(self, device):
         embd = nn.Embedding(20, 20).to(device)
@@ -9724,17 +9778,57 @@ class TestNNDeviceType(NNTestCase):
                 embedding.zero_grad()
                 self.assertEqual(after, pre)
 
+    # test is flaky on ROCm CI
+    @skipCUDAIfRocm
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypes(torch.float)
-    def test_softmax_backward(self, device, dtype):
-        sizes = [(0, 10), (32, 20), (10, 0)]
+    def test_softmax_results(self, device, dtype):
+        # Non-even sizes and non-zero shifts test fallback paths in vectorized kernel
+        # Note: dim1 > 1024 is needed to exercise the vectorized (non-persistent) path, (16, 30576) is BERT-esque
+        sizes = [(0, 10), (32, 20), (10, 0), (31, 20), (32, 21), (31, 23), (32, 1536), (31, 2048), (33, 2049), (16, 30576)]
+        shifts = [(0, 0), (1, 0), (0, 1), (1, 1)]
         for fn in [F.softmax, F.log_softmax]:
             for size in sizes:
-                input = torch.rand(size, device=device, dtype=dtype, requires_grad=True)
-                for dim in [0, 1]:
-                    output = fn(input, dtype=torch.float, dim=dim).sum()
-                    grad_input, = torch.autograd.grad(output, input, create_graph=True)
-                    grad_input.sum().backward()
+                for shift in shifts:
+                    input = torch.rand(size, device=device, dtype=dtype)
+                    # Note: With the largest tests we can hit upper limit of fp16 when we
+                    # sum, so scale the input down to stay in a nicer range.
+                    if dtype == torch.float16:
+                        input = input / 100.
+                    input = input[shift[0]:, shift[1]:]
+                    # Note; Don't want to bprop back through slice op
+                    input = input.detach().requires_grad_(True)
+                    ref_input = input.clone().cpu().detach().requires_grad_(True)
+                    for dim in [0, 1]:
+                        ref_output = fn(ref_input, dtype=torch.float, dim=dim)
+                        output = fn(input, dtype=torch.float, dim=dim)
+                        grad_output = torch.rand_like(output)
+                        ref_grad_output = grad_output.clone().cpu().detach()
+                        grad_input, = torch.autograd.grad(output, input, grad_outputs=(grad_output), create_graph=True)
+                        ref_grad_input, = torch.autograd.grad(ref_output, ref_input,
+                                                              grad_outputs=(ref_grad_output), create_graph=True)
+                        grad_input.sum().backward()
+                        ref_grad_input.sum().backward()
+
+                        self.assertEqual(output, ref_output)
+                        self.assertEqual(grad_input, ref_grad_input)
+                        self.assertEqual(input.grad, ref_input.grad)
+
+    @dtypes(torch.float)
+    @dtypesIfCUDA(torch.float, torch.half)
+    def test_log_softmax_big(self, device, dtype):
+        def _test_helper(shape):
+            # generate a tensor with big numbers that are exactly representable in dtype
+            # and are at a constant offset from tensor with small numbers
+            # the logsoftmax of a small and big tensors should be equal
+            x_small = torch.randint(100, shape, dtype=dtype, device=device)
+            offset = 1.5e3 if dtype == torch.half else 1e7
+            x_big = x_small + offset
+            self.assertEqual(F.log_softmax(x_small, -1), F.log_softmax(x_big, -1))
+        _test_helper((16, 4))
+        if self.device_type == 'cuda':
+            # test non-persistent softmax kernel
+            _test_helper((4, 1536))
 
     @largeCUDATensorTest('12GB')
     def test_conv_large_nosplit(self, device):
@@ -11325,6 +11419,32 @@ class TestNNDeviceType(NNTestCase):
             x = torch.randn(shape, device=device, requires_grad=True)
             F.max_pool3d(x, kernel_size=(1, 1, 1)).sum().backward()
             self.assertTrue(torch.allclose(x.grad, torch.ones_like(x.grad)))
+
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    def test_clip_grad_norm_multi_device(self, devices):
+        class TestModel(nn.Module):
+            def __init__(self):
+                super(TestModel, self).__init__()
+                self.layer1 = nn.Linear(10, 10)
+                self.layer2 = nn.Linear(10, 10)
+
+        test_model = TestModel()
+        test_model.layer1.to(devices[0])
+        test_model.layer2.to(devices[1])
+        ref_model = TestModel().to(devices[0])
+        for norm_type in [2., math.inf]:
+            for p in test_model.parameters():
+                p.grad = torch.ones_like(p)
+            for p in ref_model.parameters():
+                p.grad = torch.ones_like(p)
+            norm = clip_grad_norm_(test_model.parameters(), 0.5, norm_type=norm_type)
+            expected = clip_grad_norm_(ref_model.parameters(), 0.5, norm_type=norm_type)
+            self.assertEqual(norm, expected)
+            for p, pe in zip(test_model.parameters(), ref_model.parameters()):
+                self.assertEqual(p.grad.to(devices[0]), pe.grad)
+
+
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())

@@ -81,12 +81,10 @@ struct ExprSort : public IterVisitor {
 };
 
 struct InputsOf : public IterVisitor {
-  using IterVisitor::handle;
-
  private:
   std::set<Val*> inputs;
 
-  std::vector<Statement*> next(Val* v) final;
+  void handle(Val* v) final;
 
  public:
   static std::set<Val*> output(Fusion* fusion, Val* output_);
@@ -197,9 +195,11 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   // Return the Expr that produces val (const version)
   const Expr* origin(const Val* val) const;
 
-  void setRandom(bool r);
+  // Indicate to kernel to set itself up to generate random numbers
+  bool hasRNG();
 
-  bool random() const noexcept;
+  // Indicate to kernel to set itself up to generate random numbers
+  bool hasReduction();
 
  private:
   // Sets of all Vals/Exprs registered with this fusion
@@ -226,9 +226,6 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   // Dependency tracking for Vals. Where did it come from? Where is it used?
   std::unordered_map<Val*, Expr*> origin_;
   std::unordered_map<Val*, std::set<Expr*>> uses_;
-
-  // Indicate to kernel to set itself up to generate random numbers
-  bool random_ = false;
 };
 
 } // namespace fuser
