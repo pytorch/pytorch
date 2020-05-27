@@ -97,26 +97,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   PeepholeOptimize(copy);
   ConstantPropagation(copy);
   runOptimization(copy);
-
-  if (needsGradientInProfilingMode(copy->block())) {
-    auto diff_nodes = CreateAutodiffSubgraphs(
-        copy,
-        getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
-    for (Node* dnode : diff_nodes) {
-      auto diff_graph = std::move(dnode->g(attr::Subgraph));
-      Gradient gradient = differentiate(diff_graph);
-      runOptimization(gradient.f);
-      // run non diff optimization on the forward graph
-      runNondiffOptimization(gradient.f, true);
-      packGradient(gradient, dnode);
-    }
-    InlineAutodiffSubgraphs(
-        copy,
-        getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
-
-  } else {
-    runNondiffOptimization(copy, true);
-  }
+  runNondiffOptimization(copy, true);
   EliminateDeadCode(copy);
   GRAPH_DUMP("Optimized Graph : ", copy);
 }

@@ -773,10 +773,14 @@ void runNondiffOptimization(
   LowerSimpleTuples(graph);
 
   // Rewrite subgraphs with many MMs into expressions that batch them.
-  BatchMM(graph);
+  if (!getProfilingMode()) {
+    BatchMM(graph);
+  }
 
-  if (tensorExprFuserEnabled()) {
-    FuseTensorExprs(graph);
+  if (getProfilingMode()) {
+    if (tensorExprFuserEnabled()) {
+      FuseTensorExprs(graph);
+    }
   } else {
     FuseGraph(graph, strict_fuser_check);
   }
