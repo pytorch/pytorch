@@ -141,9 +141,9 @@ class TestAutograd(TestCase):
 
         x, y = self._function_test(MyFunction)
         self.assertEqual(graph_desc(x.grad.grad_fn),
-                         'CloneBackward(Error(AccumulateGrad(), None, AccumulateGrad()))')
+                         'CopyBackwards(None, Error(AccumulateGrad(), None, AccumulateGrad()))')
         self.assertEqual(graph_desc(y.grad.grad_fn),
-                         'CloneBackward(Error(AccumulateGrad(), None, AccumulateGrad()))')
+                         'CopyBackwards(None, Error(AccumulateGrad(), None, AccumulateGrad()))')
 
     def test_function_returns_input(self):
         class MyFunction(Function):
