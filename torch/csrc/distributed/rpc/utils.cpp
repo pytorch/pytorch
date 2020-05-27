@@ -353,6 +353,24 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
   return {std::move(payload), std::move(tensors)};
 }
 
+namespace {
+
+// The TensorPipe agent splits the RPC message's information across multiple
+// payloads. This allows the agent to provide the data to TensorPipe without
+// performing a copy into a single contiguous buffer, and without storing it as
+// metadata, which is less efficient.
+
+// First come the rpc::Message::type() and ::id().
+constexpr int kTpMessageTypeIdx = 0;
+constexpr int kTpMessageIdIdx = 1;
+// Then comes the rpc::Message::payload();
+constexpr int kTpMessagePayloadIdx = 2;
+// Last comes the pickle of rpc::Message::tensors() (with the tensors themselves
+// stored as, well, tensors in the tensorpipe::Message).
+constexpr int kTpMessagePickleIdx = 3;
+
+}
+
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     Message&& rpcMessage) {
   tensorpipe::Message tpMessage;
@@ -413,32 +431,32 @@ TensorpipeReadBuffers tensorpipeAllocate(tensorpipe::Message& tpMessage) {
       " payloads");
 
   TORCH_INTERNAL_ASSERT(
-      tpMessage.payloads[0].length == sizeof(MessageType),
+      tpMessage.payloads[kTpMessageTypeIdx].length == sizeof(MessageType),
       "first payload expected to contain ",
       sizeof(MessageType),
       " bytes, whereas it contained ",
-      tpMessage.payloads[0].length,
+      tpMessage.payloads[kTpMessageTypeIdx].length,
       " bytes");
   buffers.type = std::make_unique<MessageType>();
-  tpMessage.payloads[0].data = buffers.type.get();
+  tpMessage.payloads[kTpMessageTypeIdx].data = buffers.type.get();
 
   TORCH_INTERNAL_ASSERT(
-      tpMessage.payloads[1].length == sizeof(int64_t),
+      tpMessage.payloads[kTpMessageIdIdx].length == sizeof(int64_t),
       "second payload expected to contain ",
       sizeof(int64_t),
       " bytes, whereas it contained ",
-      tpMessage.payloads[1].length,
+      tpMessage.payloads[kTpMessageIdIdx].length,
       " bytes");
   buffers.id = std::make_unique<int64_t>();
-  tpMessage.payloads[1].data = buffers.id.get();
+  tpMessage.payloads[kTpMessageIdIdx].data = buffers.id.get();
 
   // FIXME The two resizes below zero out the vectors, which is not needed.
 
   buffers.payload.resize(tpMessage.payloads[2].length);
-  tpMessage.payloads[2].data = buffers.payload.data();
+  tpMessage.payloads[kTpMessagePayloadIdx].data = buffers.payload.data();
 
   buffers.pickle.resize(tpMessage.payloads[3].length);
-  tpMessage.payloads[3].data = buffers.pickle.data();
+  tpMessage.payloads[kTpMessagePickleIdx].data = buffers.pickle.data();
 
   for (auto& tensor : tpMessage.tensors) {
     buffers.tensors.push_back(at::getCPUAllocator()->allocate(tensor.length));

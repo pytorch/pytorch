@@ -503,16 +503,16 @@ void TensorPipeAgent::join() {
       // It is enough to wait for there to be no more active client calls, since
       // each server call corresponds to a client call for some other worker.
       callCountCV_.wait(lock, [this] { return clientActiveCalls_ == 0; });
+      // We'd like to immediately proceed with the allreduce, but it's a call
+      // that may block for some time, as it waits for other workers to also
+      // complete all their active client calls. While we call allreduce we must
+      // hold the mutex, or else the count we send to other workers may get
+      // stale (e.g., if some nested call happens in the meantime). But we can't
+      // hold the lock for an indeterminately long time, as that would block
+      // other operations (e.g., send). Thus we must release the lock and only
+      // re-acquire it when all workers are ready to proceed with the allreduce.
+      // We perform this synchronization using a barrier.
     }
-    // We'd like to immediately proceed with the allreduce, but it's a call that
-    // may block for some time, as it waits for other workers to also complete
-    // all their active client calls. While we call allreduce we must hold the
-    // mutex, or else the count we send to other workers may get stale (e.g.,
-    // if some nested call happens in the meantime). But we can't hold the lock
-    // for an indeterminately long time, as that would block other operations
-    // (e.g., send). Thus we must release the lock and only re-acquire it when
-    // all workers are ready to proceed with the allreduce. We perform this
-    // synchronization using a barrier.
     processGroup_->barrier()->wait();
     {
       std::unique_lock<std::mutex> lock(callCountMutex_);
@@ -533,10 +533,6 @@ void TensorPipeAgent::join() {
 }
 
 void TensorPipeAgent::shutdownImpl() {
-  // This will close all the pipes and listeners, invoke all callbacks with
-  // errors, turn down the I/O event loops and wait for everything to terminate.
-  context_->join();
-
   threadPool_.waitWorkComplete();
 
   // Join the Timeout Thread
@@ -544,6 +540,10 @@ void TensorPipeAgent::shutdownImpl() {
   if (timeoutThread_.joinable()) {
     timeoutThread_.join();
   }
+
+  // This will close all the pipes and listeners, invoke all callbacks with
+  // errors, turn down the I/O event loops and wait for everything to terminate.
+  context_->join();
 }
 
 const WorkerInfo& TensorPipeAgent::getWorkerInfo(
@@ -713,14 +713,18 @@ std::string TensorPipeAgent::getDefaultIPAddress() {
 }
 
 void TensorPipeAgent::increaseCallCount(int32_t& count) {
-  std::unique_lock<std::mutex> lock(callCountMutex_);
-  ++count;
+  {
+    std::unique_lock<std::mutex> lock(callCountMutex_);
+    ++count;
+  }
   callCountCV_.notify_all();
 }
 
 void TensorPipeAgent::decreaseCallCount(int32_t& count) {
-  std::unique_lock<std::mutex> lock(callCountMutex_);
-  --count;
+  {
+    std::unique_lock<std::mutex> lock(callCountMutex_);
+    --count;
+  }
   callCountCV_.notify_all();
 }
 
