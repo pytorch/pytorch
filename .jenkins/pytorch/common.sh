@@ -91,34 +91,36 @@ function assert_git_not_dirty() {
     fi
 }
 
-if which sccache > /dev/null; then
-  # Save sccache logs to file
-  sccache --stop-server || true
-  rm ~/sccache_error.log || true
-  # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
-  # https://github.com/pytorch/pytorch/pull/16645
-  SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
-
-  # Report sccache stats for easier debugging
-  sccache --zero-stats
-  function sccache_epilogue() {
-    echo '=================== sccache compilation log ==================='
-    python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
-    echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
-    sccache --show-stats
+if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
+  if which sccache > /dev/null; then
+    # Save sccache logs to file
     sccache --stop-server || true
-  }
-  trap_add sccache_epilogue EXIT
-fi
+    rm ~/sccache_error.log || true
+    # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
+    # https://github.com/pytorch/pytorch/pull/16645
+    SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
 
-if which ccache > /dev/null; then
-  # Report ccache stats for easier debugging
-  ccache --zero-stats
-  ccache --show-stats
-  function ccache_epilogue() {
+    # Report sccache stats for easier debugging
+    sccache --zero-stats
+    function sccache_epilogue() {
+      echo '=================== sccache compilation log ==================='
+      python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
+      echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
+      sccache --show-stats
+      sccache --stop-server || true
+    }
+    trap_add sccache_epilogue EXIT
+  fi
+
+  if which ccache > /dev/null; then
+    # Report ccache stats for easier debugging
+    ccache --zero-stats
     ccache --show-stats
-  }
-  trap_add ccache_epilogue EXIT
+    function ccache_epilogue() {
+      ccache --show-stats
+    }
+    trap_add ccache_epilogue EXIT
+  fi
 fi
 
 # It's called a COMPACT_JOB_NAME because it's distinct from the
@@ -185,14 +187,14 @@ function file_diff_from_base() {
   set +e
   git fetch origin master --quiet
   set -e
-  git diff --name-only "$(git merge-base origin master HEAD)" > "$1"
+  git diff --name-only "$(git merge-base origin/master HEAD)" > "$1"
 }
 
 function get_bazel() {
   # download bazel version
-  wget https://github.com/bazelbuild/bazel/releases/download/2.2.0/bazel-2.2.0-linux-x86_64 -O tools/bazel
+  wget https://github.com/bazelbuild/bazel/releases/download/3.1.0/bazel-3.1.0-linux-x86_64 -O tools/bazel
   # verify content
-  echo 'b2f002ea0e6194a181af6ac84cd94bd8dc797722eb2354690bebac92dda233ff tools/bazel' | sha256sum --quiet -c
+  echo '753434f4fa730266cf5ce21d1fdd425e1e167dd9347ad3e8adc19e8c0d54edca  tools/bazel' | sha256sum --quiet -c
 
   chmod +x tools/bazel
 }

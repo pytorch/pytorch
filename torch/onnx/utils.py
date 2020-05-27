@@ -141,7 +141,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_dce(graph)
     torch._C._jit_pass_lint(graph)
 
-    torch._C._jit_pass_canonicalize_ops(graph)
+    torch._C._jit_pass_canonicalize_graph_fuser_ops(graph)
     torch._C._jit_pass_lint(graph)
 
     torch._C._jit_pass_peephole(graph, True)
@@ -149,11 +149,13 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
 
     if operator_export_type != OperatorExportTypes.RAW:
+        torch._C._jit_pass_peephole(graph, True)
+        torch._C._jit_pass_lower_all_tuples(graph)
+
+        # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
         torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
 
         # onnx does not support tuples, so try to remove them
-        torch._C._jit_pass_lower_all_tuples(graph)
-        torch._C._jit_pass_peephole(graph, True)
         torch._C._jit_pass_lint(graph)
 
         # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0

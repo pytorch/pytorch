@@ -25,11 +25,11 @@ except ImportError:
 # by a native function that handles dispatch
 
 LEGACY_TH_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals});
+${return_type} ${api_name}(${formals});
 """)
 
 LEGACY_TH_DEFINITION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${formals}) {
     ${named_guard_declaration}
     ${device_guard_declaration}
     ${type_definition_body}
@@ -44,6 +44,7 @@ switch (dispatch_scalar_type) {
     default:
         AT_ERROR("${api_name} not supported on ${Type} for ", dispatch_scalar_type);
 }
+${switch_epilogue}
 """)
 
 LEGACY_TH_DEFINITION_CASE = CodeTemplate("""\
@@ -58,23 +59,23 @@ case ScalarType::${ScalarName}: {
 # In this case, it will be called for all backends, but can be overwritten on a
 # per backend basis.
 NATIVE_DISPATCH_DECLARATION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals});
+${return_type} ${type_wrapper_name}(${formals});
 """)
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${formals}) {
     ${named_guard_declaration}
     ${device_guard_declaration}
-    ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
+    ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
 
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${formals}) {
     ${named_guard_declaration}
     ${device_init}
     ${device_guard_declaration}
-    ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
+    ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
 
@@ -133,7 +134,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     ${static_dispatch_method_body}
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
-    return op.callUnboxed<${formals_types_with_return}>(${method_actuals});
+    return op.call<${formals_types_with_return}>(${method_actuals});
 #endif
 }
 """)
@@ -158,7 +159,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
-    return op.callUnboxed<${formals_types_with_return}>(${native_actuals});
+    return op.call<${formals_types_with_return}>(${actuals});
 #endif
 }
 """)
@@ -172,7 +173,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 # the time you get to the implementation.
 STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
-${return_call} TypeDefault::${type_wrapper_name}(${native_arguments});
+${return_call} TypeDefault::${type_wrapper_name}(${actuals});
 """)
 
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
@@ -187,24 +188,20 @@ switch (dispatchKeyToBackend(${dispatch_key_var_name})) {
 
 STATIC_DISPATCH_FUNCTION_SWITCH_CASE = CodeTemplate("""\
 case Backend::${backend}:
-    ${return_call} ${backend}Type::${type_wrapper_name}(${native_arguments});
+    ${return_call} ${backend}Type::${type_wrapper_name}(${actuals});
     break;
+""")
+
+IFDEF_BLOCK = CodeTemplate("""\
+#ifdef ${ifdef_guard}
+${content}
+#endif
 """)
 
 # add a native declaration for a native function
 NATIVE_DECLARATION = CodeTemplate("""\
 CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
-
-ZERO_DIM_CHECK = CodeTemplate("""\
-if (${check_name}.dim() == 0) {
-    return ${api_name}(${zero_dim_actuals});
-}""")
-
-CONDITIONAL_INITIALIZER = CodeTemplate("""\
-if (${name}.defined()) {
-    ${initializer}
-}""")
 
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
@@ -230,7 +227,8 @@ scalar_types = [
     ('ComplexDouble', 'ComplexDouble', 'ComplexDouble', False),
 ]
 
-static_dispatch_backends = ['CPU', 'QuantizedCPU']
+static_dispatch_backends = ['CPU', 'QuantizedCPU', 'Vulkan']
+static_dispatch_backends_ifdef_guard = {'Vulkan' : 'USE_VULKAN'}
 
 
 class NYIError(Exception):
@@ -300,8 +298,6 @@ CHECKED_CAST = {
             'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'DeviceType::${DeviceType}, ScalarType::Long)'),
-    # This is a cast done via direct-construction
-    'IntArrayRefStride': CodeTemplate('at::IntArrayRef ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate(
@@ -322,17 +318,17 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                 '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(${ScalarName}), 0, allocator(), true),'
-                 'DispatchKey::${Backend}).release()',
+                 '(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),'
+                 'DispatchKey::${Backend}, scalarTypeToTypeMeta(${ScalarName})).release()',
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
-                     'DispatchKey::${Backend}).release()',
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),'
+                     'DispatchKey::${Backend}, scalarTypeToTypeMeta(ScalarType::Byte)).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
-                     'DispatchKey::${Backend}).release()',
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),'
+                     'DispatchKey::${Backend}, scalarTypeToTypeMeta(ScalarType::Bool)).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(c10::Storage::use_byte_size_t(), scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
-                     'DispatchKey::${Backend}).release()',
+                     '(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),'
+                     'DispatchKey::${Backend}, scalarTypeToTypeMeta(ScalarType::Long)).release()',
 }
 
 # Replacements for constants when calling into TH
@@ -399,8 +395,6 @@ THFormal = TypedDict('THFormal', {
     'annotation': str,
     'allocate': bool,
     'mask': bool,
-    'resize': str,
-    'zero': bool,
 }, total=False)
 
 # Generic ATen formal or native_functions.yaml formal argument.
@@ -504,7 +498,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'name': str,
     'operator_name': str,
     'overload_name': str,
-    'native_actuals': List[str],
     'native_type_method_dispatch': str,
     # options should be List[FunctionOption]
     'options': Any,
@@ -516,9 +509,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'returns': List[ReturnType],
     'sparse': bool,
     'type_definition_body': List[str],
-    'type_method_actuals': List[str],
     'type_method_definition_dispatch': str,
-    'type_method_formals': List[str],
     'variants': str,
     'with_gil': bool,
 })
@@ -901,10 +892,6 @@ def create_generic(top_env, declarations):
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
 
-        # There are no cases where these differ, but they do in native_functions
-        option['type_method_formals'] = option['formals']
-        option['type_method_actuals'] = option['actuals']
-
         assert 'method' not in option['variants'], 'TH functions cannot be methods'
         is_function = 'function' in option['variants']
         # NB: TH functions don't support multiple dispatch
@@ -1036,7 +1023,6 @@ def create_generic(top_env, declarations):
         option['actuals'] = [f['name'] for f in formals]
 
         option['formals_types'] = [f['type'] for f in option['formals_list']]
-        option['native_actuals'] = [f['name'] for f in option['formals_list']]
 
         option['formals_types_with_return'] = [option['return_type']]
         if len(option['formals_types']) > 0:
@@ -1080,11 +1066,18 @@ def create_generic(top_env, declarations):
                 # calling code.
                 for backend in static_dispatch_backends:
                     if backend in type_method_dispatch:
-                        static_dispatch_function_cases.append(STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
+                        static_dispatch_function_case = STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
-                            native_arguments=option['method_actuals']))
+                            actuals=option['method_actuals'])
+                        if (backend in static_dispatch_backends_ifdef_guard):
+                            static_dispatch_function_cases.append(IFDEF_BLOCK.substitute(
+                                option,
+                                ifdef_guard=static_dispatch_backends_ifdef_guard[backend],
+                                content=static_dispatch_function_case))
+                        else:
+                            static_dispatch_function_cases.append(static_dispatch_function_case)
 
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
@@ -1093,7 +1086,7 @@ def create_generic(top_env, declarations):
                     static_dispatch_function_cases=static_dispatch_function_cases)
             else:
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
-                    option, native_arguments=option['method_actuals'])
+                    option, actuals=option['method_actuals'])
 
             method_definition = C10_TENSOR_METHOD_DEFINITION
             return FunctionCode(
@@ -1115,11 +1108,18 @@ def create_generic(top_env, declarations):
                 static_dispatch_function_cases = []
                 for backend in static_dispatch_backends:
                     if backend in type_method_dispatch:
-                        static_dispatch_function_cases.append(STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
+                        static_dispatch_function_case = STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
-                            native_arguments=option['native_actuals']))
+                            actuals=option['actuals'])
+                        if (backend in static_dispatch_backends_ifdef_guard):
+                            static_dispatch_function_cases.append(IFDEF_BLOCK.substitute(
+                                option,
+                                ifdef_guard=static_dispatch_backends_ifdef_guard[backend],
+                                content=static_dispatch_function_case))
+                        else:
+                            static_dispatch_function_cases.append(static_dispatch_function_case)
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
                     dispatch_key_var_name=dispatch_key_var_name,
@@ -1127,7 +1127,7 @@ def create_generic(top_env, declarations):
                     static_dispatch_function_cases=static_dispatch_function_cases)
             else:
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
-                    option, native_arguments=option['native_actuals'])
+                    option, actuals=option['actuals'])
 
             fn_definition = C10_FUNCTION_DEFINITION.substitute(
                 option, static_dispatch_function_body=static_dispatch_function_body)
@@ -1139,10 +1139,6 @@ def create_generic(top_env, declarations):
                 option['name'], ", ".join(option['method_formals_with_defaults']))
 
         type_method_dispatch = option['type_method_definition_dispatch']
-
-        option['type_method_formals'] = [format_formal(f) for f in formals]
-        option['type_method_actuals'] = [f['name'] for f in formals]
-        option['native_actuals'] = [f['name'] for f in formals]
 
         is_method = 'method' in option['variants']
         is_namespace_function = 'function' in option['variants']
@@ -1336,15 +1332,6 @@ def create_derived(backend_type_env, declarations):
             'auto {} = Tensor({}::reclaim({}));'.format(name, intrusive_ptr_type, tensor_arg),
         ]
 
-    def resize_arg(arg):
-        # type: (THFormal) -> str
-        resize = arg['resize']
-        if isinstance(resize, str):
-            return "{}.resize_({}.sizes());".format(arg['name'], resize)
-        else:
-            dims = ['{}.size({})'.format(name, dim) for name, dim in resize]
-            return "{}.resize_({{ {} }});".format(arg['name'], ','.join(dims))
-
     def handle_call(env, option, cimpl):
         # type: (Environment, FunctionOption, FunctionOption) -> str
         is_nn = option['mode'] == 'NN'
@@ -1428,25 +1415,6 @@ def create_derived(backend_type_env, declarations):
                             case_body.append("auto {}_ = {};".format(
                                 arg['name'], check_cast))
 
-                        initializers = []
-
-                        # resize tensors for special ops that require it
-                        if 'resize' in arg:
-                            initializers.append(resize_arg(arg))
-
-                        # also special handling where we zero some outputs.
-                        if arg.get('zero', False):
-                            initializers.append("{}.zero_();".format(arg['name']))
-
-                        # only initialize non-null arguments
-                        if nullable_argument(arg) and len(initializers) > 0:
-                            case_body.append(CONDITIONAL_INITIALIZER.substitute({
-                                'name': arg['name'],
-                                'initializer': initializers
-                            }))
-                        else:
-                            case_body += initializers
-
                 # cimpls, if it exists, contains the underlying C function names and
                 # arguments. Otherwise use option
                 cimpls = option.get('cimpls', [option])
@@ -1456,19 +1424,7 @@ def create_derived(backend_type_env, declarations):
 
                 if ret['kind'] == 'arguments':
                     case_body.extend([call + ';' for call in calls])
-                    arguments_indices = ret['arguments']
-                    arguments = [option['arguments'][argi]
-                                 for argi in arguments_indices]
-                    if len(arguments_indices) == 1:
-                        arg = arguments[0]
-                        case_body.append("return {};".format(arg['name']))
-                    else:
-                        types = [to_return_type(arg, option)['type']
-                                 for arg in arguments]
-                        # TODO: check for move semantics...
-                        names = [arg['name'] for arg in arguments]
-                        case_body.append(CodeTemplate("return std::tuple<${types}>(${names});").substitute(
-                            types=types, names=names))
+                    # return handled later
                 elif ret['kind'] == 'type':
                     assert len(calls) == 1
                     call = calls[0]
@@ -1486,7 +1442,24 @@ def create_derived(backend_type_env, declarations):
                     raise Exception("NYI - return handling")
 
                 cases.append(LEGACY_TH_DEFINITION_CASE.substitute(case_env, case_body=case_body))
-        body.append(LEGACY_TH_DEFINITION_SWITCH_STATEMENT.substitute(env, cases=cases, switch_prologue=switch_prologue))
+        switch_epilogue = ''
+        if ret['kind'] == 'arguments':
+            arguments_indices = ret['arguments']
+            arguments = [option['arguments'][argi]
+                         for argi in arguments_indices]
+            if len(arguments_indices) == 1:
+                arg = arguments[0]
+                switch_epilogue = "return {};".format(arg['name'])
+            else:
+                types = [to_return_type(arg, option)['type']
+                         for arg in arguments]
+                # TODO: check for move semantics...
+                names = [arg['name'] for arg in arguments]
+                switch_epilogue = CodeTemplate("return std::tuple<${types}>(${names});").substitute(
+                    types=types, names=names)
+        body.append(LEGACY_TH_DEFINITION_SWITCH_STATEMENT.substitute(env, cases=cases,
+                                                                     switch_prologue=switch_prologue,
+                                                                     switch_epilogue=switch_epilogue))
         return body
 
     def process_legacy_th_option(option):

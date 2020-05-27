@@ -60,8 +60,7 @@ TORCH_API TensorPipeEntry tensorpipeSerialize(const Message& rpcMessage);
 // necessary information for memory allocation, like payload length
 // and tensor metadata. The returned RPC message doesn't have any
 // data, but would be valid after tensorpipe finishs data transfer.
-TORCH_API Message
-tensorpipeAllocateMessage(const tensorpipe::Message& tpMessage);
+TORCH_API Message tensorpipeAllocateMessage(tensorpipe::Message& tpMessage);
 
 // Some Tensors are effectively views of larger Tensors, where only a small
 // subset of the Storage data is referenced. This normally is good and avoids

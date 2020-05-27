@@ -61,79 +61,6 @@ class IndexFlattener : public IRMutator {
   }
 };
 
-class ReductionExpander : public IRMutator {
- public:
-  Stmt* expand(Stmt* s) {
-    return s->accept_mutator(this);
-  }
-
-  Stmt* mutate(const For* v) override {
-    Stmt* body_new = v->body()->accept_mutator(this);
-    if (body_new == v->body()) {
-      body_new = Stmt::clone(v->body());
-    }
-
-    Stmt* ret = v->cloneWithNewBody(body_new);
-
-    for (size_t i = 0; i < initializers_.size();) {
-      InitializerInfo& info = initializers_[i];
-
-      auto end = std::remove(info.vars.begin(), info.vars.end(), v->var());
-      if (end == info.vars.end()) {
-        info.skipped_loops.push_back(v);
-        i++;
-        continue;
-      }
-
-      info.vars.erase(end);
-      if (info.vars.empty()) {
-        const ReduceOp* op = info.op;
-        std::vector<const Expr*> indices(
-            op->output_args().begin(), op->output_args().end());
-
-        Stmt* init = new Store(
-            op->accumulator(), indices, op->initializer(), new IntImm(1));
-
-        for (auto it = info.skipped_loops.rbegin();
-             it != info.skipped_loops.rend();
-             it++) {
-          const For* old_for = *it;
-          init = old_for->cloneWithNewBody(init);
-        }
-        info.skipped_loops.clear();
-
-        if (Block* b = dynamic_cast<Block*>(ret)) {
-          b->prepend_stmt(init);
-        } else {
-          ret = new Block({init, ret});
-        }
-        initializers_.erase(initializers_.begin() + i);
-        continue;
-      }
-
-      i++;
-    }
-    return ret;
-  }
-
-  const Expr* mutate(const ReduceOp* v) override {
-    const std::vector<const Var*>& reduce_vars(v->reduce_args());
-    initializers_.emplace_back(InitializerInfo(v, reduce_vars));
-    return v->complete().node();
-  }
-
- private:
-  struct InitializerInfo {
-    InitializerInfo(const ReduceOp* o, std::vector<const Var*> v)
-        : op(o), vars(std::move(v)) {}
-    const ReduceOp* op;
-    std::vector<const Var*> vars;
-    std::vector<const For*> skipped_loops;
-  };
-
-  std::vector<InitializerInfo> initializers_;
-};
-
 class Vectorizer : public IRMutator {
  public:
   Stmt* vectorize(const For* v) {
@@ -237,18 +164,6 @@ class Vectorizer : public IRMutator {
     }
 
     return v;
-  }
-
-  const Expr* mutate(const Let* v) override {
-    const Expr* var = v->var();
-    const Expr* value = v->value();
-    const Expr* body = v->body();
-
-    std::vector<const Expr*> inputs = {body};
-    return try_vectorize(v, inputs, [&]() {
-      return Let::make(
-          ExprHandle(var), ExprHandle(value), ExprHandle(inputs[0]));
-    });
   }
 
   const Expr* mutate(const Ramp* v) override {
@@ -647,12 +562,21 @@ class RandomInliner : public FunctionInliner {
  private:
   // Emit let statements for all encountered random vars, thenclear them.
   Stmt* bind_random_vars(Stmt* s) {
+    if (random_vars_.empty()) {
+      return s;
+    }
+
+    Block* b = dynamic_cast<Block*>(s);
+    if (!b) {
+      b = new Block({s});
+    }
+
     for (auto const& p : random_vars_) {
       Var* v = p.second;
-      s = new LetStmt(v, new Intrinsics(kRand, v->dtype()), s);
+      b->add_var_binding(v, new Intrinsics(kRand, v->dtype()));
     }
     random_vars_.clear();
-    return s;
+    return b;
   }
 
   // Track the function currently being inlined.
@@ -764,8 +688,17 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors)
   std::vector<Stmt*> loops;
   for (Tensor* t : tensors_to_compute) {
     Stmt* loop = lowerToStmt(t);
-    loops.push_back(loop);
+    // Flatten initializers.
+    if (Block* block = dynamic_cast<Block*>(loop)) {
+      for (auto* s : block->stmts()) {
+        block->remove_stmt(s);
+        loops.push_back(s);
+      }
+    } else {
+      loops.push_back(loop);
+    }
   }
+
   root_stmt_ = new Block(loops);
 }
 
@@ -785,10 +718,21 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
     throw malformed_input("Tensor lowered to zero dimensions");
   }
 
+  const Expr* initializer = t->initializer();
+  if (initializer) {
+    buf_initializers_[t->func_var()] = initializer;
+  }
+  std::vector<const Expr*> indices(t->args().begin(), t->args().end());
+
   for (size_t i = 0; i < f->ndim(); i++) {
     // Going in reverse order: from innermost loop to the outermost
     size_t dim_index = f->ndim() - i - 1;
     body = new For(f->arg(dim_index), new IntImm(0), f->dim(dim_index), body);
+    indices.pop_back();
+    if (initializer && indices.size() == t->ndim()) {
+      Store* init = new Store(t->buf(), indices, initializer, new IntImm(1));
+      body = new Block({init, body});
+    }
   }
   return body;
 }
@@ -841,7 +785,7 @@ std::unordered_map<const Buf*, std::vector<BufUse>> findUses(Stmt* s) {
 
 class ContainedStmtsFinder : public IRVisitor {
  public:
-  // Simply list all Stores and LetStmts that are children of the given stmt
+  // Simply list all Stores and Block that are children of the given stmt
   const std::unordered_set<Stmt*>& findContainedStmts(Stmt* s) {
     contained_.clear();
     s->accept(this);
@@ -853,7 +797,7 @@ class ContainedStmtsFinder : public IRVisitor {
     contained_.insert((Stmt*)v);
     IRVisitor::visit(v);
   }
-  void visit(const LetStmt* v) override {
+  void visit(const Block* v) override {
     contained_.insert((Stmt*)v);
     IRVisitor::visit(v);
   }
@@ -1020,7 +964,7 @@ void LoopNest::splitWithTail(
         Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
     *tail = new For(i_tail, new IntImm(0), tail_size, body_tail);
 
-    p->append_stmt(*tail);
+    p->insert_stmt_after(*tail, *outer);
   } else {
     *tail = nullptr;
   }
@@ -1141,7 +1085,7 @@ void LoopNest::reorderAxis(For* a, For* b) {
   CHECK(root);
 
   // Do a shallow copy of the inner blocks.
-  Block* body = new Block({});
+  Block* body = new Block(inner->body()->varBindings(), {});
   body->splice(body->end(), inner->body());
 
   For* before{outer};
@@ -1578,15 +1522,25 @@ void LoopNest::rfactor(
   For* target_for = nullptr;
   std::set<const Var*> reduce_args = {reduce_op->reduce_args().begin(),
                                       reduce_op->reduce_args().end()};
+
+  // Store loops below the target point.
+  std::vector<const For*> init_loops;
+
   while (st) {
-    auto f = dynamic_cast<For*>(st);
-    if (f) {
+    if (For* f = dynamic_cast<For*>(st)) {
       if (f->var() == reduction_var) {
         target_for = f;
+        init_loops.push_back(f);
       }
       if (reduce_args.count(f->var())) {
         reduce_args.erase(f->var());
+      } else {
+        init_loops.push_back(f);
+      }
+
+      if (reduce_args.empty()) {
         root_for = f;
+        break;
       }
     }
     st = st->get_parent();
@@ -1618,7 +1572,6 @@ void LoopNest::rfactor(
       new Buf(new Var("tmp_buf", kHandle), new_dims, reduce_op->body().dtype());
 
   auto old_acc = reduce_op->accumulator();
-  auto old_init_expr = reduce_op->initializer();
   auto new_inner = reduce_op->reduce_args();
   auto new_outer = reduce_op->output_args();
   bool found = false;
@@ -1646,7 +1599,6 @@ void LoopNest::rfactor(
 
   auto first_reduce = new ReduceOp(
       tmp_buf,
-      old_init_expr,
       reduce_op->body(),
       reduce_op->interaction(),
       new_outer,
@@ -1661,7 +1613,6 @@ void LoopNest::rfactor(
       new IntImm(1)));
   auto second_reduce = new ReduceOp(
       old_acc,
-      reduce_op->initializer(),
       second_reduce_load,
       reduce_op->interaction(),
       reduce_op->output_args(),
@@ -1682,7 +1633,7 @@ void LoopNest::rfactor(
     std::cerr << "Cannot rfactor a loop whose parent is not a block.\n";
     return;
   }
-  auto new_root_for = root_for->accept_mutator(&sr);
+  Stmt* new_root_for = root_for->accept_mutator(&sr);
   auto res = parent_block->replace_stmt(root_for, new_root_for);
   if (!res) {
     std::cerr << "Couldn't find target loop within parent block of loop nest\n";
@@ -1696,6 +1647,23 @@ void LoopNest::rfactor(
   }
 
   // From this point forward any errors cannot be handled silently.
+  auto init_it = buf_initializers_.find(reduce_op->accumulator());
+  if (init_it != buf_initializers_.end()) {
+    buf_initializers_[tmp_buf] = init_it->second;
+    Stmt* init_stmt =
+        new Store(tmp_buf, new_outer, init_it->second, new IntImm(1));
+
+    // Wrap it in any loops lower than the insertion point of the new reduction.
+    for (auto* il : init_loops) {
+      init_stmt = il->cloneWithNewBody(init_stmt);
+    }
+
+    parent_block->prepend_stmt(init_stmt);
+  } else {
+    // We may support this but not possible now.
+    throw std::runtime_error("can't rfactor reduction with no initializer\n");
+  }
+
   auto second_buf = dynamic_cast<const Buf*>(second_reduce->accumulator());
   std::vector<const Expr*> second_indices = {second_reduce->output_args()};
   if (insertion_point &&

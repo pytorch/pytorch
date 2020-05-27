@@ -9,6 +9,7 @@ import gc
 from contextlib import contextmanager
 import threading
 import queue
+import pickle
 
 import torch
 import torch.cuda
@@ -508,9 +509,9 @@ class TestCuda(TestCase):
             torch.save(q, f)
             f.seek(0)
             q_copy = torch.load(f)
-        self.assertEqual(q_copy, q, 0)
+        self.assertEqual(q_copy, q, atol=0, rtol=0)
         q_copy[0].fill_(5)
-        self.assertEqual(q_copy[0], q_copy[2], 0)
+        self.assertEqual(q_copy[0], q_copy[2], atol=0, rtol=0)
         self.assertTrue(isinstance(q_copy[0], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
         self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
@@ -659,15 +660,13 @@ class TestCuda(TestCase):
 
         r_tensors = list(map(comm.reduce_add, zip(*dup_tensors)))
         for r, t in zip(r_tensors, tensors):
-            self.assertEqual(r.get_device(), t.get_device())
+            self.assertEqualTypeString(r, t)
             self.assertEqual(r, t * 2)
-            self.assertEqual(r.type(), t.type())
 
         rc_tensors = comm.reduce_add_coalesced(dup_tensors, buffer_size=buffer_size)
         self.assertEqual(r_tensors, rc_tensors)
         for r, rc in zip(r_tensors, rc_tensors):
-            self.assertEqual(rc.get_device(), r.get_device())
-            self.assertEqual(rc.type(), r.type())
+            self.assertEqualTypeString(rc, r)
 
         # Since we have both cuda:0 and cuda:1 inputs, the outputs must be new.
         # We can check that they have different version counters.
@@ -724,7 +723,7 @@ class TestCuda(TestCase):
             chunk_end = chunk_start + chunk_sizes[i]
             index = [slice(None, None), slice(None, None)]
             index[dim] = slice(chunk_start, chunk_end)
-            self.assertEqual(r, input[tuple(index)], 0)
+            self.assertEqual(r, input[tuple(index)], atol=0, rtol=0)
             chunk_start = chunk_end
 
     def test_scatter_cpu(self):
@@ -855,7 +854,7 @@ class TestCuda(TestCase):
         import os
         fname = "tempfile.pt"
         try:
-            with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+            with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
                 torch.save([torch.nn.Parameter(torch.randn(10, 10))], fname,
                            _use_new_zipfile_serialization=True)
                 torch.load(fname, 'cuda0')
@@ -865,7 +864,7 @@ class TestCuda(TestCase):
 
     def test_get_device_index(self):
         from torch.cuda._utils import _get_device_index
-        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+        with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             _get_device_index('cuda0', optional=True)
 
         with self.assertRaisesRegex(ValueError, "Expected a cuda device"):
@@ -1447,7 +1446,7 @@ class TestCuda(TestCase):
         with torch.cuda.stream(stream):
             tmp2 = torch.cuda.FloatTensor(t.size())
             tmp2.zero_()
-            self.assertNotEqual(tmp2.data_ptr(), ptr[0], 'allocation re-used to soon')
+            self.assertNotEqual(tmp2.data_ptr(), ptr[0], msg='allocation re-used to soon')
 
         self.assertEqual(result.tolist(), [1, 2, 3, 4])
 
@@ -1455,7 +1454,7 @@ class TestCuda(TestCase):
         torch.cuda.current_stream().synchronize()
         with torch.cuda.stream(stream):
             tmp3 = torch.cuda.FloatTensor(t.size())
-            self.assertEqual(tmp3.data_ptr(), ptr[0], 'allocation not re-used')
+            self.assertEqual(tmp3.data_ptr(), ptr[0], msg='allocation not re-used')
 
     def test_record_stream_on_shifted_view(self):
         # See issue #27366
@@ -1502,7 +1501,7 @@ class TestCuda(TestCase):
         ptr = t.data_ptr()
         del t
         t = torch.FloatTensor([1]).pin_memory()
-        self.assertEqual(t.data_ptr(), ptr, 'allocation not reused')
+        self.assertEqual(t.data_ptr(), ptr, msg='allocation not reused')
 
         # check that the allocation is not re-used if it's in-use by a copy
         gpu_tensor = torch.cuda.FloatTensor([0])
@@ -1510,7 +1509,7 @@ class TestCuda(TestCase):
         gpu_tensor.copy_(t, non_blocking=True)
         del t
         t = torch.FloatTensor([1]).pin_memory()
-        self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
+        self.assertNotEqual(t.data_ptr(), ptr, msg='allocation re-used too soon')
         self.assertEqual(list(gpu_tensor), [1])
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
@@ -1530,7 +1529,7 @@ class TestCuda(TestCase):
 
         del t
         t = torch.FloatTensor([2]).pin_memory()
-        self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
+        self.assertNotEqual(t.data_ptr(), ptr, msg='allocation re-used too soon')
 
         with torch.cuda.device(0):
             gpu_tensor0.copy_(t, non_blocking=True)
@@ -1752,8 +1751,20 @@ class TestCuda(TestCase):
     def test_tensor_scatterAdd(self):
         _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False)
 
+    def test_scatter_add_mult_index_base(self):
+        _TestTorchMixin._test_scatter_add_mult_index_base(self, lambda t: t.cuda())
+
     def test_tensor_scatterFill(self):
         _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
+
+    def test_tensor_scatter_complex(self):
+        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False, test_complex=True)
+
+    def test_tensor_scatterAdd_complex(self):
+        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False, test_complex=True)
+
+    def test_tensor_scatterFill_complex(self):
+        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False, test_complex=True)
 
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
@@ -1776,8 +1787,8 @@ class TestCuda(TestCase):
         torch.cuda.set_rng_state_all(states)
         after0 = torch.cuda.FloatTensor(100, device=0).normal_()
         after1 = torch.cuda.FloatTensor(100, device=1).normal_()
-        self.assertEqual(before0, after0, 0)
-        self.assertEqual(before1, after1, 0)
+        self.assertEqual(before0, after0, atol=0, rtol=0)
+        self.assertEqual(before1, after1, atol=0, rtol=0)
 
     @skipIfRocm
     def test_nvtx(self):
@@ -2152,8 +2163,11 @@ t2.start()
             # so any potential errors with the growth factor handling will be magnified.
             scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
 
-            run(data, mod_control, opt_control, scaler, loss_fn, skip_iter, False)
-            run(data, mod_scaling, opt_scaling, scaler, loss_fn, skip_iter, True)
+            _ = run(data, mod_control, opt_control, scaler, loss_fn, skip_iter, False)
+            ret = run(data, mod_scaling, opt_scaling, scaler, loss_fn, skip_iter, True)
+
+            # Allows run() to optionally return a different scaler instance.
+            scaler = ret if ret else scaler
 
             # If scaling was enabled, the scale factor should have been multiplied by the growth factor
             # len(data) - skipped times and the backoff factor "skipped" times.
@@ -2169,6 +2183,8 @@ t2.start()
 
     # Compares no scaling + no autocasting against scaling + autocasting.
     def test_grad_scaling_autocast(self):
+        try_pickle = False
+
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             for i, (input, target) in enumerate(data):
                 optimizer.zero_grad()
@@ -2181,12 +2197,18 @@ t2.start()
                         model[1].weight.grad.data.fill_(float('inf'))
                     scaler.step(optimizer)
                     scaler.update()
+                    if try_pickle:
+                        scaler = pickle.loads(pickle.dumps(scaler))
                 else:
                     loss.backward()
                     if (not scaler.is_enabled()) or (i != skip_iter):
                         optimizer.step()
+            return scaler
 
         # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
+        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-3)
+        # this will be picked up by try_pickle within run():
+        try_pickle = True
         self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-3)
 
     def test_grad_scaling_clipping(self):

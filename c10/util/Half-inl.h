@@ -45,7 +45,8 @@ inline C10_HOST_DEVICE Half::operator __half() const {
 
 // CUDA intrinsics
 
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 350)
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 350)) || \
+    (defined(__clang__) && defined(__CUDA__))
 inline __device__ Half __ldg(const Half* ptr) {
     return __ldg(reinterpret_cast<const __half*>(ptr));
 }

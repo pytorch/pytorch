@@ -123,9 +123,11 @@ struct complex;
 
 template<typename T>
 struct alignas(sizeof(T) * 2) complex_common {
-  T storage[2];
+  using value_type = T;
 
-  constexpr complex_common(): storage{T(), T()} {}
+  T storage[2] = {T(), T()};
+
+  constexpr complex_common() = default;
   constexpr complex_common(const T& re, const T& im = T()): storage{re, im} {}
   template<typename U>
   explicit constexpr complex_common(const std::complex<U> &other): complex_common(other.real(), other.imag()) {}
@@ -250,11 +252,15 @@ struct alignas(sizeof(T) * 2) complex_common {
   }
 };
 
+// In principle, `using complex_common<??>::complex_common;` should be enough
+// to for default constructor, but multiple compilers are having multiple bugs on
+// this at different contexts
+#define COMPILER_BUGS constexpr complex() = default;
 
 template<>
 struct alignas(2*sizeof(float)) complex<float>: public complex_common<float> {
   using complex_common<float>::complex_common;
-  constexpr complex(): complex_common() {}; // needed by CUDA 9.x
+  COMPILER_BUGS
   explicit constexpr complex(const complex<double> &other);
   using complex_common<float>::operator=;
 };
@@ -262,10 +268,12 @@ struct alignas(2*sizeof(float)) complex<float>: public complex_common<float> {
 template<>
 struct alignas(2*sizeof(double)) complex<double>: public complex_common<double> {
   using complex_common<double>::complex_common;
-  constexpr complex(): complex_common() {}; // needed by CUDA 9.x
+  COMPILER_BUGS
   constexpr complex(const complex<float> &other);
   using complex_common<double>::operator=;
 };
+
+#undef COMPILER_BUGS
 
 constexpr complex<float>::complex(const complex<double> &other): complex_common(other.real(), other.imag()) {}
 constexpr complex<double>::complex(const complex<float> &other): complex_common(other.real(), other.imag()) {}
@@ -372,6 +380,56 @@ constexpr c10::complex<T> operator/(const T& lhs, const c10::complex<T>& rhs) {
   return result /= rhs;
 }
 
+
+// Define operators between integral scalars and c10::complex. std::complex does not support this when T is a
+// floating-point number. This is useful because it saves a lot of "static_cast" when operate a complex and an integer.
+// This makes the code both less verbose and potentially more efficient.
+#define COMPLEX_INTEGER_OP_TEMPLATE_CONDITION \
+  typename std::enable_if_t<std::is_floating_point<fT>::value && std::is_integral<iT>::value, int> = 0
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+constexpr c10::complex<fT> operator+(const c10::complex<fT>& a, const iT& b) {
+  return a + static_cast<fT>(b);
+}
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+constexpr c10::complex<fT> operator+(const iT& a, const c10::complex<fT>& b) {
+  return static_cast<fT>(a) + b;
+}
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+constexpr c10::complex<fT> operator-(const c10::complex<fT>& a, const iT& b) {
+  return a - static_cast<fT>(b);
+}
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+constexpr c10::complex<fT> operator-(const iT& a, const c10::complex<fT>& b) {
+  return static_cast<fT>(a) - b;
+}
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+constexpr c10::complex<fT> operator*(const c10::complex<fT>& a, const iT& b) {
+  return a * static_cast<fT>(b);
+}
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+constexpr c10::complex<fT> operator*(const iT& a, const c10::complex<fT>& b) {
+  return static_cast<fT>(a) * b;
+}
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+constexpr c10::complex<fT> operator/(const c10::complex<fT>& a, const iT& b) {
+  return a / static_cast<fT>(b);
+}
+
+template<typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
+constexpr c10::complex<fT> operator/(const iT& a, const c10::complex<fT>& b) {
+  return static_cast<fT>(a) / b;
+}
+
+#undef COMPLEX_INTEGER_OP_TEMPLATE_CONDITION
+
+
 template<typename T>
 constexpr bool operator==(const c10::complex<T>& lhs, const c10::complex<T>& rhs) {
   return (lhs.real() == rhs.real()) && (lhs.imag() == rhs.imag());
@@ -433,18 +491,22 @@ constexpr T imag(const c10::complex<T>& z) {
   return z.imag();
 }
 
+#if defined(CUDA_VERSION) && (CUDA_VERSION < 10000)
+#define CUDA92_BUG(x) thrust::complex<T>(x.real(), x.imag())
+#else
+#define CUDA92_BUG(x) x
+#endif
+
 template<typename T>
 C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
-  // Algorithm reference:
-  //   https://www.johndcook.com/blog/2010/06/02/whats-so-hard-about-finding-a-hypotenuse/
-  //   https://en.wikipedia.org/wiki/Hypot#Implementation
-  auto r = std::abs(std::real(z));
-  auto i = std::abs(std::imag(z));
-  auto max = r > i ? r : i;
-  auto min = r > i ? i : r;
-  auto rr = min / max;
-  return max * std::sqrt(1 + rr * rr);
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  return thrust::abs(static_cast<thrust::complex<T>>(CUDA92_BUG(z)));
+#else
+  return std::abs(static_cast<std::complex<T>>(z));
+#endif
 }
+
+#undef CUDA92_BUG
 
 #ifdef __HIP_PLATFORM_HCC__
 #define ROCm_Bug(x)
@@ -500,3 +562,5 @@ C10_HOST_DEVICE c10::complex<T> polar(const T& r, const T& theta = T()) {
 
 // math functions are included in a separate file
 #include <c10/util/complex_math.h>
+// utilities for complex types
+#include <c10/util/complex_utils.h>

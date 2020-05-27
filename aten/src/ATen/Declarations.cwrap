@@ -57,38 +57,6 @@
     - THTensor* source
 ]]
 [[
-  name: _th_masked_select
-  cname: maskedSelect
-  cpu_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  backends:
-    - CPU
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - THByteTensor* mask
-]]
-[[
-  name: _th_masked_select_bool
-  cname: maskedSelectBool
-  cpu_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  backends:
-    - CPU
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - THBoolTensor* mask
-]]
-[[
   name: _th_nonzero
   cname: nonzero
   cpu_half: True
@@ -177,36 +145,6 @@
       - long dim
       - THIndexTensor* index
       - real value
-]]
-[[
-  name: _th_scatter_add_
-  return: argument 0
-  cname: scatterAdd
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants: function
-  arguments:
-    - THTensor* self
-    - long dim
-    - THIndexTensor* index
-    - THTensor* src
-]]
-[[
-  name: _th_gather
-  cname: gather
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long dim
-    - THIndexTensor* index
 ]]
 [[
   name: _th_equal
@@ -335,48 +273,6 @@
     - bool sorted
 ]]
 [[
-  name: _th_exp
-  cname: exp
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_atan
-  cname: atan
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_erfc
-  cname: erfc
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_var
   types:
     - floating_point
@@ -460,34 +356,6 @@
     - long bins
     - real min
     - real max
-]]
-[[
-  name: _th_cumsum
-  cname: cumsum
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long dim
-]]
-[[
-  name: _th_cumprod
-  cname: cumprod
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long dim
 ]]
 [[
   name: _th_trace
@@ -655,7 +523,6 @@
   arguments:
     - arg: THTensor* result
       output: True
-      resize: [ [self,0], [self,1], [mat2,2] ]
     - argument 0
     - THTensor* self
     - THTensor* mat2

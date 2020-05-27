@@ -12,7 +12,6 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/types.h>
 
 #include <pybind11/chrono.h>
@@ -221,8 +220,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
               )")
           .def(
               "rpc_sync",
-              [&](PyRRef& self) {
-                return self.createRRefProxy(self, RRefProxyType::RPC_SYNC);
+              [](const PyRRef& self) {
+                return self.createRRefProxy(RRefProxyType::RPC_SYNC);
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -245,8 +244,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
               )")
           .def(
               "rpc_async",
-              [&](PyRRef& self) {
-                return self.createRRefProxy(self, RRefProxyType::RPC_ASYNC);
+              [](const PyRRef& self) {
+                return self.createRRefProxy(RRefProxyType::RPC_ASYNC);
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -269,8 +268,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
               )")
           .def(
               "remote",
-              [&](PyRRef& self) {
-                return self.createRRefProxy(self, RRefProxyType::REMOTE);
+              [](const PyRRef& self) {
+                return self.createRRefProxy(RRefProxyType::REMOTE);
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -292,22 +291,31 @@ PyObject* rpc_init(PyObject* /* unused */) {
                       >>> rref.remote().view(1, 4).to_here()  # returns tensor([[1., 1., 1., 1.]])
               )")
           .def(
-              "__getstate__",
-              [](const PyRRef& /* unused */) {
-                TORCH_CHECK(
-                    false,
-                    "Can not pickle rref in python pickler, rref can only be "
-                    "pickled when using RPC");
-              },
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "__setstate__",
-              [](const PyRRef& /* unused */, const py::tuple& /* unused */) {
-                TORCH_CHECK(
-                    false,
-                    "Can not unpickle rref in python pickler, rref can only be "
-                    "unpickled when using RPC");
-              },
+              py::pickle(
+                  /* __getstate__ */
+                  [](const PyRRef& /* unused */) {
+                    TORCH_CHECK(
+                        false,
+                        "Can not pickle rref in python pickler, rref can only be "
+                        "pickled when using RPC");
+                    // Note that this return has no meaning since we always
+                    // throw, it's only here to satisfy Pybind API's
+                    // requirement.
+                    return py::make_tuple();
+                  },
+                  /* __setstate__ */
+                  [](py::tuple /* unused */) { // NOLINT
+                    TORCH_CHECK(
+                        false,
+                        "Can not unpickle rref in python pickler, rref can only be "
+                        "unpickled when using RPC");
+                    // Note that this return has no meaning since we always
+                    // throw, it's only here to satisfy PyBind's API
+                    // requirement.
+                    return PyRRef(
+                        py::cast<py::none>(Py_None),
+                        py::cast<py::none>(Py_None));
+                  }),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_serialize",
@@ -319,37 +327,41 @@ PyObject* rpc_init(PyObject* /* unused */) {
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_get_future",
-              &PyRRef::getFuture,
+              [](const PyRRef& self) {
+                return std::make_shared<jit::PythonFutureWrapper>(
+                    self.getFuture());
+              },
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Returns the future that corresponds to the creation of this RRef
                   on the remote node. This is for internal use cases such as profiling
                   only.
               )")
+          .def(
+              "_get_profiling_future",
+              [](const PyRRef& self) {
+                return std::make_shared<jit::PythonFutureWrapper>(
+                    self.getProfilingFuture());
+              },
+              py::call_guard<py::gil_scoped_acquire>(),
+              R"(
+                  Returns future that completes when the profiling event corresponding
+                  to the creation of this RRef on the remote node has been recorded.
+              )")
+          .def(
+              "_set_profiling_future",
+              [](PyRRef& self,
+                 const std::shared_ptr<jit::PythonFutureWrapper>&
+                     wrappedFuture) {
+                self.setProfilingFuture(wrappedFuture->fut);
+              },
+              py::call_guard<py::gil_scoped_acquire>(),
+              R"(
+                  Set future that is completed when the profiling event corresponding
+                  to the creation of this RRef on the remote node has been recorded.
+              )")
           // not releasing GIL to avoid context switch
           .def("__str__", &PyRRef::str);
-
-  // future.wait() should not be called after shutdown(), e.g.,
-  // pythonRpcHandler is cleaned up in shutdown(), after
-  // shutdown(), python objects returned from rpc python call can not be
-  // resolved.
-  auto future = shared_ptr_class_<FutureIValue>(module, "Future")
-                    .def(
-                        "wait",
-                        [&](FutureIValue& fut) {
-                          auto& pythonRpcHandler =
-                              PythonRpcHandler::getInstance();
-                          const auto& value = fut.wait();
-                          pybind11::gil_scoped_acquire ag;
-                          auto obj = torch::jit::toPyObject(value);
-                          pythonRpcHandler.handleException(obj);
-                          return obj;
-                        },
-                        py::call_guard<py::gil_scoped_release>(),
-                        R"(
-Wait on future to complete and return the object it completed with.
-If the future completes with an error, an exception is thrown.
-              )");
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,
@@ -448,21 +460,24 @@ If the future completes with an error, an exception is thrown.
   // Base class: torch.distributed.rpc.RpcBackendOptions.
   py::class_<TensorPipeRpcBackendOptions>(
       module, "TensorPipeRpcBackendOptions", rpcBackendOptions)
-      .def(py::init<>())
-      .def_readwrite(
-          "worker_name_to_id", &TensorPipeRpcBackendOptions::workerNameToId);
+      .def(
+          py::init<float, std::string>(),
+          py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
+          py::arg("init_method") = kDefaultInitMethod);
 
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
           py::init<
-              worker_id_t /* selfId */,
-              std::string /* selfName */,
               std::shared_ptr<::c10d::Store> /* addressStore */,
+              std::string /* selfName */,
+              worker_id_t /* selfId */,
+              int /* worldSize */,
               TensorPipeRpcBackendOptions /* TensorPipeBackendOptions */>(),
-          py::arg("worker_id"),
+          py::arg("store"),
           py::arg("name"),
-          py::arg("address_store"),
-          py::arg("tensorpipe_backend_options"))
+          py::arg("rank"),
+          py::arg("world_size"),
+          py::arg("rpc_backend_options"))
       .def(
           "join",
           &TensorPipeAgent::join,
@@ -546,8 +561,8 @@ If the future completes with an error, an exception is thrown.
          const float rpcTimeoutSeconds,
          const py::args& args,
          const py::kwargs& kwargs) {
-        DCHECK(PyGILState_Check());
-        return pyRpcBuiltin(dst, opName, args, kwargs, rpcTimeoutSeconds);
+        return std::make_shared<jit::PythonFutureWrapper>(
+            pyRpcBuiltin(dst, opName, args, kwargs, rpcTimeoutSeconds));
       },
       py::call_guard<py::gil_scoped_acquire>());
 
@@ -557,9 +572,21 @@ If the future completes with an error, an exception is thrown.
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
          const float rpcTimeoutSeconds) {
-        DCHECK(!PyGILState_Check());
-        return pyRpcPythonUdf(
-            dst, pickledPythonUDF, tensors, rpcTimeoutSeconds);
+        return std::make_shared<jit::PythonFutureWrapper>(
+            pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rpcTimeoutSeconds),
+            /* unwrap_func */ [](const py::object& value) {
+              py::gil_scoped_release release;
+              auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+              // This will unwrap RemoteException and raise the contained
+              // server-side Python exception on client side. A caveat here is
+              // that the exception must be raise in the client thread calling
+              // the pybind "wait" API, so that it can be correctly shown to
+              // user. A wrong way is to raise it in RPC server thread, where
+              // the exception would be swallowed in the ThreadPool task, and
+              // also no pybind handling code can help shown the Python
+              // exception.
+              pythonRpcHandler.handleException(value);
+            });
       },
       py::call_guard<py::gil_scoped_release>());
 
@@ -570,86 +597,32 @@ If the future completes with an error, an exception is thrown.
          const py::tuple& argsTuple,
          const py::dict& kwargsDict,
          const float rpcTimeoutSeconds) {
-        // No need to catch exception here, if function can not be found,
-        // exception will be thrown in get_function() call; if args do not match
-        // with function schema, exception will be thrown in
-        // createStackForSchema() call.
-        DCHECK(!PyGILState_Check());
-        const c10::QualifiedName qualifiedName(qualifiedNameStr);
-        auto functionSchema = PythonRpcHandler::getInstance()
-                                  .jitCompilationUnit()
-                                  ->get_function(qualifiedName)
-                                  .getSchema();
-        Stack stack;
-        {
-          // Acquire GIL for py::args and py::kwargs processing.
-          py::gil_scoped_acquire acquire;
-          stack = torch::jit::createStackForSchema(
-              functionSchema,
-              argsTuple.cast<py::args>(),
-              kwargsDict.cast<py::kwargs>(),
-              c10::nullopt);
-        }
-        DCHECK(!PyGILState_Check());
-        c10::intrusive_ptr<c10::ivalue::Future> fut = rpcTorchscript(
+        return std::make_shared<jit::PythonFutureWrapper>(pyRpcTorchscript(
             dstWorkerName,
-            qualifiedName,
-            functionSchema,
-            stack,
-            rpcTimeoutSeconds);
-        return torch::jit::PythonFutureWrapper(fut);
+            qualifiedNameStr,
+            argsTuple,
+            kwargsDict,
+            rpcTimeoutSeconds));
       },
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_remote_builtin",
-      [](const WorkerInfo& dst,
-         const std::string& opName,
-         const py::args& args,
-         const py::kwargs& kwargs) {
-        DCHECK(PyGILState_Check());
-        return pyRemoteBuiltin(dst, opName, args, kwargs);
-      },
+      &pyRemoteBuiltin,
       py::call_guard<py::gil_scoped_acquire>());
 
   module.def(
-      "_invoke_remote_torchscript",
-      [](const std::string& dstWorkerName,
-         const std::string& qualifiedNameStr,
-         const py::args& args,
-         const py::kwargs& kwargs) {
-        DCHECK(!PyGILState_Check());
-        auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
-        auto functionSchema = PythonRpcHandler::getInstance()
-                                  .jitCompilationUnit()
-                                  ->get_function(qualifiedName)
-                                  .getSchema();
-        Stack stack;
-        // Acquire GIL for py::args and py::kwargs processing.
-        {
-          pybind11::gil_scoped_acquire ag;
-          stack = torch::jit::createStackForSchema(
-              functionSchema, args, kwargs, c10::nullopt);
-        }
-        DCHECK(!PyGILState_Check());
-        auto rrefPtr = remoteTorchscript(
-            dstWorkerName, qualifiedName, functionSchema, stack);
-        return PyRRef(rrefPtr);
-      },
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
       "_invoke_remote_python_udf",
-      [](const WorkerInfo& dst,
-         std::string& pickledPythonUDF,
-         std::vector<torch::Tensor>& tensors) {
-        DCHECK(!PyGILState_Check());
-        return pyRemotePythonUdf(dst, pickledPythonUDF, tensors);
-      },
+      &pyRemotePythonUdf,
       py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
       py::arg("tensors"));
+
+  module.def(
+      "_invoke_remote_torchscript",
+      &pyRemoteTorchscript,
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "get_rpc_timeout",

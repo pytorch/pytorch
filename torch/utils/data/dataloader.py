@@ -74,11 +74,13 @@ class DataLoader(object):
             (default: ``1``).
         shuffle (bool, optional): set to ``True`` to have the data reshuffled
             at every epoch (default: ``False``).
-        sampler (Sampler, optional): defines the strategy to draw samples from
-            the dataset. If specified, :attr:`shuffle` must be ``False``.
-        batch_sampler (Sampler, optional): like :attr:`sampler`, but returns a batch of
-            indices at a time. Mutually exclusive with :attr:`batch_size`,
-            :attr:`shuffle`, :attr:`sampler`, and :attr:`drop_last`.
+        sampler (Sampler or Iterable, optional): defines the strategy to draw
+            samples from the dataset. Can be any ``Iterable`` with ``__len__``
+            implemented. If specified, :attr:`shuffle` must not be specified.
+        batch_sampler (Sampler or Iterable, optional): like :attr:`sampler`, but
+            returns a batch of indices at a time. Mutually exclusive with
+            :attr:`batch_size`, :attr:`shuffle`, :attr:`sampler`,
+            and :attr:`drop_last`.
         num_workers (int, optional): how many subprocesses to use for data
             loading. ``0`` means that the data will be loaded in the main process.
             (default: ``0``)
@@ -311,6 +313,12 @@ class DataLoader(object):
             # `DataLoader`, save the returned value in `self._len_called`, and warn
             # if the iterator ends up yielding more than this number of samples.
             length = self._IterableDataset_len_called = len(self.dataset)
+            if self.batch_size is not None:
+                from math import ceil
+                if self.drop_last:
+                    length = length // self.batch_size
+                else:
+                    length = ceil(length / self.batch_size)
             return length
         else:
             return len(self._index_sampler)
