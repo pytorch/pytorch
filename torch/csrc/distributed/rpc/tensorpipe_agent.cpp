@@ -219,7 +219,13 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     std::shared_ptr<FutureMessage>& futureResponseMessage,
     uint64_t messageId) {
   if (!rpcAgentRunning_.load()) {
-    LOG(WARNING) << "RPC agent is being closed. Skip sending rpc response";
+    auto err = c10::str(
+        "Node ",
+        RpcAgent::getWorkerInfo().name_,
+        " tried to respond to message with id ",
+        messageId,
+        " but RPC is no longer running on this node.");
+    LOG(WARNING) << err;
     return;
   }
 
