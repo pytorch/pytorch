@@ -12823,12 +12823,18 @@ class TestTorchDeviceType(TestCase):
                 non_zero_rand((2, 2), dtype=dtype, device=device))
 
         for dtype in torch.testing.get_all_math_dtypes(device):
-            # CPU complex addcdiv is wildly inaccurate
-            if dtype.is_complex and self.device_type == 'cpu':
-                with self.assertRaises(AssertionError):
-                    _helper()
-            # CUDA complex addcdiv is not implemented
-            elif dtype.is_complex and self.device_type == 'cuda':
+            if dtype.is_complex:
+                # CPU complex addcdiv is wildly inaccurate
+                if self.device_type == 'cpu':
+                    with self.assertRaises(AssertionError):
+                        _helper()
+
+                # CUDA complex addcdiv is not implemented
+                if self.device_type == 'cuda':
+                    with self.assertRaises(RuntimeError):
+                        _helper()
+            elif not dtype.is_floating_point:
+                # Integer division with addcdiv is prohibited
                 with self.assertRaises(RuntimeError):
                     _helper()
             else:
