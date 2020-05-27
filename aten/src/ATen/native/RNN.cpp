@@ -1336,8 +1336,8 @@ bool _use_cudnn_rnn_flatten_weight() {
         double dropout_p,                                                   \
         bool train,                                                         \
         bool bidirectional,                                                 \
-        bool type_2,                                                        \
-        bool batch_first) {                                                 \
+        bool batch_first,                                                   \
+        bool type_2) {                                                      \
     Tensor _fwd_hx;                                                         \
     Tensor _bwd_hx;                                                         \
     std::tie(_fwd_hx, _bwd_hx) = split_rnn_hidden(hx);                      \
@@ -1359,8 +1359,8 @@ bool _use_cudnn_rnn_flatten_weight() {
         dropout_p,                                                          \
         train,                                                              \
         bidirectional,                                                      \
-        type_2,                                                             \
-        false);                                                             \
+        false,                                                              \
+        type_2);                                                            \
     Tensor bwd_output, b_hy;                                                \
     NAME##_cudnn_stub(                                                      \
         _input.device().type(),                                             \
@@ -1374,8 +1374,8 @@ bool _use_cudnn_rnn_flatten_weight() {
         dropout_p,                                                          \
         train,                                                              \
         bidirectional,                                                      \
-        type_2,                                                             \
-        false);                                                             \
+        false,                                                              \
+        type_2);                                                            \
     auto bwd_rev_output = reverse(bwd_output);                              \
     std::vector<Tensor> outputs;                                            \
     outputs.push_back(fwd_output);                                          \
@@ -1395,8 +1395,8 @@ bool _use_cudnn_rnn_flatten_weight() {
         double dropout_p,                                                   \
         bool train,                                                         \
         bool bidirectional,                                                 \
-        bool type_2,                                                        \
-        bool batch_first) {                                                 \
+        bool batch_first,                                                   \
+        bool type_2) {                                                      \
     Tensor _fwd_hx;                                                         \
     Tensor _bwd_hx;                                                         \
     std::tie(_fwd_hx, _bwd_hx) = split_rnn_hidden(hx);                      \
@@ -1418,8 +1418,8 @@ bool _use_cudnn_rnn_flatten_weight() {
       dropout_p,                                                            \
       train,                                                                \
       bidirectional,                                                        \
-      type_2,                                                               \
-      false);                                                               \
+      false,                                                                \
+      type_2);                                                              \
     Tensor bwd_output, b_hy;                                                \
     NAME##_miopen_stub(                                                     \
       _input.device().type(),                                               \
@@ -1433,8 +1433,8 @@ bool _use_cudnn_rnn_flatten_weight() {
       dropout_p,                                                            \
       train,                                                                \
       bidirectional,                                                        \
-      type_2,                                                               \
-      false);                                                               \
+      false,                                                                \
+      type_2);                                                              \
     auto bwd_rev_output = reverse(bwd_output);                              \
     std::vector<Tensor> outputs;                                            \
     outputs.push_back(fwd_output);                                          \
@@ -1568,8 +1568,8 @@ bool _use_cudnn_rnn_flatten_weight() {
       double dropout_p,                                                     \
       bool train,                                                           \
       bool bidirectional,                                                   \
-      bool type_2,                                                          \
-      bool batch_first) {                                                   \
+      bool batch_first,                                                     \
+      bool type_2) {                                                        \
     if (at::cudnn_is_acceptable(_input)) {                                  \
       if(bidirectional && !type_2) {                                        \
         return NAME##_cudnn_type1(                                          \
@@ -1581,8 +1581,8 @@ bool _use_cudnn_rnn_flatten_weight() {
           dropout_p,                                                        \
           train,                                                            \
           bidirectional,                                                    \
-          type_2,                                                           \
-          batch_first);                                                     \
+          batch_first,                                                      \
+          type_2);                                                          \
       } else {                                                              \
         Tensor output, hy;                                                  \
         NAME##_cudnn_stub(                                                  \
@@ -1597,8 +1597,8 @@ bool _use_cudnn_rnn_flatten_weight() {
             dropout_p,                                                      \
             train,                                                          \
             bidirectional,                                                  \
-            type_2,                                                         \
-            batch_first);                                                   \
+            batch_first,                                                    \
+            type_2);                                                        \
         return std::make_tuple(std::move(output), std::move(hy));           \
       }                                                                     \
     }                                                                       \
@@ -1613,8 +1613,8 @@ bool _use_cudnn_rnn_flatten_weight() {
           dropout_p,                                                        \
           train,                                                            \
           bidirectional,                                                    \
-          type_2,                                                           \
-          batch_first);                                                     \
+          batch_first,                                                      \
+          type_2);                                                          \
       } else {                                                              \
         Tensor output, hy;                                                  \
         NAME##_miopen_stub(                                                 \
@@ -1629,8 +1629,8 @@ bool _use_cudnn_rnn_flatten_weight() {
             dropout_p,                                                      \
             train,                                                          \
             bidirectional,                                                  \
-            type_2,                                                         \
-            batch_first);                                                   \
+            batch_first,                                                    \
+            type_2);                                                        \
         return std::make_tuple(std::move(output), std::move(hy));           \
       }                                                                     \
     }                                                                       \
@@ -1823,8 +1823,8 @@ std::tuple<Tensor, Tensor> quantized_gru_input_legacy(
     double dropout_p,
     bool train,
     bool bidirectional,
-    bool type_2,
-    bool batch_first) {
+    bool batch_first,
+    bool type_2) {
   TORCH_WARN_ONCE(
       "torch.quantized_gru with List[Tensor] for parameters is "
       "deprecated and may be removed! Please re-export your model "
@@ -1839,8 +1839,8 @@ std::tuple<Tensor, Tensor> quantized_gru_input_legacy(
       dropout_p,
       train,
       bidirectional,
-      type_2,
-      batch_first);
+      batch_first,
+      type_2);
 }
 
 std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
@@ -1852,8 +1852,8 @@ std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
     int64_t num_layers,
     double dropout_p,
     bool train,
-    bool type_2,
-    bool bidirectional) {
+    bool bidirectional,
+    bool type_2) {
   TORCH_WARN_ONCE(
       "torch.quantized_gru with List[Tensor] for parameters is "
       "deprecated and may be removed! Please re-export your model "
@@ -1890,7 +1890,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_cudnn_type1(
       const Tensor& _input, TensorList hx,
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional,
-      bool type_2, bool batch_first) {
+      bool batch_first, bool type_2) {
 
   std::vector<Tensor> _fwd_hx;
   std::vector<Tensor> _bwd_hx;
@@ -1909,13 +1909,13 @@ std::tuple<Tensor, Tensor, Tensor> lstm_cudnn_type1(
   Tensor fwd_output, f_hy, f_cy;
   lstm_cudnn_stub(_input.device().type(), fwd_output, f_hy, f_cy, input,
                  _fwd_hx, fwd_params, has_biases, num_layers, dropout_p,
-                 train, bidirectional, type_2, false);
+                 train, bidirectional, false, type_2);
 
   // Backward LSTM
   Tensor bwd_output, b_hy, b_cy;
   lstm_cudnn_stub(_input.device().type(), bwd_output, b_hy, b_cy, rev_input,
                   _bwd_hx, bwd_params, has_biases, num_layers, dropout_p,
-                  train, bidirectional, type_2, false);
+                  train, bidirectional, false, type_2);
 
   // Cat forward and backward outputs
   auto bwd_rev_output = reverse(bwd_output);
@@ -1936,7 +1936,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_miopen_type1(
       const Tensor& _input, TensorList hx,
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional,
-      bool type_2, bool batch_first) {
+      bool batch_first, bool type_2) {
 
   std::vector<Tensor> _fwd_hx;
   std::vector<Tensor> _bwd_hx;
@@ -1955,13 +1955,13 @@ std::tuple<Tensor, Tensor, Tensor> lstm_miopen_type1(
   Tensor fwd_output, f_hy, f_cy;
   lstm_miopen_stub(_input.device().type(), fwd_output, f_hy, f_cy, input,
                    _fwd_hx, fwd_params, has_biases, num_layers, dropout_p,
-                   train, bidirectional, type_2, false);
+                   train, bidirectional, false, type_2);
 
   // Backward LSTM
   Tensor bwd_output, b_hy, b_cy;
   lstm_miopen_stub(_input.device().type(), bwd_output, b_hy, b_cy, rev_input,
                    _bwd_hx, bwd_params, has_biases, num_layers, dropout_p,
-                   train, bidirectional, type_2, false);
+                   train, bidirectional, false, type_2);
 
   // Cat forward and backward outputs
   auto bwd_rev_output = reverse(bwd_output);
@@ -2065,7 +2065,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& _input, TensorList hx,
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional,
-      bool type_2, bool batch_first) {
+      bool batch_first, bool type_2) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     if(bidirectional && !type_2) {
@@ -2073,12 +2073,12 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         // split and reverse the inputs and run two "independent" RNNs.
         // See pytorch/pytorch#4930
         return lstm_cudnn_type1(_input, hx, _params, has_biases, num_layers,
-                                dropout_p, train, bidirectional, type_2, batch_first);
+                                dropout_p, train, bidirectional, batch_first, type_2);
     } else {
       // Apply Type-2 RNN
       Tensor output, hy, cy;
       lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-                      num_layers, dropout_p, train, bidirectional, type_2, batch_first);
+                      num_layers, dropout_p, train, bidirectional, batch_first, type_2);
       return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
     }
   }
@@ -2089,12 +2089,12 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         // split and reverse the inputs and run two "independent" RNNs.
         // See pytorch/pytorch#4930
         return lstm_miopen_type1(_input, hx, _params, has_biases, num_layers,
-                                 dropout_p, train, bidirectional, type_2, batch_first);
+                                 dropout_p, train, bidirectional, batch_first, type_2);
     } else {
       // Apply Type-2 RNN
       Tensor output, hy, cy;
       lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-                num_layers, dropout_p, train, bidirectional, type_2, batch_first);
+                num_layers, dropout_p, train, bidirectional, batch_first, type_2);
       return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
     }
   }
@@ -2279,8 +2279,8 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
     double dropout_p,
     bool train,
     bool bidirectional,
-    bool type_2,
     bool batch_first,
+    bool type_2,
     c10::optional<ScalarType> dtype,
     bool use_dynamic) {
   auto hx = hx_.vec();
@@ -2332,8 +2332,8 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
     double dropout_p,
     bool train,
     bool bidirectional,
-    bool type_2,
     bool batch_first,
+    bool type_2,
     c10::optional<ScalarType> dtype,
     bool use_dynamic) {
   TORCH_WARN_ONCE(
@@ -2360,8 +2360,8 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
       dropout_p,
       train,
       bidirectional,
-      type_2,
       batch_first,
+      type_2,
       std::move(dtype),
       use_dynamic);
 }
@@ -2532,20 +2532,20 @@ static auto cell_params_base_registry =
 
 static auto registry =
     torch::RegisterOperators()
-        .op("aten::quantized_lstm.input(Tensor input, Tensor[] hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
+        .op("aten::quantized_lstm.input(Tensor input, Tensor[] hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, bool type_2=True, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<decltype(quantized_lstm_input), quantized_lstm_input>(
                     DispatchKey::CPUTensorId))
-        .op("aten::quantized_lstm.data(Tensor data, Tensor batch_sizes, Tensor[] hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
+        .op("aten::quantized_lstm.data(Tensor data, Tensor batch_sizes, Tensor[] hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2=True, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<decltype(quantized_lstm_data), quantized_lstm_data>(
                     DispatchKey::CPUTensorId))
-        .op("aten::quantized_lstm.input_legacy(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
+        .op("aten::quantized_lstm.input_legacy(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, bool type_2=True, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<
                     decltype(quantized_lstm_input_legacy),
                     quantized_lstm_input_legacy>(DispatchKey::CPUTensorId))
-        .op("aten::quantized_lstm.data_legacy(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
+        .op("aten::quantized_lstm.data_legacy(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2=True, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<
                     decltype(quantized_lstm_data_legacy),
@@ -2566,20 +2566,20 @@ static auto registry =
                 .kernel<
                     decltype(make_quantized_cell_params),
                     make_quantized_cell_params>(DispatchKey::CPUTensorId))
-        .op("aten::quantized_gru.input(Tensor input, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2, bool batch_first) -> (Tensor, Tensor)",
+        .op("aten::quantized_gru.input(Tensor input, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, bool type_2=True) -> (Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<decltype(quantized_gru_input), quantized_gru_input>(
                     DispatchKey::CPUTensorId))
-        .op("aten::quantized_gru.data(Tensor data, Tensor batch_sizes, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2) -> (Tensor, Tensor)",
+        .op("aten::quantized_gru.data(Tensor data, Tensor batch_sizes, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2=True) -> (Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<decltype(quantized_gru_data), quantized_gru_data>(
                     DispatchKey::CPUTensorId))
-        .op("aten::quantized_gru.input_legacy(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2, bool batch_first) -> (Tensor, Tensor)",
+        .op("aten::quantized_gru.input_legacy(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, bool type_2=True) -> (Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<
                     decltype(quantized_gru_input_legacy),
                     quantized_gru_input_legacy>(DispatchKey::CPUTensorId))
-        .op("aten::quantized_gru.data_legacy(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2) -> (Tensor, Tensor)",
+        .op("aten::quantized_gru.data_legacy(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2=True) -> (Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<
                     decltype(quantized_gru_data_legacy),

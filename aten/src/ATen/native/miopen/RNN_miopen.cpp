@@ -826,7 +826,7 @@ template<typename hidden_type>
 std::pair<Tensor, hidden_type> _miopen_impl(
     const Tensor& input, const hidden_type& hidden,
     TensorList params, bool has_biases, miopenRNNMode_t mode,
-    int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool type_2, bool batch_first) {
+    int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first, bool type_2) {
     Tensor hx, cx;
     std::tie(hx, cx) = unpack_hidden(hidden);
     int64_t hidden_size = hx.size(2);
@@ -846,9 +846,9 @@ std::pair<Tensor, hidden_type> _miopen_impl(
 void NAME##_miopen(Tensor& output, Tensor& hy,                                 \
       const Tensor& input, const Tensor& hx,                                   \
       TensorList params, bool has_biases,                                      \
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool type_2, bool batch_first) { \
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first, bool type_2) { \
   std::tie(output, hy) = _miopen_impl(input, hx, params, has_biases,           \
-      MODE, num_layers, dropout_p, train, bidirectional, type_2, batch_first);         \
+      MODE, num_layers, dropout_p, train, bidirectional, batch_first, type_2); \
 }                                                                              \
                                                                                \
 void NAME##_packed_miopen(Tensor& output, Tensor& hy,                          \
@@ -869,9 +869,9 @@ ONE_HIDDEN_RNN(rnn_relu, miopenRNNRELU)
 void lstm_miopen(Tensor& output, Tensor& hy, Tensor& cy,
       const Tensor& input, TensorList hx,
       TensorList params, bool has_biases,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool type_2, bool batch_first) {
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first, bool type_2) {
     auto result = _miopen_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
-        miopenLSTM, num_layers, dropout_p, train, bidirectional, type_2, batch_first);
+        miopenLSTM, num_layers, dropout_p, train, bidirectional, batch_first, type_2);
     output = result.first;
     hy = std::get<0>(result.second);
     cy = std::get<1>(result.second);

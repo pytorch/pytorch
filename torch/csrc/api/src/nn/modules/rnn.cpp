@@ -533,8 +533,8 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
           options_base.dropout(),
           this->is_training(),
           options_base.bidirectional(),
-          options_base.concat(),
-          options_base.batch_first());
+          options_base.batch_first(),
+          options_base.concat());
     } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
       result = torch::rnn_relu(
           input,
@@ -545,8 +545,8 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
           options_base.dropout(),
           this->is_training(),
           options_base.bidirectional(),
-          options_base.concat(),
-          options_base.batch_first());
+          options_base.batch_first(),
+          options_base.concat());
     } else {
       TORCH_CHECK(
           false,
@@ -704,8 +704,8 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
         options.dropout(),
         this->is_training(),
         options.bidirectional(),
-        options.concat(),
-        options.batch_first());
+        options.batch_first(),
+        options.concat());
   } else {
     result = torch::lstm(
         input,
@@ -810,8 +810,8 @@ std::tuple<Tensor, Tensor> GRUImpl::forward_helper(
         options.dropout(),
         this->is_training(),
         options.bidirectional(),
-        options.concat(),
-        options.batch_first());
+        options.batch_first(),
+        options.concat());
   } else {
     result = torch::gru(
         input,

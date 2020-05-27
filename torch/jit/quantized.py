@@ -379,8 +379,8 @@ class QuantizedLSTM(QuantizedRNNBase):
         assert batch_sizes is None
         result = torch.quantized_lstm(input, hx, self.all_weights, self.bias, self.num_layers,
                                       float(self.dropout), self.training, self.bidirectional,
-                                      self.concat,
-                                      self.batch_first, dtype=self.dtype, use_dynamic=False)
+                                      self.batch_first, self.concat, dtype=self.dtype,
+                                      use_dynamic=False)
         output = result[0]
         hidden = result[1:]
 
@@ -456,7 +456,7 @@ class QuantizedGRU(QuantizedRNNBase):
         if batch_sizes is None:
             result = torch.quantized_gru(input, hx, self.all_weights, self.bias, self.num_layers,
                                          float(self.dropout), self.training, self.bidirectional,
-                                         self.concat, self.batch_first)
+                                         self.batch_first, self.concat)
         else:
             result = torch.quantized_gru(input, batch_sizes, hx, self.all_weights, self.bias, self.num_layers,
                                          float(self.dropout), self.training, self.bidirectional,

@@ -301,7 +301,7 @@ class LSTM(RNNBase):
         if batch_sizes is None:
             result = torch.quantized_lstm(input, hx, _all_params, self.bias, self.num_layers,
                                           float(self.dropout), self.training, self.bidirectional,
-                                          self.concat, self.batch_first,
+                                          self.batch_first, self.concat,
                                           dtype=self.dtype, use_dynamic=True)
         else:
             result = torch.quantized_lstm(input, batch_sizes, hx, _all_params, self.bias,

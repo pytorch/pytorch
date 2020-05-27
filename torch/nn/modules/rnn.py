@@ -277,7 +277,7 @@ class RNNBase(Module):
         if batch_sizes is None:
             result = _impl(input, hx, self._flat_weights, self.bias, self.num_layers,
                            self.dropout, self.training, self.bidirectional,
-                           self.concat, self.batch_first)
+                           self.batch_first, self.concat)
         else:
             result = _impl(input, batch_sizes, hx, self._flat_weights, self.bias,
                            self.num_layers, self.dropout, self.training, self.bidirectional,
@@ -638,7 +638,7 @@ class LSTM(RNNBase):
         if batch_sizes is None:
             result = _VF.lstm(input, hx, self._flat_weights, self.bias, self.num_layers,
                               self.dropout, self.training, self.bidirectional,
-                              self.concat, self.batch_first)
+                              self.batch_first, self.concat)
         else:
             result = _VF.lstm(input, batch_sizes, hx, self._flat_weights, self.bias,
                               self.num_layers, self.dropout, self.training, self.bidirectional,
@@ -805,7 +805,7 @@ class GRU(RNNBase):
         if batch_sizes is None:
             result = _VF.gru(input, hx, self._flat_weights, self.bias, self.num_layers,
                              self.dropout, self.training, self.bidirectional,
-                             self.concat, self.batch_first)
+                             self.batch_first, self.concat)
         else:
             result = _VF.gru(input, batch_sizes, hx, self._flat_weights, self.bias,
                              self.num_layers, self.dropout, self.training, self.bidirectional,
