@@ -34,8 +34,9 @@
   function redirectAnchor() {
     if (location.hash) { // e.g., #torch.flip
       var anchorName = location.hash.substr(1); // remove the leading "#"
-      if (document.getElementById(anchorName) === null) { // anchor not found
-        window.location.replace("generated/" + anchorName + ".html#" + anchorName);
+      var link = document.querySelector("a.reference[title=\"" + anchorName + "\"]") // look for the link
+      if (link !== null) {
+        window.location.replace(link.href);
       }
     }
   }
