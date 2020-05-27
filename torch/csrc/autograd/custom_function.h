@@ -27,20 +27,25 @@ using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
 ///
 /// `forward` can take as many arguments as you want and should return either a
 /// variable list or a Variable. Use of any direct Variable arguments will be
-/// registered in the graph but no vectors/sets or any other data structures will
-/// be traversed. It should take a pointer to `torch::autograd::AutogradContext`
-/// as the first argument. Variables can be saved in the `ctx` using `ctx->save_for_backward`
+/// registered in the graph but no vectors/sets or any other data structures
+/// will be traversed. You can use c10::optional<Tensor> as one of the arguments
+/// and it will be registered as a variable in the graph if the argument has a
+/// value. It should take a pointer to `torch::autograd::AutogradContext` as the
+/// first argument. Variables can be saved in the `ctx` using
+/// `ctx->save_for_backward`
 /// (see `torch::autograd::AutogradContext::save_for_backward`) and other data
-/// can be saved in the `ctx->saved_data` map (see `torch::autograd::AutogradContext::saved_data`)
+/// can be saved in the `ctx->saved_data` map
+/// (see `torch::autograd::AutogradContext::saved_data`)
 /// in the form of `<std::string, at::IValue>` pairs.
 ///
 /// `backward` should take a pointer to `torch::autograd::AutogradContext`
 /// and a variable list containing as many Variables as there were outputs from
 /// `forward` as arguments. It should return as many Variables as there were
-/// inputs with each of them containing the gradient w.r.t. its corresponding input.
-/// Variables saved in `forward` can be accessed with `ctx->get_saved_variables`
-/// (see `torch::autograd::AutogradContext::get_saved_variables`) and other saved data
-/// can be accessed from `ctx->saved_data`.
+/// inputs with each of them containing the gradient w.r.t. its corresponding
+/// input. Variables saved in `forward` can be accessed with
+/// `ctx->get_saved_variables` (see
+/// `torch::autograd::AutogradContext::get_saved_variables`) and other saved
+/// data can be accessed from `ctx->saved_data`.
 ///
 /// For example:
 /// ```
@@ -55,7 +60,8 @@ using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
 ///      return {var};
 ///   }
 ///
-///   static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
+///   static variable_list backward(AutogradContext *ctx, variable_list
+///   grad_output) {
 ///      // Use data saved in forward
 ///      auto n = ctx->saved_data["n"].toInt();
 ///      return {grad_output[0]*n};
@@ -160,6 +166,14 @@ struct ExtractVariables : IterArgs<ExtractVariables> {
   std::vector<bool>& is_var_;
   variable_list& list_;
   ExtractVariables(std::vector<bool>& is_var, variable_list& list) : is_var_(is_var), list_(list) {}
+  void operator()(const c10::optional<at::Tensor>& x) {
+    if (x) {
+      is_var_.push_back(true);
+      list_.emplace_back(x.value());
+    } else {
+      is_var_.push_back(false);
+    }
+  }
   void operator()(const at::Tensor& x) {
     is_var_.push_back(true);
     list_.emplace_back(x);

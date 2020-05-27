@@ -6,18 +6,22 @@ namespace c10 {
 
 struct C10_API Storage {
  public:
+  struct use_byte_size_t {};
+
   Storage() {}
   Storage(c10::intrusive_ptr<StorageImpl> ptr) : storage_impl_(std::move(ptr)) {}
 
   // Allocates memory buffer using given allocator and creates a storage with it
   Storage(
+      use_byte_size_t use_byte_size,
       caffe2::TypeMeta data_type,
-      size_t size,
+      size_t size_bytes,
       Allocator* allocator,
       bool resizable)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
+            StorageImpl::use_byte_size_t(),
             data_type,
-            size,
+            size_bytes,
             allocator,
             resizable)) {}
 
@@ -25,14 +29,16 @@ struct C10_API Storage {
   // potential future reallocations, however it can be nullptr if the storage
   // is non-resizable
   Storage(
+      use_byte_size_t use_byte_size,
       caffe2::TypeMeta data_type,
-      int64_t numel,
+      size_t size_bytes,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
       bool resizable)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
+            StorageImpl::use_byte_size_t(),
             data_type,
-            numel,
+            size_bytes,
             std::move(data_ptr),
             allocator,
             resizable)) {}
@@ -43,11 +49,12 @@ struct C10_API Storage {
   static Storage create_legacy(at::Device device, caffe2::TypeMeta data_type) {
     auto allocator = GetAllocator(device.type());
     return Storage(c10::make_intrusive<StorageImpl>(
-            data_type,
-            0,
-            allocator->allocate(0), // materialize a non-default Device.
-            allocator,
-            true));
+        StorageImpl::use_byte_size_t(),
+        data_type,
+        0,
+        allocator->allocate(0), // materialize a non-default Device.
+        allocator,
+        true));
   }
 
   template <typename T>
@@ -61,33 +68,17 @@ struct C10_API Storage {
   template <typename T>
   T* unsafe_data() const { return storage_impl_->unsafe_data<T>(); }
 
-  size_t elementSize() const {
-    return storage_impl_->itemsize();
-  }
-
-  inline size_t itemsize() const {
-    return storage_impl_->itemsize();
-  }
-
-  ptrdiff_t size() const {
-    return storage_impl_->numel();
-  }
-
-  int64_t numel() const {
-    return storage_impl_->numel();
-  }
-
   // TODO: remove later
-  void set_numel(int64_t numel) const {
-    storage_impl_.get()->set_numel(numel);
+  void set_nbytes(size_t size_bytes) const {
+    storage_impl_.get()->set_nbytes(size_bytes);
   }
 
   bool resizable() const {
     return storage_impl_->resizable();
   }
 
-  size_t capacity() const {
-    return storage_impl_->capacity();
+  size_t nbytes() const {
+    return storage_impl_->nbytes();
   }
   // get() use here is to get const-correctness
 

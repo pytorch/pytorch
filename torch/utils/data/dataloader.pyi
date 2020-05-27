@@ -1,6 +1,8 @@
 from typing import Any, Callable, TypeVar, Generic, overload, Sequence, List, Optional
 from . import Dataset, Sampler
 
+from torch.utils.data._utils.worker import get_worker_info as get_worker_info
+
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
 _worker_init_fn_t = Callable[[int], None]

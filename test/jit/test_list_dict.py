@@ -122,11 +122,6 @@ class TestList(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "out of range"):
             fn2([])
 
-        with self.assertRaisesRegex(RuntimeError, "only supported for list and dict"):
-            @torch.jit.script
-            def fn(x):
-                del x
-
         with self.assertRaisesRegex(RuntimeError, "deletion at a single index"):
             @torch.jit.script
             def fn(x):
@@ -311,7 +306,7 @@ class TestList(JitTestCase):
             test_invalid_list_equality,
             (),
             RuntimeError,
-            "bool value of Tensor")
+            "Boolean value of Tensor")
 
     def test_list_sort(self):
         template = dedent('''
@@ -343,7 +338,7 @@ class TestList(JitTestCase):
             return x
 
         self.checkScriptRaisesRegex(test_fail, (([torch.zeros([2]), torch.zeros([2])],)), Exception,
-                                    "bool value of Tensor with more than one value")
+                                    "Boolean value of Tensor with more than one value")
 
         @torch.jit.script
         def test_mutation():
@@ -1096,6 +1091,19 @@ class TestList(JitTestCase):
             [1, 2, 3, 4], dtype=torch.long).cuda(),))
         self.checkScript(to_list_float_1D, (torch.randn(
             5, dtype=torch.double).cuda(),))
+
+    def test_no_element_type_annotation(self):
+        def fn(x):
+            # type: (torch.Tensor) -> List
+            a: List = x.tolist()
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+            torch.jit.script(fn)
 
 
 class TestDict(JitTestCase):

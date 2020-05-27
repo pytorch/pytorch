@@ -51,18 +51,21 @@
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::IndexError& e) {                               \
-      auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
-      PyErr_SetString(PyExc_IndexError, msg.c_str());                \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(PyExc_IndexError, torch::processErrorMsg(msg).c_str()); \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::ValueError& e) {                               \
-      auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
-      PyErr_SetString(PyExc_ValueError, msg.c_str());                \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(PyExc_ValueError, torch::processErrorMsg(msg).c_str()); \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::Error& e) {                                    \
-      auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
-      PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(PyExc_RuntimeError, torch::processErrorMsg(msg).c_str()); \
       retstmnt;                                                      \
     }                                                                \
     catch (torch::PyTorchError & e) {                                \
@@ -223,6 +226,8 @@ namespace torch {
 
 THP_CLASS std::string processErrorMsg(std::string str);
 
+THP_API bool get_cpp_stacktraces_enabled();
+
 // Abstract base class for exceptions which translate to specific Python types
 struct PyTorchError : public std::exception {
   virtual PyObject* python_type() = 0;
@@ -262,6 +267,14 @@ struct ValueError : public PyTorchError {
   ValueError(const char *format, ...) TORCH_FORMAT_FUNC(2, 3);
   PyObject* python_type() override {
     return PyExc_ValueError;
+  }
+};
+
+// Translates to Python NotImplementedError
+struct NotImplementedError : public PyTorchError {
+  NotImplementedError() {}
+  PyObject* python_type() override {
+    return PyExc_NotImplementedError;
   }
 };
 

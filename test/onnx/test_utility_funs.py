@@ -5,7 +5,7 @@ import torch
 import torch.onnx
 from torch.onnx import utils, OperatorExportTypes
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
-from test_pytorch_common import skipIfUnsupportedOpsetVersion
+from test_pytorch_common import skipIfUnsupportedOpsetVersion, skipIfUnsupportedMinOpsetVersion
 
 import onnx
 import onnxruntime  # noqa
@@ -13,6 +13,8 @@ import onnxruntime  # noqa
 import io
 import copy
 import unittest
+
+import numpy as np
 
 
 skip = unittest.skip
@@ -393,7 +395,8 @@ class TestUtilityFuns(TestCase):
         params = list(params_dict.values())
         self.assertEqual(len(params), 1)
         weight = params[0]
-        self.assertEqual(weight, torch.tensor([2, 3, 4, 5, 6]))
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(weight, torch.tensor([2, 3, 4, 5, 6]))
 
     # TODO : enable when constant folding is enabled for opset 12
     @skipIfUnsupportedOpsetVersion([12])
@@ -419,7 +422,8 @@ class TestUtilityFuns(TestCase):
         params = list(params_dict.values())
         self.assertEqual(len(params), 1)
         weight = params[0]
-        self.assertEqual(weight, torch.tensor([0, -1, -2, -3, -4]))
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(weight, torch.tensor([0, -1, -2, -3, -4]))
 
     # TODO : enable when constant folding is enabled for opset 12
     @skipIfUnsupportedOpsetVersion([12])
@@ -522,8 +526,6 @@ class TestUtilityFuns(TestCase):
         # verify that the model state is preserved
         assert model.training == old_state
 
-    # TODO: Enable test when Dropout is implemented in ORT for opset 12.
-    @skipIfUnsupportedOpsetVersion([12])
     def test_dropout_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -547,6 +549,47 @@ class TestUtilityFuns(TestCase):
         ort_outs = ort_sess.run(None, ort_inputs)
         assert x != ort_outs[0]
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_dropout_training_zero(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.dropout = torch.nn.Dropout(0.5)
+
+            def forward(self, x):
+                dropout = self.dropout(x)
+                return dropout
+
+        torch.manual_seed(0)
+        onnxruntime.set_seed(0)
+
+        model = MyModule()
+
+        # ensure there are no zeros in the input
+        x = torch.randn(10, 3, 128, 128)
+        y = x.numpy()
+        y_mask = np.where(y == 0, 1, y)
+        input = torch.from_numpy(y_mask)
+        nb_elements = torch.numel(input)
+
+        model.train()
+
+        f = io.BytesIO()
+        torch.onnx.export(model, (input,), f,
+                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
+        ort_inputs = {ort_sess.get_inputs()[0].name : input.cpu().numpy()}
+        ort_outs = ort_sess.run(None, ort_inputs)
+        y = model(input)
+        output = y.cpu().numpy()
+
+        ort_mask = np.where(ort_outs[0] != 0, 1, 0)
+        pyt_mask = np.where(output != 0, 1, 0)
+
+        ratio_pytorch = np.sum(pyt_mask) / nb_elements
+        ratio_ort = np.sum(ort_mask) / nb_elements
+
+        np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),

@@ -14,8 +14,9 @@ _ASMoutput = namedtuple('ASMoutput', ['output', 'loss'])
 
 class AdaptiveLogSoftmaxWithLoss(Module):
     r"""Efficient softmax approximation as described in
-    `Efficient softmax approximation for GPUs`_ by Edouard Grave, Armand Joulin,
-    Moustapha Cissé, David Grangier, and Hervé Jégou.
+    `Efficient softmax approximation for GPUs by Edouard Grave, Armand Joulin,
+    Moustapha Cissé, David Grangier, and Hervé Jégou
+    <https://arxiv.org/abs/1609.04309>`__.
 
     Adaptive softmax is an approximate strategy for training models with large
     output spaces. It is most effective when the label distribution is highly
@@ -94,12 +95,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         - output1: :math:`(N)`
         - output2: ``Scalar``
 
-
-    .. _Efficient softmax approximation for GPUs:
-        https://arxiv.org/abs/1609.04309
-
-    .. _Zipf's law:
-        https://en.wikipedia.org/wiki/Zipf%27s_law
+    .. _Zipf's law: https://en.wikipedia.org/wiki/Zipf%27s_law
     """
 
     def __init__(self, in_features, n_classes, cutoffs, div_value=4., head_bias=False):

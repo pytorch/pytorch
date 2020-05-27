@@ -39,7 +39,9 @@ Tensor _shape_as_tensor(const Tensor& self) {
 }
 
 Tensor& set_(Tensor& result, Storage source) {
-  return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
+  int64_t new_size =
+      static_cast<int64_t>(source.nbytes() / result.dtype().itemsize());
+  return result.set_(source, 0, new_size, {});
 }
 
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
@@ -64,7 +66,12 @@ Tensor& set_tensor_(Tensor& result, const Tensor& source) {
 // way of getting the allocator to use for a device (c10::GetAllocator is not
 // the same as at::cuda::getCUDADeviceAllocator().
 Tensor& set_cpu_(Tensor& result) {
-  Storage storage(result.dtype(), 0, c10::GetAllocator(kCPU), true);
+  Storage storage(
+      Storage::use_byte_size_t(),
+      result.dtype(),
+      0,
+      c10::GetAllocator(kCPU),
+      true);
   return result.set_(storage, 0, {0}, {});
 }
 
@@ -604,6 +611,15 @@ Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
            "size {", size, "} is not expandable to size {", self.sizes(), "}.");
 
   return sum_to(self, size);
+}
+
+// We currently do not support per-channel quant for unfold, diagonal, expand, permute.
+// TODO: Make this an aten function and replace as_strided_qtensorimpl once that is done.
+Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, QuantizerPtr quantizer) {
+  auto result = detail::make_tensor<QTensorImpl>(
+      Storage(self.storage()), self.key_set(), quantizer);
+  setStrided(result, size, stride, self.storage_offset());
+  return result;
 }
 
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
@@ -1225,9 +1241,66 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
   return std::make_tuple(sizes, strides);
 }
 
+Tensor squeeze_qtensor(const Tensor& self) {
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  std::vector<int64_t> sizes;
+  std::vector<int64_t> strides;
+  std::tie(sizes, strides) = inferSqueezeGeometry(self);
+  if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
+    const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
+    auto axis = per_channel_quantizer->axis();
+    int64_t shift = 0;
+    for (int64_t d = 0; d < self.dim(); ++d) {
+      if (self.sizes()[d] == 1) {
+        TORCH_CHECK(axis != d, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
+        if (d < axis) {
+          shift += 1;
+        }
+      }
+    }
+    axis = axis - shift;
+    quantizer = make_per_channel_affine_quantizer(per_channel_quantizer->scales(),
+                                                  per_channel_quantizer->zero_points(),
+                                                  axis,
+                                                  quantizer->scalar_type());
+  }
+  return make_qtensor(self, sizes, strides, quantizer);
+}
+
+Tensor squeeze_qtensor(const Tensor& self, int64_t dim) {
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  std::vector<int64_t> sizes;
+  std::vector<int64_t> strides;
+  std::tie(sizes, strides) = inferSqueezeGeometry(self, dim);
+  if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
+    const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
+    auto axis = per_channel_quantizer->axis();
+    TORCH_CHECK(axis != dim, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
+    if (axis >= dim) {
+      axis -= 1;
+    }
+    quantizer = make_per_channel_affine_quantizer(per_channel_quantizer->scales(),
+                                                  per_channel_quantizer->zero_points(),
+                                                  axis,
+                                                  quantizer->scalar_type());
+  }
+  if (self.dim() == 0 || self.sizes()[dim] != 1) {
+    sizes = self.sizes().vec();
+    strides = self.strides().vec();
+  }
+  auto result = make_qtensor(self, sizes, strides, quantizer);
+  namedinference::propagate_names_except(result, self, {dim});
+  return result;
+}
+
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+  at::Tensor result;
+  if (self.is_quantized()) {
+    result = squeeze_qtensor(self);
+  } else {
+    result = self.as_strided(std::get<0>(g), std::get<1>(g));
+  }
   auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
@@ -1237,6 +1310,9 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
   int64_t dims = self.dim();
   dim = maybe_wrap_dim(dim, dims);
 
+  if (self.is_quantized()) {
+    return squeeze_qtensor(self, dim);
+  }
   if (dims == 0 || self.sizes()[dim] != 1) {
     return self.as_strided(self.sizes(), self.strides());
   }
@@ -1296,11 +1372,31 @@ static Tensor unsqueeze_sparse(Tensor const &self, int64_t dim /* should already
   }
 }
 
+Tensor unsqueeze_qtensor(const Tensor& self, int64_t dim) {
+  dim = maybe_wrap_dim(dim, self.dim() + 1);
+  auto g = inferUnsqueezeGeometry(self, dim);
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
+    const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
+    auto axis = per_channel_quantizer->axis();
+    if (axis >= dim) {
+      axis += 1;
+    }
+    quantizer = make_per_channel_affine_quantizer(per_channel_quantizer->scales(),
+                                                  per_channel_quantizer->zero_points(),
+                                                  axis,
+                                                  quantizer->scalar_type());
+  }
+  return make_qtensor(self, std::get<0>(g), std::get<1>(g), quantizer);
+}
+
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
 
   if (self.is_sparse()) {
     return unsqueeze_sparse(self, dim);
+  } else if (self.is_quantized()) {
+    return unsqueeze_qtensor(self, dim);
   } else {
     auto g = inferUnsqueezeGeometry(self, dim);
     return self.as_strided(std::get<0>(g), std::get<1>(g));

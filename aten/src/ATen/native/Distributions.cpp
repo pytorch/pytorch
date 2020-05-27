@@ -206,12 +206,17 @@ Tensor& log_normal_(Tensor& self, double mean, double std, c10::optional<Generat
   return at::native::templates::log_normal_impl_<LogNormalStub, Generator>(self, mean, std, gen);
 }
 
-// ====================================================================================================================
+// ==================================================== Cauchy ========================================================
+
+template<typename RNG>
+struct CauchyStub {
+  void operator()(TensorIterator& iter, double median, double sigma, c10::optional<Generator> gen) {
+    cauchy_stub(iter.device_type(), iter, median, sigma, gen);
+  }
+};
 
 Tensor& cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> gen) {
-  auto iter = TensorIterator::nullary_op(self);
-  cauchy_stub(iter.device_type(), iter, median, sigma, gen);
-  return self;
+  return at::native::templates::cauchy_impl_<CauchyStub, Generator>(self, median, sigma, gen);
 }
 
 // ================================================== Exponential =====================================================

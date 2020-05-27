@@ -597,7 +597,7 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
   if (!self_.is_leaf() && !requires_grad) {
     throw std::runtime_error(autograd::utils::requires_grad_leaf_error(requires_grad));
   }
-  if (requires_grad && !self_.is_floating_point()) {
+  if (requires_grad && ! isDifferentiableType(at::typeMetaToScalarType(self_.dtype()))) {
     throw std::runtime_error("only Tensors of floating point dtype can require gradients");
   }
   self_.set_requires_grad(requires_grad);
@@ -854,7 +854,9 @@ PyMethodDef variable_methods[] = {
   {"__isub__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_sub_>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__div__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_div>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__truediv__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_div>, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__floordiv__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_floor_divide>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__idiv__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_div_>, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__ifloordiv__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_floor_divide_>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__mod__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_remainder>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__bool__", (PyCFunction)THPVariable_bool_scalar, METH_NOARGS, NULL},
   {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},

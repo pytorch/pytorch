@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
@@ -105,10 +106,17 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
    * Compute at modifies this, not consumer.
    */
   TORCH_CHECK(
+      this->fusion() == consumer->fusion(),
+      this,
+      " and ",
+      consumer,
+      " are not in the same fusion.");
+  TORCH_CHECK(
       !this->sameAs(consumer), "Cannot call this->computeAt(this, ...)");
+
   if (axis < 0)
-    // Compute at is funny where size is the maximum acceptable value instead of
-    // size-1
+    // Compute at is a bit strange where size is the maximum acceptable value
+    // instead of size-1
     axis += int(consumer->nDims()) + 1;
 
   TORCH_CHECK(
@@ -117,6 +125,28 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
 
   std::stack<Val*> dep_chain =
       DependencyCheck::getDependencyChain(this, consumer);
+
+  TORCH_CHECK(
+      DependencyCheck::getDependencyChain(consumer, this).size() == 0,
+      "Expected ",
+      this,
+      " computeAt ",
+      consumer,
+      " but got the reverse.");
+
+  if (dep_chain.size() == 0) {
+    // Make sure ordering is correct based on ordered vars in Fusion.
+    auto vals = FusionGuard::getCurFusion()->deterministic_vals();
+    for (auto val : vals) {
+      if (val == this) {
+        break;
+      } else if (val == consumer) {
+        consumer->computeAt(this, axis);
+        return this;
+      }
+    }
+  }
+
   // forward apply to uses of this.
   // Recursively apply replay.
   TensorView* running_consumer = consumer;
@@ -187,6 +217,8 @@ TensorView* TensorView::split(int axis, int factor) {
   TORCH_CHECK(
       axis >= 0 && axis < domain()->nDims(),
       "Trying to split axis outside of TensorView's range.");
+
+  TORCH_CHECK(factor >= 0, "Cannot split by a factor less than 1.");
 
   if (getComputeAtView() != nullptr)
     if (axis < getComputeAtAxis())
