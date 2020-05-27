@@ -15,6 +15,8 @@ layout(set = 0, binding = 4) uniform constBlock {
   ivec2 dilate;
   ivec4 outputSize;
   ivec4 inputSize;
+  float outputMin;
+  float outputMax;
 }
 uConstBlock;
 
@@ -48,6 +50,8 @@ void main() {
         acc += kv * iv;
       }
     }
-    imageStore(uOutput, pos, acc);
+    vec4 outputMin = vec4(uConstBlock.outputMin);
+    vec4 outputMax = vec4(uConstBlock.outputMax);
+    imageStore(uOutput, pos, clamp(acc, outputMin, outputMax));
   }
 }

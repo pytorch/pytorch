@@ -20,6 +20,8 @@ struct ContextConv2D final {
   std::array<int64_t, 2> stride_;
   std::array<int64_t, 2> dilation_;
   int64_t groups_;
+  float output_min_;
+  float output_max_;
 
   ContextConv2D() = delete;
 
@@ -30,14 +32,18 @@ struct ContextConv2D final {
       std::array<int64_t, 2> padding,
       std::array<int64_t, 2> stride,
       std::array<int64_t, 2> dilation,
-      int64_t groups)
+      int64_t groups,
+      float output_min,
+      float output_max)
       : weight_prepacked_vulkan_(std::move(weight_prepacked_vulkan)),
         bias_vulkan_(std::move(bias_vulkan)),
         weight_size_(weight_size),
         padding_(padding),
         stride_(stride),
         dilation_(dilation),
-        groups_(groups) {}
+        groups_(groups),
+        output_min_(output_min),
+        output_max_(output_max) {}
 
   ContextConv2D(ContextConv2D&&) = default;
   ContextConv2D& operator=(ContextConv2D&&) = default;
