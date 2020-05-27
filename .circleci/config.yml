@@ -419,11 +419,10 @@ jobs:
           # Pull Docker image and run build
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
           time docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          VOLUME_MOUNTS="-v /home/circleci/project/:/var/lib/jenkins/workspace"
+          export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
           git submodule sync && git submodule update -q --init --recursive
-
-          docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
           if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
             export PARALLEL_FLAGS="export ATEN_THREADING=TBB USE_TBB=1 "
@@ -496,10 +495,11 @@ jobs:
 
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
 
+          VOLUME_MOUNTS="-v '$(pwd):/var/lib/jenkins/workspace/test/test-reports'"
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
 
           # Pass environment variables to the next step
@@ -546,8 +546,6 @@ jobs:
           set -e
           docker stats --all --no-stream
           echo "cd workspace; python test/print_test_stats.py test" | docker exec -u jenkins -i "$id" bash
-          echo "Retrieving test reports"
-          docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
         when: always
     - store_test_results:
         path: test-reports
@@ -782,8 +780,8 @@ jobs:
 
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
           time docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
-          docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
+          VOLUME_MOUNTS="-v /home/circleci/project/:/var/lib/jenkins/workspace"
+          export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -852,12 +850,12 @@ jobs:
           fi
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          VOLUME_MOUNTS="-v /home/circleci/project/:/var/lib/jenkins/workspace"
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
-          docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -1342,7 +1340,8 @@ jobs:
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          VOLUME_MOUNTS="-v ${HOME}/workspace/build_artifacts:/var/lib/jenkins/workspace/pytorch.github.io/docs/master"
+          export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           # master branch docs push
           if [[ "${CIRCLE_BRANCH}" == "master" ]]; then
@@ -1503,6 +1502,8 @@ jobs:
           set -eux
           docker_image_commit=${DOCKER_IMAGE}-${CIRCLE_SHA1}
 
+          # TODO: This should really be split up into 4 different build jobs that save their artifacts to the
+          #       cirlceci workspace and then load them in the test step
           docker_image_libtorch_android_x86_32=${docker_image_commit}-android-x86_32
           docker_image_libtorch_android_x86_64=${docker_image_commit}-android-x86_64
           docker_image_libtorch_android_arm_v7a=${docker_image_commit}-android-arm-v7a

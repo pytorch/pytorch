@@ -18,11 +18,10 @@ jobs:
           # Pull Docker image and run build
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
           time docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          VOLUME_MOUNTS="-v /home/circleci/project/:/var/lib/jenkins/workspace"
+          export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
           git submodule sync && git submodule update -q --init --recursive
-
-          docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
           if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
             export PARALLEL_FLAGS="export ATEN_THREADING=TBB USE_TBB=1 "
@@ -95,10 +94,11 @@ jobs:
 
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
 
+          VOLUME_MOUNTS="-v '$(pwd):/var/lib/jenkins/workspace/test/test-reports'"
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
 
           # Pass environment variables to the next step
@@ -145,8 +145,6 @@ jobs:
           set -e
           docker stats --all --no-stream
           echo "cd workspace; python test/print_test_stats.py test" | docker exec -u jenkins -i "$id" bash
-          echo "Retrieving test reports"
-          docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
         when: always
     - store_test_results:
         path: test-reports

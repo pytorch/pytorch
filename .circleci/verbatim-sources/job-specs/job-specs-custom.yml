@@ -19,7 +19,8 @@
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          VOLUME_MOUNTS="-v ${HOME}/workspace/build_artifacts:/var/lib/jenkins/workspace/pytorch.github.io/docs/master"
+          export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           # master branch docs push
           if [[ "${CIRCLE_BRANCH}" == "master" ]]; then
@@ -180,6 +181,8 @@
           set -eux
           docker_image_commit=${DOCKER_IMAGE}-${CIRCLE_SHA1}
 
+          # TODO: This should really be split up into 4 different build jobs that save their artifacts to the
+          #       cirlceci workspace and then load them in the test step
           docker_image_libtorch_android_x86_32=${docker_image_commit}-android-x86_32
           docker_image_libtorch_android_x86_64=${docker_image_commit}-android-x86_64
           docker_image_libtorch_android_arm_v7a=${docker_image_commit}-android-arm-v7a
