@@ -87,7 +87,7 @@ class TORCH_API Future final {
       // log errors and thats why we have this log here.
       LOG (INFO) << "Skipping setting following error on the Future since " <<
         "it is already marked completed (this is not neccessarily an error): "
-        << errorMsg;
+        << error.what();
       return;
     } else {
       setErrorInternal(FutureError(std::move(errorMsg)), lock);
