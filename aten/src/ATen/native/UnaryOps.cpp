@@ -137,11 +137,10 @@ Tensor angle(const Tensor& self) {
 
 Tensor real(const Tensor& self) {
   if (self.is_complex()) {
-    auto size = self.sizes().vec();
+    auto float_tensor = at::native::view_complex_as_float(self);
     if (self.numel() == 0) {
-      return at::empty({0}, self.options().dtype(c10::toValueType(self.scalar_type())));
+      return float_tensor;
     } else {
-      auto float_tensor = at::native::view_complex_as_float(self);
       return at::select(float_tensor, float_tensor.dim() - 1, 0);
     }
   } else {
@@ -153,10 +152,10 @@ Tensor real(const Tensor& self) {
 
 Tensor imag(const Tensor& self) {
   if (self.is_complex()) {
+    auto float_tensor = at::native::view_complex_as_float(self);
     if (self.numel() == 0) {
-      return at::empty({0}, self.options().dtype(c10::toValueType(self.scalar_type())));
+      return float_tensor;
     } else {
-      auto float_tensor = at::native::view_complex_as_float(self);
       return at::select(float_tensor, float_tensor.dim() - 1, 1);
     }
   } else {
