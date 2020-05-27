@@ -318,10 +318,10 @@ identity_transform = ComposeTransform([])
 
 class ErfTransform(Transform):
     r"""
-    Transform via the mapping :math:`y = \erf(x)`.
+    Transform via the mapping :math:`y = \text{erf}(x)`.
     """
     domain = constraints.real
-    codomain = constraints.positive
+    codomain = constraints.interval(-1., 1.)
     bijective = True
     sign = +1
 

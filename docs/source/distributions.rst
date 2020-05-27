@@ -203,6 +203,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`Moyal`
+~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.moyal
+.. autoclass:: Moyal
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Multinomial`
 ~~~~~~~~~~~~~~~~~~~~~~~
 

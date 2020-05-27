@@ -57,8 +57,8 @@ from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
-                                            CatTransform, ComposeTransform, ExpTransform,
-                                            LowerCholeskyTransform,
+                                            CatTransform, ComposeTransform, ErfTransform,
+                                            ExpTransform, LowerCholeskyTransform,
                                             PowerTransform, SigmoidTransform,
                                             TanhTransform, SoftmaxTransform,
                                             StickBreakingTransform,
@@ -4289,6 +4289,7 @@ class TestTransforms(TestCase):
         for cache_size in [0, 1]:
             transforms = [
                 AbsTransform(cache_size=cache_size),
+                ErfTransform(cache_size=cache_size),
                 ExpTransform(cache_size=cache_size),
                 PowerTransform(exponent=2,
                                cache_size=cache_size),
