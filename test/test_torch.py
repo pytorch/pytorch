@@ -14895,12 +14895,12 @@ class TestTorchDeviceType(TestCase):
         for test in test_list:
             actual = torch.einsum(test[0], test[1:])
             expected = np.einsum(test[0], *[t.numpy() for t in test[1:]])
-            self.assertEqual(expected.shape, actual.shape, test[0])
-            self.assertTrue(np.allclose(expected, actual.numpy()), test[0])
+            self.assertEqual(expected.shape, actual.shape, msg=test[0])
+            self.assertTrue(np.allclose(expected, actual.numpy()), msg=test[0])
             # test vararg
             actual2 = torch.einsum(test[0], *test[1:])
-            self.assertEqual(expected.shape, actual2.shape, test[0])
-            self.assertTrue(np.allclose(expected, actual2.numpy()), test[0])
+            self.assertEqual(expected.shape, actual2.shape, msg=test[0])
+            self.assertTrue(np.allclose(expected, actual2.numpy()), msg=test[0])
 
             def do_einsum(*args):
                 return torch.einsum(test[0], args)
@@ -17541,8 +17541,11 @@ class TestViewOps(TestCase):
     @dtypes(torch.float, torch.double, torch.long)
     def test_real_self(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
-        s = t.real
+        s = torch.real(t)
         self.assertTrue(s is t)
+
+        u = t.real
+        self.assertTrue(u is t)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @onlyOnCPUAndCUDA
@@ -17552,12 +17555,12 @@ class TestViewOps(TestCase):
         re = t.real
         exp = torch.from_numpy(t.numpy().real)
         self.assertEqual(re, exp)
-        assert(t.storage().data_ptr() == re.storage().data_ptr())
+        self.assertTrue(self.is_view_of(t, re))
 
         im = t.imag
         exp = torch.from_numpy(t.numpy().imag)
         self.assertEqual(im, exp)
-        assert(t.storage().data_ptr() == im.storage().data_ptr())
+        self.assertTrue(self.is_view_of(t, im))
 
     def test_imag_noncomplex(self, device):
         t = torch.ones((5, 5), device=device)

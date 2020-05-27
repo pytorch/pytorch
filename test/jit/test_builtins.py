@@ -137,7 +137,14 @@ class TestTensorBuiltins(JitTestCase):
             return True
 
         tensor = torch.arange(4, dtype=torch.float).view(2, 2)
-        properties = [p for p in dir(tensor) if should_keep(tensor, p)]
+        keys = dir(tensor)
+
+        # imag is only implemented for complex tensors.
+        self.assertRaises(RuntimeError, lambda: should_keep(tensor, 'imag'))
+        keys.remove('imag')
+        keys.remove('real')
+
+        properties = [p for p in keys if should_keep(tensor, p)]
 
         code_template = """
         def fn(x):
@@ -163,6 +170,7 @@ class TestTensorBuiltins(JitTestCase):
             if p in MISSING_PROPERTIES:
                 continue
             code = code_template.format(p)
+            print(code)
             cu = torch.jit.CompilationUnit()
             cu.define(code)
             if p in EQUALITY_MISMATCH:
