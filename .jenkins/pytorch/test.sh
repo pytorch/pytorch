@@ -138,6 +138,22 @@ if [ -n "$CIRCLE_PULL_REQUEST" ]; then
   file_diff_from_base "$DETERMINE_FROM"
 fi
 
+DISTRIBUTED_TESTS="
+distributed/test_c10d
+distributed/test_c10d_spawn
+distributed/test_data_parallel
+distributed/test_distributed
+distributed/test_nccl
+distributed/rpc/faulty_agent/test_dist_autograd_spawn
+distributed/rpc/faulty_agent/test_rpc_spawn
+distributed/rpc/jit/test_dist_autograd_spawn
+distributed/rpc/test_dist_autograd_spawn
+distributed/rpc/test_dist_optimizer_spawn
+distributed/rpc/test_rpc_spawn
+distributed/rpc/jit/test_rpc_spawn
+distributed/rpc/faulty_agent/test_rpc_spawn
+"
+
 test_python_nn() {
   time python test/run_test.py --include test_nn --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
@@ -153,8 +169,13 @@ test_python_ge_config_legacy() {
   assert_git_not_dirty
 }
 
-test_python_all_except_nn() {
-  time python test/run_test.py --exclude test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
+test_python_all_except_nn_and_distributed() {
+  time python test/run_test.py --exclude test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr $DISTRIBUTED_TESTS --verbose --determine-from="$DETERMINE_FROM"
+  assert_git_not_dirty
+}
+
+test_python_distributed() {
+  time python test/run_test.py --include $DISTRIBUTED_TESTS --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -303,19 +324,22 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   test_python_nn
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   test_torchvision
-  test_python_all_except_nn
+  test_python_all_except_nn_and_distributed
   test_aten
   test_libtorch
   test_custom_script_ops
   test_torch_function_benchmark
+elif [[ "${BUILD_ENVIRONMENT}" == *-test3 || "${JOB_BASE_NAME}" == *-test3 ]]; then
+  test_python_distributed
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 else
   test_torchvision
   test_python_nn
-  test_python_all_except_nn
+  test_python_all_except_nn_and_distributed
   test_aten
   test_libtorch
   test_custom_script_ops
   test_torch_function_benchmark
+  test_python_distributed
 fi
