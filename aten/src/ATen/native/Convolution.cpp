@@ -402,10 +402,10 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
 // Use cudnn for FP16 depthwise convolutions
 auto ConvParams::use_cudnn_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
+  if (cudnn_conv_use_channels_last(input, weight) && use_cudnn(input, weight)) {
+    return true;
+  }
   if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
-    if (cudnn_conv_use_channels_last(input, weight) && use_cudnn(input, weight)) {
-      return true;
-    }
     long cudnn_version = detail::getCUDAHooks().versionCuDNN();
     bool kernel_cond =  (cudnn_version >= 7600 &&
                          use_cudnn(input, weight) &&
