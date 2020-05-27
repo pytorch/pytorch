@@ -328,7 +328,7 @@ static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
     try {
       return handle_torch_function(self, "__bool__");
     }
-    catch(python_error) {
+    catch(const python_error&) {
       return nullptr;
     }
   }
@@ -1019,7 +1019,7 @@ static PyObject * THPVariable_bool_scalar(PyObject* self, PyObject* args) {
     try {
       return handle_torch_function(self, "__bool__");
     }
-    catch(python_error) {
+    catch(const python_error&) {
       return nullptr;
     }
   }

@@ -341,7 +341,7 @@ PyObject *THPVariable_get_volatile(THPVariable *self, void *unused)
     try {
       return handle_torch_function_getter(self, "volatile");
     }
-    catch (python_error) {
+    catch (const python_error&) {
       return nullptr;
     }
   }
@@ -356,7 +356,7 @@ int THPVariable_set_volatile(THPVariable *self, PyObject *obj, void *unused)
     try {
       return handle_torch_function_setter(self, "volatile", obj);
     }
-    catch (python_error) {
+    catch (const python_error&) {
       return -1;
     }
   }
@@ -475,7 +475,7 @@ PyObject *THPVariable_get_name(THPVariable* self, void *unused)
     try {
       return handle_torch_function_getter(self, "name");
     }
-    catch (python_error) {
+    catch (const python_error&) {
       return nullptr;
     }
   }
