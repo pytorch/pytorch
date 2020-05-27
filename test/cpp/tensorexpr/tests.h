@@ -157,6 +157,7 @@ namespace jit {
   _(SimplifyForWontLoseLoopOptions)         \
   _(SimplifyMultilevelFor)                  \
   _(SimplifyForCleansUp)                    \
+  _(SimplifyEliminateEmptyFor)              \
   _(SimplifyFlattenBlock)                   \
   _(StmtClone)                              \
   _(BoundsInference_1)                      \
