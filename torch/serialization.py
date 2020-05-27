@@ -473,6 +473,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         if storage.device.type == 'cpu':
             # If it's on the CPU we can directly copy it into the zip file
             num_bytes = storage.size() * storage.element_size()
+            buf = io.BytesIO()
             zip_file.write_record(name, storage.data_ptr(), num_bytes)
         else:
             # Copy to a buffer, then serialize that
@@ -809,7 +810,8 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
 
     loaded_storages = {}
 
-    def load_tensor(data_type, size, key, location):
+    def load_tensor(obj, size, key, location):
+        loaded_storages[key] = restore_location(obj, location)
         name = 'data/{}'.format(key)
         size_long = struct.pack("<Q", size)
         tensor_file = io.BytesIO(size_long + zip_file.get_record(name))
