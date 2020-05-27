@@ -65,11 +65,13 @@ struct CPPTypeAndStdComplexToScalarType<thrust::complex<double>> {
 };
 #endif
 
-// this shouldn't strictly be necessary, but needs some finagling to get to work
-// with "fake" C++17 if_constexpr.
-template<>
-struct CPPTypeAndStdComplexToScalarType<void> {
-  constexpr static c10::ScalarType value() { return c10::ScalarType::Undefined; }
+// this is needed to work around the lack of a real "constexpr if" -- this is used
+// to avoid/delay the computation of a type that isn't available in one of the if/else
+// clauses.  An alternative would be to define a <void> version of
+// CPPTypeAndStdComplexToScalarType with the downside risk of mistakenly matching on Undefined.
+template<typename T, typename U>
+struct throw_away_first_type {
+  using type = U;
 };
 
 }} //namespace cppmap::detail
@@ -97,8 +99,14 @@ struct needs_dynamic_casting<func_t, 0> {
     // we could assert output numbers are correct here, but checks
     // (including arity) are currently pushed outside of this struct.
     return c10::guts::if_constexpr<std::is_void<typename traits::result_type>::value>(
-      [&]() { return false; },
-      [&]() { return iter.dtype(0) != cppmap::detail::CPPTypeAndStdComplexToScalarType<typename traits::result_type>::value();}
+      [&](auto _) { return false; },
+      [&](auto _) {
+        using result_type = typename traits::result_type;
+        using map  = typename cppmap::detail::CPPTypeAndStdComplexToScalarType<result_type>;
+        // decltype(_) is used to delay computation
+        using dtype = typename cppmap::detail::throw_away_first_type<decltype(_), map>::type;
+        return iter.dtype(0) != dtype::value();
+      }
     );
   }
 };
