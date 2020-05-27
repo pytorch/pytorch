@@ -207,7 +207,7 @@ bool validateKernelArgTensor(
 }
 
 bool validateKernelArgScalar(
-    const c10::TypePtr arg_type,
+    const c10::TypePtr& arg_type,
     const Val* const param,
     std::stringstream& msg) {
   if (!param->isScalar()) {
