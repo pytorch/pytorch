@@ -65,15 +65,6 @@ struct CPPTypeAndStdComplexToScalarType<thrust::complex<double>> {
 };
 #endif
 
-// this is needed to work around the lack of a real "constexpr if" -- this is used
-// to avoid/delay the computation of a type that isn't available in one of the if/else
-// clauses.  An alternative would be to define a <void> version of
-// CPPTypeAndStdComplexToScalarType with the downside risk of mistakenly matching on Undefined.
-template<typename T, typename U>
-struct throw_away_first_type {
-  using type = U;
-};
-
 }} //namespace cppmap::detail
 
 // `needs_dynamic_casting` compares the types expected by iterator
@@ -104,7 +95,7 @@ struct needs_dynamic_casting<func_t, 0> {
         using result_type = typename traits::result_type;
         using map  = typename cppmap::detail::CPPTypeAndStdComplexToScalarType<result_type>;
         // decltype(_) is used to delay computation
-        using dtype = typename cppmap::detail::throw_away_first_type<decltype(_), map>::type;
+        using dtype = typename decltype(_)::template type_identity<map>;
         return iter.dtype(0) != dtype::value();
       }
     );
