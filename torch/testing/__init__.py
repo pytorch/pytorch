@@ -5,6 +5,7 @@ The testing package contains testing-specific utilities.
 import torch
 import random
 import math
+from typing import cast, List, Optional, Tuple, Union
 
 FileCheck = torch._C.FileCheck
 
@@ -40,6 +41,8 @@ def _unravel_index(flat_index, shape):
         return res[0]
 
     return tuple(res[::-1])
+# (bool, msg) tuple, where msg is None if and only if bool is True.
+_compare_return_type = Tuple[bool, Optional[str]]
 
 # Compares two tensors with the same size on the same device and with the same
 # dtype for equality.
@@ -63,7 +66,8 @@ def _unravel_index(flat_index, shape):
 #
 #   Bool tensors are equal only if they are identical, regardless of
 #   the rtol and atol values.
-def _compare_tensors_internal(a, b, *, rtol, atol, equal_nan):
+def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, equal_nan: bool) -> _compare_return_type:
+    debug_msg : Optional[str]
     # Integer (including bool) comparisons are identity comparisons
     # when rtol is zero and atol is less than one
     if (is_integral(a.dtype) and rtol == 0 and atol < 1) or a.dtype is torch.bool:
@@ -99,7 +103,7 @@ def _compare_tensors_internal(a, b, *, rtol, atol, equal_nan):
                                                            equal_nan=equal_nan)
 
         if not real_result:
-            debug_msg = "Real parts failed to compare as equal! " + debug_msg
+            debug_msg = "Real parts failed to compare as equal! " + cast(str, debug_msg)
             return (real_result, debug_msg)
 
         a_imag = a.imag
@@ -109,7 +113,7 @@ def _compare_tensors_internal(a, b, *, rtol, atol, equal_nan):
                                                            equal_nan=equal_nan)
 
         if not imag_result:
-            debug_msg = "Imaginary parts failed to compare as equal! " + debug_msg
+            debug_msg = "Imaginary parts failed to compare as equal! " + cast(str, debug_msg)
             return (imag_result, debug_msg)
 
         return (True, None)
@@ -149,8 +153,8 @@ def _compare_tensors_internal(a, b, *, rtol, atol, equal_nan):
 
 # Checks if two scalars are equal(-ish), returning (True, None)
 # when they are and (False, debug_msg) when they are not.
-def _compare_scalars_internal(a, b, *, rtol, atol, equal_nan):
-    def _helper(a, b, s):
+def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: bool) -> _compare_return_type:
+    def _helper(a, b, s) -> _compare_return_type:
         # Short-circuits on identity
         if a == b or (equal_nan and a != a and b != b):
             return (True, None)
@@ -278,7 +282,7 @@ def get_all_fp_dtypes(include_half=True, include_bfloat16=True):
     return dtypes
 
 
-def get_all_device_types():
+def get_all_device_types() -> List[str]:
     return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
 # 'dtype': (rtol, atol)
@@ -289,7 +293,7 @@ _default_tolerances = {
 }
 
 
-def _get_default_tolerance(a, b=None):
+def _get_default_tolerance(a, b=None) -> Tuple[float, float]:
     if b is None:
         dtype = str(a.dtype).split('.')[-1]  # e.g. "float32"
         return _default_tolerances.get(dtype, (0, 0))
