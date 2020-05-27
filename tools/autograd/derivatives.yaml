@@ -433,9 +433,6 @@
 - name: imag(Tensor self) -> Tensor
   self: Scalar(std::complex<double>{0.0, 1.0})*grad.to(self.scalar_type())
 
-- name: copy_imag(Tensor self) -> Tensor
-  self: Scalar(std::complex<double>{0.0, 1.0})*grad.to(self.scalar_type())
-
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(zeros_like(self), indices, grad)
   indices: TensorList()
@@ -748,9 +745,6 @@
 
 - name: real(Tensor self) -> Tensor
   self: at::real(grad)
-
-- name: copy_real(Tensor self) -> Tensor
-  self: grad.copy_real()
 
 - name: reciprocal(Tensor self) -> Tensor
   self: -grad * result * result

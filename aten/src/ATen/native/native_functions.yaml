@@ -265,28 +265,6 @@
   variants: function
   supports_named_tensor: True
 
-# Temporary methods for getting the real and imaginary values in complex tensors. These are needed
-# until we support real and imag as tensor attributes which is blocked by the untyped storage task
-# TODO: remove these methods when we add real and imag as tensor attributes
-
-- func: copy_real(Tensor self) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-  supports_named_tensor: True
-
-- func: copy_real.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-  supports_named_tensor: True
-
-- func: copy_imag(Tensor self) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-  supports_named_tensor: True
-
-- func: copy_imag.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-  supports_named_tensor: True
-
 - func: conj(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method

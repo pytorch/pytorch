@@ -725,8 +725,6 @@ _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
 _(aten, zeros_like) \
-_(aten, copy_real) \
-_(aten, copy_imag) \
 /* nothing */
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \

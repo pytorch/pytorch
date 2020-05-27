@@ -147,9 +147,8 @@ class _TestTorchMixin(object):
                     skip_regexes.append(re.compile('^{}$'.format(re.escape(r))))
                 else:
                     skip_regexes.append(r)
-            skipnames = ['copy_real', 'copy_imag']
             for name in dir(ns):
-                if name.startswith('_') or name in skipnames:
+                if name.startswith('_'):
                     continue
                 var = getattr(ns, name)
                 if not isinstance(var, checked_types):

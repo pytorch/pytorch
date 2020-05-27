@@ -93,8 +93,8 @@ def _compare_tensors_internal(a, b, *, rtol, atol, equal_nan):
     # (see NOTE Test Framework Tensor "Equality")
     if a.is_complex():
         float_dtype = torch.float32 if a.dtype == torch.complex64 else torch.float64
-        a_real = a.copy_real().to(float_dtype)
-        b_real = b.copy_real().to(float_dtype)
+        a_real = a.real
+        b_real = b.real
         real_result, debug_msg = _compare_tensors_internal(a_real, b_real,
                                                            rtol=rtol, atol=atol,
                                                            equal_nan=equal_nan)
@@ -103,8 +103,8 @@ def _compare_tensors_internal(a, b, *, rtol, atol, equal_nan):
             debug_msg = "Real parts failed to compare as equal! " + debug_msg
             return (real_result, debug_msg)
 
-        a_imag = a.copy_imag().to(float_dtype)
-        b_imag = b.copy_imag().to(float_dtype)
+        a_imag = a.imag
+        b_imag = b.imag
         imag_result, debug_msg = _compare_tensors_internal(a_imag, b_imag,
                                                            rtol=rtol, atol=atol,
                                                            equal_nan=equal_nan)
