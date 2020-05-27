@@ -2671,7 +2671,6 @@ class _TestTorchMixin(object):
 
             # test for empty index, should be a no-op
             idx = cast(torch.LongTensor())
-            actual=None
             if reduction:
                 actual = getattr(base.clone(), method)(dim, idx, src, reduce=reduction)
             else:
