@@ -45,9 +45,9 @@ THCTensor_(numel)(THCState *state, THCTensor *t)
 }
 
 void THCTensor_(check_shape_except_dim)(THCState *state,
-    THCTensor *first, THCTensor *second, int dimension);
+    THCTensor *first, THCTensor *second, int dimension, int index);
 inline void THCTensor_(check_shape_except_dim)(THCState *state,
-    THCTensor *first, THCTensor *second, int dimension)
+    THCTensor *first, THCTensor *second, int dimension, int index)
 {
   int first_dims = first->dim();
   int second_dims = second->dim();
@@ -61,8 +61,8 @@ inline void THCTensor_(check_shape_except_dim)(THCState *state,
     int64_t first_dim_size = THCTensor_(size)(state, first, dim);
     int64_t second_dim_size = THCTensor_(size)(state, second, dim);
     THArgCheck(first_dim_size == second_dim_size, 0,
-        "Sizes of tensors must match except in dimension %d. Got %lld and %lld in dimension %d",
-        dimension, (long long)first_dim_size, (long long)second_dim_size, dim);
+        "Sizes of tensors must match except in dimension %d. Got %lld and %lld in dimension %d (The offending index is %d)",
+        dimension, (long long)first_dim_size, (long long)second_dim_size, dim, index);
   }
 }
 

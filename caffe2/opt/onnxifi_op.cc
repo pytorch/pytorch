@@ -62,6 +62,7 @@ void SetInputTensorDescriptorTypeAndBuffer(
 TypeMeta OnnxifiTypeToDataType(uint64_t onnxifi_type) {
   static std::map<uint64_t, TypeMeta> data_type_map{
       {ONNXIFI_DATATYPE_FLOAT32, TypeMeta::Make<float>()},
+      {ONNXIFI_DATATYPE_FLOAT16, TypeMeta::Make<c10::Half>()},
       {ONNXIFI_DATATYPE_INT32, TypeMeta::Make<int>()},
       {ONNXIFI_DATATYPE_INT8, TypeMeta::Make<int8_t>()},
       {ONNXIFI_DATATYPE_UINT8, TypeMeta::Make<uint8_t>()},

@@ -20,11 +20,7 @@ size_t THStorage_(elementSize)()
 
 THStorage* THStorage_(new)(void)
 {
-#ifdef THQUANTIZED
-  return THStorage_new(caffe2::TypeMeta::Make<quantized_t>());
-#else
-  return THStorage_new(caffe2::TypeMeta::Make<scalar_t>());
-#endif
+  return THStorage_new();
 }
 
 THStorage* THStorage_(newWithSize)(ptrdiff_t size)
@@ -32,10 +28,8 @@ THStorage* THStorage_(newWithSize)(ptrdiff_t size)
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
                            c10::StorageImpl::use_byte_size_t(),
 #ifdef THQUANTIZED
-                           caffe2::TypeMeta::Make<quantized_t>(),
                            size * sizeof(quantized_t),
 #else
-                           caffe2::TypeMeta::Make<scalar_t>(),
                            size * sizeof(scalar_t),
 #endif
                            getTHDefaultAllocator(),
@@ -50,10 +44,8 @@ THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
                            c10::StorageImpl::use_byte_size_t(),
 #ifdef THQUANTIZED
-                           caffe2::TypeMeta::Make<quantized_t>(),
                            size * sizeof(quantized_t),
 #else
-                           caffe2::TypeMeta::Make<scalar_t>(),
                            size * sizeof(scalar_t),
 #endif
                            allocator,
@@ -65,15 +57,13 @@ THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
 
 THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags)
 {
-  auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
   size_t actual_size = -1;
   THStorage* storage =
       c10::make_intrusive<at::StorageImpl>(
           c10::StorageImpl::use_byte_size_t(),
-          type_meta,
-          size * type_meta.itemsize(),
+          size * sizeof(scalar_t),
           THMapAllocator::makeDataPtr(
-              filename, flags, size * type_meta.itemsize(), &actual_size),
+              filename, flags, size * sizeof(scalar_t), &actual_size),
           /* allocator */ nullptr,
           false)
           .release();
@@ -108,10 +98,8 @@ THStorage* THStorage_(newWithDataAndAllocator)(at::DataPtr&& data, ptrdiff_t siz
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
                            c10::StorageImpl::use_byte_size_t(),
 #ifdef THQUANTIZED
-                           caffe2::TypeMeta::Make<quantized_t>(),
                            size * sizeof(quantized_t),
 #else
-                           caffe2::TypeMeta::Make<scalar_t>(),
                            size * sizeof(scalar_t),
 #endif
                            std::move(data),

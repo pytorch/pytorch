@@ -42,7 +42,7 @@ void weight_scale_update(
   caffe2::math::Scale<T, T, Context>(N, scale, w, nw, context);
 }
 
-template <typename T, class Context>
+template <class Context>
 class WeightScaleOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -54,11 +54,15 @@ class WeightScaleOp final : public Operator<Context> {
         update_upper_bound_(OperatorBase::GetSingleArgument<int64_t>(
             "upper_bound_iter",
             std::numeric_limits<int64_t>::max())),
-        scale_(this->template GetSingleArgument<T>("scale", 1.0f)) {}
+        scale_(this->template GetSingleArgument<float>("scale", 1.0f)) {}
 
   bool RunOnDevice() override {
     Output(OUTPUT_WEIGHTS)->ResizeLike(Input(WEIGHTS));
+    return DispatchHelper<TensorTypes<float>>::call(this, Input(WEIGHTS));
+  }
 
+  template <typename T>
+  bool DoRunWithType() {
     const auto iter =
         OperatorBase::Input<Tensor>(ITER, CPU).template data<int64_t>()[0] + 1;
 
@@ -77,8 +81,9 @@ class WeightScaleOp final : public Operator<Context> {
  protected:
   int64_t stepsize_;
   int64_t update_upper_bound_;
-  T scale_;
+  float scale_;
   INPUT_TAGS(WEIGHTS, ITER);
   OUTPUT_TAGS(OUTPUT_WEIGHTS);
 };
+
 } // namespace caffe2
