@@ -9,6 +9,18 @@
 
 namespace torch { namespace autograd {
 
+#define CHECK_RESULT(RESULT, VAR) \
+  if (!(RESULT.is_sparse() || VAR.is_sparse())) { \
+    if (!utils::obeys_layout_contract(RESULT, VAR)) { \
+      TORCH_WARN_ONCE("grad and param do not obey the gradient layout contract. " \
+                      "This is not an error, but may impair performance.\n" \
+                      "grad.sizes() = ", RESULT.sizes(), \
+                      ", strides() = ", RESULT.strides(), "\n", \
+                      "param.sizes() = ", VAR.sizes(), \
+                      ", strides() = ", VAR.strides()); \
+    } \
+  }
+
 struct TORCH_API AccumulateGrad : public Node {
   explicit AccumulateGrad(Variable variable_);
 
@@ -134,7 +146,9 @@ struct TORCH_API AccumulateGrad : public Node {
         // `variable_grad` for it to store the result. However, changing the
         // TensorImpl type of a tensor requires changing the tensor itself, and
         // thus in this case we have to change the grad tensor.
-        update_grad(new_grad + variable_grad);
+        auto result = variable_grad + new_grad;
+        CHECK_RESULT(result, variable);
+        update_grad(std::move(result));
       } else {
         // In this case we can avoid changing the grad tensor. There are three
         // scenarios when we'll hit this case:
@@ -147,13 +161,8 @@ struct TORCH_API AccumulateGrad : public Node {
         // valid operation which adds `new_grad` to `variable_grad` in
         // place. `variable_grad` is thus still referring to the same tensor
         // after the operation.
-        if (!(new_grad.is_sparse() && !variable_grad.is_sparse())) {
-          if (!utils::obeys_layout_contract(new_grad, variable)) {
-            TORCH_WARN_ONCE("Incoming grad and param do not obey the gradient layout ",
-                            "contract. This is not an error, but may impair performance.");
-          }
-        }
         variable_grad += new_grad;
+        CHECK_RESULT(variable_grad, variable);
         // ^ We could enforce the contract more aggressively here by writing:
         // if (variable_grad.is_sparse() || new_grad.is_sparse()) {
         //   variable_grad += new_grad;
@@ -170,7 +179,9 @@ struct TORCH_API AccumulateGrad : public Node {
     } else {
       // Assumes operator+ result typically matches strides of first arg,
       // and hopes variable_grad was originally created obeying layout contract.
-      update_grad(variable_grad + new_grad);
+      auto result = variable_grad + new_grad;
+      CHECK_RESULT(result, variable);
+      update_grad(std::move(result));
       // ^ We could enforce the contract more aggressively here by saying
       // if (obeys_layout_contract(new_grad, variable)) {
       //   update_grad(new_grad + variable_grad);
@@ -191,6 +202,8 @@ struct TORCH_API AccumulateGrad : public Node {
 
   Variable variable;
 };
+
+#undef RESULT_CHECK
 
 } // namespace autograd
 } // namespace torch

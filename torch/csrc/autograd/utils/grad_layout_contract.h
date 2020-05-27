@@ -10,7 +10,7 @@ namespace utils {
 // torch/csrc/autograd/AccumulateGrad.h.
 
 // Checks if grad obeys the contract with variable.
-bool obeys_layout_contract(const at::Tensor& grad, const at::Tensor& variable) {
+inline bool obeys_layout_contract(const at::Tensor& grad, const at::Tensor& variable) {
   TORCH_INTERNAL_ASSERT(!grad.is_sparse());
   TORCH_INTERNAL_ASSERT(!variable.is_sparse());
   return variable.is_non_overlapping_and_dense() ?
@@ -20,7 +20,7 @@ bool obeys_layout_contract(const at::Tensor& grad, const at::Tensor& variable) {
 
 // Creates a clone of new_grad that obeys the contract with variable.
 // The clone should attach to new_grad's history if GradMode::is_enabled().
-at::Tensor clone_obey_contract(const at::Tensor& new_grad, const at::Tensor& variable) {
+inline at::Tensor clone_obey_contract(const at::Tensor& new_grad, const at::Tensor& variable) {
   if (variable.is_non_overlapping_and_dense()) {
     // (1)
     // Does this dicey-looking sequence attach the result to new_grad's
