@@ -231,11 +231,15 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
     // The penalty for disobedience is reduced performance, not numerical death.
     // Warnings here help diagnose poor DDP performance.
     if (grad.strides() != bucket_view.strides()) {
-      TORCH_WARN_ONCE("Grad strides do not match bucket view strides. ",
-                      "This may indicate grad was not created according to the ",
-                      "gradient layout contract, or that the param's strides ",
-                      "changed since DDP was constructed.  This is not an error, ",
-                      "but may impair performance.");
+      TORCH_WARN_ONCE("Grad strides do not match bucket view strides. "
+                      "This may indicate grad was not created according to the "
+                      "gradient layout contract, or that the param's strides "
+                      "changed since DDP was constructed.  This is not an error, "
+                      "but may impair performance.\n"
+                      "grad.sizes() = ", grad.sizes(),
+                      ", strides() = ", grad.strides(), "\n",
+                      "bucket_view.sizes() = ", bucket_view.sizes(),
+                      "bucket_view.strides() = ", bucket_view.strides());
     }
     bucket_view.copy_(grad, /* non_blocking */ true);
   } else {

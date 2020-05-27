@@ -236,30 +236,37 @@ class TestAutograd(TestCase):
         self.assertEqual(x_grad, x_grad_clone)
 
     def test_accumulate_grad_tensor_reference(self):
-        def _test_grad_tensor(params_grad_tensor, backward_grad_tensor, should_preserve_reference):
+        def _test_grad_tensor(params_grad_tensor, backward_grad_tensor, should_preserve_reference, try_create_graph):
             params = torch.tensor([1.5, 1.5]).requires_grad_()
             params.grad = params_grad_tensor
             grad_saved = params.grad
-            params.backward(backward_grad_tensor)
+            params.backward(backward_grad_tensor, create_graph=try_create_graph)
             self.assertEqual(id(grad_saved) == id(params.grad), should_preserve_reference)
 
-        # Accumulate dense gradient to sparse gradient will change the `params.grad` reference
-        _test_grad_tensor(
-            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
-            torch.tensor([1.5, 1.5]),
-            False)
+        for try_create_graph in (False, True):
+            # try_create_graph = True should make all accumulations out-of-place, so forces all
+            # should_preserve_references expectations to False.
 
-        # Accumulate dense gradient to dense gradient will preserve the `params.grad` reference
-        _test_grad_tensor(
-            torch.tensor([1.5, 1.5]),
-            torch.tensor([1.5, 1.5]),
-            True)
+            # Accumulate dense gradient to sparse gradient will change the `params.grad` reference
+            _test_grad_tensor(
+                torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+                torch.tensor([1.5, 1.5]),
+                False and (not try_create_graph),
+                try_create_graph)
 
-        # Accumulate sparse gradient to sparse gradient will preserve the `params.grad` reference
-        _test_grad_tensor(
-            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
-            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
-            True)
+            # Accumulate dense gradient to dense gradient will preserve the `params.grad` reference
+            _test_grad_tensor(
+                torch.tensor([1.5, 1.5]),
+                torch.tensor([1.5, 1.5]),
+                True and (not try_create_graph),
+                try_create_graph)
+
+            # Accumulate sparse gradient to sparse gradient will preserve the `params.grad` reference
+            _test_grad_tensor(
+                torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+                torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+                True and (not try_create_graph),
+                try_create_graph)
 
     @skipIfNoLapack
     def test_slogdet_sign(self):

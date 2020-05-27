@@ -146,7 +146,7 @@ struct TORCH_API AccumulateGrad : public Node {
         // `variable_grad` for it to store the result. However, changing the
         // TensorImpl type of a tensor requires changing the tensor itself, and
         // thus in this case we have to change the grad tensor.
-        auto result = variable_grad + new_grad;
+        auto result = new_grad + variable_grad;
         CHECK_RESULT(result, variable);
         update_grad(std::move(result));
       } else {
@@ -177,9 +177,15 @@ struct TORCH_API AccumulateGrad : public Node {
         // which may break user code.
       }
     } else {
-      // Assumes operator+ result typically matches strides of first arg,
-      // and hopes variable_grad was originally created obeying layout contract.
-      auto result = variable_grad + new_grad;
+      at::Tensor result;
+      if (variable_grad.is_sparse() && !new_grad.is_sparse()) {
+        // CPU backend throws an error on sparse + dense, so prefer dense + sparse here.
+        result = new_grad + variable_grad;
+      } else {
+        // Assumes operator+ result typically matches strides of first arg,
+        // and hopes variable_grad was originally created obeying layout contract.
+        result = variable_grad + new_grad;
+      }
       CHECK_RESULT(result, variable);
       update_grad(std::move(result));
       // ^ We could enforce the contract more aggressively here by saying
