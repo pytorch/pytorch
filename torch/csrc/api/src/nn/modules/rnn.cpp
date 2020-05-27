@@ -282,8 +282,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
               options_base.hidden_size(),
               options_base.num_layers(),
               options_base.batch_first(),
-              /*bidirectional=*/false,
-              options_base.concat());
+              /*bidirectional=*/false);
           // Flatten Backward direction weights
           torch::_cudnn_rnn_flatten_weight(
               flat_weights_bwd,
@@ -293,8 +292,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
               options_base.hidden_size(),
               options_base.num_layers(),
               options_base.batch_first(),
-              /*bidirectional=*/false,
-              options_base.concat());
+              /*bidirectional=*/false);
           std::tie(flat_weights_, flat_weights_names_) =
               merge_direction_weights(flat_weights_fwd, flat_weights_bwd,
                                       weights_fwd_names, weights_fwd_names);
@@ -307,8 +305,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
               options_base.hidden_size(),
               options_base.num_layers(),
               options_base.batch_first(),
-              options_base.bidirectional(),
-              options_base.concat());
+              options_base.bidirectional());
         }
       }
     }

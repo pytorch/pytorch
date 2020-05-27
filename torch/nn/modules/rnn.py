@@ -173,8 +173,7 @@ class RNNBase(Module):
                                 self.input_size,
                                 rnn.get_cudnn_mode(self.mode),
                                 self.hidden_size, self.num_layers,
-                                self.batch_first, False,
-                                bool(self.concat))
+                                self.batch_first, False)
                 self._flat_weights = fwd_weights + bwd_weights
                 self._flat_weights_names = fwd_names + bwd_names
             else:
@@ -187,8 +186,7 @@ class RNNBase(Module):
                             self._flat_weights, (4 if self.bias else 2),
                             self.input_size, rnn.get_cudnn_mode(self.mode),
                             self.hidden_size, self.num_layers,
-                            self.batch_first, bool(self.bidirectional),
-                            bool(self.concat))
+                            self.batch_first, bool(self.bidirectional))
 
     def _apply(self, fn):
         ret = super(RNNBase, self)._apply(fn)

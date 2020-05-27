@@ -21,8 +21,7 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t input_size,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first,
-    bool fn_bidirectional, bool fn_type_2
-    ) {
+    bool fn_bidirectional) {
   AT_ERROR("_cudnn_rnn_flatten_weight: ATen not compiled with cuDNN support");
 }
 
@@ -32,7 +31,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& weight_buf_r, const Tensor& hx, const Tensor& cx,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes, bool type_2,
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state
     ) {
   AT_ERROR("_cudnn_rnn: ATen not compiled with cuDNN support");
@@ -44,7 +43,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     const Tensor& grad_cy_r,
     int64_t mode, int64_t hidden_size,
     int64_t num_layers, bool batch_first, double dropout,
-    bool train, bool bidirectional, IntArrayRef batch_sizes, bool type_2,
+    bool train, bool bidirectional, IntArrayRef batch_sizes,
     const Tensor& dropout_state, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
@@ -138,7 +137,7 @@ namespace {
       this->algo = algo;
     }
 
-    void set(int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, bool type_2, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
+    void set(int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
       this->set_mode(mode);
       this->hidden_size = hidden_size;
       this->num_layers = num_layers;
@@ -616,7 +615,7 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t input_size,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first,
-    bool fn_bidirectional, bool fn_type_2
+    bool fn_bidirectional
     ) {
 
   TORCH_CHECK(weight_arr.size() > 0,
@@ -626,7 +625,7 @@ Tensor _cudnn_rnn_flatten_weight(
   auto datatype = getCudnnDataType(any_param);
 
   RNNDescriptorParams rnn;
-  rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, fn_type_2, promote_rnn_math_type(datatype), datatype);
+  rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
 
   auto handle = getCudnnHandle();
   RNNDescriptor rnn_desc = rnn.descriptor(handle);
@@ -672,7 +671,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& weight_buf_r, const Tensor& hx, const Tensor& cx,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes, bool type_2,
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state
     ) {
   check_device(input_r, weight, {hx, cx});
@@ -685,7 +684,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   }
   RNNParams fn;
   auto datatype = getCudnnDataType(input);
-  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, type_2, promote_rnn_math_type(datatype), datatype);
+  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
@@ -814,7 +813,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
     const Tensor& grad_cy,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes, bool type_2,
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state, const Tensor& fn_reserve,
     std::array<bool, 3> output_mask
     ) {
@@ -825,7 +824,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
 
   RNNParams fn;
   auto datatype = getCudnnDataType(input);
-  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, type_2, promote_rnn_math_type(datatype), datatype);
+  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
@@ -937,7 +936,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
     const Tensor& output_r,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes, bool type_2,
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state, const Tensor& fn_reserve
     ) {
 
@@ -948,7 +947,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
 
   RNNParams fn;
   auto datatype = getCudnnDataType(input);
-  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, type_2, promote_rnn_math_type(datatype), datatype);
+  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
@@ -1046,7 +1045,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     const Tensor& grad_cy_r,
     int64_t mode, int64_t hidden_size,
     int64_t num_layers, bool batch_first, double dropout,
-    bool train, bool bidirectional, IntArrayRef batch_sizes, bool type_2,
+    bool train, bool bidirectional, IntArrayRef batch_sizes,
     const Tensor& dropout_state, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
@@ -1057,10 +1056,10 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
 
   Tensor dx, dhx, dcx;
   // NB: unconditionally compute this gradient, because it mutates reserve
-  std::tie(dx, dhx, dcx) = at::native::_cudnn_rnn_backward_input(input, weight_buf, hx, cx, output, grad_output, grad_hy, grad_cy, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, type_2, dropout_state, reserve, {output_mask[0], output_mask[1], output_mask[2]});
+  std::tie(dx, dhx, dcx) = at::native::_cudnn_rnn_backward_input(input, weight_buf, hx, cx, output, grad_output, grad_hy, grad_cy, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, {output_mask[0], output_mask[1], output_mask[2]});
   std::vector<Tensor> dw;
   if (output_mask[3]) {
-    dw = at::native::_cudnn_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, type_2, dropout_state, reserve);
+    dw = at::native::_cudnn_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve);
   }
   return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{dx, dhx, dcx, dw};
 }
@@ -1234,8 +1233,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
         hidden_size,
         num_layers,
         /*batch_first=*/false,
-        /*bidirectional=*/bidirectional,
-        /*type_2=*/type_2);
+        /*bidirectional=*/bidirectional);
   }
 
   auto weight_buf = try_get_weight_buf(
@@ -1278,8 +1276,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
         hidden_size,
         num_layers,
         /*batch_first=*/batch_first,
-        /*bidirectional=*/bidirectional,
-        /*type_2=*/type_2);
+        /*bidirectional=*/bidirectional);
   }
 
   auto weight_buf = try_get_weight_buf(
