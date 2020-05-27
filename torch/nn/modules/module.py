@@ -990,6 +990,12 @@ class Module(object):
         for elem in gen:
             yield elem
 
+    def reset_parameters(self):
+        r"""Resets the parameters of the submodules
+        """
+        for name in self._modules:
+            self._modules[name].reset_parameters()
+
     def children(self):
         r"""Returns an iterator over immediate children modules.
 
