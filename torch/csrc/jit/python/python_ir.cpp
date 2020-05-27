@@ -125,6 +125,18 @@ Node* findNode(Block* block, Symbol kind, bool recurse = true) {
   return findNode(blocks, kind, recurse);
 }
 
+Node* addNodeToBlock(Block* block, Value* input, Symbol kind)
+{
+  auto new_node = block->appendNode(
+    block->owningGraph()->create(kind));
+  auto new_input = new_node->addInput(input);
+  for (size_t i = 0; i < new_node->outputs().size(); i++) {
+    auto output = new_node->outputs()[i];
+    block->registerOutput(output);
+  }
+  return new_node;
+}
+
 std::string ConcretePythonOp::name() const {
   pybind11::gil_scoped_acquire gil;
   if (auto autograd = autogradFunction()) {
@@ -467,7 +479,13 @@ void initPythonIRBindings(PyObject* module_) {
             return py::make_iterator(b.outputs().begin(), b.outputs().end());
           })
       .def("returnNode", [](Block& b) { return b.return_node(); })
-      .def("paramNode", [](Block& b) { return b.param_node(); });
+      .def("paramNode", [](Block& b) { return b.param_node(); })
+      .def(
+          "addNode",
+          [](Block& b, Value& input, const char* str) {
+            return addNodeToBlock(&b, &input, Symbol::fromQualString(str));
+          }
+      );
 
 #define NS(name) def(#name, &Node ::name)
   py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")

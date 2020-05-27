@@ -686,13 +686,51 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
         self.run_test(ScriptModel(), (x1, x2, x3), atol=10e-5)
 
-    def test_squeeze(self):
+    def squeeze_model_tests(self, d, x1, x2):
         class Squeeze(torch.nn.Module):
             def forward(self, x):
-                return torch.torch.squeeze(x, dim=-2)
+                if d is not None:
+                    return torch.squeeze(x, dim=d)
+                else:
+                    return torch.squeeze(x)
 
-        x = torch.randn(2, 1, 4)
-        self.run_test(Squeeze(), x)
+        self.run_test(Squeeze(), x1, input_names=['input'], dynamic_axes={'input': {0: '0', 1: '1', 2: '2'}}, test_with_inputs=[x2])
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_squeeze(self):
+        x_squeeze = torch.randn(2, 1, 4)
+        x_noop = torch.randn(2, 2, 3)
+        self.squeeze_model_tests(1, x_squeeze, x_noop)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_squeeze_neg(self):
+        x_squeeze = torch.randn(2, 1, 4)
+        x_noop = torch.randn(2, 2, 3)
+        self.squeeze_model_tests(-2, x_squeeze, x_noop)
+
+    def test_squeeze_all_dims(self):
+        x_squeeze = torch.randn(2, 1, 4)
+        x_noop = torch.randn(2, 2, 3)
+        self.squeeze_model_tests(None, x_squeeze, x_noop)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_squeeze_no_op(self):
+        x_noop = torch.randn(2, 1, 4)
+        x_squeeze = torch.randn(2, 2, 1)
+        self.squeeze_model_tests(2, x_noop, x_squeeze)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_squeeze_runtime_dim(self):
+        class Squeeze(torch.nn.Module):
+            def forward(self, d1, d2):
+                t = torch.zeros(d1[0], d2[0])
+                return t.squeeze(0)
+
+        d1 = torch.tensor([1])
+        d3 = torch.tensor([3])
+        d4 = torch.tensor([4])
+        self.run_test(Squeeze(), (d1, d4), test_with_inputs=[(d3, d4)])
+        self.run_test(Squeeze(), (d3, d4), test_with_inputs=[(d1, d3)])
 
     def test_unsqueeze(self):
         class Unsqueeze(torch.nn.Module):
@@ -1572,7 +1610,7 @@ class TestONNXRuntime(unittest.TestCase):
         class Select(torch.nn.Module):
             def forward(self, x):
                 return x[:, 1]
-        
+
         x = torch.randn(3, 4)
         self.run_test(Select(), x)
 

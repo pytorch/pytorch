@@ -559,32 +559,35 @@ def select(g, self, dim, index):
 
 def squeeze(g, self, dim=None):
     if dim is None:
-        dims = []
-        for i, size in enumerate(self.type().sizes()):
-            if size == 1:
-                dims.append(i)
-    else:
-        dims = [sym_help._get_const(dim, 'i', 'dim')]
-        # Handle negative dims
-        for i, dim in enumerate(dims):
-            if dim < 0:
-                rank = self.type().dim()
-                if rank:
-                    warnings.warn("ONNX export squeeze with negative axis " + str(dim) +
-                                  " might cause the onnx model to be incorrect. " +
-                                  "Negative axis is not supported in ONNX. " +
-                                  "Axis is converted to " + str(dim + rank) +
-                                  " based on input shape at export time. " +
-                                  "Passing an tensor of different rank in execution will be incorrect.")
-                    dims[i] += rank
-                else:
-                    return _unimplemented('squeeze', 'negative axis with unknown input rank')
-            # # Handle input dimensions > 1, which are disallowed in the ONNX spec.
-            # if input_dims[dim] > 1:
-            #     return _unimplemented('squeeze', 'cannot apply squeeze operator on shape entries not equal to 1')
+        return g.op("Squeeze", self)
 
-    return g.op("Squeeze", self, axes_i=dims)
+    dims = [sym_help._get_const(dim, 'i', 'dim')]
+    # Handle negative dims
+    for i, dim in enumerate(dims):
+        if dim < 0:
+            rank = self.type().dim()
+            if rank:
+                warnings.warn("ONNX export squeeze with negative axis " + str(dim) +
+                              " might cause the onnx model to be incorrect. " +
+                              "Negative axis is not supported in ONNX. " +
+                              "Axis is converted to " + str(dim + rank) +
+                              " based on input shape at export time. " +
+                              "Passing an tensor of different rank in execution will be incorrect.")
+                dims[i] += rank
+            else:
+                return _unimplemented('squeeze', 'negative axis with unknown input rank')
 
+    # create 'cond' node (condition is shape[i]==1)
+    dim_constant = g.op("Constant", value_t=torch.tensor(dims))
+    size = sym_help._size_helper(g, self, dim_constant)
+    const_one = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
+    cond = g.op("Equal", size, const_one)
+    # create the 'If' node and add the 'then' and 'else' blocks to it.
+    if_node_outputs = g.op("If", cond)
+    if_node = if_node_outputs.node()
+    torch.onnx.utils._add_block(if_node, self, "onnx::Squeeze", axes_i=dims)
+    torch.onnx.utils._add_block(if_node, self, "onnx::Identity")
+    return if_node_outputs
 
 def prelu(g, self, weight):
     if self.isCompleteTensor():
