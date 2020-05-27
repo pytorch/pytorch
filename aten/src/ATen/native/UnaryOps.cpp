@@ -137,11 +137,11 @@ Tensor angle(const Tensor& self) {
 
 Tensor real(const Tensor& self) {
   if (self.is_complex()) {
-    auto float_tensor = at::native::view_complex_as_float(self);
+    auto real_tensor = at::view_as_real(self);
     if (self.numel() == 0) {
-      return float_tensor;
+      return real_tensor;
     } else {
-      return at::select(float_tensor, float_tensor.dim() - 1, 0);
+      return at::select(real_tensor, real_tensor.dim() - 1, 0);
     }
   } else {
     TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
@@ -152,11 +152,11 @@ Tensor real(const Tensor& self) {
 
 Tensor imag(const Tensor& self) {
   if (self.is_complex()) {
-    auto float_tensor = at::native::view_complex_as_float(self);
+    auto real_tensor = at::view_as_real(self);
     if (self.numel() == 0) {
-      return float_tensor;
+      return real_tensor;
     } else {
-      return at::select(float_tensor, float_tensor.dim() - 1, 1);
+      return at::select(real_tensor, real_tensor.dim() - 1, 1);
     }
   } else {
     TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");

@@ -13,9 +13,10 @@ inline std::vector<int64_t> computeStrideForComplex(IntArrayRef oldstride) {
   return res;
 }
 
-// expects as input a complex tensor and returns back a float tensor
-// containing the complex values in the last two dimensions
-inline Tensor view_complex_as_float(const Tensor& self) {
+// expects as input a complex tensor and returns back a tensor
+// with corresponding real dtype containing the complex values
+// in the last two dimensions
+Tensor view_as_real(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(self.is_complex());
   auto new_sizes = self.sizes().vec();
   const auto float_type = c10::toValueType(self.scalar_type());
