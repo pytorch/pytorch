@@ -192,6 +192,13 @@ std::vector<std::shared_ptr<Module>> Module::modules(bool include_self) const {
   return result;
 }
 
+void Module::reset_parameters() {
+  for (auto& child : children_) {
+    child.value()->reset_parameters();
+  }
+}
+
+
 OrderedDict<std::string, std::shared_ptr<Module>> Module::named_modules(
     const std::string& name_prefix,
     bool include_self) const {

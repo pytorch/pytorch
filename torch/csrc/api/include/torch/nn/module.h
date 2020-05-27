@@ -461,6 +461,11 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
       std::string name,
       std::shared_ptr<ModuleType> module);
 
+
+  /// Resets the parameters of the children modules
+  virtual void reset_parameters();
+
+
   /// Registers a submodule with this `Module`.
   ///
   /// This method deals with `ModuleHolder`s.
