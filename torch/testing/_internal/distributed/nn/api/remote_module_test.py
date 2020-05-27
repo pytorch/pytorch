@@ -49,8 +49,10 @@ class MyModule(nn.Module):
         return word, number, tensor
 
 
-def create_module(first_arg, first_kwarg=-1):
-    return MyModule(first_arg, first_kwarg=first_kwarg)
+def create_scripted_module(first_arg, first_kwarg=-1):
+    module = MyModule(first_arg, first_kwarg=first_kwarg)
+    scripted_module = torch.jit.script(module)
+    return scripted_module
 
 
 class RemoteModuleTest(RpcAgentTestFixture):
@@ -83,7 +85,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
         if ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE in modes:
             remote_module = RemoteModule(
                 dst_worker_name,
-                MyModule,
+                create_scripted_module,
                 args,
                 kwargs,
                 module_interface_cls=MyModuleInterface,
@@ -108,7 +110,10 @@ class RemoteModuleTest(RpcAgentTestFixture):
             return
         dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
         args = (torch.ones(1), 2, "3")
-        for remote_module in self._create_remote_module_iter(dst_worker_name):
+        for remote_module in self._create_remote_module_iter(dst_worker_name, modes=[
+            ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE,
+            # ModuleCreationMode.MODULE_CTOR,
+        ]):
             ret_fut = remote_module.forward_async(*args)
             ret = ret_fut.wait()
             self.assertEqual(ret, tuple(reversed(args)))

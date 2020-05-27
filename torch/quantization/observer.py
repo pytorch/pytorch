@@ -66,14 +66,6 @@ class ObserverBase(ABC, nn.Module):
     def calculate_qparams(self, **kwargs):
         pass
 
-    # Returns all quantization parameters that's needed
-    # for a quantize function call
-    # For instance, per channel obsserver will return
-    # scales, zero_points and axis
-    @abstractmethod
-    def get_qparams(self, **kwargs):
-        pass
-
     with_args = classmethod(_with_args)
 
 
@@ -185,19 +177,17 @@ class _ObserverBase(ObserverBase):
             zero_point = torch.max(zero_point, torch.tensor(qmin, device=device, dtype=zero_point.dtype))
             zero_point = torch.min(zero_point, torch.tensor(qmax, device=device, dtype=zero_point.dtype))
 
-        # if len(scale.shape) == 0:
-        #     scale = torch.tensor(scale)
-        #     scale = torch.tensor([scale])
-        # if len(zero_point.shape) == 0:
-        #     zero_point = torch.tensor(zero_point)
-        #     zero_point = torch.tensor([zero_point])
+        # For scalar values, cast them to Tensors of size 1 to keep the shape
+        # consistent with default values in FakeQuantize.
+        if len(scale.shape) == 0:
+            # TODO: switch to scale.item() after adding JIT support
+            scale = torch.tensor([float(scale)], dtype=scale.dtype)
+        if len(zero_point.shape) == 0:
+            # TODO: switch to zero_point.item() after adding JIT support
+            zero_point = torch.tensor([int(zero_point)], dtype=zero_point.dtype)
 
         return scale, zero_point
 
-    @torch.jit.export
-    def get_qparams(self):
-        r"""Get all quantization parameters needed for quantize call"""
-        return self.calculate_qparams()
 
 class MinMaxObserver(_ObserverBase):
     r"""Observer module for computing the quantization parameters based on the
@@ -545,11 +535,6 @@ class PerChannelMinMaxObserver(_ObserverBase):
     @torch.jit.export
     def calculate_qparams(self):
         return self._calculate_qparams(self.min_vals, self.max_vals)
-
-    @torch.jit.export
-    def get_qparams(self):
-        scales, zero_points = self.calculate_qparams()
-        return scales, zero_points, self.ch_axis
 
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
@@ -966,11 +951,9 @@ class NoopObserver(ObserverBase):
     def forward(self, x):
         return x
 
+    @torch.jit.export
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
-
-    def get_qparams(self):
-        return self.calculate_qparams()
 
 
 # Restrict activations to be in the range (0,127)

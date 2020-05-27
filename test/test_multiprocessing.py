@@ -274,7 +274,7 @@ class TestMultiprocessing(TestCase):
             q = ctx.Queue()
             q.put(data)
             new_data = q.get(timeout=1)
-            self.assertEqual(new_data, data, 0)
+            self.assertEqual(new_data, data, atol=0, rtol=0)
             storage_cdata = data[0]._cdata
             self.assertEqual(new_data[0]._cdata, storage_cdata)
             for t in new_data[1:]:
@@ -294,9 +294,9 @@ class TestMultiprocessing(TestCase):
             results = p.map(simple_pool_fill, buffers, 1)
             self.assertEqual(len(results), len(buffers))
             for r in results:
-                self.assertEqual(r, torch.ones(2, 2) * 5, 0)
+                self.assertEqual(r, torch.ones(2, 2) * 5, atol=0, rtol=0)
             for b in buffers:
-                self.assertEqual(b, torch.ones(2, 2) * 4, 0)
+                self.assertEqual(b, torch.ones(2, 2) * 4, atol=0, rtol=0)
 
             p.close()
             p.join()
@@ -353,7 +353,7 @@ class TestMultiprocessing(TestCase):
         p = SubProcess(t.share_memory_())
         p.start()
         p.join(1)
-        self.assertEqual(t, torch.ones(5, 5) * 3, 0)
+        self.assertEqual(t, torch.ones(5, 5) * 3, atol=0, rtol=0)
 
     @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
     def test_autograd_errors(self):

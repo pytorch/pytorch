@@ -147,7 +147,6 @@ class TestQuantizedFunctional(QuantizationTestCase):
         if qengine == 'qnnpack':
             if IS_PPC or TEST_WITH_UBSAN:
                 return
-            use_channelwise = False
 
         input_feature_map_size = (H, W)
         kernel_size = (kernel_h, kernel_w)

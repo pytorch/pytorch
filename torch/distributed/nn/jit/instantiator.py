@@ -1,28 +1,18 @@
 #!/usr/bin/python3
 import importlib
-import inspect
 import os
 import pathlib
 
 import torch
-from torch.distributed.nn.jit.code_template import CodeTemplate
-from torch.distributed.nn.jit.templates import TEMPLATES_DIR_PATH
-from torch.distributed.nn.jit.templates.instantiated import INSTANTIATED_TEMPLATE_DIR_PATH
+from torch.distributed.nn.jit.templates.instantiated import (
+    INSTANTIATED_TEMPLATE_DIR_PATH,
+)
+from torch.distributed.nn.jit.templates.remote_module_template import (
+    REMOTE_MODULE_TEMPLATE,
+)
 
 
-def infer_module_interface_cls(module_creator, module_interface_cls):
-    # If module_interface_cls is provided, use it.
-    if module_interface_cls is not None:
-        return module_interface_cls
-
-    # Otherwise, if module_creator is a class ctor, use it.
-    if inspect.isclass(module_creator):
-        return module_creator
-
-    raise ValueError(
-        "Can't infer module_interface_cls, "
-        "because neither module_interface_cls nor module_creator return type is provided."
-    )
+_FILE_PREFIX = "_remote_module_"
 
 
 def get_arg_return_types_from_interface(module_interface):
@@ -66,6 +56,19 @@ def get_arg_return_types_from_interface(module_interface):
     return args_str, arg_types_str, return_type_str
 
 
+def cleanup_generated_modules():
+    generated_module_paths = pathlib.Path(INSTANTIATED_TEMPLATE_DIR_PATH).glob(
+        f"{_FILE_PREFIX}.py"
+    )
+    for file_path in generated_module_paths:
+        try:
+            print(f"Removing {file_path}")
+            assert file_path.is_file(), f"Epect {file_path} to be a file"
+            file_path.unlink()
+        except Exception:
+            pass
+
+
 def _write(out_path, text):
     try:
         with open(out_path, "r") as f:
@@ -80,60 +83,8 @@ def _write(out_path, text):
         print("Skipped writing {}".format(out_path))
 
 
-def cleanup_generated_modules():
-    generated_module_paths = pathlib.Path(INSTANTIATED_TEMPLATE_DIR_PATH).glob("_remote_module*.py")
-    for file_path in generated_module_paths:
-        assert file_path.is_file(), f"Epect {file_path} to be a file"
-        print(f"Removing {file_path}")
-        file_path.unlink()
-
-
-def instantiate_remote_module_template(module_interface_cls, is_scriptable):
-    # Generate the template instance name.
-    module_interface_cls_name = torch.jit._qualified_name(module_interface_cls).replace(
-        ".", "_"
-    )
-    generated_module_name = f"_remote_module_{module_interface_cls_name}"
-
-    if is_scriptable:
-        args_str, arg_types_str, return_type_str = get_arg_return_types_from_interface(
-            module_interface_cls
-        )
-        kwargs_str = ""
-        arrow_and_return_type_str = f" -> {return_type_str}"
-        arrow_and_future_return_type_str = f" -> Future[{return_type_str}]"
-    else:
-        args_str = "*args"
-        kwargs_str = "**kwargs"
-        arg_types_str = "*args, **kwargs"
-        arrow_and_return_type_str = ""
-        arrow_and_future_return_type_str = ""
-
-    jit_decorator_str_map = dict(
-        jit_script_decorator="@torch.jit.script",
-        jit_export_decorator="@torch.jit.export",
-        jit_interface_decorator="@torch.jit.interface",
-    )
-    if is_scriptable is False:
-        jit_decorator_str_map = {
-            key: "" for key, value in jit_decorator_str_map.items()
-        }
-
-    remote_forward_template = CodeTemplate.from_file(
-        os.path.join(TEMPLATES_DIR_PATH, "remote_module.py.template")
-    )
-    env = dict(
-        generated_module_name=generated_module_name,
-        module_interface_cls_module_name=module_interface_cls.__module__,
-        module_interface_cls_name=module_interface_cls.__name__,
-        arg_types=arg_types_str,
-        arrow_and_return_type=arrow_and_return_type_str,
-        arrow_and_future_return_type=arrow_and_future_return_type_str,
-        args=args_str,
-        kwargs=kwargs_str,
-        **jit_decorator_str_map,
-    )
-    generated_code_text = remote_forward_template.substitute(env)
+def _do_instantiate_remote_module_template(generated_module_name, str_dict):
+    generated_code_text = REMOTE_MODULE_TEMPLATE.format(**str_dict)
     out_path = os.path.join(
         INSTANTIATED_TEMPLATE_DIR_PATH, f"{generated_module_name}.py"
     )
@@ -149,3 +100,58 @@ def instantiate_remote_module_template(module_interface_cls, is_scriptable):
         f"torch.distributed.nn.jit.templates.instantiated.{generated_module_name}"
     )
     return generated_module
+
+
+def instantiate_scriptable_remote_module_template(module_interface_cls):
+    if not getattr(module_interface_cls, "__torch_script_interface__", False):
+        raise ValueError(
+            f"module_interface_cls {module_interface_cls} must be a type object decorated by "
+            "@torch.jit.interface"
+        )
+
+    # Generate the template instance name.
+    module_interface_cls_name = torch.jit._qualified_name(module_interface_cls).replace(
+        ".", "_"
+    )
+    generated_module_name = f"{_FILE_PREFIX}{module_interface_cls_name}"
+
+    # Generate type annotation strs.
+    module_interface_cls_str = (
+        f"from {module_interface_cls.__module__} import "
+        f"{module_interface_cls.__name__} as module_interface_cls"
+    )
+    args_str, arg_types_str, return_type_str = get_arg_return_types_from_interface(
+        module_interface_cls
+    )
+    kwargs_str = ""
+    arrow_and_return_type_str = f" -> {return_type_str}"
+    arrow_and_future_return_type_str = f" -> Future[{return_type_str}]"
+
+    str_dict = dict(
+        module_interface_cls=module_interface_cls_str,
+        arg_types=arg_types_str,
+        arrow_and_return_type=arrow_and_return_type_str,
+        arrow_and_future_return_type=arrow_and_future_return_type_str,
+        args=args_str,
+        kwargs=kwargs_str,
+        jit_script_decorator="@torch.jit.script",
+        jit_export_decorator="@torch.jit.export",
+        jit_interface_decorator="@torch.jit.interface",
+    )
+    return _do_instantiate_remote_module_template(generated_module_name, str_dict)
+
+
+def instantiate_non_scriptable_remote_module_template():
+    generated_module_name = f"{_FILE_PREFIX}non_sriptable"
+    str_dict = dict(
+        module_interface_cls="module_interface_cls = None",
+        args="*args",
+        kwargs="**kwargs",
+        arg_types="*args, **kwargs",
+        arrow_and_return_type="",
+        arrow_and_future_return_type="",
+        jit_script_decorator="",
+        jit_export_decorator="",
+        jit_interface_decorator="",
+    )
+    return _do_instantiate_remote_module_template(generated_module_name, str_dict)

@@ -388,11 +388,7 @@ struct MutationRemover {
       auto schema_name = node->schema().name();
       auto new_schema = schema_name.substr(0, schema_name.size() - 1);
       auto new_node = graph_->create(Symbol::fromQualString(new_schema), 1);
-      new_node->setSourceRange(node->sourceRange());
-      new_node->setScope(node->scope());
-      if (auto cs = node->callstack()) {
-        new_node->setCallStack(*cs);
-      }
+      new_node->copyMetadata(node);
       new_node->insertBefore(node);
       for (Value* input : node->inputs()) {
         new_node->addInput(input);
