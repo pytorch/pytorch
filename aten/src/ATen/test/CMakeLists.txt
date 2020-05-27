@@ -58,6 +58,10 @@ if(CAFFE2_USE_CUDNN)
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cudnn_test.cpp)
 endif()
 
+list(APPEND ATen_VULKAN_TEST_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_test.cpp)
+
 # ---[ Send the lists to the parent scope.
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
+set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)

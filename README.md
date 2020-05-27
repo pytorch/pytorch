@@ -154,7 +154,7 @@ You will get a high-quality BLAS library (MKL) and you get controlled dependency
 Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
 
 If you want to compile with CUDA support, install
-- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9 or above
+- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9.2 or above
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
@@ -174,7 +174,7 @@ conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi
 On Linux
 ```bash
 # Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda90 # or [magma-cuda92 | magma-cuda100 | magma-cuda101 ] depending on your cuda version
+conda install -c pytorch magma-cuda102  # or [ magma-cuda101 | magma-cuda100 | magma-cuda92 ] depending on your cuda version
 ```
 
 #### Get the PyTorch Source
@@ -226,7 +226,6 @@ CUDA and MSVC have strong version dependencies, so even if you use VS 2017 / 201
 
 | CUDA version | Newest supported VS version                             |
 | ------------ | ------------------------------------------------------- |
-| 9.0 / 9.1    | Visual Studio 2017 Update 4 (15.4) (`_MSC_VER` <= 1911) |
 | 9.2          | Visual Studio 2017 Update 5 (15.5) (`_MSC_VER` <= 1912) |
 | 10.0         | Visual Studio 2017 (15.X) (`_MSC_VER` < 1920)           |
 | 10.1         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |
