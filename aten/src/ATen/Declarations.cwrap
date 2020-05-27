@@ -358,34 +358,6 @@
     - real max
 ]]
 [[
-  name: _th_cumsum
-  cname: cumsum
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long dim
-]]
-[[
-  name: _th_cumprod
-  cname: cumprod
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long dim
-]]
-[[
   name: _th_trace
   cname: trace
   variants:
