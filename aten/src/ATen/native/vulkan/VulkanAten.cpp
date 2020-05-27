@@ -53,6 +53,13 @@ at::Tensor empty_vulkan(
   return new_with_vtensor_vulkan(std::move(vt), options);
 }
 
+at::Tensor empty_strided_vulkan(
+    IntArrayRef size,
+    IntArrayRef stride,
+    const TensorOptions& options) {
+  return empty_vulkan(size, options, c10::nullopt);
+}
+
 at::Tensor& copy_from_vulkan_(at::Tensor& self, const at::Tensor& src) {
   TORCH_INTERNAL_ASSERT(
       src.device().type() == DeviceType::Vulkan,
