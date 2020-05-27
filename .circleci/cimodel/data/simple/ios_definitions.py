@@ -1,9 +1,7 @@
-class IOSVersion:
-    def __init__(self, parts):
-        self.parts = parts
+from cimodel.data.simple.util.versions import MultiPartVersion
 
-    def render_dots(self):
-        return ".".join(map(str, self.parts))
+
+IOS_VERSION = MultiPartVersion([11, 2, 1])
 
 
 class ArchVariant:
@@ -16,6 +14,10 @@ class ArchVariant:
         return "_".join([self.name] + extra_parts)
 
 
+def get_platform(arch_variant_name):
+    return "SIMULATOR" if arch_variant_name == "x86_64" else "OS"
+
+
 class IOSJob:
     def __init__(self, ios_version, arch_variant, is_org_member_context=True, extra_props=None):
         self.ios_version = ios_version
@@ -24,8 +26,8 @@ class IOSJob:
         self.extra_props = extra_props
 
     def gen_name_parts(self, with_version_dots):
-        version_string_parts = list(map(str, self.ios_version.parts))
-        version_parts = [self.ios_version.render_dots()] if with_version_dots else version_string_parts
+
+        version_parts = self.ios_version.render_dots_or_parts(with_version_dots)
         build_variant_suffix = "_".join([self.arch_variant.render(), "build"])
 
         return [
@@ -35,15 +37,18 @@ class IOSJob:
             build_variant_suffix,
         ]
 
+    def gen_job_name(self):
+        return "_".join(self.gen_name_parts(False))
+
     def gen_tree(self):
 
-        platform_name = "SIMULATOR" if self.arch_variant.name == "x86_64" else "OS"
+        platform_name = get_platform(self.arch_variant.name)
 
         props_dict = {
             "build_environment": "-".join(self.gen_name_parts(True)),
             "ios_arch": self.arch_variant.name,
             "ios_platform": platform_name,
-            "name": "_".join(self.gen_name_parts(False)),
+            "name": self.gen_job_name(),
             "requires": ["setup"],
         }
 
@@ -57,9 +62,9 @@ class IOSJob:
 
 
 WORKFLOW_DATA = [
-    IOSJob(IOSVersion([11, 2, 1]), ArchVariant("x86_64"), is_org_member_context=False),
-    IOSJob(IOSVersion([11, 2, 1]), ArchVariant("arm64")),
-    IOSJob(IOSVersion([11, 2, 1]), ArchVariant("arm64", True), extra_props={"op_list": "mobilenetv2.yaml"}),
+    IOSJob(IOS_VERSION, ArchVariant("x86_64"), is_org_member_context=False),
+    IOSJob(IOS_VERSION, ArchVariant("arm64")),
+    IOSJob(IOS_VERSION, ArchVariant("arm64", True), extra_props={"op_list": "mobilenetv2.yaml"}),
 ]
 
 

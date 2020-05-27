@@ -137,7 +137,7 @@ class QuantizationTestCase(TestCase):
         super().setUp()
         self.calib_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
         self.train_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
-        self.img_data = [(torch.rand(2, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
+        self.img_data = [(torch.rand(1, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
                          for _ in range(2)]
         self.img_data_1d = [(torch.rand(2, 3, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
                             for _ in range(2)]
@@ -632,6 +632,7 @@ class ModelForFusion(nn.Module):
         self.bn2 = nn.BatchNorm3d(2).to(dtype=torch.float)
         self.relu3 = nn.ReLU(inplace=True).to(dtype=torch.float)
         self.conv3 = nn.Conv1d(3, 3, 2).to(dtype=torch.float)
+        self.bn3 = nn.BatchNorm1d(3).to(dtype=torch.float)
         self.relu4 = nn.ReLU(inplace=True).to(dtype=torch.float)
         # don't quantize sub2
         self.sub2.qconfig = None
@@ -641,6 +642,7 @@ class ModelForFusion(nn.Module):
         x = x.squeeze(2)
         x = self.quant(x)
         x = self.conv3(x)
+        x = self.bn3(x)
         x = self.relu4(x)
         x = x.unsqueeze(2)
         y = x.unsqueeze(2)

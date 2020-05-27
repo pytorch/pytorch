@@ -15,20 +15,6 @@ namespace onnx {
 using namespace ::c10::onnx;
 
 }
-// Note: this is slow because it boxes every argument
-// and likely has to re-unbox them when calling the kernel.
-// Prefer calling c10::OperatorHandle::callUnboxed<Args...>(args...).
-template <class Result, class... Args>
-inline Result call_unboxed_super_slow_temp_shim(const c10::OperatorHandle& op, Args... args) {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
-  // Temporary hack: when the `Profiler` dispatch key is inserted, this call
-  // will fail since the `unpack()` ops return multiple values, however the
-  // boxing code currently does not support this. Instead, exclude the Profiler
-  // dispatch key and go through unboxed dispatch, avoiding boxing altogether
-  c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
-  return c10::Dispatcher::singleton().template call<Result, Args...>(
-      op, std::forward<Args>(args)...);
-}
 
 // Get the scale of the input to quantized op. There are two cases here
 // 1. For ops with output_scale specified in op signature, we get the output
@@ -219,9 +205,15 @@ void unpackQuantizedWeightsHelper(
       at::Tensor packed_weight = itr->second.toTensor();
       auto op = Dispatcher::singleton().findSchema({unpack_fn, ""});
       assert(op.has_value());
-      std::tie(unpacked_weight, bias) = call_unboxed_super_slow_temp_shim<
+      // Temporary hack: when the `Profiler` dispatch key is inserted, this call
+      // will fail since the `unpack()` ops return multiple values, however the
+      // boxing code currently does not support this. Instead, exclude the
+      // Profiler dispatch key and go through unboxed dispatch, avoiding boxing
+      // altogether
+      c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
+      std::tie(unpacked_weight, bias) = op->call<
           std::tuple<at::Tensor, c10::optional<at::Tensor>>,
-          at::Tensor>(*op, packed_weight);
+          at::Tensor>(packed_weight);
     }
 
     // Permute weights
