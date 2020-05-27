@@ -5,10 +5,18 @@
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
+#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+
+bool operator==(
+    const std::pair<IterDomain*, TensorView*>& p1,
+    const std::pair<IterDomain*, TensorView*>& p2) {
+  return p1.first->sameAs(p2.first) && p1.second == p2.second;
+}
+
 // all the way in the loop nest, grab predicate
 /*
 for( i : ceil(I/4) ) {
@@ -35,20 +43,24 @@ void UnrollPass::handle(Expr* expr) {
 }
 
 namespace {
-Int* getPredicate(const TensorView* const pred_tv, std::vector<Val*> indices) {
-  TensorIndex* ti = new TensorIndex(
-      pred_tv, IndexCompute::computeIndices(pred_tv, std::move(indices)));
+Bool* getPredicate(TensorView* tv, std::vector<Val*> inds) {
+  if (tv->nDims() > inds.size()) {
+    for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
+      if (tv->axis(i)->isReduction())
+        inds.insert(inds.begin() + i, new Int(0));
+    }
+  }
+  std::vector<Bool*> all_preds = PredicateCompute::computePredicates(
+      new TensorIndex(tv, IndexCompute::get(tv->domain(), inds)));
 
-  std::vector<Int*> all_preds = PredicateCompute::computePredicates(ti);
+  std::vector<Bool*> preds;
 
-  std::vector<Int*> preds;
-
-  for (Int* pred : all_preds)
-    if (!pred->isOneInt())
+  for (Bool* pred : all_preds)
+    if (!(pred->isConst()) || !(pred->isConst() && pred->value().value()))
       preds.push_back(pred);
 
   if (preds.size() == 0)
-    return new Int(1);
+    return new Bool(true);
 
   Val* cond = preds[0];
 
@@ -59,10 +71,9 @@ Int* getPredicate(const TensorView* const pred_tv, std::vector<Val*> indices) {
   TORCH_INTERNAL_ASSERT(
       cond->getValType().value() == ValType::Scalar &&
           cond->getDataType().value() == DataType::Bool,
-      "Error computing predicate, should be returning an Bool, but returning ",
-      cond);
-
-  return static_cast<Int*>(cond);
+      "Error computing predicate, should be returning a Bool, but returning ",
+      cond->getDataType().value());
+  return static_cast<Bool*>(cond);
 }
 } // namespace
 
@@ -78,17 +89,22 @@ void UnrollPass::handle(ForLoop* fl) {
     OptOutDispatch::handle(expr);
   }
 
-  TensorView* out;
-  bool has_TV_op = false;
+  TensorView* out = nullptr;
+  bool has_global = false;
   for (Expr* expr : fl->body().exprs())
     if (ir_utils::isTVOp(expr)) {
       // Predicate determining op for unroll
       out = ir_utils::asTV(expr->output(0));
-      has_TV_op = true;
-      break;
+      has_global = has_global || out->getMemoryType() == MemoryType::Global;
+      for (auto inp : expr->inputs())
+        if (ir_utils::isTV(inp))
+          has_global = has_global ||
+              ir_utils::asTV(inp)->getMemoryType() == MemoryType::Global;
     }
 
-  if (within_unroll && has_TV_op) {
+  bool has_TV_op = out != nullptr;
+
+  if (within_unroll && has_TV_op && has_global) {
     // Setup unrolled loop information:
 
     // Indices used to detect when we can unroll a loop safely
@@ -122,7 +138,7 @@ void UnrollPass::handle(ForLoop* fl) {
     }
 
     // Make predicates for the unrolling, and the epilogue
-    Int* unroll_predicate = getPredicate(out, unroll_pred_inds);
+    Bool* unroll_predicate = getPredicate(out, unroll_pred_inds);
 
     // Make the IfThenElse controlling the unrolling
     IfThenElse* unroll_ite =
@@ -144,14 +160,13 @@ void UnrollPass::handle(ForLoop* fl) {
 
     loop_replacement_map.insert({first_unroll, unroll_ite});
 
-    bool first_expr = true;
     for (auto expr : fl->body().exprs()) {
       if (!ir_utils::isTVOp(expr))
         continue;
 
       // Setup the expressions that need predicates around them.
-      Int* inline_predicate =
-          getPredicate(out, scope_utils::getLoopIndices(for_loops.back()));
+      Bool* inline_predicate = getPredicate(out, ir_utils::indices(for_loops));
+
       IfThenElse* inline_ite =
           new IfThenElse(inline_predicate, {expr}, {}, inner_most_inlined_loop);
       std::unordered_map<Expr*, Expr*> inline_replacement_map;
@@ -164,19 +179,24 @@ void UnrollPass::handle(ForLoop* fl) {
     // modify in place, so grab a copy of exprs first.
     std::vector<Expr*> exprs(
         fl->body().exprs().begin(), fl->body().exprs().end());
+
     for (auto expr : exprs) {
       if (!ir_utils::isTVOp(expr))
         continue;
 
-      // ! within_unroll
       TensorView* out = ir_utils::asTV(ir_utils::asExpr(expr)->outputs()[0]);
-      Int* pred =
-          getPredicate(out, scope_utils::getLoopIndices(for_loops.back()));
-      if (!pred->isOneInt()) {
-        IfThenElse* inline_ite =
-            new IfThenElse(pred, {expr}, {}, for_loops.back());
-        for_loops.back()->body().insert_before(expr, inline_ite);
-        for_loops.back()->body().erase(expr);
+
+      if (has_global) {
+        Bool* pred = getPredicate(out, ir_utils::indices(for_loops));
+
+        // If we need a predicate, put expr inside an if then else
+
+        if (!(pred->isConst()) || !(pred->isConst() && pred->value().value())) {
+          IfThenElse* inline_ite =
+              new IfThenElse(pred, {expr}, {}, for_loops.back());
+          for_loops.back()->body().insert_before(expr, inline_ite);
+          for_loops.back()->body().erase(expr);
+        }
       }
     }
   } // else (if(!within_unroll))
@@ -188,10 +208,6 @@ void UnrollPass::handle(ForLoop* fl) {
 // Generate the loop nest structure and place it in lowered_exprs
 void UnrollPass::computeMap() {
   FusionGuard fg(fusion_);
-
-  // Initialize members of the class
-  active_view = nullptr;
-  active_view_axis = 0;
 
   // Run through loop nests and further lower the expressions
   for (auto* expr : incoming_exprs_) {
@@ -233,7 +249,7 @@ void LoopNestGenerator::pushAlloc(TensorView* tv) {
       break;
     }
     if (alloc_pos < tv->nDims() &&
-        tv->getComputeAtAxis(alloc_pos)->parallel_method() ==
+        tv->getComputeAtAxis(alloc_pos).first->parallel_method() ==
             ParallelType::Unroll) {
       reset = false;
       break;
@@ -244,8 +260,8 @@ void LoopNestGenerator::pushAlloc(TensorView* tv) {
 
   std::vector<Val*> alloc_dims;
   for (auto i = alloc_pos; i < tv->nDims(); i++) {
-    IterDomain* dim = tv->getComputeAtAxis(i);
-    if (dim->isThreadDim())
+    IterDomain* dim = tv->getComputeAtAxis(i).first;
+    if (dim->isThreadDim() || dim->isReduction())
       continue;
     // TORCH_INTERNAL_ASSERT()
     alloc_dims.push_back(dim->extent());
@@ -272,19 +288,9 @@ void LoopNestGenerator::pushAlloc(TensorView* tv) {
   }
 }
 
-// Clear out the last recorded computeAtView
-void LoopNestGenerator::clearActiveView() {
-  active_view_axis = 0;
-  active_view = nullptr;
-}
-
-// Set active views from computeAtView
-void LoopNestGenerator::setActiveView(const TensorView* const tv) {
-  active_view_axis = tv->getComputeAtAxis();
-  active_view = tv->getComputeAtView();
-}
-
-void LoopNestGenerator::openFor(IterDomain* id) {
+void LoopNestGenerator::openFor(std::pair<IterDomain*, TensorView*> id_pair) {
+  compute_at_scope.push_back(id_pair);
+  IterDomain* id = id_pair.first;
   if (for_loops.size() > 0) {
     ForLoop* new_scope = scope_utils::openFor(for_loops.back(), id);
     for_loops.push_back(new_scope);
@@ -294,6 +300,14 @@ void LoopNestGenerator::openFor(IterDomain* id) {
   }
 }
 
+void LoopNestGenerator::popFor() {
+  TORCH_INTERNAL_ASSERT(
+      !for_loops.empty() && !compute_at_scope.empty(),
+      "Can't pop for loop, scope is empty.");
+  for_loops.pop_back();
+  compute_at_scope.pop_back();
+}
+
 void LoopNestGenerator::pushBack(Expr* expr) {
   if (for_loops.size() == 0)
     lowered_exprs.push_back(expr);
@@ -301,92 +315,87 @@ void LoopNestGenerator::pushBack(Expr* expr) {
     scope_utils::pushBack(for_loops.back(), expr);
 }
 
-/*
- *  This is one of the most complex parts of the code lowering logic. what we
- * need to do is: 1) Reduce loop structure
- *    - Reset all loops if active_view == nullptr (I'm not the last in a series
- * of computeAts)
- *    - Else reduce to active_view_axis if loop_depth > active_view_axis
- *  2) Set active_view(_axis)
- *    - If there is a computeAt set for this TV
- *  3) Open to compute At
- *    - If there is a computeAt set for this TV
- *  4) Allocate the output.
- *  5) If this is a reduction, initialize the output (open for loops to inner
- * most, predicate, initialize, close predicate, close to computeAt) 6) Open to
- * inner most loop 7) Open predicate 8) Run operation 9) Close predicate
- */
-
-// Update fors based on tv.
-void LoopNestGenerator::updateLoopNest(TensorView* tv) {
-  // 1) Reduce loop structure
-  if (active_view != nullptr) {
-    // - Else reduce to active_view_axis if loop_depth > active_view_axis
-    auto depth = for_loops.size();
-    for (auto i = depth; i > active_view_axis; i--) {
-      for_loops.pop_back();
-    }
-  }
-
-  if (tv->hasComputeAt()) {
-    //  2) Set active_view(_axis)
-    //    - If there is a computeAt set for this TV
-    setActiveView(tv);
-
-    //  3) Open to compute At
-    //    - If there is a computeAt set for this TV
-    auto depth = for_loops.size();
-
-    for (auto i = depth; i < tv->getComputeAtAxis(); i++)
+// Update for loop structure based on this TensorView
+void LoopNestGenerator::initReduction(TensorView* tv, Val* init_val) {
+  TORCH_INTERNAL_ASSERT(
+      tv->getComputeAtAxis() <= for_loops.size(),
+      "Initialization of reduction was trying to be placed at the wrong point in the loop nest.");
+  int depth = for_loops.size();
+  for (decltype(tv->nDims()) i = depth; i < tv->nDims(); i++) {
+    if (!tv->axis(i)->isReduction())
       openFor(tv->getComputeAtAxis(i));
-  } else {
-    if (active_view != nullptr)
-      // If we're the last computeAt of a block, active view should match this
-      // tv
-      TORCH_INTERNAL_ASSERT(
-          tv->sameAs(active_view),
-          "Error detected in code lowering. Expected ",
-          active_view,
-          " but recieved ",
-          tv);
-
-    clearActiveView();
   }
-  //  4) Allocate the output.
-  if (!FusionGuard::getCurFusion()->hasInput(tv) &&
-      !FusionGuard::getCurFusion()->hasOutput(tv)) {
-    pushAlloc(tv);
-  }
-  // TODO:
-  //  5) If this is a reduction, initialize the output (open for loops to inner
-  //  most, predicate, initialize, close predicate, close to computeAt)
+  auto clone = tv->unsafeClone();
+  pushBack(new UnaryOp(UnaryOpType::Set, clone, init_val));
 
-  //  6) Open to inner most loop
-  for (decltype(tv->nDims()) i = for_loops.size(); i < tv->nDims(); i++)
-    openFor(tv->getComputeAtAxis(i));
+  while (for_loops.size() > (unsigned int)depth)
+    popFor();
 }
 
-// Custom dispatch for Expr, want to find out of it's a TV op
+/*
+ *  This is one of the most complex parts of the code lowering logic. what we
+ * need to do is:
+ *  1) Reduce loop structure if needed
+ *  2) Open to compute At
+ *    - If there is a computeAt set for this TV
+ *  3) Allocate the output.
+ *  4) If this is a reduction, initialize the output (open for loops to inner
+ *       most, predicate, initialize, close predicate, close to computeAt)
+ *  5) Open to inner most loop
+ *  6) Run operation
+ *  7) Close to computeAt
+ */
 void LoopNestGenerator::handle(Expr* expr) {
-  if (!ir_utils::isTVOp(expr))
+  if (!ir_utils::isTVOp(expr)) {
+    for (auto out : expr->outputs())
+      pushBack(new Allocate(out, new Int(1)));
+    pushBack(expr);
     return;
+  }
 
   TensorView* out = static_cast<TensorView*>(expr->output(0));
-  updateLoopNest(out);
+  // 1) Reduce loop structure
+  while (compute_at_scope.size() > out->getComputeAtAxis() &&
+         compute_at_scope.back().second != out &&
+         compute_at_scope.back() !=
+             out->getComputeAtAxis((int)compute_at_scope.size() - 1)) {
+    popFor();
+  }
 
+  // 2) Open back up to computeAt
+  while (compute_at_scope.size() < out->getComputeAtAxis()) {
+    openFor(out->getComputeAtAxis((int)compute_at_scope.size()));
+  }
+
+  //  3) Allocate the output.
+  if (!FusionGuard::getCurFusion()->hasInput(out) &&
+      !FusionGuard::getCurFusion()->hasOutput(out))
+    pushAlloc(out);
+
+  //  4) If this is a reduction, initialize the output (open for loops to inner
+  //  most, predicate, initialize, F predicate, close to computeAt)
+  if (out->hasReduction())
+    initReduction(out, static_cast<ReductionOp*>(expr)->init());
+
+  //  5) Open to inner most loop
+  for (decltype(out->nDims()) i = for_loops.size(); i < out->nDims(); i++)
+    openFor(out->getComputeAtAxis(i));
+  //  6) Run expression
   pushBack(expr);
+
+  // 7) Reduce loop structure back to computeAt
+  while (!compute_at_scope.empty() &&
+         compute_at_scope.size() > out->getComputeAtAxis())
+    popFor();
 }
 
 // Generate the loop nest structure and place it in lowered_exprs
-void LoopNestGenerator::generate() {
+void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
   FusionGuard fg(fusion_);
 
   // Initialize members of the class
   lowered_exprs = std::vector<Expr*>();
-  active_view = nullptr;
-  active_view_axis = 0;
 
-  std::vector<Expr*> exprs = fusion_->exprs(true);
   for (auto* expr : exprs)
     handle(expr);
 }
