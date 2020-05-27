@@ -145,6 +145,8 @@ Tensor real(const Tensor& self) {
       return at::select(float_tensor, float_tensor.dim() - 1, 0);
     }
   } else {
+    TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
+    // Note: unreachable
     return self;
   }
 }
@@ -158,7 +160,7 @@ Tensor imag(const Tensor& self) {
       return at::select(float_tensor, float_tensor.dim() - 1, 1);
     }
   } else {
-    TORCH_CHECK(false, "imag is not implemented for real.");
+    TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
     // Note: unreachable
     return at::zeros_like(self);
   }
