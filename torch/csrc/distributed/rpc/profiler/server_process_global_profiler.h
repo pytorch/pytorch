@@ -78,11 +78,11 @@ TORCH_API std::vector<thread_event_lists> disableServer();
 //
 // This state indicates whether the server-side process-global profiling is on.
 // All RPC threads running server-side request callbacks queries this.
-bool serverEnabled();
+TORCH_API bool serverEnabled();
 
 // If server-side process-global profiling is on, use this API to get server
 // process global profiler state to set thread-local profiling state.
-std::shared_ptr<State> serverState();
+TORCH_API std::shared_ptr<State> serverState();
 
 } // namespace processglobal
 } // namespace profiler
