@@ -82,7 +82,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
           );
       THCudaCheck(cudaGetLastError());
       auto t = THTensor_wrap(output_tmp);
-      auto r = THTensor_wrap(output)[0];
+      auto r = THTensor_wrap(output);
       at::native::sum_out(r, t, at::IntArrayRef(std::vector<int64_t>{}), false, r.scalar_type());
       THCTensor_(free)(state, output_tmp);
     }
