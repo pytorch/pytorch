@@ -144,17 +144,7 @@ class TORCH_API Future final {
     error_ = std::move(error);
     completed_ = true;
 
-    // Move callbacks to a vector on the stack so we can access it without
-    // holding a lock
-    std::vector<std::function<void(void)>> cbs(std::move(callbacks_));
-    lock.unlock();
-    finished_cv_.notify_all();
-    // There is no need to protect callbacks_ with the lock.
-    // Once completed_ is set to true, no one can add new callback to the
-    // list. pass value_, error_ for callback to easily check state.
-    for (auto& callback : cbs) {
-      callback();
-    }
+    executeCallbacksOnCompletion(lock);
   }
 
   void markCompletedInternal(T value,
@@ -163,13 +153,19 @@ class TORCH_API Future final {
     value_ = std::move(value);
     completed_ = true;
 
+    executeCallbacksOnCompletion(lock);
+  }
+
+  // Runs all the callbacks attached to this future.
+  void executeCallbacksOnCompletion(std::unique_lock<std::mutex>& lock) {
     // Move callbacks to a vector on the stack so we can access it without
     // holding a lock
-    std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
+    std::vector<std::function<void(void)>> cbs(std::move(callbacks_));
     lock.unlock();
     finished_cv_.notify_all();
     // There is no need to protect callbacks_ with the lock.
+    // Once completed_ is set to true, no one can add new callbacks to the
+    // list.
     for (auto& callback : cbs) {
       callback();
     }
