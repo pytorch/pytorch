@@ -118,7 +118,7 @@ __global__ void CatArrayBatchedCopy(
 }
 
 void check_shape_except_dim(const Tensor &first, const Tensor &second,
-                            int dimension)
+                            int dimension, int index)
 {
   int first_dims = first.dim();
   int second_dims = second.dim();
@@ -134,7 +134,8 @@ void check_shape_except_dim(const Tensor &first, const Tensor &second,
     TORCH_CHECK(first_dim_size == second_dim_size,
         "Sizes of tensors must match except in dimension ", dim, ". Got ",
         static_cast<long long>(first_dim_size), " and ",
-        static_cast<long long>(second_dim_size));
+        static_cast<long long>(second_dim_size), " (The offending index is ",
+        index, ")");
   }
 }
 
@@ -349,7 +350,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     if (should_skip(tensor)) {
       continue;
     }
-    check_shape_except_dim(*notSkippedTensor, tensor, dimension);
+    check_shape_except_dim(*notSkippedTensor, tensor, dimension, i);
     cat_dim_size += at::native::size(tensor, dimension);
   }
 
