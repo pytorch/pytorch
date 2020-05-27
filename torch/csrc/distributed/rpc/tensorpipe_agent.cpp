@@ -492,16 +492,16 @@ void TensorPipeAgent::join() {
       // It is enough to wait for there to be no more active client calls, since
       // each server call corresponds to a client call for some other worker.
       callCountCV_.wait(lock, [this] { return clientActiveCalls_ == 0; });
+      // We'd like to immediately proceed with the allreduce, but it's a call
+      // that may block for some time, as it waits for other workers to also
+      // complete all their active client calls. While we call allreduce we must
+      // hold the mutex, or else the count we send to other workers may get
+      // stale (e.g., if some nested call happens in the meantime). But we can't
+      // hold the lock for an indeterminately long time, as that would block
+      // other operations (e.g., send). Thus we must release the lock and only
+      // re-acquire it when all workers are ready to proceed with the allreduce.
+      // We perform this synchronization using a barrier.
     }
-    // We'd like to immediately proceed with the allreduce, but it's a call that
-    // may block for some time, as it waits for other workers to also complete
-    // all their active client calls. While we call allreduce we must hold the
-    // mutex, or else the count we send to other workers may get stale (e.g.,
-    // if some nested call happens in the meantime). But we can't hold the lock
-    // for an indeterminately long time, as that would block other operations
-    // (e.g., send). Thus we must release the lock and only re-acquire it when
-    // all workers are ready to proceed with the allreduce. We perform this
-    // synchronization using a barrier.
     processGroup_->barrier()->wait();
     {
       std::unique_lock<std::mutex> lock(callCountMutex_);
@@ -702,14 +702,18 @@ std::string TensorPipeAgent::getDefaultIPAddress() {
 }
 
 void TensorPipeAgent::increaseCallCount(int32_t& count) {
-  std::unique_lock<std::mutex> lock(callCountMutex_);
-  ++count;
+  {
+    std::unique_lock<std::mutex> lock(callCountMutex_);
+    ++count;
+  }
   callCountCV_.notify_all();
 }
 
 void TensorPipeAgent::decreaseCallCount(int32_t& count) {
-  std::unique_lock<std::mutex> lock(callCountMutex_);
-  --count;
+  {
+    std::unique_lock<std::mutex> lock(callCountMutex_);
+    --count;
+  }
   callCountCV_.notify_all();
 }
 
