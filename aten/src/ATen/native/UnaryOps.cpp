@@ -142,7 +142,7 @@ Tensor real(const Tensor& self) {
       return at::empty({0}, self.options().dtype(c10::toValueType(self.scalar_type())));
     } else {
       auto float_tensor = at::native::view_complex_as_float(self);
-      return at::narrow(float_tensor, float_tensor.dim() - 1, 0, 1).view(self.sizes());
+      return at::select(float_tensor, float_tensor.dim() - 1, 0);
     }
   } else {
     return self;
@@ -155,7 +155,7 @@ Tensor imag(const Tensor& self) {
       return at::empty({0}, self.options().dtype(c10::toValueType(self.scalar_type())));
     } else {
       auto float_tensor = at::native::view_complex_as_float(self);
-      return at::narrow(float_tensor, float_tensor.dim() - 1, 1, 1).view(self.sizes());
+      return at::select(float_tensor, float_tensor.dim() - 1, 1);
     }
   } else {
     TORCH_CHECK(false, "imag is not implemented for real.");
