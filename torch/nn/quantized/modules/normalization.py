@@ -153,3 +153,279 @@ class GroupNorm(torch.nn.GroupNorm):
             mod.num_groups, mod.num_channels, mod.weight, mod.bias, float(scale), int(zero_point),
             mod.eps, mod.affine)
         return new_mod
+
+class InstanceNorm1d(torch.nn.InstanceNorm1d):
+    r"""Applies Instance Normalization over a 3D input (a mini-batch of 1D
+    inputs with optional additional channel dimension) as described in the paper
+    `Instance Normalization: The Missing Ingredient for Fast Stylization
+    <https://arxiv.org/abs/1607.08022>`__.
+
+    .. math::
+
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+    The mean and standard-deviation are calculated per-dimension separately
+    for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
+    of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
+
+    By default, this layer uses instance statistics computed from input data in
+    both training and evaluation modes.
+
+    If :attr:`track_running_stats` is set to ``True``, during training this
+    layer keeps running estimates of its computed mean and variance, which are
+    then used for normalization during evaluation. The running estimates are
+    kept with a default :attr:`momentum` of 0.1.
+
+    .. note::
+        This :attr:`momentum` argument is different from one used in optimizer
+        classes and the conventional notion of momentum. Mathematically, the
+        update rule for running statistics here is
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
+        where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
+        new observed value.
+
+    .. note::
+        :class:`InstanceNorm1d` and :class:`LayerNorm` are very similar, but
+        have some subtle differences. :class:`InstanceNorm1d` is applied
+        on each channel of channeled data like multidimensional time series, but
+        :class:`LayerNorm` is usually applied on entire sample and often in NLP
+        tasks. Additionally, :class:`LayerNorm` applies elementwise affine
+        transform, while :class:`InstanceNorm1d` usually don't apply affine
+        transform.
+
+    Args:
+        num_features: :math:`C` from an expected input of size
+            :math:`(N, C, L)` or :math:`L` from input of size :math:`(N, L)`
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        momentum: the value used for the running_mean and running_var computation. Default: 0.1
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters, initialized the same way as done for batch normalization.
+            Default: ``False``.
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics and always uses batch
+            statistics in both training and eval modes. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, C, L)`
+        - Output: :math:`(N, C, L)` (same shape as input)
+
+    Examples::
+
+        >>> # Without Learnable Parameters
+        >>> m = nn.InstanceNorm1d(100)
+        >>> # With Learnable Parameters
+        >>> m = nn.InstanceNorm1d(100, affine=True)
+        >>> input = torch.randn(20, 100, 40)
+        >>> output = m(input)
+    """
+    def __init__(self, num_features, weight, bias, scale, zero_point,
+                 eps=1e-5, momentum=0.1, affine=False,
+                 track_running_stats=False):
+        super(InstanceNorm1d, self).__init__(
+            num_features, eps, momentum, affine, track_running_stats)
+        self.weight = weight
+        self.bias = bias
+        self.scale = scale
+        self.zero_point = zero_point
+
+    def forward(self, input):
+        return torch.ops.quantized.instance_norm(
+            input, self.weight, self.bias, self.eps, self.scale,
+            self.zero_point)
+
+    def _get_name(self):
+        return 'QuantizedInstanceNorm1d'
+
+    @classmethod
+    def from_float(cls, mod):
+        activation_post_process = mod.activation_post_process
+        scale, zero_point = mod.activation_post_process.calculate_qparams()
+        new_mod = cls(
+            mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
+            mod.eps, mod.affine)
+        return new_mod
+
+class InstanceNorm2d(torch.nn.InstanceNorm2d):
+    r"""Applies Instance Normalization over a 4D input (a mini-batch of 2D inputs
+    with additional channel dimension) as described in the paper
+    `Instance Normalization: The Missing Ingredient for Fast Stylization
+    <https://arxiv.org/abs/1607.08022>`__.
+
+    .. math::
+
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+    The mean and standard-deviation are calculated per-dimension separately
+    for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
+    of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
+
+    By default, this layer uses instance statistics computed from input data in
+    both training and evaluation modes.
+
+    If :attr:`track_running_stats` is set to ``True``, during training this
+    layer keeps running estimates of its computed mean and variance, which are
+    then used for normalization during evaluation. The running estimates are
+    kept with a default :attr:`momentum` of 0.1.
+
+    .. note::
+        This :attr:`momentum` argument is different from one used in optimizer
+        classes and the conventional notion of momentum. Mathematically, the
+        update rule for running statistics here is
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
+        where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
+        new observed value.
+
+    .. note::
+        :class:`InstanceNorm2d` and :class:`LayerNorm` are very similar, but
+        have some subtle differences. :class:`InstanceNorm2d` is applied
+        on each channel of channeled data like RGB images, but
+        :class:`LayerNorm` is usually applied on entire sample and often in NLP
+        tasks. Additionally, :class:`LayerNorm` applies elementwise affine
+        transform, while :class:`InstanceNorm2d` usually don't apply affine
+        transform.
+
+    Args:
+        num_features: :math:`C` from an expected input of size
+            :math:`(N, C, H, W)`
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        momentum: the value used for the running_mean and running_var computation. Default: 0.1
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters, initialized the same way as done for batch normalization.
+            Default: ``False``.
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics and always uses batch
+            statistics in both training and eval modes. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, C, H, W)`
+        - Output: :math:`(N, C, H, W)` (same shape as input)
+
+    Examples::
+
+        >>> # Without Learnable Parameters
+        >>> m = nn.InstanceNorm2d(100)
+        >>> # With Learnable Parameters
+        >>> m = nn.InstanceNorm2d(100, affine=True)
+        >>> input = torch.randn(20, 100, 35, 45)
+        >>> output = m(input)
+    """
+    def __init__(self, num_features, weight, bias, scale, zero_point,
+                 eps=1e-5, momentum=0.1, affine=False,
+                 track_running_stats=False):
+        super(InstanceNorm2d, self).__init__(
+            num_features, eps, momentum, affine, track_running_stats)
+        self.weight = weight
+        self.bias = bias
+        self.scale = scale
+        self.zero_point = zero_point
+
+    def forward(self, input):
+        return torch.ops.quantized.instance_norm(
+            input, self.weight, self.bias, self.eps, self.scale,
+            self.zero_point)
+
+    def _get_name(self):
+        return 'QuantizedInstanceNorm2d'
+
+    @classmethod
+    def from_float(cls, mod):
+        activation_post_process = mod.activation_post_process
+        scale, zero_point = mod.activation_post_process.calculate_qparams()
+        new_mod = cls(
+            mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
+            mod.eps, mod.affine)
+        return new_mod
+
+class InstanceNorm3d(torch.nn.InstanceNorm3d):
+    r"""Applies Instance Normalization over a 5D input (a mini-batch of 3D inputs
+    with additional channel dimension) as described in the paper
+    `Instance Normalization: The Missing Ingredient for Fast Stylization
+    <https://arxiv.org/abs/1607.08022>`__.
+
+    .. math::
+
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+    The mean and standard-deviation are calculated per-dimension separately
+    for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
+    of size C (where C is the input size) if :attr:`affine` is ``True``.
+
+    By default, this layer uses instance statistics computed from input data in
+    both training and evaluation modes.
+
+    If :attr:`track_running_stats` is set to ``True``, during training this
+    layer keeps running estimates of its computed mean and variance, which are
+    then used for normalization during evaluation. The running estimates are
+    kept with a default :attr:`momentum` of 0.1.
+
+    .. note::
+        This :attr:`momentum` argument is different from one used in optimizer
+        classes and the conventional notion of momentum. Mathematically, the
+        update rule for running statistics here is
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
+        where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
+        new observed value.
+
+    .. note::
+        :class:`InstanceNorm3d` and :class:`LayerNorm` are very similar, but
+        have some subtle differences. :class:`InstanceNorm3d` is applied
+        on each channel of channeled data like 3D models with RGB color, but
+        :class:`LayerNorm` is usually applied on entire sample and often in NLP
+        tasks. Additionally, :class:`LayerNorm` applies elementwise affine
+        transform, while :class:`InstanceNorm3d` usually don't apply affine
+        transform.
+
+    Args:
+        num_features: :math:`C` from an expected input of size
+            :math:`(N, C, D, H, W)`
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        momentum: the value used for the running_mean and running_var computation. Default: 0.1
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters, initialized the same way as done for batch normalization.
+            Default: ``False``.
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics and always uses batch
+            statistics in both training and eval modes. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, C, D, H, W)`
+        - Output: :math:`(N, C, D, H, W)` (same shape as input)
+
+    Examples::
+
+        >>> # Without Learnable Parameters
+        >>> m = nn.InstanceNorm3d(100)
+        >>> # With Learnable Parameters
+        >>> m = nn.InstanceNorm3d(100, affine=True)
+        >>> input = torch.randn(20, 100, 35, 45, 10)
+        >>> output = m(input)
+    """
+    def __init__(self, num_features, weight, bias, scale, zero_point,
+                 eps=1e-5, momentum=0.1, affine=False,
+                 track_running_stats=False):
+        super(InstanceNorm3d, self).__init__(
+            num_features, eps, momentum, affine, track_running_stats)
+        self.weight = weight
+        self.bias = bias
+        self.scale = scale
+        self.zero_point = zero_point
+
+    def forward(self, input):
+        return torch.ops.quantized.instance_norm(
+            input, self.weight, self.bias, self.eps, self.scale,
+            self.zero_point)
+
+    def _get_name(self):
+        return 'QuantizedInstanceNorm3d'
+
+    @classmethod
+    def from_float(cls, mod):
+        activation_post_process = mod.activation_post_process
+        scale, zero_point = mod.activation_post_process.calculate_qparams()
+        new_mod = cls(
+            mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
+            mod.eps, mod.affine)
+        return new_mod

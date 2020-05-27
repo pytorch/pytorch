@@ -377,8 +377,14 @@ class TestPostTrainingStatic(QuantizationTestCase):
         def checkQuantized(model):
             self.checkNoPrepModules(model.layer_norm)
             self.checkNoPrepModules(model.group_norm)
+            self.checkNoPrepModules(model.instance_norm1d)
+            self.checkNoPrepModules(model.instance_norm2d)
+            self.checkNoPrepModules(model.instance_norm3d)
             self.assertEqual(type(model.layer_norm), nnq.LayerNorm)
             self.assertEqual(type(model.group_norm), nnq.GroupNorm)
+            self.assertEqual(type(model.instance_norm1d), nnq.InstanceNorm1d)
+            self.assertEqual(type(model.instance_norm2d), nnq.InstanceNorm2d)
+            self.assertEqual(type(model.instance_norm3d), nnq.InstanceNorm3d)
             test_only_eval_fn(model, self.calib_data)
             self.checkScriptable(model, self.calib_data)
 

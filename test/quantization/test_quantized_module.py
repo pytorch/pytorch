@@ -658,6 +658,46 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                          msg="GroupNorm module API failed, qY_ref\n{} vs qY\n{}"
                          .format(qY_ref, qY))
 
+    def test_instance_norm(self):
+        """Tests the correctness of the instancenorm{n}d modules.
+        The correctness is defined against the functional implementation.
+        """
+        x_scale = 10.0 / 256
+        x_zero_point = 0
+        y_scale = 5.0 / 256
+        y_zero_point = 127
+
+        dims_to_modules = [
+            ((1, 4, 8), torch.nn.InstanceNorm1d, nnq.InstanceNorm1d),
+            ((1, 4, 8, 1), torch.nn.InstanceNorm2d, nnq.InstanceNorm2d),
+            ((1, 4, 8, 1, 1), torch.nn.InstanceNorm3d, nnq.InstanceNorm3d),
+        ]
+
+        for dim_to_modules in dims_to_modules:
+            dims, float_cls, q_cls = dim_to_modules
+
+            X = (torch.randn(dims, dtype=torch.float) - 0.5) * 10
+            qX = torch.quantize_per_tensor(
+                X, x_scale, x_zero_point, dtype=torch.quint8)
+            dqX = qX.dequantize()
+
+            float_mod = float_cls(dims[1], affine=True).float()
+            float_mod.weight = torch.nn.Parameter(torch.rand(dims[1]))
+            float_mod.bias = torch.nn.Parameter(torch.rand(dims[1]))
+
+            dqY_ref = float_mod(dqX)
+            qY_ref = torch.quantize_per_tensor(
+                dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
+
+            quant_mod = q_cls(
+                dims[1], float_mod.weight, float_mod.bias, y_scale,
+                y_zero_point)
+            qY = quant_mod(qX)
+
+            self.assertEqual(
+                qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
+                msg="InstanceNorm module API failed, qY_ref\n{} vs qY\n{}"
+                .format(qY_ref, qY))
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
     @skipIfNoFBGEMM
