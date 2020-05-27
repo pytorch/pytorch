@@ -73,17 +73,15 @@ void TensorIterator::reorder_dimensions() {
   permute_dimensions(perm_);
 }
 
+// Returns the first non-CPU device, if present, or the CPU
+// if all operands are on the CPU.
 Device compute_device(at::ArrayRef<OperandInfo> operands) {
   for (auto& op : operands) {
-    if (!op.tensor.defined()) continue;
-    if (op.tensor.dim() == 0) continue;
-    return op.tensor.device();
+    if (op.tensor.defined() && !op.tensor.device().is_cpu()) {
+      return op.tensor.device();
+    }
   }
-  for (auto& op : operands) {
-    if (!op.tensor.defined()) continue;
-    if (op.tensor.unsafeGetTensorImpl()->is_wrapped_number()) continue;
-    return op.tensor.device();
-  }
+
   return kCPU;
 }
 

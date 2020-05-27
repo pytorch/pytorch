@@ -13771,21 +13771,19 @@ class TestTorchDeviceType(TestCase):
                 a = torch.tensor(a, device=devices[0])
                 b = torch.tensor(b, device=devices[1])
 
-                with self.assertRaises(RuntimeError):
+                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
                     op(a, b)
-                with self.assertRaises(RuntimeError):
+                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
                     op(b, a)
-                with self.assertRaises(RuntimeError):
+                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
                     op(a, cpu_tensor)
-                with self.assertRaises(RuntimeError):
+                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
                     op(cpu_tensor, a)
 
     # Tests that CPU scalars (including zero dim tensors) can be used in
     # binary operations with CUDA tensors.
     @onlyCUDA
     def test_cuda_cpu_scalar_binary_ops(self, device):
-        t_cuda = torch.randn(1, device=device).clamp(min=1e-3)
-        t_cpu = t_cuda.cpu()
         val_scalar = math.pi
         val_tensor = torch.tensor(val_scalar)
         for op in (operator.add, torch.add,
@@ -13796,14 +13794,14 @@ class TestTorchDeviceType(TestCase):
             for tensor_val in (1, (1,)):
                 t_cuda = torch.tensor(tensor_val, device=device)
                 t_cpu = t_cuda.cpu()
-            for val in (val_scalar, val_tensor):
-                cpu_result = op(t_cpu, val)
-                cuda_result = op(t_cuda, val)
-                self.assertEqual(cpu_result, cuda_result)
+                for val in (val_scalar, val_tensor):
+                    cpu_result = op(t_cpu, val)
+                    cuda_result = op(t_cuda, val)
+                    self.assertEqual(cpu_result, cuda_result)
 
-                reverse_cpu_result = op(val, t_cpu)
-                reverse_cuda_result = op(val, t_cuda)
-                self.assertEqual(reverse_cpu_result, reverse_cuda_result)
+                    reverse_cpu_result = op(val, t_cpu)
+                    reverse_cuda_result = op(val, t_cuda)
+                    self.assertEqual(reverse_cpu_result, reverse_cuda_result)
 
     @onlyCUDA
     def test_ceil_out_mismatch(self, device):
