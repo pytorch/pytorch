@@ -66,13 +66,15 @@ Tensor& set_tensor_(Tensor& result, const Tensor& source) {
 // way of getting the allocator to use for a device (c10::GetAllocator is not
 // the same as at::cuda::getCUDADeviceAllocator().
 Tensor& set_cpu_(Tensor& result) {
+  caffe2::TypeMeta dtype = result.dtype();
   Storage storage(
       Storage::use_byte_size_t(),
-      result.dtype(),
       0,
       c10::GetAllocator(kCPU),
       true);
-  return result.set_(storage, 0, {0}, {});
+  result.set_(storage, 0, {0}, {});
+  TORCH_INTERNAL_ASSERT(dtype == result.dtype());
+  return result;
 }
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
@@ -617,14 +619,15 @@ Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
 // TODO: Make this an aten function and replace as_strided_qtensorimpl once that is done.
 Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, QuantizerPtr quantizer) {
   auto result = detail::make_tensor<QTensorImpl>(
-      Storage(self.storage()), self.key_set(), quantizer);
+      Storage(self.storage()), self.key_set(), self.dtype(), quantizer);
   setStrided(result, size, stride, self.storage_offset());
   return result;
 }
 
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), self.key_set());
+  auto result = detail::make_tensor<TensorImpl>(
+      Storage(self.storage()), self.key_set(), self.dtype());
   setStrided(result, size, stride, storage_offset);
   return result;
 }
@@ -636,7 +639,7 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
       quantizer->qscheme() == QScheme::PER_TENSOR_AFFINE,
       "Setting strides is possible only on uniformly quantized tensor");
   auto result = detail::make_tensor<QTensorImpl>(
-      Storage(self.storage()), self.key_set(), quantizer);
+      Storage(self.storage()), self.key_set(), self.dtype(), quantizer);
   setStrided(result, size, stride, storage_offset);
   return result;
 }
@@ -772,13 +775,14 @@ Tensor alias_with_sizes_and_strides(
     auto impl = c10::make_intrusive<QTensorImpl>(
         Storage(self.storage()),
         self.key_set(),
+        self.dtype(),
         get_qtensorimpl(self)->quantizer());
     impl->set_storage_offset(self.storage_offset());
     impl->set_sizes_and_strides(sizes, strides);
     self_ = Tensor(std::move(impl));
   } else {
     auto impl = c10::make_intrusive<TensorImpl>(
-        Storage(self.storage()), self.key_set());
+        Storage(self.storage()), self.key_set(), self.dtype());
     impl->set_storage_offset(self.storage_offset());
     impl->set_sizes_and_strides(sizes, strides);
     self_ = Tensor(std::move(impl));
