@@ -1,6 +1,6 @@
-#include <shared_mutex>
-
 #include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
+
+#include <shared_mutex>
 
 namespace torch {
 namespace distributed {
@@ -15,6 +15,8 @@ class StateStackEntry;
 // Compiler error: 'shared_timed_mutex' is unavailable: introduced in
 // macOS 10.12
 using mutexType = std::mutex;
+// Compiler error: 'shared_lock' is unavailable: introduced in
+// macOS 10.12
 using rLockType = std::unique_lock<std::mutex>;
 using wLockType = std::unique_lock<std::mutex>;
 #else
@@ -70,10 +72,8 @@ class StateStackEntry {
 using namespace torch::autograd::profiler;
 
 void enableServer(const ProfilerConfig& new_config) {
-  TORCH_CHECK(
-      new_config.state == ProfilerState::CPU, "RPC module only support CPU");
   auto new_state = std::make_shared<State>(new_config);
-  StateStackEntry::push(new_state);
+  StateStackEntry::push(std::move(new_state));
 }
 
 std::vector<thread_event_lists> disableServer() {

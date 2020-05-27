@@ -671,10 +671,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
       )");
 
   module.def(
-      "_enable_server_process_global_profiler",
+      "__enable_server_process_global_profiler",
       &profiler::processglobal::enableServer);
   module.def(
-      "_disable_server_process_global_profiler",
+      "__disable_server_process_global_profiler",
       &profiler::processglobal::disableServer);
 
   Py_RETURN_TRUE;

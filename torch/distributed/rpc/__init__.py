@@ -19,8 +19,8 @@ if is_available():
     from . import api, backend_registry
     from .api import *  # noqa: F401
     from .server_process_global_profiler import (
-        enable_server_process_global_profiler,
-        disable_server_process_global_profiler,
+        _enable_server_process_global_profiler,
+        _disable_server_process_global_profiler,
     )
     import torch.distributed.autograd as dist_autograd
 

@@ -583,12 +583,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
           // std::shared_lock. The cost is in magnitude
           // of 10us. If server global profiler is enabled, we futher pay the
           // cost of thread local profiler state initialization .
-          // int64_t startTime = ::torch::autograd::profiler::getTime();
           bool isServerProcessGlobalProfilerEnabled =
               profiler::processglobal::serverEnabled();
-          // int64_t endTime = ::torch::autograd::profiler::getTime();
-          // LOG(ERROR) << "Test profiler enabled took: "
-          //            << (endTime - startTime) / 1000 << " us";
           std::shared_ptr<profiler::processglobal::State>
               serverProcessGlobalProfilerStatePtr;
           if (isServerProcessGlobalProfilerEnabled) {

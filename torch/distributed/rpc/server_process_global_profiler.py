@@ -4,15 +4,15 @@ import torch
 from torch.autograd import ProfilerConfig
 
 from . import (
-    _disable_server_process_global_profiler,
-    _enable_server_process_global_profiler,
+    __disable_server_process_global_profiler,
+    __enable_server_process_global_profiler,
 )
 
 
-def enable_server_process_global_profiler(config: ProfilerConfig):
+def _enable_server_process_global_profiler(config: ProfilerConfig):
     r"""
-    Turn on the state that indicates the server-side process-global profiling is
-    on. This enables all RPC threads running server-side request callbacks.
+    Turn on server-side process-global profiling.
+    This enables thread-local profiler on all RPC threads running server-side request callbacks.
 
     Arguments:
         config (torch.autograd.profiler.ProfilerConfig): This config specifies
@@ -22,21 +22,30 @@ def enable_server_process_global_profiler(config: ProfilerConfig):
     Returns:
         None
 
+    Example::
+        >>> import torch
+        >>> profiler_config = torch.autograd.ProfilerConfig(
+        >>>     /* profiler_state */ torch.autograd.ProfilerState.CPU,
+        >>>     /* record_input_shapes */ False,
+        >>>     /* profile_memory */ False,
+        >>> )
+        >>> rpc.enable_server_process_global_profiler(profiler_config)
+
     """
-    _enable_server_process_global_profiler(config)
+    __enable_server_process_global_profiler(config)
 
 
-def disable_server_process_global_profiler():
+def _disable_server_process_global_profiler():
     """
-    Turn off the state that indicates the server-side process-global profiling is
-    on. Aggregrate all profiling events recorded by RPC threads.
+    Turn off server-side process-global profiling.
+    Aggregrate all profiling events recorded by RPC threads.
 
     Returns:
         event_list (torch.autograd.profiler.EventList). A list that have helper
         methods like show record items in a pretty-print table,
         do averaging by grouping on keys and more.
     """
-    profile_ranges = _disable_server_process_global_profiler()
+    profile_ranges = __disable_server_process_global_profiler()
 
     process_global_function_events = []
     for profile_range in profile_ranges:

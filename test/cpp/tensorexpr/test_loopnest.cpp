@@ -20,7 +20,6 @@ namespace torch {
 namespace jit {
 
 using namespace torch::jit::tensorexpr;
-using namespace torch::jit::tensorexpr;
 
 void testExprSimple01() {
   KernelScope kernel_scope;
