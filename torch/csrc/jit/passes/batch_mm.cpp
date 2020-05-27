@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/jit_log.h>
 
 #include <ATen/ATen.h>
 #include <algorithm>
@@ -306,6 +307,7 @@ void BatchMMTreeReduce(Block* block) {
     for (Node* matmul : matmuls) {
       tree_reduce->addInput(matmul->inputs().at(1));
     }
+    GRAPH_DEBUG("Inserting ", getHeader(tree_reduce));
     root.node->output()->replaceAllUsesWith(tree_reduce->output());
     // NB: don't bother with cleaning up after yourself. We'll use DCE for that.
   }
@@ -432,6 +434,7 @@ void BatchMMSide(Block* block, AliasDb& alias_db) {
         /*num_outputs=*/mms.size());
     graph->insertNode(batch_mm);
     batch_mm->i_(Symbol::attr("side"), static_cast<int>(side));
+    GRAPH_DEBUG("Merging ", mms.size(), " into ", getHeader(batch_mm));
     Value* const_side = mms[0]->inputs().at(side == Side::LHS ? 0 : 1);
     batch_mm->addInput(const_side);
     for (size_t i = 0; i < mms.size(); ++i) {
@@ -495,6 +498,8 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
     // TODO(suo): make BatchMM mutability-safe
     return;
   }
+
+  GRAPH_DEBUG("Running BatchMMTreeReduce");
   AliasDb alias_db(graph);
   BatchMMTreeReduce(graph->block());
   BatchMMSide(graph->block(), alias_db);
@@ -502,6 +507,7 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
   // It's possible that transpose rearrangements have created sequences of
   // consecutive transposes that didn't exist before.
   PeepholeOptimize(graph);
+  GRAPH_DUMP("After BatchMMTreeReduce", graph);
 }
 
 } // namespace jit

@@ -824,8 +824,10 @@ TensorTypePtr TensorType::create(const at::Tensor& t) {
   if (!t.is_mkldnn() && !t.is_sparse()) {
     sizes = VaryingShape<int64_t>{t.sizes().vec()};
     strides = VaryingShape<int64_t>{t.strides().vec()};
+
+    const auto static NO_PROFILE_GRAD = std::getenv("NO_PROFILE_GRAD");
     return TensorType::create(
-        t.scalar_type(), t.device(), sizes, strides, t.requires_grad(), false, t.is_contiguous());
+        t.scalar_type(), t.device(), sizes, strides, (NO_PROFILE_GRAD ? c10::nullopt : c10::optional<bool>(t.requires_grad())), false, t.is_contiguous());
   }
 
   return TensorType::create(

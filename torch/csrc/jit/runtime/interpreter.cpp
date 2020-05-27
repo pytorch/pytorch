@@ -1317,7 +1317,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case TAIL_CALL: {
-            GRAPH_DEBUG("running TAIL_CALL for ", inst.X);
+            
             af.functions[inst.X]->ensure_defined();
             size_t remaining_bailout_depth =
                 frames.back().function->remaining_bailout_depth_ > 0
@@ -1326,7 +1326,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             const Code& code = af.functions[inst.X]
                                    ->get_executor()
                                    .getPlanFor(stack, remaining_bailout_depth)
-                                   .code;
+                                   .code;                       
+            GRAPH_DEBUG("running TAIL_CALL for ", inst.X, " executor = ", &af.functions[inst.X]->get_executor());
             size_t num_inputs = code.num_inputs();
             size_t base_pointer = frames.back().base_pointer;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);

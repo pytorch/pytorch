@@ -98,7 +98,7 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
     modeldef = rnn_creator(**creator_args)
 
     [train_batch(modeldef) for _ in range(warmup)]
-
+    print("@#$WARMUP IS DONE!", file=sys.stderr)
     results = [train_batch(modeldef) for _ in range(nloops)]
     fwd_times, bwd_times = zip(*results)
 
