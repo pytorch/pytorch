@@ -363,8 +363,10 @@ Tensor bernoulli_impl(const Tensor& self, c10::optional<Generator> gen) {
 template<template<typename> class bernoulli_scalar_kernel, typename RNG>
 Tensor bernoulli_impl(const Tensor& self, double p, c10::optional<Generator> gen) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-//  result.bernoulli_(p, gen);
-  bernoulli_impl_<bernoulli_scalar_kernel, RNG>(result, p, gen);
+  //  bernoulli_impl_<bernoulli_scalar_kernel, RNG>(result, p, gen);
+  //  Segmentation fault would occurred in CI test while handling above method.
+  //  use result.bernoulli_(p, gen) instead.
+  result.bernoulli_(p, gen);
   return result;
 }
 
