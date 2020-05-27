@@ -429,6 +429,7 @@ class NormalizationQATTestModel(torch.nn.Module):
         self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.quant = torch.quantization.QuantStub()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
+        self.layer_norm = torch.nn.LayerNorm((8))
         self.group_norm = torch.nn.GroupNorm(2, 8)
         self.instance_norm1d = torch.nn.InstanceNorm1d(4, affine=True)
         self.instance_norm2d = torch.nn.InstanceNorm2d(4, affine=True)
@@ -438,6 +439,7 @@ class NormalizationQATTestModel(torch.nn.Module):
     def forward(self, x):
         x = self.quant(x)
         x = self.fc1(x)
+        x = self.layer_norm(x)
         x = self.group_norm(x.unsqueeze(-1))
         x = self.instance_norm1d(x.reshape((2, 4, 2)))
         x = self.instance_norm2d(x.unsqueeze(-1))
