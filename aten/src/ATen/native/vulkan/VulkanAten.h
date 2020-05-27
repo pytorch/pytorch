@@ -27,5 +27,17 @@ at::Tensor vulkan_convolution_prepacked(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups);
+
+// No-op batch norm at the moment to be able to profile models with batch_norm
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
+vulkan_batch_norm_noop(
+    const at::Tensor& input,
+    const at::Tensor& weight /* optional */,
+    const at::Tensor& bias /* optional */,
+    const at::Tensor& running_mean /* optional */,
+    const at::Tensor& running_var /* optional */,
+    double momentum,
+    double eps);
+
 } // namespace native
 } // namespace at

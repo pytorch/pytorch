@@ -315,5 +315,19 @@ Tensor mean_vulkan(
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
+vulkan_batch_norm_noop(
+    const at::Tensor& input,
+    const at::Tensor& weight /* optional */,
+    const at::Tensor& bias /* optional */,
+    const at::Tensor& running_mean /* optional */,
+    const at::Tensor& running_var /* optional */,
+    double momentum,
+    double eps) {
+  at::Tensor save_mean, save_var;
+  auto reserve = at::empty({0}, input.options().dtype(kByte));
+  return std::make_tuple(input, save_mean, save_var, reserve);
+}
+
 } // namespace native
 } // namespace at

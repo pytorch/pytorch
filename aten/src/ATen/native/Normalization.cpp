@@ -11,6 +11,9 @@
 #include <ATen/native/batch_norm.h>
 
 #include <vector>
+#ifdef USE_VULKAN
+#include <ATen/native/vulkan/VulkanAten.h>
+#endif
 
 static const int MIOPEN_DIM_MAX = 5;
 
@@ -430,6 +433,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                running_var.defined() ? running_var.contiguous() : running_var,
                training, momentum, eps),
              std::make_tuple(1));
+  }
+
+  bool use_vulkan = input.is_vulkan();
+  if (use_vulkan) {
+    return std::tuple_cat(
+              at::native::vulkan_batch_norm_noop(input, weight, bias, running_mean, running_var, momentum, eps),
+              std::make_tuple(3));
   }
 
   Tensor reserve = at::empty({0}, input.options().dtype(kByte));
