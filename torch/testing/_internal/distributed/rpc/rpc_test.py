@@ -317,9 +317,21 @@ def add_use_future_cb(to, x, y, z):
 
 
 def add_use_future_set_result(to, x, y, z):
-    out = rpc.Future()
+    out = torch.futures.Future()
     fut = rpc.rpc_async(to, torch.add, args=(x, y))
-    fut.add_done_callback(lambda fut : out.set_result(fut.wait() + z))
+    fut.then(lambda fut : out.set_result(fut.wait() + z))
+    return out.wait()
+
+
+def add_use_future_nested_cb(to, x, y, z):
+    out = torch.futures.Future()
+
+    def callback(fut1):
+        fut2 = rpc.rpc_async(to, torch.add, args=(fut1.wait(), z))
+        fut2.then(lambda fut2 : out.set_result(fut2.wait()))
+
+    fut1 = rpc.rpc_async(to, torch.add, args=(x, y))
+    fut1.then(callback)
     return out.wait()
 
 
@@ -2625,6 +2637,25 @@ class RpcTest(RpcAgentTestFixture):
         with TemporaryFileName() as fname:
             with self.assertRaisesRegex(RuntimeError, errMsg):
                 rpc.remote(dst, fail_on_fut, args=(fut,))
+
+    def _test_future_cb(self, func):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        ret = rpc.rpc_sync(
+            dst1,
+            func,
+            args=(dst2, torch.ones(2, 2), 1, 2)
+        )
+        self.assertEqual(ret, torch.ones(2, 2) + 1 + 2)
+
+    @dist_init
+    def test_future_in_rpc(self):
+        self._test_future_cb(add_use_future_set_result)
+
+    @dist_init
+    def test_future_nested_callback(self):
+        self._test_future_cb(add_use_future_nested_cb)
 
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
