@@ -1,5 +1,5 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
-load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
+load("@pybind11_bazel//:build_defs.bzl", "pybind_extension", "pybind_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("//third_party:substitution.bzl", "template_rule")
@@ -1941,7 +1941,7 @@ cc_library(
     ],
 )
 
-cc_library(
+pybind_library(
     name = "torch_python",
     srcs = libtorch_python_core_sources + [":python_generated_code"],
     hdrs = glob([
