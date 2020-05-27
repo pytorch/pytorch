@@ -11479,6 +11479,10 @@ class TestTorchDeviceType(TestCase):
         # negative nbins throws
         with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
             torch.histc(torch.tensor([1], dtype=torch.float, device=device), bins=-1)
+        # empty tensor
+        actual = torch.histc(torch.tensor([], device=device), min=0, max=3)
+        expected = torch.zeros(100, dtype=torch.float, device=device)
+        self.assertEqual(expected, actual)
 
         # without nbins
         actual = torch.histc(
