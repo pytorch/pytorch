@@ -787,7 +787,7 @@ class TORCH_API MultiheadAttentionImpl
  public:
   void reset() override;
 
-  void _reset_parameters();
+  void reset_parameters();
 
   /// The options with which this `Module` was constructed.
   MultiheadAttentionOptions options;

@@ -802,9 +802,9 @@ class MultiheadAttention(Module):
 
         self.add_zero_attn = add_zero_attn
 
-        self._reset_parameters()
+        self.reset_parameters()
 
-    def _reset_parameters(self):
+    def reset_parameters(self):
         if self._qkv_same_embed_dim:
             xavier_uniform_(self.in_proj_weight)
         else:

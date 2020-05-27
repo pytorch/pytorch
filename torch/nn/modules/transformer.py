@@ -61,7 +61,7 @@ class Transformer(Module):
             decoder_norm = LayerNorm(d_model)
             self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
 
-        self._reset_parameters()
+        self.reset_parameters()
 
         self.d_model = d_model
         self.nhead = nhead
@@ -135,7 +135,7 @@ class Transformer(Module):
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
         return mask
 
-    def _reset_parameters(self):
+    def reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
 
         for p in self.parameters():

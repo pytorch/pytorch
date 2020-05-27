@@ -481,10 +481,10 @@ void MultiheadAttentionImpl::reset() {
     bias_k = {};
     bias_v = {};
   }
-  _reset_parameters();
+  reset_parameters();
 }
 
-void MultiheadAttentionImpl::_reset_parameters() {
+void MultiheadAttentionImpl::reset_parameters() {
   using namespace torch::nn::init;
   if (_qkv_same_embed_dim) {
     xavier_uniform_(in_proj_weight);
