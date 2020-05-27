@@ -147,20 +147,6 @@
       - real value
 ]]
 [[
-  name: _th_scatter_add_
-  return: argument 0
-  cname: scatterAdd
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants: function
-  arguments:
-    - THTensor* self
-    - long dim
-    - THIndexTensor* index
-    - THTensor* src
-]]
-[[
   name: _th_equal
   cname: equal
   cpu_bool: True
@@ -370,34 +356,6 @@
     - long bins
     - real min
     - real max
-]]
-[[
-  name: _th_cumsum
-  cname: cumsum
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long dim
-]]
-[[
-  name: _th_cumprod
-  cname: cumprod
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long dim
 ]]
 [[
   name: _th_trace

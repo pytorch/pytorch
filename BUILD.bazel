@@ -293,6 +293,11 @@ filegroup(
 )
 
 filegroup(
+    name = "aten_native_vulkan_stub",
+    srcs = glob(["aten/src/ATen/native/vulkan/stub/*.cpp"]),
+)
+
+filegroup(
     name = "ATen_QUANTIZED_SRCS",
     srcs = glob(
         [
@@ -641,6 +646,7 @@ cc_library(
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",
         ":aten_native_xnnpack",
+        ":aten_native_vulkan_stub",
         ":aten_src_ATen_config",
         ":generated_cpp",
     ],

@@ -15,6 +15,9 @@
 #include <ATen/TypeDefault.h>
 #include <ATen/CPUType.h>
 #include <ATen/QuantizedCPUType.h>
+#ifdef USE_VULKAN
+#include <ATen/VulkanType.h>
+#endif
 #endif
 
 namespace at {
@@ -36,6 +39,10 @@ inline Tensor Tensor::cuda() const {
 
 inline Tensor Tensor::hip() const {
   return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
+}
+
+inline Tensor Tensor::vulkan() const {
+  return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
@@ -128,6 +135,15 @@ inline bool Tensor::is_mkldnn() const {
 
 inline bool is_mkldnn(Tensor self) {
   return self.is_mkldnn();
+}
+
+inline bool Tensor::is_vulkan() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_vulkan();
+}
+
+inline bool is_vulkan(Tensor self) {
+  return self.is_vulkan();
 }
 
 inline bool Tensor::is_quantized() const {

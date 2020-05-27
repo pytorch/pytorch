@@ -1240,10 +1240,6 @@ def abs(g, self):
     return g.op("Abs", self)
 
 
-def absolute(g, self):
-    return g.op("Abs", self)
-
-
 def log(g, self):
     return g.op("Log", self)
 
