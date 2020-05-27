@@ -141,6 +141,7 @@ def get_ignored_functions():
         torch.autocast_increment_nesting,
         torch.autocast_decrement_nesting,
         torch.nn.functional.hardswish,
+        torch.is_vulkan_available,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,

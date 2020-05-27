@@ -1092,6 +1092,12 @@ Stmt* PolynomialTransformer::mutate(const For* v) {
     return new Block({});
   }
 
+  if (auto* block = dynamic_cast<Block*>(body_new)) {
+    if (block->nstmts() == 0) {
+      return new Block({});
+    }
+  }
+
   if (var == var_new && start == start_new && stop == stop_new &&
       body == body_new) {
     return (Stmt*)v;
