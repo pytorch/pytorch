@@ -604,4 +604,45 @@ getClassConverter() {
       classConverter;
   return classConverter;
 }
+
+intrusive_ptr<ivalue::Future> collectAll(
+    List<intrusive_ptr<ivalue::Future>> srcs) {
+  struct Ctx {
+    explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs)
+        : remaining(srcs.size()),
+          srcFutures(std::move(srcs)),
+          asIvalue(srcFutures),
+          dstFuture(make_intrusive<ivalue::Future>(asIvalue.type())) {}
+    std::atomic<int32_t> remaining{0};
+    List<intrusive_ptr<ivalue::Future>> srcFutures;
+    IValue asIvalue;
+    intrusive_ptr<ivalue::Future> dstFuture;
+  };
+
+  auto ctx = std::make_shared<Ctx>(std::move(srcs));
+  std::function<void()> func = [ctx]() {
+    if (--ctx->remaining == 0) {
+      ctx->dstFuture->markCompleted(ctx->asIvalue);
+    }
+  };
+  for (int32_t tot = ctx->srcFutures.size(), i = 0; i < tot; ++i) {
+    ctx->srcFutures.get(i)->addCallback(func);
+  }
+  if (ctx->srcFutures.size() == 0) {
+    ctx->dstFuture->markCompleted(ctx->asIvalue);
+  }
+  return ctx->dstFuture;
+}
+
+intrusive_ptr<ivalue::Future> collectAll(
+    std::vector<intrusive_ptr<ivalue::Future>> srcs) {
+  auto typePtr =
+      !srcs.empty() ? srcs[0]->type() : FutureType::create(NoneType::get());
+  List<intrusive_ptr<ivalue::Future>> asList(typePtr);
+  asList.reserve(srcs.size());
+  for (auto&& s : srcs) {
+    asList.push_back(std::move(s));
+  }
+  return collectAll(asList);
+}
 } // namespace c10
