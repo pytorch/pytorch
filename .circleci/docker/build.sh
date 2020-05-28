@@ -162,7 +162,16 @@ case "$image" in
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
-    VISION=tes
+    VISION=yes
+    ;;
+  pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9)
+    CUDA_VERSION=10.2
+    CUDNN_VERSION=7
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
     ;;
   pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9)
     CUDA_VERSION=10.2
@@ -171,7 +180,7 @@ case "$image" in
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
-    VISION=tes
+    VISION=yes
     ;;
   pytorch-linux-xenial-rocm-py3.6-clang7)
     ANACONDA_PYTHON_VERSION=3.6
@@ -182,6 +191,14 @@ case "$image" in
     ROCM=yes
     # newer cmake version required
     CMAKE_VERSION=3.6.3
+    ;;
+  pytorch-linux-bionic-rocm-py3.6-clang7)
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM=yes
     ;;
 esac
 

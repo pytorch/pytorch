@@ -31,17 +31,6 @@ ValType promote_type(const ValType& t1, const ValType& t2) {
   return t1 < t2 ? t1 : t2;
 }
 
-c10::optional<UnaryOpType> cast_type(const DataType& t1, const DataType& t2) {
-  if ((DataType::Null == t1) || (DataType::Null == t2))
-    return c10::nullopt;
-  if ((DataType::Half == t1) && (DataType::Float == t2))
-    return UnaryOpType::HalfToFloat;
-  if ((DataType::Float == t1) && (DataType::Half == t2))
-    return UnaryOpType::FloatToHalf;
-  // In theory there could be stronger real check here in the future
-  return c10::nullopt;
-}
-
 template <typename T>
 struct _enum_class_hash {
   size_t operator()(T v) const {
@@ -80,7 +69,7 @@ static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
     {UnaryOpType::Asin, "asinf"},
     {UnaryOpType::Atan, "atanf"},
     {UnaryOpType::Atanh, "atanhf"},
-    //{UnaryOpType::Cast,       "cast"},
+    {UnaryOpType::Cast, "cast"},
     {UnaryOpType::Ceil, "ceilf"},
     {UnaryOpType::Cos, "cosf"},
     {UnaryOpType::Cosh, "coshf"},
@@ -88,11 +77,9 @@ static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
     {UnaryOpType::Expm1, "expm1f"},
     {UnaryOpType::Erf, "erff"},
     {UnaryOpType::Erfc, "erfcf"},
-    {UnaryOpType::FloatToHalf, "__float2half"},
     {UnaryOpType::Floor, "floorf"},
     {UnaryOpType::Frac, "frac"},
     {UnaryOpType::Gelu, "gelu"},
-    {UnaryOpType::HalfToFloat, "__half2float"},
     {UnaryOpType::Lgamma, "lgammaf"},
     {UnaryOpType::Log, "logf"},
     {UnaryOpType::Log10, "log10f"},
@@ -104,6 +91,7 @@ static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
     {UnaryOpType::Relu, "relu"},
     {UnaryOpType::Rsqrt, "rsqrtf"},
     {UnaryOpType::Round, "roundf"},
+    {UnaryOpType::Set, "set"},
     {UnaryOpType::Sigmoid, "sigmoid"},
     {UnaryOpType::Sin, "sinf"},
     {UnaryOpType::Sinh, "sinhf"},
@@ -112,7 +100,8 @@ static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
     {UnaryOpType::Tanh, "tanhf"},
     {UnaryOpType::Trunc, "truncf"}};
 static _enum_unordered_map<UnaryOpType, std::string>
-    unary_op_type_inline_op_string_map{{UnaryOpType::Neg, "-"}};
+    unary_op_type_inline_op_string_map{{UnaryOpType::Neg, "-"},
+                                       {UnaryOpType::Set, ""}};
 static _enum_unordered_map<BinaryOpType, std::string> binary_op_type_string_map{
     {BinaryOpType::Add, "add"},
     {BinaryOpType::Atan2, "atan2f"},
@@ -168,6 +157,11 @@ static _enum_unordered_map<ParallelType, std::string> parallel_type_string_map{
     {ParallelType::Unroll, "Unroll"},
     {ParallelType::Serial, "Serial"}};
 
+static _enum_unordered_map<MemoryType, std::string> memory_type_string_map{
+    {MemoryType::Local, "register"},
+    {MemoryType::Shared, "shared"},
+    {MemoryType::Global, "global"}};
+
 static _enum_unordered_map<at::ScalarType, DataType> at_type_map{
     {at::ScalarType::Bool, DataType::Bool},
     {at::ScalarType::Float, DataType::Float},
@@ -190,6 +184,23 @@ static std::unordered_set<BinaryOpType, _enum_class_hash<BinaryOpType>>
                        BinaryOpType::LE,
                        BinaryOpType::LT,
                        BinaryOpType::NE};
+
+template <typename T>
+struct _enum_pair_hash {
+  size_t operator()(std::pair<T, T> p) const {
+    return static_cast<size_t>(p.first) ^ static_cast<size_t>(p.second);
+  }
+};
+
+template <typename KeyType, typename ValType>
+using _enum_pair_unordered_map = std::unordered_map<
+    std::pair<KeyType, KeyType>,
+    ValType,
+    _enum_pair_hash<KeyType>>;
+
+static _enum_pair_unordered_map<DataType, std::string> supported_casts{
+    {{DataType::Float, DataType::Half}, "__float2half"},
+    {{DataType::Half, DataType::Float}, "__half2float"}};
 
 bool is_logical_op(const BinaryOpType& bot) {
   return logical_binary_ops.count(bot) > 0;
@@ -252,17 +263,22 @@ TORCH_CUDA_API std::ostream& operator<<(
   return out << ternary_op_type_string_map[totype];
 }
 
-std::string stringify(const ParallelType ptype) {
+TORCH_CUDA_API std::ostream& operator<<(
+    std::ostream& out,
+    const ParallelType ptype) {
   TORCH_INTERNAL_ASSERT(
       parallel_type_string_map.count(ptype) != 0,
-      "No string found for parallel type.");
-  return parallel_type_string_map[ptype];
+      "No string found for provided parallel type.");
+  return out << parallel_type_string_map[ptype];
 }
 
 TORCH_CUDA_API std::ostream& operator<<(
     std::ostream& out,
-    const ParallelType ptype) {
-  return out << stringify(ptype);
+    const MemoryType mtype) {
+  TORCH_INTERNAL_ASSERT(
+      memory_type_string_map.count(mtype) != 0,
+      "No string found for provided memory type.");
+  return out << memory_type_string_map[mtype];
 }
 
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(
@@ -292,6 +308,16 @@ std::string stringifyThreadSize(const ParallelType ptype) {
       ptype);
   return thread_size_string_map[ptype];
 }
+
+TORCH_CUDA_API c10::optional<std::string> cast_func_str(
+    const std::pair<DataType, DataType>& cast) {
+  if (supported_casts.count(cast) == 0) {
+    return c10::nullopt;
+  } else {
+    return supported_casts[cast];
+  }
+}
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

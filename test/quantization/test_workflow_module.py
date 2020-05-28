@@ -536,6 +536,34 @@ class TestFakeQuantizePerTensor(TestCase):
         self.assertNotEqual(fq_module.scale, scale)
         self.assertNotEqual(fq_module.zero_point, zero_point)
 
+    def test_fake_quant_preserves_qparam_shapes_for_activations(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.linear = nn.Linear(4, 4)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        m = Model()
+
+        m.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+        torch.quantization.prepare_qat(m, inplace=True)
+
+        scale_shape_before = m.linear.activation_post_process.scale.shape
+        zero_point_shape_before = m.linear.activation_post_process.zero_point.shape
+
+        x = torch.rand(4, 4, 4, 4)
+        m(x)
+        scale_shape_after = m.linear.activation_post_process.scale.shape
+        zero_point_shape_after = m.linear.activation_post_process.zero_point.shape
+        self.assertEqual(
+            scale_shape_before, scale_shape_after,
+            msg="FakeQuant scale shape must stay consistent")
+        self.assertEqual(
+            zero_point_shape_before, zero_point_shape_after,
+            msg="FakeQuant zero_point shape must stay consistent")
 
 
 class TestFakeQuantizePerChannel(TestCase):
@@ -682,7 +710,7 @@ class TestDistributed(QuantizationTestCase):
             self.assertEqual(
                 buffer_ids_before,
                 buffer_ids_after,
-                "{}: Buffers must be modified in place".format(str(observer)))
+                msg="{}: Buffers must be modified in place".format(str(observer)))
 
     def test_fake_quant_preserves_buffers(self):
         """
@@ -704,7 +732,7 @@ class TestDistributed(QuantizationTestCase):
         self.assertEqual(
             buffer_ids_before,
             buffer_ids_after,
-            "FakeQuant: Buffers must be modified in place")
+            msg="FakeQuant: Buffers must be modified in place")
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
