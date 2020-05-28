@@ -562,7 +562,7 @@ class TestLRScheduler(TestCase):
         gc.collect()
         del optim
         self.assertEqual(
-            gc.collect(), 0, "Optimizer should be garbage-collected on __del__")
+            gc.collect(), 0, msg="Optimizer should be garbage-collected on __del__")
 
     def test_old_pattern_warning(self):
         epochs = 35
@@ -1348,7 +1348,7 @@ class TestLRScheduler(TestCase):
     def test_swalr_no_anneal(self):
         epochs, swa_start, swa_lr = 10, 5, 0.01
         initial_lrs = [group['lr'] for group in self.opt.param_groups]
-        targets = [[lr] * (swa_start + 1) + [swa_lr] * (epochs - swa_start - 1) 
+        targets = [[lr] * (swa_start + 1) + [swa_lr] * (epochs - swa_start - 1)
                    for lr in initial_lrs]
         swa_scheduler = SWALR(self.opt, anneal_epochs=1, swa_lr=swa_lr)
         self._test_swalr(swa_scheduler, None, targets, swa_start, epochs)
@@ -1379,7 +1379,7 @@ class TestLRScheduler(TestCase):
         epochs, swa_start, swa_lrs, anneal_epochs = 15, 5, [0.01, 0.02], 4
         mult_factor = 0.9
         scheduler = MultiplicativeLR(self.opt, lr_lambda=lambda epoch: mult_factor)
-        swa_scheduler = SWALR(self.opt, anneal_epochs=anneal_epochs, 
+        swa_scheduler = SWALR(self.opt, anneal_epochs=anneal_epochs,
                               anneal_strategy="linear", swa_lr=swa_lrs)
 
         def anneal_coef(t):
@@ -1641,7 +1641,7 @@ class SWATestDNN(torch.nn.Module):
     def forward(self, x):
         x = self.fc1(x)
         x = self.bn(x)
-        return x 
+        return x
 
 
 class SWATestCNN(torch.nn.Module):
@@ -1656,7 +1656,7 @@ class SWATestCNN(torch.nn.Module):
 
     def forward(self, x):
         x = self.conv1(x)
-        x = self.bn(x) 
+        x = self.bn(x)
         return x
 
 
@@ -1760,7 +1760,7 @@ class TestSWAUtils(TestCase):
                 if i == 0:
                     updated_averaged_params.append(p.clone())
                 else:
-                    updated_averaged_params.append((p_avg * alpha + 
+                    updated_averaged_params.append((p_avg * alpha +
                                                    p * (1 - alpha)).clone())
             averaged_dnn.update_parameters(dnn)
             averaged_params = updated_averaged_params
@@ -1789,18 +1789,18 @@ class TestSWAUtils(TestCase):
             total_num += preactivations.shape[0]
 
             preactivation_sum += torch.sum(preactivations, dim=0)
-            preactivation_squared_sum += torch.sum(preactivations**2, dim=0)  
+            preactivation_squared_sum += torch.sum(preactivations**2, dim=0)
 
         preactivation_mean = preactivation_sum / total_num
-        preactivation_var = preactivation_squared_sum / total_num 
+        preactivation_var = preactivation_squared_sum / total_num
         preactivation_var = preactivation_var - preactivation_mean**2
 
         update_bn(dl_xy, dnn, device=x.device)
         self.assertEqual(preactivation_mean, dnn.bn.running_mean)
-        self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1)
+        self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1, rtol=0)
 
         def _reset_bn(module):
-            if issubclass(module.__class__, 
+            if issubclass(module.__class__,
                           torch.nn.modules.batchnorm._BatchNorm):
                 module.running_mean = torch.zeros_like(module.running_mean)
                 module.running_var = torch.ones_like(module.running_var)
@@ -1808,12 +1808,12 @@ class TestSWAUtils(TestCase):
         dnn.apply(_reset_bn)
         update_bn(dl_xy, dnn, device=x.device)
         self.assertEqual(preactivation_mean, dnn.bn.running_mean)
-        self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1)
+        self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1, rtol=0)
         # using the dl_x loader instead of dl_xy
         dnn.apply(_reset_bn)
         update_bn(dl_x, dnn, device=x.device)
         self.assertEqual(preactivation_mean, dnn.bn.running_mean)
-        self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1)
+        self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1, rtol=0)
 
     def test_update_bn_dnn(self):
         # Test update_bn for a fully-connected network with BatchNorm1d
