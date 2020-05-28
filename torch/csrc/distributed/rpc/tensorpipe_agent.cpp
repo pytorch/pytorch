@@ -428,7 +428,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
 
               threadPool_.run(
                   [this,
-                   futureResponseMessage,
+                   futureResponseMessage{std::move(futureResponseMessage)},
                    responseMessage{std::move(responseMessage)}]() mutable {
                     if (responseMessage.type() == MessageType::EXCEPTION) {
                       futureResponseMessage->setError(std::string(
@@ -441,7 +441,6 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                   });
             });
       });
-
   return futureResponseMessage;
 }
 
