@@ -1459,7 +1459,6 @@ bool _use_cudnn_rnn_flatten_weight() {
       bool train,                                                           \
       bool bidirectional,                                                   \
       bool type_2) {                                                        \
-    TORCH_INTERNAL_ASSERT(false, ROCM_DISCLAIMER);                          \
     Tensor _fwd_hx;                                                         \
     Tensor _bwd_hx;                                                         \
     std::tie(_fwd_hx, _bwd_hx) = split_rnn_hidden(hx);                      \
@@ -1517,6 +1516,7 @@ bool _use_cudnn_rnn_flatten_weight() {
         bool train,                                                         \
         bool bidirectional,                                                 \
         bool type_2) {                                                      \
+    TORCH_INTERNAL_ASSERT(false, ROCM_DISCLAIMER);                          \
     Tensor _fwd_hx;                                                         \
     Tensor _bwd_hx;                                                         \
     std::tie(_fwd_hx, _bwd_hx) = split_rnn_hidden(hx);                      \
