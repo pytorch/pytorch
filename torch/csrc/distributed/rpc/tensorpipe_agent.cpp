@@ -3,8 +3,6 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-#include <tensorpipe/tensorpipe.h>
-
 namespace torch {
 namespace distributed {
 namespace rpc {
