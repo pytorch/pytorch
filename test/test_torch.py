@@ -154,7 +154,11 @@ class AbstractTestCases:
                 for name in dir(ns):
                     if name.startswith('_') or name in skipnames:
                         continue
-                    var = getattr(ns, name)
+                    if name in ['real', 'imag']:
+                        y = torch.randn(1, dtype=torch.cfloat)
+                        var = getattr(y, name)
+                    else:
+                        var = getattr(ns, name)
                     if not isinstance(var, checked_types):
                         continue
                     doc = var.__doc__
