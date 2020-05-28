@@ -306,6 +306,12 @@ class TestConcatDataset(TestCase):
         with self.assertRaisesRegex(AssertionError, "does not support IterableDataset"):
             ConcatDataset([it1, d1])
 
+    def test_get_idxs(self):
+        result = ConcatDataset([[0], [1]])
+        self.assertEqual(2, len(result))
+        self.assertEqual((0, 0), result.get_idxs(0))
+        self.assertEqual((0, 1), result.get_idxs(1))
+
 
 # takes in dummy var so this can also be used as a `worker_init_fn`
 def set_faulthander_if_available(_=None):
