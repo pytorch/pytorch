@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <algorithm>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -71,9 +72,11 @@ void replication_pad1d_out_cpu_template(
   int pad_l = paddingSize[0];
   int pad_r = paddingSize[1];
 
-  TORCH_CHECK(input_.numel() > 0
-      && (input_.ndimension() == 2 || input_.ndimension() == 3),
-      "non-empty 2D or 3D (batch mode) tensor expected for input");
+  // allow empty batch size but not other dimensions.
+  TORCH_CHECK(
+       ((input_.ndimension() == 2 && input_.size(1) != 0) ||
+        (input_.ndimension() == 3 && input_.size(1) != 0 && input_.size(2) != 0)),
+       "2D or 3D (batch mode) tensor expected for input");
 
   if (input_.ndimension() == 3)
   {
@@ -90,7 +93,6 @@ void replication_pad1d_out_cpu_template(
   TORCH_CHECK(owidth >= 1,
       "input (W: ", iwidth, ") is too small."
       " Calculated output W: ", owidth);
-
 
   /* get contiguous input */
   auto input = input_.contiguous();

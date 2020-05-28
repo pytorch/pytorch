@@ -1978,14 +1978,14 @@ new_module_tests = [
         module_name='ReplicationPad2d',
         constructor_args=(3,),
         cpp_constructor_args='torch::nn::ReplicationPad2dOptions(3)',
-        input_size=(0, 3, 10, 10, 10),
+        input_size=(0, 3, 10, 10),
         desc="zero_batch",
     ),
     dict(
         module_name='ReplicationPad3d',
         constructor_args=(3,),
         cpp_constructor_args='torch::nn::ReplicationPad3dOptions(3)',
-        input_size=(0, 3, 10, 10),
+        input_size=(0, 3, 10, 10, 10),
         desc="zero_batch",
     ),
     dict(

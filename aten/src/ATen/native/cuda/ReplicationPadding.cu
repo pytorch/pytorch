@@ -217,14 +217,16 @@ void replication_pad1d_out_cuda_template(
   int numBatch = 1;
 
   int numInputDims = input.ndimension();
-  TORCH_CHECK(input.numel() > 0 && (numInputDims == 2 || numInputDims == 3),
+  TORCH_CHECK(
+      (numInputDims == 2 && input.size(1) != 0) ||
+      (numInputDims == 3 && input.size(1) != 0 && input.size(2) != 0),
       "2D or 3D (batch mode) tensor expected for input")
-
-    if (numInputDims == 3) {
-      numBatch = input.size(0);
-      planeDim++;
-      dimw++;
-    }
+  
+  if (numInputDims == 3) {
+    numBatch = input.size(0);
+    planeDim++;
+    dimw++;
+  }
 
   int numPlanes = input.size(planeDim);
   int inputW = input.size(dimw);
@@ -234,13 +236,20 @@ void replication_pad1d_out_cuda_template(
       "input (W: ", inputW, ")is too small."
       " Calculated output W: ", outputW);
 
+  if (numInputDims == 2) {
+    output.resize_({numPlanes, outputW});    
+  }
+  else {
+    output.resize_({numBatch, numPlanes, outputW});
+  }
+  
+  if (input.numel() == 0) {
+    return;
+  }
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "replication_pad1d_cuda", [&] {
-
-
       if (numInputDims == 2) {
-        output.resize_({numPlanes, outputW});
         auto input_ = input.unsqueeze(0);
         auto output_ = output.unsqueeze(0);
         auto devInput = input_.packed_accessor64<scalar_t, 3>();
@@ -255,7 +264,6 @@ void replication_pad1d_out_cuda_template(
         replication_pad_forward_kernel1d <<<gridSize, blockSize, 0,
           at::cuda::getCurrentCUDAStream()>>>(devInput, devOutput, padL, padR);
       } else {
-        output.resize_({numBatch, numPlanes, outputW});
         auto devInput = input.packed_accessor64<scalar_t, 3>();
         auto devOutput = output.packed_accessor64<scalar_t, 3>();
 
@@ -305,6 +313,10 @@ void replication_pad1d_backward_out_cuda_template(
 
   gradInput.resize_as_(input);
   gradInput.zero_();
+
+  if (gradInput.numel() == 0) {
+    return;
+  }
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "replication_pad1d_backward_cuda", [&] {
