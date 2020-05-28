@@ -1755,16 +1755,20 @@ class TestCuda(TestCase):
         AbstractTestCases._TestTorchMixin._test_scatter_add_mult_index_base(self, lambda t: t.cuda())
 
     def test_tensor_scatterFill(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
+                                                             'scatter_', True, test_bounds=False)
 
     def test_tensor_scatter_complex(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False, test_complex=True)
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
+                                                             'scatter_', test_bounds=False, test_complex=True)
 
     def test_tensor_scatterAdd_complex(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False, test_complex=True)
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
+                                                             'scatter_add_', test_bounds=False, test_complex=True)
 
     def test_tensor_scatterFill_complex(self):
-        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False, test_complex=True)
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
+                                                             'scatter_', True, test_bounds=False, test_complex=True)
 
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
