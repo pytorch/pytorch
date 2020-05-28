@@ -23,7 +23,7 @@ GLOW_LOWERED_BATCHNORM = False
 
 # Test the lowered LayerNorm op
 class LayerNorm(TestCase):
-    def test_layernorm(self):
+    def _test_layernorm(self):
         size = 3
         input_channels = 2
         batch_size = 4
