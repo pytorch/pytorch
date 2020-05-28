@@ -5384,7 +5384,7 @@
   variants: method, function
   dispatch:
     CPU: min
-    CUDA: legacy::cuda::_th_min
+    CUDA: min
     QuantizedCPU: min_quant
   supports_named_tensor: True
 
@@ -5399,7 +5399,7 @@
   variants: method, function
   dispatch:
     CPU: max
-    CUDA: legacy::cuda::_th_max
+    CUDA: max
     QuantizedCPU: max_quant
   supports_named_tensor: True
 
@@ -5641,17 +5641,6 @@
   dispatch:
     CPU: legacy::cpu::_th_mode_out
     CUDA: legacy::cuda::_th_mode_out
-
-- func: _max(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
-  use_c10_dispatcher: full
-  dispatch:
-    CPU: _max_cpu
-    CUDA: legacy::cuda::_th_max
-
-- func: _max.max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_indices) -> (Tensor(a!), Tensor(b!))
-  dispatch:
-    CPU: _max_out_cpu
-    CUDA: legacy::cuda::_th_max_out
 
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   use_c10_dispatcher: full
