@@ -11186,7 +11186,8 @@ class TestNNDeviceType(NNTestCase):
         def helper(n, c, h, w, out_channels, kernel_size, groups):
             input = torch.randn(n, c, h, w, dtype=dtype, device=device).to(memory_format=torch.channels_last)
             input.requires_grad_()
-            conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups).to(device='cuda', dtype=dtype, memory_format=torch.channels_last)
+            conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups)\
+                .to(device='cuda', dtype=dtype, memory_format=torch.channels_last)
 
             ref_input = input.detach().clone().contiguous().requires_grad_()
             ref_conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups)
