@@ -72,8 +72,9 @@ void testGPU_FusionExprEvalConstants() {
   auto* a = new Int(7);
   auto* b = new Int(3);
 
+  checkIntValue(&eval_context, neg(a), -7);
   checkIntValue(&eval_context, add(a, b), 10);
-  checkIntValue(&eval_context, mul(sub(a, b), div(a, b)), 8);
+  checkIntValue(&eval_context, neg(mul(sub(a, b), div(a, b))), -8);
   checkIntValue(&eval_context, mod(a, b), 1);
   checkIntValue(&eval_context, ceilDiv(a, b), 3);
 }
@@ -88,7 +89,7 @@ void testGPU_FusionExprEvalBindings() {
   auto* a = new Int();
   auto* b = new Int();
   auto* c = add(a, b);
-  auto* d = ceilDiv(add(a, b), b);
+  auto* d = neg(ceilDiv(add(a, b), b));
 
   eval_context.bind(a, 7);
   eval_context.bind(b, 3);
@@ -97,7 +98,7 @@ void testGPU_FusionExprEvalBindings() {
   checkIntValue(&eval_context, sub(a, b), 4);
   checkIntValue(&eval_context, mod(a, b), 1);
   checkIntValue(&eval_context, ceilDiv(a, b), 3);
-  checkIntValue(&eval_context, d, 4);
+  checkIntValue(&eval_context, d, -4);
 
   eval_context.bind(a, 2);
   eval_context.bind(b, 5);
@@ -106,7 +107,7 @@ void testGPU_FusionExprEvalBindings() {
   checkIntValue(&eval_context, sub(a, b), -3);
   checkIntValue(&eval_context, mod(a, b), 2);
   checkIntValue(&eval_context, ceilDiv(a, b), 1);
-  checkIntValue(&eval_context, d, 2);
+  checkIntValue(&eval_context, d, -2);
 }
 
 // Evaluate expressions in a simple IR

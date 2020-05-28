@@ -68,7 +68,7 @@ void ExpressionEvaluator::handle(const UnaryOp* uop) {
   if (in.has_value()) {
     switch (uop->getUnaryOpType()) {
       case UnaryOpType::Neg:
-        result_ = Int::ScalarType(!*in);
+        result_ = -*in;
         break;
       case UnaryOpType::Cast:
         result_ = *in;
@@ -101,9 +101,6 @@ void ExpressionEvaluator::handle(const BinaryOp* bop) {
       case BinaryOpType::Mod:
         TORCH_CHECK(*rhs != 0);
         result_ = *lhs % *rhs;
-        break;
-      case BinaryOpType::LT:
-        result_ = Int::ScalarType(*lhs < *rhs);
         break;
       case BinaryOpType::CeilDiv:
         TORCH_CHECK(*rhs != 0);

@@ -40,7 +40,10 @@ TORCH_CUDA_API Val* reductionOp(
     Val* init,
     Val* v1);
 
-// BINARY OPAERATIONS
+// UNARY OPERATIONS
+TORCH_CUDA_API Val* neg(Val* v);
+
+// BINARY OPERATIONS
 TORCH_CUDA_API Val* add(Val* v1, Val* v2);
 TORCH_CUDA_API Val* sub(Val* v1, Val* v2);
 TORCH_CUDA_API Val* mul(Val* v1, Val* v2);

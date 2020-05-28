@@ -102,8 +102,8 @@ struct TORCH_CUDA_API Statement {
     auto downcast_ptr = static_cast<T*>(this);
 #else
     auto downcast_ptr = dynamic_cast<T*>(this);
+    TORCH_INTERNAL_ASSERT(downcast_ptr != nullptr);
 #endif
-    assert(downcast_ptr != nullptr);
     return downcast_ptr;
   }
 
@@ -113,8 +113,8 @@ struct TORCH_CUDA_API Statement {
     auto downcast_ptr = static_cast<const T*>(this);
 #else
     auto downcast_ptr = dynamic_cast<const T*>(this);
+    TORCH_INTERNAL_ASSERT(downcast_ptr != nullptr);
 #endif
-    assert(downcast_ptr != nullptr);
     return downcast_ptr;
   }
 
