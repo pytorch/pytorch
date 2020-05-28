@@ -11,7 +11,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/TensorUtils.h>
 
-#include <ATen/quantized/QuantizerBase.h>
+#include <ATen/core/QuantizerBase.h>
 
 #include <cmath>
 #include <memory>

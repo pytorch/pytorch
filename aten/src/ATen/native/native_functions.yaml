@@ -5559,23 +5559,23 @@
   use_c10_dispatcher: full
   dispatch:
     CPU: _cumsum_cpu
-    CUDA: legacy::cuda::_th_cumsum
+    CUDA: _cumsum_cuda
 
 - func: _cumsum.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: _cumsum_out_cpu
-    CUDA: legacy::cuda::_th_cumsum_out
+    CUDA: _cumsum_out_cuda
 
 - func: _cumprod(Tensor self, int dim) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     CPU: _cumprod_cpu
-    CUDA: legacy::cuda::_th_cumprod
+    CUDA: _cumprod_cuda
 
 - func: _cumprod.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: _cumprod_out_cpu
-    CUDA: legacy::cuda::_th_cumprod_out
+    CUDA: _cumprod_out_cuda
 
 - func: _var(Tensor self, bool unbiased=True) -> Tensor
   use_c10_dispatcher: full

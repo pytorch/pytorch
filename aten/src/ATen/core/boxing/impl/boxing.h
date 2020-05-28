@@ -48,25 +48,6 @@ using supports_boxing =
     boxable_result<Result>
   >;
 
-// ---
-
-template <class... Args>
-using uses_dimname =
-  guts::disjunction<
-    std::is_same<at::Dimname, std::decay_t<Args>>...,
-    std::is_same<c10::ArrayRef<at::Dimname>, std::decay_t<Args>>...,
-    std::is_same<c10::optional<c10::ArrayRef<at::Dimname>>, std::decay_t<Args>>...
-  >;
-
-template <class... Args>
-using uses_quantizer =
-  guts::disjunction<
-    std::is_same<at::Quantizer, std::decay_t<Args>>...,
-    std::is_same<c10::intrusive_ptr<at::Quantizer>, std::decay_t<Args>>...
-  >;
-
-// ---
-
 // base definition establishes template arity.
 // should never be instantiated - the partial specializations that
 // follow should cover all FuncType instances, both supported and
@@ -76,13 +57,12 @@ using uses_quantizer =
 template<class FuncType, class Enable = void>
 struct BoxAndCallBoxedFunc {};
 
+// ops whose signatures include types not (yet) supported by our
+// boxing machinery will generate instances of this class
 template<class Result, class... Args>
 struct BoxAndCallBoxedFunc<
   Result(Args...),
-  std::enable_if_t<
-    !supports_boxing<Result, Args...>::value && uses_dimname<Args...>::value,
-    void
-  >
+  std::enable_if_t<!supports_boxing<Result, Args...>::value, void>
 > {
   static Result call(
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
@@ -92,30 +72,7 @@ struct BoxAndCallBoxedFunc<
   ) {
     TORCH_INTERNAL_ASSERT(
       false,
-      "Tried to call KernelFunction::call() for a kernel that uses at::Dimname, "
-      "which is not supported when calling from an unboxed API."
-    );
-  }
-};
-
-template<class Result, class... Args>
-struct BoxAndCallBoxedFunc<
-  Result(Args...),
-  std::enable_if_t<
-    !supports_boxing<Result, Args...>::value && uses_quantizer<Args...>::value,
-    void
-  >
-> {
-  static Result call(
-    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
-    OperatorKernel* functor,
-    const OperatorHandle& opHandle,
-    Args... args
-  ) {
-    TORCH_INTERNAL_ASSERT(
-      false,
-      "Tried to call KernelFunction::call() for a kernel that uses at::Quantizer, "
-      "which is not yet supported when calling from an unboxed API."
+      "Tried to call KernelFunction::call() for a kernel that does not support unboxed calling."
     );
   }
 };
@@ -198,6 +155,7 @@ struct BoxAndCallBoxedFunc<
   }
 };
 
+#if 0
 // a signature returning a tuple of references, of the same type as
 // the equivalent number of initial arguments, is assumed to return
 // references to those arguments (e.g., a function that takes and
@@ -227,7 +185,6 @@ struct BoxAndCallBoxedFunc<
       "out args, which is not supported when calling from an unboxed API."
     );
 
-#if 0
     // TODO Reuse stack vector instead of allocating?
     torch::jit::Stack stack;
     torch::jit::push(stack, std::forward<Args>(args)...);
@@ -241,9 +198,9 @@ struct BoxAndCallBoxedFunc<
     );
 
     return ResultsTuple(args...);
-#endif
   }
 };
+#endif
 
 } // impl
 } // c10
