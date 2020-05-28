@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <algorithm>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -217,6 +218,9 @@ Tensor& replication_pad1d_backward_out_cpu_template(
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return gradInput;
+  }           
   gradInput.zero_();
 
   /* backprop */
@@ -340,7 +344,10 @@ void replication_pad2d_out_cpu_template(Tensor& output,
   int dimslices = 0;
   int64_t nbatch = 1;
 
-  TORCH_CHECK(input_.numel() > 0 && (input_.dim() == 3 || input_.dim() == 4),
+  // allow 0 dim batch size and nothing else.
+  TORCH_CHECK(
+      (input_.dim() == 3 && input_.size(1) != 0 && input_.size(2) != 0) ||
+      (input_.dim() == 4 && input_.size(1) != 0 && input_.size(2) != 0 && input_.size(3) != 0),
       "3D or 4D (batch mode) tensor expected for input, but got: ", input_);
 
   if (input_.dim() == 4)
@@ -511,6 +518,10 @@ Tensor& replication_pad2d_backward_out_cpu_template(
 
   /* resize */
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return gradInput;
+  }
+  
   gradInput.zero_();
 
   /* backprop */
@@ -558,7 +569,10 @@ static inline void shapeCheck3d(
   int dimd = 1;
   int dimslices = 0;
 
-  TORCH_CHECK(input.numel() > 0 && (input.dim() == 4 || input.dim() == 5),
+  // allow batch size of 0-dim.
+  TORCH_CHECK(
+      (input.dim() == 4 && input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0) ||
+      (input.dim() == 5 && input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0 && input.size(4) != 0),
       "non-empty 4D or 5D (batch mode) tensor expected for input, but got: ", input);
 
   if (input.dim() == 5)
@@ -873,6 +887,9 @@ Tensor& replication_pad3d_backward_out_cpu_template(
 
   /* resize */
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return gradInput;
+  }
   gradInput.zero_();
 
   /* backprop */
