@@ -191,10 +191,17 @@ def process_function(func):
     if uses_single_grad(func):
         body.append('auto& grad = grads[0];')
 
-    def emit_derivative(derivative):
+    def emit_derivative(derivative, forward_func_name):
         formula = derivative['formula']
         var_names = derivative['var_names']
         if len(var_names) == 1:
+            # Seems a bit hacky to check for not_implemented in the formula, but it seems to work fine
+            if forward_func_name not in ['cat', 'stack'] and 'not_implemented' not in formula:
+                # TODO: should add the any_variable_defined call outside the
+                #   conditional block it's currently in, because if the op
+                #   has two or more inputs that need grads, any_variable_defined
+                #   gets called twice
+                formula = 'any_variable_defined(grads) ? (' + formula + ') : Tensor()'
             return DERIVATIVE_SINGLE.substitute(name=var_names[0], derivative=formula)
         else:
             if 'grad_input_mask' in formula:
@@ -213,7 +220,7 @@ def process_function(func):
 
     body.extend(unpack)
     for derivative in func['derivatives']:
-        body.append(emit_derivative(derivative))
+        body.append(emit_derivative(derivative, func['name']))
 
     env['body'] = body
     if func['name'] in UNTRACEABLE_FUNCTIONS:

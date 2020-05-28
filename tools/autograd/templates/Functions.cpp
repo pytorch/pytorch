@@ -99,6 +99,9 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
 }
 
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const Tensor & x1, const Tensor & x2, const Tensor & res) {
+  if (!grad.defined()) {
+    return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
+  }
   // handle case at 0 where we return a subgradient containing 0
   Tensor ratio = grad / res;
   ratio.masked_fill_(res == 0, 0);
@@ -564,19 +567,21 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntArrayRef sizes) {
 }
 
 std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, int64_t dim) {
-  dim = at::legacy_cat_wrap_dim(dim, sizes);
   std::vector<Tensor> grad_inputs(sizes.size());
-  int64_t accumulate = 0;
-  for (size_t i = 0; i < sizes.size(); ++i) {
-    auto& shape = sizes[i];
-    // If input was empty tensor, gradInput should be empty tensor.
-    if (shape == std::vector<int64_t>({0})) {
-      grad_inputs[i] = at::zeros({0}, grad.options());
-      continue;
+  if (grad.defined()) {
+    dim = at::legacy_cat_wrap_dim(dim, sizes);
+    int64_t accumulate = 0;
+    for (size_t i = 0; i < sizes.size(); ++i) {
+      auto& shape = sizes[i];
+      // If input was empty tensor, gradInput should be empty tensor.
+      if (shape == std::vector<int64_t>({0})) {
+        grad_inputs[i] = at::zeros({0}, grad.options());
+        continue;
+      }
+      auto size = shape[dim];
+      accumulate += size;
+      grad_inputs[i] = grad.narrow(dim, accumulate - size, size);
     }
-    auto size = shape[dim];
-    accumulate += size;
-    grad_inputs[i] = grad.narrow(dim, accumulate - size, size);
   }
   return grad_inputs;
 }
@@ -723,11 +728,8 @@ Tensor index_select_backward(Tensor grad, int64_t dim, Tensor indices, IntArrayR
 }
 
 Tensor slice_backward(Tensor grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
-  Tensor grad_input;
-  if (grad.defined()) {
-    grad_input = at::zeros(input_sizes, grad.options());
-    grad_input.slice(dim, start, end, step).copy_(grad);
-  }
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.slice(dim, start, end, step).copy_(grad);
   return grad_input;
 }
 
@@ -1679,6 +1681,9 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntArrayR
 }
 
 std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self, const Tensor& other, std::array<bool, 2> output_mask) {
+  if (!grad.defined()) {
+    return std::tuple<Tensor, Tensor>{Tensor(), Tensor()};
+  }
   auto recip = (self * self + other * other).reciprocal();
   return std::tuple<Tensor,Tensor>{
             output_mask[0] ? grad * other * recip : Tensor(),
@@ -1695,6 +1700,9 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
     const Tensor & input_,
     const Tensor & weight_) {
 
+  if (!(grad_grad_input.defined() || grad_grad_weight.defined() || grad_out.defined())) {
+    return std::tuple<Tensor, Tensor, Tensor>(Tensor(), Tensor(), Tensor());
+  }
     auto input = input_.contiguous();
     auto weight = weight_.contiguous();
 
@@ -2165,25 +2173,27 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
     const bool upper, const bool transpose, const bool unitriangular,
     std::array<bool, 2> output_mask) {
   Tensor grad_b, grad_a;
-  if (grad_x.defined()) {
-    grad_b = std::get<0>(grad_x.triangular_solve(a, upper, !transpose, unitriangular));
-    if (output_mask[1]) {
-      grad_a = transpose ? -x.matmul(grad_b.transpose(-1, -2)) : -grad_b.matmul(x.transpose(-1, -2));
-      if (upper) {
-        grad_a = grad_a.triu((int) unitriangular);
-      } else {
-        grad_a = grad_a.tril(-((int) unitriangular));
+  if (grad_x.defined() || grad_m.defined()) {
+    if (grad_x.defined()) {
+      grad_b = std::get<0>(grad_x.triangular_solve(a, upper, !transpose, unitriangular));
+      if (output_mask[1]) {
+        grad_a = transpose ? -x.matmul(grad_b.transpose(-1, -2)) : -grad_b.matmul(x.transpose(-1, -2));
+        if (upper) {
+          grad_a = grad_a.triu((int) unitriangular);
+        } else {
+          grad_a = grad_a.tril(-((int) unitriangular));
+        }
       }
     }
-  }
-  if (!grad_a.defined()) {
-    grad_a = at::zeros({1}, a.options()).expand_as(a);
-  }
-  if (!grad_b.defined()) {
-    grad_b = at::zeros({1}, b.options()).expand_as(b);
-  }
-  if (output_mask[1] && grad_m.defined()) {
-    grad_a = grad_a.add(grad_m);
+    if (!grad_a.defined()) {
+      grad_a = at::zeros({1}, a.options()).expand_as(a);
+    }
+    if (!grad_b.defined()) {
+      grad_b = at::zeros({1}, b.options()).expand_as(b);
+    }
+    if (output_mask[1] && grad_m.defined()) {
+      grad_a = grad_a.add(grad_m);
+    }
   }
   return std::tuple<Tensor, Tensor>{grad_b, grad_a};
 }
@@ -2194,17 +2204,15 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
   Tensor grad_self, grad_input2;
   if (grad_x.defined()) {
     grad_self = grad_x.cholesky_solve(input2, /*upper=*/upper);
-  } else {
-    grad_self = at::zeros({1}, self.options()).expand_as(self);
-  }
 
-  Tensor common_term = at::matmul(grad_self, result.transpose(-2, -1));
-  common_term = common_term + common_term.transpose(-2, -1);
+    Tensor common_term = at::matmul(grad_self, result.transpose(-2, -1));
+    common_term = common_term + common_term.transpose(-2, -1);
 
-  if (upper) {
-    grad_input2 = -at::matmul(input2, common_term);
-  } else {
-    grad_input2 = -at::matmul(common_term, input2);
+    if (upper) {
+      grad_input2 = -at::matmul(input2, common_term);
+    } else {
+      grad_input2 = -at::matmul(common_term, input2);
+    }
   }
   return std::tuple<Tensor, Tensor>{grad_self, grad_input2};
 }
@@ -2464,12 +2472,9 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     ggO = ggO.defined() ? ggO.add_(ggO_B_term) : ggO_B_term;
   }
 
-  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   if (output_mask[1] && !gG.defined()) {
     AT_ASSERTM(affine, "gamma should always be defined when it requires grad");
-    gG = at::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-  if (output_mask[2] && !gI.defined()) gI = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 
@@ -2655,16 +2660,19 @@ infinitely_differentiable_native_group_norm_backward(
   return std::make_tuple(dX, dgamma, dbeta);
 }
 
+// TODO: need to find out what _trilinear does before I can handle grad_out.defined() == false
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
                                                        IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3,
                                                        IntArrayRef sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask) {
   Tensor grad_i1, grad_i2, grad_i3;
-  if (grad_mask[0])
-    grad_i1 = at::_trilinear(grad_out, i2, i3, sumdim, expand2, expand3, expand1);
-  if (grad_mask[1])
-    grad_i2 = at::_trilinear(i1, grad_out, i3, expand1, sumdim, expand3, expand2);
-  if (grad_mask[2])
-    grad_i3 = at::_trilinear(i1, i2, grad_out, expand1, expand2, sumdim, expand3);
+  if (grad_out.defined()) {
+    if (grad_mask[0])
+      grad_i1 = at::_trilinear(grad_out, i2, i3, sumdim, expand2, expand3, expand1);
+    if (grad_mask[1])
+      grad_i2 = at::_trilinear(i1, grad_out, i3, expand1, sumdim, expand3, expand2);
+    if (grad_mask[2])
+      grad_i3 = at::_trilinear(i1, i2, grad_out, expand1, expand2, sumdim, expand3);
+  }
   return std::tuple<Tensor, Tensor, Tensor>(grad_i1, grad_i2, grad_i3);
 }
 
@@ -2723,6 +2731,15 @@ Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, cons
   } else {
     return raw_grad * grad_out.unsqueeze(0).unsqueeze(2);
   }
+}
+
+bool any_variable_defined(variable_list& variables) {
+  for (auto variable : variables) {
+    if (variable.defined()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 } // anonymous namespace
