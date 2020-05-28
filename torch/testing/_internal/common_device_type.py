@@ -453,11 +453,13 @@ def largeTensorTest(size):
 
                 # The sanitizers have significant memory overheads
                 if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
-                    size *= 10
+                    effective_size = size * 10
+                else:
+                    effective_size = size
 
-                if psutil.virtual_memory().available < size:
+                if psutil.virtual_memory().available < effective_size:
                     gc.collect()
-                valid = psutil.virtual_memory().available >= size
+                valid = psutil.virtual_memory().available >= effective_size
 
             if not valid:
                 raise unittest.SkipTest('Insufficient {} memory'.format(self.device_type))
