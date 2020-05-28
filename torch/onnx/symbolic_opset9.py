@@ -1749,7 +1749,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
 
 
 @parse_args('v', 'v', 'v', 'i', 'i', 'f', 'i', 'i', 'i', 'i')
-def _lstm_full(g, input, hidden_v, weight_v, has_biases, num_layers, dropout, train, bidirectional, type_2, batch_first):
+def _lstm_full(g, input, hidden_v, weight_v, has_biases, num_layers, dropout, train, bidirectional, batch_first, type_2):
     hidden, weight = sym_help._unpack_list(hidden_v), sym_help._unpack_list(weight_v)
     return _generic_rnn(g, 'LSTM', input, hidden, weight, has_biases, num_layers,
                         dropout, train, bidirectional, type_2, batch_first)
@@ -1771,7 +1771,7 @@ def lstm(g, *args):
 
 def _one_hidden_rnn(kind):
     @parse_args('v', 'v', 'v', 'i', 'i', 'f', 'i', 'i', 'i', 'i')
-    def _rnn_full(g, input, hidden, weight_v, has_biases, num_layers, dropout, train, bidirectional, type_2, batch_first):
+    def _rnn_full(g, input, hidden, weight_v, has_biases, num_layers, dropout, train, bidirectional, batch_first, type_2):
         weight = sym_help._unpack_list(weight_v)
         return _generic_rnn(g, kind, input, hidden, weight, has_biases, num_layers,
                             dropout, train, bidirectional, type_2, batch_first)
