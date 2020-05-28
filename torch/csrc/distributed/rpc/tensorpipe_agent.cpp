@@ -80,6 +80,7 @@ TensorPipeAgent::TensorPipeAgent(
     std::string selfName,
     worker_id_t selfId,
     int worldSize,
+    std::shared_ptr<c10d::ProcessGroup> processGroup,
     TensorPipeRpcBackendOptions opts)
     : RpcAgent(
           WorkerInfo(std::move(selfName), selfId),
@@ -90,7 +91,8 @@ TensorPipeAgent::TensorPipeAgent(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
       addressStore_(std::move(addressStore)),
       worldSize_(worldSize),
-      opts_(std::move(opts)) {
+      opts_(std::move(opts)),
+      processGroup_(std::move(processGroup)) {
   collectNames();
 
   // Initialize the time-series metrics tracking map
@@ -265,7 +267,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
         respond(pipe);
 
         uint64_t messageId = requestMessage.id();
-        ++serverActiveCalls_;
+        increaseCallCount(serverActiveCalls_);
 
         // Defer user RPC UDF run to thread pool
         threadPool_.run([this,
@@ -282,16 +284,16 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           // Shortcut if immediately done
           if (futureResponseMessage->completed()) {
-            --serverActiveCalls_;
+            decreaseCallCount(serverActiveCalls_);
             sendCompletedResponseMessage(
                 pipe, futureResponseMessage, messageId);
           } else {
             // Not complete yet
-            ++serverActiveAsyncCalls_;
+            increaseCallCount(serverActiveAsyncCalls_);
             futureResponseMessage->addCallback(
                 [this, pipe, futureResponseMessage, messageId]() mutable {
-                  --serverActiveCalls_;
-                  --serverActiveAsyncCalls_;
+                  decreaseCallCount(serverActiveCalls_);
+                  decreaseCallCount(serverActiveAsyncCalls_);
                   sendCompletedResponseMessage(
                       pipe, futureResponseMessage, messageId);
                 });
@@ -343,7 +345,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
         "Future marked complete from outside the thread pool");
   });
 
-  ++clientActiveCalls_;
+  increaseCallCount(clientActiveCalls_);
   // Use the default RPC timeout if no timeout is specified for this send call
   auto timeout = rpcTimeoutSeconds == kUnsetRpcTimeout
       ? getRpcTimeout()
@@ -366,12 +368,6 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
 
   // Don't need to hold lock while calling tensorpipe API.
   lock.unlock();
-
-  futureResponseMessage->futMsg.addCallback([this]() {
-    // Decrease the callcount through a callback so it is only decremented once
-    // per future.
-    --clientActiveCalls_;
-  });
 
   pipeWrite(
       clientPipe.pipe_,
@@ -492,7 +488,43 @@ void TensorPipeAgent::sync() {}
 
 // TODO: Remove join()
 void TensorPipeAgent::join() {
-  shutdown();
+  // This method behaves like a barrier, as it can only return once all workers
+  // have no more requests pending, including "nested" requests (triggered from
+  // within the remote code of another call) and "follow-up" requests (triggered
+  // from the callback of a future).
+  while (true) {
+    {
+      std::unique_lock<std::mutex> lock(callCountMutex_);
+      // It is enough to wait for there to be no more active client calls, since
+      // each server call corresponds to a client call for some other worker.
+      callCountCV_.wait(lock, [this] { return clientActiveCalls_ == 0; });
+      // We'd like to immediately proceed with the allreduce, but it's a call
+      // that may block for some time, as it waits for other workers to also
+      // complete all their active client calls. While we call allreduce we must
+      // hold the mutex, or else the count we send to other workers may get
+      // stale (e.g., if some nested call happens in the meantime). But we can't
+      // hold the lock for an indeterminately long time, as that would block
+      // other operations (e.g., send). Thus we must release the lock and only
+      // re-acquire it when all workers are ready to proceed with the allreduce.
+      // We perform this synchronization using a barrier.
+    }
+    processGroup_->barrier()->wait();
+    {
+      std::unique_lock<std::mutex> lock(callCountMutex_);
+      // At this point, the count may have become non-zero again. We can't wait
+      // for those calls to complete as other workers are waiting for us in the
+      // allreduce and we would block them. Thus we send our count even if it is
+      // non-zero and if anyone (be it us or another worker) has a non-zero
+      // count we'll just do another round.
+      std::vector<at::Tensor> totalClientActiveCalls = {
+          at::zeros({}, at::kLong)};
+      *totalClientActiveCalls[0].data_ptr<int64_t>() = clientActiveCalls_;
+      processGroup_->allreduce(totalClientActiveCalls)->wait();
+      if (*totalClientActiveCalls[0].data_ptr<int64_t>() == 0) {
+        break;
+      }
+    }
+  }
 }
 
 void TensorPipeAgent::shutdownImpl() {
@@ -559,10 +591,12 @@ std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
   metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
   metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
-  metrics[kClientActiveCalls] = c10::to_string(clientActiveCalls_.load());
-  metrics[kServerActiveCalls] = c10::to_string(serverActiveCalls_.load());
-  metrics[kServerActiveAsyncCalls] =
-      c10::to_string(serverActiveAsyncCalls_.load());
+  {
+    std::unique_lock<std::mutex> lock(callCountMutex_);
+    metrics[kClientActiveCalls] = c10::to_string(clientActiveCalls_);
+    metrics[kServerActiveCalls] = c10::to_string(serverActiveCalls_);
+    metrics[kServerActiveAsyncCalls] = c10::to_string(serverActiveAsyncCalls_);
+  }
   if (isGILProfilingEnabled()) {
     {
       std::unique_lock<std::mutex> lock(metricsMutex_);
@@ -675,6 +709,22 @@ std::string TensorPipeAgent::getDefaultIPAddress() {
   return defaultIP;
 }
 
+void TensorPipeAgent::increaseCallCount(int32_t& count) {
+  {
+    std::unique_lock<std::mutex> lock(callCountMutex_);
+    ++count;
+  }
+  callCountCV_.notify_all();
+}
+
+void TensorPipeAgent::decreaseCallCount(int32_t& count) {
+  {
+    std::unique_lock<std::mutex> lock(callCountMutex_);
+    --count;
+  }
+  callCountCV_.notify_all();
+}
+
 void TensorPipeAgent::markFutureAsComplete(
     std::shared_ptr<AtomicFutureMessage> futureMessage,
     Message message) {
@@ -682,9 +732,14 @@ void TensorPipeAgent::markFutureAsComplete(
     // Completing the future will run its callbacks, which could execute
     // arbitrary user code. To prevent blocking or stalling the TensorPipe event
     // loops, we defer this to a worker thread.
-    threadPool_.run([futureMessage{std::move(futureMessage)},
+    threadPool_.run([this,
+                     futureMessage{std::move(futureMessage)},
                      message{std::move(message)}]() mutable {
       futureMessage->futMsg.markCompleted(std::move(message));
+      // The future's callbacks may schedule further RPCs, increasing the count.
+      // Thus we must decrease it after completing the future, otherwise it may
+      // briefly dip to zero and trick join into thinking all work is done.
+      decreaseCallCount(clientActiveCalls_);
     });
   }
 }
@@ -696,9 +751,14 @@ void TensorPipeAgent::markFutureWithError(
     // Completing the future will run its callbacks, which could execute
     // arbitrary user code. To prevent blocking or stalling the TensorPipe event
     // loops, we defer this to a worker thread.
-    threadPool_.run([futureMessage{std::move(futureMessage)},
+    threadPool_.run([this,
+                     futureMessage{std::move(futureMessage)},
                      errorMsg{std::move(errorMsg)}]() mutable {
       futureMessage->futMsg.setError(std::move(errorMsg));
+      // The future's callbacks may schedule further RPCs, increasing the count.
+      // Thus we must decrease it after completing the future, otherwise it may
+      // briefly dip to zero and trick join into thinking all work is done.
+      decreaseCallCount(clientActiveCalls_);
     });
   }
 }

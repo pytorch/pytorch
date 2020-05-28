@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/thread_pool.h>
+#include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 #include <tensorpipe/core/context.h>
 #include <tensorpipe/core/listener.h>
@@ -47,6 +48,7 @@ class TensorPipeAgent : public RpcAgent {
       std::string selfName,
       worker_id_t selfId,
       int worldSize,
+      std::shared_ptr<c10d::ProcessGroup> processGroup,
       TensorPipeRpcBackendOptions opts);
 
   TensorPipeAgent(const TensorPipeAgent&) = delete;
@@ -170,6 +172,11 @@ class TensorPipeAgent : public RpcAgent {
   const int worldSize_;
   const TensorPipeRpcBackendOptions opts_;
 
+  // The join method is required to behave like a barrier and perform collective
+  // operations. For simplicity and reliability, we offload this to a process
+  // group, but probably one day we might want to re-implement them using RPCs.
+  const std::shared_ptr<c10d::ProcessGroup> processGroup_;
+
   mutable std::mutex mutex_;
   uint64_t nextMessageID_{0};
 
@@ -233,12 +240,19 @@ class TensorPipeAgent : public RpcAgent {
   // Mutex to guarg networkData_
   std::mutex networkDataMutex_;
 
+  // A mutex and a cv to guard access to the call counts and watch for changes.
+  std::mutex callCountMutex_;
+  std::condition_variable callCountCV_;
   // Running total of un-processed, un-errored RPC calls sent
-  std::atomic<int32_t> clientActiveCalls_{0};
+  int32_t clientActiveCalls_{0};
   // Running total of un-processed RPC requests received
-  std::atomic<int32_t> serverActiveCalls_{0};
+  int32_t serverActiveCalls_{0};
   // Running total of RPC requests that will be completed asynchronously
-  std::atomic<int32_t> serverActiveAsyncCalls_{0};
+  int32_t serverActiveAsyncCalls_{0};
+
+  // Helpers to modify the counts while correctly dealing with the mutex and cv.
+  void increaseCallCount(int32_t& count);
+  void decreaseCallCount(int32_t& count);
 
   // Helpers to set the state of the requests.
   void markFutureAsComplete(
