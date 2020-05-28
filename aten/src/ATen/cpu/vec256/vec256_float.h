@@ -208,8 +208,8 @@ public:
   Vec256<float> sqrt() const {
     return _mm256_sqrt_ps(values);
   }
-  Vec256<float> rad2deg() const {
-    return _mm256_mul_ps(_mm256_set1_ps(180), _mm256_div_ps(values, _mm256_set1_ps(M_PI)));
+  Vec256<float> rad2deg(const double M_180_PI) const {
+    return _mm256_mul_ps(_mm256_set1_ps(static_cast<float>(M_180_PI)), values);
   }
   Vec256<float> deg2rad() const {
     return _mm256_mul_ps(_mm256_set1_ps(M_PI), _mm256_div_ps(values, _mm256_set1_ps(180)));

@@ -40,7 +40,7 @@ DECLARE_DISPATCH(unary_fn, log10_stub);
 DECLARE_DISPATCH(unary_fn, log1p_stub);
 DECLARE_DISPATCH(unary_fn, log2_stub);
 DECLARE_DISPATCH(unary_fn, neg_stub);
-DECLARE_DISPATCH(unary_fn, rad2deg_stub);
+
 DECLARE_DISPATCH(unary_fn, deg2rad_stub);
 DECLARE_DISPATCH(unary_fn, reciprocal_stub);
 DECLARE_DISPATCH(unary_fn, round_stub);
@@ -69,6 +69,7 @@ DECLARE_DISPATCH(void(*)(TensorIterator&, c10::optional<Generator>), random_stub
 DECLARE_DISPATCH(void(*)(TensorIterator&, const int64_t), polygamma_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar a, Scalar b), clamp_stub);
 DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, int64_t, bool, c10::optional<Generator>), multinomial_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double), rad2deg_stub);
 
 // Missing unary functions
 // digamma

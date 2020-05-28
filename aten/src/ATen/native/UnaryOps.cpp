@@ -107,10 +107,16 @@ Tensor& acos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor acos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
 Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
 
+
 Tensor& rad2deg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "rad2deg is not supported for complex tensors.");
-  return unary_op_impl_out(result, self, rad2deg_stub);
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_mem_overlap=*/true);
+  double M_180_PI = 57.29577951308232087679815481410517033240547247;
+  rad2deg_stub(iter.device_type(), iter, M_180_PI);
+  return result;
 }
+
 Tensor rad2deg(const Tensor& self) { return unary_op_impl(self, at::rad2deg_out); }
 Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
 

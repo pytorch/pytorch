@@ -41,13 +41,12 @@ void expm1_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void rad2deg_kernel_cuda(TensorIterator& iter) {
+void rad2deg_kernel_cuda(TensorIterator& iter, const double M_180_PI) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "rad2deg_cuda", [&]() {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "rad2deg_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        auto t180 = scalar_t(180.0);
-        auto pi = scalar_t(M_PI);
-        return t180 * a / pi;
+      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a) -> scalar_t {
+        auto m_180_pi = scalar_t(M_180_PI);
+        return m_180_pi * a;
       });
     });
   });

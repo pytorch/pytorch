@@ -338,13 +338,12 @@ public:
     auto o2 = _mm256_sqrt_ps(hi);
     return cvtfp32_bf16(o1, o2);
   }
-  Vec256<BFloat16> rad2deg() const {
+  Vec256<BFloat16> rad2deg(const double M_180_PI) const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    auto t_180s = _mm256_set1_ps(180);
-    auto pis = _mm256_set1_ps(M_PI);
-    auto o1 = _mm256_mul_ps(t_180s, _mm256_div_ps(lo, pis));
-    auto o2 = _mm256_mul_ps(t_180s, _mm256_div_ps(hi, pis));
+    auto m_180_pi = _mm256_set1_ps(static_cast<float>(M_180_PI));
+    auto o1 = _mm256_mul_ps(lo, m_180_pi);
+    auto o2 = _mm256_mul_ps(hi, m_180_pi);
     return cvtfp32_bf16(o1, o2);
   }
   Vec256<BFloat16> deg2rad() const {
