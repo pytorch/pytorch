@@ -7,7 +7,11 @@ import torch
 import torch.testing._internal.dist_utils as dist_utils
 from torch import Tensor, nn
 from torch._jit_internal import Future
-from torch.distributed.nn.api.remote_module import RemoteModule, _gen_global_unique_name
+from torch.distributed.nn.api.remote_module import (
+    RemoteModule,
+    _gen_global_unique_name,
+    _RemoteModule,
+)
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -83,7 +87,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
         kwargs = dict(first_kwarg=2)
 
         if ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE in modes:
-            remote_module = RemoteModule(
+            remote_module = _RemoteModule(
                 dst_worker_name,
                 create_scripted_module,
                 args,
@@ -110,10 +114,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
             return
         dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
         args = (torch.ones(1), 2, "3")
-        for remote_module in self._create_remote_module_iter(dst_worker_name, modes=[
-            ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE,
-            # ModuleCreationMode.MODULE_CTOR,
-        ]):
+        for remote_module in self._create_remote_module_iter(dst_worker_name):
             ret_fut = remote_module.forward_async(*args)
             ret = ret_fut.wait()
             self.assertEqual(ret, tuple(reversed(args)))
@@ -131,9 +132,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
         )
 
         @torch.jit.script
-        def run_forward_async(
-            scripted_remote_module: RemoteMyModuleInterface
-        ):
+        def run_forward_async(scripted_remote_module: RemoteMyModuleInterface):
             ret_fut = scripted_remote_module.forward_async(torch.ones(1), 2, "3")
             ret = ret_fut.wait()
             return ret
@@ -160,8 +159,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
 
         scripted_remote_module = next(
             self._create_remote_module_iter(
-                dst_worker_name,
-                modes=[ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE],
+                dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE]
             )
         )
 

@@ -28,7 +28,7 @@ def _scripted_module_creator_wrapper(module_creator, module_interface_cls, args,
     return rpc.RRef(script_module, module_interface_cls)
 
 
-def RemoteModule(
+def _RemoteModule(
     to: str,
     module_creator: Callable,
     args: Tuple = None,
@@ -157,3 +157,89 @@ def RemoteModule(
     remote_module = remote_module_cls(module_rref, is_scriptable, global_unique_name)
 
     return remote_module
+
+
+def RemoteModule(
+    to: str,
+    module_creator: Callable,
+    args: Tuple = None,
+    kwargs: Dict[str, Any] = None,
+    global_unique_name: str = None,
+):
+    """
+        A RemoteModule instance can only be created after RPC initialization.
+        It creates a user-specified module on a specified remote node.
+        It behaves like a regular nn.Module except that the ``forward`` method is
+        executed on the remote node.
+        It takes care of autograd recording to ensure the backward pass propogates
+        gradients back to the corresponding remote module.
+
+        The arguments of ``forward_async`` and ``forward`` are the same as
+        the ``forward`` method of the module returned by the ``module_creator``.
+
+        For example, if ``module_creator`` returns an instace of ``nn.Linear``,
+        that has ``forward`` method signature, ``def forward(input: Tensor) -> Tensor:``,
+        the generated `RemoteModule`` will have 2 methods in signature of
+        ``def forward(input: Tensor) -> Tensor:`` and
+        ``def forward_async(input: Tensor) -> Future[Tensor]:``.
+
+    Arguments:
+        to (str or WorkerInfo): id or name of the destination worker.
+        module_creator (Callable): A ``module_creator`` could be
+                1. A type object that is subclass of ``nn.Module``.
+                    For example,
+                    >>> class MyModule(nn.Module):
+                    >>>     def forward(input):
+                    >>>         return input + 1
+                    >>>
+                    >>> module_creator = MyModule
+                2. A function that returns a instance of ``nn.Module``.
+                    For example,
+                    >>> def module_creator():
+                    >>>     module = MyModule()
+                    >>>     scripted_module = torch.jit.script(module)
+                    >>>     return scripted_module
+        args (Sequence, optional): args to be passed to ``module_creator``.
+        kwargs (Dict, optional): kwargs to be passed to ``module_creator``.
+        global_unique_name (str, optional): The unique name of the created RemoteModule,
+            useful for profiling purpose. If not provided, a UUID4 will
+            be generated as its name.
+
+    Returns:
+        A remote module instance which wraps the :class:`~nn.Module` created by the
+        user-provided ``module_creator``, it has a blocking ``forward`` method and an asynchronous
+        ``forward`` that returns a future of the ``forward`` call on the user created
+        remote module.
+
+    Example::
+        Run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> import torch
+        >>> import torch.distributed.rpc as rpc
+        >>> from torch import nn, Tensor
+        >>> from torch.distributed.nn.api.remote_module import RemoteModule
+        >>>
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> remote_linear_module = RemoteModule(
+        >>>     "worker1", nn.Linear, args=(20, 30),
+        >>> )
+        >>> input = torch.randn(128, 20)
+        >>> ret_fut = remote_linear_module.forward_async(input)
+        >>> ret = ret_fut.wait()
+        >>> rpc.shutdown()
+
+        >>> # On worker 1:
+        >>> import torch
+        >>> import torch.distributed.rpc as rpc
+        >>>
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.shutdown()
+    """
+    return _RemoteModule(
+        to,
+        module_creator,
+        args,
+        kwargs,
+        global_unique_name,
+    )

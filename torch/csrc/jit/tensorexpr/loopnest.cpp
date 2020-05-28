@@ -1467,18 +1467,22 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
 class SwapReduce : public IRMutator {
  public:
-  SwapReduce(ReduceOp* new_reduce) : new_reduce_(new_reduce) {}
+  SwapReduce(const ReduceOp* old_reduce, ReduceOp* new_reduce)
+      : old_reduce_(old_reduce), new_reduce_(new_reduce) {}
 
   Stmt* mutate(const Store* v) override {
-    if (dynamic_cast<const ReduceOp*>(v->value())) {
-      auto buf = new_reduce_->accumulator();
-      return new Store(
-          buf, new_reduce_->output_args(), new_reduce_, new IntImm(1));
+    if (const ReduceOp* op = dynamic_cast<const ReduceOp*>(v->value())) {
+      if (op == old_reduce_) {
+        auto buf = new_reduce_->accumulator();
+        return new Store(
+            buf, new_reduce_->output_args(), new_reduce_, new IntImm(1));
+      }
     }
     return IRMutator::mutate(v);
   }
 
  private:
+  const ReduceOp* old_reduce_;
   ReduceOp* new_reduce_;
 };
 
@@ -1626,7 +1630,7 @@ void LoopNest::rfactor(
   // variables) with a reduce over only its var by replacing the reduction op
   // buffer input with the temporary output buffer and removing other reductions
   // variables.
-  SwapReduce sr(first_reduce);
+  SwapReduce sr(reduce_op, first_reduce);
   auto root_block = dynamic_cast<Block*>(root_stmt());
   auto parent_block = dynamic_cast<Block*>(root_for->get_parent());
   if (!parent_block) {
