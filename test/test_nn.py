@@ -5593,6 +5593,10 @@ class TestNN(NNTestCase):
             for bias, bidirectional, type_2, batch_first, contig, variable_len, lens_as_tensor \
                     in product((True, False), repeat=7):
 
+                if TEST_WITH_ROCM and (not type_2 and bidirectional):
+                    # Skip type-2 RNN parity test on ROCm
+                    continue
+
                 num_directions = 2 if bidirectional else 1
                 if batch_first:
                     input_val = torch.randn(batch, seq_length, input_size, dtype=dtype)
@@ -5881,11 +5885,9 @@ class TestNN(NNTestCase):
     def test_RNN_type1(self):
         self._test_RNN_type1(torch.device('cpu'))
 
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @unittest.skipIf(not TEST_CUDNN or TEST_WITH_ROCM, "needs cudnn and does not work with ROCm")
     def test_RNN_type1_cudnn(self):
         dtype = torch.double
-        if TEST_WITH_ROCM:
-            dtype = torch.float
         self._test_RNN_type1(torch.device('cuda'), dtype=dtype)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")

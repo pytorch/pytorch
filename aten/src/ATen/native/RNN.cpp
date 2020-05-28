@@ -1397,6 +1397,10 @@ bool _use_cudnn_rnn_flatten_weight() {
         bool bidirectional,                                                 \
         bool batch_first,                                                   \
         bool type_2) {                                                      \
+    auto err_msg = ("Type-1 support for "                                   \
+                    << #NAME                                                \
+                    << " is not available in ROCm ");                       \
+    TORCH_INTERNAL_ASSERT(false, err_msg);                                  \
     Tensor _fwd_hx;                                                         \
     Tensor _bwd_hx;                                                         \
     std::tie(_fwd_hx, _bwd_hx) = split_rnn_hidden(hx);                      \
@@ -1456,6 +1460,10 @@ bool _use_cudnn_rnn_flatten_weight() {
       bool train,                                                           \
       bool bidirectional,                                                   \
       bool type_2) {                                                        \
+    auto err_msg = ("Type-1 support for "                                   \
+                    << #NAME                                                \
+                    << " is not available in ROCm ");                       \
+    TORCH_INTERNAL_ASSERT(false, err_msg);                                  \
     Tensor _fwd_hx;                                                         \
     Tensor _bwd_hx;                                                         \
     std::tie(_fwd_hx, _bwd_hx) = split_rnn_hidden(hx);                      \
@@ -1937,6 +1945,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm_miopen_type1(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional,
       bool batch_first, bool type_2) {
+  auto err_msg = "Type-1 support for lstm is not available in ROCm ";
+  TORCH_INTERNAL_ASSERT(false, err_msg);
 
   std::vector<Tensor> _fwd_hx;
   std::vector<Tensor> _bwd_hx;
@@ -2025,6 +2035,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm_packed_miopen_type1(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional,
       bool type_2) {
+  auto err_msg = "Type-1 support for lstm is not available in ROCm ";
+  TORCH_INTERNAL_ASSERT(false, err_msg);
   std::vector<Tensor> _fwd_hx;
   std::vector<Tensor> _bwd_hx;
   std::tie(_fwd_hx, _bwd_hx) = split_lstm_hidden(hx);
