@@ -20,6 +20,7 @@ struct Expr;
 struct UnaryOp;
 struct BinaryOp;
 struct TernaryOp;
+struct ReductionOp;
 
 struct ForLoop;
 struct IfThenElse;
@@ -109,6 +110,7 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   virtual void handle(const UnaryOp* const);
   virtual void handle(const BinaryOp* const);
   virtual void handle(const TernaryOp* const);
+  virtual void handle(const ReductionOp* const);
 
   virtual void handle(const ForLoop* const);
   virtual void handle(const IfThenElse* const);
@@ -124,6 +126,8 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
     handle(stmt);
     print_inline_ = prev;
   }
+
+  void printReductionOps(Fusion* fusion);
 
   void printKernel(
       const std::vector<Expr*>& exprs,

@@ -54,6 +54,13 @@ CONFIG_TREE_DATA = [
                 ]),
             ]),
         ]),
+        ("gcc", [
+            ("9", [
+                ("3.8", [
+                    ("build_only", [XImportant(True)]),
+                ]),
+            ]),
+        ]),
     ]),
 ]
 
@@ -125,6 +132,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "parallel_native": ParallelNativeConfigNode,
             "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
+            "build_only": BuildOnlyConfigNode,
             "android_abi": AndroidAbiConfigNode,
         }
         return next_nodes[experimental_feature]
@@ -178,6 +186,15 @@ class AndroidAbiConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["android_abi"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class BuildOnlyConfigNode(TreeConfigNode):
+
+    def init2(self, node_name):
+        self.props["build_only"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode
