@@ -62,11 +62,13 @@ def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, inplace=Fa
     if is_dynamic:
         model = prepare_dynamic_script(model, qconfig_dict, inplace)
         model(*run_args)
-        model = convert_dynamic_script(model, True, debug)
+        # TODO: change inplace to True
+        model = convert_dynamic_script(model, False, debug)
     else:
         model = prepare_script(model, qconfig_dict, inplace)
-        run_fn(model._c._get_method('forward'), *run_args)
-        model = convert_script(model, True, debug)
+        run_fn(model, *run_args)
+        # TODO: change inplace to True
+        model = convert_script(model, False, debug)
 
     return model
 
