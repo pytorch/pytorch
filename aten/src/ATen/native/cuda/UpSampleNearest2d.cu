@@ -14,6 +14,7 @@ namespace {
 
 #define MAX_THREADS 512
 
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_nearest2d_out_frame(
@@ -57,6 +58,7 @@ __global__ void upsample_nearest2d_out_frame(
   }
 }
 
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_nearest2d_backward_out_frame(
@@ -81,14 +83,14 @@ __global__ void upsample_nearest2d_backward_out_frame(
 
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
   int src_y =
-      nearest_neighbor_compute_source_index(height_scale, dst_y, src_dim_h);
-  int src_y_up = nearest_neighbor_compute_source_index(
+      nearest_neighbor_bw_compute_source_index(height_scale, dst_y, src_dim_h);
+  int src_y_up = nearest_neighbor_bw_compute_source_index(
       height_scale, dst_y + 1, src_dim_h + 1);
 
   int dst_x = dst_idx % dst_dim_w;
   int src_x =
-      nearest_neighbor_compute_source_index(width_scale, dst_x, src_dim_w);
-  int src_x_up = nearest_neighbor_compute_source_index(
+      nearest_neighbor_bw_compute_source_index(width_scale, dst_x, src_dim_w);
+  int src_x_up = nearest_neighbor_bw_compute_source_index(
       width_scale, dst_x + 1, src_dim_w + 1);
 
   for (int b = 0; b < dim_b; b++) {
