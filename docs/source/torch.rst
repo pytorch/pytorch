@@ -133,7 +133,7 @@ Example::
     >>> g_cuda[0].device
     device(type='cuda', index=0)
 
-Random Seeds
+Random seeds
 ~~~~~~~~~~~~
 
 .. autosummary::
@@ -147,7 +147,7 @@ Random Seeds
     set_rng_state
 
 
-Random Sampling Creation
+Random sampling creation
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autosummary::
