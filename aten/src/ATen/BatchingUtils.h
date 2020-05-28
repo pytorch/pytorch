@@ -15,7 +15,7 @@ std::bitset<kVmapNumLevels> createLevelsBitset(BatchDimsRef bdims);
 // Produces a new vector of the same size as `arr` where each element of is
 // created by calling `func` on  each element of `arr` in order.
 // Equivalent to `output = map(func, arr)` in Python.
-std::vector<int64_t> transform(IntArrayRef arr, std::function<int64_t(int64_t)> func);
+std::vector<int64_t> transformIntVector(IntArrayRef arr, std::function<int64_t(int64_t)> func);
 
 // Takes a BatchedTensor or a regular Tensor and permutes all of the batch dims of
 // the underlying tensor (if they exist) to the front, in the order of their level `.

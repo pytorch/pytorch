@@ -20,7 +20,7 @@ std::bitset<kVmapNumLevels> createLevelsBitset(BatchDimsRef bdims) {
   return result;
 }
 
-std::vector<int64_t> transform(IntArrayRef arr, std::function<int64_t(int64_t)> func) {
+std::vector<int64_t> transformIntVector(IntArrayRef arr, std::function<int64_t(int64_t)> func) {
   std::vector<int64_t> result;
   result.reserve(arr.size());
   for (int64_t elt : arr) {

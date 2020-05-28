@@ -64,7 +64,7 @@ Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, opt
   std::tie(self_, levels) = materializeBatchDimsAtFront(self);
   auto num_bdims = levels.count();
   auto self_dim = self.dim();
-  auto actual_dims = transform(
+  auto actual_dims = transformIntVector(
       dims,
       [&](int64_t dim) {
         return maybe_wrap_dim(dim, self_dim) + num_bdims;
