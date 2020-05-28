@@ -9689,6 +9689,45 @@ class TestTorchDeviceType(TestCase):
                 expected = start + weight * (end - start)
                 self.assertEqual(expected, actual)
 
+    def _test_logaddexp(self, device, dtype, base2):
+        if base2:
+            ref_func = np.logaddexp2
+            our_func = torch.logaddexp2
+        else:
+            ref_func = np.logaddexp
+            our_func = torch.logaddexp
+
+        def _test_helper(a, b):
+            ref = ref_func(a.cpu().numpy(), b.cpu().numpy())
+            v = our_func(a, b)
+            self.assertEqual(ref, v)
+
+        # simple test
+        a = torch.randn(64, 2, dtype=dtype, device=device) - 0.5
+        b = torch.randn(64, 2, dtype=dtype, device=device) - 0.5
+        _test_helper(a, b)
+        _test_helper(a[:3], b[:3])
+
+        # large value test for numerical stability
+        a *= 10000
+        b *= 10000
+        _test_helper(a, b)
+        _test_helper(a[:3], b[:3])
+
+        a = torch.tensor([float('inf'), float('-inf'), float('inf'), float("nan")], dtype=dtype, device=device)
+        b = torch.tensor([float('inf'), float('-inf'), float('-inf'), float("nan")], dtype=dtype, device=device)
+        _test_helper(a, b)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(torch.float32, torch.float64)
+    def test_logaddexp(self, device, dtype):
+        self._test_logaddexp(device, dtype, base2=False)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(torch.float32, torch.float64)
+    def test_logaddexp2(self, device, dtype):
+        self._test_logaddexp(device, dtype, base2=True)
+
     def test_diagflat(self, device):
         dtype = torch.float32
         # Basic sanity test
