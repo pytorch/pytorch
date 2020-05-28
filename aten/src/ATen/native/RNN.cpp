@@ -1755,8 +1755,8 @@ bool _use_cudnn_rnn_flatten_weight() {
       double dropout_p,                                                     \
       bool train,                                                           \
       bool bidirectional,                                                   \
-      bool type_2,                                                          \
-      bool batch_first) {                                                   \
+      bool batch_first,                                                     \
+      bool type_2) {                                                        \
     std::vector<QRNNCellParamsWrapper> params;                              \
     for (c10::intrusive_ptr<CellParamsBase> x : _params) {                  \
       params.emplace_back(std::move(x));                                    \
