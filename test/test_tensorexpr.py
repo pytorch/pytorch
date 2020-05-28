@@ -1,22 +1,12 @@
-import contextlib
 import numpy as np
 import torch
 import torch.nn.functional as F
 import unittest
 
-from torch.testing._internal.common_utils import suppress_warnings
+from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs
 
 from te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
     LLVMCodeGenExecuted, SimpleIREvalExecuted
-
-@contextlib.contextmanager
-def num_profiled_runs(num_runs):
-    old_num_runs = torch._C._jit_set_num_profiled_runs(num_runs)
-    try:
-        yield
-    finally:
-        torch._C._jit_set_num_profiled_runs(old_num_runs)
-
 
 class BaseTestClass(unittest.TestCase):
     def setUp(self):
