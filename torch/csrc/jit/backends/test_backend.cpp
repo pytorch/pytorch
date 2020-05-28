@@ -69,14 +69,11 @@ class TestBackend : public PyTorchBackendInterface {
   }
 };
 
-torch::jit::backend<TestBackend>& testBackend() {
-  static auto cls = torch::jit::backend<TestBackend>("test_backend");
-  return cls;
-}
-
 void initTestBackendBindings(PyObject* module) {
+  static auto constexpr backend_name = "test_backend";
+  static auto cls = torch::jit::backend<TestBackend>(backend_name);
   auto m = py::handle(module).cast<py::module>();
-  m.def("_jit_to_test_backend", testBackend().generateToBackendFn());
+  m.def("_jit_to_test_backend", torch::jit::generateToBackendFn(backend_name));
 }
 } // namespace jit
 } // namespace torch
