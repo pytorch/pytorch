@@ -30,11 +30,11 @@ class TestCudaFuser(JitTestCase):
         torch._C._jit_override_can_fuse_on_gpu(False)
 
         if(RUN_CUDA):
-            torch._C._jit_register_cuda_fuser()
+            self.old_nv_fuse = torch._C._jit_set_nv_fuser_enabled(True)
 
     def tearDown(self):
         if(RUN_CUDA):
-            torch._C._jit_clear_cuda_fuser()
+            torch._C._jit_set_nv_fuser_enabled(self.old_nv_fuse)
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuse)
         torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuse)
         super(TestCudaFuser, self).tearDown()
@@ -372,9 +372,8 @@ class TestPassManagerCudaFuser(JitTestCase):
     def test_context_manager_test(self):
         x = torch.randn(4, 8, dtype=torch.float, device="cuda")
         y = torch.randn(4, 8, dtype=torch.float, device="cuda")
-        with torch.jit.nvFuser():
-            with torch.jit.nvFuser():
-                torch._C._jit_register_cuda_fuser()
+        with torch.jit.fuser('fuser2'):
+            with torch.jit.fuser('fuser2'):
 
                 def t1(x, y):
                     o = x + y
@@ -406,12 +405,12 @@ class TestPassManagerCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @skipIfRocm
     def test_register_fuser(self):
-        self.assertFalse(torch._C._jit_register_cuda_fuser())
-        self.assertTrue(torch._C._jit_register_cuda_fuser())
-        self.assertTrue(torch._C._jit_register_cuda_fuser())
-        torch._C._jit_clear_cuda_fuser()
-        self.assertFalse(torch._C._jit_register_cuda_fuser())
-
+        self.assertFalse(torch._C._jit_set_nv_fuser_enabled(True))
+        self.assertTrue(torch._C._jit_nv_fuser_enabled())
+        self.assertTrue(torch._C._jit_set_nv_fuser_enabled(True))
+        self.assertTrue(torch._C._jit_nv_fuser_enabled())
+        self.assertTrue(torch._C._jit_set_nv_fuser_enabled(False))
+        self.assertFalse(torch._C._jit_nv_fuser_enabled())
 
 if __name__ == '__main__':
     run_tests()
