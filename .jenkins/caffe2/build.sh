@@ -248,7 +248,7 @@ else
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
-  $PYTHON setup.py install --user
+  ${PYTHON} setup.py install --user
 
   report_compile_cache_stats
 fi
@@ -258,7 +258,7 @@ fi
 ###############################################################################
 
 # Install ONNX into a local directory
-pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+${PIP} install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
 
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
