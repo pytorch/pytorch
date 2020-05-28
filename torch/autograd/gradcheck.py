@@ -207,7 +207,8 @@ def gradcheck(
     rtol: float = 1e-3,
     raise_exception: bool = True,
     check_sparse_nnz: bool = False,
-    nondet_tol: float = 0.0
+    nondet_tol: float = 0.0,
+    check_undefined_grad: bool = True
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
@@ -348,6 +349,33 @@ def gradcheck(
                 return fail_test("grad is incorrect type")
             if gi.size() != i.size():
                 return fail_test('grad is incorrect size')
+
+    if check_undefined_grad:
+        output = _differentiable_outputs(func(*tupled_inputs))
+        # Sending undefined output grads into the backward function should
+        # result in undefined input grads
+        output_grads_all_undef = [torch._C._functions.UndefinedGrad()(o) for o in output]
+        if any([o.requires_grad for o in output_grads_all_undef]):
+            grads_output = [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output_grads_all_undef]
+            grads_input = torch.autograd.grad(output_grads_all_undef,
+                                              diff_input_list,
+                                              grads_output,
+                                              allow_unused=True)
+            for gi, i in zip(grads_input, diff_input_list):
+                if gi is not None:
+                    return fail_test('expected undefined input grads when all output grads are undefined')
+
+            # If there are multiple output grads, we should be able to undef one at a time without error
+            if len(grads_output) > 1:
+                for undef_grad_idx in range(len(grads_output)):
+                    output = _differentiable_outputs(func(*tupled_inputs))
+                    output_grads_one_undef = [
+                        torch._C._functions.UndefinedGrad()(o) if idx == undef_grad_idx else o for idx, o in enumerate(output)
+                    ]
+                    grads_input = torch.autograd.grad(output_grads_one_undef,
+                                                      diff_input_list,
+                                                      grads_output,
+                                                      allow_unused=True)
 
     return True
 
