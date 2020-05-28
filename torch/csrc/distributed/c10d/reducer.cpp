@@ -165,10 +165,10 @@ Reducer::~Reducer() noexcept(false) {
   }
 }
 
+// Verifies replicas in this process treat the same number of params,
+// all params require grad, and corresponding params across replicas
+// have the same dtype/size/layout.
 void Reducer::verify_replicas_within_process() {
-  // Verify replicas in this process treat the same number of params,
-  // all params require grad, and corresponding params across replicas
-  // have the same dtype/size/layout.
   const auto replica_count = replicas_.size();
   for (size_t replica_index = 0; replica_index < replica_count;
        replica_index++) {
@@ -207,7 +207,7 @@ void Reducer::verify_replicas_within_process() {
   }
 }
 
-// Verify corresponding params in replica 0 have the same sizes/strides
+// Verifies corresponding params in replica 0 have the same sizes/strides
 // across processes.
 void Reducer::verify_replica0_across_processes() {
   size_t i = 0;
@@ -229,12 +229,14 @@ void Reducer::verify_replica0_across_processes() {
   auto metadata_dev = metadata.clone().to(replicas_[0][0].device());
   std::vector<at::Tensor> vec{metadata_dev};
   process_group_->broadcast(vec);
-  // Technically, since rank 0 is the broadcast source, rank 0 could
+  // Technically, since process 0 is the broadcast source, process 0 could
   // skip the check.  But there's no harm letting it continue.
   auto metadata_control = metadata_dev.to(metadata.device());
+  i = 0;
   for (size_t p = 0; p < replicas_[0].size(); p++) {
     const auto& t = replicas_[0][p];
-    // I'd like to include rank in the text, but ProcessGroup::getRank is not public!
+    // I'd like to include which process we are in the message,
+    // but ProcessGroup::getRank is not public!
     for (const auto& sz : t.sizes()) {
       TORCH_CHECK(sz == metadata_control[i++].item<int64_t>(),
 		  "replicas[0][", p, "] in this process"
