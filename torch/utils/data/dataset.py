@@ -195,6 +195,22 @@ class ConcatDataset(Dataset):
         return self.cumulative_sizes[-1]
 
     def get_idxs(self, idx):
+        r"""Derive dataset and sample indices from global index.
+
+        Arguments:
+            idx (int): global index used to compute dataset and sample index
+
+        Returns:
+            int: sample index inside current dataset
+            int: index to dataset containing current sample
+
+        Example:
+            >>> import torch
+            >>> foo = torch.utils.data.ConcatDataset([[0], [1]])
+            >>> foo.get_idxs(1)
+            (0, 1)
+        """
+
         dataset_idx = bisect.bisect_right(self.cumulative_sizes, idx)
         if dataset_idx == 0:
             sample_idx = idx
