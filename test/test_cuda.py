@@ -2828,19 +2828,20 @@ t2.start()
     def test_autocast_cat_jit(self):
         # Reported at https://github.com/pytorch/pytorch/issues/38958
 
-        class Model(nn.Module):
+        class Model(torch.nn.Module):
             def forward(self):
                 a = torch.randn(1)
                 b = torch.randn(1)
                 c = torch.cat((a, b), 0)
-                return c
+                d = torch.stack([c, c], 0)
+                return d
 
         # The JIT here doesn't really matter, we just need to call
         # cat via the boxed API
         model = Model()
         model_jit_script = torch.jit.script(model)
 
-        with amp.autocast(True):
+        with torch.cuda.amp.autocast(True):
             model()
             model_jit_script()
 
