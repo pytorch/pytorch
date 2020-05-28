@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/thread_pool.h>
+#include <c10d/PrefixStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 #include <tensorpipe/core/context.h>
@@ -44,7 +45,7 @@ struct AggregatedNetworkData {
 class TensorPipeAgent : public RpcAgent {
  public:
   TensorPipeAgent(
-      std::shared_ptr<::c10d::Store> addressStore,
+      std::shared_ptr<::c10d::Store> store,
       std::string selfName,
       worker_id_t selfId,
       int worldSize,
@@ -168,7 +169,8 @@ class TensorPipeAgent : public RpcAgent {
   std::unordered_map<std::string, WorkerInfo> workerNameToInfo_;
   std::unordered_map<std::string, std::string> workerNameToURL_;
 
-  const std::shared_ptr<::c10d::Store> addressStore_;
+  ::c10d::PrefixStore rankToNameStore_;
+  ::c10d::PrefixStore nameToAddressStore_;
   const int worldSize_;
   const TensorPipeRpcBackendOptions opts_;
 
