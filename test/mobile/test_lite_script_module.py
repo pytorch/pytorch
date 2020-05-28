@@ -3,7 +3,7 @@ import torch
 
 import io
 
-from torch.jit.mobile import *
+from torch.jit.mobile import _load_for_lite_interpreter
 
 class TestLiteScriptModule(unittest.TestCase):
 
@@ -22,7 +22,7 @@ class TestLiteScriptModule(unittest.TestCase):
 
         buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
         buffer.seek(0)
-        mobile_module = load_for_lite_interpreter(buffer)
+        mobile_module = _load_for_lite_interpreter(buffer)
 
         mobile_module_result = mobile_module(input)
         torch.testing.assert_allclose(script_module_result, mobile_module_result)

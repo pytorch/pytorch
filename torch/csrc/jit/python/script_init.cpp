@@ -1003,7 +1003,7 @@ void initJitScriptBindings(PyObject* module) {
     .def(py::init<c10::intrusive_ptr<c10::ivalue::Object>, std::shared_ptr<mobile::CompilationUnit>>())
     .def(
       "run_method",
-      [](mobile::Module& m, const std::string& method_name, py::tuple input_tuple) {
+      [](mobile::Module& m, const std::string& method_name, const py::tuple& input_tuple) {
         Stack stack;
         for (auto& input : input_tuple) {
           stack.push_back(toTypeInferredIValue(input));
@@ -1014,7 +1014,7 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("input_tuple"))
     .def(
       "forward",
-      [](mobile::Module& m, py::tuple input_tuple) {
+      [](mobile::Module& m, const py::tuple& input_tuple) {
         Stack stack;
         for (auto& input : input_tuple) {
           stack.push_back(toTypeInferredIValue(input));
