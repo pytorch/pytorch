@@ -45,10 +45,9 @@ void testGPU_IrGraphGenerator() {
   FusionGuard fg(&fusion);
 
   // Make sure we can handle empty IRs
-  {
-    IrGraphGenerator ir_graph(&fusion, IrGraphGenerator::DetailLevel::Basic);
-    TORCH_CHECK(!ir_graph.generate().empty());
-  }
+  TORCH_CHECK(!IrGraphGenerator::toGraphviz(
+                   &fusion, IrGraphGenerator::DetailLevel::Basic)
+                   .empty());
 
   // Construct an interesting IR
   TensorView* tv0 = makeDummyTensor(2);
@@ -62,10 +61,9 @@ void testGPU_IrGraphGenerator() {
   TensorView* tv6 = static_cast<TensorView*>(add(tv0, tv3));
 
   // Another checkpoint before adding outputs
-  {
-    IrGraphGenerator ir_graph(&fusion, IrGraphGenerator::DetailLevel::Explicit);
-    TORCH_CHECK(!ir_graph.generate().empty());
-  }
+  TORCH_CHECK(!IrGraphGenerator::toGraphviz(
+                   &fusion, IrGraphGenerator::DetailLevel::Explicit)
+                   .empty());
 
   fusion.addOutput(tv5);
   fusion.addOutput(tv6);
@@ -78,11 +76,9 @@ void testGPU_IrGraphGenerator() {
   tv0->computeAt(tv6, 1);
 
   // Another checkpoint with more node types
-  {
-    IrGraphGenerator ir_graph(
-        &fusion, IrGraphGenerator::DetailLevel::ComputeOnly);
-    TORCH_CHECK(!ir_graph.generate().empty());
-  }
+  TORCH_CHECK(!IrGraphGenerator::toGraphviz(
+                   &fusion, IrGraphGenerator::DetailLevel::ComputeOnly)
+                   .empty());
 
   for (Val* val : fusion.vals()) {
     if (!fusion.hasInput(val) &&
@@ -93,10 +89,9 @@ void testGPU_IrGraphGenerator() {
   }
 
   // Final IR graph
-  {
-    IrGraphGenerator ir_graph(&fusion, IrGraphGenerator::DetailLevel::Verbose);
-    TORCH_CHECK(!ir_graph.generate().empty());
-  }
+  TORCH_CHECK(!IrGraphGenerator::toGraphviz(
+                   &fusion, IrGraphGenerator::DetailLevel::Verbose)
+                   .empty());
 }
 
 void testGPU_FusionDispatch() {

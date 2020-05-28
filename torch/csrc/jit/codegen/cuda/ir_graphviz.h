@@ -12,10 +12,6 @@
 
 namespace torch {
 namespace jit {
-
-// Corresponding unit test
-void testGPU_IrGraphGenerator();
-
 namespace fuser {
 
 // Generates a DOT (https://www.graphviz.org) graph
@@ -38,8 +34,6 @@ namespace fuser {
 //    must be used instead)
 //
 class TORCH_CUDA_API IrGraphGenerator : private OptInConstDispatch {
-  friend void torch::jit::testGPU_IrGraphGenerator();
-
  public:
   enum class DetailLevel {
     ComputeOnly, // Only dataflow (compute) nodes
@@ -49,11 +43,12 @@ class TORCH_CUDA_API IrGraphGenerator : private OptInConstDispatch {
   };
 
  public:
-  // This is the public interface to IrGraphGenerator
   static void print(
       const Fusion* fusion,
       const char* filename,
       DetailLevel detail_level = DetailLevel::Basic);
+
+  static std::string toGraphviz(const Fusion* fusion, DetailLevel detail_level);
 
  private:
   IrGraphGenerator(const Fusion* fusion, DetailLevel detail_level);

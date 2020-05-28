@@ -117,13 +117,16 @@ void IrGraphGenerator::print(
     const Fusion* fusion,
     const char* filename,
     DetailLevel detail_level) {
-  // output file
   std::ofstream dot_file(filename);
   TORCH_CHECK(dot_file.good(), "Failed to open the IR graph file");
+  dot_file << toGraphviz(fusion, detail_level);
+}
 
-  // generate the dot graph definition
+std::string IrGraphGenerator::toGraphviz(
+    const Fusion* fusion,
+    DetailLevel detail_level) {
   IrGraphGenerator ir_graph(fusion, detail_level);
-  dot_file << ir_graph.generate();
+  return ir_graph.generate();
 }
 
 IrGraphGenerator::IrGraphGenerator(
