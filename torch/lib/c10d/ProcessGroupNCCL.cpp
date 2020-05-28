@@ -608,7 +608,7 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     }
 
     for (const auto& t : tensor_lists[i]) {
-      if (t.numel() != other[i].numel()) {
+      if (t.sizes() != other[i].sizes()) {
         throw std::runtime_error(
             "All tensor operands to scatter/gather must have the same size");
       }

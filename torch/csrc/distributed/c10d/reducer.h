@@ -92,6 +92,10 @@ class Reducer {
   // Work handle for allreduce on local_used_maps_
   std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
+  void verify_replicas_within_process();
+
+  void verify_replica0_across_processes();
+
   void mark_variable_ready_dense(VariableIndex index);
 
   void mark_variable_ready_sparse(VariableIndex index);
