@@ -120,18 +120,17 @@ class ModuleCloneHelper {
     size_t N = type->numAttributes();
     for (size_t i = 0; i < N; ++i) {
       IValue s = module._ivalue()->getSlot(i);
-      // we'll deepcopy the IValue in non inplace option
-      s = inplace ? s : s.deepcopy(memo);
       if (type->getAttribute(i)->is_module()) {
         const Module& orig = Module(s.toObject());
         Module cloned =
             clone_impl(orig, module_qconfig_map, type_remap, inplace, memo);
         r.register_module(type->getAttributeName(i), cloned);
       } else {
+        // we'll deepcopy the IValue in non inplace option
         r.register_attribute(
             type->getAttributeName(i),
             type->getAttribute(i),
-            s,
+            inplace ? s : s.deepcopy(memo),
             type->is_parameter(i),
             type->is_buffer(i));
       }
