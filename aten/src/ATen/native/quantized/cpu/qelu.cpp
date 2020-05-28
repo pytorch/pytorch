@@ -33,4 +33,14 @@ Tensor quantized_elu(
   return qy;
 }
 
+Tensor& quantized_celu_(Tensor& self, Scalar alpha) {
+  double inv_alpha = 1. / alpha.to<double>();
+  return quantized_elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
+}
+
+Tensor quantized_celu(const Tensor& qx, Scalar alpha) {
+  double inv_alpha = 1. / alpha.to<double>();
+  return quantized_elu(qx, alpha, Scalar(1.0), Scalar(inv_alpha));
+}
+
 }}  // namespace at::native

@@ -2601,8 +2601,18 @@
 
 - func: celu(Tensor self, Scalar alpha=1.0) -> Tensor
   use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: celu
+    CUDA: celu
+    QuantizedCPU: quantized_celu
 
 - func: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
+  python_module: nn
+  dispatch:
+    CPU: celu_
+    CUDA: celu_
+    QuantizedCPU: quantized_celu_
 
 - func: sigmoid(Tensor self) -> Tensor
   use_c10_dispatcher: full

@@ -238,6 +238,14 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qYout, qY_hat,
                          msg="F.elu.out failed ({} vs {})".format(qY, qY_hat))
 
+    """Tests the correctness of the quantized::celu op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams()),
+           alpha=st.floats(0.01, 10.0, allow_nan=False, allow_infinity=False))
+    def test_qcelu(self, X, alpha):
+        pass  # TODO: add some real tests
+
     """Tests the correctness of the quantized::qnnpack_sigmoid op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))

@@ -52,6 +52,7 @@ qactivation_ops = op_bench.op_list(
         ('functional.hardtanh', nnq.functional.hardtanh),
         ('functional.hardswish', nnq.functional.hardswish),
         ('functional.elu', nnq.functional.elu),
+        ('functional.celu', nnq.functional.celu),
         ('functional.hardsigmoid', nnq.functional.hardsigmoid),
         ('functional.leaky_relu', nnq.functional.leaky_relu),
         ('functional.sigmoid', torch.nn.functional.sigmoid),
