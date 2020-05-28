@@ -317,6 +317,9 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` is mkldnn tensor.
   bool is_mkldnn() const;
 
+  /// Returns if a `Tensor` is vulkan tensor.
+  bool is_vulkan() const;
+
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
@@ -430,6 +433,7 @@ class CAFFE2_API Tensor {
   Tensor cpu() const;
   Tensor cuda() const;
   Tensor hip() const;
+  Tensor vulkan() const;
 
   // ~~~~~ Autograd API ~~~~~
 

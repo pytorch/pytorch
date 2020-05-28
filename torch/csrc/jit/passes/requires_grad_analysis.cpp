@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <ATen/core/jit_type.h>
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -75,7 +76,8 @@ void PropagateRequiresGradSimpleNode(Node* node) {
     if (auto type = node->output()->type()->cast<TensorType>()) {
       if (type->scalarType()) {
         setRequiresGrad(
-            node->output(), at::isFloatingType(*type->scalarType()));
+            node->output(),
+            autograd::isDifferentiableType(*type->scalarType()));
       }
     }
     return;
@@ -89,7 +91,9 @@ void PropagateRequiresGradSimpleNode(Node* node) {
     if (auto type = output->type()->cast<TensorType>()) {
       if (type->scalarType()) {
         setRequiresGrad(
-            output, should_require && at::isFloatingType(*type->scalarType()));
+            output,
+            should_require &&
+                autograd::isDifferentiableType(*type->scalarType()));
       }
     }
   }

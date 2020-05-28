@@ -43,7 +43,6 @@ inline Tensor from_blob(
   }
   auto storage = Storage(
       Storage::use_byte_size_t(),
-      options.dtype(),
       detail::computeStorageNbytes(sizes, strides, options.dtype().itemsize()),
       InefficientStdFunctionContext::makeDataPtr(data, deleter, device),
       /*allocator=*/nullptr,
@@ -74,7 +73,6 @@ inline Tensor from_blob(
   }
   auto storage = Storage(
       Storage::use_byte_size_t(),
-      options.dtype(),
       detail::computeStorageNbytes(sizes, strides, options.dtype().itemsize()),
       DataPtr(data, nullptr, [](void*) {}, device),
       /*allocator=*/nullptr,
