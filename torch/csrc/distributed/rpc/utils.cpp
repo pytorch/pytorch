@@ -369,7 +369,7 @@ constexpr int kTpMessagePayloadIdx = 2;
 // stored as, well, tensors in the tensorpipe::Message).
 constexpr int kTpMessagePickleIdx = 3;
 
-}
+} // namespace
 
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     Message&& rpcMessage) {
@@ -385,9 +385,13 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
       tensorpipe::Message::Payload{buffers.id.get(), sizeof(int64_t)});
 
   // Payload
-  buffers.payload = std::move(rpcMessage).movePayload();
-  tpMessage.payloads.push_back(tensorpipe::Message::Payload{
-      const_cast<char*>(buffers.payload.data()), buffers.payload.size()});
+  buffers.payload = std::move(rpcMessage.payload());
+  // TensorPipe uses the same Message class for both reading and writing, thus
+  // it uses non-const pointers even though it doesn't modify them when writing.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  char* payloadPtr = const_cast<char*>(buffers.payload.data());
+  tpMessage.payloads.push_back(
+      tensorpipe::Message::Payload{payloadPtr, buffers.payload.size()});
 
   // Tensors
   buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
@@ -413,8 +417,12 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
           tensorpipe::Message::Tensor{storageData.data(), storageData.size()});
       buffers.copiedTensors.push_back(std::move(storageData));
     } else {
-      tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
-          const_cast<char*>(tensorData.data()), tensorData.sizeInBytes()});
+      // TensorPipe uses the same Message class for both reading and writing, so
+      // it uses non-const ptrs even though it doesn't modify them when writing.
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      char* tensorPtr = const_cast<char*>(tensorData.data());
+      tpMessage.tensors.push_back(
+          tensorpipe::Message::Tensor{tensorPtr, tensorData.sizeInBytes()});
     }
   }
 
@@ -452,10 +460,10 @@ TensorpipeReadBuffers tensorpipeAllocate(tensorpipe::Message& tpMessage) {
 
   // FIXME The two resizes below zero out the vectors, which is not needed.
 
-  buffers.payload.resize(tpMessage.payloads[2].length);
+  buffers.payload.resize(tpMessage.payloads[kTpMessagePayloadIdx].length);
   tpMessage.payloads[kTpMessagePayloadIdx].data = buffers.payload.data();
 
-  buffers.pickle.resize(tpMessage.payloads[3].length);
+  buffers.pickle.resize(tpMessage.payloads[kTpMessagePickleIdx].length);
   tpMessage.payloads[kTpMessagePickleIdx].data = buffers.pickle.data();
 
   for (auto& tensor : tpMessage.tensors) {
