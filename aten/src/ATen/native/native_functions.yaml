@@ -1766,6 +1766,22 @@
     CPU: log2_out
     CUDA: log2_out
 
+- func: logaddexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
+- func: logaddexp(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: method, function
+
+- func: logaddexp2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
+- func: logaddexp2(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: method, function
+
 - func: logdet(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
