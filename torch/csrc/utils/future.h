@@ -90,7 +90,7 @@ class TORCH_API Future final {
         << error.what();
       return;
     } else {
-      setErrorInternal(FutureError(std::move(errorMsg)), lock);
+      setErrorInternal(std::move(error), lock);
     }
   }
 
