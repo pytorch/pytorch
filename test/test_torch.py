@@ -17642,14 +17642,14 @@ class TestViewOps(TestCase):
                 t = t.T
 
             re = t.real
-            exp = torch.from_numpy(t.numpy().real)
+            exp = torch.from_numpy(t.cpu().numpy().real).to(device=device)
             self.assertEqual(re, exp)
             # TODO: update this to use is_view_of() when the autograd code is modified to
             # correctly handle .real
             self.assertTrue(t.storage().data_ptr() == re.storage().data_ptr())
 
             im = t.imag
-            exp = torch.from_numpy(t.numpy().imag)
+            exp = torch.from_numpy(t.cpu().numpy().imag).to(device=device)
             self.assertEqual(im, exp)
             # TODO: update this to use is_view_of() when the autograd code is modified to
             # correctly handle .imag
