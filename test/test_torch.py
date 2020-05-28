@@ -3916,16 +3916,16 @@ class AbstractTestCases:
             x = torch.tensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309], dtype=torch.float64)
             self.assertEqual(x.__repr__(), str(x))
             expected_str = '''\
-    tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
-                    inf], dtype=torch.float64)'''
+tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
+                inf], dtype=torch.float64)'''
             self.assertExpectedInline(str(x), expected_str)
 
             # test changing default dtype
             torch.set_default_dtype(torch.float64)
             self.assertEqual(x.__repr__(), str(x))
             expected_str = '''\
-    tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
-                    inf])'''
+tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
+                inf])'''
             self.assertExpectedInline(str(x), expected_str)
 
             # test summary
@@ -3975,26 +3975,26 @@ class AbstractTestCases:
             y = x.as_strided(size=(100, 2, 10), stride=(2 * 2 * 10, 2 * 10, 1))
             self.assertEqual(str(y), y.__repr__())
             expected_str = '''\
-    tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
-             [1., 1., 1.,  ..., 1., 1., 1.]],
+tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
+         [1., 1., 1.,  ..., 1., 1., 1.]],
 
-            [[1., 1., 1.,  ..., 1., 1., 1.],
-             [1., 1., 1.,  ..., 1., 1., 1.]],
+        [[1., 1., 1.,  ..., 1., 1., 1.],
+         [1., 1., 1.,  ..., 1., 1., 1.]],
 
-            [[1., 1., 1.,  ..., 1., 1., 1.],
-             [1., 1., 1.,  ..., 1., 1., 1.]],
+        [[1., 1., 1.,  ..., 1., 1., 1.],
+         [1., 1., 1.,  ..., 1., 1., 1.]],
 
-            ...,
+        ...,
 
-            [[1., 1., 1.,  ..., 1., 1., 1.],
-             [1., 1., 1.,  ..., 1., 1., 1.]],
+        [[1., 1., 1.,  ..., 1., 1., 1.],
+         [1., 1., 1.,  ..., 1., 1., 1.]],
 
-            [[1., 1., 1.,  ..., 1., 1., 1.],
-             [1., 1., 1.,  ..., 1., 1., 1.]],
+        [[1., 1., 1.,  ..., 1., 1., 1.],
+         [1., 1., 1.,  ..., 1., 1., 1.]],
 
-            [[1., 1., 1.,  ..., 1., 1., 1.],
-             [1., 1., 1.,  ..., 1., 1., 1.]]])\
-    '''
+        [[1., 1., 1.,  ..., 1., 1., 1.],
+         [1., 1., 1.,  ..., 1., 1., 1.]]])\
+'''
 
             self.assertExpectedInline(str(y), expected_str)
 
