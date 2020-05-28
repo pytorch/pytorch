@@ -221,7 +221,6 @@ def wait_until_pending_futures_and_users_flushed():
         if num_pending_futures == 0 and num_pending_users == 0:
             break
         time.sleep(0.1)
-    return
 
 def initialize_pg(init_method, rank, world_size):
     # This is for tests using `dist.barrier`.
