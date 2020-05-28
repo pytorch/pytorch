@@ -2,7 +2,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <algorithm>
-#include <iostream>
 
 namespace at {
 namespace native {
