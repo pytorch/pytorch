@@ -11935,6 +11935,7 @@ class TestTorchDeviceType(TestCase):
                 pt_res,
                 torch.from_numpy(np_res),
                 atol=1e-3,
+                rtol=0,
                 exact_dtype=False)
 
     def test_eye(self, device):
