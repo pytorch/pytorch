@@ -27,7 +27,8 @@ Tensor view_as_real(const Tensor& self) {
     return at::empty({0}, self.options().dtype(float_type));
   } else {
     auto new_strides = computeStrideForComplex(self.strides());
-    return at::empty({0}, self.options().dtype(float_type)).set_(self.storage(), self.storage_offset(), new_sizes, new_strides);
+    auto new_storage_offset = 2 * self.storage_offset();
+    return at::empty({0}, self.options().dtype(float_type)).set_(self.storage(), new_storage_offset, new_sizes, new_strides);
   }
 }
 

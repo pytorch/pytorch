@@ -143,9 +143,7 @@ _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
-_(aten, _th_max) \
 _(aten, _th_median) \
-_(aten, _th_min) \
 _(aten, _th_mode) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
