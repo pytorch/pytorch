@@ -7625,7 +7625,7 @@ class TestNN(NNTestCase):
             dim = len(in_t.shape) - 2
             out_shape = [1, 1] + [out_size] * dim
             with warnings.catch_warnings(record=True) as w:
-                out_t = m(in_t)
+                out_t = layer(in_t)
             self.assertEqual(torch.ones(out_shape), out_t)
 
             self.assertEqual(
@@ -7634,10 +7634,10 @@ class TestNN(NNTestCase):
             gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t])
             gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t])
 
-        def _make_input(dim):
+        def _make_input(dim, device):
             size = [1, 1]
             size += [2] * dim
-            return torch.ones(size, requires_grad=True)
+            return torch.ones(size, requires_grad=True, device=device)
 
         device_list = ['cpu']
         if TEST_CUDA:
@@ -7648,27 +7648,27 @@ class TestNN(NNTestCase):
                 for mode in ['nearest', 'area']:
                     kwargs = dict(mode=mode)
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
-                    for input in [_make_input(1), _make_input(2), _make_input(3)]:
+                    for input in [_make_input(1, device), _make_input(2, device), _make_input(3, device)]:
                         _test_interpolate_helper(input, scale_factor, m)
 
                 for align_corners in [True, False]:
                     kwargs = dict(mode='linear', align_corners=align_corners)
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
-                    _test_interpolate_helper(_make_input(1), scale_factor, m)
+                    _test_interpolate_helper(_make_input(1, device), scale_factor, m)
 
                     kwargs = dict(mode='bilinear', align_corners=align_corners)
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
-                    _test_interpolate_helper(_make_input(2), scale_factor, m)
+                    _test_interpolate_helper(_make_input(2, device), scale_factor, m)
 
                     kwargs = dict(mode='bicubic', align_corners=align_corners)
 
                     def m(t):
                         return F.interpolate(t, scale_factor=scale_factor, **kwargs).to(device)
-                    _test_interpolate_helper(_make_input(2), scale_factor, m)
+                    _test_interpolate_helper(_make_input(2, device), scale_factor, m)
 
                     kwargs = dict(mode='trilinear', align_corners=align_corners)
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
-                    _test_interpolate_helper(_make_input(3), scale_factor, m)
+                    _test_interpolate_helper(_make_input(3, device), scale_factor, m)
 
     def test_linear_broadcasting(self):
         m = nn.Linear(5, 8)
