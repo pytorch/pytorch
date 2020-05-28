@@ -8,7 +8,7 @@ import unittest
 import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
-    skipCUDANonDefaultStreamIf
+    skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN
 
 try:
     import psutil
@@ -450,6 +450,10 @@ def largeTensorTest(size):
             else:
                 if not HAS_PSUTIL:
                     raise unittest.skip('Need psutil to determine if memory is sufficient')
+
+                # The sanitizers have significant memory overheads
+                if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
+                    size *= 10
 
                 if psutil.virtual_memory().available < size:
                     gc.collect()
