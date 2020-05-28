@@ -78,8 +78,8 @@ void div_kernel(TensorIterator& iter) {
       });
     });
   } else {
-    _AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "div_cpu", [&]() {
 #ifdef __APPLE__
+    _AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "div_cpu", [&]() {
       // TODO: Vec256 for c10::complex<float> is causing illegal instruction error on the MacOS CI,
       // skipping vectorization for it.
       // See https://github.com/pytorch/pytorch/issues/39123
@@ -91,7 +91,6 @@ void div_kernel(TensorIterator& iter) {
         );
         return;
       }
-#endif
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
            return a / b;
@@ -100,6 +99,17 @@ void div_kernel(TensorIterator& iter) {
           return a / b;
         });
     });
+#else
+    _AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "div_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+           return a / b;
+        },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+          return a / b;
+        });
+    });
+#endif
   }
 }
 
