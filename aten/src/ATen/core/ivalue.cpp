@@ -605,7 +605,7 @@ getClassConverter() {
   return classConverter;
 }
 
-intrusive_ptr<ivalue::Future> collectAll(
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
     List<intrusive_ptr<ivalue::Future>> srcs) {
   struct Ctx {
     explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs)
@@ -634,7 +634,7 @@ intrusive_ptr<ivalue::Future> collectAll(
   return ctx->dstFuture;
 }
 
-intrusive_ptr<ivalue::Future> collectAll(
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
     std::vector<intrusive_ptr<ivalue::Future>> srcs) {
   auto typePtr =
       !srcs.empty() ? srcs[0]->type() : FutureType::create(NoneType::get());
