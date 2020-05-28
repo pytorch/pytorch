@@ -333,8 +333,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   ClientPipe& clientPipe = it->second;
   auto& pendingResponseMessage = clientPipe.pendingResponseMessage_;
 
-  std::shared_ptr<FutureMessage> futureResponseMessage =
-      std::make_shared<FutureMessage>();
+  auto futureResponseMessage = std::make_shared<AtomicFutureMessage>();
   requestMessage.setId(nextMessageID_++);
   pendingResponseMessage[requestMessage.id()] = futureResponseMessage;
 
@@ -362,7 +361,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   // Don't need to hold lock while calling tensorpipe API.
   lock.unlock();
 
-  futureResponseMessage->addCallback([this]() {
+  futureResponseMessage->futMsg.addCallback([this]() {
     // Decrease the callcount through a callback so it is only decremented once
     // per future.
     --clientActiveCalls_;
@@ -372,10 +371,10 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
       clientPipe.pipe_,
       std::move(requestMessage),
       [this, &clientPipe, futureResponseMessage](
-          const tensorpipe::Error& error) {
+          const tensorpipe::Error& error) mutable {
         if (error) {
           LOG(WARNING) << "client write error: " << error.what();
-          futureResponseMessage->setError(error.what());
+          markFutureWithError(*futureResponseMessage, error.what());
           return;
         }
 
@@ -394,16 +393,16 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                   std::swap(clientPipe.pendingResponseMessage_, pendingMsgs);
                   clientPipe.readError_ = true;
                 }
+                std::string errorMsg = error.what();
                 for (auto& p : pendingMsgs) {
-                  std::shared_ptr<FutureMessage>& futureMessage = p.second;
-                  futureMessage->setError(error.what());
+                  markFutureWithError(*p.second, errorMsg);
                 }
                 return;
               }
 
               // Identify future response message by message ID
               uint64_t messageId = responseMessage.id();
-              std::shared_ptr<FutureMessage> futureResponseMessage;
+              std::shared_ptr<AtomicFutureMessage> futureResponseMessage;
               {
                 std::lock_guard<std::mutex> lock(mutex_);
                 // A read error will lead all following callbacks to be
@@ -425,18 +424,21 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                    futureResponseMessage,
                    responseMessage{std::move(responseMessage)}]() mutable {
                     if (responseMessage.type() == MessageType::EXCEPTION) {
-                      futureResponseMessage->setError(std::string(
-                          responseMessage.payload().begin(),
-                          responseMessage.payload().end()));
+                      markFutureWithError(
+                          *futureResponseMessage,
+                          std::string(
+                              responseMessage.payload().begin(),
+                              responseMessage.payload().end()));
                     } else {
-                      futureResponseMessage->markCompleted(
-                          std::move(responseMessage));
+                      markFutureAsComplete(
+                          *futureResponseMessage, std::move(responseMessage));
                     }
                   });
             });
       });
 
-  return futureResponseMessage;
+  return std::shared_ptr<FutureMessage>(
+      futureResponseMessage, &futureResponseMessage->futMsg);
 }
 
 void TensorPipeAgent::pollTimeoutRpcs() {
@@ -464,7 +466,7 @@ void TensorPipeAgent::pollTimeoutRpcs() {
 
     // Move all these futures to a separate vector so we can process them
     // outside the lock.
-    std::vector<std::shared_ptr<FutureMessage>> timedOutFutures =
+    std::vector<std::shared_ptr<AtomicFutureMessage>> timedOutFutures =
         std::move(timeoutMap_.begin()->second);
     // We can safely remove this key from the timeoutMap_ since all these
     // futures will be processed.
@@ -475,11 +477,10 @@ void TensorPipeAgent::pollTimeoutRpcs() {
     // Set an error on futures added to the timedOutFutures vector. We do this
     // outside the lock to prevent potential lock-order-inversions by callbacks
     // triggered by the serError call.
-    for (const auto& future : timedOutFutures) {
+    for (auto& future : timedOutFutures) {
       std::string errorMsg = c10::str(
           "RPC ran for more than set timeout and will now be marked with an error");
-      // Using setErrorIfNeeded so completed futures are ignored.
-      future->setErrorIfNeeded(errorMsg);
+      markFutureWithError(*future, std::move(errorMsg));
     }
   }
 }
@@ -670,6 +671,22 @@ std::string TensorPipeAgent::getDefaultIPAddress() {
   LOG(WARNING) << "TensorPipe agent didn't find associated IP address with "
                << hostname.data() << ". Using " << defaultIP << " to bind";
   return defaultIP;
+}
+
+void TensorPipeAgent::markFutureAsComplete(
+    AtomicFutureMessage& futureMessage,
+    Message message) {
+  if (!futureMessage.isComplete.test_and_set()) {
+    futureMessage.futMsg.markCompleted(std::move(message));
+  }
+}
+
+void TensorPipeAgent::markFutureWithError(
+    AtomicFutureMessage& futureMessage,
+    std::string errorMsg) {
+  if (!futureMessage.isComplete.test_and_set()) {
+    futureMessage.futMsg.setError(std::move(errorMsg));
+  }
 }
 
 } // namespace rpc
