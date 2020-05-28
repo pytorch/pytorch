@@ -8,6 +8,20 @@
 #include <THC/THCTensor.hpp>
 
 template <typename T>
+struct TensorMulConstantOp {
+  TensorMulConstantOp(T v) : val(v) {}
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = *in * val;
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    *v *= val;
+  }
+
+  const T val;
+};
+
+template <typename T>
 struct TensorFmodOp {
   TensorFmodOp(T v) : val((float)v) {}
   __device__ __forceinline__ void operator()(T* out, T* in) {
