@@ -119,7 +119,6 @@ Ops that can autocast to ``float32``
 """"""""""""""""""""""""""""""""""""
 
 ``__pow__``,
-``__rdiv__``,
 ``__rpow__``,
 ``__rtruediv__``,
 ``acos``,

@@ -135,8 +135,8 @@ def doAutodiffCheck(testname):
         'test_nn_multilabel_soft_margin_loss',
         'test_nn_batch_norm',
         # AutogradJitGenerated
-        'test___rdiv___constant',
-        'test___rdiv___scalar_constant',
+        'test___rtruediv___constant',
+        'test___rtruediv___scalar_constant',
     ]
 
     if testname in test_exceptions:
@@ -17793,8 +17793,8 @@ class TestJitGeneratedFunctional(JitTestCase):
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
 # and we have to disable the failing tests here instead.
 UBSAN_BLACKLISTED_TESTS = [
-    "test___rdiv___constant",
-    "test___rdiv___scalar_constant",
+    "test___rtruediv___constant",
+    "test___rtruediv___scalar_constant",
     "test_addcdiv",
     "test_addcdiv_broadcast_all",
     "test_addcdiv_broadcast_rhs",
