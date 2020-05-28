@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/utils/variadic.h>
 #include <torch/custom_class.h>
@@ -452,7 +453,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
       Inline(*graph);
     }
     FixupTraceScopeBlocks(graph, self);
-
+    NormalizeOps(graph);
     return {state, out_stack};
   } catch (...) {
     tracer::abandon();

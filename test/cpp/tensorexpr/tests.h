@@ -70,6 +70,8 @@ namespace jit {
   _(ReduceSplitMask)                        \
   _(ReduceSplitNoMask)                      \
   _(ReduceOverSplitMask)                    \
+  _(ReduceSplitRfactor)                     \
+  _(ReduceOverSplitRfactor)                 \
   _(SplitReduceAxis)                        \
   _(SplitNonReduceAxis)                     \
   _(TypeTest01)                             \
@@ -157,6 +159,7 @@ namespace jit {
   _(SimplifyForWontLoseLoopOptions)         \
   _(SimplifyMultilevelFor)                  \
   _(SimplifyForCleansUp)                    \
+  _(SimplifyEliminateEmptyFor)              \
   _(SimplifyFlattenBlock)                   \
   _(StmtClone)                              \
   _(BoundsInference_1)                      \
