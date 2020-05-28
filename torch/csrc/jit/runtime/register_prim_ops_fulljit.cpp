@@ -48,19 +48,23 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         "prim::Guard(Tensor(a) t) -> Tensor(a)",
-         [](Stack& stack) {
-           AT_ERROR("Should be replaced by prim::BailOut");
-           return 0;
+         prim::Guard,
+         [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            AT_ERROR("Should be replaced by prim::BailOut");
+            return 0;
+          };
          },
-         aliasAnalysisFromSchema()),
+         aliasAnalysisSpecialCase()),
      Operator(
-         "prim::BailOut(...) -> Tensor(a)",
-         [](Stack& /* stack */) {
-           AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
-           return 0;
+         prim::BailOut,
+         [](const Node* node) -> Operation {
+          return [](Stack& /* stack */) {
+            AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
+            return 0;
+          };
          },
-         aliasAnalysisFromSchema()),
+         aliasAnalysisSpecialCase()),
      Operator(
          "prim::BailoutTemplate() -> int",
          [](Stack& stack) {
