@@ -19,6 +19,8 @@ using qtanh_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qelu_fn = void(*)(
     const at::Tensor& /*qx*/,
     Scalar /*alpha*/,
+    Scalar /*scale*/,
+    Scalar /*input_scale*/,
     at::Tensor& /*qy*/);
 using qbinary_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Tensor& /*other*/);

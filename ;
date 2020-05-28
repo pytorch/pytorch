@@ -499,9 +499,9 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
         torch._C._nn.elu(input, alpha, out=output)
         return output
     elif inplace:
-        return torch._C._nn.elu_(input, alpha, 1., 1.)
+        return torch._C._nn.elu_(input, alpha)
     else:
-        return torch._C._nn.elu(input, alpha, 1., 1.)
+        return torch._C._nn.elu(input, alpha)
 
 def hardsigmoid(input):
     # type: (Tensor) -> Tensor

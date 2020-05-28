@@ -11,7 +11,7 @@ DEFINE_DISPATCH(qelu_stub);
 
 Tensor& quantized_elu_out(Tensor& result, const Tensor& self, Scalar alpha,
     Scalar scale, Scalar input_scale) {
-  qelu_stub(self.device().type(), self, alpha, result);
+  qelu_stub(self.device().type(), self, alpha, scale, input_scale, result);
   return result;
 }
 
@@ -19,7 +19,7 @@ Tensor& quantized_elu_(Tensor& self, Scalar alpha, Scalar scale,
     Scalar input_scale) {
   Tensor qy = at::_empty_affine_quantized(self.sizes(), self.options(),
       self.q_scale(), self.q_zero_point());
-  qelu_stub(self.device().type(), self, alpha, qy);
+  qelu_stub(self.device().type(), self, alpha, scale, input_scale, qy);
   // This can be optimized in a later PR if necessary.
   self.copy_(qy);
   return self;
@@ -29,7 +29,7 @@ Tensor quantized_elu(
     const Tensor& qx, Scalar alpha, Scalar scale, Scalar input_scale) {
   Tensor qy = at::_empty_affine_quantized(qx.sizes(), qx.options(),
       qx.q_scale(), qx.q_zero_point());
-  qelu_stub(qx.device().type(), qx, alpha, qy);
+  qelu_stub(qx.device().type(), qx, alpha, scale, input_scale, qy);
   return qy;
 }
 
