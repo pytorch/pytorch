@@ -114,9 +114,9 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
     // `view_func` is used to recover views in backward when as_strided is not supported.
     // See Note [View + Inplace update on base tensor] and [View + Inplace update on view tensor]
     // for more details how we use this function in backward.
+    auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base_var));
     if (view_func.has_value()) {
       auto fn = view_func.value();
-      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base_var));
       if (diff_view_meta->has_view_fn()) {
         auto prev_fn = diff_view_meta->view_fn();
         view_func = [=](const at::Tensor& root_base) {
@@ -139,6 +139,13 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
         };
       }
     }
+    // else if(diff_view_meta->has_view_fn()) {
+    //   auto prev_fn = diff_view_meta->view_fn();
+    //   view_func = [=](const at::Tensor& root_base) {
+    //     auto temp = prev_fn(root_base);
+    //     return as_strided(temp, xxxx);
+    //   };
+    // }
     base_var = base_var._base();
   }
   if (is_differentiable) {

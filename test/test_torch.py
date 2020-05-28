@@ -147,10 +147,18 @@ class _TestTorchMixin(object):
                     skip_regexes.append(re.compile('^{}$'.format(re.escape(r))))
                 else:
                     skip_regexes.append(r)
+
             for name in dir(ns):
                 if name.startswith('_'):
                     continue
-                var = getattr(ns, name)
+
+                # real and imag are only implemented for complex tensors.
+                if name in ['real', 'imag']:
+                    y = torch.randn(1, dtype=torch.cfloat)
+                    var = getattr(y, name)
+                else:
+                    var = getattr(ns, name)
+
                 if not isinstance(var, checked_types):
                     continue
                 doc = var.__doc__

@@ -520,7 +520,7 @@ PyObject *THPVariable_get_real(THPVariable* self, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  auto real = at::native::real(self_);
+  auto real = at::real(self_);
   return THPVariable_Wrap(real);
   END_HANDLE_TH_ERRORS
 }
@@ -529,8 +529,16 @@ PyObject *THPVariable_get_imag(THPVariable* self, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  auto imag = at::native::imag(self_);
+  auto imag = at::imag(self_);
   return THPVariable_Wrap(imag);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPVariable_view_as_real(THPVariable* self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  return THPVariable_Wrap(at::view_as_real(self_));
   END_HANDLE_TH_ERRORS
 }
 
@@ -565,6 +573,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"names", (getter)THPVariable_get_names, (setter)THPVariable_set_names, nullptr, nullptr},
   {"real", (getter)THPVariable_get_real, nullptr, nullptr, nullptr},
   {"imag", (getter)THPVariable_get_imag, nullptr, nullptr, nullptr},
+  {"view_as_real", (getter)THPVariable_view_as_real, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
