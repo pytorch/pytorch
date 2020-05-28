@@ -124,3 +124,6 @@ def override_qengines(qfunction):
                 # qfunction should not return anything.
                 qfunction(*args, **kwargs)
     return test_fn
+
+def qengine_is_fbgemm():
+    return torch.backends.quantized.engine == 'fbgemm'
