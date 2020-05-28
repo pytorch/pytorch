@@ -55,7 +55,11 @@ CONFIG_TREE_DATA = [
             ]),
         ]),
         ("gcc", [
-            ("9", [XImportant("3.8")]),
+            ("9", [
+                ("3.8", [
+                    ("build_only", [XImportant(True)]),
+                ]),
+            ]),
         ]),
     ]),
 ]
