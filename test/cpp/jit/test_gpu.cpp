@@ -1608,7 +1608,7 @@ void testGPU_FusionUnaryOps() {
       OpTuple{at::asin, UnaryOpType::Asin, "asin"},
       OpTuple{at::atan, UnaryOpType::Atan, "atan"},
       // There does not appear to be an appropriate ATen function for atanh
-      //OpTuple{at::atanh,      UnaryOpType::Atanh,      "atanh"      },
+      // OpTuple{at::atanh,      UnaryOpType::Atanh,      "atanh"      },
       OpTuple{at::ceil, UnaryOpType::Ceil, "ceil"},
       OpTuple{at::cos, UnaryOpType::Cos, "cos"},
       OpTuple{at::cosh, UnaryOpType::Cosh, "cosh"},
