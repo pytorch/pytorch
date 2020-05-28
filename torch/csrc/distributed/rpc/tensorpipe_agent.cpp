@@ -176,20 +176,31 @@ void TensorPipeAgent::pipeRead(
     std::function<void(const tensorpipe::Error&, Message&&)> fn) {
   pipe->readDescriptor([fn{std::move(fn)}, pipe](
                            const tensorpipe::Error& error,
-                           tensorpipe::Message&& tpMessage) mutable {
+                           tensorpipe::Message tpMessage) mutable {
     if (error) {
       fn(error, Message());
       return;
     }
 
-    // Allocate memory and fill in pointers
-    Message rpcMessage = tensorpipeAllocateMessage(tpMessage);
+    TensorpipeReadBuffers tpBuffers = tensorpipeAllocate(tpMessage);
 
     pipe->read(
         std::move(tpMessage),
-        [fn{std::move(fn)}, rpcMessage{std::move(rpcMessage)}](
+        [tpBuffers{
+             std::make_shared<TensorpipeReadBuffers>(std::move(tpBuffers))},
+         fn{std::move(fn)}](
             const tensorpipe::Error& error,
-            tensorpipe::Message&& /* unused */) mutable {
+            tensorpipe::Message tpMessage) mutable {
+          if (error) {
+            fn(error, Message());
+            return;
+          }
+
+          // FIXME This does some unpickling, which could be a bit expensive:
+          // perhaps it would be best to perform it inside the worker threads?
+          Message rpcMessage = tensorpipeDeserialize(
+              std::move(tpMessage), std::move(*tpBuffers));
+
           fn(error, std::move(rpcMessage));
         });
   });
@@ -199,17 +210,17 @@ void TensorPipeAgent::pipeWrite(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
     Message&& rpcMessage,
     std::function<void(const tensorpipe::Error&)> fn) {
-  TensorPipeEntry tpEntry = tensorpipeSerialize(rpcMessage);
-  tensorpipe::Message tpMessage = std::move(tpEntry.message);
+  tensorpipe::Message tpMessage;
+  TensorpipeWriteBuffers tpBuffers;
+  std::tie(tpMessage, tpBuffers) = tensorpipeSerialize(std::move(rpcMessage));
   pipe->write(
       std::move(tpMessage),
-      // Note: keep payload and tensors of rpcMessage alive.
-      [rpcMessage{std::move(rpcMessage)},
-       reservedTensors{std::move(tpEntry.reservedTensors)},
-       copiedTensors{std::move(tpEntry.copiedTensors)},
+      [tpBuffers{
+           std::make_shared<TensorpipeWriteBuffers>(std::move(tpBuffers))},
        fn{std::move(fn)}](
-          const tensorpipe::Error& error,
-          tensorpipe::Message&& /* unused */) mutable { fn(error); });
+          const tensorpipe::Error& error, tensorpipe::Message /* unused */) {
+        fn(error);
+      });
 }
 
 void TensorPipeAgent::sendCompletedResponseMessage(
