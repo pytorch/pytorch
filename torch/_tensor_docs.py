@@ -869,6 +869,13 @@ Args:
     {memory_format}
 """.format(**common_args))
 
+add_docstr_all('logcumsumexp',
+               r"""
+logcumsumexp(dim) -> Tensor
+
+See :func:`torch.logcumsumexp`
+""")
+
 add_docstr_all('cummax',
                r"""
 cummax(dim) -> (Tensor, Tensor)
@@ -1733,6 +1740,20 @@ add_docstr_all('log2_',
 log2_() -> Tensor
 
 In-place version of :meth:`~Tensor.log2`
+""")
+
+add_docstr_all('logaddexp',
+               r"""
+logaddexp(other) -> Tensor
+
+See :func:`torch.logaddexp`
+""")
+
+add_docstr_all('logaddexp2',
+               r"""
+logaddexp2(other) -> Tensor
+
+See :func:`torch.logaddexp2`
 """)
 
 add_docstr_all('log_normal_', r"""
