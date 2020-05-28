@@ -1271,12 +1271,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               const TypePtr& expected = af.types[inst.X];
               auto expected_type = expected->cast<TensorType>();
               if (t.defined() &&
-                !frames.back().symbols2dims.bindSymbolicShapes(t.sizes(), expected_type->symbolic_sizes())) {
+                  !frames.back().symbols2dims.bindSymbolicShapes(
+                      t.sizes(), expected_type->symbolic_sizes())) {
                 push(stack, false);
-              } else{
-                push(
-                    stack,
-                    expected_type->exactMatchTensor(t));
+              } else {
+                push(stack, expected_type->matchTensor(t));
               }
             }
             ++af.pc;

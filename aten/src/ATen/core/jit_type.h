@@ -653,7 +653,7 @@ struct CAFFE2_API TensorType : public Type {
 
   TensorTypePtr merge(TensorTypePtr other, bool merge_sizes = true) const;
 
-  bool exactMatchTensor(const at::Tensor& t);
+  bool matchTensor(const at::Tensor& t);
 
   // is all information about the type specified except for autograd?
   // This replaces the notion of a 'CompleteTensorType' that used to exist

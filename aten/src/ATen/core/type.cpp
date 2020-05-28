@@ -523,15 +523,23 @@ TensorTypePtr TensorType::merge(TensorTypePtr other, bool merge_sizes) const {
       undef);
 }
 
-bool TensorType::exactMatchTensor(const at::Tensor& t) {
-    if (undefined() && !t.defined()) {
-        return true;
-    }
-    return t.defined() && !undefined() && isComplete() && t.scalar_type() == scalarType().value()
-        && t.device() == device().value()
-    && t.strides() == strides().concrete_sizes().value()
-    && t.requires_grad() == requiresGrad().value()
-    && t.sizes() == sizes().concrete_sizes().value();
+template <typename T>
+bool is_null_or_equal(c10::optional<T> a, c10::IntArrayRef b) {
+  return !a.has_value() || a.value() == b;
+}
+
+bool TensorType::matchTensor(const at::Tensor& t) {
+  bool undef = undefined().value_or(true);
+  if (undef && !t.defined()) {
+      return true;
+  }
+  bool rg = at::GradMode::is_enabled() && t.requires_grad();
+  return t.defined() && !undef
+    && scalarType().value_or(t.scalar_type()) == t.scalar_type()
+    && device().value_or(t.device()) == t.device()
+    && requiresGrad().value_or(rg) == rg
+    && is_null_or_equal(strides().concrete_sizes(), t.strides())
+    && is_null_or_equal(sizes().concrete_sizes(), t.sizes());
 }
 
 bool TensorType::operator==(const c10::Type& rhs) const {
