@@ -96,8 +96,7 @@ TensorPipeAgent::TensorPipeAgent(
   collectNames();
 
   // Initialize the time-series metrics tracking map
-  timeSeriesMetrics_[kGilAverageWaitTime] =
-      std::make_unique<TimeSeriesMetricsTracker>();
+  timeSeriesMetrics_.emplace(kGilAverageWaitTime, TimeSeriesMetricsTracker());
 }
 
 TensorPipeAgent::~TensorPipeAgent() {
@@ -648,7 +647,7 @@ std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
       // Include the averages for each time series metric. This is just the GIL
       // Wait Time for now.
       auto averageGilWaitTime =
-          timeSeriesMetrics_[kGilAverageWaitTime]->computeAverage();
+          timeSeriesMetrics_[kGilAverageWaitTime].computeAverage();
       lock.unlock();
       metrics[kGilAverageWaitTime] = c10::to_string(averageGilWaitTime);
     }
@@ -660,7 +659,7 @@ std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
 void TensorPipeAgent::addGilWaitTime(
     const std::chrono::microseconds gilWaitTime) {
   std::lock_guard<std::mutex> lock(metricsMutex_);
-  timeSeriesMetrics_[kGilAverageWaitTime]->addData(gilWaitTime.count());
+  timeSeriesMetrics_[kGilAverageWaitTime].addData(gilWaitTime.count());
 }
 
 TensorPipeAgent::NetworkDataDict TensorPipeAgent::getNetworkData() {
