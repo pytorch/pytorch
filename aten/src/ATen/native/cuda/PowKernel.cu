@@ -75,6 +75,10 @@ static inline __host__ __device__ typename std::enable_if<!std::is_floating_poin
 #else
 template <typename Base_type, typename Exp_type>
 static inline __host__ __device__ Base_type pow_(Base_type base, Exp_type exp) {
+  return ::pow(base, exp);
+}
+template <typename Base_type, typename Exp_type>
+static inline __host__ __device__ Base_type complex_pow_(Base_type base, Exp_type exp) {
   return std::pow(base, exp);
 }
 template <typename T>
@@ -143,7 +147,7 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
       const auto exp = exp_scalar.to<scalar_t>();
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
-        return pow_(base, exp);
+        return complex_pow_(base, exp);
       });
     });
   } else if (isFloatingType(iter.dtype()) || exp_scalar.isIntegral(false)) {
