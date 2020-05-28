@@ -169,14 +169,20 @@ test_python_ge_config_legacy() {
   assert_git_not_dirty
 }
 
-test_python_all_except_nn_and_distributed() {
-  time python test/run_test.py --exclude test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr $DISTRIBUTED_TESTS --verbose --determine-from="$DETERMINE_FROM"
+test_python_all_except_nn() {
+  if ([[ "$BUILD_ENVIRONMENT" == *rocm* ]]); then
+    time python test/run_test.py --exclude test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr $DISTRIBUTED_TESTS --verbose --determine-from="$DETERMINE_FROM"
+  else
+    time python test/run_test.py --exclude test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
+  fi
   assert_git_not_dirty
 }
 
 test_python_distributed() {
-  time python test/run_test.py --include $DISTRIBUTED_TESTS --verbose --determine-from="$DETERMINE_FROM"
-  assert_git_not_dirty
+  if ([[ "$BUILD_ENVIRONMENT" == *rocm* ]]); then
+    time python test/run_test.py --include $DISTRIBUTED_TESTS --verbose --determine-from="$DETERMINE_FROM"
+    assert_git_not_dirty
+  fi
 }
 
 test_aten() {
@@ -324,7 +330,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   test_python_nn
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   test_torchvision
-  test_python_all_except_nn_and_distributed
+  test_python_all_except_nn
   test_aten
   test_libtorch
   test_custom_script_ops
@@ -336,10 +342,10 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
 else
   test_torchvision
   test_python_nn
-  test_python_all_except_nn_and_distributed
+  test_python_all_except_nn
+  test_python_distributed
   test_aten
   test_libtorch
   test_custom_script_ops
   test_torch_function_benchmark
-  test_python_distributed
 fi
