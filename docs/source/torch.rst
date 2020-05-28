@@ -34,7 +34,7 @@ Creation Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 
 .. note::
-    Random sampling creation ops are listed under :ref:`random-sampling` and
+    Random sampling creation ops are listed under :ref:`random-sampling-creation` and
     include:
     :func:`torch.rand`
     :func:`torch.rand_like`
@@ -146,6 +146,8 @@ Random seeds
     get_rng_state
     set_rng_state
 
+
+.. _random-sampling-creation:
 
 Random sampling creation
 ~~~~~~~~~~~~~~~~~~~~~~~~
