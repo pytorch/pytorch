@@ -27,7 +27,7 @@ class Linear(nnq.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-
+    # version used in this class is different from the parent class nnq.Linear
     _version = 4
 
     def __init__(self, in_features, out_features, bias_=True, dtype=torch.qint8):

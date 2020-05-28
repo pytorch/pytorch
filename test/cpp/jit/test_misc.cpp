@@ -755,7 +755,6 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   TORCH_CHECK(found_mul);
 }
 
-using namespace torch::autograd;
 
 void checkScopeCallbacks() {
   bool found_function_scope = false;
