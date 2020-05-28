@@ -357,7 +357,7 @@ class SyncBatchNorm(_BatchNorm):
     Currently :class:`SyncBatchNorm` only supports
     :class:`~torch.nn.DistributedDataParallel` (DDP) with single GPU per process. Use
     :meth:`torch.nn.SyncBatchNorm.convert_sync_batchnorm()` to convert
-    :class`BatchNorm` layer to :class:`SyncBatchNorm` before wrapping
+    :attr:`BatchNorm*D` layer to :class:`SyncBatchNorm` before wrapping
     Network with DDP.
 
     Args:

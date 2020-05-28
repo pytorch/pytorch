@@ -34,8 +34,8 @@ Statement* OptOutMutator::mutate(IterDomain* id) {
   if (s->sameAs(id->start()) && e->sameAs(id->extent()))
     return id;
 
-  Val* mutated_val =
-      new IterDomain(s, e, id->parallel_method(), id->isReduction());
+  Val* mutated_val = new IterDomain(
+      s, e, id->parallel_method(), id->isReduction(), id->isRFactorProduct());
   registerMutation(id, mutated_val);
   return mutated_val;
 }
@@ -102,20 +102,24 @@ Statement* OptOutMutator::mutate(TensorIndex* ti) {
   return mutated_val;
 }
 
-Statement* OptOutMutator::mutate(Bool* n) {
-  return n;
+Statement* OptOutMutator::mutate(Bool* b) {
+  return b;
 }
-Statement* OptOutMutator::mutate(Float* n) {
-  return n;
+
+Statement* OptOutMutator::mutate(Float* f) {
+  return f;
 }
-Statement* OptOutMutator::mutate(Half* n) {
-  return n;
+
+Statement* OptOutMutator::mutate(Half* h) {
+  return h;
 }
-Statement* OptOutMutator::mutate(Int* n) {
-  return n;
+
+Statement* OptOutMutator::mutate(Int* i) {
+  return i;
 }
-Statement* OptOutMutator::mutate(NamedScalar* n) {
-  return n;
+
+Statement* OptOutMutator::mutate(NamedScalar* ns) {
+  return ns;
 }
 
 // MUTATE FUNCTIONS FOR EXPRESSIONS.
@@ -159,7 +163,7 @@ Statement* OptOutMutator::mutate(Reorder* ro) {
     return ro;
 
   FusionGuard::getCurFusion()->removeExpr(ro);
-  return new Reorder(o, i, ro->pos2axis());
+  return new Reorder(o, i, ro->new2old());
 }
 
 Statement* OptOutMutator::mutate(UnaryOp* uop) {
@@ -192,6 +196,17 @@ Statement* OptOutMutator::mutate(TernaryOp* top) {
     return top;
   FusionGuard::getCurFusion()->removeExpr(top);
   return new TernaryOp(top->getTernaryOpType(), out, in1, in2, in3);
+}
+
+Statement* OptOutMutator::mutate(ReductionOp* rop) {
+  Val* out = static_cast<Val*>(mutate(rop->out()));
+  Val* in = static_cast<Val*>(mutate(rop->in()));
+  Val* init = rop->init();
+  if (out->sameAs(rop->out()) && in->sameAs(rop->in()) &&
+      init->sameAs(rop->init()))
+    return rop;
+
+  return new ReductionOp(rop->getReductionOpType(), init, out, in);
 }
 
 Statement* OptOutMutator::mutate(ForLoop* fl) {
@@ -228,8 +243,8 @@ Statement* OptOutMutator::mutate(IfThenElse* ite) {
   Val* val_cond = mutateAsVal(ite->cond())->asVal();
   TORCH_INTERNAL_ASSERT(
       val_cond->getValType().value() == ValType::Scalar &&
-      val_cond->getDataType().value() == DataType::Int);
-  Int* cond = static_cast<Int*>(val_cond);
+      val_cond->getDataType().value() == DataType::Bool);
+  Bool* cond = static_cast<Bool*>(val_cond);
 
   bool is_mutated = !cond->sameAs(ite->cond());
 
@@ -281,20 +296,17 @@ void ReplaceAll::replaceInpOut() {
 }
 
 void ReplaceAll::instancesOf(Val* instance, Val* with) {
-  Fusion* fusion = FusionGuard::getCurFusion();
   std::unordered_map<Val*, Val*> replacement_map;
   replacement_map[instance] = with;
   ReplaceAll::instancesOf(replacement_map);
 }
 
 void ReplaceAll::instancesOf(std::unordered_map<Val*, Val*> replacement_map) {
-  Fusion* fusion = FusionGuard::getCurFusion();
-
   ReplaceAll ra(std::move(replacement_map));
   // Get a copy because this will be modified in place, we shouldn't auto
   // iterate on it
   std::vector<Expr*> to_mutate;
-  for (Expr* expr : fusion->unordered_exprs())
+  for (Expr* expr : FusionGuard::getCurFusion()->unordered_exprs())
     to_mutate.push_back(expr);
 
   for (Expr* expr : to_mutate)
