@@ -5861,20 +5861,22 @@ class TestNN(NNTestCase):
                         complete_output = torch.cat(
                             [fwd_output.data, bwd_output.data], -1)
                         self.assertEqual(output.data, complete_output,
-                                         atol=5e-5, message='output')
+                                         atol=5e-5, rtol=0, msg='output')
                     else:
                         complete_output = torch.cat(
                             [fwd_output, bwd_output], -1)
                         self.assertEqual(output, complete_output,
-                                         atol=5e-5, message='output')
+                                         atol=5e-5, rtol=0, msg='output')
                     if is_lstm:
                         exp_hy, exp_cy = complete_hy
                         t_hy, t_cy = hy
-                        self.assertEqual(t_hy, exp_hy, atol=5e-5, message='hy')
-                        self.assertEqual(t_cy, exp_cy, atol=5e-5, message='cy')
+                        self.assertEqual(t_hy, exp_hy, atol=5e-5, rtol=0,
+                                         msg='hy')
+                        self.assertEqual(t_cy, exp_cy, atol=5e-5, rtol=0,
+                                         msg='cy')
                     else:
                         self.assertEqual(hy, complete_hy,
-                                         atol=5e-5, message='hy')
+                                         atol=5e-5, rtol=0, msg='hy')
 
     def test_RNN_type1(self):
         self._test_RNN_type1(torch.device('cpu'))
