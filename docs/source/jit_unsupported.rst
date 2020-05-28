@@ -90,4 +90,4 @@ we suggest using :meth:`torch.jit.trace`.
   * :class:`torch.autograd.Function`
   * :class:`torch.autograd.no_grad`
   * :class:`torch.autograd.enable_grad`
-  * :class:`torch._C.Generator`
+  * :class:`torch.Generator`

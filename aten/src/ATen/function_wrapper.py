@@ -192,6 +192,12 @@ case Backend::${backend}:
     break;
 """)
 
+IFDEF_BLOCK = CodeTemplate("""\
+#ifdef ${ifdef_guard}
+${content}
+#endif
+""")
+
 # add a native declaration for a native function
 NATIVE_DECLARATION = CodeTemplate("""\
 CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
@@ -221,7 +227,8 @@ scalar_types = [
     ('ComplexDouble', 'ComplexDouble', 'ComplexDouble', False),
 ]
 
-static_dispatch_backends = ['CPU', 'QuantizedCPU']
+static_dispatch_backends = ['CPU', 'QuantizedCPU', 'Vulkan']
+static_dispatch_backends_ifdef_guard = {'Vulkan' : 'USE_VULKAN'}
 
 
 class NYIError(Exception):
@@ -1059,11 +1066,18 @@ def create_generic(top_env, declarations):
                 # calling code.
                 for backend in static_dispatch_backends:
                     if backend in type_method_dispatch:
-                        static_dispatch_function_cases.append(STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
+                        static_dispatch_function_case = STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
-                            actuals=option['method_actuals']))
+                            actuals=option['method_actuals'])
+                        if (backend in static_dispatch_backends_ifdef_guard):
+                            static_dispatch_function_cases.append(IFDEF_BLOCK.substitute(
+                                option,
+                                ifdef_guard=static_dispatch_backends_ifdef_guard[backend],
+                                content=static_dispatch_function_case))
+                        else:
+                            static_dispatch_function_cases.append(static_dispatch_function_case)
 
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
@@ -1094,11 +1108,18 @@ def create_generic(top_env, declarations):
                 static_dispatch_function_cases = []
                 for backend in static_dispatch_backends:
                     if backend in type_method_dispatch:
-                        static_dispatch_function_cases.append(STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
+                        static_dispatch_function_case = STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
-                            actuals=option['actuals']))
+                            actuals=option['actuals'])
+                        if (backend in static_dispatch_backends_ifdef_guard):
+                            static_dispatch_function_cases.append(IFDEF_BLOCK.substitute(
+                                option,
+                                ifdef_guard=static_dispatch_backends_ifdef_guard[backend],
+                                content=static_dispatch_function_case))
+                        else:
+                            static_dispatch_function_cases.append(static_dispatch_function_case)
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
                     dispatch_key_var_name=dispatch_key_var_name,
