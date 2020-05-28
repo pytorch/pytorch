@@ -22,7 +22,6 @@ class TestLiteScriptModule(unittest.TestCase):
 
         buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
         buffer.seek(0)
-        print("buffer len = ", len(buffer.getvalue()))
         mobile_module = load_for_lite_interpreter(buffer)
 
         mobile_module_result = mobile_module(input)

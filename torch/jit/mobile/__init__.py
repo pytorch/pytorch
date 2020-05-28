@@ -46,7 +46,6 @@ def load_for_lite_interpreter(f, map_location=None):
         import os
         os.remove("lite_script_module.pt")
     """
-    print(f)
     if isinstance(f, string_classes):
         if not os.path.exists(f):
             raise ValueError("The provided filename {} does not exist".format(f))
