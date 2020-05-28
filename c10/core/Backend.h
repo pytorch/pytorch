@@ -34,6 +34,7 @@ enum class Backend {
   SparseHIP,
   MSNPU,
   XLA,
+  Vulkan,
   QuantizedCPU,
   QuantizedCUDA,
   Undefined,
@@ -98,6 +99,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::MSNPU;
   } else if (t == DispatchKey::XLA || t == DispatchKey::XLAPreAutograd) {
     return Backend::XLA;
+  } else if (t == DispatchKey::Vulkan) {
+    return Backend::Vulkan;
   } else if (t == DispatchKey::SparseCPU) {
     return Backend::SparseCPU;
   } else if (t == DispatchKey::SparseCUDA) {
@@ -137,6 +140,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::SparseHIP;
     case Backend::MkldnnCPU:
       return DispatchKey::MkldnnCPU;
+    case Backend::Vulkan:
+      return DispatchKey::Vulkan;
     case Backend::QuantizedCPU:
       return DispatchKey::QuantizedCPU;
     case Backend::QuantizedCUDA:
@@ -171,6 +176,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CPU;
     case Backend::QuantizedCUDA:
       return DeviceType::CUDA;
+    case Backend::Vulkan:
+      return DeviceType::Vulkan;
     case Backend::Undefined:
       AT_ERROR("Undefined backend is not a valid device type");
     default:
@@ -267,6 +274,8 @@ static inline const char* toString(Backend b) {
       return "SparseHIP";
     case Backend::MkldnnCPU:
       return "MkldnnCPU";
+    case Backend::Vulkan:
+      return "Vulkan";
     case Backend::QuantizedCPU:
       return "QuantizedCPU";
     case Backend::QuantizedCUDA:

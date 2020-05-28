@@ -37,9 +37,9 @@ c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
 c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
-    const float rpcTimeoutSeconds,
-    const py::args& argsTuple,
-    const py::kwargs& kwargsDict);
+    const py::tuple& argsTuple,
+    const py::dict& kwargsDict,
+    const float rpcTimeoutSeconds);
 
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
