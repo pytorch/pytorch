@@ -520,7 +520,7 @@ PyObject *THPVariable_get_real(THPVariable* self, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  auto real = at::native::real(self_);
+  auto real = at::real(self_);
   return THPVariable_Wrap(real);
   END_HANDLE_TH_ERRORS
 }
@@ -529,7 +529,7 @@ PyObject *THPVariable_get_imag(THPVariable* self, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  auto imag = at::native::imag(self_);
+  auto imag = at::imag(self_);
   return THPVariable_Wrap(imag);
   END_HANDLE_TH_ERRORS
 }
