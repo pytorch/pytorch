@@ -41,6 +41,24 @@ int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_) {
 
 #if !defined(THC_REAL_IS_BOOL)
 
+void THCTensor_(mul)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
+  if (self_ == src_) {
+    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorMulConstantOp<scalar_t>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src_);
+
+    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorMulConstantOp<scalar_t>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
 void THCTensor_(fmod)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
