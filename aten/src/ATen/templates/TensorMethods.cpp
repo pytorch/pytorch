@@ -156,7 +156,7 @@ bool is_quantized(Tensor self) {
 
 #define DEFINE_CAST(T, name)                     \
   template <>                                    \
-  T* Tensor::data_ptr() const {           \
+  TORCH_API T* Tensor::data_ptr() const {        \
     TORCH_CHECK(                                 \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
@@ -189,10 +189,10 @@ std::complex<double>* Tensor::data_ptr() const {
 }
 // end TODO
 
-#define DEFINE_ITEM(T, name)      \
-  template <>                     \
-  T Tensor::item() const { \
-    return item().to##name();     \
+#define DEFINE_ITEM(T, name)         \
+  template <>                        \
+  TORCH_API T Tensor::item() const { \
+    return item().to##name();        \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
