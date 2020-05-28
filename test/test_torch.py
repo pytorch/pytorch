@@ -6288,36 +6288,23 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(frameinfo.lineno - 6, warning.lineno)
             self.assertEqual(len(w), 1)
 
-    def _np_compare(self, fn_name, vals, device, dtype):
-        assert TEST_NUMPY
-
-        torch_fn = getattr(torch, fn_name)
-        np_fn = getattr(np, fn_name)
-
-        a = np.array(vals, dtype=torch_to_numpy_dtype_dict[dtype])
-        np_result = torch.from_numpy(np_fn(a))
-
-        t = torch.tensor(vals, device=device, dtype=dtype)
-        torch_result = torch_fn(t).cpu()
-        self.assertEqual(np_result, torch_result)
-
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float)
     def test_isfinite_isinf_isnan(self, device, dtype):
         vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
 
-        self._np_compare('isfinite', vals, device, dtype)
-        self._np_compare('isinf', vals, device, dtype)
-        self._np_compare('isnan', vals, device, dtype)
+        self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
+        self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
+        self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.long)
     def test_isfinite_isinf_isnan_int(self, device, dtype):
         vals = (-1, 0, 1)
 
-        self._np_compare('isfinite', vals, device, dtype)
-        self._np_compare('isinf', vals, device, dtype)
-        self._np_compare('isnan', vals, device, dtype)
+        self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
+        self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
+        self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.complex64)
@@ -6332,9 +6319,9 @@ class TestTorchDeviceType(TestCase):
             complex(0, 1)
         )
 
-        self._np_compare('isfinite', vals, device, dtype)
-        self._np_compare('isinf', vals, device, dtype)
-        self._np_compare('isnan', vals, device, dtype)
+        self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
+        self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
+        self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
 
     @onlyCPU
     def test_isfinite_type(self, device):
@@ -15957,7 +15944,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             complex(2.0, 0.0),
             complex(0.0, 2.0))
 
-        self._np_compare('reciprocal', vals, device, dtype)
+        self.compare_with_numpy(torch.reciprocal, np.reciprocal, vals, device, dtype)
 
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float)
