@@ -2,11 +2,15 @@
 
 import torch
 from torch.autograd import ProfilerConfig
+from torch.autograd.profiler import profile
 
 from . import (
     __disable_server_process_global_profiler,
     __enable_server_process_global_profiler,
 )
+
+
+# ==================== Functional API ====================
 
 
 def _enable_server_process_global_profiler(config: ProfilerConfig):
@@ -25,9 +29,9 @@ def _enable_server_process_global_profiler(config: ProfilerConfig):
     Example::
         >>> import torch
         >>> profiler_config = torch.autograd.ProfilerConfig(
-        >>>     /* profiler_state */ torch.autograd.ProfilerState.CPU,
-        >>>     /* record_input_shapes */ False,
-        >>>     /* profile_memory */ False,
+        >>>     torch.autograd.ProfilerState.CPU,  # profiler_kind
+        >>>     False,  # record_input_shapes
+        >>>     False,  # profile_memory
         >>> )
         >>> rpc.enable_server_process_global_profiler(profiler_config)
 
@@ -64,3 +68,38 @@ def _disable_server_process_global_profiler():
     return torch.autograd.profiler.EventList(
         process_global_function_events, use_cuda=False, profile_memory=False
     )
+
+
+# ==================== Context API ====================
+
+
+class _server_process_global_profile(profile):
+    """
+    It has the same API as ``torch.autpgrad.profiler.profile`` class,
+    except that it enables profiling on all threads running RPC server request callbacks.
+    """
+    def __enter__(self):
+        if not self.enabled:
+            return
+
+        if self.entered:
+            raise RuntimeError("autograd profiler traces are not reentrant")
+        self.entered = True
+
+        profiler_kind = (
+            torch.autograd.ProfilerState.CUDA
+            if self.use_cuda
+            else torch.autograd.ProfilerState.CPU
+        )
+        profiler_config = torch.autograd.ProfilerConfig(
+            profiler_kind, self.record_shapes, self.profile_memory
+        )
+        _enable_server_process_global_profiler(profiler_config)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if not self.enabled:
+            return
+
+        self.function_events = _disable_server_process_global_profiler()
+        return False

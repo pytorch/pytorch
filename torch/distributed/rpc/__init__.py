@@ -21,6 +21,7 @@ if is_available():
     from .server_process_global_profiler import (
         _enable_server_process_global_profiler,
         _disable_server_process_global_profiler,
+        _server_process_global_profile,
     )
     import torch.distributed.autograd as dist_autograd
 

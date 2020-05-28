@@ -316,9 +316,8 @@ def add_use_future_cb(to, x, y, z):
     return out.result()
 
 
-def enable_profiler():
-    profiler_config = torch.autograd.ProfilerConfig(torch.autograd.ProfilerState.CPU, False, False)
-    rpc._enable_server_process_global_profiler(profiler_config)
+def get_events_from_profile(profile_rref):
+    return profile_rref.local_value().function_events
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -992,9 +991,12 @@ class RpcTest(RpcAgentTestFixture):
         x = torch.tensor(1)
         y = torch.tensor(2)
 
-        rpc.rpc_sync(dst_worker_name, enable_profiler)
+        profile_rref = rpc.remote(dst_worker_name, rpc._server_process_global_profile)
+        profile_rref.rpc_sync().__enter__()
         rpc.rpc_sync(dst_worker_name, torch.add, (x, y))
-        events = rpc.rpc_sync(dst_worker_name, rpc._disable_server_process_global_profiler)
+        profile_rref.rpc_sync().__exit__(None, None, None)
+
+        events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (profile_rref,))
 
         last_end_time = 0
         top_level_names_iter = iter(['add'])
