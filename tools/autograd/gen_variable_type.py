@@ -108,8 +108,10 @@ DONT_REQUIRE_DERIVATIVE = {
     '_sobol_engine_initialize_state_',
     # This is an unsafe method that is meant to be out of reach of autograd.
     '_coalesced_',
-    # Quantize functions should not record gradients
+    # Quantize tensor functions should not record gradients
     'quantize_per_tensor', 'quantize_per_channel',
+    # Operations on quantized tensors do not have derivatives, for now
+    'quantized_layer_norm', 'quantized_group_norm', 'quantized_instance_norm',
     # Functions that return integers should not have output that require gradients
     'argmax', 'argmin', 'argsort',
 }

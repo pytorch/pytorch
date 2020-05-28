@@ -72,7 +72,7 @@ class LayerNorm(torch.nn.LayerNorm):
         self.zero_point = zero_point
 
     def forward(self, input):
-        return torch.ops.quantized.layer_norm(
+        return torch.quantized_layer_norm(
             input, self.normalized_shape, weight=self.weight, bias=self.bias,
             eps=self.eps, output_scale=self.scale, output_zero_point=self.zero_point)
 
@@ -138,7 +138,7 @@ class GroupNorm(torch.nn.GroupNorm):
         self.zero_point = zero_point
 
     def forward(self, input):
-        return torch.ops.quantized.group_norm(
+        return torch.quantized_group_norm(
             input, self.num_groups, self.weight, self.bias, self.eps, self.scale,
             self.zero_point)
 
@@ -230,7 +230,7 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
         self.zero_point = zero_point
 
     def forward(self, input):
-        return torch.ops.quantized.instance_norm(
+        return torch.quantized_instance_norm(
             input, self.weight, self.bias, self.eps, self.scale,
             self.zero_point)
 
@@ -322,7 +322,7 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
         self.zero_point = zero_point
 
     def forward(self, input):
-        return torch.ops.quantized.instance_norm(
+        return torch.quantized_instance_norm(
             input, self.weight, self.bias, self.eps, self.scale,
             self.zero_point)
 
@@ -414,7 +414,7 @@ class InstanceNorm3d(torch.nn.InstanceNorm3d):
         self.zero_point = zero_point
 
     def forward(self, input):
-        return torch.ops.quantized.instance_norm(
+        return torch.quantized_instance_norm(
             input, self.weight, self.bias, self.eps, self.scale,
             self.zero_point)
 

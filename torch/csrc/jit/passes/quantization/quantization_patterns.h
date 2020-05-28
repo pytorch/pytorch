@@ -614,7 +614,7 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
 
   std::string quantized_layer_norm = R"(
 graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output_scale, %output_zero_point, %scalar_type):
-         %r = quantized::layer_norm(%a_quant, %normalized_shape, %weight, %bias, %eps, %output_scale, %output_zero_point)
+         %r = aten::quantized_layer_norm(%a_quant, %normalized_shape, %weight, %bias, %eps, %output_scale, %output_zero_point)
          return (%r) )";
 
   // quantized::group_norm
@@ -627,7 +627,7 @@ graph(%a_quant, %num_groups, %weight, %bias, %eps, %cudnn_enabled, %output_scale
 
   std::string quantized_group_norm = R"(
 graph(%a_quant, %num_groups, %weight, %bias, %eps, %cudnn_enabled, %output_scale, %output_zero_point, %scalar_type):
-         %r = quantized::group_norm(%a_quant, %num_groups, %weight, %bias, %eps, %output_scale, %output_zero_point)
+         %r = aten::quantized_group_norm(%a_quant, %num_groups, %weight, %bias, %eps, %output_scale, %output_zero_point)
          return (%r) )";
 
   // quantized::instance_norm
@@ -640,7 +640,7 @@ graph(%a_quant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %
 
   std::string quantized_instance_norm = R"(
 graph(%a_quant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %momentum, %eps, %cudnn_enabled, %output_scale, %output_zero_point, %scalar_type):
-         %r = quantized::instance_norm(%a_quant, %weight, %bias, %eps, %output_scale, %output_zero_point)
+         %r = aten::quantized_instance_norm(%a_quant, %weight, %bias, %eps, %output_scale, %output_zero_point)
          return (%r) )";
 
   // ============= General Ops that inherit quantization paramters from input
