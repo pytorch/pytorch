@@ -215,7 +215,7 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     }                                                                       \
   }()
 
-#define AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES(TYPE, NAME, ...)         \
+#define _AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES(TYPE, NAME, ...)        \
   [&] {                                                                     \
     const auto& the_type = TYPE;                                            \
     /* don't use TYPE again in case it is an expensive or side-effect op */ \
@@ -280,7 +280,7 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     }                                                                       \
   }()
 
-#define AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES_AND2(                    \
+#define _AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES_AND2(                   \
     SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...)                              \
   [&] {                                                                     \
     const auto& the_type = TYPE;                                            \

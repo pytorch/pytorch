@@ -77,7 +77,7 @@ void div_kernel(TensorIterator& iter) {
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "div_cpu", [&]() {
+    _AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "div_cpu", [&]() {
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
            return a / b;
@@ -512,7 +512,7 @@ void sigmoid_backward_kernel(TensorIterator& iter) {
 }
 
 void tanh_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
+  _AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
     auto one_vec = Vec256<scalar_t>(scalar_t{1});
     cpu_kernel_vec(
         iter,
