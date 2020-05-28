@@ -11187,13 +11187,13 @@ class TestNNDeviceType(NNTestCase):
         def helper(n, c, h, w, out_channels, kernel_size, groups):
             input = torch.randn(n, c, h, w, dtype=dtype, device=device).to(memory_format=torch.channels_last)
             input.requires_grad_()
-            conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups).cuda().to(dtype).to(memory_format=torch.channels_last)
+            conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups).to(device='cuda', dtype=dtype, memory_format=torch.channels_last)
 
             ref_input = input.detach().clone().contiguous().requires_grad_()
-            ref_conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups).cuda().to(dtype)
+            ref_conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups)
             # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
             ref_conv.load_state_dict(conv.state_dict())
-            ref_conv = ref_conv.to(memory_format=torch.contiguous_format)
+            ref_conv = ref_conv.to(device='cuda', dtype=dtype, memory_format=torch.contiguous_format)
 
             out = conv(input)
             ref_out = ref_conv(ref_input)
@@ -11204,12 +11204,17 @@ class TestNNDeviceType(NNTestCase):
             out.backward(grad)
             ref_out.backward(ref_grad)
 
+            if dtype == torch.half:
+                rtol, atol = 1e-3, 1e-3
+            elif dtype == torch.float:
+                rtol, atol = 1e-4, 1e-4
+
             self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
             self.assertTrue(ref_out.is_contiguous())
-            self.assertEqual(out, ref_out)
-            self.assertEqual(conv.weight.grad, ref_conv.weight.grad)
-            self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
-            self.assertEqual(input.grad, ref_input.grad)
+            self.assertEqual(out, ref_out, rtol=rtol, atol=atol)
+            self.assertEqual(conv.weight.grad, ref_conv.weight.grad, rtol=rtol, atol=atol)
+            self.assertEqual(conv.bias.grad, ref_conv.bias.grad, rtol=rtol, atol=atol)
+            self.assertEqual(input.grad, ref_input.grad, rtol=rtol, atol=atol)
 
         helper(2, 8, 4, 4, out_channels=4, kernel_size=3, groups=1)
         helper(2, 8, 4, 4, out_channels=8, kernel_size=3, groups=8)
