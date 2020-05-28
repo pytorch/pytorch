@@ -118,13 +118,8 @@ if(ANDROID_ABI)
       libcpuinfo
       libclog
   )
-  if(USE_VULKAN)
-    list(APPEND pytorch_jni_LIBS ${Vulkan_LIBS})
-  endif()
-
-  target_link_libraries(pytorch_jni ${pytorch_jni_LIBS})
 else()
-
+  # Prefer dynamic linking on the host
   set(pytorch_jni_LIBS
       fbjni
       torch
@@ -136,10 +131,10 @@ else()
       cpuinfo
       clog
   )
-  if(USE_VULKAN)
-    list(APPEND pytorch_jni_LIBS ${Vulkan_LIBS})
-  endif()
-  # Prefer dynamic linking on the host
-  target_link_libraries(pytorch_jni ${pytorch_jni_LIBS})
-
 endif()
+
+if(USE_VULKAN)
+  list(APPEND pytorch_jni_LIBS ${Vulkan_LIBS})
+endif()
+
+target_link_libraries(pytorch_jni ${pytorch_jni_LIBS})

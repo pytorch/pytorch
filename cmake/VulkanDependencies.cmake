@@ -158,6 +158,3 @@ else()
   endif(USE_VULKAN_SHADERC_RUNTIME)
 endif()
 
-#set(Vulkan_LIBS ${Vulkan_LIBS} PARENT_SCOPE)
-#set(Vulkan_INCLUDES ${Vulkan_INCLUDES} PARENT_SCOPE)
-
