@@ -98,20 +98,44 @@ Indexing, Slicing, Joining, Mutating Ops
     unsqueeze
     where
 
+.. _random-sampling:
+
+Random sampling
+----------------------------------
+
 .. _generators:
 
 Generators
-----------------------------------
+~~~~~~~~~~
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     Generator
 
-.. _random-sampling:
+:data:`torch.default_generator` returns the default CPU :class:`Generator`
 
-Random sampling
-----------------------------------
+Example::
+
+    >>> g_cpu = torch.default_generator
+    >>> g_cpu.device
+    device(type='cpu')
+
+:data:`torch.cuda.default_generators` returns a tuple of default CUDA :class:`Generator`-s if cuda is available.
+                The number of CUDA :class:`Generator`-s returned is equal to the number of
+                GPUs available in the system.
+
+Example::
+
+    >>> torch.cuda.init()
+    >>> g_cuda = torch.cuda.default_generators
+    >>> g_cuda[0].device
+    device(type='cuda', index=0)
+
+Random Seeds
+~~~~~~~~~~~~
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -122,15 +146,10 @@ Random sampling
     get_rng_state
     set_rng_state
 
-.. autoattribute:: torch.default_generator
-   :annotation:  Returns the default CPU torch.Generator
 
-.. The following doesn't actually seem to exist.
-   https://github.com/pytorch/pytorch/issues/27780
-   .. autoattribute:: torch.cuda.default_generators
-      :annotation:  If cuda is available, returns a tuple of default CUDA torch.Generator-s.
-                    The number of CUDA torch.Generator-s returned is equal to the number of
-                    GPUs available in the system.
+Random Sampling Creation
+~~~~~~~~~~~~~~~~~~~~~~~~
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
