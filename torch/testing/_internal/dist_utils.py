@@ -174,6 +174,10 @@ def get_shutdown_error_regex(rpc_backend):
             "Connection reset by peer",
             "Connection closed by peer"
         ]
+    elif rpc_backend == "TENSORPIPE":
+        # FIXME Once we consolidate the error messages returned by the
+        # TensorPipe agent put some more specific regex here.
+        error_regexes = [".*"]
     else:
         error_regexes = [
             "Request aborted during client shutdown",
@@ -193,7 +197,7 @@ def get_timeout_error_regex(rpc_backend_name):
     should receive when an RPC has timed out. Useful for use with
     assertRaisesRegex() to ensure we have the right errors during timeout.
     """
-    if rpc_backend_name in ["PROCESS_GROUP", "FAULTY_PROCESS_GROUP"]:
+    if rpc_backend_name in ["PROCESS_GROUP", "FAULTY_PROCESS_GROUP", "TENSORPIPE"]:
         return "RPC ran for more than"
     else:
         return "(Timed out)|(Task expired)"
