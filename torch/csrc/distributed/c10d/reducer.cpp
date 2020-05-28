@@ -856,7 +856,7 @@ std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
   rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
 
-  return std::move(rebuilt_bucket_indices);
+  return rebuilt_bucket_indices;
 }
 
 namespace {
