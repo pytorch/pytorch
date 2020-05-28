@@ -148,10 +148,18 @@ class _TestTorchMixin(object):
                 else:
                     skip_regexes.append(r)
             skipnames = ['copy_real', 'copy_imag']
+
             for name in dir(ns):
                 if name.startswith('_') or name in skipnames:
                     continue
-                var = getattr(ns, name)
+
+                # real and imag are only implemented for complex tensors.
+                if name in ['real', 'imag']:
+                    y = torch.randn(1, dtype=torch.cfloat)
+                    var = getattr(y, name)
+                else:
+                    var = getattr(ns, name)
+
                 if not isinstance(var, checked_types):
                     continue
                 doc = var.__doc__

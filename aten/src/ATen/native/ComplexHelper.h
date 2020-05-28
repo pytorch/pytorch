@@ -26,7 +26,7 @@ inline Tensor view_complex_as_float(const Tensor& self) {
     return at::empty({0}, self.options().dtype(float_type));
   } else {
     auto new_strides = computeStrideForComplex(self.strides());
-    return at::empty({0}, self.options().dtype(float_type)).set_(self.storage(), 0, new_sizes, new_strides);
+    return at::empty({0}, self.options().dtype(float_type)).set_(self.storage(), self.storage_offset(), new_sizes, new_strides);
   }
 }
 
